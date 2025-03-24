@@ -1,53 +1,11 @@
-                     ABOUT JUSPAY LICENSES
-  JUSPAY platform is an open source project, whose source and
-copyright is owned and maintained by JUSPAY Technology Private Limited.
-This page is intended to clarify the licenses and terms under
-which JUSPAY platform is made available.
+                       ABOUT JUSPAY LICENSES
 
-                   JUSPAY COMMERCIAL LICENSE
-  Entities who desire to use JUSPAY source software applications for
-any commercial purpose shall use JUSPAY Enterprise Edition. You must
-obtain a commercial license from JUSPAY Technologies Private Limited,
-by contacting us at info@juspay.in. The Enterprise License or
-closed-source software applications requires a commercial license,
-offered under a separate license term.
+The Juspay's "Decision Engine" is an open-source project developed and 
+maintained by Juspay Technologies Private Limited ("Juspay"). The source 
+code and associated copyrights are owned by Juspay and made available 
+under the following open-source license terms.
 
-                     JUSPAY EDUCATION EDITION
-  Education Edition Licenses are provided to “qualified institutions” like
-schools, colleges, training institutes and any other entity that shall use the
-code for educational purposes on a non-commercial basis. Non-commercial herein
-means not primarily intended for or directed towards commercial advantage or
-monetary compensation. The licensed software shall not be used by any
-entity making any commercial value of the platform. Only qualified institutions
-and private/career schools that use the platform for a non-commercial/internal
-educational use qualify to use the licensed platform. The education edition
-license by JUSPAY shall be governed by  GNU AGPL V3. You should have received a
-copy of the GNU Affero General Public License along with this program.
-If not, see https://www.gnu.org/licenses/agpl.html.
-
-
-                    INDEMNIFICATION AND DISCLAIMER
-  By using the Education Edition license JUSPAY makes no representations or
-warranties, expressed or implied.  The Licensed Software is provided free of
-charge, and, therefore, on an "as is" basis, without warranty of any kind,
-explicitly or implicitly. By way of example, but not limitation, JUSPAY makes
-no representations or warranties of merchantability or fitness for the
-Licensed Software and any particular application or that the use of the
-Licensed Software or will not infringe any patents, copyrights or trademarks
-or other rights of third parties. The entire risk as to the quality and
-performance of the product is borne by the end user. JUSPAY shall not be
-liable for any liability or damages with respect to any claim by the end user
-or any third party on account of or arising from the license or use of the
-Software. The end user will be liable for all damages without limitation,
-which is caused by the abuse of the Licensed Software and shall indemnify
-JUSPAY for such damages, claims, cost, including reasonable attorney
-fee claimed on JUSPAY. The end user has no right to claim any indemnification
-based on its use of Licensed Software.
-
-
-
-
-
+              
                     GNU AFFERO GENERAL PUBLIC LICENSE
                        Version 3, 19 November 2007
 
