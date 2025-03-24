@@ -1,0 +1,31 @@
+[server]
+host = "0.0.0.0"
+port = 8080
+
+[database]
+url = "mysql://sam:damn@localhost/open_router"
+
+[secrets]
+tenant = "hyperswitch"
+
+open_router_private_key = ""
+
+[tenant_secrets]
+hyperswitch = { master_key = "", public_key = "", schema = "public" }
+
+[secrets_management]
+secrets_manager = "no_encryption"
+
+[secrets_management.aws_kms]
+key_id = "us-west-2"
+region = "abc"
+
+[tls]
+certificate = "cert.pem"
+private_key = "key.pem"
+
+[api_client]
+client_idle_timeout = 90
+pool_max_idle_per_host = 10
+identity = ""
+
