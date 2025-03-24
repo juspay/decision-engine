@@ -1,7 +1,7 @@
 # Decision Engine 
 ## Overview 
 
-The Decision Engine system helps in choosing the most optimal payment gateway in real-time for every transaction based on pre-defined rules, success rate, latency and other business requirements. It is a fully modular service that can work with any orchestrator and third party vaults.
+The Decision Engine system helps in choosing the most optimal payment gateway in real-time for every transaction based on pre-defined rules, success rate, latency and other business requirements. It is a fully modular service that can work with any orchestrator and any PCI-compliant vaults.
 
 ## Vision 
 
