@@ -627,161 +627,271 @@ fn filterList(debugFilterList: &[T::DebugFilterEntry]) -> Vec<(String, Vec<Gatew
     }).collect()  
 }  
 
-pub async fn getDeciderFailureReason(  
-    deciderParams: T::DeciderParams,  
-    deciderState: T::DeciderState,  
-    debugFilterList: Vec<T::DebugFilterEntry>,  
-    priorityLogicOutput: Option<T::GatewayPriorityLogicOutput>,  
-) -> Result<String, Box<dyn std::error::Error>> {  
-    let filterWithEmptyList = debugFilterList.iter().find(|entry| entry.gateways.is_empty());  
-    let txnDetail = &deciderParams.dpTxnDetail;  
-    let txnCardInfo = &deciderParams.dpTxnCardInfo;  
-    let macc = &deciderParams.dpMerchantAccount;  
-    let orderReference = &deciderParams.dpOrder;  
-    let mInternalMeta = &deciderState.internalMetaData;  
-    let mCardBrand = &deciderState.cardBrand;  
-    let vaultProviderM = &deciderParams.dpVaultProvider;  
-    let mTxnType: Option<String> = deciderParams.dpTxnType.clone();  
-    let storedCardVaultProvider = mInternalMeta.as_ref().and_then(|meta| meta.storedCardVaultProvider.clone());  
-    let scope = format!("{} ", storedCardVaultProvider.as_deref().unwrap_or("card").to_lowercase());  
-    let preferredGatewayM = txnDetail.gateway.or(orderReference.preferredGateway);  
-    let configuredGatewaysM = debugFilterList.iter().find(|(filterName, _)| filterName == "getFunctionalGateways");  
-    let configuredGateways = configuredGatewaysM.map_or(Vec::new(), |(_, gateways)| gateways.clone());  
-    let juspaybankCodeM = getJuspayBankCodeFromInternalMetadata(txnDetail);  
-  
-    match filterWithEmptyList.map_or("NO_EMPTY", |entry| entry.filterName.as_str()) {  
-        "getFunctionalGateways" => {  
-            let referenceIds = getAllRefIds(deciderState.metadata.as_ref().unwrap_or(&HashMap::new()), priorityLogicOutput.as_ref().map_or(&HashMap::new(), |plo| &plo.gatewayReferenceIds));  
-            Ok(format!("No gateways are configured with the referenceIds {} to proceed transaction", json!(referenceIds)))  
-        }  
-        "filterFunctionalGatewaysForCurrency" => Ok(format!("No functional gateways after filtering for currency {}", txnDetail.currency)),  
-        "filterFunctionalGatewaysForBrand" => Ok(format!("No functional gateways after filtering for brand {}", mCardBrand.as_deref().unwrap_or(""))),  
-        "filterFunctionalGatewaysForAuthType" => Ok(format!("No functional gateways after filtering for authType {}", txnCardInfo.authType.as_ref().map_or("", |authType| authType))),  
-        "filterFunctionalGatewaysForValidationType" => Ok(format!("No functional gateways after filtering for validationType {}", getValidationType(txnDetail, txnCardInfo).map_or("", |vt| &vt))),  
-        "filterFunctionalGatewaysForEmi" => {  
-            let emiType = format!("{} ", utils::fetchEmiType(txnCardInfo).unwrap_or("emi").to_lowercase());  
-            let emiBank = format!("{} ", txnDetail.emiBank.as_deref().unwrap_or(""));  
-            if isCardTransaction(txnCardInfo) && !txnDetail.isEmi {  
-                Ok("Gateways configured supports only emi transaction.".to_string())  
-            } else if isCardTransaction(txnCardInfo) {  
-                let isBinEligible = utils::checkIfBinIsELigibleForEmi(&txnCardInfo.cardIsin, juspaybankCodeM, txnCardInfo.cardType.as_ref().map(|ct| cardTypeToText(ct)));  
-                if isBinEligible {  
-                    Ok(format!("No functional gateways supporting {}{}{} transaction.", emiBank, scope, emiType))  
-                } else {  
-                    Ok("Bin doesn't support emi transaction.".to_string())  
-                }  
-            } else {  
-                Ok(format!("No functional gateways supporting {}{}{} transaction.", emiBank, scope, emiType))  
-            }  
-        }  
-        "filterFunctionalGatewaysForPaymentMethod" => Ok(format!("No functional gateways supporting {} payment method.", txnCardInfo.paymentMethod)),  
-        "filterFunctionalGatewaysForTokenProvider" => {  
-            let vaultProvider = vaultProviderM.as_ref().unwrap_or(&Juspay);  
-            Ok(format!("No functional gateways supporting {} saved cards.", vaultProvider))  
-        }  
-        "filterFunctionalGatewaysForWallet" => {  
-            if txnCardInfo.cardType == Some(Wallet) {  
-                Ok("No functional gateways supporting wallet transaction.".to_string())  
-            } else {  
-                Ok("Gateways configured supports only wallet transaction.".to_string())  
-            }  
-        }  
-        "filterFunctionalGatewaysForNbOnly" => {  
-            if txnCardInfo.cardType == Some(NB) {  
-                Ok("No functional gateways supporting Net Banking transaction.".to_string())  
-            } else {  
-                Ok("Gateways configured supports only Net Banking transaction.".to_string())  
-            }  
-        }  
-        "filterFunctionalGatewaysForConsumerFinance" => {  
-            if txnCardInfo.paymentMethodType == ConsumerFinance {  
-                Ok("No functional gateways supporting Consumer Finance transaction.".to_string())  
-            } else {  
-                Ok("Gateways configured supports only Consumer Finance transaction.".to_string())  
-            }  
-        }  
-        "filterFunctionalGatewaysForUpi" => {  
-            if txnCardInfo.paymentMethodType == UPI {  
-                Ok("No functional gateways supporting UPI transaction.".to_string())  
-            } else if !utils::isGooglePayTxn(txnCardInfo) {  
-                Ok("Gateways configured supports only UPI transaction.".to_string())  
-            } else {  
-                Ok("No functional gateways".to_string())  
-            }  
-        }  
-        "filterFunctionalGatewaysForTxnType" => {  
-            if let Some(txnType) = mTxnType {  
-                Ok(format!("No functional gateways supporting {} transaction.", txnType))  
-            } else {  
-                Ok("No functional gateways".to_string())  
-            }  
-        }  
-        "filterFunctionalGatewaysForTxnDetailType" => Ok(format!("No functional gateways supporting {} transaction.", txnDetail.txnType)),  
-        "filterFunctionalGatewaysForReward" => {  
-            if txnCardInfo.cardType == Some(Reward) || txnCardInfo.paymentMethodType == ETPReward {  
-                Ok("No functional gateways supporting Reward transaction.".to_string())  
-            } else {  
-                Ok("Gateways configured supports only Reward transaction.".to_string())  
-            }  
-        }  
-        "filterFunctionalGatewaysForCash" => {  
-            if txnCardInfo.paymentMethodType == Cash {  
-                Ok("No functional gateways supporting CASH transaction.".to_string())  
-            } else {  
-                Ok("Gateways configured supports only CASH transaction.".to_string())  
-            }  
-        }  
-        "filterFunctionalGatewaysForSplitSettlement" => Ok("No functional gateways after validating split.".to_string()),  
-        "filterFunctionalGatewaysForOTMFlow" => Ok("No functional gateways after filtering for OTM flow.".to_string()),  
-        "filterFunctionalGateways" => {  
-            if isCardTransaction(txnCardInfo) {  
-                if mInternalMeta.as_ref().and_then(|meta| meta.isCvvLessTxn).unwrap_or(false) && txnCardInfo.authType == Some(MOTO) {  
-                    Ok(format!("No functional gateways supporting cvv less {} repeat moto transaction.", scope))  
-                } else if mInternalMeta.as_ref().and_then(|meta| meta.isCvvLessTxn).unwrap_or(false) {  
-                    Ok(format!("No functional gateways supporting cvv less {} transaction.", scope))  
-                } else if utils::isTokenRepeatTxn(mInternalMeta) {  
-                    Ok(format!("No functional gateways supporting {} transaction.", scope))  
-                } else {  
-                    Ok("No functional gateways supporting transaction.".to_string())  
-                }  
-            } else {  
-                Ok("No functional gateways supporting transaction.".to_string())  
-            }  
-        }  
-        "preferredGateway" => {  
-            if let Some(preferredGateway) = preferredGatewayM {  
-                if configuredGateways.contains(&preferredGateway) {  
-                    Ok(format!("{} is not supporting this transaction.", preferredGateway))  
-                } else {  
-                    Ok(format!("{} is not configured.", preferredGateway))  
-                }  
-            } else {  
-                Ok("No functional gateways supporting this transaction.".to_string())  
-            }  
-        }  
-        "filterEnforcement" => Ok("Priority logic enforced gateways are not supporting this transaction.".to_string()),  
-        "filterFunctionalGatewaysForMerchantRequiredFlow" => {  
-            let paymentFlowList = utils::getPaymentFlowListFromTxnDetail(txnDetail);  
-            let isMFOrder = paymentFlowList.contains(&"MUTUAL_FUND".to_string());  
-            let isCBOrder = paymentFlowList.contains(&"CROSS_BORDER_PAYMENT".to_string());  
-            let isSBMD = paymentFlowList.contains(&"SINGLE_BLOCK_MULTIPLE_DEBIT".to_string());  
-            let message = if isMFOrder {  
-                "Mutual Fund transaction flow"  
-            } else if isCBOrder {  
-                "Cross Border transaction flow"  
-            } else if isSBMD {  
-                "Single Block Multiple Debit"  
-            } else {  
-                "Merchant requested payment flows "  
-            };  
-            Ok(format!("No functional gateways after filtering for {}", message))  
-        }  
-        "filterGatewaysForMGASelectionIntegrity" => Ok("Conflicting configurations found or no functional gateways supporting this transaction".to_string()),  
-        "filterGatewaysForEMITenureSpecficGatewayCreds" => Ok("No functional gateways supporting for emi.".to_string()),  
-        "FilterFunctionalGatewaysForReversePennyDrop" => Ok("No functional gateways after filtering for Reverse Penny Drop transaction ".to_string()),  
-        _ => Ok("No functional gateways supporting this transaction.".to_string()),  
-    }  
-} 
+pub fn getDeciderFailureReason(
+    decider_params: T::DeciderParams,
+    decider_state: T::DeciderState,
+    debug_filter_list: Vec<T::DebugFilterEntry>,
+    priority_logic_output: Option<T::GatewayPriorityLogicOutput>,
+) -> String {
+    let filter_with_empty_list = sortedFilterList(&debug_filter_list)
+        .iter()
+        .find(|(_, list)| list.is_empty());
+    let txn_detail = &decider_params.dpTxnDetail;
+    let txn_card_info = &decider_params.dpTxnCardInfo;
+    let macc = &decider_params.dpMerchantAccount;
+    let order_reference = &decider_params.dpOrder;
+    let m_internal_meta = &decider_state.internalMetaData;
+    let m_card_brand = &decider_state.cardBrand;
+    let vault_provider_m = &decider_params.dpVaultProvider;
+    let m_txn_type: Option<String> = decider_params.dpTxnType.clone();
+    let stored_card_vault_provider = m_internal_meta
+        .as_ref()
+        .and_then(|meta| meta.storedCardVaultProvider.clone());
+    let scope = format!(
+        "{} ",
+        stored_card_vault_provider
+            .as_ref()
+            .map(|s| s.to_lowercase())
+            .unwrap_or_else(|| "card".to_string())
+    );
+    let preferred_gateway_m = txn_detail
+        .gateway
+        .clone()
+        .or_else(|| order_reference.preferredGateway.clone());
+    let configured_gateways_m = filterList(&debug_filter_list)
+        .iter()
+        .find(|(filter_name, _)| filter_name == "getFunctionalGateways");
+    let configured_gateways = configured_gateways_m
+        .map(|(_, gateways)| gateways.clone())
+        .unwrap_or_default();
+    let juspay_bank_code_m = Utils::getJuspayBankCodeFromInternalMetadata(txn_detail);
+
+    match filter_with_empty_list.map(|(name, _)| name.as_str()).unwrap_or("NO_EMPTY") {
+        "getFunctionalGateways" => {
+            let reference_ids = Utils::getAllRefIds(
+                decider_state.metadata.as_ref().unwrap_or(&Map::new()),
+                priority_logic_output
+                    .as_ref()
+                    .and_then(|logic| logic.gatewayReferenceIds.clone())
+                    .unwrap_or(Map::new()),
+            );
+            format!(
+                "No gateways are configured with the referenceIds {} to proceed transaction ",
+                JSON::encodeJSON(reference_ids)
+            )
+        }
+        "filterFunctionalGatewaysForCurrency" => {
+            format!(
+                "No functional gateways after filtering for currency {}",
+                txn_detail.currency
+            )
+        }
+        "filterFunctionalGatewaysForBrand" => {
+            format!(
+                "No functional gateways after filtering for brand {}",
+                m_card_brand.clone().unwrap_or_default()
+            )
+        }
+        "filterFunctionalGatewaysForAuthType" => {
+            format!(
+                "No functional gateways after filtering for authType {}",
+                txn_card_info
+                    .authType
+                    .as_ref()
+                    .map(|auth_type| RiskyShowSecrets::show(auth_type.clone()))
+                    .unwrap_or_default()
+            )
+        }
+        "filterFunctionalGatewaysForValidationType" => {
+            format!(
+                "No functional gateways after filtering for validationType {}",
+                getValidationType(txn_detail, txn_card_info)
+                    .map(|val_type| val_type.to_string())
+                    .unwrap_or_default()
+            )
+        }
+        "filterFunctionalGatewaysForEmi" => {
+            let emi_type = format!(
+                "{} ",
+                Utils::fetchEmiType(txn_card_info)
+                    .map(|emi| emi.to_lowercase())
+                    .unwrap_or_else(|| "emi".to_string())
+            );
+            let emi_bank = format!("{} ", txn_detail.emiBank.clone().unwrap_or_default());
+            if Utils::isCardTransaction(txn_card_info) && !txn_detail.isEmi {
+                "Gateways configured supports only emi transaction.".to_string()
+            } else if Utils::isCardTransaction(txn_card_info) {
+                let is_bin_eligible = Utils::checkIfBinIsELigibleForEmi(
+                    &txn_card_info.cardIsin,
+                    juspay_bank_code_m.as_ref(),
+                    txn_card_info
+                        .cardType
+                        .as_ref()
+                        .map(|card_type| ETCa::cardTypeToText(card_type))
+                        .unwrap_or_default(),
+                );
+                if is_bin_eligible {
+                    format!(
+                        "No functional gateways supporting {}{}{}transaction.",
+                        emi_bank, scope, emi_type
+                    )
+                } else {
+                    "Bin doesn't support emi transaction.".to_string()
+                }
+            } else {
+                format!(
+                    "No functional gateways supporting {}{}{}transaction.",
+                    emi_bank, scope, emi_type
+                )
+            }
+        }
+        "filterFunctionalGatewaysForPaymentMethod" => {
+            format!(
+                "No functional gateways supporting {} payment method.",
+                txn_card_info.paymentMethod
+            )
+        }
+        "filterFunctionalGatewaysForTokenProvider" => {
+            let vault_provider = vault_provider_m.clone().unwrap_or(ETCa::Juspay);
+            format!(
+                "No functional gateways supporting {} saved cards.",
+                vault_provider.to_string()
+            )
+        }
+        "filterFunctionalGatewaysForWallet" => {
+            if txn_card_info.cardType == Some(ETCa::Wallet) {
+                "No functional gateways supporting wallet transaction.".to_string()
+            } else {
+                "Gateways configured supports only wallet transaction.".to_string()
+            }
+        }
+        "filterFunctionalGatewaysForNbOnly" => {
+            if txn_card_info.cardType == Some(ETCa::NB) {
+                "No functional gateways supporting Net Banking transaction.".to_string()
+            } else {
+                "Gateways configured supports only Net Banking transaction.".to_string()
+            }
+        }
+        "filterFunctionalGatewaysForConsumerFinance" => {
+            if txn_card_info.paymentMethodType == ETP::ConsumerFinance {
+                "No functional gateways supporting Consumer Finance transaction.".to_string()
+            } else {
+                "Gateways configured supports only Consumer Finance transaction.".to_string()
+            }
+        }
+        "filterFunctionalGatewaysForUpi" => {
+            if txn_card_info.paymentMethodType == ETP::UPI {
+                "No functional gateways supporting UPI transaction.".to_string()
+            } else if !S::isGooglePayTxn(txn_card_info) {
+                "Gateways configured supports only UPI transaction.".to_string()
+            } else {
+                "No functional gateways".to_string()
+            }
+        }
+        "filterFunctionalGatewaysForTxnType" => match m_txn_type {
+            None => "No functional gateways".to_string(),
+            Some(txn_type) => format!("No functional gateways supporting {} transaction.", txn_type),
+        },
+        "filterFunctionalGatewaysForTxnDetailType" => {
+            format!(
+                "No functional gateways supporting {}transaction.",
+                NE::toText(&txn_detail.txnType)
+            )
+        }
+        "filterFunctionalGatewaysForReward" => {
+            if txn_card_info.cardType == Some(ETCa::Reward)
+                || txn_card_info.paymentMethodType == ETP::Reward
+            {
+                "No functional gateways supporting Reward transaction.".to_string()
+            } else {
+                "Gateways configured supports only Reward transaction.".to_string()
+            }
+        }
+        "filterFunctionalGatewaysForCash" => {
+            if txn_card_info.paymentMethodType == ETP::Cash {
+                "No functional gateways supporting CASH transaction.".to_string()
+            } else {
+                "Gateways configured supports only CASH transaction.".to_string()
+            }
+        }
+        "filterFunctionalGatewaysForSplitSettlement" => {
+            "No functional gateways after validating split.".to_string()
+        }
+        "filterFunctionalGatewaysForOTMFlow" => {
+            "No functional gateways after filtering for OTM flow.".to_string()
+        }
+        "filterFunctionalGateways" => {
+            if Utils::isCardTransaction(txn_card_info) {
+                if m_internal_meta
+                    .as_ref()
+                    .and_then(|meta| meta.isCvvLessTxn.clone())
+                    .unwrap_or(false)
+                    && txn_card_info.authType == Some(makeSecret(ETCa::MOTO))
+                {
+                    format!(
+                        "No functional gateways supporting cvv less {}repeat moto transaction.",
+                        scope
+                    )
+                } else if m_internal_meta
+                    .as_ref()
+                    .and_then(|meta| meta.isCvvLessTxn.clone())
+                    .unwrap_or(false)
+                {
+                    format!("No functional gateways supporting cvv less {}transaction.", scope)
+                } else if Utils::isTokenRepeatTxn(m_internal_meta.clone()) {
+                    format!("No functional gateways supporting {}transaction.", scope)
+                } else {
+                    "No functional gateways supporting transaction.".to_string()
+                }
+            } else {
+                "No functional gateways supporting transaction.".to_string()
+            }
+        }
+        "preferredGateway" => match preferred_gateway_m {
+            Some(preferred_gateway) => {
+                if configured_gateways.contains(&preferred_gateway) {
+                    format!(
+                        "{} is not supporting this transaction.",
+                        preferred_gateway.to_string()
+                    )
+                } else {
+                    format!("{} is not configured.", preferred_gateway.to_string())
+                }
+            }
+            None => "No functional gateways supporting this transaction.".to_string(),
+        },
+        "filterEnforcement" => {
+            "Priority logic enforced gateways are not supporting this transaction.".to_string()
+        }
+        "filterFunctionalGatewaysForMerchantRequiredFlow" => {
+            let payment_flow_list = Utils::getPaymentFlowListFromTxnDetail(txn_detail);
+            let is_mf_order = payment_flow_list.contains(&"MUTUAL_FUND".to_string());
+            let is_cb_order = payment_flow_list.contains(&"CROSS_BORDER_PAYMENT".to_string());
+            let is_sbmd = payment_flow_list.contains(&"SINGLE_BLOCK_MULTIPLE_DEBIT".to_string());
+            let message = if is_mf_order {
+                "Mutual Fund transaction flow"
+            } else if is_cb_order {
+                "Cross Border transaction flow"
+            } else if is_sbmd {
+                "Single Block Multiple Debit"
+            } else {
+                "Merchant requested payment flows "
+            };
+            format!("No functional gateways after filtering for {}", message)
+        }
+        "filterGatewaysForMGASelectionIntegrity" => {
+            "Conflicting configurations found or no functional gateways supporting this transaction"
+                .to_string()
+        }
+        "filterGatewaysForEMITenureSpecficGatewayCreds" => {
+            "No functional gateways supporting for emi.".to_string()
+        }
+        "FilterFunctionalGatewaysForReversePennyDrop" => {
+            "No functional gateways after filtering for Reverse Penny Drop transaction ".to_string()
+        }
+        _ => "No functional gateways supporting this transaction.".to_string(),
+    }
+}
   
 fn sortedFilterList(debugFilterList: &[T::DebugFilterEntry]) -> Vec<(String, Vec<Gateway>)> {  
     let mut list = filterList(debugFilterList);  

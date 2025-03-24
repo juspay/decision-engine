@@ -2,15 +2,17 @@
 // Generated on 2025-03-23 10:19:40
 
 // Converted imports
-use eulerhs::prelude::*;
-use utils::config::service_configuration as SC;
+// use eulerhs::prelude::*;
+// use utils::config::service_configuration as SC;
+use crate::redis::types as SC;
+use serde::{Serialize, Deserialize};
 
 
 // Converted data types
 // Original Haskell data type: Database
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Ord)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Database {
-    #[serde(rename = "ECDB")]
+    #[serde(rename = "ECRDB")]
     ECDB,
     
     #[serde(rename = "EulerDB")]
@@ -29,8 +31,8 @@ pub enum Database {
 pub struct SR_V3_BASED_FLOW_CUTOVER;
 
 impl SC::ServiceConfigKey for SR_V3_BASED_FLOW_CUTOVER {
-    fn get_key(&self) -> &str {
-        "sr_v3_based_flow_cutover"
+    fn get_key(&self) -> std::string::String {
+        "sr_v3_based_flow_cutover".to_string()
     }
 }
 
@@ -50,8 +52,8 @@ pub struct SR_V3_INPUT_CONFIG_DEFAULT;
 pub struct GW_REF_ID_ENABLED_MERCHANTS_SRV2_PRODUCER;
 
 impl SC::ServiceConfigKey for GW_REF_ID_ENABLED_MERCHANTS_SRV2_PRODUCER {
-    fn get_key(&self) -> &str {
-        "gw_ref_id_enabled_merchants_SRv2_producer"
+    fn get_key(&self) -> std::string::String {
+        "gw_ref_id_enabled_merchants_SRv2_producer".to_string()
     }
 }
 
@@ -61,8 +63,8 @@ impl SC::ServiceConfigKey for GW_REF_ID_ENABLED_MERCHANTS_SRV2_PRODUCER {
 pub struct AUTH_TYPE_SR_ROUTING_PRODUCER_ENABLED_MERCHANT;
 
 impl SC::ServiceConfigKey for AUTH_TYPE_SR_ROUTING_PRODUCER_ENABLED_MERCHANT {
-    fn get_key(&self) -> &str {
-        "auth_type_sr_routing_producer_enabled_merchant"
+    fn get_key(&self) -> std::string::String {
+        "auth_type_sr_routing_producer_enabled_merchant".to_string()
     }
 }
 
@@ -72,8 +74,8 @@ impl SC::ServiceConfigKey for AUTH_TYPE_SR_ROUTING_PRODUCER_ENABLED_MERCHANT {
 pub struct BANK_LEVEL_SR_ROUTING_PRODUCER_ENABLED_MERCHANT;
 
 impl SC::ServiceConfigKey for BANK_LEVEL_SR_ROUTING_PRODUCER_ENABLED_MERCHANT {
-    fn get_key(&self) -> &str {
-        "bank_level_sr_routing_producer_enabled_merchant"
+    fn get_key(&self) -> std::string::String {
+        "bank_level_sr_routing_producer_enabled_merchant".to_string()
     }
 }
 
@@ -83,8 +85,8 @@ impl SC::ServiceConfigKey for BANK_LEVEL_SR_ROUTING_PRODUCER_ENABLED_MERCHANT {
 pub struct PSP_APP_SR_ROUTING_PRODUCER_ENABLED_MERCHANT;
 
 impl SC::ServiceConfigKey for PSP_APP_SR_ROUTING_PRODUCER_ENABLED_MERCHANT {
-    fn get_key(&self) -> &str {
-        "psp_app_sr_routing_producer_enabled_merchant"
+    fn get_key(&self) -> std::string::String {
+        "psp_app_sr_routing_producer_enabled_merchant".to_string()
     }
 }
 
@@ -94,8 +96,8 @@ impl SC::ServiceConfigKey for PSP_APP_SR_ROUTING_PRODUCER_ENABLED_MERCHANT {
 pub struct PSP_PACKAGE_SR_ROUTING_PRODUCER_ENABLED_MERCHANT;
 
 impl SC::ServiceConfigKey for PSP_PACKAGE_SR_ROUTING_PRODUCER_ENABLED_MERCHANT {
-    fn get_key(&self) -> &str {
-        "psp_package_sr_routing_producer_enabled_merchant"
+    fn get_key(&self) -> std::string::String {
+        "psp_package_sr_routing_producer_enabled_merchant".to_string()
     }
 }
 
@@ -116,8 +118,8 @@ impl SC::ServiceConfigKey for SR_V3_INPUT_CONFIG {
 pub struct GLOBAL_GATEWAY_SCORING_ENABLED_MERCHANTS;
 
 impl SC::ServiceConfigKey for GLOBAL_GATEWAY_SCORING_ENABLED_MERCHANTS {
-    fn get_key(&self) -> &str {
-        "global_gateway_scoring_enabled_merchants"
+    fn get_key(&self) -> std::string::String {
+        "global_gateway_scoring_enabled_merchants".to_string()
     }
 }
 
@@ -126,9 +128,9 @@ impl SC::ServiceConfigKey for GLOBAL_GATEWAY_SCORING_ENABLED_MERCHANTS {
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct GLOBAL_OUTAGE_GATEWAY_SCORING_ENABLED_MERCHANTS;
 
-impl SC.ServiceConfigKey for GLOBAL_OUTAGE_GATEWAY_SCORING_ENABLED_MERCHANTS {
-    fn get_key(&self) -> &str {
-        "global_outage_gateway_scoring_enabled_merchants"
+impl SC::ServiceConfigKey for GLOBAL_OUTAGE_GATEWAY_SCORING_ENABLED_MERCHANTS {
+    fn get_key(&self) -> std::string::String {
+        "global_outage_gateway_scoring_enabled_merchants".to_string()
     }
 }
 
@@ -138,8 +140,8 @@ impl SC.ServiceConfigKey for GLOBAL_OUTAGE_GATEWAY_SCORING_ENABLED_MERCHANTS {
 pub struct MINIMUM_GATEWAY_SCORE;
 
 impl SC::ServiceConfigKey for MINIMUM_GATEWAY_SCORE {
-    fn get_key(&self) -> &str {
-        "minimum_gateway_score"
+    fn get_key(&self) -> std::string::String {
+        "minimum_gateway_score".to_string()
     }
 }
 
@@ -149,8 +151,8 @@ impl SC::ServiceConfigKey for MINIMUM_GATEWAY_SCORE {
 pub struct GATEWAY_SCORE_LATENCY_CHECK_IN_MINS;
 
 impl SC::ServiceConfigKey for GATEWAY_SCORE_LATENCY_CHECK_IN_MINS {
-    fn get_key(&self) -> &str {
-        "gateway_score_latency_check_in_mins"
+    fn get_key(&self) -> std::string::String {
+        "gateway_score_latency_check_in_mins".to_string()
     }
 }
 
@@ -160,8 +162,8 @@ impl SC::ServiceConfigKey for GATEWAY_SCORE_LATENCY_CHECK_IN_MINS {
 pub struct GATEWAY_SCORE_LATENCY_CHECK_EXEMPT_GATEWAYS;
 
 impl SC::ServiceConfigKey for GATEWAY_SCORE_LATENCY_CHECK_EXEMPT_GATEWAYS {
-    fn get_key(&self) -> &str {
-        "gateway_score_latency_check_exempt_gateways"
+    fn get_key(&self) -> std::string::String {
+        "gateway_score_latency_check_exempt_gateways".to_string()
     }
 }
 
@@ -178,9 +180,9 @@ pub struct DEFAULT_GW_SCORE_LATENCY_THRESHOLD {
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct GATEWAY_PENALTY_FACTOR;
 
-impl SC.ServiceConfigKey for GATEWAY_PENALTY_FACTOR {
-    fn get_key(&self) -> &str {
-        "gateway_penalty_factor"
+impl SC::ServiceConfigKey for GATEWAY_PENALTY_FACTOR {
+    fn get_key(&self) -> std::string::String {
+        "gateway_penalty_factor".to_string()
     }
 }
 
@@ -190,8 +192,8 @@ impl SC.ServiceConfigKey for GATEWAY_PENALTY_FACTOR {
 pub struct GATEWAY_REWARD_FACTOR;
 
 impl SC::ServiceConfigKey for GATEWAY_REWARD_FACTOR {
-    fn get_key(&self) -> &str {
-        "gateway_reward_factor"
+    fn get_key(&self) -> std::string::String {
+        "gateway_reward_factor".to_string()
     }
 }
 
@@ -211,8 +213,8 @@ pub struct OUTAGE_REWARD_FACTOR;
 pub struct GATEWAY_SCORE_OUTAGE_TTL;
 
 impl SC::ServiceConfigKey for GATEWAY_SCORE_OUTAGE_TTL {
-    fn get_key(&self) -> &str {
-        "gateway_score_outage_ttl"
+    fn get_key(&self) -> std::string::String {
+        "gateway_score_outage_ttl".to_string()
     }
 }
 
@@ -222,8 +224,8 @@ impl SC::ServiceConfigKey for GATEWAY_SCORE_OUTAGE_TTL {
 pub struct GATEWAY_SCORE_GLOBAL_TTL;
 
 impl SC::ServiceConfigKey for GATEWAY_SCORE_GLOBAL_TTL {
-    fn get_key(&self) -> &str {
-        "gateway_score_global_ttl"
+    fn get_key(&self) -> std::string::String {
+        "gateway_score_global_ttl".to_string()
     }
 }
 
@@ -233,8 +235,8 @@ impl SC::ServiceConfigKey for GATEWAY_SCORE_GLOBAL_TTL {
 pub struct GATEWAY_SCORE_GLOBAL_OUTAGE_TTL;
 
 impl SC::ServiceConfigKey for GATEWAY_SCORE_GLOBAL_OUTAGE_TTL {
-    fn get_key(&self) -> &str {
-        "gateway_score_global_outage_ttl"
+    fn get_key(&self) -> std::string::String {
+        "gateway_score_global_outage_ttl".to_string()
     }
 }
 
@@ -244,8 +246,8 @@ impl SC::ServiceConfigKey for GATEWAY_SCORE_GLOBAL_OUTAGE_TTL {
 pub struct GATEWAY_SCORE_MERCHANT_ARR_MAX_LENGTH;
 
 impl SC::ServiceConfigKey for GATEWAY_SCORE_MERCHANT_ARR_MAX_LENGTH {
-    fn get_key(&self) -> &str {
-        "gateway_score_merchant_arr_max_length"
+    fn get_key(&self) -> std::string::String {
+        "gateway_score_merchant_arr_max_length".to_string()
     }
 }
 
@@ -255,8 +257,8 @@ impl SC::ServiceConfigKey for GATEWAY_SCORE_MERCHANT_ARR_MAX_LENGTH {
 pub struct GATEWAY_SCORE_THIRD_DIMENSION_TTL;
 
 impl SC::ServiceConfigKey for GATEWAY_SCORE_THIRD_DIMENSION_TTL {
-    fn get_key(&self) -> &str {
-        "gateway_score_third_dimension_ttl"
+    fn get_key(&self) -> std::string::String {
+        "gateway_score_third_dimension_ttl".to_string()
     }
 }
 
@@ -266,8 +268,8 @@ impl SC::ServiceConfigKey for GATEWAY_SCORE_THIRD_DIMENSION_TTL {
 pub struct ENFORCE_GW_SCORE_KV_REDIS;
 
 impl SC::ServiceConfigKey for ENFORCE_GW_SCORE_KV_REDIS {
-    fn get_key(&self) -> &str {
-        "enforce_gw_score_kv_redis"
+    fn get_key(&self) -> std::string::String {
+        "enforce_gw_score_kv_redis".to_string()
     }
 }
 
@@ -277,8 +279,8 @@ impl SC::ServiceConfigKey for ENFORCE_GW_SCORE_KV_REDIS {
 pub struct SR_SCORE_REDIS_FALLBACK_LOOKUP_DISABLE;
 
 impl SC::ServiceConfigKey for SR_SCORE_REDIS_FALLBACK_LOOKUP_DISABLE {
-    fn get_key(&self) -> &str {
-        "sr_score_redis_fallback_lookup_disable"
+    fn get_key(&self) -> std::string::String {
+        "sr_score_redis_fallback_lookup_disable".to_string()
     }
 }
 
@@ -288,8 +290,8 @@ impl SC::ServiceConfigKey for SR_SCORE_REDIS_FALLBACK_LOOKUP_DISABLE {
 pub struct SR_V3_PRODUCER_ISOLATION;
 
 impl SC::ServiceConfigKey for SR_V3_PRODUCER_ISOLATION {
-    fn get_key(&self) -> &str {
-        "sr_v3_producer_isolation"
+    fn get_key(&self) -> std::string::String {
+        "sr_v3_producer_isolation".to_string()
     }
 }
 
@@ -297,12 +299,12 @@ impl SC::ServiceConfigKey for SR_V3_PRODUCER_ISOLATION {
 // Converted functions
 // Original Haskell function: ecDB
 pub fn ecDB() -> Database {
-    ECDB
+    Database::ECDB
 }
 
 
 // Original Haskell function: kvRedis
-pub fn kvRedis() -> Text {
+pub fn kvRedis() -> String {
     "KVRedis".into()
 }
 
@@ -320,7 +322,7 @@ pub const gatewaySelectionV3OrderTypeKeyPrefix: &str = "{gw_sr_v3_score";
 
 
 // Original Haskell function: ecRedis
-pub fn ecRedis() -> Text {
+pub fn ecRedis() -> String {
     "ECRRedis".into()
 }
 
@@ -332,7 +334,7 @@ pub fn ecRedis2() -> String {
 
 
 // Original Haskell function: kvRedis2
-pub fn kvRedis2() -> Text {
+pub fn kvRedis2() -> String {
     "KVRedis2".into()
 }
 

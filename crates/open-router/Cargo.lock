@@ -1070,7 +1070,7 @@ dependencies = [
  "bytes",
  "common_enums",
  "diesel",
- "error-stack 0.4.1",
+ "error-stack",
  "futures",
  "globset",
  "hex",
@@ -1659,16 +1659,6 @@ name = "error-stack"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27a72baa257b5e0e2de241967bc5ee8f855d6072351042688621081d66b2a76b"
-dependencies = [
- "anyhow",
- "rustc_version",
-]
-
-[[package]]
-name = "error-stack"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe413319145d1063f080f27556fd30b1d70b01e2ba10c2a6e40d4be982ffc5d1"
 dependencies = [
  "anyhow",
  "rustc_version",
@@ -2635,6 +2625,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "libm"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8355be11b20d696c8f18f6cc018c4e372165b1fa8126cef092399c9951984ffa"
+
+[[package]]
 name = "linked-hash-map"
 version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2942,6 +2938,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
+ "libm",
 ]
 
 [[package]]
@@ -3024,7 +3021,8 @@ dependencies = [
  "criterion",
  "diesel",
  "diesel-async",
- "error-stack 0.5.0",
+ "error-stack",
+ "fred",
  "gethostname",
  "hex",
  "hyper 1.6.0",
@@ -3034,6 +3032,7 @@ dependencies = [
  "nanoid",
  "once_cell",
  "rand 0.8.5",
+ "rand_distr",
  "redis_interface",
  "reqwest 0.12.15",
  "ring",
@@ -3601,6 +3600,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rand_distr"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32cb0b9bc82b0a0876c2dd994a7e7a2683d3e7390ca40e6886785ef0c7e3ee31"
+dependencies = [
+ "num-traits",
+ "rand 0.8.5",
+]
+
+[[package]]
 name = "rayon"
 version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3640,7 +3649,7 @@ version = "0.1.0"
 source = "git+https://github.com/juspay/hyperswitch.git?tag=2024.09.30.0#dcec2a2bff082b606cc3376e9451d53ed6ecdf04"
 dependencies = [
  "common_utils",
- "error-stack 0.4.1",
+ "error-stack",
  "fred",
  "futures",
  "serde",

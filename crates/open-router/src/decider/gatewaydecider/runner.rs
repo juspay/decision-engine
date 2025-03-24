@@ -1,57 +1,66 @@
+use masking::PeekInterface;
 use serde::{Serialize, Deserialize};
-use serde_json::Value as AValue;
-use eulerhs::prelude::*;
-use data::aeson::{Object, either_decode, (.:)};
-use data::aeson::types::parse_either;
-use data::byte_string::lazy as BSL;
-use data::maybe::from_just;
-use data::reflection::give;
-use data::text as DT::{is_infix_of, pack, to_upper, strip, to_lower};
-use types::card::{TxnCardInfo, card_type_to_text};
-use types::card::card_info::{CardInfo};
-use types::currency::Currency;
-use types::customer::CustomerId;
-use types::gateway::{text_to_gateway};
-use types::merchant::MerchantId;
-use types::money::{Money, to_double};
-use types::order::{Order, OrderId, ProductId, get_udf};
-use juspay::extra::json::{decode_json, encode_json};
-use juspay::extra::parsing::{Parsed, parse};
-use juspay::extra::secret::{SecretContext, unsafe_extract_secret};
-use types::transaction::TransactionId;
-use types::txn_detail::TxnDetail;
-use eulerhs::api_helpers as ET;
-use eulerhs::language::{MonadFlow, call_api};
-use servant::{JSON, Post, ReqBody, (:<|>), (:>)};
-use utils::api_tag;
-use types::gateway::{gateway_to_text, text_to_gateway};
-use types::card::card_info::{CardInfo};
-use types::card::{Isin};
-use optics::core::preview;
-use types::gateway::Gateway;
-use servant::client::{ClientError, ResponseF};
-use types::merchant_priority_logic as MPL;
-use gateway_decider::utils as Utils;
-use data::aeson as A;
-use juspay::extra::env as Env;
-use types::card as ETCa;
-use eulerhs::types as T;
-use eulerhs::api_helpers as T;
-use network::http::client as HC;
-use servant::client as SC;
-use eulerhs::language as L;
-use gateway_decider::types as DeciderTypes;
-use gateway_decider::types::{GatewayPriorityLogicOutput, PriorityLogicData};
-use data::text::encoding as TE;
-use types::txn_detail as ETTD;
-use types::token_bin_info as ETTB;
-use data::text as T;
-use types::merchant as ETM;
-use types::order as ETO;
-use utils::redis::feature as Feature;
-use juspay::extra::json as JSON;
-use types::tenant_config as TenantConfig;
-use types::tenant_config_filter as TenantConfigFilter;
+use serde_json::{from_str, Value};
+use crate::{config::TenantConfig, decider::configs::env_vars::groovy_executor_url, error::ApiClientError, redis::feature::roller, types::{card::{card_info::CardInfo, card_type::card_type_to_text, isin::Isin, txn_card_info::{auth_type_to_text, TxnCardInfo}}, currency::Currency, customer::CustomerId, gateway::{gateway_to_text, text_to_gateway, Gateway, GatewayAny}, merchant::{id::{merchant_pid_to_text, MerchantId}, merchant_account::MerchantAccount}, merchant_priority_logic::{find_all_priority_logic_by_merchant_pid, find_priority_logic_by_id}, money::internal::Money, order::{id::{OrderId, ProductId}, udfs::get_udf, Order }, payment::payment_method::{PaymentMethod, PaymentMethodType}, tenant::tenant_config::{filter_dimension_to_text, ConfigType, FilterDimension, ModuleName}, tenant_config::{get_tenant_config_by_tenant_id_and_module_name_and_module_key_and_type, get_tenant_config_filter_by_group_id_and_dimension_value}, transaction::id::TransactionId, txn_details::{internal_metadata::InternalMetadata, types::{TxnDetail, TxnObjectType}}}, utils::call_api};
+
+use crate::decider::gatewaydecider::types as DeciderTypes;
+
+use super::utils;
+
+
+// use serde_json::Value as AValue;
+// use eulerhs::prelude::*;
+// use data::aeson::{Object, either_decode, (.:)};
+// use data::aeson::types::parse_either;
+// use data::byte_string::lazy as BSL;
+// use data::maybe::from_just;
+// use data::reflection::give;
+// use data::text as DT::{is_infix_of, pack, to_upper, strip, to_lower};
+// use types::card::{TxnCardInfo, card_type_to_text};
+// use types::card::card_info::{CardInfo};
+// use types::currency::Currency;
+// use types::customer::CustomerId;
+// use types::gateway::{text_to_gateway};
+// use types::merchant::MerchantId;
+// use types::money::{Money, to_double};
+// use types::order::{Order, OrderId, ProductId, get_udf};
+// use juspay::extra::json::{decode_json, encode_json};
+// use juspay::extra::parsing::{Parsed, parse};
+// use juspay::extra::secret::{SecretContext, unsafe_extract_secret};
+// use types::transaction::TransactionId;
+// use types::txn_detail::TxnDetail;
+// use eulerhs::api_helpers as ET;
+// use eulerhs::language::{MonadFlow, call_api};
+// use servant::{JSON, Post, ReqBody, (:<|>), (:>)};
+// use utils::api_tag;
+// use types::gateway::{gateway_to_text, text_to_gateway};
+// use types::card::card_info::{CardInfo};
+// use types::card::{Isin};
+// use optics::core::preview;
+// use types::gateway::Gateway;
+// use servant::client::{ClientError, ResponseF};
+// use types::merchant_priority_logic as MPL;
+// use gateway_decider::utils as utils;
+// use data::aeson as A;
+// use juspay::extra::env as Env;
+// use types::card as ETCa;
+// use eulerhs::types as T;
+// use eulerhs::api_helpers as T;
+// use network::http::client as HC;
+// use servant::client as SC;
+// use eulerhs::language as L;
+// use gateway_decider::types as DeciderTypes;
+// use gateway_decider::types::{GatewayPriorityLogicOutput, PriorityLogicData};
+// use data::text::encoding as TE;
+// use types::txn_detail as ETTD;
+// use types::token_bin_info as ETTB;
+// use data::text as T;
+// use types::merchant as ETM;
+// use types::order as ETO;
+// use utils::redis::feature as Feature;
+// use juspay::extra::json as JSON;
+// use types::tenant_config as TenantConfig;
+// use types::tenant_config_filter as TenantConfigFilter;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FilteredOrderInfo {
@@ -72,28 +81,28 @@ pub struct FilteredOrderInfo {
     pub udf8: Option<String>,
     pub udf9: Option<String>,
     pub udf10: Option<String>,
-    pub orderMetaData: Option<AValue>,
+    pub orderMetaData: Option<Value>,
 }
 
-pub fn filter_order(order: Order, metaData: Option<AValue>) -> FilteredOrderInfo {
+pub fn filter_order(order: Order, metaData: Option<Value>) -> FilteredOrderInfo {
     FilteredOrderInfo {
-        amount: to_double(order.amount),
+        amount: Money::to_double(&order.amount),
         currency: order.currency,
         customerId: order.customerId,
         orderId: order.orderId,
         productId: order.productId,
         description: order.description,
-        preferredGateway: order.preferredGateway.map(gateway_to_text),
-        udf1: get_udf(1, order.udfs),
-        udf2: get_udf(2, order.udfs),
-        udf3: get_udf(3, order.udfs),
-        udf4: get_udf(4, order.udfs),
-        udf5: get_udf(5, order.udfs),
-        udf6: get_udf(6, order.udfs),
-        udf7: get_udf(7, order.udfs),
-        udf8: get_udf(8, order.udfs),
-        udf9: get_udf(9, order.udfs),
-        udf10: get_udf(10, order.udfs),
+        preferredGateway: order.preferredGateway.as_ref().map(|gateway| gateway_to_text(&gateway)),
+        udf1: get_udf(&order.udfs, 1).cloned(),
+        udf2: get_udf(&order.udfs, 2).cloned(),
+        udf3: get_udf(&order.udfs, 3).cloned(),
+        udf4: get_udf(&order.udfs, 4).cloned(),
+        udf5: get_udf(&order.udfs, 5).cloned(),
+        udf6: get_udf(&order.udfs, 6).cloned(),
+        udf7: get_udf(&order.udfs, 7).cloned(),
+        udf8: get_udf(&order.udfs, 8).cloned(),
+        udf9: get_udf(&order.udfs, 9).cloned(),
+        udf10: get_udf(&order.udfs, 10).cloned(),
         orderMetaData: metaData,
     }
 }
@@ -107,7 +116,7 @@ pub struct FilteredTxnInfo {
     pub addToLocker: bool,
     pub expressCheckout: bool,
     pub sourceObject: Option<String>,
-    pub txnObjectType: ETTD.TxnObjectType,
+    pub txnObjectType: TxnObjectType,
 }
 
 pub fn filter_txn(detail: TxnDetail) -> FilteredTxnInfo {
@@ -127,12 +136,22 @@ pub fn fetch_emi_type(txnCardInfo: TxnCardInfo) -> Result<String, Vec<LogEntry>>
     match txnCardInfo.paymentSource {
         None => Err(vec![]),
         Some(ps) => {
-            if !is_infix_of("emi_type", &ps) {
+            if ps.contains("emi_type") {
                 Err(vec![])
             } else {
-                match decode_json::<Object>(&ps) {
-                    None => Err(vec![]),
-                    Some(obj) => parse_either(&obj, "emi_type").map_err(|e| vec![LogEntry::Error("Error while parsing emi_type value from JSON".to_string(), e.to_string())]),
+                match from_str:: <Value>(&ps) {
+                    Ok(value) => {
+                        match value.get("emi_type") {
+                            Some(emi_type) => {
+                                match emi_type.as_str() {
+                                    Some(emi_type_str) => Ok(emi_type_str.to_string()),
+                                    None => Err(vec![LogEntry::Error("Invalid emi_type".to_string(), "emi_type is not a string".to_string())]),
+                                }
+                            }
+                            None => Err(vec![LogEntry::Error("Invalid emi_type".to_string(), "emi_type not found".to_string())]),
+                        }
+                    }
+                    Err(_) => Err(vec![LogEntry::Error("Invalid emi_type".to_string(), "emi_type is not a valid JSON".to_string())]),
                 }
             }
         }
@@ -162,14 +181,14 @@ pub struct FilteredPaymentInfo {
 }
 
 pub fn make_payment_info(txnCardInfo: TxnCardInfo, mCardInfo: Option<CardInfo>, mInternalMeta: Option<DeciderTypes::InternalMetadata>, juspayBankCode: Option<String>) -> FilteredPaymentInfo {
-    match txnCardInfo.cardIsin {
-        Some(cardIsin) => go_card_isin(cardIsin, txnCardInfo, mCardInfo, mInternalMeta, juspayBankCode),
+    match txnCardInfo.card_isin {
+        Some(ref cardIsin) => go_card_isin(cardIsin.to_string(), txnCardInfo.clone(), mCardInfo, mInternalMeta, juspayBankCode),
         None => FilteredPaymentInfo {
-            paymentMethodType: txnCardInfo.cardType.map(card_type_to_text).or_else(|| Some(txnCardInfo.paymentMethodType.to_string())),
-            paymentMethod: txnCardInfo.cardIssuerBankName.or_else(|| Some(txnCardInfo.paymentMethod)),
+            paymentMethodType: Some(PaymentMethodType::to_text(&txnCardInfo.paymentMethodType)).map(|s| s.to_string()),
+            paymentMethod: Some(txnCardInfo.paymentMethod),
             paymentSource: txnCardInfo.paymentSource,
             cardIssuer: txnCardInfo.cardIssuerBankName,
-            cardType: txnCardInfo.cardType.map(card_type_to_text),
+            cardType: txnCardInfo.card_type.map(|c| card_type_to_text(&c)),
             cardBin: None,
             extendedCardBin: None,
             cardBrand: None,
@@ -180,7 +199,7 @@ pub fn make_payment_info(txnCardInfo: TxnCardInfo, mCardInfo: Option<CardInfo>, 
             storedCardProvider: None,
             extendedCardType: None,
             cvvLessTxn: None,
-            juspayBankCode: juspayBankCode.map(to_upper).or_else(|| Some("".to_string())),
+            juspayBankCode: juspayBankCode,
             cardSubTypeCategory: None,
             countryCode: None,
         },
@@ -188,16 +207,16 @@ pub fn make_payment_info(txnCardInfo: TxnCardInfo, mCardInfo: Option<CardInfo>, 
 }
 
 fn go_card_isin(cardIsin: String, txnCardInfo: TxnCardInfo, mCardInfo: Option<CardInfo>, mInternalMeta: Option<DeciderTypes::InternalMetadata>, juspayBankCode: Option<String>) -> FilteredPaymentInfo {
-    let card_type = mCardInfo.as_ref().and_then(|ci| ci.cardType).map(card_type_to_text);
-    let extended_card_type = mCardInfo.as_ref().and_then(|ci| ci.extendedCardType);
-    let extended_card_bin = Utils::fetch_extended_card_bin(&txnCardInfo).or_else(|| mCardInfo.as_ref().and_then(|ci| ci.cardIsin));
-    let card_sub_type_v = mCardInfo.as_ref().and_then(|ci| ci.cardSubType).map(to_upper).or_else(|| Some("".to_string()));
+    let card_type = mCardInfo.clone().as_ref().and_then(|ci| ci.card_type.clone()).map(|ct| card_type_to_text(&ct));
+    let extended_card_type = mCardInfo.as_ref().and_then(|ci| ci.extended_card_type.clone());
+    let extended_card_bin = utils::fetch_extended_card_bin(&txnCardInfo).or_else(|| mCardInfo.as_ref().and_then(|ci| Some(Isin::to_text(&ci.card_isin))));
+    let card_sub_type_v = mCardInfo.clone().map(|ci| ci.card_sub_type).unwrap_or(None);
     let card_sub_type_category = match mCardInfo {
-        Some(ref card_info) => match card_info.cardSubTypeCategory {
-            Some(ref card_info_card_sub_type_category) => Some(to_upper(card_info_card_sub_type_category.clone())),
-            None => match Utils::get_true_string(&card_sub_type_v) {
+        Some(ref card_info) => match card_info.card_sub_type_category {
+            Some(ref card_info_card_sub_type_category) => Some(card_info_card_sub_type_category.clone().to_string()),
+            None => match card_sub_type_v.clone() {
                 Some(sub_type) => {
-                    if is_infix_of("business", &to_lower(&sub_type)) || is_infix_of("corp", &to_lower(&sub_type)) {
+                    if sub_type.to_lowercase().contains("business") || sub_type.to_lowercase().contains("corp"){
                         Some("CORPORATE".to_string())
                     } else {
                         Some("RETAIL".to_string())
@@ -208,32 +227,33 @@ fn go_card_isin(cardIsin: String, txnCardInfo: TxnCardInfo, mCardInfo: Option<Ca
         },
         None => None,
     };
+    let cloned_txn_card_info = txnCardInfo.clone();
 
     FilteredPaymentInfo {
         paymentMethodType: Some("CARD".to_string()),
-        paymentMethod: txnCardInfo.cardSwitchProvider.map(|csp| to_upper(unsafe_extract_secret(&csp))),
+        paymentMethod: txnCardInfo.cardSwitchProvider.clone().map(|csp| csp.peek().to_uppercase()),
         paymentSource: None,
-        cardIssuer: txnCardInfo.cardIssuerBankName.map(to_upper),
-        cardType: txnCardInfo.cardType.or_else(|| Some(ETCa::Credit)).map(card_type_to_text),
+        cardIssuer: txnCardInfo.cardIssuerBankName.clone().map(|ci | ci.to_uppercase()),
+        cardType: cloned_txn_card_info.card_type.map(|ct| card_type_to_text(&ct)),
         cardBin: Some(cardIsin.chars().take(6).collect()),
-        extendedCardBin: extended_card_bin,
-        cardBrand: txnCardInfo.cardSwitchProvider.map(|csp| to_upper(unsafe_extract_secret(&csp))),
-        cardIssuerCountry: mCardInfo.as_ref().and_then(|ci| ci.cardIssuerCountry).map(to_upper).or_else(|| Some("".to_string())),
-        authType: txnCardInfo.authType.map(|at| give(RiskyShowSecrets, || at.to_string())),
-        emiType: fetch_emi_type(txnCardInfo).ok().or_else(|| Some("".to_string())),
+        extendedCardBin: Isin::try_from(cardIsin.as_str()).ok(),
+        cardBrand: cloned_txn_card_info.cardSwitchProvider.clone().map(|csp| csp.peek().to_uppercase()),
+        cardIssuerCountry: mCardInfo.as_ref().and_then(|ci| ci.card_issuer_country.clone()).or_else(|| Some("".to_string())),
+        authType: txnCardInfo.authType.clone().map(|at| auth_type_to_text(&at)).or_else(|| Some("".to_string())),
+        emiType: fetch_emi_type(txnCardInfo.clone()).ok().or_else(|| Some("".to_string())),
         cardSubType: card_sub_type_v,
         storedCardProvider: mInternalMeta.as_ref().and_then(|im| im.storedCardVaultProvider.clone()).or_else(|| Some("JUSPAY".to_string())),
-        extendedCardType: extended_card_type.or_else(|| card_type).map(to_upper).or_else(|| Some("".to_string())),
+        extendedCardType: extended_card_type.or_else(|| card_type).map(|ect| ect.to_uppercase()),
         cvvLessTxn: mInternalMeta.as_ref().and_then(|im| im.isCvvLessTxn),
-        juspayBankCode: juspayBankCode.map(to_upper).or_else(|| Some("".to_string())),
+        juspayBankCode: juspayBankCode.map(|j| j.to_uppercase()).or_else(|| Some("".to_string())),
         cardSubTypeCategory: card_sub_type_category,
-        countryCode: mCardInfo.as_ref().and_then(|ci| ci.countryCode.clone()).or_else(|| Some("".to_string())),
+        countryCode: mCardInfo.as_ref().and_then(|ci| ci.country_code.clone()).or_else(|| Some("".to_string())),
     }
 }
 
-fn hush<T, E>(result: Result<T, E>) -> Option<T> {
-    result.ok()
-}
+// fn hush<T, E>(result: Result<T, E>) -> Option<T> {
+//     result.ok()
+// }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PriorityLogicConfig {
@@ -244,7 +264,7 @@ pub struct PriorityLogicConfig {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Stagger {
-    StaggerBtwnTwo(BtwnTwo),
+    StaggerBtwnTwo (BtwnTwo),
     UnhandledText(String),
 }
 
@@ -274,16 +294,17 @@ pub struct TenantPLConfig {
 pub enum LogEntry {
     Info(String),
     Error(String, String),
+    
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResponseBody {
     pub ok: bool,
     pub log: Option<Vec<Vec<String>>>,
     pub result: PriorityLogicOutput,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PriorityLogicOutput {
     pub isEnforcement: Option<bool>,
     pub gatewayPriority: Option<Vec<String>>,
@@ -296,70 +317,80 @@ pub enum EvaluationResult {
     EvaluationError(DeciderTypes::PriorityLogicData, Vec<LogEntry>),
 }
 
-type API = (
-    ReqBody<GroovyEvalPayload> :> Post<ResponseBody>,
-    "health" :> Post<bool>
-);
+// type API = (
+//     ReqBody<GroovyEvalPayload> :> Post<ResponseBody>,
+//     "health" :> Post<bool>
+// );
 
-pub fn api() -> API {
-    (ReqBody::<GroovyEvalPayload>::default(), "health".to_string())
-}
+// pub fn api() -> API {
+//     (ReqBody::<GroovyEvalPayload>::default(), "health".to_string())
+// }
 
-pub fn post_groovy_eval_n(payload: GroovyEvalPayload) -> T::EulerClient<ResponseBody> {
-    ET::client(api()).0(payload)
-}
+// pub fn post_groovy_eval_n(payload: GroovyEvalPayload) -> T::EulerClient<ResponseBody> {
+//     ET::client(api()).0(payload)
+// }
 
-pub fn post_groovy_health_n() -> T::EulerClient<bool> {
-    ET::client(api()).1()
-}
+// pub fn post_groovy_health_n() -> T::EulerClient<bool> {
+//     ET::client(api()).1()
+// }
 
 pub fn parse_log_entry(log: Vec<String>) -> LogEntry {
     match log.as_slice() {
-        ["Info", descr] => LogEntry::Info(descr.clone()),
-        ["Error", descr, err] => LogEntry::Error(descr.clone(), err.clone()),
+        [val, descr] if val == "Info" => LogEntry::Info(descr.clone()),
+        [val, descr, err] if val == "Error" => LogEntry::Error(descr.clone(), err.clone()),
         _ => LogEntry::Error("Malformed log entry".to_string(), "no logs from executor".to_string()),
     }
 }
 
-pub fn groovy_executor_url() -> SC::BaseUrl {
-    SC::BaseUrl {
-        baseUrlScheme: SC::Http,
-        baseUrlHost: Env::lookup_env(Env::JuspayEnv {
-            key: "GROOVY_RUNNER_HOST".to_string(),
-            actionLeft: Env::mk_default_env_action("euler-groovy-runner.ec-prod.svc.cluster.local".to_string()),
-            decryptFunc: Box::new(|s| Ok(s.to_string())),
-            logWhenThrowException: None,
-        }),
-        baseUrlPort: 80,
-        baseUrlPath: "/evaluate-script".to_string(),
-    }
-}
+// pub fn groovy_executor_url() -> SC::BaseUrl {
+//     SC::BaseUrl {
+//         baseUrlScheme: SC::Http,
+//         baseUrlHost: Env::lookup_env(Env::JuspayEnv {
+//             key: "GROOVY_RUNNER_HOST".to_string(),
+//             actionLeft: Env::mk_default_env_action("euler-groovy-runner.ec-prod.svc.cluster.local".to_string()),
+//             decryptFunc: Box::new(|s| Ok(s.to_string())),
+//             logWhenThrowException: None,
+//         }),
+//         baseUrlPort: 80,
+//         baseUrlPath: "/evaluate-script".to_string(),
+//     }
+// }
 
 pub fn pl_execution_retry_failure_reasons() -> Vec<DeciderTypes::PriorityLogicFailure> {
     vec![DeciderTypes::PriorityLogicFailure::CONNECTION_FAILED]
 }
 
 pub async fn execute_priority_logic(req: DeciderTypes::ExecutePriorityLogicRequest) -> DeciderTypes::GatewayPriorityLogicOutput {
-    let internal_metadata = req.txnDetail.internalMetadata.as_ref().and_then(|im| A::decode::<DeciderTypes::InternalMetadata>(BSL::from_str(&TE::encode_utf8(im))));
+    let internal_metadata: Option<DeciderTypes::InternalMetadata> = req
+    .txnDetail
+    .internalMetadata
+    .as_ref()
+    .and_then(|im| serde_json::from_str(im).ok());
     let order_metadata = req.orderMetadata.metadata.clone();
-    let resolve_bin = match Utils::fetch_extended_card_bin(&req.txnCardInfo) {
+    let resolve_bin = match utils::fetch_extended_card_bin(&req.txnCardInfo) {
         Some(card_bin) => Some(card_bin),
-        None => req.txnCardInfo.cardIsin.clone(),
+        None => req.txnCardInfo.card_isin.clone(),
     };
 
-    get_gateway_priority(
+    match get_gateway_priority(
         req.merchantAccount,
         req.order,
         req.txnDetail,
         TxnCardInfo {
-            cardIsin: resolve_bin,
+            card_isin: resolve_bin,
             ..req.txnCardInfo
         },
         internal_metadata,
         order_metadata,
         None,
     )
-    .await
+    .await {
+        Ok(output) => output,
+        Err(e) => {
+            eprintln!("Error occurred: {}", e);
+            return default_gateway_priority_logic_output();
+        }
+    }
 }
 
 
@@ -374,23 +405,23 @@ pub struct PLExecutorError {
 }
 
 pub async fn get_gateway_priority(
-    macc: ETM::MerchantAccount,
-    order: ETO::Order,
-    txn_detail: ETTD::TxnDetail,
+    macc: MerchantAccount,
+    order: Order,
+    txn_detail: TxnDetail,
     txn_card_info: TxnCardInfo,
     m_internal_meta: Option<DeciderTypes::InternalMetadata>,
     order_meta_data: Option<String>,
     priority_logic_script_m: Option<String>,
 ) -> Result<DeciderTypes::GatewayPriorityLogicOutput, Box<dyn std::error::Error>> {
-    let m_card_info = Utils::get_card_info_by_bin(txn_card_info.card_isin).await?;
-    if macc.use_code_for_gateway_priority {
+    let m_card_info = utils::get_card_info_by_bin(txn_card_info.card_isin.clone()).await;
+    if macc.useCodeForGatewayPriority {
         let evaluate_script = |script, tag| {
             eval_script(
                 order.clone(),
                 txn_detail.clone(),
                 txn_card_info.clone(),
                 m_card_info.clone(),
-                macc.merchant_id.clone(),
+                macc.merchantId.clone(),
                 script,
                 m_internal_meta.clone(),
                 order_meta_data.clone(),
@@ -398,51 +429,38 @@ pub async fn get_gateway_priority(
             )
         };
         let (script, priority_logic_tag) = get_script(macc.clone(), priority_logic_script_m).await?;
-        let result = evaluate_script(script.clone(), priority_logic_tag.clone()).await?;
+        let result = evaluate_script(script.clone(), priority_logic_tag.clone()).await;
+
         match result {
             EvaluationResult::PLResponse(gws, pl_data, logs, status) => {
-                L::log_info_v(
-                    format!("PRIORITY_LOGIC_EXECUTION_{}", status),
-                    format!(
-                        "MerchantId: {}, Gateways: {:?}, Logs: {:?}",
-                        macc.merchant_id, gws, logs
-                    ),
-                )
-                .await;
-                Ok(gws.with_primary_logic(Some(pl_data)))
+                println!("Gateway Priority Logic Response: {:?}", gws);
+                Ok(DeciderTypes::GatewayPriorityLogicOutput {
+                    isEnforcement: gws.isEnforcement,
+                    gws: gws.gws,
+                    priorityLogicTag: gws.priorityLogicTag,
+                    gatewayReferenceIds: gws.gatewayReferenceIds,
+                    primaryLogic: Some(pl_data),
+                    fallbackLogic: gws.fallbackLogic,
+                })
             }
             EvaluationResult::EvaluationError(priority_logic_data, err) => {
-                L::log_error_v(
-                    "PRIORITY_LOGIC_EXECUTION_FAILURE",
-                    format!(
-                        "MerchantId: {}, Error: {}",
-                        macc.merchant_id, err
-                    ),
-                )
-                .await;
-                if pl_execution_retry_failure_reasons.contains(&priority_logic_data.failure_reason) {
-                    let retry_result = evaluate_script(script, priority_logic_tag.clone()).await?;
+                println!("Gateway Priority Logic Error: {:?}", err);
+                if pl_execution_retry_failure_reasons().contains(&priority_logic_data.failureReason.clone()) {
+                    let retry_result = evaluate_script(script, priority_logic_tag.clone()).await;
                     match retry_result {
                         EvaluationResult::PLResponse(retry_gws, retry_pl_data, logs, status) => {
-                            L::log_info_v(
-                                format!("PRIORITY_LOGIC_EXECUTION_RETRY_{}", status),
-                                format!(
-                                    "MerchantId: {}, Gateways: {:?}, Logs: {:?}",
-                                    macc.merchant_id, retry_gws, logs
-                                ),
-                            )
-                            .await;
-                            Ok(retry_gws.with_primary_logic(Some(retry_pl_data)))
+                            println!("Gateway Priority Logic Retry Response: {:?}", retry_gws);
+                            Ok(DeciderTypes::GatewayPriorityLogicOutput {
+                                isEnforcement: retry_gws.isEnforcement,
+                                gws: retry_gws.gws,
+                                priorityLogicTag: retry_gws.priorityLogicTag,
+                                gatewayReferenceIds: retry_gws.gatewayReferenceIds,
+                                primaryLogic: Some(retry_pl_data),
+                                fallbackLogic: retry_gws.fallbackLogic,
+                            })
                         }
-                        EvaluationResult::EvaluationError(retry_pl_data, err) => {
-                            L::log_error_v(
-                                "PRIORITY_LOGIC_EXECUTION_RETRY_FAILURE",
-                                format!(
-                                    "MerchantId: {}, Error: {}",
-                                    macc.merchant_id, err
-                                ),
-                            )
-                            .await;
+                        EvaluationResult::EvaluationError(retry_pl_data, err) => Ok({
+                            println!("Gateway Priority Logic Retry Error: {:?}", err);
                             handle_fallback_logic(
                                 macc,
                                 order,
@@ -451,15 +469,13 @@ pub async fn get_gateway_priority(
                                 m_card_info,
                                 m_internal_meta,
                                 order_meta_data,
-                                default_gateway_priority_logic_output()
-                                    .with_priority_logic_tag(priority_logic_tag)
-                                    .with_primary_logic(Some(retry_pl_data)),
-                                retry_pl_data.failure_reason,
+                                default_gateway_priority_logic_output().setPriorityLogicTag(priority_logic_tag).setPrimaryLogic(Some(retry_pl_data)).build(),
+                                priority_logic_data.failureReason.clone(),
                             )
                             .await
-                        }
+                        })
                     }
-                } else {
+                } else {Ok({
                     handle_fallback_logic(
                         macc,
                         order,
@@ -468,28 +484,19 @@ pub async fn get_gateway_priority(
                         m_card_info,
                         m_internal_meta,
                         order_meta_data,
-                        default_gateway_priority_logic_output()
-                            .with_priority_logic_tag(priority_logic_tag)
-                            .with_primary_logic(Some(priority_logic_data)),
-                        priority_logic_data.failure_reason,
+                        default_gateway_priority_logic_output().setPriorityLogicTag(priority_logic_tag).setPrimaryLogic(Some(priority_logic_data.clone())).build(),
+                        priority_logic_data.failureReason.clone(),
                     )
                     .await
-                }
+                })}
             }
         }
     } else {
-        match macc.gateway_priority {
+        match macc.gatewayPriority {
             None => Ok(default_gateway_priority_logic_output()),
             Some(t) => {
                 if t.is_empty() {
-                    L::log_debug_v(
-                        "gatewayPriority",
-                        format!(
-                            "gatewayPriority for merchant: {} is empty.",
-                            macc.merchant_id
-                        ),
-                    )
-                    .await;
+                    println!("Gateway Priority Logic: Empty");
                     Ok(default_gateway_priority_logic_output())
                 } else {
                     let list_of_gateway_in_text = t
@@ -498,36 +505,15 @@ pub async fn get_gateway_priority(
                         .filter(|s| !s.is_empty())
                         .collect::<Vec<_>>();
                     let (list_of_gateway, errs) = convert_text_to_gateway(list_of_gateway_in_text);
-                    L::log_debug_t(
-                        "gatewayPriority",
-                        format!(
-                            "gatewayPriority for merchant: listOfGateway {:?}",
-                            list_of_gateway
-                        ),
-                    )
-                    .await;
+                    println!("Gateway Priority Logic: {:?}", list_of_gateway);
                     match list_of_gateway.as_slice() {
                         [] => {
-                            L::log_error_v(
-                                "gatewayPriority emptyList",
-                                format!(
-                                    "Can't get gatewayPriority for merchant: {}. Input: {}",
-                                    macc.merchant_id, t
-                                ),
-                            )
-                            .await;
+                            println!("Gateway Priority Logic: Empty");
                             Ok(default_gateway_priority_logic_output())
                         }
                         res => {
-                            L::log_debug_t(
-                                "gatewayPriority decoding",
-                                format!(
-                                    "Decoded successfully. Input: {} output: {:?}",
-                                    t, res
-                                ),
-                            )
-                            .await;
-                            Ok(default_gateway_priority_logic_output().with_gateways(res.to_vec()))
+                            println!("Gateway Priority Logic: {:?}", res);
+                            Ok(default_gateway_priority_logic_output().setGws(res.to_vec()).build())
                         }
                     }
                 }
@@ -537,147 +523,119 @@ pub async fn get_gateway_priority(
 }
 
 async fn get_script(
-    macc: ETM::MerchantAccount,
+    macc: MerchantAccount,
     maybe_script: Option<String>,
 ) -> Result<(String, Option<String>), Box<dyn std::error::Error>> {
     match maybe_script {
         Some(script) => Ok((script, Some("TEST_PL".to_string()))),
-        None => get_priority_logic_script(macc).await,
+        None => get_priority_logic_script(&macc).await,
     }
 }
 
 fn default_gateway_priority_logic_output() -> DeciderTypes::GatewayPriorityLogicOutput {
     DeciderTypes::GatewayPriorityLogicOutput {
-        is_enforcement: false,
+        isEnforcement: false,
         gws: vec![],
-        priority_logic_tag: None,
-        gateway_reference_ids: vec![],
-        primary_logic: None,
-        fallback_logic: None,
+        priorityLogicTag: None,
+        gatewayReferenceIds: std::collections::HashMap::new(),
+        primaryLogic: None,
+        fallbackLogic: None,
     }
 }
 
 async fn get_priority_logic_script(
-    macc: ETM::MerchantAccount,
+    macc: &MerchantAccount,
 ) -> Result<(String, Option<String>), Box<dyn std::error::Error>> {
-    match Utils::get_true_string(macc.priority_logic_config) {
-        Some(priority_logic_config) => match Utils::either_decode_t::<PriorityLogicConfig>(&priority_logic_config) {
+    match macc.priorityLogicConfig.clone() {
+        Some(priority_logic_config) => match utils::either_decode_t::<PriorityLogicConfig>(&priority_logic_config) {
             Ok(pl_config) => {
                 let mpl_id = match pl_config.stagger {
-                    Some(StaggerBtwnTwo { staggered_logic, rollout }) => {
-                        if Feature::roller("GatewayDecider::getPriorityLogicScript", rollout).await {
-                            staggered_logic
+                    Some(Stagger::StaggerBtwnTwo (BtwnTwo{ staggeredLogic ,rollout})) => {
+                        if roller("GatewayDecider::getPriorityLogicScript".to_string(), rollout) {
+                            staggeredLogic
                         } else {
-                            pl_config.active_logic
+                            pl_config.activeLogic
                         }
                     }
-                    None => pl_config.active_logic,
+                    Some(Stagger::UnhandledText(_)) => pl_config.activeLogic,
+                    None => pl_config.activeLogic,
                 };
-                match MPL::find_priority_logic_by_id(mpl_id).await {
-                    Some(mpl) => Ok((mpl.priority_logic, mpl.name)),
+                match find_priority_logic_by_id(mpl_id.parse().expect("Id is not able to convert")).await {
+                    Some(mpl) => Ok((mpl.priorityLogic, mpl.name)),
                     None => {
-                        L::log_error_t(
-                            "getPriorityLogicScript",
-                            format!("No merchant_priority_logic found for id {}", mpl_id),
-                        )
-                        .await;
+                        println!("Priority Logic not found in DB");
                         let pl_tag = get_active_priority_logic_name(macc).await?;
-                        Ok((macc.gateway_priority_logic, pl_tag))
+                        Ok((macc.gatewayPriorityLogic.clone(), pl_tag))
                     }
                 }
             }
             Err(err) => {
-                L::log_error_t(
-                    "getPriorityLogicScript",
-                    format!(
-                        "Error while decoding PriorityLogicConfig for {} {}",
-                        ETM::to_text(macc.merchant_id),
-                        err
-                    ),
-                )
-                .await;
+                println!("Error in parsing priority logic config: {:?}", err);
                 let pl_tag = get_active_priority_logic_name(macc).await?;
-                Ok((macc.gateway_priority_logic, pl_tag))
+                Ok((macc.gatewayPriorityLogic.clone(), pl_tag))
             }
         },
         None => {
-            if macc.gateway_priority_logic.trim().is_empty() {
+            if macc.gatewayPriorityLogic.trim().is_empty() {
                 get_priority_logic_script_from_tenant_config(macc).await
             } else {
                 let pl_tag = get_active_priority_logic_name(macc).await?;
-                Ok((macc.gateway_priority_logic, pl_tag))
+                Ok((macc.gatewayPriorityLogic.clone(), pl_tag))
             }
         }
     }
 }
 
 async fn get_active_priority_logic_name(
-    macc: ETM::MerchantAccount,
+    macc: &MerchantAccount,
 ) -> Result<Option<String>, Box<dyn std::error::Error>> {
-    match macc.internal_metadata {
-        Some(metadata) => match Utils::get_value("active_priority_logic_name", &metadata) {
+    match macc.clone().internalMetadata {
+        Some(metadata) => match utils::get_value("active_priority_logic_name", &metadata) {
             Some(name) => Ok(Some(name)),
-            None => get_active_priority_logic_name_from_db(macc).await,
+            None => {
+                get_active_priority_logic_name_from_db(macc).await
+            },
         },
         None => get_active_priority_logic_name_from_db(macc).await,
     }
 }
 
 async fn get_active_priority_logic_name_from_db(
-    macc: ETM::MerchantAccount,
+    macc: &MerchantAccount,
 ) -> Result<Option<String>, Box<dyn std::error::Error>> {
-    let all_mpls = MPL::find_all_priority_logic_by_merchant_p_id(macc.id).await?;
-    match all_mpls.iter().find(|mpl| mpl.is_active_logic) {
-        Some(mpl) => Ok(Some(mpl.name.clone())),
+    let all_mpls = find_all_priority_logic_by_merchant_pid(merchant_pid_to_text(macc.id)).await;
+    match all_mpls.iter().find(|mpl: &_| mpl.isActiveLogic) {
+        Some(mpl) => Ok(mpl.name.clone()),
         None => Ok(None),
     }
 }
 
 async fn get_priority_logic_script_from_tenant_config(
-    macc: ETM::MerchantAccount,
+    macc: &MerchantAccount,
 ) -> Result<(String, Option<String>), Box<dyn std::error::Error>> {
-    match macc.tenant_account_id {
-        Some(tenant_account_id) => {
-            match TenantConfig::get_tenant_config_by_tenant_id_and_module_name_and_module_key_and_type(
-                tenant_account_id,
-                TenantConfig::PRIORITY_LOGIC,
-                "priority_logic",
-                TenantConfig::FALLBACK,
+    match macc.tenantAccountId {
+        Some(ref tenant_account_id) => {
+            match get_tenant_config_by_tenant_id_and_module_name_and_module_key_and_type(
+                tenant_account_id.to_string(),
+                ModuleName::PRIORITY_LOGIC,
+                "priority_logic".to_string(),
+                ConfigType::FALLBACK,
             )
             .await
             {
-                Some(tenant_config) => match (tenant_config.filter_dimension, tenant_config.filter_group_id) {
+                Some(tenant_config) => match (tenant_config.filterDimension, tenant_config.filterGroupId) {
                     (Some(filter_dimension), Some(filter_group_id)) => {
-                        L::log_info_t(
-                            "getPriorityLogicScriptFromTenantConfig",
-                            format!(
-                                "Filter dimension found: {}",
-                                TenantConfig::filter_dimension_to_text(filter_dimension)
-                            ),
-                        )
-                        .await;
-                        get_pl_by_filter_dimension(macc, filter_dimension, filter_group_id, tenant_config.config_value).await
+                        println!("Filter Dimension: {:?}", filter_dimension);
+                        get_pl_by_filter_dimension(macc, filter_dimension, filter_group_id, tenant_config.configValue).await
                     }
                     _ => {
-                        L::log_info_t(
-                            "getPriorityLogicScriptFromTenantConfig",
-                            "Filter dimension and filter groupId are not present. Proceeding with default tenant config value.",
-                        )
-                        .await;
-                        decode_tenant_pl_config(tenant_config.config_value).await
+                        println!("Filter dimension not found");
+                        decode_tenant_pl_config(tenant_config.configValue).await
                     }
                 },
                 None => {
-                    let tenant_account_id = macc.tenant_account_id.unwrap_or_default();
-                    L::log_debug_t(
-                        "getPriorityLogicScriptFromTenantConfig",
-                        format!(
-                            "Unable to find tenant config of tenantAccountId {} for module {} and key priority_logic. Proceeding with gateway priority logic.",
-                            tenant_account_id,
-                            TenantConfig::module_name_to_text(TenantConfig::PRIORITY_LOGIC),
-                        ),
-                    )
-                    .await;
+                    let tenant_account_id = macc.tenantAccountId.clone().unwrap_or_default();
+                    println!("Tenant Config not found for tenant account id {}", tenant_account_id);
                     Ok((String::new(), None))
                 }
             }
@@ -687,62 +645,40 @@ async fn get_priority_logic_script_from_tenant_config(
 }
 
 async fn get_pl_by_filter_dimension(
-    macc: ETM::MerchantAccount,
-    filter_dimension: TenantConfig::FilterDimension,
+    macc: &MerchantAccount,
+    filter_dimension: FilterDimension,
     filter_group_id: String,
     config_value: String,
 ) -> Result<(String, Option<String>), Box<dyn std::error::Error>> {
     match filter_dimension {
-        TenantConfig::MCC => get_pl_by_merchant_category_code(macc, filter_group_id, config_value).await,
+        TenantConfig => get_pl_by_merchant_category_code(macc, filter_group_id, config_value).await,
         _ => {
-            L::log_info_t(
-                "getPLByFilterDimension",
-                "Filter dimension is not supported. Proceeding with default tenant config value.",
-            )
-            .await;
+            println!("Filter dimension not handled");
             decode_tenant_pl_config(config_value).await
         }
     }
 }
 
 async fn get_pl_by_merchant_category_code(
-    macc: ETM::MerchantAccount,
+    macc: &MerchantAccount,
     filter_group_id: String,
     config_value: String,
 ) -> Result<(String, Option<String>), Box<dyn std::error::Error>> {
-    match macc.merchant_category_code {
+    match &macc.merchantCategoryCode {
         Some(mcc) => {
-            match TenantConfigFilter::get_tenant_config_filter_by_group_id_and_dimension_value(filter_group_id, mcc).await {
+            match get_tenant_config_filter_by_group_id_and_dimension_value(filter_group_id, mcc.to_string()).await {
                 Some(tenant_config_filter) => {
-                    L::log_info_t(
-                        "getPLByMerchantCategoryCode",
-                        "Proceeding with tenant config filter priority logic.",
-                    )
-                    .await;
-                    decode_tenant_pl_config(tenant_config_filter.config_value).await
+                    println!("Tenant Config Filter: {:?}", tenant_config_filter);
+                    decode_tenant_pl_config(tenant_config_filter.configValue).await
                 }
                 None => {
-                    L::log_info_t(
-                        "getPLByMerchantCategoryCode",
-                        format!(
-                            "Unable to find tenant config filter for groupId {} and dimension value {}",
-                            filter_group_id, mcc
-                        ),
-                    )
-                    .await;
+                    println!("Tenant Config Filter not found for merchant category code ");
                     decode_tenant_pl_config(config_value).await
                 }
             }
         }
         None => {
-            L::log_error_t(
-                "getPLByMerchantCategoryCode",
-                format!(
-                    "Merchant category code is not present for merchantId {}",
-                    ETM::to_text(macc.merchant_id),
-                ),
-            )
-            .await;
+            println!("Merchant Category Code not found");
             decode_tenant_pl_config(config_value).await
         }
     }
@@ -751,58 +687,35 @@ async fn get_pl_by_merchant_category_code(
 async fn decode_tenant_pl_config(
     config_value: String,
 ) -> Result<(String, Option<String>), Box<dyn std::error::Error>> {
-    match Utils::either_decode_t::<TenantPLConfig>(&config_value) {
+    match utils::either_decode_t::<TenantPLConfig>(&config_value) {
         Ok(tenant_pl_config) => {
-            L::log_debug_t(
-                "decodeTenantPLConfig",
-                format!(
-                    "tenantPLConfig decoded successfully with name: {}",
-                    tenant_pl_config.name,
-                ),
-            )
-            .await;
-            Ok((tenant_pl_config.priority_logic, Some(tenant_pl_config.name)))
+            println!("Tenant Priority Logic Config: {:?}", tenant_pl_config);
+            Ok((tenant_pl_config.priorityLogic, Some(tenant_pl_config.name)))
         }
         Err(err) => {
-            L::log_error_t(
-                "decodeTenantPLConfig",
-                format!(
-                    "Error while decoding TenantPLConfig for {} {}",
-                    ETM::to_text(macc.merchant_id),
-                    err,
-                ),
-            )
-            .await;
+            println!("Error while decoding TenantPLConfig: {:?}", err);
             Ok((String::new(), None))
         }
     }
 }
 
 pub async fn get_fallback_priority_logic_script(
-    macc: ETM::MerchantAccount,
+    macc: &MerchantAccount,
 ) -> Result<(Option<String>, Option<String>), Box<dyn std::error::Error>> {
-    match macc.priority_logic_config {
-        Some(priority_logic_config) => match Utils::either_decode_t::<PriorityLogicConfig>(&priority_logic_config) {
+    match &macc.priorityLogicConfig {
+        Some(priority_logic_config) => match utils::either_decode_t::<PriorityLogicConfig>(&priority_logic_config) {
             Ok(pl_config) => {
-                let mpl_m = match pl_config.fallback_logic {
-                    Some(mpl_id) => MPL::find_priority_logic_by_id(mpl_id).await,
+                let mpl_m = match pl_config.fallbackLogic {
+                    Some(mpl_id) => find_priority_logic_by_id(mpl_id.parse().expect("Invalid mid ")).await,
                     None => None,
                 };
                 match mpl_m {
-                    Some(mpl) => Ok((Some(mpl.priority_logic), Some(mpl.name))),
+                    Some(mpl) => Ok((Some(mpl.priorityLogic), mpl.name)),
                     None => Ok((None, None)),
                 }
             }
             Err(err) => {
-                L::log_error_t(
-                    "getFallbackPriorityLogicScript",
-                    format!(
-                        "Error while decoding PriorityLogicConfig for {} {}",
-                        ETM::to_text(macc.merchant_id),
-                        err,
-                    ),
-                )
-                .await;
+                println!("Error in parsing priority logic config: {:?}", err);
                 Ok((None, None))
             }
         },
@@ -810,20 +723,11 @@ pub async fn get_fallback_priority_logic_script(
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct PLExecutorError {
-    pub error: bool,
-    #[serde(rename = "error_message")]
-    pub errorMessage: DeciderTypes::PriorityLogicFailure,
-    #[serde(rename = "user_message")]
-    pub userMessage: String,
-    pub log: Option<Vec<Vec<String>>>,
-}
 
 pub async fn handle_fallback_logic(
-    macc: ETM::MerchantAccount,
-    order: ETO::Order,
-    txn_detail: ETTD::TxnDetail,
+    macc: MerchantAccount,
+    order: Order,
+    txn_detail: TxnDetail,
     txn_card_info: TxnCardInfo,
     m_card_info: Option<CardInfo>,
     m_internal_meta: Option<DeciderTypes::InternalMetadata>,
@@ -831,8 +735,17 @@ pub async fn handle_fallback_logic(
     primary_logic_output: DeciderTypes::GatewayPriorityLogicOutput,
     pl_failure_reason: DeciderTypes::PriorityLogicFailure,
 ) -> DeciderTypes::GatewayPriorityLogicOutput {
-    if primary_logic_output.fallback_logic.is_none() && primary_logic_output.primary_logic.is_some() {
-        let (fallback_logic, fallback_pl_tag) = get_fallback_priority_logic_script(macc).await;
+    if primary_logic_output.fallbackLogic.is_none() && primary_logic_output.primaryLogic.is_some() {
+        let (fallback_logic, fallback_pl_tag) = match get_fallback_priority_logic_script(&macc).await {
+            Ok(result) => result,
+            Err(err) => {
+                eprintln!("Error fetching fallback priority logic script: {:?}", err);
+                return DeciderTypes::GatewayPriorityLogicOutput {
+                    primaryLogic: check_and_update_pl_failure_reason(primary_logic_output.primaryLogic, pl_failure_reason),
+                    ..primary_logic_output
+                };
+            }
+        };
         match fallback_logic {
             Some(fallback_script) => {
                 let fallback_result = eval_script(
@@ -840,47 +753,35 @@ pub async fn handle_fallback_logic(
                     txn_detail,
                     txn_card_info,
                     m_card_info,
-                    macc.merchant_id,
+                    macc.merchantId,
                     fallback_script,
                     m_internal_meta,
                     order_meta_data,
-                    fallback_pl_tag,
+                    fallback_pl_tag.clone(),
                 )
                 .await;
                 match fallback_result {
                     EvaluationResult::PLResponse(gws, pl_data, logs, status) => {
-                        L::log_debug_v(
-                            format!("FALLBACK_PRIORITY_LOGIC_EXECUTION_{}", status),
-                            format!(
-                                "MerchantId: {}, Gateways: {}, Logs: {}",
-                                macc.merchant_id, gws, logs
-                            ),
-                        )
-                        .await;
+                        println!("Fallback Priority Logic Response: {:?}", gws);
                         return DeciderTypes::GatewayPriorityLogicOutput {
-                            fallback_logic: Some(pl_data),
-                            priority_logic_tag: fallback_pl_tag,
-                            primary_logic: check_and_update_pl_failure_reason(
-                                primary_logic_output.primary_logic,
+                            fallbackLogic: Some(pl_data),
+                            priorityLogicTag: fallback_pl_tag,
+                            primaryLogic: check_and_update_pl_failure_reason(
+                                primary_logic_output.primaryLogic,
+                                pl_failure_reason
                             ),
                             ..primary_logic_output
                         };
                     }
                     EvaluationResult::EvaluationError(priority_logic_data, err) => {
-                        L::log_error_v(
-                            "FALLBACK_PRIORITY_LOGIC_EXECUTION_FAILURE",
-                            format!(
-                                "MerchantId: {}, Error: {}",
-                                macc.merchant_id, err
-                            ),
-                        )
-                        .await;
+                        println!("Fallback Priority Logic Error: {:?}", err);
                         return DeciderTypes::GatewayPriorityLogicOutput {
-                            primary_logic: check_and_update_pl_failure_reason(
-                                primary_logic_output.primary_logic,
+                            primaryLogic: check_and_update_pl_failure_reason(
+                                primary_logic_output.primaryLogic,
+                                pl_failure_reason
                             ),
-                            fallback_logic: Some(priority_logic_data),
-                            priority_logic_tag: fallback_pl_tag,
+                            fallbackLogic: Some(priority_logic_data),
+                            priorityLogicTag: fallback_pl_tag,
                             ..primary_logic_output
                         };
                     }
@@ -888,8 +789,9 @@ pub async fn handle_fallback_logic(
             }
             None => {
                 return DeciderTypes::GatewayPriorityLogicOutput {
-                    primary_logic: check_and_update_pl_failure_reason(
-                        primary_logic_output.primary_logic,
+                    primaryLogic: check_and_update_pl_failure_reason(
+                        primary_logic_output.primaryLogic,
+                        pl_failure_reason
                     ),
                     ..primary_logic_output
                 };
@@ -897,8 +799,9 @@ pub async fn handle_fallback_logic(
         }
     } else {
         return DeciderTypes::GatewayPriorityLogicOutput {
-            fallback_logic: check_and_update_pl_failure_reason(
-                primary_logic_output.fallback_logic,
+            fallbackLogic: check_and_update_pl_failure_reason(
+                primary_logic_output.fallbackLogic,
+                pl_failure_reason
             ),
             ..primary_logic_output
         };
@@ -907,13 +810,14 @@ pub async fn handle_fallback_logic(
 
 fn check_and_update_pl_failure_reason(
     primary_pl_data: Option<DeciderTypes::PriorityLogicData>,
+    pl_failure_reason: DeciderTypes::PriorityLogicFailure,
 ) -> Option<DeciderTypes::PriorityLogicData> {
     match primary_pl_data {
         None => None,
         Some(mut data) => {
-            if data.failure_reason != pl_failure_reason {
-                data.status = DeciderTypes::FAILURE;
-                data.failure_reason = pl_failure_reason;
+            if data.failureReason != pl_failure_reason {
+                data.status = DeciderTypes::Status::FAILURE;
+                data.failureReason = pl_failure_reason;
             }
             Some(data)
         }
@@ -921,44 +825,42 @@ fn check_and_update_pl_failure_reason(
 }
 
 pub async fn eval_script(
-    order: ETO::Order,
-    txn_detail: ETTD::TxnDetail,
+    order: Order,
+    txn_detail: TxnDetail,
     txn_card_info: TxnCardInfo,
     m_card_info: Option<CardInfo>,
     merch_id: MerchantId,
-    script: Script,
+    script: String,
     m_internal_meta: Option<DeciderTypes::InternalMetadata>,
     meta_data: Option<String>,
     priority_logic_tag: Option<String>,
 ) -> EvaluationResult {
-    let order_meta_data = meta_data.and_then(|md| Utils::parse_json_from_string(&md));
-    let juspay_bank_code = Utils::get_juspay_bank_code_from_internal_metadata(&txn_detail);
-    let response = L::call_api(
-        Some(T::ManagerSelector::TlsManager),
-        groovy_executor_url,
-        EC_PL_EVALUATION,
-        || None,
-        make_request(order_meta_data, juspay_bank_code),
-    )
-    .await;
+    // Parse metadata into JSON if available
+    let order_meta_data = meta_data
+        .as_ref()
+        .and_then(|md| utils::parse_json_from_string(md));
+
+    // Extract Juspay bank code from internal metadata
+    let juspay_bank_code = utils::get_juspay_bank_code_from_internal_metadata(&txn_detail);
+
+    // Prepare the payload for the API call
+    let payload = serde_json::json!({
+        "order_info": filter_order(order, order_meta_data),
+        "txn_info": filter_txn(txn_detail),
+        "payment_info": make_payment_info(txn_card_info, m_card_info, m_internal_meta, juspay_bank_code),
+        "merchant_id": merch_id,
+        "script": script,
+    });
+
+    // Call the API
+    let response = call_api(&groovy_executor_url(), &payload).await;
+
+    // Handle the response
     handle_response(response, priority_logic_tag).await
 }
 
-fn make_request(
-    meta_data: Option<Object>,
-    juspay_bank_code: Option<String>,
-) -> SD {
-    SD {
-        order_info: filter_order(order, meta_data),
-        txn_info: filter_txn(txn_detail),
-        payment_info: make_payment_info(txn_card_info, m_card_info, m_internal_meta, juspay_bank_code),
-        merchant_id: merch_id,
-        script,
-    }
-}
-
 async fn handle_response(
-    response: Result<ResponseBody, ClientError>,
+    response: Result<ResponseBody, ApiClientError>,
     priority_logic_tag: Option<String>,
 ) -> EvaluationResult {
     match response {
@@ -967,13 +869,13 @@ async fn handle_response(
             let log_entries = pl_resp.log.unwrap_or_default().into_iter().map(parse_log_entry).collect();
             let pl_data = DeciderTypes::PriorityLogicData {
                 name: priority_logic_tag,
-                status: DeciderTypes::FAILURE,
-                failure_reason: pl_resp.error_message,
+                status: DeciderTypes::Status::FAILURE,
+                failureReason: pl_resp.errorMessage,
             };
             EvaluationResult::EvaluationError(pl_data, log_entries)
         }
         Ok(response_body) => {
-            let log_entries = response_body.log.unwrap_or_default().into_iter().map(parse_log_entry).collect();
+            let log_entries = response_body.clone().log.unwrap_or_default().into_iter().map(parse_log_entry).collect();
             if !response_body.ok {
                 handle_failure_response(priority_logic_tag, log_entries).await
             } else {
@@ -989,8 +891,8 @@ async fn handle_failure_response(
 ) -> EvaluationResult {
     let pl_data = DeciderTypes::PriorityLogicData {
         name: priority_logic_tag,
-        status: DeciderTypes::FAILURE,
-        failure_reason: DeciderTypes::PL_EVALUATION_FAILED,
+        status: DeciderTypes::Status::FAILURE,
+        failureReason: DeciderTypes::PriorityLogicFailure::PL_EVALUATION_FAILED,
     };
     EvaluationResult::EvaluationError(pl_data, log_entries)
 }
@@ -1000,116 +902,79 @@ async fn handle_success_response(
     priority_logic_tag: Option<String>,
     log_entries: Vec<LogEntry>,
 ) -> EvaluationResult {
-    let (gws, errs) = convert_text_to_gateway(response_body.result.gateway_priority.unwrap_or_default());
+    let (gws, errs) = convert_text_to_gateway(response_body.result.gatewayPriority.unwrap_or_default());
     let is_gateway_parse_failure = !errs.is_empty();
     let status = if is_gateway_parse_failure {
-        DeciderTypes::FAILURE
+        DeciderTypes::Status::FAILURE
     } else {
-        DeciderTypes::SUCCESS
+        DeciderTypes::Status::SUCCESS
     };
     let pl_data = DeciderTypes::PriorityLogicData {
-        name: priority_logic_tag,
-        status,
-        failure_reason: if is_gateway_parse_failure {
-            DeciderTypes::GATEWAY_NAME_PARSE_FAILURE
+        name: priority_logic_tag.clone(),
+        status: status.clone(),
+        failureReason: if is_gateway_parse_failure {
+            DeciderTypes::PriorityLogicFailure::GATEWAY_NAME_PARSE_FAILURE
         } else {
-            DeciderTypes::NO_ERROR
+            DeciderTypes::PriorityLogicFailure::NO_ERROR
         },
     };
     let pl_output = DeciderTypes::GatewayPriorityLogicOutput {
-        is_enforcement: response_body.result.is_enforcement.unwrap_or(false),
+        isEnforcement: response_body.result.isEnforcement.unwrap_or(false),
         gws,
-        priority_logic_tag,
-        gateway_reference_ids: response_body.result.gateway_reference_ids.unwrap_or_default(),
-        primary_logic: None,
-        fallback_logic: None,
+        priorityLogicTag: priority_logic_tag.clone(),
+        gatewayReferenceIds: response_body.result.gatewayReferenceIds.unwrap_or_default(),
+        primaryLogic: None,
+        fallbackLogic: None,
     };
-    EvaluationResult::PLResponse(pl_output, pl_data, log_entries.into_iter().chain(errs).collect(), status)
+    EvaluationResult::PLResponse(pl_output, pl_data, log_entries.into_iter().chain(errs).collect(), status.clone())
 }
 
 fn convert_text_to_gateway(arr: Vec<String>) -> (Vec<Gateway>, Vec<LogEntry>) {
     arr.into_iter().fold((vec![], vec![]), |(mut gateways, mut errors), gw| {
-        match gw.parse::<Gateway>() {
+        match text_to_gateway(&gw) {
             Ok(res) => {
                 gateways.push(res);
             }
             Err(err) => {
-                errors.push(LogEntry::Error(format!("Gateway name parse failed: {}", err)));
+                errors.push(LogEntry::Error("Gateway parse failure".to_string(), err.to_string()));
             }
         }
         (gateways, errors)
     })
 }
 
-fn handle_client_error(client_error: ClientError) -> PLExecutorError {
+fn handle_client_error(client_error: ApiClientError) -> PLExecutorError {
     match client_error {
-        ClientError::FailureResponse(_, resp) => match A::either_decode(&resp.body) {
-            Ok(api_error) => api_error,
-            Err(parse_error) => PLExecutorError {
-                error: true,
-                error_message: DeciderTypes::RESPONSE_PARSE_ERROR,
-                user_message: "Failed to parse response".to_string(),
-                log: Some(vec![vec![
-                    "Error".to_string(),
-                    format!("Failed to parse JSON: {}", parse_error),
-                ]]),
+        ApiClientError::BadRequest(bytes) => PLExecutorError {
+                        error: true,
+                        errorMessage: DeciderTypes::PriorityLogicFailure::CONNECTION_FAILED,
+                        userMessage: String::from_utf8_lossy(&bytes).to_string(),
+                        log: None,
             },
-        },
-        ClientError::DecodeFailure(err, resp) => PLExecutorError {
-            error: true,
-            error_message: DeciderTypes::RESPONSE_DECODE_FAILURE,
-            user_message: "Response decoding failed.".to_string(),
-            log: Some(vec![
-                vec![
-                    "Error".to_string(),
-                    "Response decoding failed".to_string(),
-                    err.to_string(),
-                ],
-                vec![
-                    "Info".to_string(),
-                    format!("Response: {:?}", resp),
-                ],
-            ]),
-        },
-        ClientError::UnsupportedContentType(err, resp) => PLExecutorError {
-            error: true,
-            error_message: DeciderTypes::RESPONSE_CONTENT_TYPE_NOT_SUPPORTED,
-            user_message: "The response had an unsupported content type.".to_string(),
-            log: Some(vec![
-                vec![
-                    "Error".to_string(),
-                    format!("Unsupported content type: {:?}", err),
-                ],
-                vec![
-                    "Info".to_string(),
-                    format!("Response: {:?}", resp),
-                ],
-            ]),
-        },
-        ClientError::InvalidContentTypeHeader(resp) => PLExecutorError {
-            error: true,
-            error_message: DeciderTypes::RESPONSE_CONTENT_TYPE_NOT_SUPPORTED,
-            user_message: "The response had an invalid content type header.".to_string(),
-            log: Some(vec![
-                vec![
-                    "Error".to_string(),
-                    "Invalid content type header.".to_string(),
-                ],
-                vec![
-                    "Info".to_string(),
-                    format!("Response: {:?}", resp),
-                ],
-            ]),
-        },
-        ClientError::ConnectionError(err) => PLExecutorError {
-            error: true,
-            error_message: DeciderTypes::CONNECTION_FAILED,
-            user_message: "A connection error occurred.".to_string(),
-            log: Some(vec![vec![
-                "Error".to_string(),
-                format!("A connection error occurred: {:?}", err),
-            ]]),
-        },
+        ApiClientError::Unauthorized(bytes)=> PLExecutorError {
+                error: true,
+                errorMessage: DeciderTypes::PriorityLogicFailure::CONNECTION_FAILED,
+                userMessage: String::from_utf8_lossy(&bytes).to_string(),
+                log: None,
+            },
+        ApiClientError::InternalServerError (bytes) => PLExecutorError {
+                error: true,
+                errorMessage: DeciderTypes::PriorityLogicFailure::CONNECTION_FAILED,
+                userMessage: String::from_utf8_lossy(&bytes).to_string(),
+                log: None,
+            },
+        ApiClientError::ResponseDecodingFailed=> PLExecutorError {
+                error: true,
+                errorMessage: DeciderTypes::PriorityLogicFailure::CONNECTION_FAILED,
+                userMessage: "Response decoding failed".to_string(),
+                log: None,
+            },
+ApiClientError::ClientConstructionFailed => todo!(),
+        ApiClientError::HeaderMapConstructionFailed => todo!(),
+        ApiClientError::IdentityParseFailed => todo!(),
+        ApiClientError::CertificateParseFailed { service } => todo!(),
+        ApiClientError::UrlEncodingFailed => todo!(),
+        ApiClientError::RequestNotSent => todo!(),
+        ApiClientError::Unexpected { status_code, message } => todo!(),
     }
 }
-

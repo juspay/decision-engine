@@ -17,7 +17,7 @@ use crate::storage::types::TenantConfig as DBTenantConfig;
 use std::option::Option;
 use std::vec::Vec;
 use std::string::String;
-use crate::storage::schema::tenant_config::dsl;
+use crate::storage::schema::tenant_config::{dsl, filter_dimension};
 use diesel::*;
 use diesel::associations::HasTable;
 // use test::quickcheck::{Arbitrary, arbitrary};
@@ -163,6 +163,28 @@ impl TryFrom<DBTenantConfig> for TenantConfig {
 //     )
 //     .await
 // }
+
+pub async fn get_tenant_config_filter_by_group_id_and_dimension_value(
+    group_id: String,
+    dimension_value: String,
+) -> Option<TenantConfig> {
+    let app_state = get_tenant_app_state().await;
+    
+    // Use Diesel's query builder for querying the database
+    match crate::generics::generic_find_one_optional::<
+        <DBTenantConfig as HasTable>::Table,
+        _,
+        DBTenantConfig
+    >(
+        &app_state.db,
+        dsl::filter_group_id.eq(Some(group_id))
+            .and(dsl::filter_dimension.eq(dimension_value)),
+    )
+    .await {
+        Ok(Some(db_tenant_config)) => TenantConfig::try_from(db_tenant_config).ok(),
+        _ => None,
+    }
+}
 
 
 pub async fn get_tenant_config_by_tenant_id_and_module_name_and_module_key_and_type(

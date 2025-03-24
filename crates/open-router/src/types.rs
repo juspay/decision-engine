@@ -33,5 +33,6 @@ pub mod user_eligibility_info;
 pub mod customer;
 pub mod transaction;
 pub mod source_object_id;
+pub mod service_configuration;
 pub mod order_metadata_v2;
 pub mod txn_offer_info;

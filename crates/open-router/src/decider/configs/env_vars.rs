@@ -102,3 +102,7 @@ pub fn number_of_streams_for_routing_metrics() -> i32 {
 pub fn merchant_disabled_for_sodexo_duplicate_check() -> Vec<String> {
     resolve_env("MERC_DISABLED_FOR_SODEXO_DUPLICATE_CARD_CHECK".to_string(), || VecFromStr(Vec::new())).0
 }
+
+pub fn groovy_executor_url() -> String {
+    resolve_env("GROOVY_RUNNER_HOST".to_string(), || "euler-groovy-runner.ec-prod.svc.cluster.local".to_string())
+}

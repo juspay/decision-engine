@@ -44,7 +44,7 @@ use diesel::associations::HasTable;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SupportedPaymentFlows {
     #[serde(rename = "paymentFlowIds")]
-    pub paymentFlowIds: Vec<String>,
+    pub payment_flow_ids: Vec<String>,
     #[serde(rename = "enforcedPaymentFlows")]
     pub enforcedPaymentFlows: Option<Vec<String>>,
 }
@@ -73,11 +73,11 @@ pub fn merchant_gw_acc_id_to_id(id: MerchantGwAccId ) -> i64 {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MgaReferenceId {
     #[serde(rename = "mgaReferenceId")]
-    pub mgaReferenceId: String,
+    pub mga_reference_id: String,
 }
 
 pub fn to_mga_reference_id(id: String) -> MgaReferenceId {
-    MgaReferenceId { mgaReferenceId: id }
+    MgaReferenceId { mga_reference_id: id }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -85,7 +85,7 @@ pub struct MerchantGatewayAccount {
     #[serde(rename = "id")]
     pub id: MerchantGwAccId,
     #[serde(rename = "accountDetails")]
-    pub accountDetails: Secret<String>,
+    pub account_details: Secret<String>,
     #[serde(rename = "gateway")]
     pub gateway: Gateway,
     #[serde(rename = "merchantId")]
@@ -93,7 +93,7 @@ pub struct MerchantGatewayAccount {
     #[serde(rename = "paymentMethods")]
     pub paymentMethods: Option<String>,
     #[serde(rename = "supportedPaymentFlows")]
-    pub supportedPaymentFlows: Option<SupportedPaymentFlows>,
+    pub supported_payment_flows: Option<SupportedPaymentFlows>,
     #[serde(rename = "disabled")]
     pub disabled: Option<bool>,
     #[serde(rename = "referenceId")]
@@ -114,11 +114,11 @@ impl TryFrom<DBMerchantGatewayAccount> for MerchantGatewayAccount {
     fn try_from(value: DBMerchantGatewayAccount) -> Result<Self, ApiError> {
         Ok(MerchantGatewayAccount {
             id: to_merchant_gw_acc_id(value.id),
-            accountDetails: Secret::new(value.account_details),
+            account_details: Secret::new(value.account_details),
             gateway: text_to_gateway(value.gateway.as_str()).map_err(|_| ApiError::ParsingError("Invalid Gateway"))?,
             merchantId: to_merchant_id(value.merchant_id),
             paymentMethods: value.payment_methods,
-            supportedPaymentFlows: value.supported_payment_flows.map(|flows| to_supported_payment_flows(flows)).transpose()?,
+            supported_payment_flows: value.supported_payment_flows.map(|flows| to_supported_payment_flows(flows)).transpose()?,
             disabled: value.disabled,
             referenceId: value.reference_id.map(|id| to_mga_reference_id(id)),
             supportedCurrencies: value.supported_currencies,

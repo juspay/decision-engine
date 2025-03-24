@@ -38,6 +38,24 @@ pub enum AuthType {
     CTP,
 }
 
+impl std::fmt::Display for AuthType {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            AuthType::ATMPIN => write!(f, "ATMPIN"),
+            AuthType::THREE_DS => write!(f, "THREE_DS"),
+            AuthType::THREE_DS_2 => write!(f, "THREE_DS_2"),
+            AuthType::OTP => write!(f, "OTP"),
+            AuthType::OBO_OTP => write!(f, "OBO_OTP"),
+            AuthType::VIES => write!(f, "VIES"),
+            AuthType::NO_THREE_DS => write!(f, "NO_THREE_DS"),
+            AuthType::NETWORK_TOKEN => write!(f, "NETWORK_TOKEN"),
+            AuthType::MOTO => write!(f, "MOTO"),
+            AuthType::FIDO => write!(f, "FIDO"),
+            AuthType::CTP => write!(f, "CTP"),
+        }
+    }
+}
+
 pub fn text_to_auth_type(ctx: &str) -> Result<AuthType, ApiError> {
     match ctx {
         "ATMPIN" => Ok(AuthType::ATMPIN),
@@ -52,6 +70,21 @@ pub fn text_to_auth_type(ctx: &str) -> Result<AuthType, ApiError> {
         "FIDO" => Ok(AuthType::FIDO),
         "CTP" => Ok(AuthType::CTP),
         _ => Err(ApiError::ParsingError("Invalid Auth Type")),
+    }
+}
+pub fn auth_type_to_text(ctx: &AuthType) -> String {
+    match ctx {
+        AuthType::ATMPIN => "ATMPIN".to_string(),
+        AuthType::THREE_DS => "THREE_DS".to_string(),
+        AuthType::THREE_DS_2 => "THREE_DS_2".to_string(),
+        AuthType::OTP => "OTP".to_string(),
+        AuthType::OBO_OTP => "OBO_OTP".to_string(),
+        AuthType::VIES => "VIES".to_string(),
+        AuthType::NO_THREE_DS => "NO_THREE_DS".to_string(),
+        AuthType::NETWORK_TOKEN => "NETWORK_TOKEN".to_string(),
+        AuthType::MOTO => "MOTO".to_string(),
+        AuthType::FIDO => "FIDO".to_string(),
+        AuthType::CTP => "CTP".to_string(),
     }
 }
 
@@ -71,7 +104,7 @@ pub struct EmiDetails {
     pub emi_type: EMIType,
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TxnCardInfoPId {
     #[serde(rename = "txnCardInfoPId")]
     pub txnCardInfoPId: i64,
@@ -87,20 +120,20 @@ pub struct TokenBinPaymentSource {
     pub is_token_bin: bool,
 }
 
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct TxnCardInfo {
     #[serde(rename = "id")]
     pub id: TxnCardInfoPId,
     // #[serde(rename = "txnId")]
     // pub txnId: TransactionId,
     #[serde(rename = "cardIsin")]
-    pub cardIsin: Option<String>,
+    pub card_isin: Option<String>,
     #[serde(rename = "cardIssuerBankName")]
     pub cardIssuerBankName: Option<String>,
     #[serde(rename = "cardSwitchProvider")]
     pub cardSwitchProvider: Option<Secret<String>>,
     #[serde(rename = "cardType")]
-    pub cardType: Option<CardType>,
+    pub card_type: Option<CardType>,
     #[serde(rename = "nameOnCard")]
     pub nameOnCard: Option<Secret<String>>,
     // #[serde(rename = "txnDetailId")]

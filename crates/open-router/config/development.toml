@@ -12,11 +12,11 @@ request_count = 1
 duration = 60
 
 [database]
-username = "db_user"
-password = "db_pass"
+username = "root"
+password = ""
 host = "localhost"
-port = 5432
-dbname = "open_router"
+port = 3307
+dbname = "jdb"
 
 [redis]
 host = "127.0.0.1"

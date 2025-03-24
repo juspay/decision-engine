@@ -15,4 +15,5 @@ pub mod validations;
 pub mod types;
 pub mod generics;
 pub mod decider;
-// pub mod feedback;
+pub mod redis;
+pub mod feedback;

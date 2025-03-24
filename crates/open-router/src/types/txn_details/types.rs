@@ -97,6 +97,97 @@ impl fmt::Display for TxnObjectType {
     }
 }
 
+impl TxnObjectType {
+    pub fn from_text(text: String) -> Option<Self> {
+        match text.as_str() {
+            "ORDER_PAYMENT" => Some(TxnObjectType::OrderPayment),
+            "MANDATE_REGISTER" => Some(TxnObjectType::MandateRegister),
+            "EMANDATE_REGISTER" => Some(TxnObjectType::EmandateRegister),
+            "MANDATE_PAYMENT" => Some(TxnObjectType::MandatePayment),
+            "EMANDATE_PAYMENT" => Some(TxnObjectType::EmandatePayment),
+            "TPV_PAYMENT" => Some(TxnObjectType::TpvPayment),
+            "TPV_EMANDATE_REGISTER" => Some(TxnObjectType::TpvEmandateRegister),
+            "TPV_MANDATE_REGISTER" => Some(TxnObjectType::TpvMandateRegister),
+            "TPV_EMANDATE_PAYMENT" => Some(TxnObjectType::TpvEmandatePayment),
+            "TPV_MANDATE_PAYMENT" => Some(TxnObjectType::TpvMandatePayment),
+            "PARTIAL_CAPTURE" => Some(TxnObjectType::PartialCapture),
+            "PARTIAL_VOID" => Some(TxnObjectType::PartialVoid),
+            "VAN_PAYMENT" => Some(TxnObjectType::VanPayment),
+            "MOTO_PAYMENT" => Some(TxnObjectType::MotoPayment),
+            _ => None,
+        }
+    }
+
+    pub fn to_text(&self) -> &str {
+        match self {
+            TxnObjectType::OrderPayment => "ORDER_PAYMENT",
+            TxnObjectType::MandateRegister => "MANDATE_REGISTER",
+            TxnObjectType::EmandateRegister => "EMANDATE_REGISTER",
+            TxnObjectType::MandatePayment => "MANDATE_PAYMENT",
+            TxnObjectType::EmandatePayment => "EMANDATE_PAYMENT",
+            TxnObjectType::TpvPayment => "TPV_PAYMENT",
+            TxnObjectType::TpvEmandateRegister => "TPV_EMANDATE_REGISTER",
+            TxnObjectType::TpvMandateRegister => "TPV_MANDATE_REGISTER",
+            TxnObjectType::TpvEmandatePayment => "TPV_EMANDATE_PAYMENT",
+            TxnObjectType::TpvMandatePayment => "TPV_MANDATE_PAYMENT",
+            TxnObjectType::PartialCapture => "PARTIAL_CAPTURE",
+            TxnObjectType::PartialVoid => "PARTIAL_VOID",
+            TxnObjectType::VanPayment => "VAN_PAYMENT",
+            TxnObjectType::MotoPayment => "MOTO_PAYMENT",
+        }
+    }
+}
+
+impl TxnFlowType {
+    pub fn from_text(text: String) -> Option<Self> {
+        match text.as_str() {
+            "INTENT" => Some(TxnFlowType::Intent),
+            "COLLECT" => Some(TxnFlowType::Collect),
+            "REDIRECT" => Some(TxnFlowType::Redirect),
+            "PAY" => Some(TxnFlowType::Pay),
+            "DIRECT_DEBIT" => Some(TxnFlowType::DirectDebit),
+            "REDIRECT_DEBIT" => Some(TxnFlowType::RedirectDebit),
+            "TOPUP_DIRECT_DEBIT" => Some(TxnFlowType::TopupDirectDebit),
+            "TOPUP_REDIRECT_DEBIT" => Some(TxnFlowType::TopupRedirectDebit),
+            "INAPP_DEBIT" => Some(TxnFlowType::InappDebit),
+            "NET_BANKING" => Some(TxnFlowType::Netbanking),
+            "EMI" => Some(TxnFlowType::Emi),
+            "CARD_TRANSACTION" => Some(TxnFlowType::CardTransaction),
+            "PAY_LATER" => Some(TxnFlowType::PayLater),
+            "AADHAAR_PAY" => Some(TxnFlowType::AadhaarPay),
+            "PAPERNACH" => Some(TxnFlowType::Papernach),
+            "CASH_PAY" => Some(TxnFlowType::CashPay),
+            "QR" => Some(TxnFlowType::Qr),
+            "NATIVE" => Some(TxnFlowType::Native),
+            "PAN" => Some(TxnFlowType::PAN),
+            _ => None,
+        }
+    }
+
+    pub fn to_text(&self) -> &str {
+        match self {
+            TxnFlowType::Intent => "INTENT",
+            TxnFlowType::Collect => "COLLECT",
+            TxnFlowType::Redirect => "REDIRECT",
+            TxnFlowType::Pay => "PAY",
+            TxnFlowType::DirectDebit => "DIRECT_DEBIT",
+            TxnFlowType::RedirectDebit => "REDIRECT_DEBIT",
+            TxnFlowType::TopupDirectDebit => "TOPUP_DIRECT_DEBIT",
+            TxnFlowType::TopupRedirectDebit => "TOPUP_REDIRECT_DEBIT",
+            TxnFlowType::InappDebit => "INAPP_DEBIT",
+            TxnFlowType::Netbanking => "NET_BANKING",
+            TxnFlowType::Emi => "EMI",
+            TxnFlowType::CardTransaction => "CARD_TRANSACTION",
+            TxnFlowType::PayLater => "PAY_LATER",
+            TxnFlowType::AadhaarPay => "AADHAAR_PAY",
+            TxnFlowType::Papernach => "PAPERNACH",
+            TxnFlowType::CashPay => "CASH_PAY",
+            TxnFlowType::Qr => "QR",
+            TxnFlowType::Native => "NATIVE",
+            TxnFlowType::PAN => "PAN",
+        }
+    }
+}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TxnFlowType {
     #[serde(rename = "INTENT")]
@@ -227,6 +318,63 @@ pub enum TxnStatus {
     Failure,
     #[serde(rename = "DECLINED")]
     Declined,
+}
+
+impl TxnStatus {
+    pub fn from_text(text: String) -> Option<Self> {
+        match text.as_str() {
+            "STARTED" => Some(TxnStatus::Started),
+            "AUTHENTICATION_FAILED" => Some(TxnStatus::AuthenticationFailed),
+            "JUSPAY_DECLINED" => Some(TxnStatus::JuspayDeclined),
+            "PENDING_VBV" => Some(TxnStatus::PendingVBV),
+            "VBV_SUCCESSFUL" => Some(TxnStatus::VBVSuccessful),
+            "AUTHORIZED" => Some(TxnStatus::Authorized),
+            "AUTHORIZATION_FAILED" => Some(TxnStatus::AuthorizationFailed),
+            "CHARGED" => Some(TxnStatus::Charged),
+            "AUTHORIZING" => Some(TxnStatus::Authorizing),
+            "COD_INITIATED" => Some(TxnStatus::CODInitiated),
+            "VOIDED" => Some(TxnStatus::Voided),
+            "VOID_INITIATED" => Some(TxnStatus::VoidInitiated),
+            "NOP" => Some(TxnStatus::Nop),
+            "CAPTURE_INITIATED" => Some(TxnStatus::CaptureInitiated),
+            "CAPTURE_FAILED" => Some(TxnStatus::CaptureFailed),
+            "VOID_FAILED" => Some(TxnStatus::VoidFailed),
+            "AUTO_REFUNDED" => Some(TxnStatus::AutoRefunded),
+            "PARTIAL_CHARGED" => Some(TxnStatus::PartialCharged),
+            "TO_BE_CHARGED" => Some(TxnStatus::ToBeCharged),
+            "PENDING" => Some(TxnStatus::Pending),
+            "FAILURE" => Some(TxnStatus::Failure),
+            "DECLINED" => Some(TxnStatus::Declined),
+            _ => None,
+        }
+    }
+
+    pub fn to_text(&self) -> &str {
+        match self {
+            TxnStatus::Started => "STARTED",
+            TxnStatus::AuthenticationFailed => "AUTHENTICATION_FAILED",
+            TxnStatus::JuspayDeclined => "JUSPAY_DECLINED",
+            TxnStatus::PendingVBV => "PENDING_VBV",
+            TxnStatus::VBVSuccessful => "VBV_SUCCESSFUL",
+            TxnStatus::Authorized => "AUTHORIZED",
+            TxnStatus::AuthorizationFailed => "AUTHORIZATION_FAILED",
+            TxnStatus::Charged => "CHARGED",
+            TxnStatus::Authorizing => "AUTHORIZING",
+            TxnStatus::CODInitiated => "COD_INITIATED",
+            TxnStatus::Voided => "VOIDED",
+            TxnStatus::VoidInitiated => "VOID_INITIATED",
+            TxnStatus::Nop => "NOP",
+            TxnStatus::CaptureInitiated => "CAPTURE_INITIATED",
+            TxnStatus::CaptureFailed => "CAPTURE_FAILED",
+            TxnStatus::VoidFailed => "VOID_FAILED",
+            TxnStatus::AutoRefunded => "AUTO_REFUNDED",
+            TxnStatus::PartialCharged => "PARTIAL_CHARGED",
+            TxnStatus::ToBeCharged => "TO_BE_CHARGED",
+            TxnStatus::Pending => "PENDING",
+            TxnStatus::Failure => "FAILURE",
+            TxnStatus::Declined => "DECLINED",
+        }
+    }
 }
 
 // #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

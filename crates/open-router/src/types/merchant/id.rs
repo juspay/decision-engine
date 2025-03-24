@@ -20,7 +20,7 @@ pub fn to_optional_merchant_id(id: Option<String>) -> Option<MerchantId> {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, Copy)]
 pub struct MerchantPId {
     pub merchantPId: i64,
 }

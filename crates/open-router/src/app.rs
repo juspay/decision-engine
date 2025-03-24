@@ -2,6 +2,8 @@ use axum::{extract::Request, middleware, routing::post};
 use axum_server::tls_rustls::RustlsConfig;
 use error_stack::ResultExt;
 use tower_http::trace as tower_trace;
+use redis_interface::RedisConnectionPool;
+use crate::redis::commands::RedisConnectionWrapper;
 
 use crate::middleware as custom_middleware;
 
@@ -43,6 +45,7 @@ type Storage = storage::Storage;
 #[derive(Clone)]
 pub struct TenantAppState {
     pub db: Storage,
+    pub redis_conn: Arc<RedisConnectionWrapper>,
     pub config: config::TenantConfig,
     pub api_client: ApiClient,
 }
@@ -64,8 +67,13 @@ impl TenantAppState {
         .await
         .change_context(error::ConfigurationError::DatabaseError)?;
 
+        let redis_conn = redis_interface::RedisConnectionPool::new(&global_config.redis)
+                .await
+                .expect("Failed to create Redis connection Pool");
+
         Ok(Self {
             db,
+            redis_conn: Arc::new(RedisConnectionWrapper::new(redis_conn)),
             api_client,
             config: tenant_config,
         })

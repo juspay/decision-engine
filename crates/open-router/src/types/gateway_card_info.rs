@@ -80,6 +80,12 @@ pub enum ValidationType {
     Reward,
 }
 
+impl Display for ValidationType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", validation_type_to_text(self.clone()))
+    }
+}
+
 pub fn text_to_validation_type(validation_type: String) -> Result<ValidationType, ApiError> {
     match validation_type.as_str() {
         "CARD_MANDATE" => Ok(ValidationType::CardMandate),

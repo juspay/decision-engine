@@ -1,12 +1,13 @@
 use serde::ser::SerializeStruct;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use serde_json::Value as AValue;
-use time::PrimitiveDateTime;
 use std::collections::HashMap as HMap;
-use std::option::Option;
-use std::vec::Vec;
-use std::string::String;
+use std::collections::HashMap;
 use std::i64;
+use std::option::Option;
+use std::string::String;
+use std::vec::Vec;
+use time::PrimitiveDateTime;
 
 use crate::app::TenantAppState;
 use crate::error::ApiError;
@@ -18,8 +19,8 @@ use crate::error::ApiError;
 // use unsafe_coerce::unsafeCoerce;
 use crate::types::card as ETCa;
 use crate::types::gateway as ETG;
-use crate::types::merchant::id::MerchantId;
 use crate::types::merchant as ETM;
+use crate::types::merchant::id::MerchantId;
 use crate::types::order as ETO;
 use crate::types::order_metadata_v2 as ETOMV2;
 use crate::types::txn_details::types as ETTD;
@@ -30,6 +31,7 @@ use crate::types::gateway_routing_input as ETGRI;
 // use eulerhs::language as L;
 // use juspay::extra::parsing as Parsing;
 use crate::types::payment as ETP;
+use std::fmt;
 // use utils::errors as Errors;
 // use eulerhs::tenantredislayer as RC;
 
@@ -66,6 +68,44 @@ pub enum DeciderFilterName {
     FilterGatewaysForEMITenureSpecficGatewayCreds,
     FilterFunctionalGatewaysForReversePennyDrop,
     FilterFunctionalGatewaysForOTM,
+}
+
+impl fmt::Display for DeciderFilterName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DeciderFilterName::GetFunctionalGateways => write!(f, "GetFunctionalGateways"),
+            DeciderFilterName::FilterFunctionalGatewaysForCurrency => write!(f, "FilterFunctionalGatewaysForCurrency"),
+            DeciderFilterName::FilterBySurcharge => write!(f, "FilterBySurcharge"),
+            DeciderFilterName::FilterFunctionalGatewaysForBrand => write!(f, "FilterFunctionalGatewaysForBrand"),
+            DeciderFilterName::FilterFunctionalGatewaysForAuthType => write!(f, "FilterFunctionalGatewaysForAuthType"),
+            DeciderFilterName::FilterFunctionalGatewaysForValidationType => write!(f, "FilterFunctionalGatewaysForValidationType"),
+            DeciderFilterName::FilterFunctionalGatewaysForEmi => write!(f, "FilterFunctionalGatewaysForEmi"),
+            DeciderFilterName::FilterFunctionalGatewaysForTxnOfferDetails => write!(f, "FilterFunctionalGatewaysForTxnOfferDetails"),
+            DeciderFilterName::FilterFunctionalGatewaysForPaymentMethod => write!(f, "FilterFunctionalGatewaysForPaymentMethod"),
+            DeciderFilterName::FilterFunctionalGatewaysForTokenProvider => write!(f, "FilterFunctionalGatewaysForTokenProvider"),
+            DeciderFilterName::FilterFunctionalGatewaysForTxnOfferInfo => write!(f, "FilterFunctionalGatewaysForTxnOfferInfo"),
+            DeciderFilterName::FilterFunctionalGatewaysForWallet => write!(f, "FilterFunctionalGatewaysForWallet"),
+            DeciderFilterName::FilterFunctionalGatewaysForNbOnly => write!(f, "FilterFunctionalGatewaysForNbOnly"),
+            DeciderFilterName::FilterFunctionalGatewaysForConsumerFinance => write!(f, "FilterFunctionalGatewaysForConsumerFinance"),
+            DeciderFilterName::FilterFunctionalGatewaysForUpi => write!(f, "FilterFunctionalGatewaysForUpi"),
+            DeciderFilterName::FilterFunctionalGatewaysForTxnType => write!(f, "FilterFunctionalGatewaysForTxnType"),
+            DeciderFilterName::FilterFunctionalGatewaysForTxnDetailType => write!(f, "FilterFunctionalGatewaysForTxnDetailType"),
+            DeciderFilterName::FilterFunctionalGatewaysForReward => write!(f, "FilterFunctionalGatewaysForReward"),
+            DeciderFilterName::FilterFunctionalGatewaysForCash => write!(f, "FilterFunctionalGatewaysForCash"),
+            DeciderFilterName::FilterFunctionalGatewaysForSplitSettlement => write!(f, "FilterFunctionalGatewaysForSplitSettlement"),
+            DeciderFilterName::FilterFunctionalGateways => write!(f, "FilterFunctionalGateways"),
+            DeciderFilterName::FinalFunctionalGateways => write!(f, "FinalFunctionalGateways"),
+            DeciderFilterName::FilterByPriorityLogic => write!(f, "FilterByPriorityLogic"),
+            DeciderFilterName::PreferredGateway => write!(f, "PreferredGateway"),
+            DeciderFilterName::FilterEnforcement => write!(f, "FilterEnforcement"),
+            DeciderFilterName::GatewayPriorityList => write!(f, "GatewayPriorityList"),
+            DeciderFilterName::FilterFunctionalGatewaysForMerchantRequiredFlow => write!(f, "FilterFunctionalGatewaysForMerchantRequiredFlow"),
+            DeciderFilterName::FilterGatewaysForMGASelectionIntegrity => write!(f, "FilterGatewaysForMGASelectionIntegrity"),
+            DeciderFilterName::FilterGatewaysForEMITenureSpecficGatewayCreds => write!(f, "FilterGatewaysForEMITenureSpecficGatewayCreds"),
+            DeciderFilterName::FilterFunctionalGatewaysForReversePennyDrop => write!(f, "FilterFunctionalGatewaysForReversePennyDrop"),
+            DeciderFilterName::FilterFunctionalGatewaysForOTM => write!(f, "FilterFunctionalGatewaysForOTM"),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -128,8 +168,9 @@ pub struct GatewayScoringTypeLog {
 
 impl Serialize for GatewayScoringTypeLog {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer {
+    where
+        S: serde::Serializer,
+    {
         let mut state = serializer.serialize_struct("GatewayScoringTypeLog", 1)?;
         state.serialize_field("data", &self.log_data)?;
         state.end()
@@ -141,7 +182,11 @@ impl<'de> Deserialize<'de> for GatewayScoringTypeLog {
     where
         D: serde::Deserializer<'de>,
     {
-        let data = deserializer.deserialize_struct("GatewayScoringTypeLog", &["data"], GatewayScoringTypeLogVisitor)?;
+        let data = deserializer.deserialize_struct(
+            "GatewayScoringTypeLog",
+            &["data"],
+            GatewayScoringTypeLogVisitor,
+        )?;
         Ok(GatewayScoringTypeLog { log_data: data })
     }
 }
@@ -216,7 +261,8 @@ pub fn transform_gateway_wise_success_rate_based_routing(
         eliminationMaxCountThreshold: gateway_wise_success_rate_input.eliminationMaxCountThreshold,
         selectionMaxCountThreshold: gateway_wise_success_rate_input.selectionMaxCountThreshold,
         softTxnResetCount: gateway_wise_success_rate_input.softTxnResetCount,
-        gatewayLevelEliminationThreshold: gateway_wise_success_rate_input.gatewayLevelEliminationThreshold,
+        gatewayLevelEliminationThreshold: gateway_wise_success_rate_input
+            .gatewayLevelEliminationThreshold,
         eliminationLevel: gateway_wise_success_rate_input.eliminationLevel,
         currentScore: gateway_wise_success_rate_input.currentScore,
         lastResetTimeStamp: gateway_wise_success_rate_input.lastResetTimeStamp,
@@ -288,19 +334,19 @@ pub struct DeciderState {
     pub isOptimizedBasedOnSRMetricEnabled: bool,
     pub isSrV3MetricEnabled: bool,
     pub isPrimaryGateway: Option<bool>,
-    pub experimentTag: Option<String>,
-    pub resetApproach: ResetApproach,
-    pub routingDimension: Option<String>,
-    pub routingDimensionLevel: Option<String>,
+    pub experiment_tag: Option<String>,
+    pub reset_approach: ResetApproach,
+    pub routing_dimension: Option<String>,
+    pub routing_dimension_level: Option<String>,
     pub isScheduledOutage: bool,
-    pub isDynamicMGAEnabled: bool,
-    pub outageDimension: Option<String>,
-    pub eliminationDimension: Option<String>,
-    pub srGatewayScores: Option<Vec<GatewayScore>>,
-    pub eliminationScores: Option<Vec<GatewayScore>>,
-    pub srv3BucketSize: Option<i32>,
-    pub srV3HedgingPercent: Option<f64>,
-    pub gatewayReferenceId: Option<String>,
+    pub is_dynamic_mga_enabled: bool,
+    pub outage_dimension: Option<String>,
+    pub elimination_dimension: Option<String>,
+    pub sr_gateway_scores: Option<Vec<GatewayScore>>,
+    pub elimination_scores: Option<Vec<GatewayScore>>,
+    pub srv3_bucket_size: Option<i32>,
+    pub sr_v3_hedging_percent: Option<f64>,
+    pub gateway_reference_id: Option<String>,
 }
 
 pub fn initial_decider_state(date_created: String) -> DeciderState {
@@ -332,23 +378,21 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
         isOptimizedBasedOnSRMetricEnabled: false,
         isSrV3MetricEnabled: false,
         isPrimaryGateway: Some(true),
-        experimentTag: None,
-        resetApproach: ResetApproach::NO_RESET,
-        routingDimension: None,
-        routingDimensionLevel: None,
+        experiment_tag: None,
+        reset_approach: ResetApproach::NO_RESET,
+        routing_dimension: None,
+        routing_dimension_level: None,
         isScheduledOutage: false,
-        isDynamicMGAEnabled: false,
-        outageDimension: None,
-        eliminationDimension: None,
-        srGatewayScores: None,
-        eliminationScores: None,
-        srv3BucketSize: None,
-        srV3HedgingPercent: None,
-        gatewayReferenceId: None,
+        is_dynamic_mga_enabled: false,
+        outage_dimension: None,
+        elimination_dimension: None,
+        sr_gateway_scores: None,
+        elimination_scores: None,
+        srv3_bucket_size: None,
+        sr_v3_hedging_percent: None,
+        gateway_reference_id: None,
     }
 }
-
-
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct GatewayScoringData {
@@ -435,7 +479,7 @@ pub enum DownTime {
     NO_DOWNTIME,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ResetApproach {
     ELIMINATION_RESET,
     SRV2_RESET,
@@ -771,7 +815,6 @@ pub struct ApiOrderReference {
 //     }
 // }
 
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SrV3InputConfig {
     pub defaultLatencyThreshold: Option<f64>,
@@ -783,7 +826,7 @@ pub struct SrV3InputConfig {
     pub subLevelInputConfig: Option<Vec<SrV3SubLevelInputConfig>>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SrV3SubLevelInputConfig {
     pub paymentMethodType: Option<String>,
     pub paymentMethod: Option<String>,
@@ -795,7 +838,7 @@ pub struct SrV3SubLevelInputConfig {
     pub gatewayExtraScore: Option<Vec<GatewayWiseExtraScore>>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct GatewayWiseExtraScore {
     pub gatewayName: String,
     pub gatewaySigmaFactor: f64,
@@ -837,7 +880,12 @@ pub struct DebugScoringEntry {
 pub type DebugScoringList = Vec<DebugScoringEntry>;
 
 pub fn toListOfGatewayScore(m: GatewayScoreMap) -> Vec<GatewayScore> {
-    m.into_iter().map(|(k, v)| GatewayScore { gateway: k, score: v }).collect()
+    m.into_iter()
+        .map(|(k, v)| GatewayScore {
+            gateway: k,
+            score: v,
+        })
+        .collect()
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -857,7 +905,7 @@ pub struct DecidedGateway {
     pub gateway_mga_id_map: Option<AValue>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Clone, Deserialize)]
 pub struct DeciderParams {
     pub dpMerchantAccount: ETM::merchant_account::MerchantAccount,
     pub dpOrder: ETO::Order,
@@ -924,10 +972,201 @@ pub struct Offer {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct EmiType;
+pub enum EmiType {
+    NO_COST_EMI,
+    LOW_COST_EMI,
+}
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ValidationType;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ValidationType {
+    CARD_MANDATE,
+    EMANDATE,
+    TPV,
+    TPV_MANDATE,
+    REWARD,
+    TPV_EMANDATE,
+}
+
+impl fmt::Display for DeciderScoringName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DeciderScoringName::UpdateScoreForIssuer => write!(f, "UpdateScoreForIssuer"),
+            DeciderScoringName::UpdateScoreForIsin => write!(f, "UpdateScoreForIsin"),
+            DeciderScoringName::UpdateScoreForCardBrand => write!(f, "UpdateScoreForCardBrand"),
+            DeciderScoringName::UpdateScoreWithHealth => write!(f, "UpdateScoreWithHealth"),
+            DeciderScoringName::UpdateScoreIfLastTxnFailure => write!(f, "UpdateScoreIfLastTxnFailure"),
+            DeciderScoringName::UpdateScoreForOutage => write!(f, "UpdateScoreForOutage"),
+            DeciderScoringName::ScoringByGatewayScoreBasedOnGlobalSuccessRate => write!(f, "ScoringByGatewayScoreBasedOnGlobalSuccessRate"),
+            DeciderScoringName::UpdateGatewayScoreBasedOnSuccessRate => write!(f, "UpdateGatewayScoreBasedOnSuccessRate"),
+            DeciderScoringName::FinalScoring => write!(f, "FinalScoring"),
+            DeciderScoringName::GetScoreWithPriority => write!(f, "GetScoreWithPriority"),
+            DeciderScoringName::GetCachedScoresBasedOnSuccessRate => write!(f, "GetCachedScoresBasedOnSuccessRate"),
+            DeciderScoringName::GetCachedScoresBasedOnSrV3 => write!(f, "GetCachedScoresBasedOnSrV3"),
+        }
+    }
+}
+
+impl fmt::Display for DetailedGatewayScoringType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DetailedGatewayScoringType::ELIMINATION_PENALISE => write!(f, "ELIMINATION_PENALISE"),
+            DetailedGatewayScoringType::ELIMINATION_REWARD => write!(f, "ELIMINATION_REWARD"),
+            DetailedGatewayScoringType::SRV2_PENALISE => write!(f, "SRV2_PENALISE"),
+            DetailedGatewayScoringType::SRV2_REWARD => write!(f, "SRV2_REWARD"),
+            DetailedGatewayScoringType::SRV3_PENALISE => write!(f, "SRV3_PENALISE"),
+            DetailedGatewayScoringType::SRV3_REWARD => write!(f, "SRV3_REWARD"),
+        }
+    }
+}
+
+impl fmt::Display for RoutingFlowType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RoutingFlowType::ELIMINATION_FLOW => write!(f, "ELIMINATION_FLOW"),
+            RoutingFlowType::SRV2_FLOW => write!(f, "SRV2_FLOW"),
+            RoutingFlowType::SRV3_FLOW => write!(f, "SRV3_FLOW"),
+        }
+    }
+}
+
+impl fmt::Display for ScoreUpdateStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ScoreUpdateStatus::PENALISED => write!(f, "PENALISED"),
+            ScoreUpdateStatus::REWARDED => write!(f, "REWARDED"),
+            ScoreUpdateStatus::NOT_INITIATED => write!(f, "NOT_INITIATED"),
+        }
+    }
+}
+
+impl fmt::Display for ScoreKeyType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ScoreKeyType::ELIMINATION_GLOBAL_KEY => write!(f, "ELIMINATION_GLOBAL_KEY"),
+            ScoreKeyType::ELIMINATION_MERCHANT_KEY => write!(f, "ELIMINATION_MERCHANT_KEY"),
+            ScoreKeyType::OUTAGE_GLOBAL_KEY => write!(f, "OUTAGE_GLOBAL_KEY"),
+            ScoreKeyType::OUTAGE_MERCHANT_KEY => write!(f, "OUTAGE_MERCHANT_KEY"),
+            ScoreKeyType::SR_V2_KEY => write!(f, "SR_V2_KEY"),
+            ScoreKeyType::SR_V3_KEY => write!(f, "SR_V3_KEY"),
+        }
+    }
+}
+
+impl fmt::Display for GatewayDeciderApproach {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            GatewayDeciderApproach::SR_SELECTION => write!(f, "SR_SELECTION"),
+            GatewayDeciderApproach::SR_SELECTION_V2_ROUTING => write!(f, "SR_SELECTION_V2_ROUTING"),
+            GatewayDeciderApproach::SR_SELECTION_V3_ROUTING => write!(f, "SR_SELECTION_V3_ROUTING"),
+            GatewayDeciderApproach::PRIORITY_LOGIC => write!(f, "PRIORITY_LOGIC"),
+            GatewayDeciderApproach::DEFAULT => write!(f, "DEFAULT"),
+            GatewayDeciderApproach::NONE => write!(f, "NONE"),
+            GatewayDeciderApproach::MERCHANT_PREFERENCE => write!(f, "MERCHANT_PREFERENCE"),
+            GatewayDeciderApproach::PL_ALL_DOWNTIME_ROUTING => write!(f, "PL_ALL_DOWNTIME_ROUTING"),
+            GatewayDeciderApproach::PL_DOWNTIME_ROUTING => write!(f, "PL_DOWNTIME_ROUTING"),
+            GatewayDeciderApproach::PL_GLOBAL_DOWNTIME_ROUTING => write!(f, "PL_GLOBAL_DOWNTIME_ROUTING"),
+            GatewayDeciderApproach::SR_V2_ALL_DOWNTIME_ROUTING => write!(f, "SR_V2_ALL_DOWNTIME_ROUTING"),
+            GatewayDeciderApproach::SR_V2_DOWNTIME_ROUTING => write!(f, "SR_V2_DOWNTIME_ROUTING"),
+            GatewayDeciderApproach::SR_V2_GLOBAL_DOWNTIME_ROUTING => write!(f, "SR_V2_GLOBAL_DOWNTIME_ROUTING"),
+            GatewayDeciderApproach::SR_V2_HEDGING => write!(f, "SR_V2_HEDGING"),
+            GatewayDeciderApproach::SR_V2_ALL_DOWNTIME_HEDGING => write!(f, "SR_V2_ALL_DOWNTIME_HEDGING"),
+            GatewayDeciderApproach::SR_V2_DOWNTIME_HEDGING => write!(f, "SR_V2_DOWNTIME_HEDGING"),
+            GatewayDeciderApproach::SR_V2_GLOBAL_DOWNTIME_HEDGING => write!(f, "SR_V2_GLOBAL_DOWNTIME_HEDGING"),
+            GatewayDeciderApproach::SR_V3_ALL_DOWNTIME_ROUTING => write!(f, "SR_V3_ALL_DOWNTIME_ROUTING"),
+            GatewayDeciderApproach::SR_V3_DOWNTIME_ROUTING => write!(f, "SR_V3_DOWNTIME_ROUTING"),
+            GatewayDeciderApproach::SR_V3_GLOBAL_DOWNTIME_ROUTING => write!(f, "SR_V3_GLOBAL_DOWNTIME_ROUTING"),
+            GatewayDeciderApproach::SR_V3_HEDGING => write!(f, "SR_V3_HEDGING"),
+            GatewayDeciderApproach::SR_V3_ALL_DOWNTIME_HEDGING => write!(f, "SR_V3_ALL_DOWNTIME_HEDGING"),
+            GatewayDeciderApproach::SR_V3_DOWNTIME_HEDGING => write!(f, "SR_V3_DOWNTIME_HEDGING"),
+            GatewayDeciderApproach::SR_V3_GLOBAL_DOWNTIME_HEDGING => write!(f, "SR_V3_GLOBAL_DOWNTIME_HEDGING"),
+        }
+    }
+}
+
+impl fmt::Display for DownTime {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DownTime::ALL_DOWNTIME => write!(f, "ALL_DOWNTIME"),
+            DownTime::GLOBAL_DOWNTIME => write!(f, "GLOBAL_DOWNTIME"),
+            DownTime::DOWNTIME => write!(f, "DOWNTIME"),
+            DownTime::NO_DOWNTIME => write!(f, "NO_DOWNTIME"),
+        }
+    }
+}
+
+impl fmt::Display for ResetApproach {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ResetApproach::ELIMINATION_RESET => write!(f, "ELIMINATION_RESET"),
+            ResetApproach::SRV2_RESET => write!(f, "SRV2_RESET"),
+            ResetApproach::SRV3_RESET => write!(f, "SRV3_RESET"),
+            ResetApproach::NO_RESET => write!(f, "NO_RESET"),
+            ResetApproach::SRV2_ELIMINATION_RESET => write!(f, "SRV2_ELIMINATION_RESET"),
+            ResetApproach::SRV3_ELIMINATION_RESET => write!(f, "SRV3_ELIMINATION_RESET"),
+        }
+    }
+}
+
+impl fmt::Display for ValidationType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ValidationType::CARD_MANDATE => write!(f, "CARD_MANDATE"),
+            ValidationType::EMANDATE => write!(f, "EMANDATE"),
+            ValidationType::TPV => write!(f, "TPV"),
+            ValidationType::TPV_MANDATE => write!(f, "TPV_MANDATE"),
+            ValidationType::REWARD => write!(f, "REWARD"),
+            ValidationType::TPV_EMANDATE => write!(f, "TPV_EMANDATE"),
+        }
+    }
+}
+
+impl fmt::Display for Status {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Status::SUCCESS => write!(f, "SUCCESS"),
+            Status::FAILURE => write!(f, "FAILURE"),
+        }
+    }
+}
+
+impl fmt::Display for PriorityLogicFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PriorityLogicFailure::NO_ERROR => write!(f, "NO_ERROR"),
+            PriorityLogicFailure::CONNECTION_FAILED => write!(f, "CONNECTION_FAILED"),
+            PriorityLogicFailure::COMPILATION_ERROR => write!(f, "COMPILATION_ERROR"),
+            PriorityLogicFailure::MEMORY_EXCEEDED => write!(f, "MEMORY_EXCEEDED"),
+            PriorityLogicFailure::GATEWAY_NAME_PARSE_FAILURE => write!(f, "GATEWAY_NAME_PARSE_FAILURE"),
+            PriorityLogicFailure::RESPONSE_CONTENT_TYPE_NOT_SUPPORTED => write!(f, "RESPONSE_CONTENT_TYPE_NOT_SUPPORTED"),
+            PriorityLogicFailure::RESPONSE_DECODE_FAILURE => write!(f, "RESPONSE_DECODE_FAILURE"),
+            PriorityLogicFailure::RESPONSE_PARSE_ERROR => write!(f, "RESPONSE_PARSE_ERROR"),
+            PriorityLogicFailure::PL_EVALUATION_FAILED => write!(f, "PL_EVALUATION_FAILED"),
+            PriorityLogicFailure::NULL_AFTER_ENFORCE => write!(f, "NULL_AFTER_ENFORCE"),
+            PriorityLogicFailure::UNHANDLED_EXCEPTION => write!(f, "UNHANDLED_EXCEPTION"),
+            PriorityLogicFailure::CODE_TOO_LARGE => write!(f, "CODE_TOO_LARGE"),
+        }
+    }
+}
+
+impl fmt::Display for Dimension {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Dimension::FIRST => write!(f, "FIRST"),
+            Dimension::SECOND => write!(f, "SECOND"),
+            Dimension::THIRD => write!(f, "THIRD"),
+            Dimension::FOURTH => write!(f, "FOURTH"),
+        }
+    }
+}
+
+impl fmt::Display for EmiType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EmiType::NO_COST_EMI => write!(f, "NO_COST_EMI"),
+            EmiType::LOW_COST_EMI => write!(f, "LOW_COST_EMI"),
+        }
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Marketplace {
@@ -958,7 +1197,7 @@ pub struct ApiDeciderFullRequest {
     pub captures: ApiDeciderRequest,
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct GatewayPriorityLogicOutput {
     pub isEnforcement: bool,
     pub gws: Vec<ETG::Gateway>,
@@ -968,21 +1207,90 @@ pub struct GatewayPriorityLogicOutput {
     pub fallbackLogic: Option<PriorityLogicData>,
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+impl GatewayPriorityLogicOutput {
+    pub fn new(
+        isEnforcement: bool,
+        gws: Vec<ETG::Gateway>,
+        priorityLogicTag: Option<String>,
+        gatewayReferenceIds: HMap<String, String>,
+        primaryLogic: Option<PriorityLogicData>,
+        fallbackLogic: Option<PriorityLogicData>,
+    ) -> GatewayPriorityLogicOutput {
+        GatewayPriorityLogicOutput {
+            isEnforcement,
+            gws,
+            priorityLogicTag,
+            gatewayReferenceIds,
+            primaryLogic,
+            fallbackLogic,
+        }
+    }
+    pub fn setIsEnforcement(&mut self, isEnforcement: bool) -> &mut Self {
+        self.isEnforcement = isEnforcement;
+        self
+    }
+    pub fn setPriorityLogicTag(&mut self, priorityLogicTag: Option<String>) -> &mut Self {
+        self.priorityLogicTag = priorityLogicTag;
+        self
+    }
+    pub fn setPrimaryLogic(&mut self, primaryLogic: Option<PriorityLogicData>) -> &mut Self {
+        self.primaryLogic = primaryLogic;
+        self
+    }
+    pub fn setGws(&mut self, setGws: Vec<ETG::Gateway>) -> &mut Self {
+        self.gws = setGws;
+        self
+    }
+    pub fn build(&self) -> GatewayPriorityLogicOutput {
+        GatewayPriorityLogicOutput {
+            isEnforcement: self.isEnforcement,
+            gws: self.gws.clone(),
+            priorityLogicTag: self.priorityLogicTag.clone(),
+            gatewayReferenceIds: self.gatewayReferenceIds.clone(),
+            primaryLogic: self.primaryLogic.clone(),
+            fallbackLogic: self.fallbackLogic.clone(),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct PriorityLogicData {
     pub name: Option<String>,
     pub status: Status,
     pub failureReason: PriorityLogicFailure,
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub struct PriorityLogicFailure;
+#[derive(Debug, PartialEq, Clone, Eq, Serialize, Deserialize)]
+// #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum PriorityLogicFailure {
+    NO_ERROR,
+    CONNECTION_FAILED,
+    COMPILATION_ERROR,
+    MEMORY_EXCEEDED,
+    GATEWAY_NAME_PARSE_FAILURE,
+    RESPONSE_CONTENT_TYPE_NOT_SUPPORTED,
+    RESPONSE_DECODE_FAILURE,
+    RESPONSE_PARSE_ERROR,
+    PL_EVALUATION_FAILED,
+    NULL_AFTER_ENFORCE,
+    UNHANDLED_EXCEPTION,
+    CODE_TOO_LARGE,
+}
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub struct Status;
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
+// #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum Status {
+    SUCCESS,
+    FAILURE,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Dimension;
+pub enum Dimension {
+    FIRST,
+    SECOND,
+    THIRD,
+    FOURTH,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ResetGatewayInput {
@@ -1033,7 +1341,7 @@ pub struct LogCurrScore {
     pub current_score: f64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InternalMetadata {
     pub isCvvLessTxn: Option<bool>,
     pub storedCardVaultProvider: Option<String>,
@@ -1148,10 +1456,9 @@ pub struct EMIAccountDetails {
     pub isEmi: Option<BooleanOrString>,
 }
 
-
-
 pub struct DeciderFlow<'a> {
     pub reader: Reader<DeciderParams>,
+    pub logger: &'a mut HashMap<String, String>,
     pub writer: &'a mut DeciderState,
 }
 
@@ -1164,7 +1471,6 @@ impl DeciderFlow<'_> {
         &self.reader.tenant_state
     }
 }
-
 
 struct Reader<T> {
     reader: T,

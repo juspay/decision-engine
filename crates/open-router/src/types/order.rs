@@ -89,6 +89,34 @@ impl OrderStatus {
             OrderStatus::Declined => "DECLINED".to_string(),
         }
     }
+
+    pub fn from_text(text: String) -> Option<Self> {
+        match text.as_str() {
+            "AUTHENTICATION_FAILED" => Some(OrderStatus::AuthenticationFailed),
+            "AUTHORIZATION_FAILED" => Some(OrderStatus::AuthorizationFailed),
+            "AUTHORIZED" => Some(OrderStatus::Authorized),
+            "AUTHORIZING" => Some(OrderStatus::Authorizing),
+            "AUTO_REFUNDED" => Some(OrderStatus::AutoRefunded),
+            "CAPTURE_FAILED" => Some(OrderStatus::CaptureFailed),
+            "CAPTURE_INITIATED" => Some(OrderStatus::CaptureInitiated),
+            "COD_INITIATED" => Some(OrderStatus::CodInitiated),
+            "CREATED" => Some(OrderStatus::Created),
+            "ERROR" => Some(OrderStatus::Error),
+            "JUSPAY_DECLINED" => Some(OrderStatus::JuspayDeclined),
+            "NEW" => Some(OrderStatus::New),
+            "NOT_FOUND" => Some(OrderStatus::NotFound),
+            "PARTIAL_CHARGED" => Some(OrderStatus::PartialCharged),
+            "TO_BE_CHARGED" => Some(OrderStatus::ToBeCharged),
+            "PENDING_AUTHENTICATION" => Some(OrderStatus::PendingAuthentication),
+            "SUCCESS" => Some(OrderStatus::Success),
+            "VOID_FAILED" => Some(OrderStatus::VoidFailed),
+            "VOID_INITIATED" => Some(OrderStatus::VoidInitiated),
+            "VOIDED" => Some(OrderStatus::Voided),
+            "MERCHANT_VOIDED" => Some(OrderStatus::MerchantVoided),
+            "DECLINED" => Some(OrderStatus::Declined),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -125,6 +153,21 @@ impl OrderType {
             OrderType::TpvMandatePayment => "TPV_MANDATE_PAYMENT".to_string(),
             OrderType::VanPayment => "VAN_PAYMENT".to_string(),
             OrderType::MotoPayment => "MOTO_PAYMENT".to_string(),
+        }
+    }
+
+    pub fn from_text(text: String) -> Option<Self> {
+        match text.as_str() {
+            "MANDATE_REGISTER" => Some(OrderType::MandateRegister),
+            "EMANDATE_REGISTER" => Some(OrderType::EmandateRegister),
+            "MANDATE_PAYMENT" => Some(OrderType::MandatePayment),
+            "ORDER_PAYMENT" => Some(OrderType::OrderPayment),
+            "TPV_PAYMENT" => Some(OrderType::TpvPayment),
+            "TPV_MANDATE_REGISTER" => Some(OrderType::TpvMandateRegister),
+            "TPV_MANDATE_PAYMENT" => Some(OrderType::TpvMandatePayment),
+            "VAN_PAYMENT" => Some(OrderType::VanPayment),
+            "MOTO_PAYMENT" => Some(OrderType::MotoPayment),
+            _ => None,
         }
     }
 }
