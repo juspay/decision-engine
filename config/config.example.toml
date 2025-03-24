@@ -1,0 +1,101 @@
+[log.console]
+log_level = "debug"                        # Level to be set for the logging framework
+log_format = "console"                     # Format to be used for logging console | json
+
+[server]
+host = "127.0.0.1"                         # The host that the server should be exposed to
+port = 8080                                # The port where the server should be hosted on
+type = "grpc"                              # The type of server to be used grpc | http
+
+[metrics]
+host = "127.0.0.1"                         # The host that the metrics server should be exposed to
+port = 9080                                # The port where the metrics server should be hosted on
+
+[secret_config]
+type = "aws_kms"                           # One of no_encryption or aws_kms specific to needs and environments
+
+[secret_config.aws_kms]
+region = ""                                # Aws region
+key_id = ""                                # Aws key_id
+
+[secrets]
+hash_key = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" # Use to hash api-key
+
+[database]
+host = "localhost"
+port = 5432
+database = "hyperswitch_db"               # name of authentication provider database
+user = "db_user"                          # database username
+database_password = "db_pass"             # database password
+max_connections = 10                      # max connections size
+tenants = ["public"]                      # default tenant
+
+[cache]
+max_cache_size = 1000                     # max cache size to be stored
+ttl_in_seconds = 900                      # ttl of the stored cache
+tti_in_seconds = 300                      # tti of the stored cache
+
+[redis]
+host = "127.0.0.1"
+port = 6379
+pool_size = 5                              # Number of connections to keep open
+reconnect_max_attempts = 5                 # Maximum number of reconnection attempts to make before failing. Set to 0 to retry forever.
+reconnect_delay = 5                        # Delay between reconnection attempts, in milliseconds
+use_legacy_version = false                 # Resp protocol for fred crate (set this to true if using RESPv2 or redis version < 6)
+stream_read_count = 1                      # Default number of entries to read from stream if not provided in stream read options
+auto_pipeline = true                       # Whether or not the client should automatically pipeline commands across tasks when possible.
+disable_auto_backpressure = false          # Whether or not to disable the automatic backpressure features when pipelining is enabled.
+max_in_flight_commands = 5000              # The maximum number of in-flight commands (per connection) before backpressure will be applied.
+default_command_timeout = 30               # An optional timeout to apply to all commands. In seconds
+unresponsive_timeout = 10                  # An optional timeout for Unresponsive commands in seconds. This should be less than default_command_timeout.
+max_feed_count = 200                       # The maximum number of frames that will be fed to a socket before flushing.
+
+[ttl_for_keys]
+aggregates = 300                           # Time to live of aggregates keys in redis
+current_block = 900                        # Time to live of current_block keys in redis
+elimination_bucket = 900                   # Time to live of bucket keys in redis
+
+[global_routing_configs.elimination_rate]
+bucket_size = 5                            # Capacity of buckets
+bucket_leak_interval_in_secs = 300         # Leak rate of buckets
+
+[multi_tenancy]
+enabled = true                             # Indicates whether multi-tenancy is enabled or not
+
+[global_routing_configs.success_rate]      # Global Success rate config
+min_aggregates_size = 5                    # minimum aggregate size needed to calculate score
+default_success_rate = 100                 # default success rate to be returned
+max_aggregates_size = 10                   # maximum aggregates size to be used
+
+[global_routing_configs.success_rate.current_block_threshold]
+duration_in_mins = 10                      # current block duration for global success rates
+max_total_count = 5                        # maximum total transaction count for current block
+
+
+# Simulation Specific Configs
+[parameters]
+max_default_body_limit_in_bytes = 10485760 # 10 MB
+total_chunks = 4                           # Total number of chunks to be formed from the baseline data to derive label success rate
+total_records_per_json = 1000              # Total number of records to store in a single output json file
+
+[[model_configs]]                          # Model Configurations
+aggregates_threshold = { min_aggregates_size = 3, max_aggregates_size = 5 }
+current_block_threshold = { max_total_count = 8 }
+default_success_rate = 100.0
+
+[redis_simulation_keys]                    # TTL of Redis keys used for simulation
+ttl = 900
+
+# File storage configuration
+[file_storage]
+file_storage_backend = "aws_s3"            # File storage backend to be used
+
+[file_storage.aws_s3]
+region = "us-east-1"                       # The AWS region used by the AWS S3 for file storage
+bucket_name = "bucket1"                    # The AWS S3 bucket name for file storage
+
+[baseline_static_data]
+file_name = "baseline_data/baseline_data.csv"   # The baseline data file to be used for simulation
+
+[environment]                              # The environment to be used for the application
+env = "development"

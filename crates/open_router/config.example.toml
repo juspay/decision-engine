@@ -1,0 +1,71 @@
+[log.console]
+enabled = true         # To enable logging in console
+level = "DEBUG"        # level to be set for the logging framework
+log_format = "default" # format to be used for logging default | json
+
+[server]
+host = "127.0.0.1" # The host that the server should be exposed to
+port = 3001        # The port where the server should be hosted on
+
+[limit]
+request_count = 1 # The requests per duration
+duration = 60     # duration to rate limit the delete api (in sec)
+
+
+[cache]
+tti = 7200          # Idle time after a get/insert of a cache entry to free the cache (in secs)
+max_capacity = 5000 # Max capacity of a single table cache
+
+[database]
+username = "sam"   # username for the database
+password = "damn"  # password of the database
+host = "localhost" # the host where the database is hosted on
+port = 5432        # the port of the database
+dbname = "open_router"  # the name of the database where the cards are stored
+
+[secrets]
+open_router_private_key = "" # the open_router private key to used used and the private key present with the tenant
+
+[tenant_secrets]
+# configure master_key and public_key for each tenant
+# master_key - used for database encryption this could be aes encrypted by key custodian
+# public_key - used for signature verification and encryption of response payload which is sent back to tenant
+hyperswitch = { master_key = "", public_key = "", schema = "public" }
+
+# To protect secret/sensitive values like:
+# - database.passwod
+# - secrets.master_key
+# - secrets.tenant_public_key
+# - secrets.open_router_private_key
+#
+# Following possible encryption schemes are used, of of them are mutually exclusive, the sections are:
+# - aws_kms (AWS KMS Symmetric Encryption)
+# - hashi_corp_vault (HashiCorp Vault Secrets Engine KV version 2)
+
+# Aws kms as secrets manager
+# [secrets_management]
+# secrets_manager = "aws_kms" # Secrets manager client to be used
+
+# [secrets_management.aws_kms]
+# key_id = "kms_key_id" # The AWS key ID used by the KMS SDK for decrypting data.
+# region = "kms_region" # The AWS region used by the KMS SDK for decrypting data.
+
+# HashiCorp vault as secrets manager
+# [secrets_management]
+# secrets_manager = "hashi_corp_vault" # Secrets manager client to be used
+
+# [secrets_management.aws_kms]
+# url = "http://127.0.0.1:8200" # The URL of the hosted HashiCorp vault
+# token = "hvs.abc" # The secret token to access and communicate with the vault
+
+# TLS server within axum
+[tls]
+certificate = "cert.pem" # path to the certificate file (`pem` format)
+private_key = "key.pem"  # path to the private key file (`pem` format)
+
+# Api client
+[api_client]
+client_idle_timeout = 90    # timeout for idle sockets being kept-alive
+pool_max_idle_per_host = 10 # maximum idle connection per host allowed in the pool.
+identity = ""               # identity to be used for client certificate authentication in mtls.
+

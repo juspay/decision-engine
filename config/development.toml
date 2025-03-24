@@ -1,0 +1,87 @@
+[log.console]
+enabled = true
+level = "DEBUG"
+log_format = "default"
+
+[server]
+host = "127.0.0.1"
+port = 8000
+type = "grpc"
+
+[metrics]
+host = "127.0.0.1"
+port = 9000
+
+[redis]
+host = "127.0.0.1"
+port = 6379
+pool_size = 5
+reconnect_max_attempts = 5
+reconnect_delay = 5
+use_legacy_version = false
+stream_read_count = 1
+auto_pipeline = true
+disable_auto_backpressure = false
+max_in_flight_commands = 5000
+default_command_timeout = 30
+unresponsive_timeout = 10
+max_feed_count = 200
+
+[secret_config]
+type = "no_encryption"
+
+[secrets]
+hash_key = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+jwt_secret = "secret"
+
+[database]
+user = "db_user"
+database_password = "db_pass"
+host = "localhost"
+port = 5432
+database = "hyperswitch_db"
+max_connections = 10
+tenants = ["public"]
+
+[cache]
+max_cache_size = 1000
+ttl_in_seconds = 300
+tti_in_seconds = 90
+
+[ttl_for_keys]
+aggregates = 300
+current_block = 900
+elimination_bucket = 900
+contract_ttl = 900
+
+[global_routing_configs.success_rate]
+min_aggregates_size = 5
+default_success_rate = 100
+max_aggregates_size = 10
+
+[global_routing_configs.success_rate.current_block_threshold]
+duration_in_mins = 10
+max_total_count = 5
+
+[global_routing_configs.elimination_rate]
+bucket_size = 5
+bucket_leak_interval_in_secs = 300
+
+[multi_tenancy]
+enabled = true
+
+[parameters]
+max_default_body_limit_in_bytes = 10485760 # 1024 * 1024 * 10
+total_chunks = 4
+total_records_per_json = 1000
+
+[redis_simulation_keys]
+ttl = 900
+
+[[model_configs]]
+aggregates_threshold = { min_aggregates_size = 3, max_aggregates_size = 5 }
+current_block_threshold = { max_total_count = 8 }
+default_success_rate = 100.0
+
+[baseline_static_data]
+file_name = "baseline_data.csv"
