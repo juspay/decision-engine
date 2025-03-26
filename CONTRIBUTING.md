@@ -1,6 +1,6 @@
-# Contributing to Dynamo
+# Contributing to Decision Engine
 
-Thank you for considering contributing to Dynamo! This document provides guidelines and instructions for contributing.
+Thank you for considering contributing to Decision Engine! This document provides guidelines and instructions for contributing.
 
 ## Code of Conduct
 
@@ -10,9 +10,9 @@ By participating in this project, you agree to abide by our [Code of Conduct](CO
 
 ### Reporting Bugs
 
-Bug reports help make Dynamo more stable. When you submit a bug report, please include:
+Bug reports help make Decision Engine more stable. When you submit a bug report, please include:
 
-1. **Version Information**: Include the Dynamo version you're using
+1. **Version Information**: Include the Decision Engine version you're using
 2. **Environment**: Include OS, Rust version, Redis version, etc.
 3. **Steps to Reproduce**: Detailed steps to reproduce the bug
 4. **Expected vs. Actual Behavior**: What you expected vs. what happened
@@ -40,11 +40,11 @@ We welcome feature suggestions! Feature requests should include:
 
 ```bash
 # Clone your fork
-git clone https://github.com/your-username/dynamo.git
-cd dynamo
+git clone https://github.com/your-username/decision-engine.git
+cd Decision Engine
 
 # Add the upstream repository
-git remote add upstream https://github.com/project-owner/dynamo.git
+git remote add upstream https://github.com/project-owner/decision-engine.git
 
 # Create a branch
 git checkout -b feature/your-feature-name
@@ -121,4 +121,4 @@ If you need help, you can:
 
 All contributors will be recognized in our README and CONTRIBUTORS file.
 
-Thank you for contributing to Dynamo!
+Thank you for contributing to Decision Engine!
