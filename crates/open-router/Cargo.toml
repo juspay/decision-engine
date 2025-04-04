@@ -71,7 +71,7 @@ serde_path_to_error = "0.1.16"
 error-stack = "0.4.1"
 fred = { version = "7.1.2", features = ["metrics", "partial-tracing", "subscriber-client", "check-unresponsive"] }
 masking = { git = "https://github.com/juspay/hyperswitch", tag = "v1.111.1" }
-ring = { version = "0.17.8", features = ["std"] }
+ring = { version = "0.17.12", features = ["std"] }
 hex = "0.4.3"
 time = { version = "0.3.36", features = ["serde"] }
 uuid = { version = "1.10.0", features = ["v7", "fast-rng"] }
