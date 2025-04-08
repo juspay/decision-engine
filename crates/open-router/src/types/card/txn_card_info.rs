@@ -1,18 +1,18 @@
-use masking::{Secret, SerializableSecret};
-use serde::{Serialize, Deserialize};
 use crate::error::ApiError;
 use crate::types::card::card_type::CardType;
 use crate::types::payment::payment_method::PaymentMethodType;
+use masking::Secret;
+use serde::{Deserialize, Deserializer, Serialize};
+use time::{OffsetDateTime, PrimitiveDateTime};
 // use crate::types::transaction::id::TransactionId;
 // use crate::types::txn_details::types::TxnDetailId;
 // use juspay::extra::parsing::{Step, lift_either, lift_pure, ParsingErrorType};
 // use juspay::extra::secret::{Secret, SecretContext};
+use std::fmt::Debug;
 use std::option::Option;
 use std::string::String;
-use std::time::{SystemTime, UNIX_EPOCH};
-use std::fmt::Debug;
 
-#[derive(Debug, PartialEq, Clone, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Eq, Serialize, Deserialize, Hash)]
 pub enum AuthType {
     #[serde(rename = "ATMPIN")]
     ATMPIN,
@@ -41,17 +41,17 @@ pub enum AuthType {
 impl std::fmt::Display for AuthType {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            AuthType::ATMPIN => write!(f, "ATMPIN"),
-            AuthType::THREE_DS => write!(f, "THREE_DS"),
-            AuthType::THREE_DS_2 => write!(f, "THREE_DS_2"),
-            AuthType::OTP => write!(f, "OTP"),
-            AuthType::OBO_OTP => write!(f, "OBO_OTP"),
-            AuthType::VIES => write!(f, "VIES"),
-            AuthType::NO_THREE_DS => write!(f, "NO_THREE_DS"),
-            AuthType::NETWORK_TOKEN => write!(f, "NETWORK_TOKEN"),
-            AuthType::MOTO => write!(f, "MOTO"),
-            AuthType::FIDO => write!(f, "FIDO"),
-            AuthType::CTP => write!(f, "CTP"),
+            Self::ATMPIN => write!(f, "ATMPIN"),
+            Self::THREE_DS => write!(f, "THREE_DS"),
+            Self::THREE_DS_2 => write!(f, "THREE_DS_2"),
+            Self::OTP => write!(f, "OTP"),
+            Self::OBO_OTP => write!(f, "OBO_OTP"),
+            Self::VIES => write!(f, "VIES"),
+            Self::NO_THREE_DS => write!(f, "NO_THREE_DS"),
+            Self::NETWORK_TOKEN => write!(f, "NETWORK_TOKEN"),
+            Self::MOTO => write!(f, "MOTO"),
+            Self::FIDO => write!(f, "FIDO"),
+            Self::CTP => write!(f, "CTP"),
         }
     }
 }
@@ -105,19 +105,40 @@ pub struct EmiDetails {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TxnCardInfoPId {
-    #[serde(rename = "txnCardInfoPId")]
-    pub txnCardInfoPId: i64,
-}
+pub struct TxnCardInfoPId(i64);
 
 pub fn to_txn_card_info_pid(ctx: i64) -> TxnCardInfoPId {
-    TxnCardInfoPId { txnCardInfoPId: ctx }
+    TxnCardInfoPId(ctx)
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TokenBinPaymentSource {
     #[serde(rename = "is_token_bin")]
     pub is_token_bin: bool,
+}
+
+pub fn deserialize_optional_primitive_datetime<'de, D>(
+    deserializer: D,
+) -> Result<Option<PrimitiveDateTime>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s: Option<String> = Deserialize::deserialize(deserializer)?;
+    if s.is_none() {
+        return Ok(None);
+    }
+
+    let format = time::macros::format_description!(
+        "[year]-[month]-[day]T[hour]:[minute]:[second]"
+    );
+
+    match time::PrimitiveDateTime::parse(&s.unwrap(), &format) {
+        Ok(o) => Ok(Some(o)),
+        Err(err) => {
+            print!("Error: {:?}", err);
+            Ok(None)
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -138,8 +159,9 @@ pub struct TxnCardInfo {
     pub nameOnCard: Option<Secret<String>>,
     // #[serde(rename = "txnDetailId")]
     // pub txnDetailId: TxnDetailId,
+    #[serde(with = "time::serde::iso8601")]
     #[serde(rename = "dateCreated")]
-    pub dateCreated: SystemTime,
+    pub dateCreated: OffsetDateTime,
     #[serde(rename = "paymentMethodType")]
     pub paymentMethodType: PaymentMethodType,
     #[serde(rename = "paymentMethod")]
@@ -149,5 +171,6 @@ pub struct TxnCardInfo {
     #[serde(rename = "authType")]
     pub authType: Option<AuthType>,
     #[serde(rename = "partitionKey")]
-    pub partitionKey: Option<SystemTime>,
+    #[serde(deserialize_with = "deserialize_optional_primitive_datetime")]
+    pub partitionKey: Option<PrimitiveDateTime>,
 }

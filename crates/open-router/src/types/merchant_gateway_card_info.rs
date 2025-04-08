@@ -1,18 +1,14 @@
-
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 // use db::euler_mesh_impl::mesh_config;
 // use db::mesh::internal;
 // use control::category::compose as compose; // Equivalent to Haskell's Control.Category ((>>>))
-use std::option::Option;
-use std::vec::Vec;
-use std::string::String;
 use crate::app::get_tenant_app_state;
-use crate::storage::types::MerchantGatewayCardInfo as DBMerchantGatewayCardInfo;
+use crate::storage::types::{BitBool, MerchantGatewayCardInfo as DBMerchantGatewayCardInfo};
 // use types::utils::dbconfig::get_euler_db_conf;
-use crate::types::gateway_card_info::{GciPId, to_gci_pid};
-use crate::types::merchant::id::{MerchantPId, to_merchant_pid};
-use crate::types::merchant::merchant_gateway_account::{MerchantGwAccId, to_merchant_gw_acc_id};
-use crate::types::money::internal::{Money};
+use crate::types::gateway_card_info::{to_gci_pid, GciPId};
+use crate::types::merchant::id::{to_merchant_pid, MerchantPId};
+use crate::types::merchant::merchant_gateway_account::{to_merchant_gw_acc_id, MerchantGwAccId};
+use crate::types::money::internal::Money;
 // use juspay::extra::parsing::{Parsed, Step, around, lift_pure, mandated, non_negative, parse_field, project};
 // use eulerhs::extra::combinators::to_domain_all;
 // use eulerhs::language::MonadFlow;
@@ -32,9 +28,7 @@ pub struct MgciPId {
 }
 
 pub fn to_mgci_pid(id: i64) -> MgciPId {
-    MgciPId {
-        mgciPId: id,
-    }
+    MgciPId { mgciPId: id }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -49,19 +43,22 @@ pub struct MerchantGatewayCardInfo {
 
 impl From<DBMerchantGatewayCardInfo> for MerchantGatewayCardInfo {
     fn from(db_type: DBMerchantGatewayCardInfo) -> Self {
-        MerchantGatewayCardInfo {
+        Self {
             id: to_mgci_pid(db_type.id),
-            disabled: db_type.disabled,
+            disabled: db_type.disabled.0 ,
             gatewayCardInfoId: to_gci_pid(db_type.gateway_card_info_id),
             merchantAccountId: to_merchant_pid(db_type.merchant_account_id),
-            emandateRegisterMaxAmount: db_type.emandate_register_max_amount.map(|x| Money::from_double(x)),
-            merchantGatewayAccountId: db_type.merchant_gateway_account_id.map(|x| to_merchant_gw_acc_id(x)),
+            emandateRegisterMaxAmount: db_type
+                .emandate_register_max_amount
+                .map(Money::from_double),
+            merchantGatewayAccountId: db_type
+                .merchant_gateway_account_id
+                .map(to_merchant_gw_acc_id),
         }
     }
 }
 
 pub async fn find_all_mgcis_by_macc_and_gci_p_id_db(
-    
     m_pid: &MerchantPId,
     gci_ids: &[GciPId],
 ) -> Result<Vec<DBMerchantGatewayCardInfo>, crate::generics::MeshError> {
@@ -76,21 +73,21 @@ pub async fn find_all_mgcis_by_macc_and_gci_p_id_db(
         >(
             &app_state.db,
             dsl::gateway_card_info_id.eq_any(gci_id_values)
-                .and(dsl::merchant_account_id.eq(m_pid.merchantPId))
-                .and(dsl::disabled.eq(false)),
+                .and(dsl::merchant_account_id.eq(m_pid.0))
+                .and(dsl::disabled.eq(BitBool(false))),
         ).await
 }
 
 pub async fn find_all_mgcis_by_macc_and_gci_p_id(
-    
     m_pid: MerchantPId,
     gci_ids: Vec<GciPId>,
 ) -> Vec<MerchantGatewayCardInfo> {
     // Call the database function and handle results
     match find_all_mgcis_by_macc_and_gci_p_id_db(&m_pid, &gci_ids).await {
-        Ok(db_results) => db_results.into_iter()
-                                   .filter_map(|db_record| MerchantGatewayCardInfo::try_from(db_record).ok())
-                                   .collect(),
+        Ok(db_results) => db_results
+            .into_iter()
+            .filter_map(|db_record| MerchantGatewayCardInfo::try_from(db_record).ok())
+            .collect(),
         Err(_) => Vec::new(), // Silently handle any errors by returning empty vec
     }
 }

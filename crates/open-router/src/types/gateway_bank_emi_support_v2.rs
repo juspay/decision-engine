@@ -1,16 +1,15 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 // use db::eulermeshimpl::meshConfig;
 // use db::mesh::internal;
 // use control::category;
-use std::vec::Vec;
-use std::string::String;
-use std::option::Option;
-use std::i64;
 use crate::app::get_tenant_app_state;
 use crate::error::ApiError;
 use crate::storage::types::GatewayBankEmiSupportV2 as DBGatewayBankEmiSupportV2;
+use std::i64;
+use std::string::String;
+use std::vec::Vec;
 // use types::utils::dbconfig::getEulerDbConf;
-use crate::types::gateway::{gateway_to_text, Gateway, text_to_gateway};
+use crate::types::gateway::{gateway_to_text, text_to_gateway, Gateway};
 // use juspay::extra::parsing::{Parsed, Step, liftPure, mandated, nonNegative, parseField, project};
 // use eulerhs::extra::combinators::toDomainAll;
 // use eulerhs::language::MonadFlow;
@@ -28,9 +27,7 @@ pub struct GbesPId {
 }
 
 pub fn to_gbes_pid(id: i64) -> GbesPId {
-    GbesPId {
-        gbesPId: id,
-    }
+    GbesPId { gbesPId: id }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -41,19 +38,22 @@ pub struct GatewayBankEmiSupportV2 {
     pub scope: String,
     pub cardType: String,
     pub tenure: i32,
+    pub metadata: Option<String>
 }
 
 impl TryFrom<DBGatewayBankEmiSupportV2> for GatewayBankEmiSupportV2 {
     type Error = ApiError;
 
     fn try_from(db_gbes: DBGatewayBankEmiSupportV2) -> Result<Self, ApiError> {
-        Ok(GatewayBankEmiSupportV2 {
+        Ok(Self {
             id: to_gbes_pid(db_gbes.id),
-            gateway: text_to_gateway(db_gbes.gateway.as_str()).map_err(|_| ApiError::ParsingError("Invalid gateway"))?,
+            gateway: text_to_gateway(db_gbes.gateway.as_str())
+                .map_err(|_| ApiError::ParsingError("Invalid gateway"))?,
             juspayBankCodeId: db_gbes.juspay_bank_code_id,
             scope: db_gbes.scope,
             cardType: db_gbes.card_type,
             tenure: db_gbes.tenure,
+            metadata: db_gbes.metadata,
         })
     }
 }
@@ -66,28 +66,28 @@ pub async fn getGatewayBankEmiSupportV2DB(
     ten: i32,
 ) -> Result<Vec<DBGatewayBankEmiSupportV2>, crate::generics::MeshError> {
     // Convert Gateway enum values to strings
-    let gateway_strings: Vec<String> = gws.iter().map(|gw| gateway_to_text(gw)).collect();
+    let gateway_strings: Vec<String> = gws.iter().map(gateway_to_text).collect();
     let app_state = get_tenant_app_state().await;
-    
+
     // Use Diesel's query builder with multiple conditions
     crate::generics::generic_find_all::<
-            <DBGatewayBankEmiSupportV2 as HasTable>::Table,
-            _,
-            DBGatewayBankEmiSupportV2
-        >(
-            &app_state.db,
-            dsl::juspay_bank_code_id.eq(jbc_id)
-                .and(dsl::gateway.eq_any(gateway_strings))
-                .and(dsl::scope.eq(scp))
-                .and(dsl::card_type.eq(ct))
-                .and(dsl::tenure.eq(ten)),
-        )
-        .await
+        <DBGatewayBankEmiSupportV2 as HasTable>::Table,
+        _,
+        DBGatewayBankEmiSupportV2,
+    >(
+        &app_state.db,
+        dsl::juspay_bank_code_id
+            .eq(jbc_id)
+            .and(dsl::gateway.eq_any(gateway_strings))
+            .and(dsl::scope.eq(scp))
+            .and(dsl::card_type.eq(ct))
+            .and(dsl::tenure.eq(ten)),
+    )
+    .await
 }
 
 // Domain-level function with error handling and conversion
 pub async fn getGatewayBankEmiSupportV2(
-    
     jbc_id: i64,
     gws: &[Gateway],
     scp: String,
@@ -95,15 +95,14 @@ pub async fn getGatewayBankEmiSupportV2(
     ten: i32,
 ) -> Vec<GatewayBankEmiSupportV2> {
     // Call the DB function and handle results
-    match getGatewayBankEmiSupportV2DB( jbc_id, gws, scp, ct, ten).await {
-        Ok(db_results) => db_results.into_iter()
-                                   .filter_map(|db_record| GatewayBankEmiSupportV2::try_from(db_record).ok())
-                                   .collect(),
+    match getGatewayBankEmiSupportV2DB(jbc_id, gws, scp, ct, ten).await {
+        Ok(db_results) => db_results
+            .into_iter()
+            .filter_map(|db_record| GatewayBankEmiSupportV2::try_from(db_record).ok())
+            .collect(),
         Err(_) => Vec::new(), // Silently handle any errors by returning empty vec
     }
 }
-
-
 
 // #TOD implement db calls
 

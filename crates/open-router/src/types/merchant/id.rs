@@ -1,34 +1,27 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MerchantId{
-    pub merchantId: String,
-}
+pub struct MerchantId(pub String);
 
 pub fn to_merchant_id(id: String) -> MerchantId {
-    MerchantId { merchantId: id }
+    MerchantId(id)
 }
 
-pub fn merchant_id_to_text(id: MerchantId) -> String{
-    id.merchantId
+pub fn merchant_id_to_text(id: MerchantId) -> String {
+    id.0
 }
 
 pub fn to_optional_merchant_id(id: Option<String>) -> Option<MerchantId> {
-    match id {
-        Some(id) => Some(to_merchant_id(id)),
-        None => None,
-    }
+    id.map(to_merchant_id)
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, Copy)]
-pub struct MerchantPId {
-    pub merchantPId: i64,
-}
+pub struct MerchantPId(pub i64);
 
 pub fn to_merchant_pid(id: i64) -> MerchantPId {
-    MerchantPId { merchantPId: id }
+    MerchantPId(id)
 }
 
-pub fn merchant_pid_to_text(id: MerchantPId) -> i64{
-    id.merchantPId
+pub fn merchant_pid_to_text(id: MerchantPId) -> i64 {
+    id.0
 }

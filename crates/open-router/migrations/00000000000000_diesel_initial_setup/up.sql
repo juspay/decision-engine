@@ -1,3 +1,7 @@
+DROP DATABASE IF EXISTS jdb;
+CREATE DATABASE jdb;
+USE jdb;
+
 SET FOREIGN_KEY_CHECKS=0;
 
 DROP TABLE IF EXISTS gateway_bank_emi_support_v2;
@@ -46,7 +50,7 @@ CREATE TABLE merchant_priority_logic (
     name VARCHAR(255),
     description TEXT,
     priority_logic_rules TEXT,
-    is_active_logic BOOLEAN NOT NULL
+    is_active_logic bit(1) NOT NULL
 );
 
 DROP TABLE IF EXISTS tenant_config;
@@ -93,7 +97,7 @@ CREATE TABLE merchant_gateway_account_sub_info (
     sub_id_type TEXT NOT NULL,
     juspay_sub_account_id TEXT NOT NULL,
     gateway_sub_account_id TEXT NOT NULL,
-    disabled BOOLEAN NOT NULL
+    disabled bit(1) NOT NULL
 );
 
 DROP TABLE IF EXISTS gateway_payment_method_flow;
@@ -111,7 +115,7 @@ CREATE TABLE gateway_payment_method_flow (
     dsl TEXT,
     non_combination_flows TEXT,
     country_code_alpha3 TEXT,
-    disabled BOOLEAN NOT NULL,
+    disabled bit(1) NOT NULL,
     payment_method_type TEXT,
     PRIMARY KEY (id(255))
 );
@@ -120,11 +124,11 @@ DROP TABLE IF EXISTS merchant_iframe_preferences;
 CREATE TABLE merchant_iframe_preferences (
     id INT AUTO_INCREMENT PRIMARY KEY,
     merchant_id TEXT NOT NULL,
-    dynamic_switching_enabled BOOLEAN,
-    isin_routing_enabled BOOLEAN,
-    issuer_routing_enabled BOOLEAN,
-    txn_failure_gateway_penalty BOOLEAN,
-    card_brand_routing_enabled BOOLEAN
+    dynamic_switching_enabled bit(1),
+    isin_routing_enabled bit(1),
+    issuer_routing_enabled bit(1),
+    txn_failure_gateway_penality bit(1),
+    card_brand_routing_enabled bit(1)
 );
 
 DROP TABLE IF EXISTS token_bin_info;
@@ -153,11 +157,11 @@ CREATE TABLE txn_offer_detail (
 DROP TABLE IF EXISTS merchant_gateway_card_info;
 CREATE TABLE merchant_gateway_card_info (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    disabled BOOLEAN NOT NULL,
+    disabled bit(1) NOT NULL,
     gateway_card_info_id BIGINT NOT NULL,
     merchant_account_id BIGINT NOT NULL,
     emandate_register_max_amount DOUBLE,
-    merchant_gateway_account_id BIGINT,
+    merchant_gateway_account_id BIGINT
 );
 
 DROP TABLE IF EXISTS merchant_account;
@@ -165,7 +169,7 @@ CREATE TABLE merchant_account (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     merchant_id TEXT,
     date_created DATETIME NOT NULL,
-    gateway_decided_by_health_enabled BOOLEAN,
+    gateway_decided_by_health_enabled bit(1),
     gateway_priority TEXT,
     gateway_priority_logic TEXT,
     internal_hash_key TEXT,
@@ -174,13 +178,13 @@ CREATE TABLE merchant_account (
     user_id BIGINT,
     settlement_account_id BIGINT,
     secondary_merchant_account_id BIGINT,
-    use_code_for_gateway_priority BOOLEAN NOT NULL,
-    enable_gateway_reference_id_based_routing BOOLEAN,
+    use_code_for_gateway_priority bit(1) NOT NULL,
+    enable_gateway_reference_id_based_routing bit(1),
     gateway_success_rate_based_decider_input TEXT,
     internal_metadata TEXT,
-    enabled BOOLEAN NOT NULL,
+    enabled bit(1) NOT NULL,
     country TEXT,
-    installment_enabled BOOLEAN,
+    installment_enabled bit(1),
     tenant_account_id TEXT,
     priority_logic_config TEXT,
     merchant_category_code TEXT
@@ -194,7 +198,7 @@ CREATE TABLE merchant_gateway_payment_method_flow (
     currency_configs TEXT,
     date_created DATETIME NOT NULL,
     last_updated DATETIME NOT NULL,
-    disabled BOOLEAN,
+    disabled bit(1),
     gateway_bank_code TEXT
 );
 
@@ -222,7 +226,7 @@ CREATE TABLE isin_routes (
 DROP TABLE IF EXISTS feature;
 CREATE TABLE feature (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    enabled BOOLEAN NOT NULL,
+    enabled bit(1) NOT NULL,
     name TEXT NOT NULL,
     merchant_id TEXT NULL
 );
@@ -291,11 +295,11 @@ CREATE TABLE txn_detail (
     txn_id TEXT NOT NULL,
     txn_type TEXT NOT NULL,
     date_created DATETIME,
-    add_to_locker BOOLEAN,
+    add_to_locker bit(1),
     merchant_id TEXT,
     gateway TEXT,
-    express_checkout BOOLEAN,
-    is_emi BOOLEAN,
+    express_checkout bit(1),
+    is_emi bit(1),
     emi_bank TEXT,
     emi_tenure INT,
     txn_uuid TEXT,
@@ -337,7 +341,7 @@ CREATE TABLE gateway_card_info (
     card_issuer_bank_name TEXT,
     auth_type TEXT,
     juspay_bank_code_id BIGINT,
-    disabled BOOLEAN,
+    disabled bit(1),
     validation_type TEXT,
     payment_method_type TEXT
 );
@@ -373,7 +377,7 @@ CREATE TABLE user_eligibility_info (
     identifier_name TEXT NOT NULL,
     identifier_value TEXT NOT NULL,
     provider_name TEXT NOT NULL,
-    disabled BOOLEAN,
+    disabled bit(1),
     PRIMARY KEY (id(255))
 );
 
@@ -385,12 +389,21 @@ CREATE TABLE merchant_gateway_account (
     merchant_id TEXT NOT NULL,
     payment_methods TEXT,
     supported_payment_flows TEXT,
-    disabled BOOLEAN,
+    disabled bit(1),
     reference_id TEXT,
     supported_currencies TEXT,
     gateway_identifier TEXT,
     gateway_type TEXT,
     supported_txn_type TEXT
+);
+
+DROP TABLE IF EXISTS tenant_config_filter;
+CREATE TABLE tenant_config_filter (
+    id VARCHAR(255) NOT NULL PRIMARY KEY,
+    filter_group_id VARCHAR(255) NOT NULL,
+    dimension_value VARCHAR(255) NOT NULL,
+    config_value VARCHAR(255) NOT NULL,
+    tenant_config_id VARCHAR(255) NOT NULL
 );
 
 SET FOREIGN_KEY_CHECKS=1;

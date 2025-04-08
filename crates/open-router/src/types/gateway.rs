@@ -1,12 +1,8 @@
-use serde::{Serialize, Deserialize};
-use serde_json::Value as AValue;
-use std::collections::HashMap;
-use std::string::String;
-use std::vec::Vec;
-use std::option::Option;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::hash::Hash;
-use std::str::FromStr;
+use std::option::Option;
+use std::string::String;
 
 use crate::error::ApiError;
 
@@ -214,6 +210,12 @@ pub enum Gateway {
     DEFAULT,
 }
 
+impl fmt::Display for Gateway {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", gateway_to_text(self))
+    }
+}
+
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum GatewayAny {
     GatewayKnown(Gateway),
@@ -409,39 +411,39 @@ pub fn text_to_gateway(text: &str) -> Result<Gateway, ApiError> {
         "SNAPMINT" => Ok(Gateway::SNAPMINT),
         "SODEXO" => Ok(Gateway::SODEXO),
         "STRIPE" => Ok(Gateway::STRIPE),
-        "TABBY"              => Ok(Gateway::TABBY),
-        "TATA_PA"            => Ok(Gateway::TATA_PA),
-        "TATA_UPI"           => Ok(Gateway::TATA_UPI),
-        "TATANEU"            => Ok(Gateway::TATANEU),
-        "TATAPAY"            => Ok(Gateway::TATAPAY),
-        "TATAPAYLATER"       => Ok(Gateway::TATAPAYLATER),
-        "TAP"                => Ok(Gateway::TAP),
-        "TPSL_SI"            => Ok(Gateway::TPSL_SI),
-        "TPSL"               => Ok(Gateway::TPSL),
-        "TRIPLEA"            => Ok(Gateway::TRIPLEA),
-        "TRUSTPAY"           => Ok(Gateway::TRUSTPAY),
-        "TWID"               => Ok(Gateway::TWID),
-        "TWID_V2"            => Ok(Gateway::TWID_V2),
-        "TWOC_TWOP"          => Ok(Gateway::TWOC_TWOP),
-        "VIJAYA_UPI"         => Ok(Gateway::VIJAYA_UPI),
-        "VISA_PBW"           => Ok(Gateway::VISA_PBW),
-        "VOLT"               => Ok(Gateway::VOLT),
-        "WALLET_CONTAINER"   => Ok(Gateway::WALLET_CONTAINER),
-        "WORLDPAY"           => Ok(Gateway::WORLDPAY),
-        "XENDIT"             => Ok(Gateway::XENDIT),
-        "YES_BIZ"            => Ok(Gateway::YES_BIZ),
-        "YESBANK_UPI"        => Ok(Gateway::YESBANK_UPI),
-        "YPP"                => Ok(Gateway::YPP),
-        "ZAAKPAY"            => Ok(Gateway::ZAAKPAY),
-        "ZESTMONEY"          => Ok(Gateway::ZESTMONEY),
-        "DOKU"               => Ok(Gateway::DOKU),
-        "DIRECT_BANK_EMI"    => Ok(Gateway::DIRECT_BANK_EMI),
-        "ZAINCASH"           => Ok(Gateway::ZAINCASH),
-        "PAY10"              => Ok(Gateway::PAY10),
-        "PINELABS_ONLINE"    => Ok(Gateway::PINELABS_ONLINE),
-        "WIBMO"              => Ok(Gateway::WIBMO),
-        "NDPS"               => Ok(Gateway::NDPS),
-        "DEFAULT"            => Ok(Gateway::DEFAULT),
+        "TABBY" => Ok(Gateway::TABBY),
+        "TATA_PA" => Ok(Gateway::TATA_PA),
+        "TATA_UPI" => Ok(Gateway::TATA_UPI),
+        "TATANEU" => Ok(Gateway::TATANEU),
+        "TATAPAY" => Ok(Gateway::TATAPAY),
+        "TATAPAYLATER" => Ok(Gateway::TATAPAYLATER),
+        "TAP" => Ok(Gateway::TAP),
+        "TPSL_SI" => Ok(Gateway::TPSL_SI),
+        "TPSL" => Ok(Gateway::TPSL),
+        "TRIPLEA" => Ok(Gateway::TRIPLEA),
+        "TRUSTPAY" => Ok(Gateway::TRUSTPAY),
+        "TWID" => Ok(Gateway::TWID),
+        "TWID_V2" => Ok(Gateway::TWID_V2),
+        "TWOC_TWOP" => Ok(Gateway::TWOC_TWOP),
+        "VIJAYA_UPI" => Ok(Gateway::VIJAYA_UPI),
+        "VISA_PBW" => Ok(Gateway::VISA_PBW),
+        "VOLT" => Ok(Gateway::VOLT),
+        "WALLET_CONTAINER" => Ok(Gateway::WALLET_CONTAINER),
+        "WORLDPAY" => Ok(Gateway::WORLDPAY),
+        "XENDIT" => Ok(Gateway::XENDIT),
+        "YES_BIZ" => Ok(Gateway::YES_BIZ),
+        "YESBANK_UPI" => Ok(Gateway::YESBANK_UPI),
+        "YPP" => Ok(Gateway::YPP),
+        "ZAAKPAY" => Ok(Gateway::ZAAKPAY),
+        "ZESTMONEY" => Ok(Gateway::ZESTMONEY),
+        "DOKU" => Ok(Gateway::DOKU),
+        "DIRECT_BANK_EMI" => Ok(Gateway::DIRECT_BANK_EMI),
+        "ZAINCASH" => Ok(Gateway::ZAINCASH),
+        "PAY10" => Ok(Gateway::PAY10),
+        "PINELABS_ONLINE" => Ok(Gateway::PINELABS_ONLINE),
+        "WIBMO" => Ok(Gateway::WIBMO),
+        "NDPS" => Ok(Gateway::NDPS),
+        "DEFAULT" => Ok(Gateway::DEFAULT),
         _ => Err(ApiError::ParsingError("Invalid Gateway")),
     }
 }

@@ -7,10 +7,15 @@ use std::i64;
 use std::option::Option;
 use std::string::String;
 use std::vec::Vec;
-use time::PrimitiveDateTime;
-
-use crate::app::TenantAppState;
-use crate::error::ApiError;
+use time::{OffsetDateTime, PrimitiveDateTime};
+use crate::types::currency::Currency;
+use crate::types::order::udfs::UDFs;
+use crate::types::txn_details::types::TxnObjectType;
+use crate::app::{get_tenant_app_state, TenantAppState};
+use crate::types::money::internal as ETMo;
+use masking::Secret;
+use crate::types::transaction::id as ETId;
+use crate::types::order::deserialize_udfs_to_hashmap;
 // use eulerhs::prelude::*;
 // use eulerhs::language::MonadFlow;
 // use juspay::extra::secret::SecretContext;
@@ -32,6 +37,8 @@ use crate::types::gateway_routing_input as ETGRI;
 // use juspay::extra::parsing as Parsing;
 use crate::types::payment as ETP;
 use std::fmt;
+use crate::types::customer as ETCu;
+
 // use utils::errors as Errors;
 // use eulerhs::tenantredislayer as RC;
 
@@ -73,37 +80,83 @@ pub enum DeciderFilterName {
 impl fmt::Display for DeciderFilterName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            DeciderFilterName::GetFunctionalGateways => write!(f, "GetFunctionalGateways"),
-            DeciderFilterName::FilterFunctionalGatewaysForCurrency => write!(f, "FilterFunctionalGatewaysForCurrency"),
-            DeciderFilterName::FilterBySurcharge => write!(f, "FilterBySurcharge"),
-            DeciderFilterName::FilterFunctionalGatewaysForBrand => write!(f, "FilterFunctionalGatewaysForBrand"),
-            DeciderFilterName::FilterFunctionalGatewaysForAuthType => write!(f, "FilterFunctionalGatewaysForAuthType"),
-            DeciderFilterName::FilterFunctionalGatewaysForValidationType => write!(f, "FilterFunctionalGatewaysForValidationType"),
-            DeciderFilterName::FilterFunctionalGatewaysForEmi => write!(f, "FilterFunctionalGatewaysForEmi"),
-            DeciderFilterName::FilterFunctionalGatewaysForTxnOfferDetails => write!(f, "FilterFunctionalGatewaysForTxnOfferDetails"),
-            DeciderFilterName::FilterFunctionalGatewaysForPaymentMethod => write!(f, "FilterFunctionalGatewaysForPaymentMethod"),
-            DeciderFilterName::FilterFunctionalGatewaysForTokenProvider => write!(f, "FilterFunctionalGatewaysForTokenProvider"),
-            DeciderFilterName::FilterFunctionalGatewaysForTxnOfferInfo => write!(f, "FilterFunctionalGatewaysForTxnOfferInfo"),
-            DeciderFilterName::FilterFunctionalGatewaysForWallet => write!(f, "FilterFunctionalGatewaysForWallet"),
-            DeciderFilterName::FilterFunctionalGatewaysForNbOnly => write!(f, "FilterFunctionalGatewaysForNbOnly"),
-            DeciderFilterName::FilterFunctionalGatewaysForConsumerFinance => write!(f, "FilterFunctionalGatewaysForConsumerFinance"),
-            DeciderFilterName::FilterFunctionalGatewaysForUpi => write!(f, "FilterFunctionalGatewaysForUpi"),
-            DeciderFilterName::FilterFunctionalGatewaysForTxnType => write!(f, "FilterFunctionalGatewaysForTxnType"),
-            DeciderFilterName::FilterFunctionalGatewaysForTxnDetailType => write!(f, "FilterFunctionalGatewaysForTxnDetailType"),
-            DeciderFilterName::FilterFunctionalGatewaysForReward => write!(f, "FilterFunctionalGatewaysForReward"),
-            DeciderFilterName::FilterFunctionalGatewaysForCash => write!(f, "FilterFunctionalGatewaysForCash"),
-            DeciderFilterName::FilterFunctionalGatewaysForSplitSettlement => write!(f, "FilterFunctionalGatewaysForSplitSettlement"),
-            DeciderFilterName::FilterFunctionalGateways => write!(f, "FilterFunctionalGateways"),
-            DeciderFilterName::FinalFunctionalGateways => write!(f, "FinalFunctionalGateways"),
-            DeciderFilterName::FilterByPriorityLogic => write!(f, "FilterByPriorityLogic"),
-            DeciderFilterName::PreferredGateway => write!(f, "PreferredGateway"),
-            DeciderFilterName::FilterEnforcement => write!(f, "FilterEnforcement"),
-            DeciderFilterName::GatewayPriorityList => write!(f, "GatewayPriorityList"),
-            DeciderFilterName::FilterFunctionalGatewaysForMerchantRequiredFlow => write!(f, "FilterFunctionalGatewaysForMerchantRequiredFlow"),
-            DeciderFilterName::FilterGatewaysForMGASelectionIntegrity => write!(f, "FilterGatewaysForMGASelectionIntegrity"),
-            DeciderFilterName::FilterGatewaysForEMITenureSpecficGatewayCreds => write!(f, "FilterGatewaysForEMITenureSpecficGatewayCreds"),
-            DeciderFilterName::FilterFunctionalGatewaysForReversePennyDrop => write!(f, "FilterFunctionalGatewaysForReversePennyDrop"),
-            DeciderFilterName::FilterFunctionalGatewaysForOTM => write!(f, "FilterFunctionalGatewaysForOTM"),
+            Self::GetFunctionalGateways => write!(f, "GetFunctionalGateways"),
+            Self::FilterFunctionalGatewaysForCurrency => {
+                write!(f, "FilterFunctionalGatewaysForCurrency")
+            }
+            Self::FilterBySurcharge => write!(f, "FilterBySurcharge"),
+            Self::FilterFunctionalGatewaysForBrand => {
+                write!(f, "FilterFunctionalGatewaysForBrand")
+            }
+            Self::FilterFunctionalGatewaysForAuthType => {
+                write!(f, "FilterFunctionalGatewaysForAuthType")
+            }
+            Self::FilterFunctionalGatewaysForValidationType => {
+                write!(f, "FilterFunctionalGatewaysForValidationType")
+            }
+            Self::FilterFunctionalGatewaysForEmi => {
+                write!(f, "FilterFunctionalGatewaysForEmi")
+            }
+            Self::FilterFunctionalGatewaysForTxnOfferDetails => {
+                write!(f, "FilterFunctionalGatewaysForTxnOfferDetails")
+            }
+            Self::FilterFunctionalGatewaysForPaymentMethod => {
+                write!(f, "FilterFunctionalGatewaysForPaymentMethod")
+            }
+            Self::FilterFunctionalGatewaysForTokenProvider => {
+                write!(f, "FilterFunctionalGatewaysForTokenProvider")
+            }
+            Self::FilterFunctionalGatewaysForTxnOfferInfo => {
+                write!(f, "FilterFunctionalGatewaysForTxnOfferInfo")
+            }
+            Self::FilterFunctionalGatewaysForWallet => {
+                write!(f, "FilterFunctionalGatewaysForWallet")
+            }
+            Self::FilterFunctionalGatewaysForNbOnly => {
+                write!(f, "FilterFunctionalGatewaysForNbOnly")
+            }
+            Self::FilterFunctionalGatewaysForConsumerFinance => {
+                write!(f, "FilterFunctionalGatewaysForConsumerFinance")
+            }
+            Self::FilterFunctionalGatewaysForUpi => {
+                write!(f, "FilterFunctionalGatewaysForUpi")
+            }
+            Self::FilterFunctionalGatewaysForTxnType => {
+                write!(f, "FilterFunctionalGatewaysForTxnType")
+            }
+            Self::FilterFunctionalGatewaysForTxnDetailType => {
+                write!(f, "FilterFunctionalGatewaysForTxnDetailType")
+            }
+            Self::FilterFunctionalGatewaysForReward => {
+                write!(f, "FilterFunctionalGatewaysForReward")
+            }
+            Self::FilterFunctionalGatewaysForCash => {
+                write!(f, "FilterFunctionalGatewaysForCash")
+            }
+            Self::FilterFunctionalGatewaysForSplitSettlement => {
+                write!(f, "FilterFunctionalGatewaysForSplitSettlement")
+            }
+            Self::FilterFunctionalGateways => write!(f, "FilterFunctionalGateways"),
+            Self::FinalFunctionalGateways => write!(f, "FinalFunctionalGateways"),
+            Self::FilterByPriorityLogic => write!(f, "FilterByPriorityLogic"),
+            Self::PreferredGateway => write!(f, "PreferredGateway"),
+            Self::FilterEnforcement => write!(f, "FilterEnforcement"),
+            Self::GatewayPriorityList => write!(f, "GatewayPriorityList"),
+            Self::FilterFunctionalGatewaysForMerchantRequiredFlow => {
+                write!(f, "FilterFunctionalGatewaysForMerchantRequiredFlow")
+            }
+            Self::FilterGatewaysForMGASelectionIntegrity => {
+                write!(f, "FilterGatewaysForMGASelectionIntegrity")
+            }
+            Self::FilterGatewaysForEMITenureSpecficGatewayCreds => {
+                write!(f, "FilterGatewaysForEMITenureSpecficGatewayCreds")
+            }
+            Self::FilterFunctionalGatewaysForReversePennyDrop => {
+                write!(f, "FilterFunctionalGatewaysForReversePennyDrop")
+            }
+            Self::FilterFunctionalGatewaysForOTM => {
+                write!(f, "FilterFunctionalGatewaysForOTM")
+            }
         }
     }
 }
@@ -156,6 +209,33 @@ pub type Gateway = String;
 pub type RedisKey = String;
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct GBESV2Metadata {
+    pub supported_networks: Option<Vec<NETWORK>>,
+}
+
+/// Enum representing different network types.
+#[derive(Debug, Serialize, Deserialize)]
+pub enum NETWORK {
+    VISA,
+    AMEX,
+    DINERS,
+    RUPAY,
+    MASTERCARD,
+}
+
+impl fmt::Display for NETWORK {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            NETWORK::VISA => write!(f, "VISA"),
+            NETWORK::AMEX => write!(f, "AMEX"),
+            NETWORK::DINERS => write!(f, "DINERS"),
+            NETWORK::RUPAY => write!(f, "RUPAY"),
+            NETWORK::MASTERCARD => write!(f, "MASTERCARD"),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct GatewayScoringTypeLogData {
     pub dateCreated: String,
     pub score_type: DetailedGatewayScoringType,
@@ -187,7 +267,7 @@ impl<'de> Deserialize<'de> for GatewayScoringTypeLog {
             &["data"],
             GatewayScoringTypeLogVisitor,
         )?;
-        Ok(GatewayScoringTypeLog { log_data: data })
+        Ok(Self { log_data: data })
     }
 }
 
@@ -253,19 +333,19 @@ pub struct DeciderGatewayWiseSuccessRateBasedRoutingInput {
 }
 
 pub fn transform_gateway_wise_success_rate_based_routing(
-    gateway_wise_success_rate_input: ETGRI::GatewayWiseSuccessRateBasedRoutingInput,
+    gateway_wise_success_rate_input: &ETGRI::GatewayWiseSuccessRateBasedRoutingInput,
 ) -> DeciderGatewayWiseSuccessRateBasedRoutingInput {
     DeciderGatewayWiseSuccessRateBasedRoutingInput {
-        gateway: gateway_wise_success_rate_input.gateway,
-        eliminationThreshold: gateway_wise_success_rate_input.eliminationThreshold,
-        eliminationMaxCountThreshold: gateway_wise_success_rate_input.eliminationMaxCountThreshold,
-        selectionMaxCountThreshold: gateway_wise_success_rate_input.selectionMaxCountThreshold,
-        softTxnResetCount: gateway_wise_success_rate_input.softTxnResetCount,
+        gateway: gateway_wise_success_rate_input.gateway.clone(),
+        eliminationThreshold: gateway_wise_success_rate_input.eliminationThreshold.clone(),
+        eliminationMaxCountThreshold: gateway_wise_success_rate_input.eliminationMaxCountThreshold.clone(),
+        selectionMaxCountThreshold: gateway_wise_success_rate_input.selectionMaxCountThreshold.clone(),
+        softTxnResetCount: gateway_wise_success_rate_input.softTxnResetCount.clone(),
         gatewayLevelEliminationThreshold: gateway_wise_success_rate_input
-            .gatewayLevelEliminationThreshold,
-        eliminationLevel: gateway_wise_success_rate_input.eliminationLevel,
-        currentScore: gateway_wise_success_rate_input.currentScore,
-        lastResetTimeStamp: gateway_wise_success_rate_input.lastResetTimeStamp,
+            .gatewayLevelEliminationThreshold.clone(),
+        eliminationLevel: gateway_wise_success_rate_input.eliminationLevel.clone(),
+        currentScore: gateway_wise_success_rate_input.currentScore.clone(),
+        lastResetTimeStamp: gateway_wise_success_rate_input.lastResetTimeStamp.clone(),
     }
 }
 
@@ -312,7 +392,7 @@ pub struct SelectionScoreInfo {
     pub eliminationLevel: Option<ETGRI::EliminationLevel>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeciderState {
     pub functionalGateways: Vec<ETG::Gateway>,
     pub metadata: Option<HMap<String, String>>,
@@ -347,6 +427,7 @@ pub struct DeciderState {
     pub srv3_bucket_size: Option<i32>,
     pub sr_v3_hedging_percent: Option<f64>,
     pub gateway_reference_id: Option<String>,
+    pub gateway_scoring_data: GatewayScoringData,
 }
 
 pub fn initial_decider_state(date_created: String) -> DeciderState {
@@ -391,10 +472,27 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
         srv3_bucket_size: None,
         sr_v3_hedging_percent: None,
         gateway_reference_id: None,
+        gateway_scoring_data: GatewayScoringData {
+            merchantId: String::new(),
+            paymentMethodType: String::new(),
+            paymentMethod: String::new(),
+            orderType: String::new(),
+            cardType: None,
+            bankCode: None,
+            authType: None,
+            paymentSource: None,
+            isPaymentSourceEnabledForSrRouting: false,
+            isAuthLevelEnabledForSrRouting: false,
+            isBankLevelEnabledForSrRouting: false,
+            isGriEnabledForElimination: false,
+            isGriEnabledForSrRouting: false,
+            routingApproach: None,
+            dateCreated: OffsetDateTime::now_utc(),
+        },
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct GatewayScoringData {
     pub merchantId: String,
     pub paymentMethodType: String,
@@ -409,6 +507,8 @@ pub struct GatewayScoringData {
     pub isBankLevelEnabledForSrRouting: bool,
     pub isGriEnabledForElimination: bool,
     pub isGriEnabledForSrRouting: bool,
+    pub routingApproach: Option<String>,
+    pub dateCreated: OffsetDateTime,
 }
 
 #[derive(Debug)]
@@ -433,7 +533,7 @@ pub struct MetricsStreamKey(String);
 //     }
 // }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum ScoreKeyType {
     ELIMINATION_GLOBAL_KEY,
     ELIMINATION_MERCHANT_KEY,
@@ -487,6 +587,12 @@ pub enum ResetApproach {
     NO_RESET,
     SRV2_ELIMINATION_RESET,
     SRV3_ELIMINATION_RESET,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum RankingAlgorithm {
+   SR_BASED_ROUTING,
+   PL_BASED_ROUTING  
 }
 
 // pub type DeciderFlow<R> = for<'a> fn(&'a mut (dyn MonadFlow + 'a)) -> ReaderT<DeciderParams, StateT<DeciderState, &'a mut (dyn MonadFlow + 'a)>, R>;
@@ -581,8 +687,8 @@ pub struct ApiTxnDetail {
     pub status: String,
     pub txnId: String,
     pub txnType: String,
-    pub dateCreated: Option<PrimitiveDateTime>,
-    pub lastModified: Option<PrimitiveDateTime>,
+    pub dateCreated: Option<OffsetDateTime>,
+    pub lastModified: Option<OffsetDateTime>,
     pub successResponseId: Option<String>,
     pub txnMode: Option<String>,
     pub addToLocker: Option<bool>,
@@ -654,9 +760,9 @@ pub struct ApiOrderMetadataV2 {
     pub id: Option<String>,
     pub browser: Option<String>,
     pub browserVersion: Option<String>,
-    pub dateCreated: PrimitiveDateTime,
+    pub dateCreated: OffsetDateTime,
     pub device: Option<String>,
-    pub lastUpdated: PrimitiveDateTime,
+    pub lastUpdated: OffsetDateTime,
     pub metadata: Option<HMap<String, AValue>>,
     pub mobile: Option<bool>,
     pub operatingSystem: Option<String>,
@@ -696,7 +802,7 @@ pub struct ApiTxnCardInfo {
     pub cardFingerprint: Option<String>,
     pub cardReferenceId: Option<String>,
     pub txnDetailId: Option<String>,
-    pub dateCreated: Option<PrimitiveDateTime>,
+    pub dateCreated: Option<OffsetDateTime>,
     pub paymentMethodType: Option<String>,
     pub paymentMethod: Option<String>,
     pub cardGlobalFingerprint: Option<String>,
@@ -737,6 +843,127 @@ pub struct DomainDeciderRequest {
 }
 
 // impl Given<SecretContext> for DomainDeciderRequest {}
+#[derive(Debug,Clone, Serialize, Deserialize)]
+pub struct DomainDeciderRequestForApiCallV2 {
+    pub paymentInfo : PaymentInfo,
+    pub merchantId: String,
+    pub eligibleGatewayList: Option<Vec<ETG::Gateway>>,
+    pub rankingAlgorithm: Option<RankingAlgorithm>,
+    pub eliminationEnabled: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaymentInfo {
+    paymentId: String,
+    amount: f64,
+    currency: Currency,
+    customerId: Option<ETCu::CustomerId>,
+    udfs: Option<UDFs>,
+    preferredGateway: Option<ETG::Gateway>,
+    paymentType: TxnObjectType,
+    metadata: Option<String>,
+    internalMetadata: Option<String>,
+    isEmi: Option<bool>,
+    emiBank: Option<String>,
+    emiTenure: Option<i32>,
+    paymentMethodType: ETP::payment_method::PaymentMethodType,
+    paymentMethod: String,
+    paymentSource: Option<String>,
+    authType: Option<ETCa::txn_card_info::AuthType>,
+    cardIssuerBankName: Option<String>,
+    cardIsin: Option<String>,
+    cardType: Option<ETCa::card_type::CardType>,
+    cardSwitchProvider: Option<Secret<String>>,
+}
+// write a function to transfer DomainDeciderRequestForApiCallV2 to DomainDeciderRequest
+
+impl DomainDeciderRequestForApiCallV2 {
+    pub async  fn to_domain_decider_request(&self) -> DomainDeciderRequest {
+        DomainDeciderRequest {
+            orderReference: ETO::Order {
+                id: ETO::id::to_order_prim_id(1),
+                amount: ETMo::Money::from_double(self.paymentInfo.amount),
+                currency: self.paymentInfo.currency.clone(),
+                dateCreated: OffsetDateTime::now_utc(),
+                merchantId: ETM::id::to_merchant_id(self.merchantId.clone()),
+                orderId: ETO::id::to_order_id(self.paymentInfo.paymentId.clone()),
+                status:  ETO::OrderStatus::Created,
+                description : None,
+                customerId: self.paymentInfo.customerId.clone(),
+                udfs: self.paymentInfo.udfs.clone().unwrap_or(UDFs(HashMap::new())),
+                preferredGateway: self.paymentInfo.preferredGateway.clone(),
+                productId: None,
+                orderType: ETO::OrderType::from_txn_object_type(self.paymentInfo.paymentType.clone()),
+                metadata: self.paymentInfo.metadata.clone(),
+                internalMetadata: self.paymentInfo.internalMetadata.clone(),
+            },
+            orderMetadata: ETOMV2::OrderMetadataV2 {
+                id: ETOMV2::to_order_metadata_v2_pid(1),
+                date_created: OffsetDateTime::now_utc(),
+                last_updated: OffsetDateTime::now_utc(),
+                metadata: self.paymentInfo.metadata.clone(),
+                order_reference_id: 1,
+                ip_address: None,
+                partition_key: None,
+            },
+            txnDetail: ETTD::TxnDetail {
+                id: ETTD::to_txn_detail_id(1),
+                orderId: ETO::id::to_order_id(self.paymentInfo.paymentId.clone()),
+                status: ETTD::TxnStatus::Started,
+                txnId: ETId::to_transaction_id(self.paymentInfo.paymentId.clone()),
+                txnType: "NOT_DEFINED".to_string(),
+                dateCreated: OffsetDateTime::now_utc(),
+                addToLocker: false,
+                merchantId: ETM::id::to_merchant_id(self.merchantId.clone()),
+                gateway: None,
+                expressCheckout: false,
+                isEmi: self.paymentInfo.isEmi.clone().unwrap_or(false),
+                emiBank: self.paymentInfo.emiBank.clone(),
+                emiTenure: self.paymentInfo.emiTenure.clone(),
+                txnUuid: self.paymentInfo.paymentId.clone(),
+                merchantGatewayAccountId: None,
+                txnAmount: ETMo::Money::from_double(self.paymentInfo.amount),
+                txnObjectType: self.paymentInfo.paymentType.clone(),
+                sourceObject: Some(self.paymentInfo.paymentMethod.clone()),
+                sourceObjectId: None,
+                currency: self.paymentInfo.currency.clone(),
+                netAmount: ETMo::Money::from_double(self.paymentInfo.amount),
+                surchargeAmount: None,
+                taxAmount: None,
+                internalMetadata: self.paymentInfo.internalMetadata.clone(),
+                metadata: self.paymentInfo.metadata.clone(),
+                offerDeductionAmount : None,
+                internalTrackingInfo : None,
+                partitionKey : None,
+                txnAmountBreakup: None,
+            },
+            txnOfferDetails: None,
+            txnCardInfo: ETCa::txn_card_info::TxnCardInfo {
+                id: ETCa::txn_card_info::to_txn_card_info_pid(1),
+                card_isin: self.paymentInfo.cardIsin.clone(),
+                cardIssuerBankName: self.paymentInfo.cardIssuerBankName.clone(),
+                cardSwitchProvider: self.paymentInfo.cardSwitchProvider.clone(),
+                card_type: self.paymentInfo.cardType.clone(),
+                nameOnCard: None,
+                dateCreated: OffsetDateTime::now_utc(),
+                paymentMethodType: self.paymentInfo.paymentMethodType.clone(),
+                paymentMethod: self.paymentInfo.paymentMethod.clone(),
+                paymentSource: self.paymentInfo.paymentSource.clone(),
+                authType: self.paymentInfo.authType.clone(),
+                partitionKey: None,
+            },
+            merchantAccount: ETM::merchant_account::load_merchant_by_merchant_id( self.merchantId.clone()).await.expect("Merchant account not found"),
+            cardToken: None,
+            txnType: None,
+            shouldCreateMandate: None,
+            enforceGatewayList: None,
+            priorityLogicOutput: None,
+            priorityLogicScript: None,
+            isEdccApplied: Some(false),
+        }
+    }
+}
+
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DomainDeciderRequestForApiCall {
@@ -759,8 +986,8 @@ pub struct ApiOrderReference {
     pub version: Option<i32>,
     pub amount: Option<f64>,
     pub currency: Option<String>,
-    pub dateCreated: PrimitiveDateTime,
-    pub lastModified: PrimitiveDateTime,
+    pub dateCreated: OffsetDateTime,
+    pub lastModified: OffsetDateTime,
     pub merchantId: Option<String>,
     pub orderId: Option<String>,
     pub status: String,
@@ -790,11 +1017,11 @@ pub struct ApiOrderReference {
     pub billingAddressId: Option<String>,
     pub shippingAddressId: Option<String>,
     pub orderUuid: Option<String>,
-    pub lastSynced: Option<PrimitiveDateTime>,
+    pub lastSynced: Option<OffsetDateTime>,
     pub orderType: Option<String>,
     pub mandateFeature: Option<String>,
     pub autoRefund: Option<bool>,
-    pub partitionKey: Option<PrimitiveDateTime>,
+    pub partitionKey: Option<OffsetDateTime>,
     pub parentOrderId: Option<String>,
     pub internalMetadata: Option<String>,
     pub metadata: Option<String>,
@@ -815,7 +1042,7 @@ pub struct ApiOrderReference {
 //     }
 // }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SrV3InputConfig {
     pub defaultLatencyThreshold: Option<f64>,
     pub defaultBucketSize: Option<i32>,
@@ -845,6 +1072,13 @@ pub struct GatewayWiseExtraScore {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct UnifiedError {
+    pub code: String,
+    pub user_message: String,
+    pub developer_message: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ErrorResponse {
     pub status: String,
     pub error_code: String,
@@ -852,7 +1086,7 @@ pub struct ErrorResponse {
     pub priority_logic_tag: Option<String>,
     pub routing_approach: Option<GatewayDeciderApproach>,
     pub filter_wise_gateways: Option<AValue>,
-    pub error_info: String, // #TDOO - Change to ErrorInfo
+    pub error_info: UnifiedError,
     pub priority_logic_output: Option<GatewayPriorityLogicOutput>,
     pub is_dynamic_mga_enabled: bool,
 }
@@ -871,7 +1105,7 @@ pub struct GatewayScore {
     pub score: f64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DebugScoringEntry {
     pub scoringName: String,
     pub gatewayScores: Vec<GatewayScore>,
@@ -990,18 +1224,28 @@ pub enum ValidationType {
 impl fmt::Display for DeciderScoringName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            DeciderScoringName::UpdateScoreForIssuer => write!(f, "UpdateScoreForIssuer"),
-            DeciderScoringName::UpdateScoreForIsin => write!(f, "UpdateScoreForIsin"),
-            DeciderScoringName::UpdateScoreForCardBrand => write!(f, "UpdateScoreForCardBrand"),
-            DeciderScoringName::UpdateScoreWithHealth => write!(f, "UpdateScoreWithHealth"),
-            DeciderScoringName::UpdateScoreIfLastTxnFailure => write!(f, "UpdateScoreIfLastTxnFailure"),
-            DeciderScoringName::UpdateScoreForOutage => write!(f, "UpdateScoreForOutage"),
-            DeciderScoringName::ScoringByGatewayScoreBasedOnGlobalSuccessRate => write!(f, "ScoringByGatewayScoreBasedOnGlobalSuccessRate"),
-            DeciderScoringName::UpdateGatewayScoreBasedOnSuccessRate => write!(f, "UpdateGatewayScoreBasedOnSuccessRate"),
-            DeciderScoringName::FinalScoring => write!(f, "FinalScoring"),
-            DeciderScoringName::GetScoreWithPriority => write!(f, "GetScoreWithPriority"),
-            DeciderScoringName::GetCachedScoresBasedOnSuccessRate => write!(f, "GetCachedScoresBasedOnSuccessRate"),
-            DeciderScoringName::GetCachedScoresBasedOnSrV3 => write!(f, "GetCachedScoresBasedOnSrV3"),
+            Self::UpdateScoreForIssuer => write!(f, "UpdateScoreForIssuer"),
+            Self::UpdateScoreForIsin => write!(f, "UpdateScoreForIsin"),
+            Self::UpdateScoreForCardBrand => write!(f, "UpdateScoreForCardBrand"),
+            Self::UpdateScoreWithHealth => write!(f, "UpdateScoreWithHealth"),
+            Self::UpdateScoreIfLastTxnFailure => {
+                write!(f, "UpdateScoreIfLastTxnFailure")
+            }
+            Self::UpdateScoreForOutage => write!(f, "UpdateScoreForOutage"),
+            Self::ScoringByGatewayScoreBasedOnGlobalSuccessRate => {
+                write!(f, "ScoringByGatewayScoreBasedOnGlobalSuccessRate")
+            }
+            Self::UpdateGatewayScoreBasedOnSuccessRate => {
+                write!(f, "UpdateGatewayScoreBasedOnSuccessRate")
+            }
+            Self::FinalScoring => write!(f, "FinalScoring"),
+            Self::GetScoreWithPriority => write!(f, "GetScoreWithPriority"),
+            Self::GetCachedScoresBasedOnSuccessRate => {
+                write!(f, "GetCachedScoresBasedOnSuccessRate")
+            }
+            Self::GetCachedScoresBasedOnSrV3 => {
+                write!(f, "GetCachedScoresBasedOnSrV3")
+            }
         }
     }
 }
@@ -1009,12 +1253,12 @@ impl fmt::Display for DeciderScoringName {
 impl fmt::Display for DetailedGatewayScoringType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            DetailedGatewayScoringType::ELIMINATION_PENALISE => write!(f, "ELIMINATION_PENALISE"),
-            DetailedGatewayScoringType::ELIMINATION_REWARD => write!(f, "ELIMINATION_REWARD"),
-            DetailedGatewayScoringType::SRV2_PENALISE => write!(f, "SRV2_PENALISE"),
-            DetailedGatewayScoringType::SRV2_REWARD => write!(f, "SRV2_REWARD"),
-            DetailedGatewayScoringType::SRV3_PENALISE => write!(f, "SRV3_PENALISE"),
-            DetailedGatewayScoringType::SRV3_REWARD => write!(f, "SRV3_REWARD"),
+            Self::ELIMINATION_PENALISE => write!(f, "ELIMINATION_PENALISE"),
+            Self::ELIMINATION_REWARD => write!(f, "ELIMINATION_REWARD"),
+            Self::SRV2_PENALISE => write!(f, "SRV2_PENALISE"),
+            Self::SRV2_REWARD => write!(f, "SRV2_REWARD"),
+            Self::SRV3_PENALISE => write!(f, "SRV3_PENALISE"),
+            Self::SRV3_REWARD => write!(f, "SRV3_REWARD"),
         }
     }
 }
@@ -1022,9 +1266,9 @@ impl fmt::Display for DetailedGatewayScoringType {
 impl fmt::Display for RoutingFlowType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            RoutingFlowType::ELIMINATION_FLOW => write!(f, "ELIMINATION_FLOW"),
-            RoutingFlowType::SRV2_FLOW => write!(f, "SRV2_FLOW"),
-            RoutingFlowType::SRV3_FLOW => write!(f, "SRV3_FLOW"),
+            Self::ELIMINATION_FLOW => write!(f, "ELIMINATION_FLOW"),
+            Self::SRV2_FLOW => write!(f, "SRV2_FLOW"),
+            Self::SRV3_FLOW => write!(f, "SRV3_FLOW"),
         }
     }
 }
@@ -1032,9 +1276,9 @@ impl fmt::Display for RoutingFlowType {
 impl fmt::Display for ScoreUpdateStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ScoreUpdateStatus::PENALISED => write!(f, "PENALISED"),
-            ScoreUpdateStatus::REWARDED => write!(f, "REWARDED"),
-            ScoreUpdateStatus::NOT_INITIATED => write!(f, "NOT_INITIATED"),
+            Self::PENALISED => write!(f, "PENALISED"),
+            Self::REWARDED => write!(f, "REWARDED"),
+            Self::NOT_INITIATED => write!(f, "NOT_INITIATED"),
         }
     }
 }
@@ -1042,12 +1286,12 @@ impl fmt::Display for ScoreUpdateStatus {
 impl fmt::Display for ScoreKeyType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ScoreKeyType::ELIMINATION_GLOBAL_KEY => write!(f, "ELIMINATION_GLOBAL_KEY"),
-            ScoreKeyType::ELIMINATION_MERCHANT_KEY => write!(f, "ELIMINATION_MERCHANT_KEY"),
-            ScoreKeyType::OUTAGE_GLOBAL_KEY => write!(f, "OUTAGE_GLOBAL_KEY"),
-            ScoreKeyType::OUTAGE_MERCHANT_KEY => write!(f, "OUTAGE_MERCHANT_KEY"),
-            ScoreKeyType::SR_V2_KEY => write!(f, "SR_V2_KEY"),
-            ScoreKeyType::SR_V3_KEY => write!(f, "SR_V3_KEY"),
+            Self::ELIMINATION_GLOBAL_KEY => write!(f, "ELIMINATION_GLOBAL_KEY"),
+            Self::ELIMINATION_MERCHANT_KEY => write!(f, "ELIMINATION_MERCHANT_KEY"),
+            Self::OUTAGE_GLOBAL_KEY => write!(f, "OUTAGE_GLOBAL_KEY"),
+            Self::OUTAGE_MERCHANT_KEY => write!(f, "OUTAGE_MERCHANT_KEY"),
+            Self::SR_V2_KEY => write!(f, "SR_V2_KEY"),
+            Self::SR_V3_KEY => write!(f, "SR_V3_KEY"),
         }
     }
 }
@@ -1055,30 +1299,48 @@ impl fmt::Display for ScoreKeyType {
 impl fmt::Display for GatewayDeciderApproach {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            GatewayDeciderApproach::SR_SELECTION => write!(f, "SR_SELECTION"),
-            GatewayDeciderApproach::SR_SELECTION_V2_ROUTING => write!(f, "SR_SELECTION_V2_ROUTING"),
-            GatewayDeciderApproach::SR_SELECTION_V3_ROUTING => write!(f, "SR_SELECTION_V3_ROUTING"),
-            GatewayDeciderApproach::PRIORITY_LOGIC => write!(f, "PRIORITY_LOGIC"),
-            GatewayDeciderApproach::DEFAULT => write!(f, "DEFAULT"),
-            GatewayDeciderApproach::NONE => write!(f, "NONE"),
-            GatewayDeciderApproach::MERCHANT_PREFERENCE => write!(f, "MERCHANT_PREFERENCE"),
-            GatewayDeciderApproach::PL_ALL_DOWNTIME_ROUTING => write!(f, "PL_ALL_DOWNTIME_ROUTING"),
-            GatewayDeciderApproach::PL_DOWNTIME_ROUTING => write!(f, "PL_DOWNTIME_ROUTING"),
-            GatewayDeciderApproach::PL_GLOBAL_DOWNTIME_ROUTING => write!(f, "PL_GLOBAL_DOWNTIME_ROUTING"),
-            GatewayDeciderApproach::SR_V2_ALL_DOWNTIME_ROUTING => write!(f, "SR_V2_ALL_DOWNTIME_ROUTING"),
-            GatewayDeciderApproach::SR_V2_DOWNTIME_ROUTING => write!(f, "SR_V2_DOWNTIME_ROUTING"),
-            GatewayDeciderApproach::SR_V2_GLOBAL_DOWNTIME_ROUTING => write!(f, "SR_V2_GLOBAL_DOWNTIME_ROUTING"),
-            GatewayDeciderApproach::SR_V2_HEDGING => write!(f, "SR_V2_HEDGING"),
-            GatewayDeciderApproach::SR_V2_ALL_DOWNTIME_HEDGING => write!(f, "SR_V2_ALL_DOWNTIME_HEDGING"),
-            GatewayDeciderApproach::SR_V2_DOWNTIME_HEDGING => write!(f, "SR_V2_DOWNTIME_HEDGING"),
-            GatewayDeciderApproach::SR_V2_GLOBAL_DOWNTIME_HEDGING => write!(f, "SR_V2_GLOBAL_DOWNTIME_HEDGING"),
-            GatewayDeciderApproach::SR_V3_ALL_DOWNTIME_ROUTING => write!(f, "SR_V3_ALL_DOWNTIME_ROUTING"),
-            GatewayDeciderApproach::SR_V3_DOWNTIME_ROUTING => write!(f, "SR_V3_DOWNTIME_ROUTING"),
-            GatewayDeciderApproach::SR_V3_GLOBAL_DOWNTIME_ROUTING => write!(f, "SR_V3_GLOBAL_DOWNTIME_ROUTING"),
-            GatewayDeciderApproach::SR_V3_HEDGING => write!(f, "SR_V3_HEDGING"),
-            GatewayDeciderApproach::SR_V3_ALL_DOWNTIME_HEDGING => write!(f, "SR_V3_ALL_DOWNTIME_HEDGING"),
-            GatewayDeciderApproach::SR_V3_DOWNTIME_HEDGING => write!(f, "SR_V3_DOWNTIME_HEDGING"),
-            GatewayDeciderApproach::SR_V3_GLOBAL_DOWNTIME_HEDGING => write!(f, "SR_V3_GLOBAL_DOWNTIME_HEDGING"),
+            Self::SR_SELECTION => write!(f, "SR_SELECTION"),
+            Self::SR_SELECTION_V2_ROUTING => write!(f, "SR_SELECTION_V2_ROUTING"),
+            Self::SR_SELECTION_V3_ROUTING => write!(f, "SR_SELECTION_V3_ROUTING"),
+            Self::PRIORITY_LOGIC => write!(f, "PRIORITY_LOGIC"),
+            Self::DEFAULT => write!(f, "DEFAULT"),
+            Self::NONE => write!(f, "NONE"),
+            Self::MERCHANT_PREFERENCE => write!(f, "MERCHANT_PREFERENCE"),
+            Self::PL_ALL_DOWNTIME_ROUTING => write!(f, "PL_ALL_DOWNTIME_ROUTING"),
+            Self::PL_DOWNTIME_ROUTING => write!(f, "PL_DOWNTIME_ROUTING"),
+            Self::PL_GLOBAL_DOWNTIME_ROUTING => {
+                write!(f, "PL_GLOBAL_DOWNTIME_ROUTING")
+            }
+            Self::SR_V2_ALL_DOWNTIME_ROUTING => {
+                write!(f, "SR_V2_ALL_DOWNTIME_ROUTING")
+            }
+            Self::SR_V2_DOWNTIME_ROUTING => write!(f, "SR_V2_DOWNTIME_ROUTING"),
+            Self::SR_V2_GLOBAL_DOWNTIME_ROUTING => {
+                write!(f, "SR_V2_GLOBAL_DOWNTIME_ROUTING")
+            }
+            Self::SR_V2_HEDGING => write!(f, "SR_V2_HEDGING"),
+            Self::SR_V2_ALL_DOWNTIME_HEDGING => {
+                write!(f, "SR_V2_ALL_DOWNTIME_HEDGING")
+            }
+            Self::SR_V2_DOWNTIME_HEDGING => write!(f, "SR_V2_DOWNTIME_HEDGING"),
+            Self::SR_V2_GLOBAL_DOWNTIME_HEDGING => {
+                write!(f, "SR_V2_GLOBAL_DOWNTIME_HEDGING")
+            }
+            Self::SR_V3_ALL_DOWNTIME_ROUTING => {
+                write!(f, "SR_V3_ALL_DOWNTIME_ROUTING")
+            }
+            Self::SR_V3_DOWNTIME_ROUTING => write!(f, "SR_V3_DOWNTIME_ROUTING"),
+            Self::SR_V3_GLOBAL_DOWNTIME_ROUTING => {
+                write!(f, "SR_V3_GLOBAL_DOWNTIME_ROUTING")
+            }
+            Self::SR_V3_HEDGING => write!(f, "SR_V3_HEDGING"),
+            Self::SR_V3_ALL_DOWNTIME_HEDGING => {
+                write!(f, "SR_V3_ALL_DOWNTIME_HEDGING")
+            }
+            Self::SR_V3_DOWNTIME_HEDGING => write!(f, "SR_V3_DOWNTIME_HEDGING"),
+            Self::SR_V3_GLOBAL_DOWNTIME_HEDGING => {
+                write!(f, "SR_V3_GLOBAL_DOWNTIME_HEDGING")
+            }
         }
     }
 }
@@ -1086,10 +1348,10 @@ impl fmt::Display for GatewayDeciderApproach {
 impl fmt::Display for DownTime {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            DownTime::ALL_DOWNTIME => write!(f, "ALL_DOWNTIME"),
-            DownTime::GLOBAL_DOWNTIME => write!(f, "GLOBAL_DOWNTIME"),
-            DownTime::DOWNTIME => write!(f, "DOWNTIME"),
-            DownTime::NO_DOWNTIME => write!(f, "NO_DOWNTIME"),
+            Self::ALL_DOWNTIME => write!(f, "ALL_DOWNTIME"),
+            Self::GLOBAL_DOWNTIME => write!(f, "GLOBAL_DOWNTIME"),
+            Self::DOWNTIME => write!(f, "DOWNTIME"),
+            Self::NO_DOWNTIME => write!(f, "NO_DOWNTIME"),
         }
     }
 }
@@ -1097,12 +1359,12 @@ impl fmt::Display for DownTime {
 impl fmt::Display for ResetApproach {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ResetApproach::ELIMINATION_RESET => write!(f, "ELIMINATION_RESET"),
-            ResetApproach::SRV2_RESET => write!(f, "SRV2_RESET"),
-            ResetApproach::SRV3_RESET => write!(f, "SRV3_RESET"),
-            ResetApproach::NO_RESET => write!(f, "NO_RESET"),
-            ResetApproach::SRV2_ELIMINATION_RESET => write!(f, "SRV2_ELIMINATION_RESET"),
-            ResetApproach::SRV3_ELIMINATION_RESET => write!(f, "SRV3_ELIMINATION_RESET"),
+            Self::ELIMINATION_RESET => write!(f, "ELIMINATION_RESET"),
+            Self::SRV2_RESET => write!(f, "SRV2_RESET"),
+            Self::SRV3_RESET => write!(f, "SRV3_RESET"),
+            Self::NO_RESET => write!(f, "NO_RESET"),
+            Self::SRV2_ELIMINATION_RESET => write!(f, "SRV2_ELIMINATION_RESET"),
+            Self::SRV3_ELIMINATION_RESET => write!(f, "SRV3_ELIMINATION_RESET"),
         }
     }
 }
@@ -1110,12 +1372,12 @@ impl fmt::Display for ResetApproach {
 impl fmt::Display for ValidationType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ValidationType::CARD_MANDATE => write!(f, "CARD_MANDATE"),
-            ValidationType::EMANDATE => write!(f, "EMANDATE"),
-            ValidationType::TPV => write!(f, "TPV"),
-            ValidationType::TPV_MANDATE => write!(f, "TPV_MANDATE"),
-            ValidationType::REWARD => write!(f, "REWARD"),
-            ValidationType::TPV_EMANDATE => write!(f, "TPV_EMANDATE"),
+            Self::CARD_MANDATE => write!(f, "CARD_MANDATE"),
+            Self::EMANDATE => write!(f, "EMANDATE"),
+            Self::TPV => write!(f, "TPV"),
+            Self::TPV_MANDATE => write!(f, "TPV_MANDATE"),
+            Self::REWARD => write!(f, "REWARD"),
+            Self::TPV_EMANDATE => write!(f, "TPV_EMANDATE"),
         }
     }
 }
@@ -1123,8 +1385,8 @@ impl fmt::Display for ValidationType {
 impl fmt::Display for Status {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Status::SUCCESS => write!(f, "SUCCESS"),
-            Status::FAILURE => write!(f, "FAILURE"),
+            Self::SUCCESS => write!(f, "SUCCESS"),
+            Self::FAILURE => write!(f, "FAILURE"),
         }
     }
 }
@@ -1132,18 +1394,22 @@ impl fmt::Display for Status {
 impl fmt::Display for PriorityLogicFailure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            PriorityLogicFailure::NO_ERROR => write!(f, "NO_ERROR"),
-            PriorityLogicFailure::CONNECTION_FAILED => write!(f, "CONNECTION_FAILED"),
-            PriorityLogicFailure::COMPILATION_ERROR => write!(f, "COMPILATION_ERROR"),
-            PriorityLogicFailure::MEMORY_EXCEEDED => write!(f, "MEMORY_EXCEEDED"),
-            PriorityLogicFailure::GATEWAY_NAME_PARSE_FAILURE => write!(f, "GATEWAY_NAME_PARSE_FAILURE"),
-            PriorityLogicFailure::RESPONSE_CONTENT_TYPE_NOT_SUPPORTED => write!(f, "RESPONSE_CONTENT_TYPE_NOT_SUPPORTED"),
-            PriorityLogicFailure::RESPONSE_DECODE_FAILURE => write!(f, "RESPONSE_DECODE_FAILURE"),
-            PriorityLogicFailure::RESPONSE_PARSE_ERROR => write!(f, "RESPONSE_PARSE_ERROR"),
-            PriorityLogicFailure::PL_EVALUATION_FAILED => write!(f, "PL_EVALUATION_FAILED"),
-            PriorityLogicFailure::NULL_AFTER_ENFORCE => write!(f, "NULL_AFTER_ENFORCE"),
-            PriorityLogicFailure::UNHANDLED_EXCEPTION => write!(f, "UNHANDLED_EXCEPTION"),
-            PriorityLogicFailure::CODE_TOO_LARGE => write!(f, "CODE_TOO_LARGE"),
+            Self::NO_ERROR => write!(f, "NO_ERROR"),
+            Self::CONNECTION_FAILED => write!(f, "CONNECTION_FAILED"),
+            Self::COMPILATION_ERROR => write!(f, "COMPILATION_ERROR"),
+            Self::MEMORY_EXCEEDED => write!(f, "MEMORY_EXCEEDED"),
+            Self::GATEWAY_NAME_PARSE_FAILURE => {
+                write!(f, "GATEWAY_NAME_PARSE_FAILURE")
+            }
+            Self::RESPONSE_CONTENT_TYPE_NOT_SUPPORTED => {
+                write!(f, "RESPONSE_CONTENT_TYPE_NOT_SUPPORTED")
+            }
+            Self::RESPONSE_DECODE_FAILURE => write!(f, "RESPONSE_DECODE_FAILURE"),
+            Self::RESPONSE_PARSE_ERROR => write!(f, "RESPONSE_PARSE_ERROR"),
+            Self::PL_EVALUATION_FAILED => write!(f, "PL_EVALUATION_FAILED"),
+            Self::NULL_AFTER_ENFORCE => write!(f, "NULL_AFTER_ENFORCE"),
+            Self::UNHANDLED_EXCEPTION => write!(f, "UNHANDLED_EXCEPTION"),
+            Self::CODE_TOO_LARGE => write!(f, "CODE_TOO_LARGE"),
         }
     }
 }
@@ -1151,10 +1417,10 @@ impl fmt::Display for PriorityLogicFailure {
 impl fmt::Display for Dimension {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Dimension::FIRST => write!(f, "FIRST"),
-            Dimension::SECOND => write!(f, "SECOND"),
-            Dimension::THIRD => write!(f, "THIRD"),
-            Dimension::FOURTH => write!(f, "FOURTH"),
+            Self::FIRST => write!(f, "FIRST"),
+            Self::SECOND => write!(f, "SECOND"),
+            Self::THIRD => write!(f, "THIRD"),
+            Self::FOURTH => write!(f, "FOURTH"),
         }
     }
 }
@@ -1162,8 +1428,8 @@ impl fmt::Display for Dimension {
 impl fmt::Display for EmiType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            EmiType::NO_COST_EMI => write!(f, "NO_COST_EMI"),
-            EmiType::LOW_COST_EMI => write!(f, "LOW_COST_EMI"),
+            Self::NO_COST_EMI => write!(f, "NO_COST_EMI"),
+            Self::LOW_COST_EMI => write!(f, "LOW_COST_EMI"),
         }
     }
 }
@@ -1215,8 +1481,8 @@ impl GatewayPriorityLogicOutput {
         gatewayReferenceIds: HMap<String, String>,
         primaryLogic: Option<PriorityLogicData>,
         fallbackLogic: Option<PriorityLogicData>,
-    ) -> GatewayPriorityLogicOutput {
-        GatewayPriorityLogicOutput {
+    ) -> Self {
+        Self {
             isEnforcement,
             gws,
             priorityLogicTag,
@@ -1241,8 +1507,8 @@ impl GatewayPriorityLogicOutput {
         self.gws = setGws;
         self
     }
-    pub fn build(&self) -> GatewayPriorityLogicOutput {
-        GatewayPriorityLogicOutput {
+    pub fn build(&self) -> Self {
+        Self {
             isEnforcement: self.isEnforcement,
             gws: self.gws.clone(),
             priorityLogicTag: self.priorityLogicTag.clone(),
@@ -1257,7 +1523,7 @@ impl GatewayPriorityLogicOutput {
 pub struct PriorityLogicData {
     pub name: Option<String>,
     pub status: Status,
-    pub failureReason: PriorityLogicFailure,
+    pub failure_reason: PriorityLogicFailure,
 }
 
 #[derive(Debug, PartialEq, Clone, Eq, Serialize, Deserialize)]
@@ -1432,7 +1698,7 @@ pub struct GatewayRule {
     pub gateway_info: Vec<GatewayInfo>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SuccessRate1AndNConfig {
     pub successRate: f64,
     pub nValue: f64,
@@ -1441,11 +1707,20 @@ pub struct SuccessRate1AndNConfig {
     pub txnObjectType: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct FilterLevel;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum FilterLevel {
+    TXN_OBJECT_TYPE,
+    PAYMENT_METHOD,
+    PAYMENT_METHOD_TYPE,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ConfigSource;
+pub enum ConfigSource {
+    GLOBAL_DEFAULT,
+    MERCHANT_DEFAULT,
+    SERVICE_CONFIG,
+    REDIS,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BooleanOrString;
@@ -1453,7 +1728,7 @@ pub struct BooleanOrString;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EMIAccountDetails {
     pub emiTenure: Option<i32>,
-    pub isEmi: Option<BooleanOrString>,
+    pub isEmi: Option<AValue>,
 }
 
 pub struct DeciderFlow<'a> {
@@ -1469,6 +1744,23 @@ impl DeciderFlow<'_> {
 
     pub fn state(&self) -> &TenantAppState {
         &self.reader.tenant_state
+    }
+}
+
+pub async fn initial_decider_flow<'a>(
+    decider_params: DeciderParams,
+    logger: &'a mut HashMap<String, String>,
+    writer: &'a mut DeciderState,
+) -> DeciderFlow<'a> {
+    let app_state = get_tenant_app_state().await;
+    let reader = Reader {
+        reader: decider_params,
+        tenant_state: (*app_state).clone(),
+    };
+    DeciderFlow {
+        reader,
+        logger,
+        writer,
     }
 }
 

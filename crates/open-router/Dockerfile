@@ -1,4 +1,6 @@
-FROM rust:slim-bookworm as builder
+FROM rust:bookworm as builder
+
+ARG EXTRA_FEATURES=""
 
 WORKDIR /open_router
 
@@ -7,20 +9,20 @@ ENV RUSTUP_MAX_RETRIES=10
 ENV CARGO_INCREMENTAL=0
 
 RUN apt-get update \
-    && apt-get install -y libpq-dev libssl-dev pkg-config
+    && apt-get install -y libpq-dev libssl-dev pkg-config protobuf-compiler clang
 
 COPY . .
-RUN cargo build --release --features release ${EXTRA_FEATURES}
+RUN RUSTFLAGS="-A warnings" cargo build --release --features release ${EXTRA_FEATURES}
 
 
-FROM debian:bookworm-slim
+FROM debian:bookworm
 
 ARG CONFIG_DIR=/local/config
 ARG BIN_DIR=/local
 ARG BINARY=open_router
 
 RUN apt-get update \
-    && apt-get install -y ca-certificates tzdata libpq-dev curl procps
+    && apt-get install -y ca-certificates tzdata libpq-dev curl procps libmariadb-dev
 
 EXPOSE 8080
 

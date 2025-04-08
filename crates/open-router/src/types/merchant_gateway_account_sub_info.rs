@@ -1,4 +1,3 @@
-
 use crate::error::ApiError;
 // use db::eulermeshimpl::mesh_config;
 // use db::mesh::internal;
@@ -8,7 +7,7 @@ use crate::error::ApiError;
 use crate::app::get_tenant_app_state;
 use crate::storage::types::MerchantGatewayAccountSubInfo as DBMerchantGatewayAccountSubInfo;
 // use types::utils::dbconfig::get_euler_db_conf;
-use crate::types::merchant::merchant_gateway_account::{MerchantGwAccId, to_merchant_gw_acc_id};
+use crate::types::merchant::merchant_gateway_account::{to_merchant_gw_acc_id, MerchantGwAccId};
 // use juspay::extra::parsing::{Parsed, ParsingErrorType, Step, lift_either, lift_pure, mandated, parse_field, project};
 // use eulerhs::extra::combinators::to_domain_all;
 // use eulerhs::language::MonadFlow;
@@ -72,20 +71,19 @@ impl TryFrom<DBMerchantGatewayAccountSubInfo> for MerchantGatewayAccountSubInfo 
     type Error = ApiError;
 
     fn try_from(db_type: DBMerchantGatewayAccountSubInfo) -> Result<Self, ApiError> {
-        Ok(MerchantGatewayAccountSubInfo {
+        Ok(Self {
             id: to_mgasi_pid(db_type.id),
             merchantGatewayAccountId: to_merchant_gw_acc_id(db_type.merchant_gateway_account_id),
             subInfoType: text_to_sub_info_type(db_type.sub_info_type)?,
             subIdType: text_to_sub_id_type(db_type.sub_id_type)?,
             juspaySubAccountId: db_type.juspay_sub_account_id,
             gatewaySubAccountId: db_type.gateway_sub_account_id,
-            disabled: db_type.disabled,
+            disabled: db_type.disabled.0,
         })
     }
 }
 
 pub async fn find_all_mgasi_by_maga_ids_db(
-    
     mga_ids: &[MerchantGwAccId],
 ) -> Result<Vec<DBMerchantGatewayAccountSubInfo>, crate::generics::MeshError> {
     // Extract IDs from MerchantGwAccId objects
@@ -93,14 +91,14 @@ pub async fn find_all_mgasi_by_maga_ids_db(
     let app_state = get_tenant_app_state().await;
     // Use Diesel's query builder to find all matching records
     crate::generics::generic_find_all::<
-            <DBMerchantGatewayAccountSubInfo as HasTable>::Table,
-            _,
-            DBMerchantGatewayAccountSubInfo
-        >(
-            &app_state.db,
-            dsl::merchant_gateway_account_id.eq_any(mga_id_values),
-        )
-        .await
+        <DBMerchantGatewayAccountSubInfo as HasTable>::Table,
+        _,
+        DBMerchantGatewayAccountSubInfo,
+    >(
+        &app_state.db,
+        dsl::merchant_gateway_account_id.eq_any(mga_id_values),
+    )
+    .await
 }
 
 pub async fn find_all_mgasi_by_maga_ids(
@@ -108,9 +106,10 @@ pub async fn find_all_mgasi_by_maga_ids(
 ) -> Vec<MerchantGatewayAccountSubInfo> {
     // Call the database function and handle results
     match find_all_mgasi_by_maga_ids_db(mga_ids).await {
-        Ok(db_results) => db_results.into_iter()
-                                    .filter_map(|db_record| MerchantGatewayAccountSubInfo::try_from(db_record).ok())
-                                    .collect(),
+        Ok(db_results) => db_results
+            .into_iter()
+            .filter_map(|db_record| MerchantGatewayAccountSubInfo::try_from(db_record).ok())
+            .collect(),
         Err(_) => Vec::new(), // Silently handle any errors by returning empty vec
     }
 }

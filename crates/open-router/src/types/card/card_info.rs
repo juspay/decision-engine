@@ -1,15 +1,13 @@
-
+use crate::error::ApiError;
 use diesel::associations::HasTable;
 use serde::{Deserialize, Serialize};
-use crate::app;
-use crate::error::ApiError;
 // use db::eulermeshimpl::meshConfig;
 // use db::mesh::internal;
 // use eulerhs::prelude::*;
 use crate::app::get_tenant_app_state;
 use crate::storage::types::CardInfo as DBCardInfo;
-use crate::types::card::card_type::{CardType, to_card_type};
-use crate::types::card::isin::{Isin, to_isin};
+use crate::types::card::card_type::{to_card_type, CardType};
+use crate::types::card::isin::{to_isin, Isin};
 // use types::utils::dbconfig::getEulerDbConf;
 // use juspay::extra::parsing::{Parsed, Step, around, parseField, project, liftPure};
 // use juspay::extra::text::emptyTextAsNothing;
@@ -24,7 +22,6 @@ use crate::types::card::isin::{Isin, to_isin};
 // use sequelize::{Clause, Term};
 use crate::storage::schema::card_info::dsl;
 use diesel::*;
-
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Eq)]
 pub struct CardInfo {
@@ -50,10 +47,13 @@ impl TryFrom<DBCardInfo> for CardInfo {
     type Error = ApiError;
 
     fn try_from(value: DBCardInfo) -> Result<Self, ApiError> {
-        Ok(CardInfo {
+        Ok(Self {
             card_isin: to_isin(value.card_isin)?,
             card_switch_provider: value.card_switch_provider,
-            card_type: value.card_type.map(|card_type| to_card_type(card_type.as_str())).transpose()?,
+            card_type: value
+                .card_type
+                .map(|card_type| to_card_type(card_type.as_str()))
+                .transpose()?,
             card_sub_type: value.card_sub_type,
             card_sub_type_category: value.card_sub_type_category,
             card_issuer_country: value.card_issuer_country,
@@ -76,7 +76,6 @@ impl TryFrom<DBCardInfo> for CardInfo {
 //     )
 //     .await
 // }
-
 
 // pub async fn get_feature_by_name(
 //     app_state: &crate::app::TenantAppState,
@@ -101,9 +100,7 @@ impl TryFrom<DBCardInfo> for CardInfo {
 
 // implement get_card_info__by_isin
 
-pub async fn getCardInfoByIsin (
-    isin: Isin,
-) -> Option<CardInfo> {
+pub async fn getCardInfoByIsin(isin: Isin) -> Option<CardInfo> {
     // Try to find the card info by isin using diesel
     let app_state = get_tenant_app_state().await;
     match crate::generics::generic_find_one_optional::<
@@ -125,26 +122,28 @@ pub async fn getCardInfoByIsin (
     }
 }
 
-pub async fn getAllCardInfoByIsins (
-    isin_list: Vec<Isin>,
-) -> Vec<CardInfo> {
+pub async fn getAllCardInfoByIsins(isin_list: Vec<Isin>) -> Vec<CardInfo> {
     // Try to find the card info by isin using diesel
     let app_state = get_tenant_app_state().await;
-    match crate::generics::generic_find_all::<
-            <DBCardInfo as HasTable>::Table,
-            _,
-            DBCardInfo
-        >(
-            &app_state.db,
-            dsl::card_isin.eq_any(isin_list.iter().map(|isin| isin.to_text()).collect::<Vec<String>>()),
-        )
-        .await
-        {
-            Ok(db_card_info_list) => db_card_info_list.into_iter().map(|db_card_info| CardInfo::try_from(db_card_info)).filter_map(Result::ok).collect(),
-            Err(_) => Vec::new(), // Silently handle any errors by returning empty vec
-        }
+    match crate::generics::generic_find_all::<<DBCardInfo as HasTable>::Table, _, DBCardInfo>(
+        &app_state.db,
+        dsl::card_isin.eq_any(
+            isin_list
+                .iter()
+                .map(|isin| isin.to_text())
+                .collect::<Vec<String>>(),
+        ),
+    )
+    .await
+    {
+        Ok(db_card_info_list) => db_card_info_list
+            .into_iter()
+            .map(CardInfo::try_from)
+            .filter_map(Result::ok)
+            .collect(),
+        Err(_) => Vec::new(), // Silently handle any errors by returning empty vec
+    }
 }
-
 
 // --done
 

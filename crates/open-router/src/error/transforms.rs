@@ -41,7 +41,7 @@ impl<'a> From<&'a super::StorageError> for super::MerchantDBError {
             | super::StorageError::DeleteError => Self::UnknownError,
             super::StorageError::InsertError => Self::DBInsertError,
             super::StorageError::NotFoundError => Self::NotFoundError,
-            super::StorageError::InitializationError => Self::NotFoundError
+            super::StorageError::InitializationError => Self::NotFoundError,
         }
     }
 }
@@ -61,7 +61,6 @@ impl<'a> From<&'a super::StorageError> for super::VaultDBError {
             super::StorageError::DeleteError => Self::DBDeleteError,
             super::StorageError::NotFoundError => Self::NotFoundError,
             super::StorageError::InitializationError => Self::NotFoundError,
-            
         }
     }
 }
@@ -97,7 +96,7 @@ impl<'a> From<&'a super::StorageError> for super::TestDBError {
             super::StorageError::DecryptionError
             | super::StorageError::EncryptionError
             | super::StorageError::NotFoundError => Self::UnknownError,
-            | super::StorageError::InitializationError => Self::UnknownError,
+            super::StorageError::InitializationError => Self::UnknownError,
         }
     }
 }
@@ -252,7 +251,7 @@ impl<'a> From<&'a super::StorageError> for super::EntityDBError {
             super::StorageError::FindError => Self::DBFilterError,
             super::StorageError::NotFoundError => Self::NotFoundError,
             super::StorageError::InitializationError => Self::NotFoundError,
-            
+
             super::StorageError::DecryptionError
             | super::StorageError::EncryptionError
             | super::StorageError::DeleteError => Self::UnknownError,
@@ -337,7 +336,7 @@ impl<'a> From<&'a super::ApiClientError> for super::DataKeyCreationError {
             | super::ApiClientError::UrlEncodingFailed => Self::RequestConstructionFailed,
             super::ApiClientError::IdentityParseFailed
             | super::ApiClientError::CertificateParseFailed { .. } => Self::CertificateParseFailed,
-            super::ApiClientError::RequestNotSent { .. } => Self::RequestSendFailed,
+            super::ApiClientError::RequestNotSent => Self::RequestSendFailed,
             super::ApiClientError::ResponseDecodingFailed => Self::ResponseDecodingFailed,
             super::ApiClientError::BadRequest(_) => Self::BadRequest,
             super::ApiClientError::InternalServerError(_) => Self::InternalServerError,
@@ -372,7 +371,7 @@ impl<'a> From<&'a super::ApiClientError> for super::DataKeyTransferError {
             | super::ApiClientError::UrlEncodingFailed => Self::RequestConstructionFailed,
             super::ApiClientError::IdentityParseFailed
             | super::ApiClientError::CertificateParseFailed { .. } => Self::CertificateParseFailed,
-            super::ApiClientError::RequestNotSent { .. } => Self::RequestSendFailed,
+            super::ApiClientError::RequestNotSent => Self::RequestSendFailed,
             super::ApiClientError::ResponseDecodingFailed => Self::ResponseDecodingFailed,
             super::ApiClientError::BadRequest(_) => Self::BadRequest,
             super::ApiClientError::InternalServerError(_) => Self::InternalServerError,
@@ -423,7 +422,7 @@ impl<'a> From<&'a super::ApiClientError> for super::DataEncryptionError {
             | super::ApiClientError::UrlEncodingFailed => Self::RequestConstructionFailed,
             super::ApiClientError::IdentityParseFailed
             | super::ApiClientError::CertificateParseFailed { .. } => Self::CertificateParseFailed,
-            super::ApiClientError::RequestNotSent { .. } => Self::RequestSendFailed,
+            super::ApiClientError::RequestNotSent => Self::RequestSendFailed,
             super::ApiClientError::ResponseDecodingFailed => Self::ResponseDecodingFailed,
             super::ApiClientError::BadRequest(_) => Self::BadRequest,
             super::ApiClientError::InternalServerError(_) => Self::InternalServerError,
@@ -458,7 +457,7 @@ impl<'a> From<&'a super::ApiClientError> for super::DataDecryptionError {
             | super::ApiClientError::UrlEncodingFailed => Self::RequestConstructionFailed,
             super::ApiClientError::IdentityParseFailed
             | super::ApiClientError::CertificateParseFailed { .. } => Self::CertificateParseFailed,
-            super::ApiClientError::RequestNotSent { .. } => Self::RequestSendFailed,
+            super::ApiClientError::RequestNotSent => Self::RequestSendFailed,
             super::ApiClientError::ResponseDecodingFailed => Self::ResponseDecodingFailed,
             super::ApiClientError::BadRequest(_) => Self::BadRequest,
             super::ApiClientError::InternalServerError(_) => Self::InternalServerError,

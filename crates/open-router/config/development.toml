@@ -5,7 +5,7 @@ log_format = "default"
 
 [server]
 host = "127.0.0.1"
-port = 3001
+port = 8080
 
 [limit]
 request_count = 1
@@ -13,9 +13,9 @@ duration = 60
 
 [database]
 username = "root"
-password = ""
-host = "localhost"
-port = 3307
+password = "root"
+host = "127.0.0.1"
+port = 3306
 dbname = "jdb"
 
 [redis]
@@ -42,4 +42,3 @@ open_router_private_key = ""
 
 [tenant_secrets]
 public = { master_key = "", public_key = "", schema = "public" }
-

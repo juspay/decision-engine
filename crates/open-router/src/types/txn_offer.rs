@@ -1,19 +1,17 @@
-
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 // use db::eulermeshimpl::meshConfig;
 // use db::mesh::internal::*;
-use std::string::String;
-use std::vec::Vec;
-use std::option::Option;
-use std::result::Result;
-use std::convert::From;
 use crate::app::get_tenant_app_state;
 use crate::storage::types::TxnOffer as DBTxnOffer;
+use std::convert::From;
+use std::result::Result;
+use std::string::String;
+use std::vec::Vec;
 // use types::utils::dbconfig::getEulerDbConf;
 use crate::types::money::internal::Money;
-use crate::types::offer::{OfferId, to_offer_id};
+use crate::types::offer::{to_offer_id, OfferId};
 // use juspay::extra::parsing::{Parsed, Step, liftPure, mandated, nonNegative, parseField, project};
-use crate::types::txn_details::types::{TxnDetailId, to_txn_detail_id};
+use crate::types::txn_details::types::{to_txn_detail_id, TxnDetailId};
 // use eulerhs::extra::combinators::toDomainAll;
 // use eulerhs::language::MonadFlow;
 // use ghc::stack::HasCallStack;
@@ -31,9 +29,7 @@ pub struct TxnOfferPId {
 }
 
 pub fn to_txn_offer_pid(id: i64) -> TxnOfferPId {
-    TxnOfferPId {
-        txnOfferPId: id,
-    }
+    TxnOfferPId { txnOfferPId: id }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -48,7 +44,7 @@ pub struct TxnOffer {
 
 impl From<DBTxnOffer> for TxnOffer {
     fn from(db: DBTxnOffer) -> Self {
-        TxnOffer {
+        Self {
             id: to_txn_offer_pid(db.id),
             version: db.version,
             discountAmount: Money::from_whole(db.discount_amount),
@@ -60,33 +56,26 @@ impl From<DBTxnOffer> for TxnOffer {
 }
 
 pub async fn getOffersDB(
-    
     txn_id: &TxnDetailId,
 ) -> Result<Vec<DBTxnOffer>, crate::generics::MeshError> {
     // Convert TxnDetailId to the appropriate format for database query if needed
-    let txn_id_value = txn_id.txnDetailId;
+    let txn_id_value = txn_id.0;
     let app_state = get_tenant_app_state().await;
     // Use Diesel's query builder to find all offers for the transaction
-    crate::generics::generic_find_all::<
-            <DBTxnOffer as HasTable>::Table,
-            _,
-            DBTxnOffer
-        >(
-            &app_state.db,
-            dsl::txn_detail_id.eq(txn_id_value),
-        )
-        .await
+    crate::generics::generic_find_all::<<DBTxnOffer as HasTable>::Table, _, DBTxnOffer>(
+        &app_state.db,
+        dsl::txn_detail_id.eq(txn_id_value),
+    )
+    .await
 }
 
-pub async fn getOffers(
-
-    txn_id: &TxnDetailId,
-) -> Vec<TxnOffer> {
+pub async fn getOffers(txn_id: &TxnDetailId) -> Vec<TxnOffer> {
     // Call the database function and handle results
     match getOffersDB(txn_id).await {
-        Ok(db_results) => db_results.into_iter()
-                                   .filter_map(|db_record| TxnOffer::try_from(db_record).ok())
-                                   .collect(),
+        Ok(db_results) => db_results
+            .into_iter()
+            .filter_map(|db_record| TxnOffer::try_from(db_record).ok())
+            .collect(),
         Err(_) => Vec::new(), // Silently handle any errors by returning empty vec
     }
 }

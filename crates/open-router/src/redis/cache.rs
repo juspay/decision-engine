@@ -36,7 +36,8 @@ pub type KVDBName = String;
 
 // Converted functions
 // Original Haskell function: findByNameFromRedis
-pub async fn findByNameFromRedis<A>(key: String) -> Option<A> where
+pub async fn findByNameFromRedis<A>(key: String) -> Option<A>
+where
     A: for<'de> Deserialize<'de>,
 {
     findByNameFromRedisHelper(key, Some(extractValue)).await
@@ -46,8 +47,10 @@ pub async fn findByNameFromRedis<A>(key: String) -> Option<A> where
 pub async fn findByNameFromRedisWithDecode<A>(
     key: String,
     decode_fn: impl Fn(String) -> Option<A>,
-) -> Option<A> where
-A: for<'de> Deserialize<'de>,{
+) -> Option<A>
+where
+    A: for<'de> Deserialize<'de>,
+{
     findByNameFromRedisHelper(key, Some(decode_fn)).await
 }
 
@@ -81,7 +84,7 @@ where
 pub fn extractValue<A>(value: String) -> Option<A>
 where
     A: for<'de> Deserialize<'de>,
-{
+{   
     value.parse_struct("generic type").ok()
 }
 

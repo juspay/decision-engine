@@ -8,12 +8,12 @@ use crate::{
 };
 use error_stack::ResultExt;
 use masking::ExposeInterface;
+use redis_interface::RedisSettings;
 use std::{
     collections::HashMap,
     ops::{Deref, DerefMut},
     path::PathBuf,
 };
-use redis_interface::RedisSettings;
 
 #[derive(Clone, serde::Deserialize, Debug)]
 pub struct GlobalConfig {
@@ -83,7 +83,6 @@ pub struct Database {
     pub dbname: String,
     pub pool_size: Option<usize>,
 }
-
 
 #[derive(Clone, serde::Deserialize, Debug)]
 pub struct Secrets {
@@ -167,10 +166,10 @@ impl GlobalConfig {
     pub fn new_with_config_path(
         explicit_config_path: Option<PathBuf>,
     ) -> Result<Self, config::ConfigError> {
-        let env = "dev";
-        let config_path = Self::config_path(env, explicit_config_path);
+        let env = std::env::var("APP_ENV").unwrap_or_else(|_| "dev".to_string());
+        let config_path = Self::config_path(&env, explicit_config_path);
 
-        let config = Self::builder(env)?
+        let config = Self::builder(&env)?
             .add_source(config::File::from(config_path).required(false))
             .add_source(config::Environment::with_prefix("LOCKER").separator("__"))
             .build()?;
@@ -203,6 +202,7 @@ impl GlobalConfig {
                 "sandbox" => "sandbox.toml",
                 _ => "development.toml",
             };
+            // println!("Using configuration file: {}", config_file_name);
 
             config_path.push(workspace_path());
             config_path.push(config_directory);
@@ -235,6 +235,11 @@ impl GlobalConfig {
             ))?;
 
         for tenant_secrets in self.tenant_secrets.values_mut() {
+            if tenant_secrets.master_key.is_empty() {
+                println!("Skipping decryption of master key for tenant");
+                // Skip decryption if master_key is empty
+                continue;
+            }
             tenant_secrets.master_key = hex::decode(
                 secret_management_client
                     .get_secret(
@@ -252,18 +257,26 @@ impl GlobalConfig {
         #[cfg(feature = "middleware")]
         {
             for tenant_secrets in self.tenant_secrets.values_mut() {
+                if tenant_secrets.public_key.clone().expose().is_empty() {
+                    println!("Skipping decryption of public key for tenant as it is empty");
+                    continue; // Skip decryption if public_key is empty
+                }
                 tenant_secrets.public_key = secret_management_client
                     .get_secret(tenant_secrets.public_key.clone())
                     .await
-                    .change_context(error::ConfigurationError::KmsDecryptError("master_key"))?;
+                    .change_context(error::ConfigurationError::KmsDecryptError("public_key"))?;
             }
 
-            self.secrets.open_router_private_key = secret_management_client
-                .get_secret(self.secrets.open_router_private_key.clone())
-                .await
-                .change_context(error::ConfigurationError::KmsDecryptError(
-                    "open_router_private_key",
-                ))?;
+            if self.secrets.open_router_private_key.clone().expose().is_empty() {
+                println!("Skipping decryption of open_router_private_key as it is empty");
+            } else {
+                self.secrets.open_router_private_key = secret_management_client
+                    .get_secret(self.secrets.open_router_private_key.clone())
+                    .await
+                    .change_context(error::ConfigurationError::KmsDecryptError(
+                        "open_router_private_key",
+                    ))?;
+            }
         }
 
         Ok(())

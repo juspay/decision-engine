@@ -1,10 +1,8 @@
-
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use time::PrimitiveDateTime;
-use std::string::String;
 use std::option::Option;
+use std::string::String;
 use std::time::SystemTime;
+use time::PrimitiveDateTime;
 // use chrono::NaiveDateTime;
 // use data::text::Text;
 // use juspay::extra::nonemptytext::NonEmptyText;
@@ -53,13 +51,13 @@ pub enum TxnOfferDetailStatus {
 impl TxnOfferDetailStatus {
     pub fn to_text(&self) -> String {
         match self {
-            TxnOfferDetailStatus::Created => "CREATED".into(),
-            TxnOfferDetailStatus::Initiated => "INITIATED".into(),
-            TxnOfferDetailStatus::Availed => "AVAILED".into(),
-            TxnOfferDetailStatus::Refunded => "REFUNDED".into(),
-            TxnOfferDetailStatus::PartiallyRefunded => "PARTIALLY_REFUNDED".into(),
-            TxnOfferDetailStatus::Failed => "FAILED".into(),
-            TxnOfferDetailStatus::Revoked => "REVOKED".into(),
+            Self::Created => "CREATED".into(),
+            Self::Initiated => "INITIATED".into(),
+            Self::Availed => "AVAILED".into(),
+            Self::Refunded => "REFUNDED".into(),
+            Self::PartiallyRefunded => "PARTIALLY_REFUNDED".into(),
+            Self::Failed => "FAILED".into(),
+            Self::Revoked => "REVOKED".into(),
         }
     }
 }

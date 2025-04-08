@@ -1,0 +1,34 @@
+merchant_id: test_merchant1
+
+priority_logic:
+  script: priority_logic.txt
+  tag: PL_TEST
+
+elimination_config:
+  threshold: 0.35
+
+sr_routing_config:
+  defaultBucketSize: 50
+  defaultHedgingPercent: 5
+  subLevelInputConfig:
+    - paymentMethodType: UPI
+      paymentMethod: UPI_COLLECT
+      bucketSize: 100
+      hedgingPercent: 1
+    - paymentMethodType: UPI
+      paymentMethod: UPI_PAY
+      bucketSize: 500
+      hedgingPercent: 1
+    - paymentMethodType: UPI
+      paymentMethod: UPI_QR
+      bucketSize: 1000
+      hedgingPercent: 1
+    - paymentMethodType: NB
+      bucketSize: 50
+      hedgingPercent: 1
+    - paymentMethodType: CARD
+      bucketSize: 200
+      hedgingPercent: 1
+    - paymentMethodType: WALLET
+      bucketSize: 50
+      hedgingPercent: 1

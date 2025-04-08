@@ -1,18 +1,19 @@
-pub mod udfs;
 pub mod id;
+pub mod udfs;
 
-use serde::{Serialize, Deserialize};
-use serde_json::Value;
-use time::PrimitiveDateTime;
-use std::option::Option;
-use std::string::String;
 use crate::types::currency::Currency;
 use crate::types::customer::CustomerId;
 use crate::types::gateway::Gateway;
 use crate::types::merchant::id::MerchantId;
 use crate::types::money::internal::Money;
-use crate::types::order::id::{OrderId, OrderPrimId, ProductId, to_order_id, to_order_prim_id, to_product_id};
-use crate::types::order::udfs::{UDFs, get_udf};
+use crate::types::order::id::{OrderId, OrderPrimId, ProductId};
+use crate::types::order::udfs::UDFs;
+use serde::{Deserialize, Deserializer, Serialize};
+use std::collections::HashMap;
+use std::option::Option;
+use std::string::String;
+use time::OffsetDateTime;
+use crate::types::txn_details::types::TxnObjectType;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OrderStatus {
@@ -65,55 +66,55 @@ pub enum OrderStatus {
 impl OrderStatus {
     pub fn to_text(&self) -> String {
         match self {
-            OrderStatus::AuthenticationFailed => "AUTHENTICATION_FAILED".to_string(),
-            OrderStatus::AuthorizationFailed => "AUTHORIZATION_FAILED".to_string(),
-            OrderStatus::Authorized => "AUTHORIZED".to_string(),
-            OrderStatus::Authorizing => "AUTHORIZING".to_string(),
-            OrderStatus::AutoRefunded => "AUTO_REFUNDED".to_string(),
-            OrderStatus::CaptureFailed => "CAPTURE_FAILED".to_string(),
-            OrderStatus::CaptureInitiated => "CAPTURE_INITIATED".to_string(),
-            OrderStatus::CodInitiated => "COD_INITIATED".to_string(),
-            OrderStatus::Created => "CREATED".to_string(),
-            OrderStatus::Error => "ERROR".to_string(),
-            OrderStatus::JuspayDeclined => "JUSPAY_DECLINED".to_string(),
-            OrderStatus::New => "NEW".to_string(),
-            OrderStatus::NotFound => "NOT_FOUND".to_string(),
-            OrderStatus::PartialCharged => "PARTIAL_CHARGED".to_string(),
-            OrderStatus::ToBeCharged => "TO_BE_CHARGED".to_string(),
-            OrderStatus::PendingAuthentication => "PENDING_AUTHENTICATION".to_string(),
-            OrderStatus::Success => "SUCCESS".to_string(),
-            OrderStatus::VoidFailed => "VOID_FAILED".to_string(),
-            OrderStatus::VoidInitiated => "VOID_INITIATED".to_string(),
-            OrderStatus::Voided => "VOIDED".to_string(),
-            OrderStatus::MerchantVoided => "MERCHANT_VOIDED".to_string(),
-            OrderStatus::Declined => "DECLINED".to_string(),
+            Self::AuthenticationFailed => "AUTHENTICATION_FAILED".to_string(),
+            Self::AuthorizationFailed => "AUTHORIZATION_FAILED".to_string(),
+            Self::Authorized => "AUTHORIZED".to_string(),
+            Self::Authorizing => "AUTHORIZING".to_string(),
+            Self::AutoRefunded => "AUTO_REFUNDED".to_string(),
+            Self::CaptureFailed => "CAPTURE_FAILED".to_string(),
+            Self::CaptureInitiated => "CAPTURE_INITIATED".to_string(),
+            Self::CodInitiated => "COD_INITIATED".to_string(),
+            Self::Created => "CREATED".to_string(),
+            Self::Error => "ERROR".to_string(),
+            Self::JuspayDeclined => "JUSPAY_DECLINED".to_string(),
+            Self::New => "NEW".to_string(),
+            Self::NotFound => "NOT_FOUND".to_string(),
+            Self::PartialCharged => "PARTIAL_CHARGED".to_string(),
+            Self::ToBeCharged => "TO_BE_CHARGED".to_string(),
+            Self::PendingAuthentication => "PENDING_AUTHENTICATION".to_string(),
+            Self::Success => "SUCCESS".to_string(),
+            Self::VoidFailed => "VOID_FAILED".to_string(),
+            Self::VoidInitiated => "VOID_INITIATED".to_string(),
+            Self::Voided => "VOIDED".to_string(),
+            Self::MerchantVoided => "MERCHANT_VOIDED".to_string(),
+            Self::Declined => "DECLINED".to_string(),
         }
     }
 
     pub fn from_text(text: String) -> Option<Self> {
         match text.as_str() {
-            "AUTHENTICATION_FAILED" => Some(OrderStatus::AuthenticationFailed),
-            "AUTHORIZATION_FAILED" => Some(OrderStatus::AuthorizationFailed),
-            "AUTHORIZED" => Some(OrderStatus::Authorized),
-            "AUTHORIZING" => Some(OrderStatus::Authorizing),
-            "AUTO_REFUNDED" => Some(OrderStatus::AutoRefunded),
-            "CAPTURE_FAILED" => Some(OrderStatus::CaptureFailed),
-            "CAPTURE_INITIATED" => Some(OrderStatus::CaptureInitiated),
-            "COD_INITIATED" => Some(OrderStatus::CodInitiated),
-            "CREATED" => Some(OrderStatus::Created),
-            "ERROR" => Some(OrderStatus::Error),
-            "JUSPAY_DECLINED" => Some(OrderStatus::JuspayDeclined),
-            "NEW" => Some(OrderStatus::New),
-            "NOT_FOUND" => Some(OrderStatus::NotFound),
-            "PARTIAL_CHARGED" => Some(OrderStatus::PartialCharged),
-            "TO_BE_CHARGED" => Some(OrderStatus::ToBeCharged),
-            "PENDING_AUTHENTICATION" => Some(OrderStatus::PendingAuthentication),
-            "SUCCESS" => Some(OrderStatus::Success),
-            "VOID_FAILED" => Some(OrderStatus::VoidFailed),
-            "VOID_INITIATED" => Some(OrderStatus::VoidInitiated),
-            "VOIDED" => Some(OrderStatus::Voided),
-            "MERCHANT_VOIDED" => Some(OrderStatus::MerchantVoided),
-            "DECLINED" => Some(OrderStatus::Declined),
+            "AUTHENTICATION_FAILED" => Some(Self::AuthenticationFailed),
+            "AUTHORIZATION_FAILED" => Some(Self::AuthorizationFailed),
+            "AUTHORIZED" => Some(Self::Authorized),
+            "AUTHORIZING" => Some(Self::Authorizing),
+            "AUTO_REFUNDED" => Some(Self::AutoRefunded),
+            "CAPTURE_FAILED" => Some(Self::CaptureFailed),
+            "CAPTURE_INITIATED" => Some(Self::CaptureInitiated),
+            "COD_INITIATED" => Some(Self::CodInitiated),
+            "CREATED" => Some(Self::Created),
+            "ERROR" => Some(Self::Error),
+            "JUSPAY_DECLINED" => Some(Self::JuspayDeclined),
+            "NEW" => Some(Self::New),
+            "NOT_FOUND" => Some(Self::NotFound),
+            "PARTIAL_CHARGED" => Some(Self::PartialCharged),
+            "TO_BE_CHARGED" => Some(Self::ToBeCharged),
+            "PENDING_AUTHENTICATION" => Some(Self::PendingAuthentication),
+            "SUCCESS" => Some(Self::Success),
+            "VOID_FAILED" => Some(Self::VoidFailed),
+            "VOID_INITIATED" => Some(Self::VoidInitiated),
+            "VOIDED" => Some(Self::Voided),
+            "MERCHANT_VOIDED" => Some(Self::MerchantVoided),
+            "DECLINED" => Some(Self::Declined),
             _ => None,
         }
     }
@@ -144,32 +145,69 @@ pub enum OrderType {
 impl OrderType {
     pub fn to_text(&self) -> String {
         match self {
-            OrderType::MandateRegister => "MANDATE_REGISTER".to_string(),
-            OrderType::EmandateRegister => "EMANDATE_REGISTER".to_string(),
-            OrderType::MandatePayment => "MANDATE_PAYMENT".to_string(),
-            OrderType::OrderPayment => "ORDER_PAYMENT".to_string(),
-            OrderType::TpvPayment => "TPV_PAYMENT".to_string(),
-            OrderType::TpvMandateRegister => "TPV_MANDATE_REGISTER".to_string(),
-            OrderType::TpvMandatePayment => "TPV_MANDATE_PAYMENT".to_string(),
-            OrderType::VanPayment => "VAN_PAYMENT".to_string(),
-            OrderType::MotoPayment => "MOTO_PAYMENT".to_string(),
+            Self::MandateRegister => "MANDATE_REGISTER".to_string(),
+            Self::EmandateRegister => "EMANDATE_REGISTER".to_string(),
+            Self::MandatePayment => "MANDATE_PAYMENT".to_string(),
+            Self::OrderPayment => "ORDER_PAYMENT".to_string(),
+            Self::TpvPayment => "TPV_PAYMENT".to_string(),
+            Self::TpvMandateRegister => "TPV_MANDATE_REGISTER".to_string(),
+            Self::TpvMandatePayment => "TPV_MANDATE_PAYMENT".to_string(),
+            Self::VanPayment => "VAN_PAYMENT".to_string(),
+            Self::MotoPayment => "MOTO_PAYMENT".to_string(),
         }
     }
 
     pub fn from_text(text: String) -> Option<Self> {
         match text.as_str() {
-            "MANDATE_REGISTER" => Some(OrderType::MandateRegister),
-            "EMANDATE_REGISTER" => Some(OrderType::EmandateRegister),
-            "MANDATE_PAYMENT" => Some(OrderType::MandatePayment),
-            "ORDER_PAYMENT" => Some(OrderType::OrderPayment),
-            "TPV_PAYMENT" => Some(OrderType::TpvPayment),
-            "TPV_MANDATE_REGISTER" => Some(OrderType::TpvMandateRegister),
-            "TPV_MANDATE_PAYMENT" => Some(OrderType::TpvMandatePayment),
-            "VAN_PAYMENT" => Some(OrderType::VanPayment),
-            "MOTO_PAYMENT" => Some(OrderType::MotoPayment),
+            "MANDATE_REGISTER" => Some(Self::MandateRegister),
+            "EMANDATE_REGISTER" => Some(Self::EmandateRegister),
+            "MANDATE_PAYMENT" => Some(Self::MandatePayment),
+            "ORDER_PAYMENT" => Some(Self::OrderPayment),
+            "TPV_PAYMENT" => Some(Self::TpvPayment),
+            "TPV_MANDATE_REGISTER" => Some(Self::TpvMandateRegister),
+            "TPV_MANDATE_PAYMENT" => Some(Self::TpvMandatePayment),
+            "VAN_PAYMENT" => Some(Self::VanPayment),
+            "MOTO_PAYMENT" => Some(Self::MotoPayment),
             _ => None,
         }
     }
+   pub fn from_txn_object_type(txn_type: TxnObjectType) -> Self {
+        match txn_type{
+            TxnObjectType::OrderPayment => Self::OrderPayment,
+            TxnObjectType::MandateRegister => Self::MandateRegister,
+            TxnObjectType::EmandateRegister => Self::EmandateRegister ,
+            TxnObjectType::MandatePayment => Self::MandatePayment,
+            TxnObjectType::EmandatePayment => Self::MandatePayment,
+            TxnObjectType::TpvPayment => Self::TpvPayment,
+            TxnObjectType::TpvEmandateRegister => Self::TpvMandateRegister,
+            TxnObjectType::TpvMandateRegister => Self::TpvMandateRegister,
+            TxnObjectType::TpvEmandatePayment => Self::TpvMandatePayment,
+            TxnObjectType::TpvMandatePayment => Self::TpvMandatePayment,
+            TxnObjectType::PartialCapture => Self::OrderPayment,
+            TxnObjectType::PartialVoid => Self::OrderPayment,
+            TxnObjectType::VanPayment => Self::VanPayment,
+            TxnObjectType::MotoPayment => Self::MotoPayment,
+        }
+    }
+
+}
+
+pub fn deserialize_udfs_to_hashmap<'de, D>(deserializer: D) -> Result<UDFs, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    // Deserialize the input as a Vec<String>
+    let raw_vec: Vec<Option<String>> = Vec::deserialize(deserializer)?;
+
+    // Convert the Vec<String> to a HashMap<i32, String>
+    let hashmap: HashMap<i32, String> = raw_vec
+        .into_iter()
+        .enumerate()
+        .filter(|(_, value)| value.is_some())
+        .map(|(index, value)| (index as i32, value.unwrap_or("".to_string())))
+        .collect();
+
+    Ok(UDFs(hashmap))
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -177,12 +215,14 @@ pub struct Order {
     pub id: OrderPrimId,
     pub amount: Money,
     pub currency: Currency,
-    pub dateCreated: PrimitiveDateTime,
+    #[serde(with = "time::serde::iso8601")]
+    pub dateCreated: OffsetDateTime,
     pub merchantId: MerchantId,
     pub orderId: OrderId,
     pub status: OrderStatus,
     pub customerId: Option<CustomerId>,
     pub description: Option<String>,
+    #[serde(deserialize_with = "deserialize_udfs_to_hashmap")]
     pub udfs: UDFs,
     pub preferredGateway: Option<Gateway>,
     pub productId: Option<ProductId>,

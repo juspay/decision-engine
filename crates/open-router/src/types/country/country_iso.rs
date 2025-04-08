@@ -1,7 +1,7 @@
-use serde::{Serialize, Deserialize};
-use std::string::String;
-use std::hash::Hash;
 use crate::error::ApiError;
+use serde::{Deserialize, Serialize};
+use std::hash::Hash;
+use std::string::String;
 #[derive(Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Clone, Copy)]
 pub enum CountryISO {
     AIA,

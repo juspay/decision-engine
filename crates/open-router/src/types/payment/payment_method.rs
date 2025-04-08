@@ -1,6 +1,5 @@
-use serde::{Serialize, Deserialize};
-use serde_json::Value;
 use crate::app::get_tenant_app_state;
+use serde::{Deserialize, Serialize};
 // use db::euler_mesh_impl::mesh_config;
 // use db::mesh::internal::*;
 // use db::storage::types::paymentmethod as DB;
@@ -11,16 +10,15 @@ use crate::app::get_tenant_app_state;
 // use eulerhs::language::MonadFlow;
 use crate::error::ApiError;
 use crate::storage::types::PaymentMethod as DBPaymentMethod;
-use crate::types::bank_code::{BankCodeId, to_bank_code_id};
+use crate::types::bank_code::{to_bank_code_id, BankCodeId};
 
-use std::string::String;
-use std::option::Option;
-use std::vec::Vec;
-use time::PrimitiveDateTime;
-use std::convert::TryFrom;
 use crate::storage::schema::payment_method::dsl;
-use diesel::*;
 use diesel::associations::HasTable;
+use diesel::*;
+use std::convert::TryFrom;
+use std::option::Option;
+use std::string::String;
+use time::PrimitiveDateTime;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PaymentMethodType {
@@ -69,57 +67,59 @@ pub enum PaymentMethodType {
 impl PaymentMethodType {
     pub fn to_text(&self) -> &'static str {
         match self {
-            PaymentMethodType::Wallet => "WALLET",
-            PaymentMethodType::UPI => "UPI",
-            PaymentMethodType::NB => "NB",
-            PaymentMethodType::Card => "CARD",
-            PaymentMethodType::Paylater => "PAYLATER",
-            PaymentMethodType::ConsumerFinance => "CONSUMER_FINANCE",
-            PaymentMethodType::Reward => "REWARD",
-            PaymentMethodType::Cash => "CASH",
-            PaymentMethodType::AtmCard => "ATM_CARD",
-            PaymentMethodType::Aadhaar => "AADHAAR",
-            PaymentMethodType::MerchantContainer => "MERCHANT_CONTAINER",
-            PaymentMethodType::WalletContainer => "WALLET_CONTAINER",
-            PaymentMethodType::Papernach => "PAPERNACH",
-            PaymentMethodType::VirtualAccount => "VIRTUAL_ACCOUNT",
-            PaymentMethodType::Otc => "OTC",
-            PaymentMethodType::Rtp => "RTP",
-            PaymentMethodType::Crypto => "CRYPTO",
-            PaymentMethodType::CardQr => "CARD_QR",
-            PaymentMethodType::PAN => "PAN",
-            PaymentMethodType::Unknown => "UNKNOWN",
+            Self::Wallet => "WALLET",
+            Self::UPI => "UPI",
+            Self::NB => "NB",
+            Self::Card => "CARD",
+            Self::Paylater => "PAYLATER",
+            Self::ConsumerFinance => "CONSUMER_FINANCE",
+            Self::Reward => "REWARD",
+            Self::Cash => "CASH",
+            Self::AtmCard => "ATM_CARD",
+            Self::Aadhaar => "AADHAAR",
+            Self::MerchantContainer => "MERCHANT_CONTAINER",
+            Self::WalletContainer => "WALLET_CONTAINER",
+            Self::Papernach => "PAPERNACH",
+            Self::VirtualAccount => "VIRTUAL_ACCOUNT",
+            Self::Otc => "OTC",
+            Self::Rtp => "RTP",
+            Self::Crypto => "CRYPTO",
+            Self::CardQr => "CARD_QR",
+            Self::PAN => "PAN",
+            Self::Unknown => "UNKNOWN",
         }
     }
 
-    pub fn from_text(ctx: &str) -> Result<PaymentMethodType, ApiError> {
+    pub fn from_text(ctx: &str) -> Result<Self, ApiError> {
         match ctx {
-            "WALLET" => Ok(PaymentMethodType::Wallet),
-            "UPI" => Ok(PaymentMethodType::UPI),
-            "NB" => Ok(PaymentMethodType::NB),
-            "CARD" => Ok(PaymentMethodType::Card),
-            "PAYLATER" => Ok(PaymentMethodType::Paylater),
-            "CONSUMER_FINANCE" => Ok(PaymentMethodType::ConsumerFinance),
-            "REWARD" => Ok(PaymentMethodType::Reward),
-            "CASH" => Ok(PaymentMethodType::Cash),
-            "ATM_CARD" => Ok(PaymentMethodType::AtmCard),
-            "AADHAAR" => Ok(PaymentMethodType::Aadhaar),
-            "MERCHANT_CONTAINER" => Ok(PaymentMethodType::MerchantContainer),
-            "WALLET_CONTAINER" => Ok(PaymentMethodType::WalletContainer),
-            "PAPERNACH" => Ok(PaymentMethodType::Papernach),
-            "VIRTUAL_ACCOUNT" => Ok(PaymentMethodType::VirtualAccount),
-            "OTC" => Ok(PaymentMethodType::Otc),
-            "RTP" => Ok(PaymentMethodType::Rtp),
-            "CRYPTO" => Ok(PaymentMethodType::Crypto),
-            "CARD_QR" => Ok(PaymentMethodType::CardQr),
-            "PAN" => Ok(PaymentMethodType::PAN),
-            "UNKNOWN" => Ok(PaymentMethodType::Unknown),
+            "WALLET" => Ok(Self::Wallet),
+            "UPI" => Ok(Self::UPI),
+            "NB" => Ok(Self::NB),
+            "CARD" => Ok(Self::Card),
+            "PAYLATER" => Ok(Self::Paylater),
+            "CONSUMER_FINANCE" => Ok(Self::ConsumerFinance),
+            "REWARD" => Ok(Self::Reward),
+            "CASH" => Ok(Self::Cash),
+            "ATM_CARD" => Ok(Self::AtmCard),
+            "AADHAAR" => Ok(Self::Aadhaar),
+            "MERCHANT_CONTAINER" => Ok(Self::MerchantContainer),
+            "WALLET_CONTAINER" => Ok(Self::WalletContainer),
+            "PAPERNACH" => Ok(Self::Papernach),
+            "VIRTUAL_ACCOUNT" => Ok(Self::VirtualAccount),
+            "OTC" => Ok(Self::Otc),
+            "RTP" => Ok(Self::Rtp),
+            "CRYPTO" => Ok(Self::Crypto),
+            "CARD_QR" => Ok(Self::CardQr),
+            "PAN" => Ok(Self::PAN),
+            "UNKNOWN" => Ok(Self::Unknown),
             _ => Err(ApiError::ParsingError("Invalid Payment Method Type")),
         }
     }
 }
 
-pub fn text_to_payment_method_type(payment_method_type: String) -> Result<PaymentMethodType, ApiError> {
+pub fn text_to_payment_method_type(
+    payment_method_type: String,
+) -> Result<PaymentMethodType, ApiError> {
     PaymentMethodType::from_text(payment_method_type.as_str())
 }
 
@@ -178,37 +178,37 @@ pub enum PaymentMethodSubType {
 impl PaymentMethodSubType {
     pub fn to_text(&self) -> &'static str {
         match self {
-            PaymentMethodSubType::WALLET => "WALLET",
-            PaymentMethodSubType::CF_BNPL => "CF_BNPL",
-            PaymentMethodSubType::GIFT_CARD => "GIFT_CARD",
-            PaymentMethodSubType::CF_EMI => "CF_EMI",
-            PaymentMethodSubType::REAL_TIME => "REAL_TIME",
-            PaymentMethodSubType::CF_POD => "CF_POD",
-            PaymentMethodSubType::REWARD => "REWARD",
-            PaymentMethodSubType::VAN => "VAN",
-            PaymentMethodSubType::STORE => "STORE",
-            PaymentMethodSubType::POS => "POS",
-            PaymentMethodSubType::CF_LSP => "CF_LSP",
-            PaymentMethodSubType::FPX => "FPX",
-            PaymentMethodSubType::UNKNOWN => "UNKNOWN",
+            Self::WALLET => "WALLET",
+            Self::CF_BNPL => "CF_BNPL",
+            Self::GIFT_CARD => "GIFT_CARD",
+            Self::CF_EMI => "CF_EMI",
+            Self::REAL_TIME => "REAL_TIME",
+            Self::CF_POD => "CF_POD",
+            Self::REWARD => "REWARD",
+            Self::VAN => "VAN",
+            Self::STORE => "STORE",
+            Self::POS => "POS",
+            Self::CF_LSP => "CF_LSP",
+            Self::FPX => "FPX",
+            Self::UNKNOWN => "UNKNOWN",
         }
     }
 
-    pub fn from_text(ctx: &str) -> Result<PaymentMethodSubType, ApiError> {
+    pub fn from_text(ctx: &str) -> Result<Self, ApiError> {
         match ctx {
-            "WALLET" => Ok(PaymentMethodSubType::WALLET),
-            "CF_BNPL" => Ok(PaymentMethodSubType::CF_BNPL),
-            "GIFT_CARD" => Ok(PaymentMethodSubType::GIFT_CARD),
-            "CF_EMI" => Ok(PaymentMethodSubType::CF_EMI),
-            "REAL_TIME" => Ok(PaymentMethodSubType::REAL_TIME),
-            "CF_POD" => Ok(PaymentMethodSubType::CF_POD),
-            "REWARD" => Ok(PaymentMethodSubType::REWARD),
-            "VAN" => Ok(PaymentMethodSubType::VAN),
-            "STORE" => Ok(PaymentMethodSubType::STORE),
-            "POS" => Ok(PaymentMethodSubType::POS),
-            "CF_LSP" => Ok(PaymentMethodSubType::CF_LSP),
-            "FPX" => Ok(PaymentMethodSubType::FPX),
-            "UNKNOWN" => Ok(PaymentMethodSubType::UNKNOWN),
+            "WALLET" => Ok(Self::WALLET),
+            "CF_BNPL" => Ok(Self::CF_BNPL),
+            "GIFT_CARD" => Ok(Self::GIFT_CARD),
+            "CF_EMI" => Ok(Self::CF_EMI),
+            "REAL_TIME" => Ok(Self::REAL_TIME),
+            "CF_POD" => Ok(Self::CF_POD),
+            "REWARD" => Ok(Self::REWARD),
+            "VAN" => Ok(Self::VAN),
+            "STORE" => Ok(Self::STORE),
+            "POS" => Ok(Self::POS),
+            "CF_LSP" => Ok(Self::CF_LSP),
+            "FPX" => Ok(Self::FPX),
+            "UNKNOWN" => Ok(Self::UNKNOWN),
             _ => Err(ApiError::ParsingError("Invalid Payment Method Sub Type")),
         }
     }
@@ -221,18 +221,21 @@ impl TryFrom<DBPaymentMethod> for PaymentMethod {
     type Error = ApiError;
 
     fn try_from(value: DBPaymentMethod) -> Result<Self, ApiError> {
-        Ok(PaymentMethod {
+        Ok(Self {
             id: PaymentMethodId(value.id),
             dateCreated: value.date_created,
             lastUpdated: value.last_updated,
             name: value.name,
             pmType: PaymentMethodType::from_text(&value.pm_type)?,
             description: value.description,
-            juspayBankCodeId: value.juspay_bank_code_id.map(|id| to_bank_code_id(id)),
+            juspayBankCodeId: value.juspay_bank_code_id.map(to_bank_code_id),
             displayName: value.display_name,
             nickName: value.nick_name,
-            subType: value.sub_type.map(|sub_type| PaymentMethodSubType::from_text(&sub_type)).transpose()?,
-            dsl: value.dsl,
+            subType: value
+                .sub_type
+                .map(|sub_type| PaymentMethodSubType::from_text(&sub_type))
+                .transpose()?,
+            dsl: value.payment_dsl,
         })
     }
 }
@@ -251,19 +254,15 @@ impl TryFrom<DBPaymentMethod> for PaymentMethod {
 //     }
 // }
 
-
-pub async fn get_by_name(
-    name: String,
-) -> Option<PaymentMethod> {
+pub async fn get_by_name(name: String) -> Option<PaymentMethod> {
     let app_state = get_tenant_app_state().await;
     match crate::generics::generic_find_one_optional::<
         <DBPaymentMethod as HasTable>::Table,
         _,
-        DBPaymentMethod
-    >(
-        &app_state.db,
-        dsl::name.eq(name)
-    ).await {
+        DBPaymentMethod,
+    >(&app_state.db, dsl::name.eq(name))
+    .await
+    {
         Ok(Some(db_payment_method)) => PaymentMethod::try_from(db_payment_method).ok(),
         _ => None,
     }

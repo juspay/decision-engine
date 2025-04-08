@@ -1,26 +1,27 @@
-
 use std::fmt::Debug;
 
+use crate::logger;
+use crate::storage::MysqlPoolConn;
+use crate::storage::Storage;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::{
-    associations::HasTable, debug_query, dsl::{Find, Limit}, helper_types::{Filter, IntoBoxed}, insertable::CanInsertInSingleQuery, mysql::Mysql, query_builder::{
-        AsChangeset, AsQuery, DeleteStatement, InsertStatement, IntoUpdateTarget, QueryFragment,
-        QueryId, UpdateStatement,
-    }, query_dsl::{
-        methods::{BoxedDsl, FilterDsl, FindDsl, LimitDsl, OffsetDsl, OrderDsl},
+    associations::HasTable,
+    debug_query,
+    dsl::{Find, Limit},
+    helper_types::Filter,
+    mysql::Mysql,
+    query_builder::QueryFragment,
+    query_dsl::{
+        methods::{FilterDsl, FindDsl, LimitDsl},
         LoadQuery, RunQueryDsl,
-    }, result::Error as DieselError, Expression, Insertable, MysqlConnection, QueryDsl, QuerySource, Table
+    },
+    result::Error as DieselError,
+    MysqlConnection, QueryDsl, Table,
 };
-use diesel_async::{AsyncMysqlConnection};
-use error_stack::{report, ResultExt};
-use crate::logger;
-use crate::storage::Storage;
-use bb8::PooledConnection;
-use crate::storage::MysqlPoolConn;
 
 // use crate::{errors, MysqlPooledConn, StorageResult};
 
-pub type StorageResult<T> = Result<T,MeshError>;
+pub type StorageResult<T> = Result<T, MeshError>;
 
 #[derive(Copy, Clone, Debug, thiserror::Error)]
 pub enum MeshError {
@@ -59,7 +60,7 @@ where
 {
     let conn = match storage.get_conn().await {
         Ok(conn) => Ok(conn),
-        Err(err)            => Err(MeshError::Others)
+        Err(err) => Err(MeshError::Others),
     }?;
     generic_filter::<T, _, _>(&conn, predicate).await
 }
@@ -92,7 +93,7 @@ where
         .map_err(|err| match err {
             DieselError::NotFound => MeshError::NotFound,
             _ => MeshError::Others,
-        }) 
+        })
 }
 
 async fn generic_find_one_core<T, P, R>(conn: &MysqlPoolConn, predicate: P) -> StorageResult<R>
@@ -103,19 +104,23 @@ where
 {
     let query = <T as HasTable>::table().filter(predicate);
     logger::debug!(query = %debug_query::<Mysql, _>(&query).to_string());
+    // println!("{}", debug_query::<Mysql, _>(&query));
 
     track_database_call::<T, _, _>(query.get_result_async(conn), DatabaseOperation::FindOne)
         .await
         .map_err(|err| match err {
-            DieselError::NotFound => MeshError::NotFound,
-            _ => MeshError::Others, 
+            DieselError::NotFound => {
+                print!("Error: {:?}", err);
+                MeshError::NotFound
+            }
+            _ => {
+                print!("Error: {:?}", err);
+                MeshError::Others
+            }
         })
 }
 
-pub async fn generic_find_one<T, P, R>(
-    storage: &Storage,
-    predicate: P,
-) -> StorageResult<R>
+pub async fn generic_find_one<T, P, R>(storage: &Storage, predicate: P) -> StorageResult<R>
 where
     T: FilterDsl<P> + HasTable<Table = T> + Table + 'static,
     Filter<T, P>: LoadQuery<'static, MysqlConnection, R> + QueryFragment<Mysql> + Send + 'static,
@@ -123,7 +128,7 @@ where
 {
     let conn = match storage.get_conn().await {
         Ok(conn) => Ok(conn),
-        Err(err)            => Err(MeshError::Others)
+        Err(err) => Err(MeshError::Others),
     }?;
     generic_find_one_core::<T, _, _>(&conn, predicate).await
 }
@@ -138,14 +143,20 @@ where
     R: Send + 'static,
 {
     let conn = match storage.get_conn().await {
-        Ok(conn) => Ok(conn),
-        Err(err)            => Err(MeshError::Others)
+        Ok(conn) => {
+            print!("DB connected sccessfuly");
+            Ok(conn)
+        }
+        Err(err) => {
+            print!("Error getting connection: {:?}", err);
+            Err(MeshError::Others)
+        }
     }?;
     to_optional(generic_find_one_core::<T, _, _>(&conn, predicate).await)
 }
 
 pub async fn generic_find_by_id_optional<T, Pk, R>(
-    storage : &Storage,
+    storage: &Storage,
     id: Pk,
 ) -> StorageResult<Option<R>>
 where
@@ -158,21 +169,21 @@ where
 {
     let conn = match storage.get_conn().await {
         Ok(conn) => Ok(conn),
-        Err(err)            => Err(MeshError::Others)
+        Err(err) => Err(MeshError::Others),
     }?;
     to_optional(generic_find_by_id_core::<T, _, _>(&conn, id).await)
 }
 
 pub async fn track_database_call<T, Fut, U>(future: Fut, operation: DatabaseOperation) -> U
-    where
-        Fut: std::future::Future<Output = U>,
-    {
-        let start = std::time::Instant::now();
-        let output = future.await;
-        output
-    }
+where
+    Fut: std::future::Future<Output = U>,
+{
+    let start = std::time::Instant::now();
+    let output = future.await;
+    output
+}
 
-async fn generic_find_by_id_core<T, Pk, R>(conn : &MysqlPoolConn, id: Pk) -> StorageResult<R>
+async fn generic_find_by_id_core<T, Pk, R>(conn: &MysqlPoolConn, id: Pk) -> StorageResult<R>
 where
     T: FindDsl<Pk> + HasTable<Table = T> + LimitDsl + Table + 'static,
     Find<T, Pk>: LimitDsl + QueryFragment<Mysql> + RunQueryDsl<MysqlConnection> + Send + 'static,
@@ -182,17 +193,16 @@ where
 {
     let query = <T as HasTable>::table().find(id.to_owned());
     logger::debug!(query = %debug_query::<Mysql, _>(&query).to_string());
-    
-
 
     match track_database_call::<T, _, _>(query.first_async(conn), DatabaseOperation::FindOne).await
     {
         Ok(value) => Ok(value),
         Err(err) => match err {
-            DieselError::NotFound => {
-                Err(MeshError::NotFound)
+            DieselError::NotFound => Err(MeshError::NotFound),
+            _ => {
+                logger::debug!("Error: {:?}", err);
+                Err(MeshError::Others)
             }
-            _ => Err(MeshError::Others),
         },
     }
 }
@@ -207,4 +217,6 @@ fn to_optional<T>(arg: StorageResult<T>) -> StorageResult<Option<T>> {
     }
 }
 
+// SELECT merchant_iframe_preferences.id, merchant_iframe_preferences.merchant_id, merchant_iframe_preferences.dynamic_switching_enabled, merchant_iframe_preferences.isin_routing_enabled, merchant_iframe_preferences.issuer_routing_enabled, merchant_iframe_preferences.txn_failure_gateway_penalty, merchant_iframe_preferences.card_brand_routing_enabled FROM merchant_iframe_preferences WHERE (merchant_iframe_preferences.merchant_id = 'azharamin');
 
+// SELECT merchant_iframe_preferences.id, merchant_iframe_preferences.merchant_id, merchant_iframe_preferences.dynamic_switching_enabled, merchant_iframe_preferences.isin_routing_enabled, merchant_iframe_preferences.issuer_routing_enabled, merchant_iframe_preferences.txn_failure_gateway_penality, merchant_iframe_preferences.card_brand_routing_enabled FROM merchant_iframe_preferences WHERE (merchant_iframe_preferences.merchant_id = 'azharamin');

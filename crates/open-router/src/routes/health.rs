@@ -4,8 +4,8 @@ use crate::tenant::GlobalAppState;
 
 use axum::{routing::get, Json};
 
-use crate::{custom_extractors::TenantStateResolver, error};
 use crate::storage::TestInterface;
+use crate::{custom_extractors::TenantStateResolver, error};
 
 ///
 /// Function for registering routes that is specifically handling the health apis

@@ -24,45 +24,48 @@
 // use type::reflection as TR;
 // use types::account as RI;
 // use types::locker as LI;
-use std::option::Option;
-use std::vec::Vec;
-use std::string::String;
-use std::collections::HashMap;
-use crate::types::order::udfs::UDFs;
 use super::types as T;
-use crate::types::order as ETO;
-use crate::types::order::id as ETOID;
-use crate::types::money::internal::Money;
+use crate::error;
+use crate::types::card::card_type as Ca;
+use crate::types::card::txn_card_info as ETCa;
 use crate::types::currency::Currency;
-use crate::types::merchant::id::{MerchantId, to_merchant_id,merchant_id_to_text};
-use crate::types::order::id::{OrderId, to_order_id};
 use crate::types::customer as ETC;
 use crate::types::gateway as ETG;
-use std::iter::FromIterator;
-use crate::types::order_metadata_v2 as ETOMV2;
-use serde_json::Value as AValue;
-use crate::types::merchant as ETM;
-use crate::types::txn_details::types as ETTD;
-use crate::types::card::txn_card_info as ETCa;
-use crate::types::card::card_type as Ca;
-use crate::types::transaction::id as ETTID;
+use crate::types::merchant::id::to_merchant_id;
 use crate::types::merchant::merchant_gateway_account as ETMGA;
-use crate::types::source_object_id as SO;
+use crate::types::money::internal::Money;
+use crate::types::order as ETO;
+use crate::types::order::id as ETOID;
+use crate::types::order::id::to_order_id;
+use crate::types::order::udfs::UDFs;
+use crate::types::order_metadata_v2 as ETOMV2;
 use crate::types::payment::payment_method as ETP;
+use crate::types::source_object_id as SO;
+use crate::types::transaction::id as ETTID;
+use crate::types::txn_details::types as ETTD;
 use masking::Secret;
-use crate::error;
-
-
-
+use serde_json::Value as AValue;
+use std::collections::HashMap;
+use std::iter::FromIterator;
+use std::option::Option;
+use std::string::String;
+use std::vec::Vec;
 
 // pub fn parseFromApiOrderReference(apiType: T::ApiOrderReference) -> Option<String>{
 pub fn parseFromApiOrderReference(apiType: T::ApiOrderReference) -> Option<ETO::Order> {
     let udfs = parseUDFs(&apiType)?;
 
     Some(ETO::Order {
-        id: apiType.id.and_then(|id_str| id_str.parse::<i64>().ok()).map(ETOID::to_order_prim_id)?,
+        id: apiType
+            .id
+            .and_then(|id_str| id_str.parse::<i64>().ok())
+            .map(ETOID::to_order_prim_id)?,
         amount: apiType.amount.map(Money::from_double)?,
-        currency: apiType.currency.as_deref().map(Currency::text_to_curr)?.ok()?,
+        currency: apiType
+            .currency
+            .as_deref()
+            .map(Currency::text_to_curr)?
+            .ok()?,
         dateCreated: apiType.dateCreated,
         merchantId: apiType.merchantId.map(to_merchant_id)?,
         orderId: apiType.orderId.map(to_order_id)?,
@@ -70,11 +73,15 @@ pub fn parseFromApiOrderReference(apiType: T::ApiOrderReference) -> Option<ETO::
         customerId: apiType.customerId.map(ETC::customer_id_text),
         description: apiType.description,
         udfs,
-        preferredGateway: apiType.preferredGateway.as_deref().map(ETG::text_to_gateway)?.ok(),
+        preferredGateway: apiType
+            .preferredGateway
+            .as_deref()
+            .map(ETG::text_to_gateway)?
+            .ok(),
         productId: apiType.productId.map(ETOID::to_product_id),
         orderType: ETO::OrderType::from_text(apiType.orderType?)?,
         internalMetadata: apiType.internalMetadata,
-        metadata: apiType.metadata
+        metadata: apiType.metadata,
     })
 }
 
@@ -105,11 +112,9 @@ pub fn parseFromApiOrderReference(apiType: T::ApiOrderReference) -> Option<ETO::
 //     parseField(apiType, step)
 impl FromIterator<(i32, String)> for UDFs {
     fn from_iter<T: IntoIterator<Item = (i32, String)>>(iter: T) -> Self {
-        let mut udfs = UDFs {
-            to_map: HashMap::new(),
-        };
+        let mut udfs = Self(HashMap::new());
         for (key, value) in iter {
-            udfs.to_map.insert(key, value); // Assuming UDFs has an insert method
+            udfs.0.insert(key, value); // Assuming UDFs has an insert method
         }
         udfs
     }
@@ -117,7 +122,7 @@ impl FromIterator<(i32, String)> for UDFs {
 
 fn parseUDFs(apiType: &T::ApiOrderReference) -> Option<UDFs> {
     Some(UDFs::from_iter(
-        udfLine(&apiType)
+        udfLine(apiType)
             .into_iter()
             .enumerate()
             .filter_map(|(i, parsed)| parsed.map(|p| (i as i32 + 1, p))),
@@ -172,7 +177,6 @@ fn udfLine(api_type: &T::ApiOrderReference) -> Vec<Option<String>> {
 //     }
 // }
 
-
 fn convert_metadata_to_string(metadata: Option<HashMap<String, AValue>>) -> Option<String> {
     metadata.map(|map| {
         map.into_iter()
@@ -182,9 +186,14 @@ fn convert_metadata_to_string(metadata: Option<HashMap<String, AValue>>) -> Opti
     })
 }
 
-pub fn parseFromApiOrderMetadataV2(apiType: T::ApiOrderMetadataV2) -> Option<ETOMV2::OrderMetadataV2> {
+pub fn parseFromApiOrderMetadataV2(
+    apiType: T::ApiOrderMetadataV2,
+) -> Option<ETOMV2::OrderMetadataV2> {
     Some(ETOMV2::OrderMetadataV2 {
-        id: apiType.id.and_then(|id_str| id_str.parse::<i64>().ok()).map(ETOMV2::to_order_metadata_v2_pid)?,
+        id: apiType
+            .id
+            .and_then(|id_str| id_str.parse::<i64>().ok())
+            .map(ETOMV2::to_order_metadata_v2_pid)?,
         date_created: apiType.dateCreated,
         last_updated: apiType.lastUpdated,
         metadata: convert_metadata_to_string(apiType.metadata),
@@ -196,7 +205,10 @@ pub fn parseFromApiOrderMetadataV2(apiType: T::ApiOrderMetadataV2) -> Option<ETO
 
 pub fn parseFromApiTxnDetail(apiType: T::ApiTxnDetail) -> Option<ETTD::TxnDetail> {
     Some(ETTD::TxnDetail {
-        id: apiType.id.and_then(|id_str| id_str.parse::<i64>().ok()).map(ETTD::to_txn_detail_id)?,
+        id: apiType
+            .id
+            .and_then(|id_str| id_str.parse::<i64>().ok())
+            .map(ETTD::to_txn_detail_id)?,
         dateCreated: apiType.dateCreated?,
         orderId: ETOID::to_order_id(apiType.orderId),
         status: ETTD::TxnStatus::from_text(apiType.status)?,
@@ -210,13 +222,21 @@ pub fn parseFromApiTxnDetail(apiType: T::ApiTxnDetail) -> Option<ETTD::TxnDetail
         emiBank: apiType.emiBank,
         emiTenure: apiType.emiTenure,
         txnUuid: apiType.txnUuid?,
-        merchantGatewayAccountId: apiType.merchantGatewayAccountId.map(ETMGA::to_merchant_gw_acc_id),
+        merchantGatewayAccountId: apiType
+            .merchantGatewayAccountId
+            .map(ETMGA::to_merchant_gw_acc_id),
         netAmount: apiType.netAmount.map(Money::from_double)?,
         txnAmount: apiType.txnAmount.map(Money::from_double)?,
-        txnObjectType: apiType.txnObjectType.and_then(ETTD::TxnObjectType::from_text)?,
+        txnObjectType: apiType
+            .txnObjectType
+            .and_then(ETTD::TxnObjectType::from_text)?,
         sourceObject: apiType.sourceObject,
         sourceObjectId: apiType.sourceObjectId.map(SO::to_source_object_id),
-        currency: apiType.currency.as_deref().map(Currency::text_to_curr)?.ok()?,
+        currency: apiType
+            .currency
+            .as_deref()
+            .map(Currency::text_to_curr)?
+            .ok()?,
         surchargeAmount: apiType.surchargeAmount.map(Money::from_double),
         taxAmount: apiType.taxAmount.map(Money::from_double),
         internalMetadata: apiType.internalMetadata,
@@ -225,14 +245,17 @@ pub fn parseFromApiTxnDetail(apiType: T::ApiTxnDetail) -> Option<ETTD::TxnDetail
         internalTrackingInfo: apiType.internalTrackingInfo,
         partitionKey: apiType.partitionKey,
         txnAmountBreakup: apiType.txnAmountBreakup.as_deref().and_then(|breakup_str| {
-                                    serde_json::from_str::<Vec<ETTD::TransactionCharge>>(breakup_str).ok()
-                                }),
+            serde_json::from_str::<Vec<ETTD::TransactionCharge>>(breakup_str).ok()
+        }),
     })
 }
 
 pub fn parseFromApiTxnCardInfo(apiType: T::ApiTxnCardInfo) -> Option<ETCa::TxnCardInfo> {
     Some(ETCa::TxnCardInfo {
-        id: apiType.id.and_then(|id_str| id_str.parse::<i64>().ok()).map(ETCa::to_txn_card_info_pid)?,
+        id: apiType
+            .id
+            .and_then(|id_str| id_str.parse::<i64>().ok())
+            .map(ETCa::to_txn_card_info_pid)?,
         // txnId: ETTID::to_transaction_id(apiType.txnId),
         card_isin: apiType.cardIsin,
         cardIssuerBankName: apiType.cardIssuerBankName,
@@ -243,25 +266,37 @@ pub fn parseFromApiTxnCardInfo(apiType: T::ApiTxnCardInfo) -> Option<ETCa::TxnCa
         // cardFingerprint: apiType.cardFingerprint,
         // cardReferenceId: apiType.cardReferenceId,
         // txnDetailId: apiType.txnDetailId.and_then(|id_str| id_str.parse::<i64>().ok()).map(ETTD::to_txn_detail_id)?,
-        dateCreated: apiType.dateCreated.map(|dt| dt.assume_utc().into())?,
-        paymentMethodType: apiType.paymentMethodType.map(ETP::text_to_payment_method_type)?.ok()?,
+        dateCreated: apiType.dateCreated?,
+        paymentMethodType: apiType
+            .paymentMethodType
+            .map(ETP::text_to_payment_method_type)?
+            .ok()?,
         paymentMethod: apiType.paymentMethod?,
         // cardGlobalFingerprint: apiType.cardGlobalFingerprint,
         paymentSource: apiType.paymentSource,
-        authType: apiType.authType.as_deref().map(ETCa::text_to_auth_type)?.ok(),
-        partitionKey: apiType.partitionKey.map(|dt| dt.assume_utc().into()),
+        authType: apiType
+            .authType
+            .as_deref()
+            .map(ETCa::text_to_auth_type)?
+            .ok(),
+        partitionKey: apiType.partitionKey,
     })
 }
 
-pub fn parseApiDeciderRequest(apiType: T::ApiDeciderRequest) -> Result<T::DomainDeciderRequestForApiCall, error::ApiError> {
+pub fn parseApiDeciderRequest(
+    apiType: T::ApiDeciderRequest,
+) -> Result<T::DomainDeciderRequestForApiCall, error::ApiError> {
     match parseApiDeciderRequestO(apiType) {
         Some(domainDeciderRequest) => Ok(domainDeciderRequest),
-        None => Err(error::ApiError::ParsingError("Failed to parse ApiDeciderRequest")),
+        None => Err(error::ApiError::ParsingError(
+            "Failed to parse ApiDeciderRequest",
+        )),
     }
 }
 
-
-pub fn parseApiDeciderRequestO(apiType: T::ApiDeciderRequest) -> Option<T::DomainDeciderRequestForApiCall> {
+pub fn parseApiDeciderRequestO(
+    apiType: T::ApiDeciderRequest,
+) -> Option<T::DomainDeciderRequestForApiCall> {
     Some(T::DomainDeciderRequestForApiCall {
         orderReference: parseFromApiOrderReference(apiType.orderReference)?,
         orderMetadata: parseFromApiOrderMetadataV2(apiType.orderMetadata)?,

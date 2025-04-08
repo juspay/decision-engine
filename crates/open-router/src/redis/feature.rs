@@ -1,6 +1,6 @@
 use crate::redis::types::DimensionConf;
-use rand::Rng;
 use crate::redis::{cache::findByNameFromRedis, types::FeatureConf};
+use rand::Rng;
 
 // Converted functions
 // Original Haskell function: isFeatureEnabled
@@ -86,8 +86,7 @@ pub fn checkMerchantEnabled(conf: Option<FeatureConf>, mid: String, key: String)
             if conf.enableAll {
                 if let Some(disable_any) = conf.disableAny {
                     !disable_any.contains(&mid)
-                }
-                else {
+                } else {
                     match conf.enableAllRollout {
                         Some(rollout) => roller(key, rollout),
                         None => true,

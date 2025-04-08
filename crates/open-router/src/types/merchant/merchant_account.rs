@@ -1,32 +1,25 @@
-
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 // use db::eulermeshimpl::{mesh_config, throw_missing_tenant_error, throw_tenant_mismatch_error, default_tenant_account_id};
 // use db::mesh::internal::*;
-use crate::storage::types::MerchantAccount as DBMerchantAccount;
 use crate::error::ApiError;
+use crate::storage::types::MerchantAccount as DBMerchantAccount;
 // use types::utils::dbconfig::get_euler_db_conf;
 // use types::locker::id::{LockerId, to_locker_id};
 use crate::app::get_tenant_app_state;
-use crate::types::merchant::id::{MerchantId, MerchantPId, to_merchant_id, to_merchant_pid};
+use crate::types::merchant::id::{to_merchant_id, to_merchant_pid, MerchantId, MerchantPId};
 // use juspay::extra::parsing::{Parsed, Step, around, defaulting, lift_pure, mandated, non_negative, parse_field, project};
 // use juspay::extra::secret::SecretContext;
 // use juspay::extra::nonemptytext::non_empty;
 // use eulerhs::extra::combinators::to_domain_all;
 // use eulerhs::language::{MonadFlow, log_error, throw_exception, get_option_local, TenantConfigObj, TenantConfig};
 // use eulerhs::prelude::{bool, from_maybe, when};
-use serde_json::Value as AValue;
-use std::option::Option;
-use std::vec::Vec;
-use std::string::String;
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::convert::From;
+use crate::storage::schema::merchant_account::dsl;
+use diesel::associations::HasTable;
+use diesel::*;
 use std::cmp::PartialEq;
 use std::fmt::Debug;
-use crate::storage::schema::merchant_account::dsl;
-use diesel::*;
-use diesel::associations::HasTable;
-
+use std::option::Option;
+use std::string::String;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EnableTokenization {
@@ -84,22 +77,25 @@ pub struct MerchantAccount {
 impl TryFrom<DBMerchantAccount> for MerchantAccount {
     type Error = ApiError;
 
-    fn try_from(value: DBMerchantAccount) ->  Result<Self, ApiError> {
-        Ok(MerchantAccount {
+    fn try_from(value: DBMerchantAccount) -> Result<Self, ApiError> {
+        Ok(Self {
             id: to_merchant_pid(value.id),
-            merchantId: value.merchant_id.map(|mid| to_merchant_id(mid)).ok_or(ApiError::ParsingError("Merchant Id Not Found"))?,
+            merchantId: value
+                .merchant_id
+                .map(to_merchant_id)
+                .ok_or(ApiError::ParsingError("Merchant Id Not Found"))?,
             country: value.country,
-            gatewayDecidedByHealthEnabled: value.gateway_decided_by_health_enabled,
+            gatewayDecidedByHealthEnabled: value.gateway_decided_by_health_enabled.map(|x| x.0),
             gatewayPriority: value.gateway_priority,
             gatewayPriorityLogic: value.gateway_priority_logic.unwrap_or("".to_string()),
-            useCodeForGatewayPriority: value.use_code_for_gateway_priority,
+            useCodeForGatewayPriority: value.use_code_for_gateway_priority.0,
             internalHashKey: value.internal_hash_key,
             userId: value.user_id,
             secondaryMerchantAccountId: value.secondary_merchant_account_id.map(|mid| to_merchant_pid(mid)),
-            enableGatewayReferenceIdBasedRouting: value.enable_gateway_reference_id_based_routing,
+            enableGatewayReferenceIdBasedRouting: value.enable_gateway_reference_id_based_routing.map(|f| f.0),
             gatewaySuccessRateBasedDeciderInput: value.gateway_success_rate_based_decider_input.unwrap_or("".to_string()),
             internalMetadata: value.internal_metadata,
-            installmentEnabled: value.installment_enabled,
+            installmentEnabled: value.installment_enabled.map(|f| f.0),
             tenantAccountId: value.tenant_account_id,
             priorityLogicConfig: value.priority_logic_config,
             merchantCategoryCode: value.merchant_category_code,
@@ -144,20 +140,19 @@ impl TryFrom<DBMerchantAccount> for MerchantAccount {
 //     unimplemented!()
 // }
 
-pub async fn load_merchant_by_merchant_id(
-    merchant_id: String,
-) -> Option<MerchantAccount> {
+pub async fn load_merchant_by_merchant_id(merchant_id: String) -> Option<MerchantAccount> {
     // Perform the query using Diesel's generic_find_all
     let app_state = get_tenant_app_state().await;
     match crate::generics::generic_find_all::<
         <DBMerchantAccount as HasTable>::Table,
         _,
-        DBMerchantAccount
-    >(
-        &app_state.db,
-        dsl::merchant_id.eq(merchant_id)
-    ).await {
-        Ok(mut db_results) => db_results.pop().and_then(|db_merchant| MerchantAccount::try_from(db_merchant).ok()),
+        DBMerchantAccount,
+    >(&app_state.db, dsl::merchant_id.eq(merchant_id))
+    .await
+    {
+        Ok(mut db_results) => db_results
+            .pop()
+            .and_then(|db_merchant| MerchantAccount::try_from(db_merchant).ok()),
         Err(_) => None, // Silently handle errors and return None
     }
 }

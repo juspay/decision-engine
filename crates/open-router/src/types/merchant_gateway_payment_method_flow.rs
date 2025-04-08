@@ -1,27 +1,26 @@
-
-use serde::{Serialize, Deserialize};
-use serde_json::Value as AValue;
-use time::PrimitiveDateTime;
-use std::option::Option;
-use std::vec::Vec;
-use std::string::String;
-use std::time::SystemTime;
-use crate::storage::schema::merchant_gateway_payment_method_flow::dsl;
-use diesel::*;
 use crate::app::get_tenant_app_state;
+use crate::storage::schema::merchant_gateway_payment_method_flow::dsl;
 use diesel::associations::HasTable;
+use diesel::*;
+use serde::{Deserialize, Serialize};
+use std::option::Option;
+use std::string::String;
+use std::vec::Vec;
+use time::PrimitiveDateTime;
 // use db::euler_mesh_impl::mesh_config;
 // use db::mesh::internal::*;
-use crate::storage::types::MerchantGatewayPaymentMethodFlow as DBMerchantGatewayPaymentMethodFlow;
+use crate::storage::types::{BitBool, MerchantGatewayPaymentMethodFlow as DBMerchantGatewayPaymentMethodFlow};
 // use types::utils::dbconfig::get_euler_db_conf;
 // use eulerhs::extra::aeson::aeson_omit_nothing_fields;
 // use eulerhs::extra::combinators::to_domain_all;
 // use eulerhs::language::MonadFlow;
 // use juspay::extra::parsing::{Parsed, Step, parse_field, project, to_utc};
 // use named::*;
-use crate::types::gateway_payment_method_flow::{GatewayPaymentMethodFlowId, to_gateway_payment_method_flow_id, gateway_payment_method_flow_id_text};
+use crate::types::gateway_payment_method_flow::{
+    gateway_payment_method_flow_id_text, to_gateway_payment_method_flow_id,
+    GatewayPaymentMethodFlowId,
+};
 // use sequelize::{Clause::{Is, And}, Term::{Eq, In}};
-use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,14 +45,16 @@ pub struct MerchantGatewayPaymentMethodFlow {
 
 impl From<DBMerchantGatewayPaymentMethodFlow> for MerchantGatewayPaymentMethodFlow {
     fn from(db_mgpmf: DBMerchantGatewayPaymentMethodFlow) -> Self {
-        MerchantGatewayPaymentMethodFlow {
+        Self {
             id: Some(db_mgpmf.id),
-            gatewayPaymentMethodFlowId: to_gateway_payment_method_flow_id(db_mgpmf.gateway_payment_method_flow_id),
+            gatewayPaymentMethodFlowId: to_gateway_payment_method_flow_id(
+                db_mgpmf.gateway_payment_method_flow_id,
+            ),
             merchantGatewayAccountId: db_mgpmf.merchant_gateway_account_id,
             currencyConfigs: db_mgpmf.currency_configs,
             dateCreated: db_mgpmf.date_created,
             lastUpdated: db_mgpmf.last_updated,
-            disabled: db_mgpmf.disabled,
+            disabled: db_mgpmf.disabled.map(|f| f.0) ,
             gatewayBankCode: db_mgpmf.gateway_bank_code,
         }
     }
@@ -139,26 +140,33 @@ impl From<DBMerchantGatewayPaymentMethodFlow> for MerchantGatewayPaymentMethodFl
 // }
 
 pub async fn get_all_mgpmf_by_mga_id_and_gpmf_ids(
-   
     mga_ids: Vec<i64>,
     gpmf_ids: Vec<GatewayPaymentMethodFlowId>,
 ) -> Vec<MerchantGatewayPaymentMethodFlow> {
     // Convert GatewayPaymentMethodFlowId to Strings for query
-    let gpmf_id_strings: Vec<String> = gpmf_ids.into_iter().map(|id| gateway_payment_method_flow_id_text(id)).collect();
+    let gpmf_id_strings: Vec<String> = gpmf_ids
+        .into_iter()
+        .map(gateway_payment_method_flow_id_text)
+        .collect();
     let app_state = get_tenant_app_state().await;
     // Query using Diesel and generic_find_all
     match crate::generics::generic_find_all::<
-            <DBMerchantGatewayPaymentMethodFlow as HasTable>::Table,
-            _,
-            DBMerchantGatewayPaymentMethodFlow
-        >(
-            &app_state.db,
-            dsl::merchant_gateway_account_id.eq_any(mga_ids)
-                .and(dsl::gateway_payment_method_flow_id.eq_any(gpmf_id_strings))
-        ).await {
-            Ok(db_results) => db_results.into_iter()
-                                        .filter_map(|db_record| MerchantGatewayPaymentMethodFlow::try_from(db_record).ok())
-                                        .collect(),
-            Err(_) => Vec::new(), // Silently handle any errors by returning empty vec
-        }
+        <DBMerchantGatewayPaymentMethodFlow as HasTable>::Table,
+        _,
+        DBMerchantGatewayPaymentMethodFlow,
+    >(
+        &app_state.db,
+        dsl::merchant_gateway_account_id
+            .eq_any(mga_ids)
+            .and(dsl::gateway_payment_method_flow_id.eq_any(gpmf_id_strings))
+            .and(dsl::disabled.eq(BitBool(false))),
+    )
+    .await
+    {
+        Ok(db_results) => db_results
+            .into_iter()
+            .filter_map(|db_record| MerchantGatewayPaymentMethodFlow::try_from(db_record).ok())
+            .collect(),
+        Err(_) => Vec::new(), // Silently handle any errors by returning empty vec
+    }
 }

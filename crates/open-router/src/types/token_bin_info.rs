@@ -1,5 +1,4 @@
-
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 // use db::eulermeshimpl::meshConfig;
 // use db::mesh::internal::*;
 // use eulerhs::language::MonadFlow;
@@ -12,8 +11,8 @@ use crate::storage::types::TokenBinInfo as DBTokenBinInfo;
 // use named::*;
 // use sequelize::{Clause::Is, Term::In};
 use crate::storage::schema::token_bin_info::dsl;
-use diesel::*;
 use diesel::associations::HasTable;
+use diesel::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TokenBinInfo {
@@ -27,7 +26,7 @@ pub struct TokenBinInfo {
 
 impl From<DBTokenBinInfo> for TokenBinInfo {
     fn from(dbType: DBTokenBinInfo) -> Self {
-        TokenBinInfo {
+        Self {
             tokenBin: dbType.token_bin,
             cardBin: dbType.card_bin,
             provider: dbType.provider,
@@ -56,11 +55,7 @@ impl From<DBTokenBinInfo> for TokenBinInfo {
 //     )
 // }
 
-
-pub async fn getAllTokenBinInfoByTokenBins(
-    
-    token_bins: Vec<String>,
-) -> Vec<TokenBinInfo> {
+pub async fn getAllTokenBinInfoByTokenBins(token_bins: Vec<String>) -> Vec<TokenBinInfo> {
     // Perform database query using Diesel's generic_find_all
     let app_state = get_tenant_app_state().await;
     match crate::generics::generic_find_all::<

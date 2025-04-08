@@ -1,10 +1,9 @@
 use serde_json as A;
+use std::env;
+use std::option::Option;
 use std::str::FromStr;
 use std::string::String;
 use std::vec::Vec;
-use std::option::Option;
-use std::env;
-
 
 pub fn resolve_env<T, F>(key: String, default: F) -> T
 where
@@ -33,7 +32,7 @@ trait FromStrExt {
         Self: Sized;
 }
 
-// impl<T: FromStr> FromStrExt for T 
+// impl<T: FromStr> FromStrExt for T
 // where
 //     <T as FromStr>::Err: std::fmt::Debug,
 // {
@@ -43,7 +42,7 @@ trait FromStrExt {
 //     }
 // }
 
-impl<T: FromStr> FromStrExt for Option<T> 
+impl<T: FromStr> FromStrExt for Option<T>
 where
     <T as FromStr>::Err: std::fmt::Debug,
 {
@@ -58,14 +57,11 @@ struct VecFromStr(Vec<String>);
 
 impl FromStrExt for VecFromStr {
     type Error = String;
-    fn from_str(s: &str) -> Result<Self, Self::Error>
-    {
+    fn from_str(s: &str) -> Result<Self, Self::Error> {
         let a: Vec<String> = s.split(",").map(|s| s.to_string()).collect();
-        Ok(VecFromStr(a))
+        Ok(Self(a))
     }
 }
-
-
 
 impl FromStrExt for String {
     type Error = A::Error;
@@ -84,11 +80,16 @@ impl FromStrExt for i32 {
 }
 
 pub fn euler_endpoint() -> String {
-    resolve_env("EULER_PROD_INTERNAL_ENDPOINT".to_string(), euler_prod_internal_endpoint)
+    resolve_env(
+        "EULER_PROD_INTERNAL_ENDPOINT".to_string(),
+        euler_prod_internal_endpoint,
+    )
 }
 
 pub fn euler_prod_internal_endpoint() -> String {
-    resolve_env("PROD_EULER_INTERNAL_ENDPOINT".to_string(), || "http://euler.prod.internal.mum.juspay.net".to_string())
+    resolve_env("PROD_EULER_INTERNAL_ENDPOINT".to_string(), || {
+        "http://euler.prod.internal.mum.juspay.net".to_string()
+    })
 }
 
 pub fn is_passed_gpm() -> Option<String> {
@@ -100,9 +101,31 @@ pub fn number_of_streams_for_routing_metrics() -> i32 {
 }
 
 pub fn merchant_disabled_for_sodexo_duplicate_check() -> Vec<String> {
-    resolve_env("MERC_DISABLED_FOR_SODEXO_DUPLICATE_CARD_CHECK".to_string(), || VecFromStr(Vec::new())).0
+    resolve_env(
+        "MERC_DISABLED_FOR_SODEXO_DUPLICATE_CARD_CHECK".to_string(),
+        || VecFromStr(Vec::new()),
+    )
+    .0
 }
 
 pub fn groovy_executor_url() -> String {
-    resolve_env("GROOVY_RUNNER_HOST".to_string(), || "euler-groovy-runner.ec-prod.svc.cluster.local".to_string())
+    resolve_env("GROOVY_RUNNER_HOST".to_string(), || {
+        "http://localhost:8085".to_string()
+    })
+}
+
+impl FromStrExt for bool {
+    type Error = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Error> {
+        match s.to_lowercase().as_str() {
+            "true" => Ok(true),
+            "false" => Ok(false),
+            _ => Err(format!("Invalid boolean value: {}", s)),
+        }
+    }
+}
+
+pub fn enable_merchant_config_entity_lookup() -> bool {
+    resolve_env("ENABLE_MERCHANT_CONFIG_ENTITY_LOOKUP".to_string(), || false)
 }

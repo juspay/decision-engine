@@ -1,12 +1,10 @@
-
-use serde::{Serialize, Deserialize};
-use serde_json::Value;
 use crate::types::gateway::Gateway;
 use crate::types::merchant::id::MerchantId;
 use crate::types::payment::payment_method::PaymentMethodType;
+use serde::{Deserialize, Serialize};
 use std::option::Option;
-use std::vec::Vec;
 use std::string::String;
+use std::vec::Vec;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum EliminationLevel {

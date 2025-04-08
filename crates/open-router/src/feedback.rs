@@ -1,6 +1,8 @@
-// pub mod gateway_elemination_scoring;
-// pub mod gateway_elemination_scoring_v3;
+pub mod constants;
+pub mod gateway_elimination_scoring;
+pub mod gateway_selection_scoring_v3;
+pub mod gateway_scoring_service;
 pub mod types;
-// pub mod utils;
+pub mod utils;
 // pub mod constants;
 // pub mod gateway_scoring_service;

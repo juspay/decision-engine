@@ -1,0 +1,134 @@
+services:
+  open-router:
+    image: ghcr.io/juspay/decision-engine:main
+    pull_policy: always
+    platform: linux/amd64
+    container_name: open-router
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      groovy-runner:
+        condition: service_healthy
+      routing-config:
+        condition: service_completed_successfully
+    volumes:
+      - ./config/docker-configuration.toml:/local/config/development.toml
+    networks:
+      - open-router-network
+    environment:
+      - GROOVY_RUNNER_HOST=http://host.docker.internal:8085
+
+  open-router-local:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    platform: linux/amd64
+    container_name: open-router
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      groovy-runner:
+        condition: service_healthy
+      routing-config:
+        condition: service_completed_successfully
+    volumes:
+      - ./config/docker-configuration.toml:/local/config/development.toml
+    networks:
+      - open-router-network
+    environment:
+      - GROOVY_RUNNER_HOST=http://host.docker.internal:8085
+
+  groovy-runner:
+    build:
+      context: .
+      dockerfile: groovy.Dockerfile
+    platform: linux/amd64
+    image: groovy-runner
+    container_name: groovy-runner
+    ports:
+      - "8085:8085"
+    networks:
+      - open-router-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8085/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  mysql:
+    image: mysql:8.0
+    container_name: open-router-mysql
+    restart: unless-stopped
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_DATABASE=jdb
+    volumes:
+      - mysql-data:/var/lib/mysql
+    ports:
+      - "3306:3306"
+    networks:
+      - open-router-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+
+  redis:
+    image: redis:7
+    container_name: open-router-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - open-router-network
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep '^PONG$'"]
+      interval: 5s
+      retries: 5
+      start_period: 5s
+      timeout: 5s
+
+  db-migrator:
+    image: mysql:8.0
+    container_name: db-migrator
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ./migrations/00000000000000_diesel_initial_setup/up.sql:/app/migrations/up.sql
+    working_dir: /app
+    entrypoint: ["/bin/sh", "-c", "mysql -h mysql -uroot -proot jdb < /app/migrations/up.sql"]
+    networks:
+      - open-router-network
+
+  routing-config:
+    image: python:3.10-slim
+    container_name: routing-config
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ./routing-config:/app
+    working_dir: /app
+    command: bash run_setup.sh
+    networks:
+      - open-router-network
+
+networks:
+  open-router-network:
+    driver: bridge
+
+volumes:
+  mysql-data:
+  redis-data:

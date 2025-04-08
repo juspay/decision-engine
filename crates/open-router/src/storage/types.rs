@@ -1,14 +1,16 @@
-use diesel::{
-    backend::Backend,
-    deserialize::{self, FromSql},
-    serialize::ToSql,
-    sql_types, AsExpression, Queryable, Identifiable, Insertable, Selectable,
-};
-use masking::{PeekInterface, Secret, StrongSecret};
-use time::PrimitiveDateTime;
 use super::schema;
-use serde::{self, Deserialize, Serialize};
-
+use diesel::mysql::Mysql;
+use diesel::serialize::{IsNull, Output};
+use diesel::sql_types::Binary;
+use diesel::*;
+use diesel::{
+    backend::Backend, deserialize::FromSql, serialize::ToSql, AsExpression, Identifiable,
+    Queryable, Selectable,
+};
+use serde::Serialize;
+use serde::{self, Deserialize};
+use std::io::Write;
+use time::PrimitiveDateTime;
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
 #[diesel(table_name = schema::card_brand_routes)]
@@ -22,7 +24,7 @@ pub struct CardBrandRoutes {
     pub preferred_gateway: String,
 }
 
-#[derive(Debug, Clone, Queryable, Deserialize,Identifiable, Serialize, Selectable)]
+#[derive(Debug, Clone, Queryable, Deserialize, Identifiable, Serialize, Selectable)]
 #[diesel(table_name = schema::card_info, primary_key(card_isin), check_for_backend(diesel::mysql::Mysql))]
 pub struct CardInfo {
     pub card_isin: String,
@@ -44,11 +46,11 @@ pub struct EmiBankCode {
     pub last_updated: Option<PrimitiveDateTime>,
 }
 
-#[derive(Debug, Clone, Identifiable, Queryable, Deserialize, Serialize, Selectable)]
+#[derive(Debug, Clone, Identifiable, Queryable, Serialize, Selectable)]
 #[diesel(table_name = schema::feature)]
 pub struct Feature {
     pub id: i64,
-    pub enabled: bool,
+    pub enabled: BitBool,
     pub name: String,
     pub merchant_id: Option<String>,
 }
@@ -80,7 +82,7 @@ pub struct GatewayBankEmiSupportV2 {
     pub last_updated: Option<PrimitiveDateTime>,
 }
 
-#[derive(Debug, Clone, Identifiable, Queryable, Deserialize, Serialize, Selectable)]
+#[derive(Debug, Clone, Identifiable, Queryable, Serialize, Selectable)]
 #[diesel(table_name = schema::gateway_card_info)]
 pub struct GatewayCardInfo {
     pub id: i64,
@@ -89,7 +91,7 @@ pub struct GatewayCardInfo {
     pub card_issuer_bank_name: Option<String>,
     pub auth_type: Option<String>,
     pub juspay_bank_code_id: Option<i64>,
-    pub disabled: Option<bool>,
+    pub disabled: Option<BitBool>,
     pub validation_type: Option<String>,
     pub payment_method_type: Option<String>,
 }
@@ -126,10 +128,10 @@ pub struct GatewayPaymentMethodFlow {
     pub juspay_bank_code_id: Option<i64>,
     pub gateway_bank_code: Option<String>,
     pub currency_configs: Option<String>,
-    pub dsl: Option<String>,
+    pub gateway_dsl: Option<String>,
     pub non_combination_flows: Option<String>,
     pub country_code_alpha3: Option<String>,
-    pub disabled: bool,
+    pub disabled: BitBool,
     pub payment_method_type: Option<String>,
 }
 
@@ -171,7 +173,7 @@ pub struct MerchantAccount {
     pub id: i64,
     pub merchant_id: Option<String>,
     pub date_created: PrimitiveDateTime,
-    pub gateway_decided_by_health_enabled: Option<bool>,
+    pub gateway_decided_by_health_enabled: Option<BitBool>,
     pub gateway_priority: Option<String>,
     pub gateway_priority_logic: Option<String>,
     pub internal_hash_key: Option<String>,
@@ -180,13 +182,13 @@ pub struct MerchantAccount {
     pub user_id: Option<i64>,
     pub settlement_account_id: Option<i64>,
     pub secondary_merchant_account_id: Option<i64>,
-    pub use_code_for_gateway_priority: bool,
-    pub enable_gateway_reference_id_based_routing: Option<bool>,
+    pub use_code_for_gateway_priority: BitBool,
+    pub enable_gateway_reference_id_based_routing: Option<BitBool>,
     pub gateway_success_rate_based_decider_input: Option<String>,
     pub internal_metadata: Option<String>,
-    pub enabled: bool,
+    pub enabled: BitBool,
     pub country: Option<String>,
-    pub installment_enabled: Option<bool>,
+    pub installment_enabled: Option<BitBool>,
     pub tenant_account_id: Option<String>,
     pub priority_logic_config: Option<String>,
     pub merchant_category_code: Option<String>,
@@ -214,7 +216,7 @@ pub struct MerchantGatewayAccount {
     pub merchant_id: String,
     pub payment_methods: Option<String>,
     pub supported_payment_flows: Option<String>,
-    pub disabled: Option<bool>,
+    pub disabled: Option<BitBool>,
     pub reference_id: Option<String>,
     pub supported_currencies: Option<String>,
     pub gateway_identifier: Option<String>,
@@ -231,14 +233,14 @@ pub struct MerchantGatewayAccountSubInfo {
     pub sub_id_type: String,
     pub juspay_sub_account_id: String,
     pub gateway_sub_account_id: String,
-    pub disabled: bool,
+    pub disabled: BitBool,
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
 #[diesel(table_name = schema::merchant_gateway_card_info)]
 pub struct MerchantGatewayCardInfo {
     pub id: i64,
-    pub disabled: bool,
+    pub disabled: BitBool,
     pub gateway_card_info_id: i64,
     pub merchant_account_id: i64,
     pub emandate_register_max_amount: Option<f64>,
@@ -254,8 +256,35 @@ pub struct MerchantGatewayPaymentMethodFlow {
     pub currency_configs: Option<String>,
     pub date_created: PrimitiveDateTime,
     pub last_updated: PrimitiveDateTime,
-    pub disabled: Option<bool>,
+    pub disabled: Option<BitBool>,
     pub gateway_bank_code: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, FromSqlRow, AsExpression, Serialize)]
+#[diesel(sql_type = Binary)]
+pub struct BitBool(pub bool);
+
+impl ToSql<Binary, Mysql> for BitBool {
+    fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Mysql>) -> diesel::serialize::Result {
+        match *self {
+            BitBool(true) => {
+                out.write_all(b"1")?;
+            }
+            BitBool(false) => {
+                out.write_all(b"0")?;
+            }
+        }
+            Ok(IsNull::No)
+        }
+}
+
+impl FromSql<Binary, Mysql> for BitBool {
+    fn from_sql(bytes: <Mysql as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
+        match bytes.as_bytes().first() {
+            Some(&1) => Ok(Self(true)),
+            _ => Ok(Self(false)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
@@ -263,11 +292,11 @@ pub struct MerchantGatewayPaymentMethodFlow {
 pub struct MerchantIframePreferences {
     pub id: i64,
     pub merchant_id: String,
-    pub dynamic_switching_enabled: Option<bool>,
-    pub isin_routing_enabled: Option<bool>,
-    pub issuer_routing_enabled: Option<bool>,
-    pub txn_failure_gateway_penalty: Option<bool>,
-    pub card_brand_routing_enabled: Option<bool>,
+    pub dynamic_switching_enabled: Option<BitBool>,
+    pub isin_routing_enabled: Option<BitBool>,
+    pub issuer_routing_enabled: Option<BitBool>,
+    pub txn_failure_gateway_penality: Option<BitBool>,
+    pub card_brand_routing_enabled: Option<BitBool>,
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
@@ -283,7 +312,7 @@ pub struct MerchantPriorityLogic {
     pub name: Option<String>,
     pub description: Option<String>,
     pub priority_logic_rules: Option<String>,
-    pub is_active_logic: bool,
+    pub is_active_logic: BitBool,
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
@@ -299,7 +328,7 @@ pub struct PaymentMethod {
     pub display_name: Option<String>,
     pub nick_name: Option<String>,
     pub sub_type: Option<String>,
-    pub dsl: Option<String>,
+    pub payment_dsl: Option<String>,
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
@@ -328,7 +357,17 @@ pub struct TenantConfig {
     pub country_code_alpha3: Option<String>,
 }
 
-#[derive(Debug, Clone, Queryable, Deserialize,Identifiable, Serialize, Selectable)]
+#[derive(Debug, Clone, Identifiable, Queryable)]
+#[diesel(table_name = schema::tenant_config_filter)]
+pub struct TenantConfigFilter {
+    pub id: String,
+    pub filter_group_id: String,
+    pub dimension_value: String,
+    pub config_value: String,
+    pub tenant_config_id: String,
+}
+
+#[derive(Debug, Clone, Queryable, Deserialize, Identifiable, Serialize, Selectable)]
 #[diesel(table_name = schema::token_bin_info, primary_key(token_bin), check_for_backend(diesel::mysql::Mysql))]
 pub struct TokenBinInfo {
     pub token_bin: String,
@@ -366,11 +405,11 @@ pub struct TxnDetail {
     pub txn_id: String,
     pub txn_type: String,
     pub date_created: Option<PrimitiveDateTime>,
-    pub add_to_locker: Option<bool>,
+    pub add_to_locker: Option<BitBool>,
     pub merchant_id: Option<String>,
     pub gateway: Option<String>,
-    pub express_checkout: Option<bool>,
-    pub is_emi: Option<bool>,
+    pub express_checkout: Option<BitBool>,
+    pub is_emi: Option<BitBool>,
     pub emi_bank: Option<String>,
     pub emi_tenure: Option<i32>,
     pub txn_uuid: Option<String>,
@@ -424,6 +463,5 @@ pub struct UserEligibilityInfo {
     pub identifier_name: String,
     pub identifier_value: String,
     pub provider_name: String,
-    pub disabled: Option<bool>,
+    pub disabled: Option<BitBool>,
 }
-

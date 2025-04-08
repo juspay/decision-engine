@@ -53,6 +53,8 @@ impl AwsKmsClient {
             .change_context(AwsKmsError::Base64DecodingFailed)?;
         let ciphertext_blob = Blob::new(data);
 
+        logger::debug!(ciphertext_blob=?ciphertext_blob, "Ciphertext blob to be decrypted");
+
         let decrypt_output = self
             .inner_client
             .decrypt()

@@ -1,8 +1,6 @@
-
-use time::PrimitiveDateTime;
 use crate::app::get_tenant_app_state;
-use crate::error::ApiError;
 use crate::storage::types::EmiBankCode as DBEmiBankCode;
+use time::PrimitiveDateTime;
 // use db::storageprelude::LocalTime;
 // use eulerhs::language::MonadFlow;
 // use eulerhs::extra::combinators::to_domain_all;
@@ -12,17 +10,13 @@ use crate::storage::types::EmiBankCode as DBEmiBankCode;
 use crate::storage::schema::emi_bank_code::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
+use serde::{Deserialize, Serialize};
+use std::clone::Clone;
+use std::convert::From;
+use std::fmt::Debug;
 use std::option::Option;
 use std::string::String;
 use std::vec::Vec;
-use std::result::Result;
-use std::convert::From;
-use std::default::Default;
-use serde::{Serialize, Deserialize};
-use std::fmt::Debug;
-use std::clone::Clone;
-use std::cmp::{Ord};
-use std::marker::PhantomData;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EbcPId {
@@ -47,7 +41,7 @@ pub struct EmiBankCode {
 
 impl From<DBEmiBankCode> for EmiBankCode {
     fn from(value: DBEmiBankCode) -> Self {
-        EmiBankCode {
+        Self {
             id: to_ebc_pid(value.id),
             emiBank: value.emi_bank,
             juspayBankCodeId: value.juspay_bank_code_id,
@@ -56,24 +50,21 @@ impl From<DBEmiBankCode> for EmiBankCode {
     }
 }
 
-pub async fn findEmiBankCodeByEMIBank(
-    bank_name: &str,
-) -> Vec<DBEmiBankCode> {
+pub async fn findEmiBankCodeByEMIBank(bank_name: &str) -> Vec<DBEmiBankCode> {
     // Try to find the EMI bank codes using diesel
     let app_state = get_tenant_app_state().await;
-    match crate::generics::generic_find_all::<
-            <DBEmiBankCode as HasTable>::Table,
-            _,
-            _
-        >(
-            &app_state.db,
-            dsl::emi_bank.eq(bank_name.to_owned())
-        ).await {
-            Ok(db_results) => db_results.into_iter()
-                                                    .map(|db_emi_bank_code: DBEmiBankCode| db_emi_bank_code.into())
-                                                    .collect(),
-            Err(_) => Vec::new(), // Silently handle any errors by returning empty vec
-        }
+    match crate::generics::generic_find_all::<<DBEmiBankCode as HasTable>::Table, _, _>(
+        &app_state.db,
+        dsl::emi_bank.eq(bank_name.to_owned()),
+    )
+    .await
+    {
+        Ok(db_results) => db_results
+            .into_iter()
+            .map(|db_emi_bank_code: DBEmiBankCode| db_emi_bank_code)
+            .collect(),
+        Err(_) => Vec::new(), // Silently handle any errors by returning empty vec
+    }
 }
 
 // #TOD implement db calls --done

@@ -1,9 +1,9 @@
-use serde::{Serialize, Deserialize};
 use serde::de::{self, Deserializer};
 use serde::ser::Serializer;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum VaultProvider {
     Juspay,
     PayU,
@@ -16,12 +16,12 @@ pub enum VaultProvider {
 impl fmt::Display for VaultProvider {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let value = match self {
-            VaultProvider::Juspay => "JUSPAY",
-            VaultProvider::PayU => "PAYU",
-            VaultProvider::Sodexo => "SODEXO",
-            VaultProvider::Cof => "COF_ISSUER",
-            VaultProvider::NetworkToken => "NETWORK_TOKEN",
-            VaultProvider::IssuerToken => "ISSUER_TOKEN",
+            Self::Juspay => "JUSPAY",
+            Self::PayU => "PAYU",
+            Self::Sodexo => "SODEXO",
+            Self::Cof => "COF_ISSUER",
+            Self::NetworkToken => "NETWORK_TOKEN",
+            Self::IssuerToken => "ISSUER_TOKEN",
         };
         write!(f, "{}", value)
     }
@@ -33,12 +33,12 @@ impl Serialize for VaultProvider {
         S: Serializer,
     {
         let value = match self {
-            VaultProvider::Juspay => "JUSPAY",
-            VaultProvider::PayU => "PAYU",
-            VaultProvider::Sodexo => "SODEXO",
-            VaultProvider::Cof => "COF_ISSUER",
-            VaultProvider::NetworkToken => "NETWORK_TOKEN",
-            VaultProvider::IssuerToken => "ISSUER_TOKEN",
+            Self::Juspay => "JUSPAY",
+            Self::PayU => "PAYU",
+            Self::Sodexo => "SODEXO",
+            Self::Cof => "COF_ISSUER",
+            Self::NetworkToken => "NETWORK_TOKEN",
+            Self::IssuerToken => "ISSUER_TOKEN",
         };
         serializer.serialize_str(value)
     }
@@ -50,13 +50,13 @@ impl<'de> Deserialize<'de> for VaultProvider {
         D: Deserializer<'de>,
     {
         let value = String::deserialize(deserializer)?;
-        match value.as_str() {
-            "JUSPAY" => Ok(VaultProvider::Juspay),
-            "PAYU" => Ok(VaultProvider::PayU),
-            "SODEXO" => Ok(VaultProvider::Sodexo),
-            "COF_ISSUER" => Ok(VaultProvider::Cof),
-            "NETWORK_TOKEN" => Ok(VaultProvider::NetworkToken),
-            "ISSUER_TOKEN" => Ok(VaultProvider::IssuerToken),
+        match value.to_uppercase().as_str() {
+            "JUSPAY" => Ok(Self::Juspay),
+            "PAYU" => Ok(Self::PayU),
+            "SODEXO" => Ok(Self::Sodexo),
+            "COF_ISSUER" => Ok(Self::Cof),
+            "NETWORK_TOKEN" => Ok(Self::NetworkToken),
+            "ISSUER_TOKEN" => Ok(Self::IssuerToken),
             _ => Err(de::Error::custom("Invalid value")),
         }
     }

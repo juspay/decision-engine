@@ -1,8 +1,8 @@
-use serde::{Serialize, Deserialize};
-use std::option::Option;
-use std::vec::Vec;
-use std::string::String;
+use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
+use std::option::Option;
+use std::string::String;
+use std::vec::Vec;
 
 use crate::error::ApiError;
 
@@ -19,11 +19,19 @@ pub enum Isin {
 impl Isin {
     pub fn to_text(&self) -> String {
         match self {
-            Isin::Isin(d1, d2, d3, d4, d5, d6) => format!("{}{}{}{}{}{}", d1, d2, d3, d4, d5, d6),
-            Isin::Isin9(d1, d2, d3, d4, d5, d6, d7, d8, d9) => format!("{}{}{}{}{}{}{}{}{}", d1, d2, d3, d4, d5, d6, d7, d8, d9),
-            Isin::Isin8(d1, d2, d3, d4, d5, d6, d7, d8) => format!("{}{}{}{}{}{}{}{}", d1, d2, d3, d4, d5, d6, d7, d8),
-            Isin::Isin7(d1, d2, d3, d4, d5, d6, d7) => format!("{}{}{}{}{}{}{}", d1, d2, d3, d4, d5, d6, d7),
-            Isin::IsinWithSpaceAfter4(d1, d2, d3, d4, d5) => format!("{}{}{}{} {}", d1, d2, d3, d4, d5),
+            Self::Isin(d1, d2, d3, d4, d5, d6) => format!("{}{}{}{}{}{}", d1, d2, d3, d4, d5, d6),
+            Self::Isin9(d1, d2, d3, d4, d5, d6, d7, d8, d9) => {
+                format!("{}{}{}{}{}{}{}{}{}", d1, d2, d3, d4, d5, d6, d7, d8, d9)
+            }
+            Self::Isin8(d1, d2, d3, d4, d5, d6, d7, d8) => {
+                format!("{}{}{}{}{}{}{}{}", d1, d2, d3, d4, d5, d6, d7, d8)
+            }
+            Self::Isin7(d1, d2, d3, d4, d5, d6, d7) => {
+                format!("{}{}{}{}{}{}{}", d1, d2, d3, d4, d5, d6, d7)
+            }
+            Self::IsinWithSpaceAfter4(d1, d2, d3, d4, d5) => {
+                format!("{}{}{}{} {}", d1, d2, d3, d4, d5)
+            }
         }
     }
 }
@@ -39,14 +47,24 @@ impl TryFrom<&str> for Isin {
     type Error = String;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let digits: Vec<Option<char>> = value.chars().map(|c| char_d10_maybe(c)).collect();
-        let digits: Vec<char> = digits.into_iter().filter_map(|d| d).collect();
+        let digits: Vec<Option<char>> = value.chars().map(char_d10_maybe).collect();
+        let digits: Vec<char> = digits.into_iter().flatten().collect();
 
         match digits.len() {
-            6 => Ok(Isin::Isin(digits[0], digits[1], digits[2], digits[3], digits[4], digits[5])),
-            7 => Ok(Isin::Isin7(digits[0], digits[1], digits[2], digits[3], digits[4], digits[5], digits[6])),
-            8 => Ok(Isin::Isin8(digits[0], digits[1], digits[2], digits[3], digits[4], digits[5], digits[6], digits[7])),
-            9 => Ok(Isin::Isin9(digits[0], digits[1], digits[2], digits[3], digits[4], digits[5], digits[6], digits[7], digits[8])),
+            6 => Ok(Self::Isin(
+                digits[0], digits[1], digits[2], digits[3], digits[4], digits[5],
+            )),
+            7 => Ok(Self::Isin7(
+                digits[0], digits[1], digits[2], digits[3], digits[4], digits[5], digits[6],
+            )),
+            8 => Ok(Self::Isin8(
+                digits[0], digits[1], digits[2], digits[3], digits[4], digits[5], digits[6],
+                digits[7],
+            )),
+            9 => Ok(Self::Isin9(
+                digits[0], digits[1], digits[2], digits[3], digits[4], digits[5], digits[6],
+                digits[7], digits[8],
+            )),
             _ => Err("Invalid ISIN format".to_string()),
         }
     }

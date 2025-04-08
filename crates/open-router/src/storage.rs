@@ -3,8 +3,8 @@ use crate::{
     error::{self, ContainerError},
 };
 
-use std::sync::Arc;
-
+use crate::generics::StorageResult;
+use bb8::PooledConnection;
 use diesel::MysqlConnection;
 use diesel_async::{
     pooled_connection::{
@@ -14,12 +14,7 @@ use diesel_async::{
     AsyncMysqlConnection,
 };
 use error_stack::ResultExt;
-use hyper::server::conn;
 use masking::PeekInterface;
-use crate::generics::StorageResult;
-use crate::generics::MeshError;
-use bb8::PooledConnection;
-
 
 pub mod consts;
 pub mod db;
@@ -35,20 +30,14 @@ pub struct Storage {
     pg_pool: MysqlPool,
 }
 
-
 pub type MysqlPooledConn = async_bb8_diesel::ConnectionManager<MysqlConnection>;
 pub type MysqlPoolConn = async_bb8_diesel::Connection<diesel::MysqlConnection>;
 
 pub type MysqlPool = bb8::Pool<MysqlPooledConn>;
 
-
-
 type DeadPoolConnType = Object<AsyncMysqlConnection>;
 
 impl Storage {
-
-    
-
     /// Create a new storage interface from configuration
     pub async fn new(
         database: &Database,
@@ -65,8 +54,9 @@ impl Storage {
             schema
         );
 
-        let config =
-            pooled_connection::AsyncDieselConnectionManager::<AsyncMysqlConnection>::new(database_url);
+        let config = pooled_connection::AsyncDieselConnectionManager::<AsyncMysqlConnection>::new(
+            database_url,
+        );
         let pool = Pool::builder(config);
 
         let pool = match database.pool_size {
@@ -75,9 +65,7 @@ impl Storage {
         };
 
         let pool = diesel_make_mysql_pool(database, schema, false).await?;
-        Ok(Self {
-            pg_pool: pool,
-        })
+        Ok(Self { pg_pool: pool })
     }
 
     /// Get connection from database pool for accessing data
@@ -85,15 +73,12 @@ impl Storage {
         &self,
     ) -> StorageResult<PooledConnection<'_, async_bb8_diesel::ConnectionManager<MysqlConnection>>>
     {
-    
-        match (self.pg_pool.get().await) {
+        match self.pg_pool.get().await {
             Ok(conn) => Ok(conn),
-            Err(err) => Err(crate::generics::MeshError::DatabaseConnectionError)
+            Err(err) => Err(crate::generics::MeshError::DatabaseConnectionError),
         }
     }
 }
-
-
 
 pub(crate) trait TestInterface {
     type Error;
@@ -116,12 +101,12 @@ pub async fn diesel_make_mysql_pool(
         schema
     );
     let manager = async_bb8_diesel::ConnectionManager::<MysqlConnection>::new(database_url);
-    let mut pool = bb8::Pool::builder()
+    let pool = bb8::Pool::builder()
         .max_size(50)
         // .min_idle(database.min_idle)
         // .queue_strategy(database.queue_strategy.into())
         .connection_timeout(std::time::Duration::from_secs(60));
-        // .max_lifetime(database.max_lifetime.map(std::time::Duration::from_secs));
+    // .max_lifetime(database.max_lifetime.map(std::time::Duration::from_secs));
 
     // if test_transaction {
     //     pool = pool.connection_customizer(Box::new(TestTransaction));

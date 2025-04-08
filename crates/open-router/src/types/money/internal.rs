@@ -1,14 +1,6 @@
-use error_stack::ResultExt;
-use serde::{Serialize, Deserialize};
-use serde_json::{json, Deserializer, Value};
-use std::string::String;
+use serde::{Deserialize, Serialize};
 use std::f64;
 use std::ops::{Add, Sub};
-use std::convert::From;
-use std::cmp::Ordering;
-use std::fmt;
-use std::str::FromStr;
-use crate::error::ApiError;
 // use db::eulermeshimpl as Env;
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -17,23 +9,23 @@ pub struct Money(pub f64);
 impl Money {
     pub fn from_double(val: f64) -> Self {
         let fixed = format!("{:.2}", val);
-        Money(fixed.parse::<f64>().unwrap())
+        Self(fixed.parse::<f64>().unwrap())
     }
 
     pub fn from_whole(val: i64) -> Self {
-        Money(val as f64)
+        Self(val as f64)
     }
 
     pub fn to_double(&self) -> f64 {
         self.0
     }
 
-    pub fn m_add(&self, other: &Money) -> Money {
-        Money(self.0 + other.0)
+    pub fn m_add(&self, other: &Self) -> Self {
+        Self(self.0 + other.0)
     }
 
-    pub fn m_sub(&self, other: &Money) -> Money {
-        Money(self.0 - other.0)
+    pub fn m_sub(&self, other: &Self) -> Self {
+        Self(self.0 - other.0)
     }
 }
 
@@ -79,7 +71,6 @@ impl Money {
 //     Err(serde_json::Error::custom("Invalid old format"))
 // }
 
-
 // impl<'de> Deserialize<'de> for Money {
 //     fn deserialize<String>(deserializer: &str) -> Result<Money, ApiError>
 //     {
@@ -105,17 +96,17 @@ impl Money {
 // }
 
 impl Add for Money {
-    type Output = Money;
+    type Output = Self;
 
-    fn add(self, other: Money) -> Money {
-        Money(self.0 + other.0)
+    fn add(self, other: Self) -> Self {
+        Self(self.0 + other.0)
     }
 }
 
 impl Sub for Money {
-    type Output = Money;
+    type Output = Self;
 
-    fn sub(self, other: Money) -> Money {
-        Money(self.0 - other.0)
+    fn sub(self, other: Self) -> Self {
+        Self(self.0 - other.0)
     }
 }

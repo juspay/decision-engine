@@ -1,10 +1,14 @@
+use crate::{
+    decider::gatewaydecider::runner::ResponseBody, error::ApiClientError, storage::consts,
+};
 use axum::{body::Body, extract::Request};
-use serde::Deserialize;
 use error_stack::ResultExt;
-use crate::{decider::gatewaydecider::runner::ResponseBody, error::ApiClientError, storage::consts};
-use reqwest::{Client, header::{HeaderMap, HeaderValue, CONTENT_TYPE}};
-use serde_json::Value;
 use hyper::StatusCode;
+use reqwest::{
+    header::{HeaderMap, HeaderValue, CONTENT_TYPE},
+    Client,
+};
+use serde::Deserialize;
 
 use rand::Rng;
 
@@ -103,10 +107,7 @@ pub trait StringExt<T> {
         <T as std::str::FromStr>::Err: std::error::Error + Send + Sync + 'static;
 
     /// Convert `serde_json::Value` into type `<T>` by using `serde::Deserialize`
-    fn parse_struct<'de>(
-        &'de self,
-        type_name: &'static str,
-    ) -> CustomResult<T, ParsingError>
+    fn parse_struct<'de>(&'de self, type_name: &'static str) -> CustomResult<T, ParsingError>
     where
         T: Deserialize<'de>;
 }
@@ -122,10 +123,7 @@ impl<T> StringExt<T> for String {
             .attach_printable_lazy(|| format!("Invalid enum variant {self:?} for enum {enum_name}"))
     }
 
-    fn parse_struct<'de>(
-        &'de self,
-        type_name: &'static str,
-    ) -> CustomResult<T, ParsingError>
+    fn parse_struct<'de>(&'de self, type_name: &'static str) -> CustomResult<T, ParsingError>
     where
         T: Deserialize<'de>,
     {
@@ -154,7 +152,10 @@ pub async fn call_api(url: &str, body: &serde_json::Value) -> Result<ResponseBod
     let status_code = response.status();
 
     // Parse the response body
-    let body_bytes = response.bytes().await.map_err(|_| ApiClientError::ResponseDecodingFailed)?;
+    let body_bytes = response
+        .bytes()
+        .await
+        .map_err(|_| ApiClientError::ResponseDecodingFailed)?;
 
     if status_code.is_success() {
         // Deserialize the response body into `ResponseBody`
@@ -166,7 +167,9 @@ pub async fn call_api(url: &str, body: &serde_json::Value) -> Result<ResponseBod
         match status_code {
             StatusCode::BAD_REQUEST => Err(ApiClientError::BadRequest(body_bytes)),
             StatusCode::UNAUTHORIZED => Err(ApiClientError::Unauthorized(body_bytes)),
-            StatusCode::INTERNAL_SERVER_ERROR => Err(ApiClientError::InternalServerError(body_bytes)),
+            StatusCode::INTERNAL_SERVER_ERROR => {
+                Err(ApiClientError::InternalServerError(body_bytes))
+            }
             _ => Err(ApiClientError::Unexpected {
                 status_code,
                 message: body_bytes,
@@ -180,23 +183,19 @@ pub fn generate_random_number(tag: String, range: (f64, f64)) -> f64 {
 
     // Create a random number generator
     let mut rng = rand::thread_rng();
-    
+
     // Handle invalid range
     if min > max {
-        return rng.gen_range(max..=min)
+        return rng.gen_range(max..=min);
     }
     rng.gen_range(min..=max)
     // Generate a random number in the range (inclusive)
 }
 
-
-
-
 pub fn get_current_date_in_millis() -> u128 {
     let since_epoch = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("Time went backwards");
-    
+
     since_epoch.as_millis()
 }
-

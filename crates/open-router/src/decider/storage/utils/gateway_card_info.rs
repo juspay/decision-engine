@@ -1,31 +1,22 @@
-use crate::app::get_tenant_app_state;
 // use db::eulermeshimpl::mesh_config;
 // use db::mesh::internal::*;
-use crate::storage::types::{GatewayCardInfo as DBGatewayCardInfo, MerchantGatewayCardInfo as DBMerchantGatewayCardInfo};
+use crate::storage::types::{BitBool, GatewayCardInfo as DBGatewayCardInfo, MerchantGatewayCardInfo as DBMerchantGatewayCardInfo};
 use crate::types::gateway_card_info::GatewayCardInfo;
 // use types::utils::dbconfig::get_euler_db_conf;
-use crate::types::merchant::id::{merchant_id_to_text, merchant_pid_to_text, to_merchant_id, MerchantId};
+use crate::types::merchant::id::merchant_pid_to_text;
 // use juspay::extra::parsing::{Parsed, Step, around, lift_pure, mandated, parse_field, project};
 // use eulerhs::extra::combinators::to_domain_all;
 // use eulerhs::language::MonadFlow;
-use crate::types::merchant_gateway_card_info::MerchantGatewayCardInfo;
 use crate::types::merchant::merchant_account::MerchantAccount;
 
-use std::option::Option;
-use std::string::String;
-use std::vec::Vec;
-use std::result::Result;
-use std::convert::From;
-use std::default::Default;
-use serde::{Serialize, Deserialize};
-use std::fmt::Debug;
-use std::clone::Clone;
-use std::cmp::{Ord};
-use std::marker::PhantomData;
-use diesel::*;
 use crate::storage::schema::gateway_card_info::dsl;
 use crate::storage::schema::merchant_gateway_card_info::dsl as m_dsl;
 use diesel::associations::HasTable;
+use diesel::*;
+use std::clone::Clone;
+use std::option::Option;
+use std::string::String;
+use std::vec::Vec;
 
 pub async fn getSupportedGatewayCardInfoForBins(
     app_state: &crate::app::TenantAppState,
@@ -36,17 +27,17 @@ pub async fn getSupportedGatewayCardInfoForBins(
     let gci_records: Vec<DBGatewayCardInfo> = match crate::generics::generic_find_all::<
         <DBGatewayCardInfo as HasTable>::Table,
         _,
-        DBGatewayCardInfo
+        DBGatewayCardInfo,
     >(
         &app_state.db,
         dsl::isin.eq_any(card_bins.clone())
-            .and(dsl::disabled.eq(Some(false))),
+            .and(dsl::disabled.eq(Some(BitBool(false)))),
     ).await {
         Ok(records) => records,
         Err(_) => Vec::new(),
     };
 
-    let gcis: Vec<i64> = gci_records.iter().map(|r| r.id.clone()).collect();
+    let gcis: Vec<i64> = gci_records.iter().map(|r| r.id).collect();
     if gcis.is_empty() {
         return Vec::new();
     }
@@ -55,26 +46,32 @@ pub async fn getSupportedGatewayCardInfoForBins(
     let mgci_records: Vec<DBMerchantGatewayCardInfo> = match crate::generics::generic_find_all::<
         <DBMerchantGatewayCardInfo as HasTable>::Table,
         _,
-        DBMerchantGatewayCardInfo
+        DBMerchantGatewayCardInfo,
     >(
         &app_state.db,
         m_dsl::merchant_account_id.eq(merchant_pid_to_text(input_merchant_account.id))
-            .and(m_dsl::disabled.eq(false))
+            .and(m_dsl::disabled.eq(BitBool(false)))
             .and(m_dsl::gateway_card_info_id.eq_any(gcis)),
-    ).await {
+    )
+    .await
+    {
         Ok(records) => records,
         Err(_) => Vec::new(),
     };
 
     // Step 3: Filter GatewayCardInfo records
-    let gcis_filtered: Vec<i64> = mgci_records.iter().map(|r| r.gateway_card_info_id.clone()).collect();
+    let gcis_filtered: Vec<i64> = mgci_records
+        .iter()
+        .map(|r| r.gateway_card_info_id)
+        .collect();
     let gci_records_filtered: Vec<DBGatewayCardInfo> = gci_records
         .into_iter()
         .filter(|gci| gcis_filtered.contains(&gci.id.clone()))
         .collect();
 
     // Step 4: Convert using TryFrom and handle errors
-    gci_records_filtered.into_iter()
+    gci_records_filtered
+        .into_iter()
         .filter_map(|gci_record| GatewayCardInfo::try_from(gci_record).ok())
         .collect()
 }

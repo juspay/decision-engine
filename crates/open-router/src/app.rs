@@ -1,20 +1,15 @@
-use axum::{extract::Request, middleware, routing::post};
+use crate::redis::commands::RedisConnectionWrapper;
+use axum::{extract::Request, routing::post};
 use axum_server::tls_rustls::RustlsConfig;
 use error_stack::ResultExt;
 use tower_http::trace as tower_trace;
-use redis_interface::RedisConnectionPool;
-use crate::redis::commands::RedisConnectionWrapper;
-
-use crate::middleware as custom_middleware;
 
 use std::sync::Arc;
 
 use crate::{
     api_client::ApiClient,
     config::{self, GlobalConfig, TenantConfig},
-    error, logger,
-    routes,
-    storage,
+    error, logger, routes, storage,
     tenant::GlobalAppState,
     utils,
 };
@@ -23,16 +18,13 @@ use once_cell::sync::OnceCell;
 
 pub static APP_STATE: OnceCell<Arc<GlobalAppState>> = OnceCell::new();
 
-
 pub async fn get_tenant_app_state() -> Arc<TenantAppState> {
     let app_state = APP_STATE.get().expect("GlobalAppState not set");
-    let tenant_app_state = GlobalAppState::get_app_state_of_tenant(app_state, "public").await.unwrap();
+    let tenant_app_state = GlobalAppState::get_app_state_of_tenant(app_state, "public")
+        .await
+        .unwrap();
     tenant_app_state
 }
-
-
-    
-
 
 type Storage = storage::Storage;
 
@@ -68,8 +60,8 @@ impl TenantAppState {
         .change_context(error::ConfigurationError::DatabaseError)?;
 
         let redis_conn = redis_interface::RedisConnectionPool::new(&global_config.redis)
-                .await
-                .expect("Failed to create Redis connection Pool");
+            .await
+            .expect("Failed to create Redis connection Pool");
 
         Ok(Self {
             db,
@@ -94,23 +86,31 @@ where
         global_app_state.global_config.server.port,
     );
 
-    
-
     if APP_STATE.set(global_app_state.clone()).is_err() {
         panic!("Failed to set global app state");
     }
 
-
     let router = axum::Router::new()
-        .layer(middleware::from_fn_with_state(
-            global_app_state.clone(),
-            custom_middleware::authenticate,
-        ))
+        // .layer(middleware::from_fn_with_state(
+        //     global_app_state.clone(),
+        //     custom_middleware::authenticate,
+        // ))
         .route(
             "/decision_gateway",
-            post(routes::decision_gateway::decision_gateway)
+            post(routes::decision_gateway::decision_gateway),
         );
-       
+    
+    let router = router.route(
+        "/update-score",
+        post(routes::update_score::update_score));
+    let router = router.route(
+        "/decide-gateway",
+        post(routes::decide_gateway::decide_gateway),
+    );
+    let router = router.route(
+        "/update-gateway-score",
+        post(routes::update_gateway_score::update_gateway_score),
+    );
 
     let router = router.layer(
         tower_trace::TraceLayer::new_for_http()
@@ -129,7 +129,7 @@ where
     );
 
     let router = router
-        // .nest("/health", routes::health::serve())
+        .nest("/health", routes::health::serve())
         .with_state(global_app_state.clone());
 
     logger::info!(

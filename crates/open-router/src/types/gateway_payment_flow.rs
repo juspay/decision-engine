@@ -1,11 +1,9 @@
 use serde::{Deserialize, Serialize};
 use time::PrimitiveDateTime;
 
-use crate::types::gateway::{Gateway, text_to_gateway, gateway_to_text};
 use crate::types::country::country_iso::CountryISO;
+use crate::types::gateway::Gateway;
 
-use super::bank_code::BankCodeId;
-use super::payment::payment_method::{PaymentMethodId, PaymentMethodType};
 use super::payment_flow::{FlowStatus, PaymentFlow, UiAccessMode};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -53,12 +51,3 @@ pub struct GatewayPaymentFlowF {
     #[serde(rename = "countryCodeAlpha3")]
     pub countryCodeAlpha3: Option<CountryISO>,
 }
-
-
-
-
-
-
-  
-
-

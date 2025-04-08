@@ -6,7 +6,5 @@ pub struct OfferId {
 }
 
 pub fn to_offer_id(id: String) -> OfferId {
-    OfferId {
-        offerId: id,
-    }
+    OfferId { offerId: id }
 }

@@ -128,7 +128,7 @@ pub enum ApiError {
     KeyManagerError(&'static str),
 
     #[error("Parsing error: {0}")]
-    ParsingError(&'static str)
+    ParsingError(&'static str),
 }
 
 /// Errors that could occur during KMS operations.

@@ -1,18 +1,14 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TransactionId {
-    transactionId: String,
-}
+pub struct TransactionId(pub String);
 
 pub fn transaction_id_to_text(id: TransactionId) -> String {
-    id.transactionId
+    id.0
 }
 
 pub fn to_transaction_id(id: String) -> TransactionId {
-    TransactionId {
-        transactionId: id,
-    }
+    TransactionId(id)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

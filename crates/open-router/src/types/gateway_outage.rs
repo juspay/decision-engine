@@ -1,22 +1,19 @@
-
-use serde::{Serialize, Deserialize};
-use serde_json::Value as AValue;
-use time::PrimitiveDateTime;
-use crate::api_client::ApiClient;
 use crate::error::ApiError;
+use serde::{Deserialize, Serialize};
+use time::PrimitiveDateTime;
 // use db::eulermeshimpl::meshConfig;
 // use db::mesh::internal;
-use crate::types::bank_code::{BankCodeId, to_bank_code_id};
+use crate::types::bank_code::{to_bank_code_id, BankCodeId};
 // use control::category::{self, liftPure};
-use std::string::String;
 use crate::app::get_tenant_app_state;
 use std::option::Option;
+use std::string::String;
 use std::vec::Vec;
 // use std::time::{LocalTime, UTCTime};
-use crate::types::gateway::{Gateway, text_to_gateway};
-use crate::types::merchant::id::{MerchantId, to_optional_merchant_id};
+use crate::types::gateway::{text_to_gateway, Gateway};
+use crate::types::merchant::id::{to_optional_merchant_id, MerchantId};
 // use juspay::extra::parsing::{Parsed, ParsingErrorType, Step, around, liftEither, parseField, project, toUTC};
-use crate::types::payment::payment_method::{PaymentMethodType, text_to_payment_method_type};
+use crate::types::payment::payment_method::{text_to_payment_method_type, PaymentMethodType};
 // use eulerhs::extra::combinators::toDomainAll;
 // use eulerhs::language::MonadFlow;
 // use named::{self, Named};
@@ -104,21 +101,30 @@ impl TryFrom<DBGatewayOutage> for GatewayOutage {
     type Error = ApiError;
 
     fn try_from(db_type: DBGatewayOutage) -> Result<Self, ApiError> {
-        Ok(GatewayOutage {
+        Ok(Self {
             id: to_gateway_outage_id(db_type.id),
             version: db_type.version,
             endTime: db_type.end_time,
-            gateway: db_type.gateway.map(|gw| text_to_gateway(gw.as_str())).transpose()?,
+            gateway: db_type
+                .gateway
+                .map(|gw| text_to_gateway(gw.as_str()))
+                .transpose()?,
             merchantId: to_optional_merchant_id(db_type.merchant_id),
             startTime: db_type.start_time,
             bank: db_type.bank,
-            paymentMethodType: db_type.payment_method_type.map(|p| text_to_payment_method_type(p)).transpose()?,
+            paymentMethodType: db_type
+                .payment_method_type
+                .map(text_to_payment_method_type)
+                .transpose()?,
             paymentMethod: db_type.payment_method,
             description: db_type.description,
             dateCreated: db_type.date_created,
             lastUpdated: db_type.last_updated,
-            juspayBankCodeId: db_type.juspay_bank_code_id.map(|j| to_bank_code_id(j)),
-            metadata: db_type.metadata.map(|m| to_schedule_outage_metadata(m)).transpose()?,
+            juspayBankCodeId: db_type.juspay_bank_code_id.map(to_bank_code_id),
+            metadata: db_type
+                .metadata
+                .map(to_schedule_outage_metadata)
+                .transpose()?,
         })
     }
 }
@@ -128,28 +134,23 @@ pub async fn getPotentialGwOutagesDB(
 ) -> Result<Vec<DBGatewayOutage>, crate::generics::MeshError> {
     // Query gateway outages that are currently active
     let app_state = get_tenant_app_state().await;
-    crate::generics::generic_find_all::<
-            <DBGatewayOutage as HasTable>::Table,
-            _,
-            DBGatewayOutage
-        >(
-            &app_state.db,
-            dsl::start_time.lt(time_now)
-                .and(dsl::end_time.gt(time_now))
-                .and(dsl::gateway.is_not_null()),
-        )
+    crate::generics::generic_find_all::<<DBGatewayOutage as HasTable>::Table, _, DBGatewayOutage>(
+        &app_state.db,
+        dsl::start_time
+            .lt(time_now)
+            .and(dsl::end_time.gt(time_now))
+            .and(dsl::gateway.is_not_null()),
+    )
     .await
 }
 
-pub async fn getPotentialGwOutages(
-    
-    time_now: PrimitiveDateTime,
-) -> Vec<GatewayOutage> {
+pub async fn getPotentialGwOutages(time_now: PrimitiveDateTime) -> Vec<GatewayOutage> {
     // Call the database function and handle the results
     match getPotentialGwOutagesDB(time_now).await {
-        Ok(db_results) => db_results.into_iter()
-                                   .filter_map(|db_record| GatewayOutage::try_from(db_record).ok())
-                                   .collect(),
+        Ok(db_results) => db_results
+            .into_iter()
+            .filter_map(|db_record| GatewayOutage::try_from(db_record).ok())
+            .collect(),
         Err(_) => Vec::new(), // Silently handle any errors by returning empty vec
     }
 }

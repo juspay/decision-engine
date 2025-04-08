@@ -1,26 +1,23 @@
-
-use serde::{Serialize, Deserialize};
-use serde_json::Value as AValue;
+use serde::{Deserialize, Serialize};
+use std::option::Option;
 use std::string::String;
 use std::vec::Vec;
-use std::option::Option;
 // use db::eulermeshimpl::mesh_config;
 // use db::mesh::internal::*;
 use crate::app::get_tenant_app_state;
-use crate::storage::types::UserEligibilityInfo as DBUserEligibilityInfo;
+use crate::storage::types::{BitBool, UserEligibilityInfo as DBUserEligibilityInfo};
 // use types::utils::dbconfig::get_euler_db_conf;
 // use eulerhs::language::MonadFlow;
 // use eulerhs::extra::combinators::to_domain_all;
 // use juspay::extra::parsing::{Parsed, Step, ParsingErrorType, lift_either, parse_field, project};
 // use sequelize::{Clause::{Is, And, Or}, Term::{Eq, In}};
 // use named::Named;
-use std::error::Error;
 use crate::error::ApiError;
 use crate::types::payment_flow::PaymentFlow;
 
 use crate::storage::schema::user_eligibility_info::dsl;
-use diesel::*;
 use diesel::associations::HasTable;
+use diesel::*;
 
 use super::payment_flow::text_to_payment_flows;
 
@@ -52,6 +49,14 @@ pub enum IdentifierName {
     BIN,
 }
 
+pub fn identifier_name_to_text(identifier_name: IdentifierName) -> String {
+    match identifier_name {
+        IdentifierName::PAN => "PAN".to_string(),
+        IdentifierName::MOBILE => "MOBILE".to_string(),
+        IdentifierName::BIN => "BIN".to_string(),
+    }
+}
+
 pub fn text_to_identifier_name(text: String) -> Result<IdentifierName, ApiError> {
     match text.as_str() {
         "PAN" => Ok(IdentifierName::PAN),
@@ -81,13 +86,15 @@ impl TryFrom<DBUserEligibilityInfo> for UserEligibilityInfo {
     type Error = ApiError;
 
     fn try_from(db_type: DBUserEligibilityInfo) -> Result<Self, ApiError> {
-        Ok(UserEligibilityInfo {
+        Ok(Self {
             id: db_type.id,
-            flowType: text_to_payment_flows(db_type.flow_type).map_err(|_| ApiError::ParsingError("Invalid Payment Flow"))?,
-            identifierName: text_to_identifier_name(db_type.identifier_name).map_err(|_| ApiError::ParsingError("Invalid Identifier Name"))?,
+            flowType: text_to_payment_flows(db_type.flow_type)
+                .map_err(|_| ApiError::ParsingError("Invalid Payment Flow"))?,
+            identifierName: text_to_identifier_name(db_type.identifier_name)
+                .map_err(|_| ApiError::ParsingError("Invalid Identifier Name"))?,
             identifierValue: db_type.identifier_value,
             providerName: db_type.provider_name,
-            disabled: db_type.disabled,
+            disabled: db_type.disabled.map(|f| f.0),
         })
     }
 }
@@ -120,9 +127,7 @@ impl TryFrom<DBUserEligibilityInfo> for UserEligibilityInfo {
 //     to_domain_all(res, parse_user_eligibility_info, "getEligibilityInfo", "getEligibilityInfo").await
 // }
 
-
 pub async fn get_eligibility_info(
-    
     identifiers: Vec<String>,
     identifier_name: String,
     provider_name: String,
@@ -133,15 +138,16 @@ pub async fn get_eligibility_info(
     match crate::generics::generic_find_all::<
         <DBUserEligibilityInfo as HasTable>::Table,
         _,
-        DBUserEligibilityInfo
+        DBUserEligibilityInfo,
     >(
         &app_state.db,
-        dsl::identifier_value.eq_any(identifiers)
+        dsl::identifier_value
+            .eq_any(identifiers)
             .and(dsl::identifier_name.eq(identifier_name))
             .and(dsl::provider_name.eq(provider_name))
             .and(dsl::flow_type.eq(flow_type))
             .and(
-                dsl::disabled.eq(Some(false)).or(dsl::disabled.is_null())
+                dsl::disabled.eq(Some(BitBool(false))).or(dsl::disabled.is_null())
             ),
     ).await {
         Ok(db_results) => db_results.into_iter()
