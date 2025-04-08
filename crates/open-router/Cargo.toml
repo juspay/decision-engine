@@ -41,7 +41,7 @@ rand_distr = "0.4"
 async-bb8-diesel = { git = "https://github.com/jarnura/async-bb8-diesel", rev = "53b4ab901aab7635c8215fd1c2d542c8db443094" }
 redis_interface = { git = "https://github.com/juspay/hyperswitch.git", tag = "2024.09.30.0" }
 # Tokio Dependencies
-tokio = { version = "1.39.3", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.44.2", features = ["macros", "rt-multi-thread"] }
 axum = { version = "0.7.5", features = ["macros"] }
 axum-server = { version = "0.7.1", features = ["tls-rustls"] }
 hyper = "1.4.1"
