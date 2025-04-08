@@ -5,6 +5,7 @@ Follow the steps below to set up and run the project locally.
 1. Clone the Repository
 
 git clone <repo-url>
+
 cd <repo-directory>/crates/open-router
 
 -------------------------------------------------------------------------------------------------------------------------
@@ -13,8 +14,11 @@ cd <repo-directory>/crates/open-router
 
 Make sure Docker is installed on your system.
 You can download and install Docker Desktop from the below links.
+
 Mac - https://docs.docker.com/desktop/setup/install/mac-install/
+
 Windows - https://docs.docker.com/desktop/setup/install/windows-install/
+
 Linux - https://docs.docker.com/desktop/setup/install/linux/
 
 -------------------------------------------------------------------------------------------------------------------------
@@ -28,10 +32,15 @@ If you're setting up the environment for the first time, run:
 make init
 
 This will:
+
 .Set up the environment
+
 .Set up the database with the required schema
+
 .Sets up redis and the server for running the application
+
 .Push the configs defined in the config.yaml & the static rules defined for routing in priority_logic.txt to the DB
+
 
 b. Start the Server (without resetting DB)
 
