@@ -4,9 +4,9 @@ Follow the steps below to set up and run the project locally.
 
 1. Clone the Repository
 
-git clone <repo-url>
+git clone {repo-url}
 
-cd <repo-directory>/crates/open-router
+cd {repo-directory}/crates/open-router
 
 -------------------------------------------------------------------------------------------------------------------------
 
