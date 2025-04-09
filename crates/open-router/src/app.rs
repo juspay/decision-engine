@@ -1,7 +1,8 @@
 use crate::redis::commands::RedisConnectionWrapper;
 use axum::{extract::Request, routing::post};
-use axum_server::tls_rustls::RustlsConfig;
+use axum_server::{tls_rustls::RustlsConfig, Handle};
 use error_stack::ResultExt;
+use tokio::signal::unix::{signal, SignalKind};
 use tower_http::trace as tower_trace;
 
 use std::sync::Arc;
@@ -90,6 +91,24 @@ where
         panic!("Failed to set global app state");
     }
 
+    // Create a signal stream for SIGTERM
+    let mut sigterm = signal(SignalKind::terminate()).expect("Failed to create SIGTERM handler");
+
+    // Create an axum_server handle for graceful shutdown
+    let handle = Handle::new();
+
+    // Spawn a task to listen for SIGTERM and trigger shutdown
+    let handle_clone = handle.clone();
+    tokio::spawn(async move {
+        sigterm.recv().await;
+        eprintln!("SIGTERM signal received, shutting down...");
+        let app_state = APP_STATE.get().expect("GlobalAppState not set");
+        app_state.set_not_ready(); // Set readiness flag to false
+        // Wait for 60 seconds before shutting down
+        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        handle_clone.shutdown(); // Trigger axum_server shutdown
+    });
+
     let router = axum::Router::new()
         // .layer(middleware::from_fn_with_state(
         //     global_app_state.clone(),
@@ -111,6 +130,7 @@ where
         "/update-gateway-score",
         post(routes::update_gateway_score::update_gateway_score),
     );
+    
 
     let router = router.layer(
         tower_trace::TraceLayer::new_for_http()
@@ -146,12 +166,16 @@ where
             RustlsConfig::from_pem_file(&tls_config.certificate, &tls_config.private_key).await?;
 
         axum_server::from_tcp_rustls(tcp_listener, rusttls_config)
+            .handle(handle)
             .serve(router.into_make_service())
             .await?;
     } else {
-        let tcp_listener = tokio::net::TcpListener::bind(socket_addr).await?;
+        let tcp_listener = std::net::TcpListener::bind(socket_addr)?;
 
-        axum::serve(tcp_listener, router.into_make_service()).await?;
+        axum_server::from_tcp(tcp_listener)
+            .handle(handle) // Attach the handle for graceful shutdown
+            .serve(router.into_make_service())
+            .await?;
     }
 
     Ok(())

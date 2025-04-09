@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{collections::HashSet, sync::Arc};
 
 use rustc_hash::FxHashMap;
@@ -11,6 +12,7 @@ pub struct GlobalAppState {
     pub api_client: ApiClient,
     pub known_tenants: HashSet<String>,
     pub global_config: GlobalConfig,
+    pub readiness_flag : Arc<AtomicBool>
 }
 
 impl GlobalAppState {
@@ -51,7 +53,16 @@ impl GlobalAppState {
             api_client: api_client.clone(),
             known_tenants: HashSet::<String>::from_iter(known_tenants),
             global_config,
+            readiness_flag: Arc::new(AtomicBool::new(true)),
         })
+    }
+
+    pub fn set_not_ready(&self) {
+        self.readiness_flag.store(false, Ordering::SeqCst);
+    }
+
+    pub fn is_ready(&self) -> bool {
+        self.readiness_flag.load(Ordering::SeqCst)
     }
 
     pub async fn get_app_state_of_tenant(

@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
+use crate::app::APP_STATE;
 use crate::tenant::GlobalAppState;
 
 use axum::{routing::get, Json};
+use hyper::StatusCode;
 
 use crate::storage::TestInterface;
 use crate::{custom_extractors::TenantStateResolver, error};
@@ -14,11 +16,35 @@ pub fn serve() -> axum::Router<Arc<GlobalAppState>> {
     axum::Router::new()
         .route("/", get(health))
         .route("/diagnostics", get(diagnostics))
+        .route("/ready", get(ready))
 }
 
 #[derive(serde::Serialize, Debug)]
 pub struct HealthRespPayload {
     pub message: String,
+}
+
+/// '/health/ready` API handler`
+pub async fn ready() -> (StatusCode, Json<HealthRespPayload>) {
+    let app_state = APP_STATE.get().expect("GlobalAppState not set");
+    let app_ready = app_state.is_ready();
+    crate::logger::debug!("Readiness check was called");
+
+    if app_ready {
+        (
+            StatusCode::OK,
+            Json(HealthRespPayload {
+                message: "Up".into(),
+            }),
+        )
+    } else {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(HealthRespPayload {
+                message: "Down".into(),
+            }),
+        )
+    }
 }
 
 /// '/health` API handler`
