@@ -26,20 +26,15 @@ To learn more, refer to this blog: [https://juspay.io/blog/juspay-orchestrator-a
 ![](https://cdn.sanity.io/images/9sed75bn/production/fd872ae5b086e7a60011ad9d4d5c7988e1084d03-1999x1167.png)  
 
 ## Try it out
-
-You can run Decision Engine on your system using Docker compose after cloning this repository. 
-
-```shell
-git clone --depth 1 --branch latest https://github.com/juspay/decision-engine
-cd decision-engine
-docker compose up -d
-```
+ 
+ Check the [SETUP.md](/crates/open-router/SETUP.md) for detailed steps to try out the application.
 
 
 
-## API Reference (TODO)
+## API Reference : 
 
-   
+Check the [API_REFERENCE.md](/crates/open-router/API_REFERENCE.md) for more details
+
 
 ## Support, Feature Requests, Bugs 
 
