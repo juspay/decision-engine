@@ -31,6 +31,10 @@ If you're setting up the environment for the first time, run:
 
 make init
 
+This command performs the following under the hood:
+
+docker-compose run --rm db-migrator && docker-compose up open-router
+
 This will:
 
 .Set up the environment
@@ -71,6 +75,10 @@ If you've made changes to the code locally and want to test them:
 a. Initialize Local Environment
 
 make init-local
+
+This command performs the following under the hood:
+
+docker-compose run --rm db-migrator && docker-compose up open-router-local
 
 b. Run Locally
 
