@@ -56,7 +56,7 @@ CREATE TABLE merchant_priority_logic (
 DROP TABLE IF EXISTS tenant_config;
 CREATE TABLE tenant_config (
     id VARCHAR(255) PRIMARY KEY,
-    _type VARCHAR(255) NOT NULL,
+    type VARCHAR(255) NOT NULL,
     module_key VARCHAR(255) NOT NULL,
     module_name VARCHAR(255) NOT NULL,
     tenant_account_id VARCHAR(255) NOT NULL,

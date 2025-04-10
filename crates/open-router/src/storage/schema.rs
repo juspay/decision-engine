@@ -333,7 +333,8 @@ diesel::table! {
         #[max_length = 255]
         id -> Varchar,
         #[max_length = 255]
-        _type -> Varchar,
+        #[sql_name = "type"]
+        tenant_type -> Varchar,
         #[max_length = 255]
         module_key -> Varchar,
         #[max_length = 255]

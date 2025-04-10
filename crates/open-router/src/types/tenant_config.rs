@@ -42,7 +42,7 @@ use super::tenant::tenant_config::{
 pub struct TenantConfig {
     #[serde(rename = "id")]
     pub id: TenantConfigId,
-    #[serde(rename = "_type")]
+    #[serde(rename = "type")]
     pub _type: ConfigType,
     #[serde(rename = "moduleKey")]
     pub moduleKey: String,
@@ -145,7 +145,7 @@ pub async fn get_arr_active_tenant_config_by_tenant_id_module_name_module_key_an
         dsl::tenant_account_id.eq(t_id)
             .and(dsl::module_name.eq(module_name_str))
             .and(dsl::module_key.eq(m_key))
-            .and(dsl::_type.eq_any(config_type_strs))
+            .and(dsl::tenant_type.eq_any(config_type_strs))
             .and(dsl::status.eq(active_status_str)),
     ).await {
         Ok(db_results) => db_results.into_iter()
@@ -181,7 +181,7 @@ pub async fn get_arr_active_tenant_config_by_tenant_id_module_name_module_key_an
         dsl::tenant_account_id.eq(t_id)
             .and(dsl::module_name.eq(module_name_str))
             .and(dsl::module_key.eq(m_key))
-            .and(dsl::_type.eq_any(config_type_strs))
+            .and(dsl::tenant_type.eq_any(config_type_strs))
             .and(dsl::status.eq(config_status_to_text(&ConfigStatus::ACTIVE)))
             .and(dsl::country_code_alpha3.eq(Some(country_code_str))),
     ).await {
@@ -216,7 +216,7 @@ pub async fn get_tenant_config_by_tenant_id_and_module_name_and_module_key_and_t
             .eq(t_id)
             .and(dsl::module_name.eq(module_name_str))
             .and(dsl::module_key.eq(m_key))
-            .and(dsl::_type.eq(config_type_str))
+            .and(dsl::tenant_type.eq(config_type_str))
             .and(dsl::status.eq(config_status_str)),
     )
     .await
