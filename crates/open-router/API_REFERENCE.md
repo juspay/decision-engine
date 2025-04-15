@@ -1,9 +1,11 @@
-API REFERENCE
+# API REFERENCE
 
-Sample curl for decide-gateway
+## Decision Gateway API
 
-Request:
+### Sample curl for decide-gateway
 
+#### Request:
+```bash
 curl --location 'http://localhost:8080/decide-gateway' \
 --header 'Content-Type: application/json' \
 --data '{           
@@ -34,9 +36,10 @@ curl --location 'http://localhost:8080/decide-gateway' \
             "cardSwitchProvider": null
         }
 }'
+```
 
-Response:
-
+#### Response:
+```json
 {
     "decided_gateway": "GatewayA",
     "gateway_priority_map": {
@@ -67,10 +70,14 @@ Response:
     "is_dynamic_mga_enabled": false,
     "gateway_mga_id_map": null
 }
+```
 
+## Update Gateway Score API
 
-Sample curl for update-gateway-score
+### Sample curl for update-gateway-score
 
+#### Request:
+```bash
 curl --location 'http://localhost:8080/update-gateway-score' \
 --header 'Content-Type: application/json' \
 --data '{
@@ -81,7 +88,9 @@ curl --location 'http://localhost:8080/update-gateway-score' \
   "paymentId": "PAY12359",
   "enforceDynamicRoutingFailure" : null
 }'
+```
 
-Response:
-
+#### Response:
+```
 Success
+```
