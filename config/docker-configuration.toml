@@ -55,3 +55,104 @@ client_idle_timeout = 90
 pool_max_idle_per_host = 10
 identity = ""
 
+[routing_config.keys]
+payment_method = { type = "enum", values = "card, bank_debit, bank_transfer" }
+amount = { type = "integer" }
+metadata = { type = "udf" }
+currency = { type = "enum", values = "USD, EUR, GBP, JPY, CAD, AUD" }
+order_udf1 = { type = "global_ref" }
+payment_methodType = { type = "enum", values = "CARD, UPI, NB" }
+payment_cardBrand = { type = "enum", values = "VISA, MASTERCARD, AMEX, RUPAY, DINERS" }
+payment_cardBin = { type = "global_ref" }
+payment_cardType = { type = "enum", values = "CREDIT, DEBIT" }
+payment_cardIssuerCountry = { type = "enum", values = "INDIA, US, UK, SINGAPORE" }
+payment_paymentMethod = { type = "enum", values = "NB_HDFC, NB_ICICI, NB_SBI" }
+payment_paymentSource = { type = "enum", values = "net.one97.paytm, @paytm" }
+txn_isEmi = { type = "enum", values = "true, false" }
+
+[routing_config.default]
+output = ["stripe", "adyen"]
+
+[[routing_config.constraint_graph.nodes]]
+preds = []
+succs = [0]
+
+[routing_config.constraint_graph.nodes.kind]
+kind = "value"
+
+[routing_config.constraint_graph.nodes.kind.data]
+kind = "value"
+
+[routing_config.constraint_graph.nodes.kind.data.data]
+key = "payment_method"
+comparison = "equal"
+
+[routing_config.constraint_graph.nodes.kind.data.data.value]
+type = "enum_variant"
+value = "card"
+
+[[routing_config.constraint_graph.nodes]]
+preds = []
+succs = [1]
+
+[routing_config.constraint_graph.nodes.kind]
+kind = "value"
+
+[routing_config.constraint_graph.nodes.kind.data]
+kind = "value"
+
+[routing_config.constraint_graph.nodes.kind.data.data]
+key = "payment_method"
+comparison = "equal"
+
+[routing_config.constraint_graph.nodes.kind.data.data.value]
+type = "enum_variant"
+value = "bank_debit"
+
+[[routing_config.constraint_graph.nodes]]
+preds = [0]
+succs = []
+
+[routing_config.constraint_graph.nodes.kind]
+kind = "value"
+
+[routing_config.constraint_graph.nodes.kind.data]
+kind = "value"
+
+[routing_config.constraint_graph.nodes.kind.data.data]
+key = "output"
+comparison = "equal"
+
+[routing_config.constraint_graph.nodes.kind.data.data.value]
+type = "enum_variant"
+value = "stripe"
+
+[[routing_config.constraint_graph.nodes]]
+preds = [1]
+succs = []
+
+[routing_config.constraint_graph.nodes.kind]
+kind = "value"
+
+[routing_config.constraint_graph.nodes.kind.data]
+kind = "value"
+
+[routing_config.constraint_graph.nodes.kind.data.data]
+key = "output"
+comparison = "equal"
+
+[routing_config.constraint_graph.nodes.kind.data.data.value]
+type = "enum_variant"
+value = "adyen"
+
+[[routing_config.constraint_graph.edges]]
+strength = "strong"
+relation = "positive"
+pred = 0
+succ = 2
+
+[[routing_config.constraint_graph.edges]]
+strength = "strong"
+relation = "positive"
+pred = 1
+succ = 3
