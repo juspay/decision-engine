@@ -1,7 +1,10 @@
-name: Build and Push Docker Image
+name: Docker Build and Push Check
 
 on:
   push:
+    branches:
+      - main
+  pull_request:
     branches:
       - main
   workflow_dispatch:
