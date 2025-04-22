@@ -48,7 +48,6 @@ pub fn record_fields_from_header(request: &Request<Body>) -> tracing::Span {
         config_version = tracing::field::Empty,
         sdk_session_span = tracing::field::Empty,
         cell_selector = tracing::field::Empty,
-        is_art_enabled = tracing::field::Empty,
     );
 
     let headers = request.headers();
