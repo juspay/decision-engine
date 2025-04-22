@@ -124,17 +124,9 @@ pub fn is_otm_enabled(mga: &ETM::merchant_gateway_account::MerchantGatewayAccoun
 }
 
 pub fn is_seamless(mga: &ETM::merchant_gateway_account::MerchantGatewayAccount) -> bool {
-    let secret_json = mga.account_details.peek();
-
-    let parsed: Option<Value> = serde_json::from_str(secret_json).ok();
-
-    parsed
-        .and_then(|val| val.get("seamless").cloned())
-        .and_then(|seamless| {
-            seamless
-                .as_bool()
-                .or_else(|| seamless.as_str().and_then(|s| s.parse::<bool>().ok()))
-        })
+    let secret_json = Some(mga.account_details.peek());
+    secret_json
+        .and_then(|seamless_value| get_value("seamless", seamless_value))
         .unwrap_or(false)
 }
 
@@ -436,7 +428,21 @@ pub fn parse_json_from_string(text_data: &str) -> Option<Value> {
 
 pub fn get_value<T: for<'de> Deserialize<'de>>(key: &str, t: &str) -> Option<T> {
     from_str::<Value>(t).ok().and_then(|v| match v {
-        Value::Object(map) => map.get(key).and_then(|v| from_value(v.clone()).ok()),
+        Value::Object(map) => map.get(key).and_then(|v| {
+            if std::any::type_name::<T>() == std::any::type_name::<bool>() {
+                match v {
+                    Value::Bool(b) => Some(*b),
+                    Value::String(s) => match s.as_str() {
+                        "True" | "true" => Some(true),
+                        "False" | "false" => Some(false),
+                        _ => None,
+                    },
+                    _ => None,
+                }.and_then(|b| from_value(Value::Bool(b)).ok())
+            } else {
+                from_value(v.clone()).ok()
+            }
+        }),
         _ => None,
     })
 }
