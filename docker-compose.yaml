@@ -1,6 +1,6 @@
 services:
   open-router:
-    image: ghcr.io/juspay/open-router:main
+    image: ghcr.io/juspay/decision-engine:main
     pull_policy: always
     platform: linux/amd64
     container_name: open-router

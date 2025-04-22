@@ -1,5 +1,5 @@
 COMMIT_HASH := $(shell git rev-parse --short HEAD)
-TAG := ghcr.io/juspay/open-router:sha_$(COMMIT_HASH)
+TAG := ghcr.io/juspay/decision-engine:sha_$(COMMIT_HASH)
 
 docker-build:
     docker build --platform=linux/amd64 -t $(TAG) .
@@ -17,10 +17,10 @@ run:
 	docker-compose up open-router
 
 init-local:
-	docker-compose run --rm db-migrator && docker-compose up --build open-router-local
+	docker-compose run --rm db-migrator && docker-compose up open-router-local
 
 run-local:
-	docker-compose up --build open-router-local
+	docker-compose up open-router-local
 
 update-config:
 	docker-compose run --rm routing-config
