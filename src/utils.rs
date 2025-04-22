@@ -40,6 +40,15 @@ pub fn record_fields_from_header(request: &Request<Body>) -> tracing::Span {
         merchant_id = tracing::field::Empty,
         is_art_enabled = tracing::field::Empty,
         is_audit_trail_log = tracing::field::Empty,
+        "euler-request-id" = tracing::field::Empty,
+        tenant_id = tracing::field::Empty,
+        tenant_name = tracing::field::Empty,
+        schema_version = tracing::field::Empty,
+        tag = tracing::field::Empty,
+        config_version = tracing::field::Empty,
+        sdk_session_span = tracing::field::Empty,
+        cell_selector = tracing::field::Empty,
+        is_art_enabled = tracing::field::Empty,
     );
 
     let headers = request.headers();
@@ -56,8 +65,16 @@ pub fn record_fields_from_header(request: &Request<Body>) -> tracing::Span {
     record_field(consts::UDF_TXN_UUID, "udf_txn_uuid");
     record_field(consts::X_REQUEST_ID, "x-request-id");
     record_field(consts::X_GLOBAL_REQUEST_ID, "x-global-request-id");
-    span.record("is_art_enabled", "false");
+    record_field(consts::EULER_REQUEST_ID, "euler-request-id");
+    record_field(consts::X_SESSION_ID, "sdk_session_span");
+    record_field(consts::X_CELL_SELECTOR, "cell_selector");
+    record_field(consts::X_ART_RECORDING, "is_art_enabled");
     span.record("is_audit_trail_log", "true");
+    span.record("schema_version", "V2");
+    span.record("tenant_name", "JUSPAY");
+    span.record("tenant_id", "JUSPAY");
+    span.record("tag", "euler_logs");
+    span.record("config_version", 4872);
 
     span
 }

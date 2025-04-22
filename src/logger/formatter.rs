@@ -259,6 +259,10 @@ where
                 map_serializer.serialize_entry("level", &Value::String("Info".to_string()))?;
                 explicit_entries_set.insert("level");
             }
+            if !explicit_entries_set.contains("cell_id"){ 
+                map_serializer.serialize_entry("cell_id", &get_env_var("CELL_ID", "null"))?;
+                explicit_entries_set.insert("cell_id");
+            }
 
         } else {
             // DOMAIN category logic.
@@ -328,6 +332,10 @@ where
                 explicit_entries_set.insert("@timestamp");
             }
 
+        }
+        if !explicit_entries_set.contains("is_art_enabled"){
+            map_serializer.serialize_entry("is_art_enabled", "false")?;
+            explicit_entries_set.insert("is_art_enabled");
         }
 
         // Serialize other common fields.
