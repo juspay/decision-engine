@@ -1,0 +1,343 @@
+// Automatically converted from Haskell to Rust
+// Generated on 2025-03-23 12:02:17
+
+// Converted imports
+// use std::string::String as T;
+// use feedback::utils::get_current_ist_date_with_format;
+// use eulerhs::prelude::*;
+// use std::vec::Vec;
+// use std::vec::Vec;
+// use gateway_decider::utils as GU;
+// use gateway_decider::types::{RoutingFlowType, GatewayScoringData, ScoreKeyType};
+// use utils::config::merchant_config as MC;
+// use feedback::types::*;
+// use feedback::utils as U;
+// use feedback::utils::*;
+// use std::string::String as TE;
+// use eulerhs::tenant_redis_layer as RC;
+// use utils::redis::cache as Cutover;
+// use eulerhs::language as LogUtils;
+// use control::monad::extra::maybe_m;
+// use control::monad::except::run_except;
+// use db::storage::types::merchant_account as MerchantAccount;
+// use utils::redis as Redis;
+// use feedback::utils::{log_gateway_score_type, get_producer_key};
+// use gateway_decider::types as UpdateStatus;
+// use feedback::utils::*;
+// use utils::redis::feature::is_feature_enabled;
+// use eulerhs::language as L;
+// use serde_json as A;
+// use std::vec::Vec as BSL;
+// use feedback::types::{TxnCardInfo, PaymentMethodType, MerchantGatewayAccount};
+use crate::logger;
+use crate::decider::gatewaydecider::utils as GU;
+use crate::{
+    app,
+    decider::gatewaydecider::types::GatewayScoringData,
+    feedback::{
+        constants as C,
+        types::SrV3DebugBlock,
+        utils::{
+            dateInIST, getCurrentIstDateWithFormat,
+            getProducerKey, getTrueString, isKeyExistsRedis, logGatewayScoreType,
+            GatewayScoringType,updateMovingWindow, updateScore,
+        },
+       
+    },
+    redis::{feature::isFeatureEnabled, types::ServiceConfigKey},
+    types::{
+        card::txn_card_info::TxnCardInfo,
+        payment_flow::PaymentFlow as PF,
+        merchant::{
+            merchant_account::MerchantAccount, merchant_gateway_account::MerchantGatewayAccount,
+        },
+        payment::payment_method::PaymentMethodType as PMT,
+        txn_details::types::TxnDetail,
+        merchant::id as MID
+    },
+    decider::{
+        gatewaydecider::constants as DC,
+        gatewaydecider::types::{SrV3InputConfig},
+        gatewaydecider::types::ScoreKeyType as SK,
+        gatewaydecider::types::RoutingFlowType as RF,
+    },
+    utils as U,
+};
+use crate::redis::cache::findByNameFromRedis;
+use crate::merchant_config_util as MC;
+
+
+// Converted functions
+// Original Haskell function: updateSrV3Score
+pub async fn updateSrV3Score(
+    gateway_scoring_type: GatewayScoringType,
+    txn_detail: TxnDetail,
+    txn_card_info: TxnCardInfo,
+    merchant_acc: MerchantAccount,
+    mb_gateway_scoring_data: Option<GatewayScoringData>,
+    gateway_reference_id: Option<String>,
+) {
+    // let is_merchant_enabled_globally = MC::isMerchantEnabledForPaymentFlows(merchant_acc.id, [PF::SR_BASED_ROUTING].to_vec()).await;
+        match (txn_detail.gateway.clone()) {
+            (None) => {
+                logger::info!(
+                    action = "gateway not found",
+                    tag = "gateway not found",
+                    "gateway not found for this transaction having id"
+                );
+            }
+            (Some(gateway)) => {
+                let unified_sr_v3_key =
+                    getProducerKey(txn_detail.clone(), mb_gateway_scoring_data, SK::SR_V3_KEY, false, gateway_reference_id.clone())
+                        .await;
+                let key_for_gateway_selection = unified_sr_v3_key.clone().unwrap_or_else(|| "".to_string());
+                let payment_method_type = txn_card_info.paymentMethodType.clone();
+                let key_for_gateway_selection_queue =
+                    format!("{}_{}queue", key_for_gateway_selection, "}");
+                let key_for_gateway_selection_score =
+                    format!("{}_{}score", key_for_gateway_selection, "}");
+                updateScoreAndQueue(
+                    key_for_gateway_selection_queue,
+                    key_for_gateway_selection_score,
+                    gateway_scoring_type.clone(),
+                    txn_detail.clone(),
+                    txn_card_info.clone(),
+                ).await;
+                if [PMT::Card, PMT::UPI].contains(&payment_method_type) {
+                    let key3d_for_gateway_selection =
+                        unified_sr_v3_key.clone().unwrap_or_else(|| "".to_string());
+                    if key3d_for_gateway_selection != key_for_gateway_selection {
+                        logger::info!(
+                            tag = "SR V3 Based threeD Producer Key",
+                            action = "SR V3 Based threeD Producer Key",
+                            "{:?}",
+                            key3d_for_gateway_selection
+                        );
+                        let key3d_for_gateway_selection_queue =
+                            format!("{}_{}queue", key3d_for_gateway_selection, "}");
+                        let key3d_for_gateway_selection_score =
+                            format!("{}_{}score", key3d_for_gateway_selection, "}");
+                        updateScoreAndQueue(
+                            key3d_for_gateway_selection_queue,
+                            key3d_for_gateway_selection_score,
+                            gateway_scoring_type.clone(),
+                            txn_detail.clone(),
+                            txn_card_info.clone(),
+                        ).await;
+                    }
+                }
+                logGatewayScoreType(gateway_scoring_type, RF::SRV3_FLOW, txn_detail);
+            }
+        }
+
+}
+
+// Original Haskell function: createKeysIfNotExist
+pub async fn createKeysIfNotExist(
+    key_for_gateway_selection_queue: String,
+    key_for_gateway_selection_score: String,
+    txn_detail: TxnDetail,
+    txn_card_info: TxnCardInfo,
+) {
+    let is_queue_key_exists = isKeyExistsRedis(key_for_gateway_selection_queue.clone()).await;
+    let is_score_key_exists = isKeyExistsRedis(key_for_gateway_selection_score.clone()).await;
+    logger::info!(
+        tag = "createKeysIfNotExist",
+        action = "createKeysIfNotExist",
+        "Value for isQueueKeyExists is {} and isScoreKeyExists is {}",
+        is_queue_key_exists,
+        is_score_key_exists
+    );
+    if is_queue_key_exists && is_score_key_exists {
+        return;
+    } else {
+        let merchant_bucket_size = getSrV3MerchantBucketSize(txn_detail, txn_card_info).await;
+        logger::info!(
+            tag = "createKeysIfNotExist",
+            action = "createKeysIfNotExist",
+            "Creating keys with bucket size as {}",
+            merchant_bucket_size
+        );
+        let score_list = vec!["1".to_string(); merchant_bucket_size.clone().try_into().unwrap()];
+        let redis = C::kvRedis();
+        GU::create_moving_window_and_score(
+            redis,
+            key_for_gateway_selection_queue,
+            key_for_gateway_selection_score,
+            merchant_bucket_size,
+            score_list
+        ).await;
+    }
+}
+
+// Original Haskell function: updateScoreAndQueue
+pub async fn updateScoreAndQueue(
+    key_for_gateway_selection_queue: String,
+    key_for_gateway_selection_score: String,
+    gateway_scoring_type: GatewayScoringType,
+    txn_detail: TxnDetail,
+    txn_card_info: TxnCardInfo,
+) {
+    logger::info!(
+        action = "updateScoreAndQueue",
+        tag = "updateScoreAndQueue",
+        "Updating sr v3 score and queue"
+    );
+    createKeysIfNotExist(
+        key_for_gateway_selection_queue.clone(),
+        key_for_gateway_selection_score.clone(),
+        txn_detail.clone(),
+        txn_card_info,
+    ).await;
+    let (value, should_score_increase) : (String, bool) = match gateway_scoring_type {
+        GatewayScoringType::PENALISE_SRV3 => ("0".into(), false),
+        GatewayScoringType::REWARD => ("1".into(), true),
+        _ => ("0".into(), false),
+    };
+    // let is_debug_mode_enabled = isFeatureEnabled(
+    //     DC::enableDebugModeOnSrV3.get_key(),
+    //     MID::merchant_id_to_text(txn_detail.merchantId),
+    //     C::kvRedis(),
+    // ).await;
+    // if is_debug_mode_enabled {
+    //     let _ = RC::rHDelB(
+    //         C::kvRedis,
+    //         &format!(
+    //             "{}{}",
+    //             C::pendingTxnsKeyPrefix,
+    //             txn_detail.merchantId.clone()
+    //         ),
+    //         &[txn_detail.txnUuid.clone()],
+    //     );
+    // } else {
+    //     match app::get_tenant_app_state()
+    //         .await
+    //         .redis_conn
+    //         .conn
+    //         .delete_key(&[format!(
+    //             "{}{}",
+    //             C::pendingTxnsKeyPrefix,
+    //             txn_detail.merchantId.clone()
+    //         )])
+    //         .await
+    //     {
+    //         Ok(res) => (),
+    //         Err(err) => {
+    //             // Log an error if there's an issue deleting the score key
+    //             // L::log_error_v(
+    //             //     "deleteScoreKeyIfBucketSizeChanges",
+    //             //     "Error while deleting score key in redis",
+    //             //     err
+    //             // ).await;
+    //             ()
+    //         }
+//     }
+// }
+    let current_ist_time = getCurrentIstDateWithFormat("YYYY-MM-DD HH:mm:SS.sss".to_string());
+    let date_created = dateInIST(
+        txn_detail.clone().dateCreated.to_string(),
+        "YYYY-MM-DD HH:mm:SS.sss".to_string(),
+    )
+    .unwrap_or_default();
+    // let updated_value = if is_debug_mode_enabled {
+    //     TE::decodeUtf8(&BSL::toStrict(&A::encode(&debugBlock(
+    //         txn_detail.clone(),
+    //         current_ist_time.clone(),
+    //         date_created.clone(),
+    //         value.clone(),
+    //     ))))
+    //     .unwrap()
+    // } else {
+    //     value.clone()
+    // };
+    let popped_status = updateMovingWindow(
+        C::kvRedis(),
+        key_for_gateway_selection_queue.clone(),
+        key_for_gateway_selection_score.clone(),
+        value.clone(),
+    ).await;
+    logger::info!(
+        action = "updateScoreAndQueue",
+        tag = "updateScoreAndQueue",
+        "Popped Redis Value {}",
+        popped_status
+    );
+    let returned_value = match serde_json::from_slice::<Option<SrV3DebugBlock>>(popped_status.as_bytes()){
+            Ok(maybe_popped_status_block) => {
+                get_status(maybe_popped_status_block, popped_status)
+            },
+            Err(_) => popped_status
+        };
+    logger::info!(
+        action = "updateScoreAndQueue",
+        tag = "updateScoreAndQueue",
+        "Popped Returned Value {}",
+        returned_value
+    );
+    if returned_value == value {
+        return;
+    } else {
+        updateScore(
+            C::kvRedis(),
+            key_for_gateway_selection_score.clone(),
+            should_score_increase,
+        ).await;
+    }
+}
+
+fn debugBlock(
+    txn_detail: TxnDetail,
+    current_time: String,
+    date_created: String,
+    value: String,
+) -> SrV3DebugBlock {
+    SrV3DebugBlock {
+        txn_uuid: txn_detail.txnUuid,
+        order_id: txn_detail.orderId.0,
+        date_created,
+        current_time,
+        txn_status: value,
+    }
+}
+
+fn getStatus(maybe_popped_status_block: Option<SrV3DebugBlock>, popped_status: String) -> String {
+    match maybe_popped_status_block {
+        Some(popped_status_block) => popped_status_block.txn_status.clone(),
+        None => popped_status,
+    }
+}
+
+//Original Haskell function: getSrV3MerchantBucketSize
+pub async fn getSrV3MerchantBucketSize(txn_detail: TxnDetail, txn_card_info: TxnCardInfo) -> i32 {
+    let merchant_sr_v3_input_config:Option<SrV3InputConfig>  =
+        findByNameFromRedis(C::SR_V3_INPUT_CONFIG(MID::merchant_id_to_text(txn_detail.merchantId)).get_key()).await;
+    let pmt = txn_card_info.paymentMethodType.to_text();
+    let pm = GU::get_payment_method(
+        (&pmt).to_string(),
+        txn_card_info.paymentMethod,
+        txn_detail.sourceObject.unwrap_or_default(),
+    );
+    let maybe_bucket_size = GU::get_sr_v3_bucket_size(merchant_sr_v3_input_config, &pmt, &pm);
+    let merchant_bucket_size = match maybe_bucket_size {
+        None => {
+            let default_sr_v3_input_config:Option<SrV3InputConfig> =
+                findByNameFromRedis(DC::srV3DefaultInputConfig.get_key()).await;
+            GU::get_sr_v3_bucket_size(default_sr_v3_input_config, &pmt, &pm)
+                .unwrap_or(C::defaultSrV3BasedBucketSize)
+        }
+        Some(bucket_size) => bucket_size,
+    };
+    logger::info!(
+        action = "sr_v3_bucket_size",
+        tag = "sr_v3_bucket_size",
+        "Bucket Size: {}",
+        merchant_bucket_size
+    );
+    merchant_bucket_size
+}
+
+fn get_status(maybe_popped_status_block: Option<SrV3DebugBlock>, default_status: String) -> String {
+    maybe_popped_status_block
+        .map(|block| block.txn_status)
+        .unwrap_or(default_status)
+}

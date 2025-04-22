@@ -5,12 +5,18 @@ log_format = "default"
 
 [server]
 host = "127.0.0.1"
-port = 8000
-type = "grpc"
+port = 8080
 
-[metrics]
+[limit]
+request_count = 1
+duration = 60
+
+[database]
+username = "root"
+password = "root"
 host = "127.0.0.1"
-port = 9000
+port = 3306
+dbname = "jdb"
 
 [redis]
 host = "127.0.0.1"
@@ -27,61 +33,114 @@ default_command_timeout = 30
 unresponsive_timeout = 10
 max_feed_count = 200
 
-[secret_config]
-type = "no_encryption"
+[cache]
+tti = 7200 # i.e. 2 hours
+max_capacity = 5000
 
 [secrets]
-hash_key = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-jwt_secret = "secret"
+open_router_private_key = ""
 
-[database]
-user = "db_user"
-database_password = "db_pass"
-host = "localhost"
-port = 5432
-database = "hyperswitch_db"
-max_connections = 10
-tenants = ["public"]
+[tenant_secrets]
+public = { master_key = "", public_key = "", schema = "public" }
 
-[cache]
-max_cache_size = 1000
-ttl_in_seconds = 300
-tti_in_seconds = 90
+[routing_config.keys]
+payment_method = { type = "enum", values = "card, bank_debit, bank_transfer" }
+amount = { type = "integer" }
+metadata = { type = "udf" }
+currency = { type = "enum", values = "USD, EUR, GBP, JPY, CAD, AUD" }
+order_udf1 = { type = "global_ref" }
+payment_methodType = { type = "enum", values = "CARD, UPI, NB" }
+payment_cardBrand = { type = "enum", values = "VISA, MASTERCARD, AMEX, RUPAY, DINERS" }
+payment_cardBin = { type = "global_ref" }
+payment_cardType = { type = "enum", values = "CREDIT, DEBIT" }
+payment_cardIssuerCountry = { type = "enum", values = "INDIA, US, UK, SINGAPORE" }
+payment_paymentMethod = { type = "enum", values = "NB_HDFC, NB_ICICI, NB_SBI" }
+payment_paymentSource = { type = "enum", values = "net.one97.paytm, @paytm" }
+txn_isEmi = { type = "enum", values = "true, false" }
 
-[ttl_for_keys]
-aggregates = 300
-current_block = 900
-elimination_bucket = 900
-contract_ttl = 900
+[routing_config.default]
+output = ["stripe", "adyen"]
 
-[global_routing_configs.success_rate]
-min_aggregates_size = 5
-default_success_rate = 100
-max_aggregates_size = 10
+[[routing_config.constraint_graph.nodes]]
+preds = []
+succs = [0]
 
-[global_routing_configs.success_rate.current_block_threshold]
-duration_in_mins = 10
-max_total_count = 5
+[routing_config.constraint_graph.nodes.kind]
+kind = "value"
 
-[global_routing_configs.elimination_rate]
-bucket_size = 5
-bucket_leak_interval_in_secs = 300
+[routing_config.constraint_graph.nodes.kind.data]
+kind = "value"
 
-[multi_tenancy]
-enabled = true
+[routing_config.constraint_graph.nodes.kind.data.data]
+key = "payment_method"
+comparison = "equal"
 
-[parameters]
-max_default_body_limit_in_bytes = 10485760 # 1024 * 1024 * 10
-total_chunks = 4
-total_records_per_json = 1000
+[routing_config.constraint_graph.nodes.kind.data.data.value]
+type = "enum_variant"
+value = "card"
 
-[redis_simulation_keys]
-ttl = 900
+[[routing_config.constraint_graph.nodes]]
+preds = []
+succs = [1]
 
-[[model_configs]]
-aggregates_threshold = { min_aggregates_size = 3, max_aggregates_size = 5 }
-current_block_threshold = { max_total_count = 8 }
-default_success_rate = 100.0
+[routing_config.constraint_graph.nodes.kind]
+kind = "value"
 
-[baseline_static_data]
-file_name = "baseline_data.csv"
+[routing_config.constraint_graph.nodes.kind.data]
+kind = "value"
+
+[routing_config.constraint_graph.nodes.kind.data.data]
+key = "payment_method"
+comparison = "equal"
+
+[routing_config.constraint_graph.nodes.kind.data.data.value]
+type = "enum_variant"
+value = "bank_debit"
+
+[[routing_config.constraint_graph.nodes]]
+preds = [0]
+succs = []
+
+[routing_config.constraint_graph.nodes.kind]
+kind = "value"
+
+[routing_config.constraint_graph.nodes.kind.data]
+kind = "value"
+
+[routing_config.constraint_graph.nodes.kind.data.data]
+key = "output"
+comparison = "equal"
+
+[routing_config.constraint_graph.nodes.kind.data.data.value]
+type = "enum_variant"
+value = "stripe"
+
+[[routing_config.constraint_graph.nodes]]
+preds = [1]
+succs = []
+
+[routing_config.constraint_graph.nodes.kind]
+kind = "value"
+
+[routing_config.constraint_graph.nodes.kind.data]
+kind = "value"
+
+[routing_config.constraint_graph.nodes.kind.data.data]
+key = "output"
+comparison = "equal"
+
+[routing_config.constraint_graph.nodes.kind.data.data.value]
+type = "enum_variant"
+value = "adyen"
+
+[[routing_config.constraint_graph.edges]]
+strength = "strong"
+relation = "positive"
+pred = 0
+succ = 2
+
+[[routing_config.constraint_graph.edges]]
+strength = "strong"
+relation = "positive"
+pred = 1
+succ = 3

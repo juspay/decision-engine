@@ -1,54 +1,36 @@
-FROM rust:slim-bookworm as base
-RUN cargo install cargo-chef --version ^0.1
-RUN apt-get update \
-    && apt-get install -y pkg-config libssl-dev
-RUN cargo install sccache
+FROM rust:bookworm as builder
 
-FROM base AS planner
-WORKDIR /app
+ARG EXTRA_FEATURES=""
+
+WORKDIR /open_router
+
+ENV CARGO_NET_RETRY=10
+ENV RUSTUP_MAX_RETRIES=10
+ENV CARGO_INCREMENTAL=0
+
+RUN apt-get update \
+    && apt-get install -y libpq-dev libssl-dev pkg-config protobuf-compiler clang
+
 COPY . .
-RUN cargo chef prepare --recipe-path recipe.json
+RUN RUSTFLAGS="-A warnings" cargo build --release --features release ${EXTRA_FEATURES}
 
-FROM base AS builder
-WORKDIR /app
-COPY --from=planner /app/recipe.json recipe.json
 
-# Set up sccache
-# ENV RUSTC_WRAPPER=/usr/local/cargo/bin/sccache
-ENV SCCACHE_DIR=/sccache
-ENV SCCACHE_CACHE_SIZE=5G
+FROM debian:bookworm
 
-# Cook dependencies
-RUN --mount=type=cache,target=/sccache \
-    cargo chef cook --release --recipe-path recipe.json
+ARG CONFIG_DIR=/local/config
+ARG BIN_DIR=/local
+ARG BINARY=open_router
 
 RUN apt-get update \
-    && apt-get install -y protobuf-compiler libpq-dev
+    && apt-get install -y ca-certificates tzdata libpq-dev curl procps libmariadb-dev
 
+EXPOSE 8080
 
-# Build the application
-COPY . .
-RUN --mount=type=cache,target=/sccache \
-    cargo build --release --features release
+RUN mkdir -p ${CONFIG_DIR}
 
-# Print sccache stats
-RUN sccache --show-stats
+COPY --from=builder /open_router/target/release/${BINARY} ${BIN_DIR}/${BINARY}
 
-FROM debian:bookworm-slim AS runtime
-WORKDIR /app
+WORKDIR ${BIN_DIR}
 
-RUN apt-get update \
-    && apt-get install -y libpq-dev ca-certificates
-RUN mkdir -p bin config
+CMD ./open_router
 
-COPY --from=builder /app/target/release/dynamo bin/dynamo
-COPY --from=builder /app/target/release/simulator bin/simulator
-# allows us to mount `/app/config/production.toml`
-COPY --from=builder /app/config config
-
-# Copy the shell entrypoint script and make it executable
-COPY entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
-
-# Set the entrypoint script
-ENTRYPOINT ["/app/entrypoint.sh"]
