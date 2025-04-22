@@ -417,7 +417,6 @@ CREATE TABLE routing_algorithm (
 );
 SET FOREIGN_KEY_CHECKS = 1;
 
-DROP INDEX IF EXISTS co_badged_cards_card_bin_min_card_bin_max_index;
 DROP TABLE IF EXISTS co_badged_cards_info;
 CREATE TABLE co_badged_cards_info (
     id VARCHAR(64) PRIMARY KEY,
