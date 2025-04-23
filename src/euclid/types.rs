@@ -1,3 +1,4 @@
+use crate::decider::network_decider;
 use crate::euclid::ast::{Output, Program, ValueType};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt, ops::Deref};
@@ -132,6 +133,7 @@ pub struct TomlConfig {
     pub default: DefaultConfig,
     #[serde(default)]
     pub constraint_graph: crate::euclid::cgraph::ConstraintGraph,
+    pub debit_routing_config: network_decider::types::DebitRoutingConfig,
 }
 
 impl Default for TomlConfig {
@@ -140,6 +142,7 @@ impl Default for TomlConfig {
             keys: KeysConfig::default(),
             default: DefaultConfig::default(),
             constraint_graph: crate::euclid::cgraph::ConstraintGraph::default(),
+            debit_routing_config: network_decider::types::DebitRoutingConfig::default(),
         }
     }
 }

@@ -221,6 +221,8 @@ pub struct GBESV2Metadata {
     Clone,
     Serialize,
     Deserialize,
+    Eq,
+    Hash,
     PartialEq,
     diesel::AsExpression,
     diesel::FromSqlRow,

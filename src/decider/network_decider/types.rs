@@ -1,8 +1,11 @@
-use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 
 use crate::decider::gatewaydecider;
-
+use crate::types::currency;
 use diesel::sql_types;
+use serde::{Deserialize, Serialize};
+
+use crate::decider::network_decider::utils::{deserialize_hashmap, deserialize_hashset};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoBadgedCardRequest {
@@ -142,32 +145,195 @@ pub struct DebitRoutingOutput {
     pub card_type: CardType,
 }
 
-/// Implements the `ToSql` and `FromSql` traits on a type to allow it to be serialized/deserialized
-/// to/from TEXT data in MySQL using `ToString`/`FromStr`.
-#[macro_export]
-macro_rules! impl_to_sql_from_sql_text_mysql {
-    ($type:ty) => {
-        impl ::diesel::serialize::ToSql<::diesel::sql_types::Text, ::diesel::mysql::Mysql>
-            for $type
-        {
-            fn to_sql<'b>(
-                &'b self,
-                out: &mut ::diesel::serialize::Output<'b, '_, ::diesel::mysql::Mysql>,
-            ) -> ::diesel::serialize::Result {
-                use ::std::io::Write;
-                out.write_all(self.to_string().as_bytes())?;
-                Ok(::diesel::serialize::IsNull::No)
-            }
-        }
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
+pub struct DebitRoutingConfig {
+    pub network_fee: HashMap<gatewaydecider::types::NETWORK, NetworkProcessingData>,
+    pub interchange_fee: NetworkInterchangeFee,
+    #[serde(deserialize_with = "deserialize_hashmap")]
+    pub connector_supported_debit_networks:
+        HashMap<Connector, HashSet<gatewaydecider::types::NETWORK>>,
+    #[serde(deserialize_with = "deserialize_hashset")]
+    pub supported_currencies: HashSet<currency::Currency>,
+    #[serde(deserialize_with = "deserialize_hashset")]
+    pub supported_connectors: HashSet<Connector>,
+    pub fraud_check_fee: f64,
+}
 
-        impl ::diesel::deserialize::FromSql<::diesel::sql_types::Text, ::diesel::mysql::Mysql>
-            for $type
-        {
-            fn from_sql(value: ::diesel::mysql::MysqlValue) -> ::diesel::deserialize::Result<Self> {
-                use ::core::str::FromStr;
-                let s = ::core::str::from_utf8(value.as_bytes())?;
-                <$type>::from_str(s).map_err(|_| "Unrecognized enum variant".into())
-            }
-        }
-    };
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct NetworkInterchangeFee {
+    pub non_regulated: NoneRegulatedNetworkProcessingData,
+    pub regulated: NetworkProcessingData,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct NoneRegulatedNetworkProcessingData(
+    pub HashMap<String, HashMap<gatewaydecider::types::NETWORK, NetworkProcessingData>>,
+);
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct NetworkProcessingData {
+    pub percentage: f64,
+    pub fixed_amount: f64,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct Platform {
+    pub enabled: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct CoBadgedCardInfoResponse {
+    pub co_badged_card_networks: Vec<gatewaydecider::types::NETWORK>,
+    pub issuer_country: CountryAlpha2,
+    pub is_regulated: bool,
+    pub regulated_name: Option<RegulatedName>,
+    pub card_type: CardType,
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    serde::Deserialize,
+    serde::Serialize,
+    strum::VariantNames,
+    strum::EnumIter,
+    strum::Display,
+    strum::EnumString,
+    diesel::AsExpression,
+    diesel::FromSqlRow,
+    Hash,
+)]
+#[diesel(sql_type = sql_types::Text)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum Connector {
+    Adyenplatform,
+    #[cfg(feature = "dummy_connector")]
+    #[serde(rename = "phonypay")]
+    #[strum(serialize = "phonypay")]
+    DummyConnector1,
+    #[cfg(feature = "dummy_connector")]
+    #[serde(rename = "fauxpay")]
+    #[strum(serialize = "fauxpay")]
+    DummyConnector2,
+    #[cfg(feature = "dummy_connector")]
+    #[serde(rename = "pretendpay")]
+    #[strum(serialize = "pretendpay")]
+    DummyConnector3,
+    #[cfg(feature = "dummy_connector")]
+    #[serde(rename = "stripe_test")]
+    #[strum(serialize = "stripe_test")]
+    DummyConnector4,
+    #[cfg(feature = "dummy_connector")]
+    #[serde(rename = "adyen_test")]
+    #[strum(serialize = "adyen_test")]
+    DummyConnector5,
+    #[cfg(feature = "dummy_connector")]
+    #[serde(rename = "checkout_test")]
+    #[strum(serialize = "checkout_test")]
+    DummyConnector6,
+    #[cfg(feature = "dummy_connector")]
+    #[serde(rename = "paypal_test")]
+    #[strum(serialize = "paypal_test")]
+    DummyConnector7,
+    Aci,
+    Adyen,
+    Airwallex,
+    // Amazonpay,
+    Authorizedotnet,
+    Bambora,
+    Bamboraapac,
+    Bankofamerica,
+    Billwerk,
+    Bitpay,
+    Bluesnap,
+    Boku,
+    Braintree,
+    Cashtocode,
+    Chargebee,
+    Checkout,
+    Coinbase,
+    Coingate,
+    Cryptopay,
+    CtpMastercard,
+    CtpVisa,
+    Cybersource,
+    Datatrans,
+    Deutschebank,
+    Digitalvirgo,
+    Dlocal,
+    Ebanx,
+    Elavon,
+    // Facilitapay,
+    Fiserv,
+    Fiservemea,
+    Fiuu,
+    Forte,
+    Getnet,
+    Globalpay,
+    Globepay,
+    Gocardless,
+    Gpayments,
+    Hipay,
+    Helcim,
+    Inespay,
+    Iatapay,
+    Itaubank,
+    Jpmorgan,
+    Juspaythreedsserver,
+    Klarna,
+    Mifinity,
+    Mollie,
+    Moneris,
+    Multisafepay,
+    Netcetera,
+    Nexinets,
+    Nexixpay,
+    Nmi,
+    Nomupay,
+    Noon,
+    Novalnet,
+    Nuvei,
+    // Opayo, added as template code for future usage
+    Opennode,
+    Paybox,
+    // Payeezy, As psync and rsync are not supported by this connector, it is added as template code for future usage
+    Payme,
+    Payone,
+    Paypal,
+    Paystack,
+    Payu,
+    Placetopay,
+    Powertranz,
+    Prophetpay,
+    Rapyd,
+    Razorpay,
+    Recurly,
+    Redsys,
+    Shift4,
+    Square,
+    Stax,
+    Stripe,
+    // Stripebilling,
+    Taxjar,
+    Threedsecureio,
+    //Thunes,
+    Trustpay,
+    Tsys,
+    // UnifiedAuthenticationService,
+    Volt,
+    Wellsfargo,
+    // Wellsfargopayout,
+    Wise,
+    Worldline,
+    Worldpay,
+    Signifyd,
+    Plaid,
+    Riskified,
+    Xendit,
+    Zen,
+    Zsl,
 }
