@@ -1,5 +1,5 @@
 use crate::euclid::{errors::EuclidErrors, types::ActivateRoutingRule};
-use axum::Json;
+use axum::{extract::Path, Json};
 use crate::{logger, storage::types::RoutingAlgorithm};
 use error_stack::ResultExt;
 use crate::storage::schema::routing_algorithm::dsl;
@@ -53,11 +53,21 @@ pub async fn routing_create(
         Err(ContainerError::from(EuclidErrors::StorageError))
     }
 }
-#[axum::debug_handler]
+
 pub async fn activate_routing_rule(
     Json(payload): Json<ActivateRoutingRule>,
 ) -> Result<(), ContainerError<EuclidErrors>> {
 // TODO: Update the RoutingAlgorithmMapper table here with new  rule_id
+    // Find whether this merchant previously has an entry in mapper table
+    // If yes go on with updating the rule_id inplace.
+    // If not create a new entry in RoutingAlgorithmMapper table.
+Ok(())
+}
+
+pub async fn list_all_routing_algorithm_id(
+    Path(created_by): Path<String>,
+) -> Result<(), ContainerError<EuclidErrors>> {
+// TODO: find all the routing_algorithm_ids created by this creator.
 Ok(())
 }
 
