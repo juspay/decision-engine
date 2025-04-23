@@ -1,9 +1,3 @@
-use crate::euclid::{errors::EuclidErrors, types::ActivateRoutingRule};
-use axum::Json;
-use crate::{logger, storage::types::RoutingAlgorithm};
-use error_stack::ResultExt;
-use crate::storage::schema::routing_algorithm::dsl;
-use diesel::{associations::HasTable, ExpressionMethods};
 use crate::euclid::{
     ast::{self, ComparisonType, Output, ValueType},
     cgraph,
@@ -13,11 +7,17 @@ use crate::euclid::{
     },
     utils::{generate_random_id, is_valid_enum_value, validate_routing_rule},
 };
+use crate::euclid::{errors::EuclidErrors, types::ActivateRoutingRule};
+use crate::storage::schema::routing_algorithm::dsl;
+use crate::{logger, storage::types::RoutingAlgorithm};
+use axum::Json;
+use diesel::{associations::HasTable, ExpressionMethods};
+use error_stack::ResultExt;
 
 use crate::app::get_tenant_app_state;
 
 use crate::error::{self, ContainerError};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 pub async fn routing_create(
     Json(payload): Json<Value>,
@@ -44,11 +44,13 @@ pub async fn routing_create(
             modified_at: timestamp,
         };
 
-    crate::generics::generic_insert(&state.db, new_algo).await
-    .map_err(|_| ContainerError::from(EuclidErrors::StorageError))?;
+        crate::generics::generic_insert(&state.db, new_algo)
+            .await
+            .map_err(|_| ContainerError::from(EuclidErrors::StorageError))?;
 
-    let response = RoutingDictionaryRecord::new(algorithm_id, config.name, timestamp, timestamp);
-    Ok(Json(response))
+        let response =
+            RoutingDictionaryRecord::new(algorithm_id, config.name, timestamp, timestamp);
+        Ok(Json(response))
     } else {
         Err(ContainerError::from(EuclidErrors::StorageError))
     }
@@ -109,21 +111,17 @@ pub async fn routing_evaluate(
         <RoutingAlgorithm as HasTable>::Table,
         _,
         RoutingAlgorithm,
-    >(
-        &state.db,
-        dsl::id
-            .eq(payload_clone)
-    )
+    >(&state.db, dsl::id.eq(payload_clone))
     .await
     .change_context(EuclidErrors::StorageError)?;
-
 
     let program: ast::Program = serde_json::from_str(&algorithm.algorithm_data)
         .map_err(|_| EuclidErrors::InvalidRequest("Invalid algorithm data format".into()))?;
 
     let context = Context::new(parameters.clone());
-    let interpreter_result = InterpreterBackend::eval_program(&program, &context)
-        .map_err(|e| EuclidErrors::InvalidRequest(format!("Interpreter error: {:?}", e.error_type)))?;
+    let interpreter_result = InterpreterBackend::eval_program(&program, &context).map_err(|e| {
+        EuclidErrors::InvalidRequest(format!("Interpreter error: {:?}", e.error_type))
+    })?;
 
     let eligible_connectors = if let Some(ref config) = state.config.routing_config {
         let ctx = cgraph::CheckCtx::from(parameters);
