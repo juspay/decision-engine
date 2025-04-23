@@ -3,7 +3,7 @@ use crate::euclid::{
     cgraph,
     interpreter::InterpreterBackend,
     types::{
-        Context, RoutingDictionaryRecord, RoutingEvaluateResponse, RoutingRequest, RoutingRule,
+        ActivateRoutingConfigRequest, Context, RoutingDictionaryRecord, RoutingEvaluateResponse, RoutingRequest, RoutingRule
     },
     utils::{generate_random_id, is_valid_enum_value, validate_routing_rule},
 };
@@ -65,7 +65,7 @@ pub async fn routing_create(
 
 use crate::storage::schema::routing_algorithm_mapper::dsl as mapper_dsl;
 pub async fn activate_routing_rule(
-    Json(payload): Json<RoutingAlgorithmMapper>,
+    Json(payload): Json<ActivateRoutingConfigRequest>,
 ) -> Result<(), ContainerError<EuclidErrors>> {
     let state = get_tenant_app_state().await;
     // Update the RoutingAlgorithmMapper table here with new rule_id

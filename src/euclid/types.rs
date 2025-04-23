@@ -90,8 +90,14 @@ pub struct RoutingAlgorithm {
 
 #[derive(AsChangeset, Insertable, Debug, serde::Serialize, serde::Deserialize, Identifiable, Queryable)]
 #[diesel(table_name = schema::routing_algorithm_mapper)]
+#[diesel(primary_key(created_by))]
 pub struct RoutingAlgorithmMapper {
-    pub id: String,
+    pub created_by: String,
+    pub routing_algorithm_id: String,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct ActivateRoutingConfigRequest {
     pub created_by: String,
     pub routing_algorithm_id: String,
 }
@@ -102,7 +108,6 @@ impl RoutingAlgorithmMapper {
         routing_algorithm_id: String,
     ) -> Self {
         Self {
-            id: generate_random_id("routing_mapper"),
             created_by,
             routing_algorithm_id
         }
