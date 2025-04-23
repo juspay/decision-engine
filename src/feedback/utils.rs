@@ -465,7 +465,7 @@ pub async fn updateQueue(
                 "Error while updating queue in Redis: {:?}",
                 e
             );
-            Ok(Some(value_clone))
+            Err(e)
         }
     }
 }
@@ -487,10 +487,6 @@ pub async fn updateMovingWindow(
                 "Error while updating queue in redis - returning input value: {:?}",
                 err
             );
-            // println!(
-            //     "Error while updating queue in redis - returning input value: {:?}",
-            //     err
-            // );
             value
         }
     }
