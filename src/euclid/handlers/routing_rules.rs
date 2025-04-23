@@ -1,4 +1,4 @@
-use crate::euclid::errors::EuclidErrors;
+use crate::euclid::{errors::EuclidErrors, types::ActivateRoutingRule};
 use axum::Json;
 use crate::{logger, storage::types::RoutingAlgorithm};
 use error_stack::ResultExt;
@@ -52,6 +52,13 @@ pub async fn routing_create(
     } else {
         Err(ContainerError::from(EuclidErrors::StorageError))
     }
+}
+#[axum::debug_handler]
+pub async fn activate_routing_rule(
+    Json(payload): Json<ActivateRoutingRule>,
+) -> Result<(), ContainerError<EuclidErrors>> {
+// TODO: Update the RoutingAlgorithmMapper table here with new  rule_id
+Ok(())
 }
 
 pub async fn routing_evaluate(

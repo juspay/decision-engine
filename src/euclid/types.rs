@@ -66,6 +66,12 @@ pub struct RoutingEvaluateResponse {
     pub eligible_connectors: Vec<String>,
 }
 
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct ActivateRoutingRule {
+    pub created_by: String,
+    pub routing_algorithm_id: String,
+}
+
 #[derive(Debug, Clone, Serialize, thiserror::Error)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum InterpreterErrorType {

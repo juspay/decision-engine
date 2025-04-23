@@ -118,6 +118,10 @@ where
             axum::routing::post(crate::euclid::handlers::routing_rules::routing_create),
         )
         .route(
+            "/routing/activate",
+            axum::routing::post(crate::euclid::handlers::routing_rules::activate_routing_rule),
+        )
+        .route(
             "/routing/evaluate",
             axum::routing::post(crate::euclid::handlers::routing_rules::routing_evaluate),
         )
