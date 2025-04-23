@@ -423,7 +423,7 @@ pub async fn updateQueue(
 ) -> Result<Option<String>, error_stack::Report<redis_interface::errors::RedisError>>  {
     let app_state = get_tenant_app_state().await;
     let value_clone = value.clone();
-    let r: Result<String, error_stack::Report<redis_interface::errors::RedisError>> =
+    let r: Result<Vec<String>, error_stack::Report<redis_interface::errors::RedisError>> =
         app_state
             .redis_conn
             .multi(false, |transaction| {
@@ -441,9 +441,9 @@ pub async fn updateQueue(
                     transaction.expire::<(), _>(&score_key, 10000000).await?;
 
                     // Remove from the end of the list
-                    let removed_value = transaction.rpop::<(), _>(&queue_key, None).await?;
+                    transaction.rpop::<String, _>(&queue_key, None).await?;
 
-                    Ok(removed_value)
+                    Ok(())
                 })
             })
             .await;
@@ -456,7 +456,7 @@ pub async fn updateQueue(
                 "Successfully updated queue in Redis: {:?}",
                 result
             );
-            Ok(Some(result))
+            Ok(Some(result.last().cloned().unwrap_or_default()))
         }
         Err(e) => {
             logger::error!(

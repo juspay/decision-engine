@@ -228,7 +228,7 @@ pub fn is_tpv_mandate_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
 }
 
 pub fn get_merchant_wise_si_bin_key(gw: &String) -> String {
-    format!("MERCHANT_WISE_SI_BINS_{:?}", gw)
+    format!("MERCHANT_WISE_SI_BINS_{}", gw)
 }
 
 fn get_merchant_gateway_card_info_feature_name(
@@ -237,9 +237,9 @@ fn get_merchant_gateway_card_info_feature_name(
     gateway: &String,
 ) -> Option<String> {
     let flow = validation_type
-        .map(|v| format!("{:?}", v))
-        .or_else(|| auth_type.map(|a| format!("{:?}", a)))?;
-    Some(format!("MERCHANT_GATEWAY_CARD_INFO_{}_{:?}", flow, gateway))
+        .map(|v| format!("{}", v))
+        .or_else(|| auth_type.map(|a| format!("{}", a)))?;
+    Some(format!("MERCHANT_GATEWAY_CARD_INFO_{}_{}", flow, gateway))
 }
 
 pub fn is_mandate_transaction(txn: &ETTD::TxnDetail) -> bool {
@@ -545,9 +545,9 @@ pub fn get_gateway_reference_id(
     pl_ref_id_map: HashMap<String, String>,
 ) -> Option<ETM::merchant_gateway_account::MgaReferenceId> {
     let meta_res = pl_ref_id_map
-        .get(&format!("{:?}:gateway_reference_id", gw))
+        .get(&format!("{}:gateway_reference_id", gw))
         .or_else(|| pl_ref_id_map.get("JUSPAY:gateway_reference_id"))
-        .or_else(|| metadata.get(&format!("{:?}:gateway_reference_id", gw)))
+        .or_else(|| metadata.get(&format!("{}:gateway_reference_id", gw)))
         .or_else(|| metadata.get("JUSPAY:gateway_reference_id"));
 
     match meta_res {
