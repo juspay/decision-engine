@@ -50,7 +50,6 @@ diesel::table! {
     }
 }
 
-
 diesel::table! {
     use diesel::sql_types::*;
     emi_bank_code (id) {
@@ -506,6 +505,7 @@ diesel::table! {
 
 diesel::table! {
     routing_algorithm_mapper (created_by) {
+        id -> Text,
         #[max_length = 255]
         created_by -> Varchar,
         #[max_length = 255]

@@ -1,9 +1,3 @@
-use crate::{euclid::{errors::EuclidErrors, types::{ActivateRoutingRule, RoutingAlgorithmMapperUpdate}}, storage::schema::routing_algorithm_mapper};
-use axum::{extract::Path, Json};
-use crate::{logger, storage::types::RoutingAlgorithm};
-use error_stack::ResultExt;
-use crate::storage::schema::routing_algorithm::dsl;
-use diesel::{associations::HasTable, ExpressionMethods};
 use crate::euclid::{
     ast::{self, ComparisonType, Output, ValueType},
     cgraph,
@@ -13,6 +7,18 @@ use crate::euclid::{
     },
     utils::{generate_random_id, is_valid_enum_value, validate_routing_rule},
 };
+use crate::storage::schema::routing_algorithm::dsl;
+use crate::{
+    euclid::{
+        errors::EuclidErrors,
+        types::{RoutingAlgorithmMapper, RoutingAlgorithmMapperUpdate},
+    },
+    storage::schema::routing_algorithm_mapper,
+};
+use crate::{logger, storage::types::RoutingAlgorithm};
+use axum::{extract::Path, Json};
+use diesel::{associations::HasTable, ExpressionMethods};
+use error_stack::ResultExt;
 
 use crate::app::get_tenant_app_state;
 
@@ -58,7 +64,7 @@ pub async fn routing_create(
 
 use crate::storage::schema::routing_algorithm_mapper::dsl as mapper_dsl;
 pub async fn activate_routing_rule(
-    Json(payload): Json<ActivateRoutingRule>,
+    Json(payload): Json<RoutingAlgorithmMapper>,
 ) -> Result<(), ContainerError<EuclidErrors>> {
     let state = get_tenant_app_state().await;
     // TODO: Update the RoutingAlgorithmMapper table here with new  rule_id
@@ -66,17 +72,27 @@ pub async fn activate_routing_rule(
     // If yes go on with updating the rule_id inplace.
     // If not create a new entry in RoutingAlgorithmMapper table.
 
-    let mut conn = &state.db.get_conn().await.map_err(|_| EuclidErrors::StorageError)?;
+    let mut conn = &state
+        .db
+        .get_conn()
+        .await
+        .map_err(|_| EuclidErrors::StorageError)?;
     let predicate = mapper_dsl::created_by.eq(payload.created_by.clone());
     let values = RoutingAlgorithmMapperUpdate {
-            routing_algorithm_id: payload.routing_algorithm_id.clone(),
-        };
+        routing_algorithm_id: payload.routing_algorithm_id.clone(),
+    };
 
-    match crate::generics::generic_update::<RoutingAlgorithmMapperUpdate, _, _>(conn, predicate, values).await {
+    match crate::generics::generic_update::<
+        <RoutingAlgorithmMapper as HasTable>::Table,
+        RoutingAlgorithmMapperUpdate,
+        _,
+    >(conn, predicate, values)
+    .await
+    {
         Ok(rows_affected) if rows_affected > 0 => Ok(()),
         Ok(_) => {
             // call generic_insert::<...>(...) here if needed
-            return Ok(())
+            return Ok(());
         }
         Err(err) => return Err(EuclidErrors::StorageError.into()),
     }
@@ -85,8 +101,8 @@ pub async fn activate_routing_rule(
 pub async fn list_all_routing_algorithm_id(
     Path(created_by): Path<String>,
 ) -> Result<(), ContainerError<EuclidErrors>> {
-// TODO: find all the routing_algorithm_ids created by this creator.
-Ok(())
+    // TODO: find all the routing_algorithm_ids created by this creator.
+    Ok(())
 }
 
 pub async fn routing_evaluate(

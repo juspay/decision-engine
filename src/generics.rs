@@ -16,17 +16,17 @@ use diesel::{
     helper_types::Filter,
     insertable::CanInsertInSingleQuery,
     mysql::Mysql,
-    query_builder::{InsertStatement, IntoUpdateTarget},
     query_builder::QueryFragment,
     query_builder::UpdateStatement,
-    AsChangeset,
+    query_builder::{InsertStatement, IntoUpdateTarget},
     query_dsl::{
         methods::{FilterDsl, FindDsl, LimitDsl},
         LoadQuery, RunQueryDsl,
     },
     result::Error as DieselError,
-    Insertable, MysqlConnection, Table,
+    AsChangeset, Insertable, MysqlConnection, Table,
 };
+use error_stack::ResultExt;
 
 // use crate::{errors, MysqlPooledConn, StorageResult};
 
@@ -68,7 +68,7 @@ where
     <T as QuerySource>::FromClause: QueryFragment<Mysql> + Debug,
     <V as Insertable<T>>::Values: CanInsertInSingleQuery<Mysql> + QueryFragment<Mysql> + 'static,
     InsertStatement<T, <V as Insertable<T>>::Values>:
-        AsQuery + ExecuteDsl< MysqlConnection, Mysql> + Send,
+        AsQuery + ExecuteDsl<MysqlConnection, Mysql> + Send,
 {
     let mut conn = storage.get_conn().await.map_err(|_| MeshError::Others)?;
     generic_insert_core::<T, _>(&mut conn, values).await
@@ -76,20 +76,19 @@ where
 
 pub async fn generic_insert_core<T, V>(conn: &MysqlPoolConn, values: V) -> StorageResult<usize>
 where
-    T: HasTable<Table = T> + Table + 'static + Debug ,
+    T: HasTable<Table = T> + Table + 'static + Debug,
     V: Debug + Insertable<T>,
     <T as QuerySource>::FromClause: QueryFragment<Mysql> + Debug,
     <V as Insertable<T>>::Values: CanInsertInSingleQuery<Mysql> + QueryFragment<Mysql> + 'static,
     InsertStatement<T, <V as Insertable<T>>::Values>:
-        AsQuery + ExecuteDsl< MysqlConnection, Mysql> + Send,
+        AsQuery + ExecuteDsl<MysqlConnection, Mysql> + Send,
 {
     let debug_values = format!("{values:?}");
 
     let query = diesel::insert_into(<T as HasTable>::table()).values(values);
     logger::debug!(query = %debug_query::<Mysql, _>(&query).to_string());
 
-    match track_database_call::<T, _, _>(query.execute_async(conn), DatabaseOperation::Insert)
-        .await
+    match track_database_call::<T, _, _>(query.execute_async(conn), DatabaseOperation::Insert).await
     {
         Ok(value) => Ok(value),
         Err(err) => {
@@ -119,15 +118,14 @@ where
     let query = diesel::update(<T as HasTable>::table().filter(predicate)).set(values);
     logger::debug!(query = %debug_query::<Mysql, _>(&query).to_string());
 
-    match track_database_call::<T, _, _>(query.execute_async(conn), DatabaseOperation::Update)
-        .await
-        {
-            Ok(value) => Ok(value),
-            Err(err) => {
-                print!("Error while updating: {:?} {:?}", err, debug_values);
-                Err(MeshError::NotFound)
-            }
+    match track_database_call::<T, _, _>(query.execute_async(conn), DatabaseOperation::Update).await
+    {
+        Ok(value) => Ok(value),
+        Err(err) => {
+            print!("Error while updating: {:?} {:?}", err, debug_values);
+            Err(MeshError::NotFound)
         }
+    }
 }
 
 pub async fn generic_find_all<T, P, R>(storage: &Storage, predicate: P) -> StorageResult<Vec<R>>
