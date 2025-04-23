@@ -258,14 +258,7 @@ pub fn calculate_total_fees_per_network(
     amount: f64,
 ) -> CustomResult<Option<Vec<(gatewaydecider::types::NETWORK, f64)>>, error::ApiError> {
     logger::debug!("Calculating total fees per network");
-    let routing_config = &app_state
-        .config
-        .routing_config
-        .clone()
-        .ok_or(error::ApiError::UnknownError)
-        .attach_printable("Missing routing config for debit routing")?;
-
-    let debit_routing_config = &routing_config.debit_routing_config;
+    let debit_routing_config = &app_state.config.debit_routing_config.clone();
 
     co_badged_cards_info
         .co_badged_card_networks
