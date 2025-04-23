@@ -1,88 +1,96 @@
-API REFERENCE
+# API REFERENCE
 
-Sample curl for decide-gateway
+## Decision Gateway API
 
-Request:
+### Sample curl for decide-gateway
 
+#### Request:
+```bash
 curl --location 'http://localhost:8080/decide-gateway' \
 --header 'Content-Type: application/json' \
---data '{ 
-        "merchantId": "test_merchant1",<br>
-        "eligibleGatewayList": ["GatewayA", "GatewayB", "GatewayC"],<br>
-        "rankingAlgorithm": "SR_BASED_ROUTING",<br>
-        "eliminationEnabled": true,<br>
-        "paymentInfo": {<br>
-            "paymentId": "PAY12359",<br>
-            "amount": 100.50,<br>
-            "currency": "USD",<br>
-            "customerId": "CUST12345",<br>
-            "udfs": null,<br>
-            "preferredGateway": null,<br>
-            "paymentType": "ORDER_PAYMENT",<br>
-            "metadata": null,<br>
-            "internalMetadata": null,<br>
-            "isEmi": false,<br>
-            "emiBank": null,<br>
-            "emiTenure": null,<br>
-            "paymentMethodType": "UPI",<br>
-            "paymentMethod": "UPI_PAY",<br>
-            "paymentSource": null,<br>
-            "authType": null,<br>
-            "cardIssuerBankName": null,<br>
-            "cardIsin": null,<br>
-            "cardType": null,<br>
-            "cardSwitchProvider": null<br>
-        }<br>
-}'<br>
+--data '{           
+        "merchantId": "test_merchant1",
+        "eligibleGatewayList": ["GatewayA", "GatewayB", "GatewayC"],
+        "rankingAlgorithm": "SR_BASED_ROUTING",
+        "eliminationEnabled": true,
+        "paymentInfo": {
+            "paymentId": "PAY12359",
+            "amount": 100.50,
+            "currency": "USD",
+            "customerId": "CUST12345",
+            "udfs": null,
+            "preferredGateway": null,
+            "paymentType": "ORDER_PAYMENT",
+            "metadata": null,
+            "internalMetadata": null,
+            "isEmi": false,
+            "emiBank": null,
+            "emiTenure": null,
+            "paymentMethodType": "UPI",
+            "paymentMethod": "UPI_PAY",
+            "paymentSource": null,
+            "authType": null,
+            "cardIssuerBankName": null,
+            "cardIsin": null,
+            "cardType": null,
+            "cardSwitchProvider": null
+        }
+}'
+```
 
-Response:
+#### Response:
+```json
+{
+    "decided_gateway": "GatewayA",
+    "gateway_priority_map": {
+        "GatewayA": 1.0,
+        "GatewayB": 1.0,
+        "GatewayC": 1.0
+    },
+    "filter_wise_gateways": null,
+    "priority_logic_tag": null,
+    "routing_approach": "SR_SELECTION_V3_ROUTING",
+    "gateway_before_evaluation": "GatewayA",
+    "priority_logic_output": {
+        "isEnforcement": false,
+        "gws": [
+            "GatewayA",
+            "GatewayB",
+            "GatewayC"
+        ],
+        "priorityLogicTag": null,
+        "gatewayReferenceIds": {},
+        "primaryLogic": null,
+        "fallbackLogic": null
+    },
+    "reset_approach": "NO_RESET",
+    "routing_dimension": "ORDER_PAYMENT, UPI, UPI_PAY",
+    "routing_dimension_level": "PM_LEVEL",
+    "is_scheduled_outage": false,
+    "is_dynamic_mga_enabled": false,
+    "gateway_mga_id_map": null
+}
+```
 
-{<br>
-    "decided_gateway": "GatewayA",<br>
-    "gateway_priority_map": {<br>
-        "GatewayA": 1.0,<br>
-        "GatewayB": 1.0,<br>
-        "GatewayC": 1.0<br>
-    },<br>
-    "filter_wise_gateways": null,<br>
-    "priority_logic_tag": null,<br>
-    "routing_approach": "SR_SELECTION_V3_ROUTING",<br>
-    "gateway_before_evaluation": "GatewayA",<br>
-    "priority_logic_output": {<br>
-        "isEnforcement": false,<br>
-        "gws": [<br>
-            "GatewayA",<br>
-            "GatewayB",<br>
-            "GatewayC"<br>
-        ],<br>
-        "priorityLogicTag": null,<br>
-        "gatewayReferenceIds": {},<br>
-        "primaryLogic": null,<br>
-        "fallbackLogic": null<br>
-    },<br>
-    "reset_approach": "NO_RESET",<br>
-    "routing_dimension": "ORDER_PAYMENT, UPI, UPI_PAY",<br>
-    "routing_dimension_level": "PM_LEVEL",<br>
-    "is_scheduled_outage": false,<br>
-    "is_dynamic_mga_enabled": false,<br>
-    "gateway_mga_id_map": null<br>
-}<br>
+## Update Gateway Score API
 
+### Sample curl for update-gateway-score
 
-Sample curl for update-gateway-score<br>
-
+#### Request:
+```bash
 curl --location 'http://localhost:8080/update-gateway-score' \
 --header 'Content-Type: application/json' \
 --data '{
   "merchantId" : "test_merchant1",
-  "gateway": "RAZORPAY",<br>
-  "gatewayReferenceId": null,<br>
-  "status": "FAILURE",<br>
-  "paymentId": "PAY12359",<br>
-  "enforceDynamicRoutingFailure" : null<br>
+  "gateway": "RAZORPAY",
+  "gatewayReferenceId": null,
+  "status": "FAILURE",
+  "paymentId": "PAY12359",
+  "enforceDynamicRoutingFailure" : null
 }'
-<br>
+```
 
-Response:
-
+#### Response:
+```
 Success
+```
