@@ -1,4 +1,4 @@
-use crate::euclid::{errors::EuclidErrors, types::ActivateRoutingRule};
+use crate::{euclid::{errors::EuclidErrors, types::{ActivateRoutingRule, RoutingAlgorithmMapperUpdate}}, storage::schema::routing_algorithm_mapper};
 use axum::{extract::Path, Json};
 use crate::{logger, storage::types::RoutingAlgorithm};
 use error_stack::ResultExt;
@@ -56,14 +56,30 @@ pub async fn routing_create(
     }
 }
 
+use crate::storage::schema::routing_algorithm_mapper::dsl as mapper_dsl;
 pub async fn activate_routing_rule(
     Json(payload): Json<ActivateRoutingRule>,
 ) -> Result<(), ContainerError<EuclidErrors>> {
-// TODO: Update the RoutingAlgorithmMapper table here with new  rule_id
+    let state = get_tenant_app_state().await;
+    // TODO: Update the RoutingAlgorithmMapper table here with new  rule_id
     // Find whether this merchant previously has an entry in mapper table
     // If yes go on with updating the rule_id inplace.
     // If not create a new entry in RoutingAlgorithmMapper table.
-Ok(())
+
+    let mut conn = &state.db.get_conn().await.map_err(|_| EuclidErrors::StorageError)?;
+    let predicate = mapper_dsl::created_by.eq(payload.created_by.clone());
+    let values = RoutingAlgorithmMapperUpdate {
+            routing_algorithm_id: payload.routing_algorithm_id.clone(),
+        };
+
+    match crate::generics::generic_update::<RoutingAlgorithmMapperUpdate, _, _>(conn, predicate, values).await {
+        Ok(rows_affected) if rows_affected > 0 => Ok(()),
+        Ok(_) => {
+            // call generic_insert::<...>(...) here if needed
+            return Ok(())
+        }
+        Err(err) => return Err(EuclidErrors::StorageError.into()),
+    }
 }
 
 pub async fn list_all_routing_algorithm_id(

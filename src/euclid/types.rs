@@ -1,4 +1,5 @@
 use crate::euclid::ast::{Output, Program, ValueType};
+use diesel::prelude::AsChangeset;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt, ops::Deref};
 
@@ -66,9 +67,17 @@ pub struct RoutingEvaluateResponse {
     pub eligible_connectors: Vec<String>,
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+use crate::storage::schema::routing_algorithm_mapper;
+#[derive(AsChangeset, Debug, serde::Serialize, serde::Deserialize)]
+#[diesel(table_name = routing_algorithm_mapper)]
 pub struct ActivateRoutingRule {
     pub created_by: String,
+    pub routing_algorithm_id: String,
+}
+
+#[derive(AsChangeset, Debug, serde::Serialize, serde::Deserialize)]
+#[diesel(table_name = routing_algorithm_mapper)]
+pub struct RoutingAlgorithmMapperUpdate {
     pub routing_algorithm_id: String,
 }
 

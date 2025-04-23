@@ -504,6 +504,15 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    routing_algorithm_mapper (created_by) {
+        #[max_length = 255]
+        created_by -> Varchar,
+        #[max_length = 255]
+        routing_algorithm_id -> Varchar,
+    }
+}
+
 diesel::allow_tables_to_appear_in_same_query!(
     card_brand_routes,
     card_info,
