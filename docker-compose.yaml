@@ -21,7 +21,7 @@ services:
     networks:
       - open-router-network
     environment:
-      - GROOVY_RUNNER_HOST=http://host.docker.internal:8085
+      - GROOVY_RUNNER_HOST=host.docker.internal:8085
 
   open-router-local:
     build:
@@ -46,7 +46,7 @@ services:
     networks:
       - open-router-network
     environment:
-      - GROOVY_RUNNER_HOST=http://host.docker.internal:8085
+      - GROOVY_RUNNER_HOST=host.docker.internal:8085
 
   groovy-runner:
     image: ghcr.io/juspay/open-router/groovy-runner:main
@@ -69,6 +69,13 @@ services:
     build:
       context: .
       dockerfile: groovy.Dockerfile
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+      cache_from:
+        - groovy-runner-local:latest
+      labels:
+        - "com.docker.compose.watchfile=groovy.Dockerfile"
+        - "com.docker.compose.watchfile=src/Runner.groovy"
     platform: linux/amd64
     container_name: groovy-runner
     restart: unless-stopped

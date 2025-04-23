@@ -2435,7 +2435,7 @@ pub async fn get_consumer_key(
                 None => "NULL".to_string(),
                 Some(ref_id) => ref_id.mga_reference_id,
             };
-            map.insert(format!("{:?}", gateway), Some(val));
+            map.insert(gateway.clone(), Some(val));
             map
         });
         set_gw_ref_id(decider_flow, gw_ref_ids.values().next().cloned().flatten());
@@ -2445,7 +2445,7 @@ pub async fn get_consumer_key(
         gateway_list
             .iter()
             .fold(HashMap::new(), |mut acc, gateway| {
-                acc.insert(format!("{:?}", gateway), None);
+                acc.insert(gateway.clone(), None);
                 acc
             })
     };
