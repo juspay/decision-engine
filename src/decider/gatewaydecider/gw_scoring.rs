@@ -507,7 +507,7 @@ pub async fn get_cached_scores_based_on_srv3(
 
     let mut score_map = GatewayScoreMap::new();
     for gw in functional_gateways.clone() {
-        if let Some(key) = sr_gateway_redis_key_map.get(&format!("{:?}", gw)) {
+        if let Some(key) = sr_gateway_redis_key_map.get(&gw) {
             let score = get_score_from_redis(merchant_bucket_size, key).await;
             score_map.insert(gw, score);
         }
@@ -2528,7 +2528,7 @@ pub async fn update_gateway_score_based_on_success_rate(
                             sr_based_elimination_approach_info,
                         )
                     };
-
+                
                 let gateway_decider_approach =
                                     Utils::modify_gateway_decider_approach(gateway_decider_approach.clone(), downtime);
 
