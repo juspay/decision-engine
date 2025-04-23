@@ -495,6 +495,7 @@ diesel::table! {
 diesel::table! {
     routing_algorithm (id) {
         id -> Text,
+        created_by -> Text,
         name -> Text,
         description -> Nullable<Text>,
         algorithm_data -> Text,

@@ -1,9 +1,13 @@
 use crate::euclid::ast::{Output, Program, ValueType};
 use diesel::prelude::AsChangeset;
-use diesel::Identifiable;
+use diesel::Identifiable;use diesel::Insertable;
 use diesel::{Queryable, Selectable};
 use serde::{Deserialize, Serialize};
+use time::PrimitiveDateTime;
 use std::{collections::HashMap, fmt, ops::Deref};
+use crate::storage::schema;
+
+use super::utils::generate_random_id;
 
 pub type Metadata = HashMap<String, serde_json::Value>;
 
@@ -21,12 +25,13 @@ pub enum DataType {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RoutingRule {
     pub name: String,
+    pub created_by: String,
     pub algorithm: Program,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct RoutingRequest {
-    pub routing_id: String,
+    pub created_by: String,
     pub parameters: HashMap<String, Option<ValueType>>,
 }
 
@@ -69,18 +74,43 @@ pub struct RoutingEvaluateResponse {
     pub eligible_connectors: Vec<String>,
 }
 
-use crate::storage::schema::routing_algorithm_mapper;
+// #[derive(AsChangeset, Debug, Clone, Identifiable, Insertable, Queryable, Selectable)]
+#[derive(AsChangeset, Insertable, Debug, serde::Serialize, serde::Deserialize, Identifiable, Queryable)]
+#[diesel(table_name = schema::routing_algorithm)]
+pub struct RoutingAlgorithm {
+    pub id: String,
+    pub created_by: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub algorithm_data: String,
+    pub created_at: PrimitiveDateTime,
+    pub modified_at: PrimitiveDateTime,
+}
 
-#[derive(AsChangeset, Debug, serde::Serialize, serde::Deserialize, Identifiable, Queryable)]
-#[diesel(table_name = routing_algorithm_mapper)]
+
+#[derive(AsChangeset, Insertable, Debug, serde::Serialize, serde::Deserialize, Identifiable, Queryable)]
+#[diesel(table_name = schema::routing_algorithm_mapper)]
 pub struct RoutingAlgorithmMapper {
     pub id: String,
     pub created_by: String,
     pub routing_algorithm_id: String,
 }
 
+impl RoutingAlgorithmMapper {
+    pub fn new(
+        created_by: String,
+        routing_algorithm_id: String,
+    ) -> Self {
+        Self {
+            id: generate_random_id("routing_mapper"),
+            created_by,
+            routing_algorithm_id
+        }
+    }
+}
+
 #[derive(AsChangeset, Debug, serde::Serialize, serde::Deserialize, Queryable, Selectable)]
-#[diesel(table_name = routing_algorithm_mapper)]
+#[diesel(table_name = schema::routing_algorithm_mapper)]
 pub struct RoutingAlgorithmMapperUpdate {
     pub routing_algorithm_id: String,
 }

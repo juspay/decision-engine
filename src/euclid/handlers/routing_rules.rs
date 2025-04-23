@@ -15,7 +15,7 @@ use crate::{
     },
     storage::schema::routing_algorithm_mapper,
 };
-use crate::{logger, storage::types::RoutingAlgorithm};
+use crate::{logger, euclid::types::RoutingAlgorithm};
 use axum::{extract::Path, Json};
 use diesel::{associations::HasTable, ExpressionMethods};
 use error_stack::ResultExt;
@@ -43,6 +43,7 @@ pub async fn routing_create(
     if let Ok(data) = data {
         let new_algo = RoutingAlgorithm {
             id: algorithm_id.clone(),
+            created_by: config.created_by,
             name: "My Algo".into(),
             description: Some("Test algo".into()),
             algorithm_data: serde_json::to_string(&data).unwrap(),
@@ -67,8 +68,8 @@ pub async fn activate_routing_rule(
     Json(payload): Json<RoutingAlgorithmMapper>,
 ) -> Result<(), ContainerError<EuclidErrors>> {
     let state = get_tenant_app_state().await;
-    // TODO: Update the RoutingAlgorithmMapper table here with new  rule_id
-    // Find whether this merchant previously has an entry in mapper table
+    // Update the RoutingAlgorithmMapper table here with new rule_id
+    // Find whether this creator previously has an entry in mapper table
     // If yes go on with updating the rule_id inplace.
     // If not create a new entry in RoutingAlgorithmMapper table.
 
@@ -91,7 +92,14 @@ pub async fn activate_routing_rule(
     {
         Ok(rows_affected) if rows_affected > 0 => Ok(()),
         Ok(_) => {
-            // call generic_insert::<...>(...) here if needed
+            // Creator is non-existent in mapper table
+            let mapper_entry = RoutingAlgorithmMapper::new(
+                payload.created_by,
+                payload.routing_algorithm_id
+            );
+            crate::generics::generic_insert(&state.db, mapper_entry)
+                .await
+                .map_err(|_| ContainerError::from(EuclidErrors::StorageError))?;
             return Ok(());
         }
         Err(err) => return Err(EuclidErrors::StorageError.into()),
@@ -100,8 +108,17 @@ pub async fn activate_routing_rule(
 
 pub async fn list_all_routing_algorithm_id(
     Path(created_by): Path<String>,
+// ) -> Result<Vec<RoutingAlgorithm>, ContainerError<EuclidErrors>> {
 ) -> Result<(), ContainerError<EuclidErrors>> {
-    // TODO: find all the routing_algorithm_ids created by this creator.
+    let state = get_tenant_app_state().await;
+    let res = crate::generics::generic_find_all::<
+            <RoutingAlgorithm as HasTable>::Table,
+            _,
+            RoutingAlgorithm,
+        >(&state.db, dsl::created_by.eq(created_by))
+        .await
+        .change_context(EuclidErrors::StorageError)?;
+    println!(">>>>>>>>>>>>>>>{:?}",res);
     Ok(())
 }
 
@@ -111,8 +128,18 @@ pub async fn routing_evaluate(
     let state = get_tenant_app_state().await;
     logger::debug!(
         "Received routing evaluation request for ID: {}",
-        payload.routing_id
+        payload.created_by
     );
+
+    // fetch the active routing_algorithm of the merchant
+    let routing_algorithm_id = crate::generics::generic_find_one::<
+        <RoutingAlgorithmMapper as HasTable>::Table,
+        _,
+        RoutingAlgorithmMapper,
+    >(&state.db, mapper_dsl::created_by.eq(payload.created_by.clone()))
+    .await
+    //PKTODO: add error to let merchant know that he didn't activate a routing rule.
+    .change_context(EuclidErrors::StorageError)?.routing_algorithm_id;
 
     let parameters = payload.parameters.clone();
 
@@ -148,12 +175,13 @@ pub async fn routing_evaluate(
         }
     }
 
-    let payload_clone = payload.routing_id.clone();
+    let payload_clone = payload.created_by.clone();
+
     let algorithm = crate::generics::generic_find_one::<
         <RoutingAlgorithm as HasTable>::Table,
         _,
         RoutingAlgorithm,
-    >(&state.db, dsl::id.eq(payload_clone))
+    >(&state.db, dsl::id.eq(routing_algorithm_id))
     .await
     .change_context(EuclidErrors::StorageError)?;
 

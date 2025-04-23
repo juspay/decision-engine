@@ -511,13 +511,3 @@ pub struct UserEligibilityInfo {
     pub disabled: Option<BitBool>,
 }
 
-#[derive(Debug, Clone, Identifiable, Insertable, Queryable)]
-#[diesel(table_name = schema::routing_algorithm)]
-pub struct RoutingAlgorithm {
-    pub id: String,
-    pub name: String,
-    pub description: Option<String>,
-    pub algorithm_data: String,
-    pub created_at: PrimitiveDateTime,
-    pub modified_at: PrimitiveDateTime,
-}
