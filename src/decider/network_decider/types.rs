@@ -1,13 +1,11 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::decider::gatewaydecider;
 use crate::error;
-use crate::types::currency;
+use crate::utils::CustomResult;
 use diesel::sql_types;
 use error_stack::{Report, ResultExt};
 use serde::{Deserialize, Serialize};
-
-use crate::decider::network_decider::utils::{deserialize_hashmap, deserialize_hashset};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoBadgedCardRequest {
@@ -26,9 +24,10 @@ impl TryInto<CoBadgedCardRequest> for serde_json::Value {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, strum::EnumString, strum::Display)]
 #[serde(rename_all = "snake_case")]
 pub enum MerchantCategoryCode {
+    #[serde(rename = "merchant_category_code_0001")]
     Mcc0001,
 }
 
@@ -161,14 +160,44 @@ pub struct DebitRoutingOutput {
 pub struct DebitRoutingConfig {
     pub network_fee: HashMap<gatewaydecider::types::NETWORK, NetworkProcessingData>,
     pub interchange_fee: NetworkInterchangeFee,
-    #[serde(deserialize_with = "deserialize_hashmap")]
-    pub connector_supported_debit_networks:
-        HashMap<Connector, HashSet<gatewaydecider::types::NETWORK>>,
-    #[serde(deserialize_with = "deserialize_hashset")]
-    pub supported_currencies: HashSet<currency::Currency>,
-    #[serde(deserialize_with = "deserialize_hashset")]
-    pub supported_connectors: HashSet<Connector>,
     pub fraud_check_fee: f64,
+}
+
+impl DebitRoutingConfig {
+    pub fn get_non_regulated_interchange_fee(
+        &self,
+        merchant_category_code: &str,
+        network: &gatewaydecider::types::NETWORK,
+    ) -> CustomResult<&NetworkProcessingData, error::ApiError> {
+        self.interchange_fee
+            .non_regulated
+            .0
+            .get(merchant_category_code)
+            .ok_or(error::ApiError::MissingRequiredField(
+                "interchange fee for merchant category code",
+            ))?
+            .get(network)
+            .ok_or(error::ApiError::MissingRequiredField(
+                "interchange fee for non regulated",
+            ))
+            .attach_printable(
+                "Failed to fetch interchange fee for non regulated banks in debit routing",
+            )
+    }
+
+    pub fn get_network_fee(
+        &self,
+        network: &gatewaydecider::types::NETWORK,
+    ) -> CustomResult<&NetworkProcessingData, error::ApiError> {
+        Ok(self.network_fee
+            .get(network)
+            .ok_or(error::ApiError::MissingRequiredField(
+                "interchange fee for non regulated",
+            ))
+            .attach_printable(
+                "Failed to fetch interchange fee for non regulated banks in debit routing",
+            )?)
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
@@ -212,152 +241,4 @@ impl From<DebitRoutingRequestData> for CoBadgedCardInfoResponse {
             card_type: co_badged_card_data.card_type,
         }
     }
-}
-
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    PartialEq,
-    serde::Deserialize,
-    serde::Serialize,
-    strum::VariantNames,
-    strum::EnumIter,
-    strum::Display,
-    strum::EnumString,
-    diesel::AsExpression,
-    diesel::FromSqlRow,
-    Hash,
-)]
-#[diesel(sql_type = sql_types::Text)]
-#[serde(rename_all = "snake_case")]
-#[strum(serialize_all = "snake_case")]
-pub enum Connector {
-    Adyenplatform,
-    #[cfg(feature = "dummy_connector")]
-    #[serde(rename = "phonypay")]
-    #[strum(serialize = "phonypay")]
-    DummyConnector1,
-    #[cfg(feature = "dummy_connector")]
-    #[serde(rename = "fauxpay")]
-    #[strum(serialize = "fauxpay")]
-    DummyConnector2,
-    #[cfg(feature = "dummy_connector")]
-    #[serde(rename = "pretendpay")]
-    #[strum(serialize = "pretendpay")]
-    DummyConnector3,
-    #[cfg(feature = "dummy_connector")]
-    #[serde(rename = "stripe_test")]
-    #[strum(serialize = "stripe_test")]
-    DummyConnector4,
-    #[cfg(feature = "dummy_connector")]
-    #[serde(rename = "adyen_test")]
-    #[strum(serialize = "adyen_test")]
-    DummyConnector5,
-    #[cfg(feature = "dummy_connector")]
-    #[serde(rename = "checkout_test")]
-    #[strum(serialize = "checkout_test")]
-    DummyConnector6,
-    #[cfg(feature = "dummy_connector")]
-    #[serde(rename = "paypal_test")]
-    #[strum(serialize = "paypal_test")]
-    DummyConnector7,
-    Aci,
-    Adyen,
-    Airwallex,
-    // Amazonpay,
-    Authorizedotnet,
-    Bambora,
-    Bamboraapac,
-    Bankofamerica,
-    Billwerk,
-    Bitpay,
-    Bluesnap,
-    Boku,
-    Braintree,
-    Cashtocode,
-    Chargebee,
-    Checkout,
-    Coinbase,
-    Coingate,
-    Cryptopay,
-    CtpMastercard,
-    CtpVisa,
-    Cybersource,
-    Datatrans,
-    Deutschebank,
-    Digitalvirgo,
-    Dlocal,
-    Ebanx,
-    Elavon,
-    // Facilitapay,
-    Fiserv,
-    Fiservemea,
-    Fiuu,
-    Forte,
-    Getnet,
-    Globalpay,
-    Globepay,
-    Gocardless,
-    Gpayments,
-    Hipay,
-    Helcim,
-    Inespay,
-    Iatapay,
-    Itaubank,
-    Jpmorgan,
-    Juspaythreedsserver,
-    Klarna,
-    Mifinity,
-    Mollie,
-    Moneris,
-    Multisafepay,
-    Netcetera,
-    Nexinets,
-    Nexixpay,
-    Nmi,
-    Nomupay,
-    Noon,
-    Novalnet,
-    Nuvei,
-    // Opayo, added as template code for future usage
-    Opennode,
-    Paybox,
-    // Payeezy, As psync and rsync are not supported by this connector, it is added as template code for future usage
-    Payme,
-    Payone,
-    Paypal,
-    Paystack,
-    Payu,
-    Placetopay,
-    Powertranz,
-    Prophetpay,
-    Rapyd,
-    Razorpay,
-    Recurly,
-    Redsys,
-    Shift4,
-    Square,
-    Stax,
-    Stripe,
-    // Stripebilling,
-    Taxjar,
-    Threedsecureio,
-    //Thunes,
-    Trustpay,
-    Tsys,
-    // UnifiedAuthenticationService,
-    Volt,
-    Wellsfargo,
-    // Wellsfargopayout,
-    Wise,
-    Worldline,
-    Worldpay,
-    Signifyd,
-    Plaid,
-    Riskified,
-    Xendit,
-    Zen,
-    Zsl,
 }
