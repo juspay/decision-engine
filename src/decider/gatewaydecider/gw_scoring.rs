@@ -796,7 +796,7 @@ pub async fn reset_sr_v3_score(
         .iter()
         .filter_map(|(gw, score)| {
             sr_gateway_redis_key_map
-                .get(&format!("{:?}", gw))
+                .get(&format!("{}", gw))
                 .map(|key| (key.clone(), *score))
         })
         .collect();
@@ -862,7 +862,7 @@ pub fn prepare_log_curr_score(
     score: f64,
 ) -> &Vec<LogCurrScore> {
     acc.push(LogCurrScore {
-        gateway: format!("{:?}", gw),
+        gateway: format!("{}", gw),
         current_score: score,
     });
     acc
@@ -2599,7 +2599,7 @@ pub async fn update_current_score(
     i: ETGRI::GatewayWiseSuccessRateBasedRoutingInput,
 ) -> ETGRI::GatewayWiseSuccessRateBasedRoutingInput {
     let redis_key = gateway_redis_key_map
-        .get(&format!("{:?}", i.gateway))
+        .get(&format!("{}", i.gateway))
         .unwrap_or(&String::new())
         .to_string();
     let txn_detail = decider_flow.get().dpTxnDetail.clone();
