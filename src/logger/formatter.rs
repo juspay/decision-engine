@@ -199,7 +199,11 @@ where
                 if let Some(visitor) = extensions.get::<Storage<'_>>() {
                     for key in &incoming_api_keys {
                         if let Some(value) = visitor.values.get(*key) {
-                            map_serializer.serialize_entry(*key, value)?;
+                            if let Some(value) = storage.values.get(*key) {
+                                if !value.is_null() {
+                                    map_serializer.serialize_entry(*key, value)?;
+                                }
+                            }
                             explicit_entries_set.insert(*key);
                         }
                     }
@@ -258,6 +262,10 @@ where
             if !explicit_entries_set.contains("level"){ 
                 map_serializer.serialize_entry("level", &Value::String("Info".to_string()))?;
                 explicit_entries_set.insert("level");
+            }
+            if !explicit_entries_set.contains("cell_id"){ 
+                map_serializer.serialize_entry("cell_id", &get_env_var("CELL_ID", "null"))?;
+                explicit_entries_set.insert("cell_id");
             }
 
         } else {
@@ -329,18 +337,31 @@ where
             }
 
         }
+        if !explicit_entries_set.contains("is_art_enabled"){
+            map_serializer.serialize_entry("is_art_enabled", "false")?;
+            explicit_entries_set.insert("is_art_enabled");
+        }
 
         // Serialize other common fields.
         map_serializer.serialize_entry("timestamp", &format_time_custom())?;
         map_serializer.serialize_entry("app_framework", "Rust")?;
         map_serializer.serialize_entry("hostname", &self.hostname)?;
         map_serializer.serialize_entry("source_commit", &get_env_var("SOURCE_COMMIT", "NA"))?;
-        map_serializer.serialize_entry("env", &get_env_var("ENV", "unknown"))?;
+        if let Ok(env) = std::env::var("ENV") {
+            map_serializer.serialize_entry("env", &env)?;
+        }
+
+        if let Ok(source_commit) = std::env::var("SOURCE_COMMIT") {
+            map_serializer.serialize_entry("source_commit", &source_commit)?;
+        }
         map_serializer.serialize_entry(TARGET, metadata.target())?;
         map_serializer.serialize_entry(SERVICE, &self.service)?;
         map_serializer.serialize_entry(LINE, &metadata.line())?;
         map_serializer.serialize_entry(FILE, &metadata.file())?;
-        map_serializer.serialize_entry(FN, name)?;
+        if name != "?" {
+            map_serializer.serialize_entry(FN, name)?;
+            map_serializer.serialize_entry(FULL_NAME, &format!("{}::{}", metadata.target(), name))?;
+        }
         map_serializer.serialize_entry(FULL_NAME, &format_args!("{}::{}", metadata.target(), name))?;
         map_serializer.serialize_entry("message_number", &MESSAGE_NUMBER.fetch_add(1, Ordering::SeqCst))?;
         explicit_entries_set.insert("message_number");

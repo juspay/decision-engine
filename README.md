@@ -27,13 +27,13 @@ To learn more, refer to this blog: [https://juspay.io/blog/juspay-orchestrator-a
 
 ## Try it out
  
- Check the [SETUP.md](/crates/open-router/SETUP.md) for detailed steps to try out the application.
+ Check the [SETUP.md](/docs/setup-guide1.md) for detailed steps to try out the application.
 
 
 
 ## API Reference : 
 
-Check the [API_REFERENCE.md](/crates/open-router/API_REFERENCE.md) for more details
+Check the [API_REFERENCE.md](/docs/api-reference1.md) for more details
 
 
 ## Support, Feature Requests, Bugs 

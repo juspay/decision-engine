@@ -420,7 +420,7 @@ pub async fn updateQueue(
     queue_key: String,
     score_key: String,
     value: String,
-) -> Result<Vec<String>, Option<String>> {
+) -> Result<Option<String>, error_stack::Report<redis_interface::errors::RedisError>>  {
     let app_state = get_tenant_app_state().await;
     let value_clone = value.clone();
     let r: Result<Vec<String>, error_stack::Report<redis_interface::errors::RedisError>> =
@@ -441,7 +441,7 @@ pub async fn updateQueue(
                     transaction.expire::<(), _>(&score_key, 10000000).await?;
 
                     // Remove from the end of the list
-                    transaction.rpop::<(), _>(&queue_key, None).await?;
+                    transaction.rpop::<String, _>(&queue_key, None).await?;
 
                     Ok(())
                 })
@@ -456,7 +456,7 @@ pub async fn updateQueue(
                 "Successfully updated queue in Redis: {:?}",
                 result
             );
-            Ok(result)
+            Ok(Some(result.last().cloned().unwrap_or_default()))
         }
         Err(e) => {
             logger::error!(
@@ -465,7 +465,7 @@ pub async fn updateQueue(
                 "Error while updating queue in Redis: {:?}",
                 e
             );
-            Ok(vec![value_clone])
+            Err(e)
         }
     }
 }
@@ -479,7 +479,7 @@ pub async fn updateMovingWindow(
 ) -> String {
     let either_res = updateQueue(redis_name, queue_key, score_key, value.clone()).await;
     match either_res {
-        Ok(maybe_val) => maybe_val.into_iter().next().unwrap_or(value),
+        Ok(maybe_val) => maybe_val.unwrap_or(value),
         Err(err) => {
             logger::error!(
                 action = "updateMovingWindow",
@@ -487,10 +487,6 @@ pub async fn updateMovingWindow(
                 "Error while updating queue in redis - returning input value: {:?}",
                 err
             );
-            // println!(
-            //     "Error while updating queue in redis - returning input value: {:?}",
-            //     err
-            // );
             value
         }
     }

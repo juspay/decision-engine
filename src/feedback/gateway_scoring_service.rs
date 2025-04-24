@@ -784,5 +784,5 @@ async fn checkExemptIfMandateTxn(txn_detail: &TxnDetail, txn_card_info: &TxnCard
 
 // Original Haskell function: isTransactionPending
 pub fn isTransactionPending(txnStatus: TxnStatus) -> bool {
-    txnStatus == TS::PendingVBV
+    txnStatus == TS::PendingVBV || txnStatus == TS::Started
 }
