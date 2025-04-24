@@ -1,10 +1,7 @@
 use error_stack::ResultExt;
 
 use crate::{
-    decider::{
-        gatewaydecider, network_decider::types,
-        storage::utils::co_badged_card_info::find_co_badged_cards_info_by_card_bin,
-    },
+    decider::{gatewaydecider, network_decider::types, storage::utils::co_badged_card_info},
     error, logger,
     storage::types::CoBadgedCardInfo,
     utils::CustomResult,
@@ -125,7 +122,7 @@ pub async fn get_co_badged_cards_info(
         )?;
 
     let co_badged_card_infos_record =
-        find_co_badged_cards_info_by_card_bin(app_state, parsed_number).await;
+        co_badged_card_info::find_co_badged_cards_info_by_card_bin(app_state, parsed_number).await;
 
     let filtered_co_badged_card_info_list_optional = match co_badged_card_infos_record {
         Err(error) => {
