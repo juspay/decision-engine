@@ -25,14 +25,13 @@ pub async fn perform_debit_routing(
         .flatten()
     {
         if let Ok(co_badged_card_request) = TryInto::try_into(metadata_value) {
-            if let Some(debit_routing_output) =
-                co_badged_card_info::get_sorted_co_badged_networks_by_fee(
-                    &app_state,
-                    card_isin_optional,
-                    amount,
-                    co_badged_card_request,
-                )
-                .await
+            if let Some(debit_routing_output) = co_badged_card_info::sorted_networks_by_fee(
+                &app_state,
+                card_isin_optional,
+                amount,
+                co_badged_card_request,
+            )
+            .await
             {
                 return Ok(gateway_decider_types::DecidedGateway {
                     // This field should not be consumed when the request is made to /decide-gateway with the rankingAlgorithm set to NTW_BASED_ROUTING.

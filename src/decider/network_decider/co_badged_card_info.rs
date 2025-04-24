@@ -295,7 +295,7 @@ pub fn sort_networks_by_fee(
         .collect()
 }
 
-pub async fn get_sorted_co_badged_networks_by_fee(
+pub async fn sorted_networks_by_fee(
     app_state: &app::TenantAppState,
     card_isin_optional: Option<String>,
     amount: f64,
