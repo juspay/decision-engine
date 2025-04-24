@@ -88,6 +88,34 @@ pub struct RoutingAlgorithm {
 }
 
 
+#[derive(Serialize)]
+pub struct JsonifiedRoutingAlgorithm {
+    pub id: String,
+    pub created_by: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub algorithm_data: serde_json::Value,
+    pub created_at: PrimitiveDateTime,
+    pub modified_at: PrimitiveDateTime,
+}
+
+impl From<RoutingAlgorithm> for JsonifiedRoutingAlgorithm {
+    fn from(ra: RoutingAlgorithm) -> Self {
+        let algorithm_data: serde_json::Value =
+            serde_json::from_str(&ra.algorithm_data).unwrap_or_else(|_| serde_json::Value::Null);
+
+        JsonifiedRoutingAlgorithm {
+            id: ra.id,
+            created_by: ra.created_by,
+            name: ra.name,
+            description: ra.description,
+            algorithm_data,
+            created_at: ra.created_at,
+            modified_at: ra.modified_at,
+        }
+    }
+}
+
 #[derive(AsChangeset, Insertable, Debug, serde::Serialize, serde::Deserialize, Identifiable, Queryable)]
 #[diesel(table_name = schema::routing_algorithm_mapper)]
 #[diesel(primary_key(created_by))]
