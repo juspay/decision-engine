@@ -3,9 +3,7 @@ use crate::decider::gatewaydecider::{
     types as gateway_decider_types, utils as gateway_decider_utils,
 };
 
-use crate::decider::network_decider::helpers;
-
-use super::co_badged_card_info;
+use crate::decider::network_decider::{helpers, types};
 
 pub async fn perform_debit_routing(
     decider_request: gateway_decider_types::DomainDeciderRequestForApiCallV2,
@@ -24,14 +22,12 @@ pub async fn perform_debit_routing(
         .map(|metadata_string| gateway_decider_utils::parse_json_from_string(&metadata_string))
         .flatten()
     {
-        if let Ok(co_badged_card_request) = TryInto::try_into(metadata_value) {
-            if let Some(debit_routing_output) = co_badged_card_info::sorted_networks_by_fee(
-                &app_state,
-                card_isin_optional,
-                amount,
-                co_badged_card_request,
-            )
-            .await
+        if let Ok(co_badged_card_request) =
+            TryInto::<types::CoBadgedCardRequest>::try_into(metadata_value)
+        {
+            if let Some(debit_routing_output) = co_badged_card_request
+                .sorted_networks_by_fee(&app_state, card_isin_optional, amount)
+                .await
             {
                 return Ok(gateway_decider_types::DecidedGateway {
                     // This field should not be consumed when the request is made to /decide-gateway with the rankingAlgorithm set to NTW_BASED_ROUTING.

@@ -64,7 +64,7 @@ impl CoBadgedCardInfoList {
 
     pub fn is_local_transaction(
         &self,
-        acquirer_country: types::CountryAlpha2,
+        acquirer_country: &types::CountryAlpha2,
     ) -> CustomResult<bool, error::ApiError> {
         logger::debug!("Validating if the transaction is local or international");
 
@@ -75,7 +75,7 @@ impl CoBadgedCardInfoList {
             .attach_printable("The filtered co-badged card info list is empty")?;
 
         let issuer_country = first_element.country_code;
-        Ok(acquirer_country == issuer_country)
+        Ok(*acquirer_country == issuer_country)
     }
 
     pub fn extract_networks(&self) -> Vec<gatewaydecider::types::NETWORK> {
@@ -109,7 +109,7 @@ impl CoBadgedCardInfoList {
 pub async fn get_co_badged_cards_info(
     app_state: &app::TenantAppState,
     card_isin: String,
-    acquirer_country: types::CountryAlpha2,
+    acquirer_country: &types::CountryAlpha2,
 ) -> CustomResult<Option<types::CoBadgedCardInfoResponse>, error::ApiError> {
     // pad the card number to 19 digits to match the co-badged card bin length
     let card_number_str = CoBadgedCardInfoList::pad_card_number_to_19_digit(card_isin);
@@ -280,76 +280,4 @@ pub fn calculate_total_fees_per_network(
             Ok(Some((network, total_fee)))
         })
         .collect::<CustomResult<Option<Vec<(gatewaydecider::types::NETWORK, f64)>>, error::ApiError>>()
-}
-
-pub fn sort_networks_by_fee(
-    network_fees: Vec<(gatewaydecider::types::NETWORK, f64)>,
-) -> Vec<gatewaydecider::types::NETWORK> {
-    logger::debug!("Sorting networks by fee");
-    let mut sorted_fees = network_fees;
-    sorted_fees.sort_by(|(_network1, fee1), (_network2, fee2)| fee1.total_cmp(fee2));
-
-    sorted_fees
-        .into_iter()
-        .map(|(network, _fee)| network)
-        .collect()
-}
-
-pub async fn sorted_networks_by_fee(
-    app_state: &app::TenantAppState,
-    card_isin_optional: Option<String>,
-    amount: f64,
-    co_badged_card_request: types::CoBadgedCardRequest,
-) -> Option<types::DebitRoutingOutput> {
-    logger::debug!("Fetching sorted card networks based on their respective network fees");
-
-    let co_badged_card_info_optional =
-        if let Some(co_badged_card_data) = co_badged_card_request.co_badged_card_data {
-            logger::debug!("Co-badged card data found in request");
-            Some(co_badged_card_data.into())
-        } else {
-            if let Some(card_isin) = card_isin_optional {
-                get_co_badged_cards_info(
-                    app_state,
-                    card_isin,
-                    co_badged_card_request.acquirer_country,
-                )
-                .await
-                .map_err(|error| {
-                    logger::warn!(?error, "Failed to calculate total fees per network");
-                })
-                .ok()
-                .flatten()
-            } else {
-                None
-            }
-        };
-
-    if let Some(co_badged_card_info) = co_badged_card_info_optional {
-        // Calculate total fees per network within this scope
-        let cost_calculated_network = calculate_total_fees_per_network(
-            app_state,
-            &co_badged_card_info,
-            &co_badged_card_request.merchant_category_code,
-            amount,
-        )
-        .map_err(|error| {
-            logger::warn!(?error, "Failed to calculate total fees per network");
-        })
-        .ok()
-        .flatten();
-
-        if let Some(networks) = cost_calculated_network {
-            let sorted_networks = sort_networks_by_fee(networks);
-
-            return Some(types::DebitRoutingOutput {
-                co_badged_card_networks: sorted_networks,
-                issuer_country: co_badged_card_info.issuer_country,
-                is_regulated: co_badged_card_info.is_regulated,
-                regulated_name: co_badged_card_info.regulated_name,
-                card_type: co_badged_card_info.card_type.clone(),
-            });
-        }
-    };
-    None
 }
