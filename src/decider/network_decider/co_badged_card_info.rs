@@ -178,41 +178,47 @@ pub async fn get_co_badged_cards_info(
 
 pub fn calculate_interchange_fee(
     network: &gatewaydecider::types::NETWORK,
-    is_regulated: &bool,
-    regulated_name_optional: Option<&types::RegulatedName>,
+    co_badged_cards_info: &types::CoBadgedCardInfoResponse,
+    merchant_category_code: &types::MerchantCategoryCode,
     amount: f64,
     debit_routing: &types::DebitRoutingConfig,
 ) -> CustomResult<f64, error::ApiError> {
     logger::debug!("Calculating interchange fee");
+    let is_regulated = &co_badged_cards_info.is_regulated;
+    let regulated_name_optional = &co_badged_cards_info.regulated_name;
+
     let fee_data = if *is_regulated {
         logger::debug!("Regulated bank");
         &debit_routing.interchange_fee.regulated
     } else {
         logger::debug!("Non regulated bank");
         debit_routing
-            .interchange_fee
-            .non_regulated
-            .0
-            .get("merchant_category_code_0001")
-            .ok_or(error::ApiError::MissingRequiredField(
-                "interchange fee for merchant category code",
-            ))?
-            .get(network)
-            .ok_or(error::ApiError::MissingRequiredField(
-                "interchange fee for non regulated",
-            ))
-            .attach_printable(
-                "Failed to fetch interchange fee for non regulated banks in debit routing",
-            )?
+            .get_non_regulated_interchange_fee(&merchant_category_code.to_string(), network)?
     };
 
     let percentage = fee_data.percentage;
 
     let fixed_amount = fee_data.fixed_amount;
 
-    let mut total_interchange_fee = (amount * percentage / 100.0) + fixed_amount;
+    let total_interchange_fee = (amount * percentage / 100.0) + fixed_amount;
 
-    if *is_regulated {
+    let total_fee = apply_fraud_check_fee_if_applicable(
+        *is_regulated,
+        regulated_name_optional,
+        debit_routing.fraud_check_fee,
+        total_interchange_fee,
+    );
+
+    Ok(total_fee)
+}
+
+pub fn apply_fraud_check_fee_if_applicable(
+    is_regulated: bool,
+    regulated_name_optional: &Option<types::RegulatedName>,
+    fraud_check_fee: f64,
+    total_interchange_fee: f64,
+) -> f64 {
+    if is_regulated {
         if let Some(regulated_name) = regulated_name_optional {
             match regulated_name {
                 types::RegulatedName::ExemptFraud => {
@@ -220,15 +226,12 @@ pub fn calculate_interchange_fee(
                 }
                 types::RegulatedName::NonExemptWithFraud => {
                     logger::debug!("Regulated bank with non exemption for fraud");
-                    let fraud_check_fee = debit_routing.fraud_check_fee;
-
-                    total_interchange_fee += fraud_check_fee
+                    return total_interchange_fee + fraud_check_fee;
                 }
-            };
+            }
         }
-    };
-
-    Ok(total_interchange_fee)
+    }
+    total_interchange_fee
 }
 
 pub fn calculate_network_fee(
@@ -237,15 +240,7 @@ pub fn calculate_network_fee(
     debit_routing: &types::DebitRoutingConfig,
 ) -> CustomResult<f64, error::ApiError> {
     logger::debug!("Calculating network fee");
-    let fee_data = debit_routing
-        .network_fee
-        .get(network)
-        .ok_or(error::ApiError::MissingRequiredField(
-            "interchange fee for non regulated",
-        ))
-        .attach_printable(
-            "Failed to fetch interchange fee for non regulated banks in debit routing",
-        )?;
+    let fee_data = debit_routing.get_network_fee(network)?;
     let percentage = fee_data.percentage;
     let fixed_amount = fee_data.fixed_amount;
     let total_network_fee = (amount * percentage / 100.0) + fixed_amount;
@@ -254,20 +249,21 @@ pub fn calculate_network_fee(
 
 pub fn calculate_total_fees_per_network(
     app_state: &crate::app::TenantAppState,
-    co_badged_cards_info: types::CoBadgedCardInfoResponse,
+    co_badged_cards_info: &types::CoBadgedCardInfoResponse,
+    merchant_category_code: &types::MerchantCategoryCode,
     amount: f64,
 ) -> CustomResult<Option<Vec<(gatewaydecider::types::NETWORK, f64)>>, error::ApiError> {
     logger::debug!("Calculating total fees per network");
     let debit_routing_config = &app_state.config.debit_routing_config.clone();
 
     co_badged_cards_info
-        .co_badged_card_networks
+        .co_badged_card_networks.clone()
         .into_iter()
         .map(|network| {
             let interchange_fee = calculate_interchange_fee(
                 &network,
-                &co_badged_cards_info.is_regulated,
-                co_badged_cards_info.regulated_name.as_ref(),
+                &co_badged_cards_info,
+                &merchant_category_code,
                 amount,
                 debit_routing_config,
             )
