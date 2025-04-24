@@ -1,8 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::decider::gatewaydecider;
+use crate::error;
 use crate::types::currency;
 use diesel::sql_types;
+use error_stack::{Report, ResultExt};
 use serde::{Deserialize, Serialize};
 
 use crate::decider::network_decider::utils::{deserialize_hashmap, deserialize_hashset};
@@ -11,7 +13,17 @@ use crate::decider::network_decider::utils::{deserialize_hashmap, deserialize_ha
 pub struct CoBadgedCardRequest {
     pub merchant_category_code: MerchantCategoryCode,
     pub acquirer_country: CountryAlpha2,
-    pub co_badged_card_data: Option<DebitRoutingData>,
+    pub co_badged_card_data: Option<DebitRoutingRequestData>,
+}
+
+impl TryInto<CoBadgedCardRequest> for serde_json::Value {
+    type Error = Report<error::ApiError>;
+
+    fn try_into(self) -> Result<CoBadgedCardRequest, Self::Error> {
+        serde_json::from_value(self).change_context(error::ApiError::ParsingError(
+            "Failed to parse metadata to CoBadgedCardRequest",
+        ))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,7 +33,7 @@ pub enum MerchantCategoryCode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct DebitRoutingData {
+pub struct DebitRoutingRequestData {
     pub co_badged_card_networks: Vec<gatewaydecider::types::NETWORK>,
     pub issuer_country: CountryAlpha2,
     pub is_regulated: bool,
@@ -188,6 +200,18 @@ pub struct CoBadgedCardInfoResponse {
     pub is_regulated: bool,
     pub regulated_name: Option<RegulatedName>,
     pub card_type: CardType,
+}
+
+impl From<DebitRoutingRequestData> for CoBadgedCardInfoResponse {
+    fn from(co_badged_card_data: DebitRoutingRequestData) -> Self {
+        CoBadgedCardInfoResponse {
+            co_badged_card_networks: co_badged_card_data.co_badged_card_networks,
+            issuer_country: co_badged_card_data.issuer_country,
+            is_regulated: co_badged_card_data.is_regulated,
+            regulated_name: co_badged_card_data.regulated_name,
+            card_type: co_badged_card_data.card_type,
+        }
+    }
 }
 
 #[derive(

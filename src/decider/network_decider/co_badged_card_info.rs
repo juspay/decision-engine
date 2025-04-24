@@ -1,5 +1,4 @@
-use error_stack::ResultExt;
-
+use crate::app;
 use crate::{
     decider::{
         gatewaydecider, network_decider::types,
@@ -9,6 +8,7 @@ use crate::{
     storage::types::CoBadgedCardInfo,
     utils::CustomResult,
 };
+use error_stack::ResultExt;
 
 pub struct CoBadgedCardInfoList(Vec<CoBadgedCardInfo>);
 
@@ -110,7 +110,7 @@ impl CoBadgedCardInfoList {
 }
 
 pub async fn get_co_badged_cards_info(
-    app_state: &crate::app::TenantAppState,
+    app_state: &app::TenantAppState,
     card_isin: String,
     acquirer_country: types::CountryAlpha2,
 ) -> CustomResult<Option<types::CoBadgedCardInfoResponse>, error::ApiError> {
@@ -254,14 +254,14 @@ pub fn calculate_network_fee(
 
 pub fn calculate_total_fees_per_network(
     app_state: &crate::app::TenantAppState,
-    co_badged_cards_info: types::CoBadgedCardInfoResponse,
+    co_badged_cards_info: &types::CoBadgedCardInfoResponse,
     amount: f64,
 ) -> CustomResult<Option<Vec<(gatewaydecider::types::NETWORK, f64)>>, error::ApiError> {
     logger::debug!("Calculating total fees per network");
     let debit_routing_config = &app_state.config.debit_routing_config.clone();
 
     co_badged_cards_info
-        .co_badged_card_networks
+        .co_badged_card_networks.clone()
         .into_iter()
         .map(|network| {
             let interchange_fee = calculate_interchange_fee(
@@ -300,4 +300,59 @@ pub fn sort_networks_by_fee(
         .into_iter()
         .map(|(network, _fee)| network)
         .collect()
+}
+
+pub async fn get_sorted_co_badged_networks_by_fee(
+    app_state: &app::TenantAppState,
+    card_isin_optional: Option<String>,
+    amount: f64,
+    co_badged_card_request: types::CoBadgedCardRequest,
+) -> Option<types::DebitRoutingOutput> {
+    logger::debug!("Fetching sorted card networks based on their respective network fees");
+
+    let co_badged_card_info_optional =
+        if let Some(co_badged_card_data) = co_badged_card_request.co_badged_card_data {
+            logger::debug!("Co-badged card data found in request");
+            Some(co_badged_card_data.into())
+        } else {
+            if let Some(card_isin) = card_isin_optional {
+                get_co_badged_cards_info(
+                    app_state,
+                    card_isin,
+                    co_badged_card_request.acquirer_country,
+                )
+                .await
+                .map_err(|error| {
+                    logger::warn!(?error, "Failed to calculate total fees per network");
+                })
+                .ok()
+                .flatten()
+            } else {
+                None
+            }
+        };
+
+    if let Some(co_badged_card_info) = co_badged_card_info_optional {
+        // Calculate total fees per network within this scope
+        let cost_calculated_network =
+            calculate_total_fees_per_network(app_state, &co_badged_card_info, amount)
+                .map_err(|error| {
+                    logger::warn!(?error, "Failed to calculate total fees per network");
+                })
+                .ok()
+                .flatten();
+
+        if let Some(networks) = cost_calculated_network {
+            let sorted_networks = sort_networks_by_fee(networks);
+
+            return Some(types::DebitRoutingOutput {
+                co_badged_card_networks: sorted_networks,
+                issuer_country: co_badged_card_info.issuer_country,
+                is_regulated: co_badged_card_info.is_regulated,
+                regulated_name: co_badged_card_info.regulated_name,
+                card_type: co_badged_card_info.card_type.clone(),
+            });
+        }
+    };
+    None
 }
