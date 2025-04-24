@@ -21,9 +21,6 @@ pub fn setup(
 ) -> TelemetryGuard {
     let mut guards = Vec::new();
 
-    let subscriber = tracing_subscriber::registry().with(StorageSubscription);
-
-    // Setup console logging
     if config.console.enabled {
         let (console_writer, guard) = tracing_appender::non_blocking(std::io::stdout());
         guards.push(guard);
@@ -35,11 +32,36 @@ pub fn setup(
             &crates_to_filter,
         );
 
-        let logging_layer = FormattingLayer::new(service_name, console_writer).with_filter(console_filter);
-        subscriber.with(logging_layer).init();
+        match config.console.log_format {
+            config::LogFormat::Default => {
+                let subscriber_pretty = tracing_subscriber::fmt()
+                    .with_target(false)
+                    .with_level(true)
+                    .pretty()
+                    .with_env_filter(console_filter)
+                    .finish();
+
+                tracing::subscriber::set_global_default(subscriber_pretty)
+                    .expect("Unable to set global subscriber");
+                return TelemetryGuard { _log_guards: guards };
+            }
+
+            config::LogFormat::Json => {
+                let formatting_layer = FormattingLayer::new(service_name, console_writer)
+                    .with_filter(console_filter);
+
+                let subscriber = tracing_subscriber::registry()
+                    .with(StorageSubscription)
+                    .with(formatting_layer);
+
+                subscriber.init();
+            }
+        }
     } else {
-        subscriber.init();
-    };
+        tracing_subscriber::registry()
+            .with(StorageSubscription)
+            .init();
+    }
 
     TelemetryGuard {
         _log_guards: guards,
