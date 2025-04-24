@@ -122,7 +122,7 @@ where
     {
         Ok(value) => Ok(value),
         Err(err) => {
-            print!("Error while updating: {:?} {:?}", err, debug_values);
+            logger::error!("Error while updating: {:?} {:?}", err, debug_values);
             Err(MeshError::NotFound)
         }
     }

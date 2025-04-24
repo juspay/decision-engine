@@ -196,7 +196,7 @@ curl --location 'http://localhost:8080/routing/activate' \
 status_code: 200
 ```
 
-## Evaluate Payment paramenters using Routing Algorithm (Euclid):
+## Evaluate Payment parameters using Routing Algorithm (Euclid):
 ### Request:
 ```
 curl --location 'http://localhost:8080/routing/evaluate' \
