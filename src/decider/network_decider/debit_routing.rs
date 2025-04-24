@@ -3,6 +3,8 @@ use crate::decider::gatewaydecider::{
     types as gateway_decider_types, utils as gateway_decider_utils,
 };
 
+use crate::decider::network_decider::helpers;
+
 use super::co_badged_card_info;
 
 pub async fn perform_debit_routing(
@@ -53,21 +55,5 @@ pub async fn perform_debit_routing(
         }
     }
 
-    Err(gateway_decider_types::ErrorResponse {
-        status: "Invalid Request".to_string(),
-        error_code: "invalid_request_error".to_string(),
-        error_message: "Can't find the co-badged card network".to_string(),
-        priority_logic_tag: None,
-        routing_approach: None,
-        filter_wise_gateways: None,
-        error_info: gateway_decider_types::UnifiedError {
-            code: "CO_BADGED_NETWORK_NOT_FOUND".to_string(),
-            user_message: "Co-badged card network not found to process the transaction request."
-                .to_string(),
-            developer_message:
-                "Co-badged card network not found to process the transaction request.".to_string(),
-        },
-        priority_logic_output: None,
-        is_dynamic_mga_enabled: false,
-    })
+    Err(helpers::return_debit_routing_application_error())
 }

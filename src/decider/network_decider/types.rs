@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use crate::decider::gatewaydecider;
 use crate::error;
-use crate::utils::CustomResult;
 use diesel::sql_types;
 use error_stack::{Report, ResultExt};
 use serde::{Deserialize, Serialize};
@@ -161,43 +160,6 @@ pub struct DebitRoutingConfig {
     pub network_fee: HashMap<gatewaydecider::types::NETWORK, NetworkProcessingData>,
     pub interchange_fee: NetworkInterchangeFee,
     pub fraud_check_fee: f64,
-}
-
-impl DebitRoutingConfig {
-    pub fn get_non_regulated_interchange_fee(
-        &self,
-        merchant_category_code: &str,
-        network: &gatewaydecider::types::NETWORK,
-    ) -> CustomResult<&NetworkProcessingData, error::ApiError> {
-        self.interchange_fee
-            .non_regulated
-            .0
-            .get(merchant_category_code)
-            .ok_or(error::ApiError::MissingRequiredField(
-                "interchange fee for merchant category code",
-            ))?
-            .get(network)
-            .ok_or(error::ApiError::MissingRequiredField(
-                "interchange fee for non regulated",
-            ))
-            .attach_printable(
-                "Failed to fetch interchange fee for non regulated banks in debit routing",
-            )
-    }
-
-    pub fn get_network_fee(
-        &self,
-        network: &gatewaydecider::types::NETWORK,
-    ) -> CustomResult<&NetworkProcessingData, error::ApiError> {
-        Ok(self.network_fee
-            .get(network)
-            .ok_or(error::ApiError::MissingRequiredField(
-                "interchange fee for non regulated",
-            ))
-            .attach_printable(
-                "Failed to fetch interchange fee for non regulated banks in debit routing",
-            )?)
-    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
