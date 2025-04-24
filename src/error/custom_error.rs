@@ -90,6 +90,50 @@ pub enum EntityDBError {
     NotFoundError,
 }
 
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum RuleConfigurationError {
+    #[error("Storage error")]
+    StorageError,
+    #[error("Invalid Rule Configuration error")]
+    InvalidRuleConfiguration,
+    #[error("Merchant not found")]
+    MerchantNotFound,
+}
+
+impl axum::response::IntoResponse for RuleConfigurationError {
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            RuleConfigurationError::StorageError => (
+                hyper::StatusCode::INTERNAL_SERVER_ERROR,
+                axum::Json(crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_04,
+                    "Storage error".to_string(),
+                    None,
+                )),
+            )
+                .into_response(),
+            RuleConfigurationError::InvalidRuleConfiguration => (
+                hyper::StatusCode::BAD_REQUEST,
+                axum::Json(crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_04,
+                    "Invalid routing rule configuration".to_string(),
+                    None,
+                )),
+            )
+                .into_response(),
+            RuleConfigurationError::MerchantNotFound => (
+                hyper::StatusCode::BAD_REQUEST,
+                axum::Json(crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_04,
+                    "MerchantId not found".to_string(),
+                    None,
+                )),
+            )
+                .into_response(),
+        }
+    }
+}
+
 pub trait NotFoundError {
     fn is_not_found(&self) -> bool;
 }

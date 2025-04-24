@@ -1,10 +1,10 @@
-use crate::{redis::commands::RedisConnectionWrapper};
+use crate::redis::commands::RedisConnectionWrapper;
 use axum::{extract::Request, routing::post};
 use axum_server::{tls_rustls::RustlsConfig, Handle};
 use error_stack::ResultExt;
+use std::sync::Arc;
 use tokio::signal::unix::{signal, SignalKind};
 use tower_http::trace as tower_trace;
-use std::sync::Arc;
 
 use crate::{
     api_client::ApiClient,
@@ -103,7 +103,7 @@ where
         logger::error!("SIGTERM signal received, shutting down...");
         let app_state = APP_STATE.get().expect("GlobalAppState not set");
         app_state.set_not_ready(); // Set readiness flag to false
-        // Wait for 60 seconds before shutting down
+                                   // Wait for 60 seconds before shutting down
         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
         handle_clone.shutdown(); // Trigger axum_server shutdown
     });
@@ -124,10 +124,12 @@ where
         .route(
             "/decision_gateway",
             post(routes::decision_gateway::decision_gateway),
+        )
+        .route(
+            "/rule/create",
+            post(routes::rule_configuration::create_rule_config),
         );
-    let router = router.route(
-        "/update-score",
-        post(routes::update_score::update_score));
+    let router = router.route("/update-score", post(routes::update_score::update_score));
     let router = router.route(
         "/decide-gateway",
         post(routes::decide_gateway::decide_gateway),
@@ -163,7 +165,6 @@ where
         global_app_state.global_config.server,
         global_app_state.global_config.log
     );
-
 
     if let Some(tls_config) = &global_app_state.global_config.tls {
         let tcp_listener = std::net::TcpListener::bind(socket_addr)?;

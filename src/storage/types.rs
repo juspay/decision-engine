@@ -385,6 +385,18 @@ pub struct ServiceConfiguration {
     pub new_value: Option<String>,
     pub previous_value: Option<String>,
     pub new_value_status: Option<String>,
+    pub version: i64,
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = schema::service_configuration)]
+pub struct ServiceConfigurationNew {
+    pub name: String,
+    pub value: Option<String>,
+    pub new_value: Option<String>,
+    pub previous_value: Option<String>,
+    pub new_value_status: Option<String>,
+    pub version: i64,
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
