@@ -27,6 +27,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      cache_from:
+        - decision-engine-open-router-local:latest
+      labels:
+        - "com.docker.compose.watchfile=Dockerfile"
+        - "com.docker.compose.watchfile=src/"
+        - "com.docker.compose.watchfile=Cargo.toml"
+        - "com.docker.compose.watchfile=Cargo.lock"
+    image: decision-engine-open-router-local:latest
     platform: linux/amd64
     container_name: open-router
     restart: unless-stopped
@@ -72,7 +80,7 @@ services:
       args:
         - BUILDKIT_INLINE_CACHE=1
       cache_from:
-        - groovy-runner-local:latest
+        - decision-engine-groovy-runner-local:latest
       labels:
         - "com.docker.compose.watchfile=groovy.Dockerfile"
         - "com.docker.compose.watchfile=src/Runner.groovy"

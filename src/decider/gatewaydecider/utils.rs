@@ -15,6 +15,7 @@ use crate::{decider, logger};
 use diesel::Identifiable;
 use fred::prelude::{KeysInterface, ListInterface};
 use masking::PeekInterface;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::from_value;
 use serde_json::{from_slice, from_str, Value};
@@ -426,25 +427,22 @@ pub fn parse_json_from_string(text_data: &str) -> Option<Value> {
     from_str(text_data).ok()
 }
 
-pub fn get_value<T: for<'de> Deserialize<'de>>(key: &str, t: &str) -> Option<T> {
-    from_str::<Value>(t).ok().and_then(|v| match v {
-        Value::Object(map) => map.get(key).and_then(|v| {
-            if std::any::type_name::<T>() == std::any::type_name::<bool>() {
-                match v {
-                    Value::Bool(b) => Some(*b),
-                    Value::String(s) => match s.as_str() {
-                        "True" | "true" => Some(true),
-                        "False" | "false" => Some(false),
-                        _ => None,
-                    },
-                    _ => None,
-                }.and_then(|b| from_value(Value::Bool(b)).ok())
-            } else {
-                from_value(v.clone()).ok()
-            }
-        }),
-        _ => None,
-    })
+pub fn get_value<T: DeserializeOwned>(key: &str, json_text: &str) -> Option<T> {
+    let parsed: Value = serde_json::from_str(json_text).ok()?;
+    let obj = parsed.as_object()?;
+    let val = obj.get(key)?;
+
+    serde_json::from_value(val.clone()).ok()
+        .or_else(|| match val {
+            Value::String(s) => {
+                match s.as_str() {
+                    "True" => serde_json::from_str("true").ok(),
+                    "False" => serde_json::from_str("false").ok(),
+                    _ => serde_json::from_str(s).ok()
+                }
+            },
+            _ => None,
+        })
 }
 
 pub fn is_txn_type_enabled(
