@@ -2,7 +2,6 @@ use crate::app::{get_tenant_app_state, TenantAppState};
 use crate::decider::network_decider;
 use crate::types::currency::Currency;
 use crate::types::money::internal as ETMo;
-use crate::types::order::deserialize_udfs_to_hashmap;
 use crate::types::order::udfs::UDFs;
 use crate::types::transaction::id as ETId;
 use crate::types::txn_details::types::TxnObjectType;

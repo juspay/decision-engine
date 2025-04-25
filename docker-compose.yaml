@@ -21,12 +21,20 @@ services:
     networks:
       - open-router-network
     environment:
-      - GROOVY_RUNNER_HOST=http://host.docker.internal:8085
+      - GROOVY_RUNNER_HOST=host.docker.internal:8085
 
   open-router-local:
     build:
       context: .
       dockerfile: Dockerfile
+      cache_from:
+        - decision-engine-open-router-local:latest
+      labels:
+        - "com.docker.compose.watchfile=Dockerfile"
+        - "com.docker.compose.watchfile=src/"
+        - "com.docker.compose.watchfile=Cargo.toml"
+        - "com.docker.compose.watchfile=Cargo.lock"
+    image: decision-engine-open-router-local:latest
     platform: linux/amd64
     container_name: open-router
     restart: unless-stopped
@@ -46,7 +54,7 @@ services:
     networks:
       - open-router-network
     environment:
-      - GROOVY_RUNNER_HOST=http://host.docker.internal:8085
+      - GROOVY_RUNNER_HOST=host.docker.internal:8085
 
   groovy-runner:
     image: ghcr.io/juspay/open-router/groovy-runner:main
@@ -69,6 +77,13 @@ services:
     build:
       context: .
       dockerfile: groovy.Dockerfile
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+      cache_from:
+        - decision-engine-groovy-runner-local:latest
+      labels:
+        - "com.docker.compose.watchfile=groovy.Dockerfile"
+        - "com.docker.compose.watchfile=src/Runner.groovy"
     platform: linux/amd64
     container_name: groovy-runner
     restart: unless-stopped
