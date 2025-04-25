@@ -82,6 +82,9 @@ pub enum ApiError {
     #[error("failed in response middleware: {0}")]
     ResponseMiddlewareError(&'static str),
 
+    #[error("Missing required param: {0}")]
+    MissingRequiredField(&'static str),
+
     #[error("Error while encoding data")]
     EncodingError,
 
@@ -334,6 +337,17 @@ impl axum::response::IntoResponse for ApiError {
                 )),
             )
                 .into_response(),
+
+            Self::MissingRequiredField(field_name) => (
+                hyper::StatusCode::INTERNAL_SERVER_ERROR,
+                axum::Json(ApiErrorResponse::new(
+                    error_codes::TE_00,
+                    format!("Missing required param: {field_name}"),
+                    None,
+                )),
+            )
+                .into_response(),
+
             Self::DecryptingKeysFailed(err) => (
                 hyper::StatusCode::UNAUTHORIZED,
                 axum::Json(ApiErrorResponse::new(

@@ -1,11 +1,11 @@
-use error_stack::ResultExt;
-
+use crate::app;
 use crate::{
     decider::{gatewaydecider, network_decider::types, storage::utils::co_badged_card_info},
     error, logger,
     storage::types::CoBadgedCardInfo,
     utils::CustomResult,
 };
+use error_stack::ResultExt;
 
 pub struct CoBadgedCardInfoList(Vec<CoBadgedCardInfo>);
 
@@ -64,7 +64,7 @@ impl CoBadgedCardInfoList {
 
     pub fn is_local_transaction(
         &self,
-        acquirer_country: types::CountryAlpha2,
+        acquirer_country: &types::CountryAlpha2,
     ) -> CustomResult<bool, error::ApiError> {
         logger::debug!("Validating if the transaction is local or international");
 
@@ -75,7 +75,7 @@ impl CoBadgedCardInfoList {
             .attach_printable("The filtered co-badged card info list is empty")?;
 
         let issuer_country = first_element.country_code;
-        Ok(acquirer_country == issuer_country)
+        Ok(*acquirer_country == issuer_country)
     }
 
     pub fn extract_networks(&self) -> Vec<gatewaydecider::types::NETWORK> {
@@ -87,7 +87,7 @@ impl CoBadgedCardInfoList {
 
     pub fn get_co_badged_cards_info_response(
         &self,
-    ) -> CustomResult<types::DebitRoutingOutput, error::ApiError> {
+    ) -> CustomResult<types::CoBadgedCardInfoResponse, error::ApiError> {
         logger::debug!("Constructing co-badged card info response");
 
         let first_element = self
@@ -96,7 +96,7 @@ impl CoBadgedCardInfoList {
             .ok_or(error::ApiError::UnknownError)
             .attach_printable("The filtered co-badged card info list is empty")?;
 
-        Ok(types::DebitRoutingOutput {
+        Ok(types::CoBadgedCardInfoResponse {
             co_badged_card_networks: self.extract_networks(),
             issuer_country: first_element.country_code,
             is_regulated: first_element.regulated,
@@ -107,10 +107,10 @@ impl CoBadgedCardInfoList {
 }
 
 pub async fn get_co_badged_cards_info(
-    app_state: &crate::app::TenantAppState,
+    app_state: &app::TenantAppState,
     card_isin: String,
-    acquirer_country: types::CountryAlpha2,
-) -> CustomResult<Option<types::DebitRoutingOutput>, error::ApiError> {
+    acquirer_country: &types::CountryAlpha2,
+) -> CustomResult<Option<types::CoBadgedCardInfoResponse>, error::ApiError> {
     // pad the card number to 19 digits to match the co-badged card bin length
     let card_number_str = CoBadgedCardInfoList::pad_card_number_to_19_digit(card_isin);
 
@@ -171,4 +171,113 @@ pub async fn get_co_badged_cards_info(
         .attach_printable("Failed to construct co-badged card info response")?;
 
     Ok(co_badged_cards_info_response)
+}
+
+pub fn calculate_interchange_fee(
+    network: &gatewaydecider::types::NETWORK,
+    co_badged_cards_info: &types::CoBadgedCardInfoResponse,
+    merchant_category_code: &types::MerchantCategoryCode,
+    amount: f64,
+    debit_routing: &types::DebitRoutingConfig,
+) -> CustomResult<f64, error::ApiError> {
+    logger::debug!("Calculating interchange fee");
+    let is_regulated = &co_badged_cards_info.is_regulated;
+    let regulated_name_optional = &co_badged_cards_info.regulated_name;
+
+    let fee_data = if *is_regulated {
+        logger::debug!("Regulated bank");
+        &debit_routing.interchange_fee.regulated
+    } else {
+        logger::debug!("Non regulated bank");
+        debit_routing
+            .get_non_regulated_interchange_fee(&merchant_category_code.to_string(), network)?
+    };
+
+    let percentage = fee_data.percentage;
+
+    let fixed_amount = fee_data.fixed_amount;
+
+    let total_interchange_fee = (amount * percentage / 100.0) + fixed_amount;
+
+    let total_fee = apply_fraud_check_fee_if_applicable(
+        *is_regulated,
+        regulated_name_optional,
+        debit_routing.fraud_check_fee,
+        total_interchange_fee,
+    );
+
+    Ok(total_fee)
+}
+
+pub fn apply_fraud_check_fee_if_applicable(
+    is_regulated: bool,
+    regulated_name_optional: &Option<types::RegulatedName>,
+    fraud_check_fee: f64,
+    total_interchange_fee: f64,
+) -> f64 {
+    if is_regulated {
+        if let Some(regulated_name) = regulated_name_optional {
+            match regulated_name {
+                types::RegulatedName::ExemptFraud => {
+                    logger::debug!("Regulated bank with exemption for fraud");
+                }
+                types::RegulatedName::NonExemptWithFraud => {
+                    logger::debug!("Regulated bank with non exemption for fraud");
+                    return total_interchange_fee + fraud_check_fee;
+                }
+            }
+        }
+    }
+    total_interchange_fee
+}
+
+pub fn calculate_network_fee(
+    network: &gatewaydecider::types::NETWORK,
+    amount: f64,
+    debit_routing: &types::DebitRoutingConfig,
+) -> CustomResult<f64, error::ApiError> {
+    logger::debug!("Calculating network fee");
+    let fee_data = debit_routing.get_network_fee(network)?;
+    let percentage = fee_data.percentage;
+    let fixed_amount = fee_data.fixed_amount;
+    let total_network_fee = (amount * percentage / 100.0) + fixed_amount;
+    Ok(total_network_fee)
+}
+
+pub fn calculate_total_fees_per_network(
+    app_state: &crate::app::TenantAppState,
+    co_badged_cards_info: &types::CoBadgedCardInfoResponse,
+    merchant_category_code: &types::MerchantCategoryCode,
+    amount: f64,
+) -> CustomResult<Option<Vec<(gatewaydecider::types::NETWORK, f64)>>, error::ApiError> {
+    logger::debug!("Calculating total fees per network");
+    let debit_routing_config = &app_state.config.debit_routing_config.clone();
+
+    co_badged_cards_info
+        .co_badged_card_networks.clone()
+        .into_iter()
+        .map(|network| {
+            let interchange_fee = calculate_interchange_fee(
+                &network,
+                &co_badged_cards_info,
+                &merchant_category_code,
+                amount,
+                debit_routing_config,
+            )
+            .change_context(error::ApiError::UnknownError)
+            .attach_printable("Failed to calculate debit routing interchange_fee")?;
+
+            let network_fee = calculate_network_fee(&network, amount, debit_routing_config)
+                .change_context(error::ApiError::UnknownError)
+                .attach_printable("Failed to calculate debit routing network_fee")?;
+
+            let total_fee = interchange_fee + network_fee;
+            logger::debug!(
+                "Total fee for network {} is {}",
+                network.to_string(),
+                total_fee
+            );
+            Ok(Some((network, total_fee)))
+        })
+        .collect::<CustomResult<Option<Vec<(gatewaydecider::types::NETWORK, f64)>>, error::ApiError>>()
 }
