@@ -2,6 +2,7 @@ use super::runner::get_gateway_priority;
 use super::types::RankingAlgorithm;
 use super::types::UnifiedError;
 use crate::app::get_tenant_app_state;
+use crate::decider::network_decider;
 use axum::response::IntoResponse;
 use diesel::expression::is_aggregate::No;
 use serde_json::json;
@@ -114,12 +115,19 @@ pub async fn deciderFullPayloadHSFunction(
         dpPriorityLogicScript: dreq.priorityLogicScript,
         dpEDCCApplied: dreq.isEdccApplied,
     };
-    runDeciderFlow(
-        decider_params,
-        dreq_.clone().rankingAlgorithm,
-        dreq_.clone().eliminationEnabled,
-    )
-    .await
+
+    if dreq_.rankingAlgorithm == Some(RankingAlgorithm::NTW_BASED_ROUTING) {
+        logger::debug!("Performing debit routing");
+        network_decider::debit_routing::perform_debit_routing(dreq_).await
+    } else {
+        logger::debug!("Performing gateway routing");
+        runDeciderFlow(
+            decider_params,
+            dreq_.clone().rankingAlgorithm,
+            dreq_.clone().eliminationEnabled,
+        )
+        .await
+    }
 }
 
 fn handleEnforcedGateway(gateway_list: Option<Vec<String>>) -> Option<Vec<String>> {

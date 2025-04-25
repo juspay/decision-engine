@@ -1,16 +1,26 @@
 use std::collections::HashMap;
 
-use crate::utils::CustomResult;
-use crate::{decider::gatewaydecider, error};
+use crate::decider::gatewaydecider;
+use crate::error;
 use diesel::sql_types;
-use error_stack::ResultExt;
+use error_stack::{Report, ResultExt};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoBadgedCardRequest {
     pub merchant_category_code: MerchantCategoryCode,
     pub acquirer_country: CountryAlpha2,
-    pub co_badged_card_data: Option<DebitRoutingData>,
+    pub co_badged_card_data: Option<DebitRoutingRequestData>,
+}
+
+impl TryInto<CoBadgedCardRequest> for serde_json::Value {
+    type Error = Report<error::ApiError>;
+
+    fn try_into(self) -> Result<CoBadgedCardRequest, Self::Error> {
+        serde_json::from_value(self).change_context(error::ApiError::ParsingError(
+            "Failed to parse metadata to CoBadgedCardRequest",
+        ))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, strum::EnumString, strum::Display)]
@@ -21,7 +31,7 @@ pub enum MerchantCategoryCode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct DebitRoutingData {
+pub struct DebitRoutingRequestData {
     pub co_badged_card_networks: Vec<gatewaydecider::types::NETWORK>,
     pub issuer_country: CountryAlpha2,
     pub is_regulated: bool,
@@ -152,43 +162,6 @@ pub struct DebitRoutingConfig {
     pub fraud_check_fee: f64,
 }
 
-impl DebitRoutingConfig {
-    pub fn get_non_regulated_interchange_fee(
-        &self,
-        merchant_category_code: &str,
-        network: &gatewaydecider::types::NETWORK,
-    ) -> CustomResult<&NetworkProcessingData, error::ApiError> {
-        self.interchange_fee
-            .non_regulated
-            .0
-            .get(merchant_category_code)
-            .ok_or(error::ApiError::MissingRequiredField(
-                "interchange fee for merchant category code",
-            ))?
-            .get(network)
-            .ok_or(error::ApiError::MissingRequiredField(
-                "interchange fee for non regulated",
-            ))
-            .attach_printable(
-                "Failed to fetch interchange fee for non regulated banks in debit routing",
-            )
-    }
-
-    pub fn get_network_fee(
-        &self,
-        network: &gatewaydecider::types::NETWORK,
-    ) -> CustomResult<&NetworkProcessingData, error::ApiError> {
-        Ok(self.network_fee
-            .get(network)
-            .ok_or(error::ApiError::MissingRequiredField(
-                "interchange fee for non regulated",
-            ))
-            .attach_printable(
-                "Failed to fetch interchange fee for non regulated banks in debit routing",
-            )?)
-    }
-}
-
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub struct NetworkInterchangeFee {
     pub non_regulated: NoneRegulatedNetworkProcessingData,
@@ -218,4 +191,16 @@ pub struct CoBadgedCardInfoResponse {
     pub is_regulated: bool,
     pub regulated_name: Option<RegulatedName>,
     pub card_type: CardType,
+}
+
+impl From<DebitRoutingRequestData> for CoBadgedCardInfoResponse {
+    fn from(co_badged_card_data: DebitRoutingRequestData) -> Self {
+        CoBadgedCardInfoResponse {
+            co_badged_card_networks: co_badged_card_data.co_badged_card_networks,
+            issuer_country: co_badged_card_data.issuer_country,
+            is_regulated: co_badged_card_data.is_regulated,
+            regulated_name: co_badged_card_data.regulated_name,
+            card_type: co_badged_card_data.card_type,
+        }
+    }
 }

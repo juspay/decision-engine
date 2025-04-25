@@ -609,6 +609,7 @@ pub enum ResetApproach {
 pub enum RankingAlgorithm {
     SR_BASED_ROUTING,
     PL_BASED_ROUTING,
+    NTW_BASED_ROUTING,
 }
 
 // pub type DeciderFlow<R> = for<'a> fn(&'a mut (dyn MonadFlow + 'a)) -> ReaderT<DeciderParams, StateT<DeciderState, &'a mut (dyn MonadFlow + 'a)>, R>;
@@ -871,13 +872,13 @@ pub struct DomainDeciderRequestForApiCallV2 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaymentInfo {
     paymentId: String,
-    amount: f64,
+    pub amount: f64,
     currency: Currency,
     customerId: Option<ETCu::CustomerId>,
     udfs: Option<UDFs>,
     preferredGateway: Option<String>,
     paymentType: TxnObjectType,
-    metadata: Option<String>,
+    pub metadata: Option<String>,
     internalMetadata: Option<String>,
     isEmi: Option<bool>,
     emiBank: Option<String>,
@@ -887,7 +888,7 @@ pub struct PaymentInfo {
     paymentSource: Option<String>,
     authType: Option<ETCa::txn_card_info::AuthType>,
     cardIssuerBankName: Option<String>,
-    cardIsin: Option<String>,
+    pub cardIsin: Option<String>,
     cardType: Option<ETCa::card_type::CardType>,
     cardSwitchProvider: Option<Secret<String>>,
 }
