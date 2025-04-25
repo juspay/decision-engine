@@ -9,6 +9,20 @@ pub struct RoutingRule {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct FetchRoutingRule {
+    pub merchant_id: String,
+    pub algorithm: AlgorithmType,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AlgorithmType {
+    SuccessRate,
+    Elimination,
+    DebitRouting,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 pub enum ConfigVariant {
     #[serde(rename = "success_rate")]

@@ -385,7 +385,6 @@ pub struct ServiceConfiguration {
     pub new_value: Option<String>,
     pub previous_value: Option<String>,
     pub new_value_status: Option<String>,
-    pub version: i64,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -396,7 +395,6 @@ pub struct ServiceConfigurationNew {
     pub new_value: Option<String>,
     pub previous_value: Option<String>,
     pub new_value_status: Option<String>,
-    pub version: i64,
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]

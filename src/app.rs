@@ -128,6 +128,10 @@ where
         .route(
             "/rule/create",
             post(routes::rule_configuration::create_rule_config),
+        )
+        .route(
+            "/rule/get",
+            post(routes::rule_configuration::get_rule_config),
         );
     let router = router.route("/update-score", post(routes::update_score::update_score));
     let router = router.route(

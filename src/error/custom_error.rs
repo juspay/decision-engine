@@ -98,6 +98,8 @@ pub enum RuleConfigurationError {
     InvalidRuleConfiguration,
     #[error("Merchant not found")]
     MerchantNotFound,
+    #[error(" Rule Configuration not found")]
+    ConfigurationNotFound,
 }
 
 impl axum::response::IntoResponse for RuleConfigurationError {
@@ -126,6 +128,15 @@ impl axum::response::IntoResponse for RuleConfigurationError {
                 axum::Json(crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
                     "MerchantId not found".to_string(),
+                    None,
+                )),
+            )
+                .into_response(),
+            RuleConfigurationError::ConfigurationNotFound => (
+                hyper::StatusCode::NOT_FOUND,
+                axum::Json(crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_04,
+                    "Rule configuration not found".to_string(),
                     None,
                 )),
             )
