@@ -1,4 +1,5 @@
 use crate::app::{get_tenant_app_state, TenantAppState};
+use crate::decider::network_decider;
 use crate::types::currency::Currency;
 use crate::types::money::internal as ETMo;
 use crate::types::order::deserialize_udfs_to_hashmap;
@@ -37,6 +38,7 @@ use crate::types::gateway_routing_input as ETGRI;
 // use juspay::extra::parsing as Parsing;
 use crate::types::customer as ETCu;
 use crate::types::payment as ETP;
+use diesel::sql_types;
 use std::fmt;
 
 // use utils::errors as Errors;
@@ -214,7 +216,18 @@ pub struct GBESV2Metadata {
 }
 
 /// Enum representing different network types.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    diesel::AsExpression,
+    diesel::FromSqlRow,
+    strum::EnumString,
+    strum::Display,
+)]
+#[diesel(sql_type = sql_types::Text)]
 pub enum NETWORK {
     VISA,
     AMEX,
@@ -227,21 +240,7 @@ pub enum NETWORK {
     NYCE,
 }
 
-impl fmt::Display for NETWORK {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            NETWORK::VISA => write!(f, "VISA"),
-            NETWORK::AMEX => write!(f, "AMEX"),
-            NETWORK::DINERS => write!(f, "DINERS"),
-            NETWORK::RUPAY => write!(f, "RUPAY"),
-            NETWORK::MASTERCARD => write!(f, "MASTERCARD"),
-            NETWORK::STAR => write!(f, "STAR"),
-            NETWORK::PULSE => write!(f, "PULSE"),
-            NETWORK::ACCEL => write!(f, "ACCEL"),
-            NETWORK::NYCE => write!(f, "NYCE"),
-        }
-    }
-}
+crate::impl_to_sql_from_sql_text_mysql!(NETWORK);
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GatewayScoringTypeLogData {
@@ -891,27 +890,6 @@ pub struct PaymentInfo {
     cardSwitchProvider: Option<Secret<String>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CoBadgedCardRequest {
-    merchant_category_code: MerchantCategoryCode,
-    acquirer_country: CountryAlpha2,
-    co_badged_card_data: Option<DebitRoutingData>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum MerchantCategoryCode {
-    Mcc0001,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct DebitRoutingData {
-    co_badged_card_networks: Vec<NETWORK>,
-    issuer_country: CountryAlpha2,
-    is_regulated: bool,
-    regulated_name: RegulatedName,
-    card_type: CardType,
-}
-
 // write a function to transfer DomainDeciderRequestForApiCallV2 to DomainDeciderRequest
 
 impl DomainDeciderRequestForApiCallV2 {
@@ -1177,87 +1155,13 @@ pub struct DecidedGateway {
     pub routing_approach: GatewayDeciderApproach,
     pub gateway_before_evaluation: Option<String>,
     pub priority_logic_output: Option<GatewayPriorityLogicOutput>,
-    pub debit_routing_output: Option<DebitRoutingOutput>,
+    pub debit_routing_output: Option<network_decider::types::DebitRoutingOutput>,
     pub reset_approach: ResetApproach,
     pub routing_dimension: Option<String>,
     pub routing_dimension_level: Option<String>,
     pub is_scheduled_outage: bool,
     pub is_dynamic_mga_enabled: bool,
     pub gateway_mga_id_map: Option<AValue>,
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct DebitRoutingOutput {
-    co_badged_card_networks: Vec<NETWORK>,
-    issuer_country: CountryAlpha2,
-    is_regulated: bool,
-    regulated_name: RegulatedName,
-    card_type: CardType,
-}
-
-#[derive(
-    Clone,
-    Debug,
-    Eq,
-    Default,
-    Hash,
-    PartialEq,
-    serde::Deserialize,
-    serde::Serialize,
-    Copy
-)]
-#[rustfmt::skip]
-pub enum CountryAlpha2 {
-    AF, AX, AL, DZ, AS, AD, AO, AI, AQ, AG, AR, AM, AW, AU, AT,
-    AZ, BS, BH, BD, BB, BY, BE, BZ, BJ, BM, BT, BO, BQ, BA, BW,
-    BV, BR, IO, BN, BG, BF, BI, KH, CM, CA, CV, KY, CF, TD, CL,
-    CN, CX, CC, CO, KM, CG, CD, CK, CR, CI, HR, CU, CW, CY, CZ,
-    DK, DJ, DM, DO, EC, EG, SV, GQ, ER, EE, ET, FK, FO, FJ, FI,
-    FR, GF, PF, TF, GA, GM, GE, DE, GH, GI, GR, GL, GD, GP, GU,
-    GT, GG, GN, GW, GY, HT, HM, VA, HN, HK, HU, IS, IN, ID, IR,
-    IQ, IE, IM, IL, IT, JM, JP, JE, JO, KZ, KE, KI, KP, KR, KW,
-    KG, LA, LV, LB, LS, LR, LY, LI, LT, LU, MO, MK, MG, MW, MY,
-    MV, ML, MT, MH, MQ, MR, MU, YT, MX, FM, MD, MC, MN, ME, MS,
-    MA, MZ, MM, NA, NR, NP, NL, NC, NZ, NI, NE, NG, NU, NF, MP,
-    NO, OM, PK, PW, PS, PA, PG, PY, PE, PH, PN, PL, PT, PR, QA,
-    RE, RO, RU, RW, BL, SH, KN, LC, MF, PM, VC, WS, SM, ST, SA,
-    SN, RS, SC, SL, SG, SX, SK, SI, SB, SO, ZA, GS, SS, ES, LK,
-    SD, SR, SJ, SZ, SE, CH, SY, TW, TJ, TZ, TH, TL, TG, TK, TO,
-    TT, TN, TR, TM, TC, TV, UG, UA, AE, GB, UM, UY, UZ, VU,
-    VE, VN, VG, VI, WF, EH, YE, ZM, ZW,
-    #[default]
-    US
-}
-
-#[derive(
-    Clone,
-    Debug,
-    Eq,
-    Hash,
-    PartialEq,
-    serde::Deserialize,
-    serde::Serialize,
-    Copy,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum PanOrToken {
-    Pan,
-    Token,
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq, serde::Deserialize, serde::Serialize, Copy)]
-pub enum RegulatedName {
-    #[serde(rename = "GOVERNMENT NON-EXEMPT INTERCHANGE FEE (WITH FRAUD)")]
-    NonExemptWithFraud,
-    #[serde(rename = "GOVERNMENT EXEMPT INTERCHANGE FEE")]
-    ExemptFraud,
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq, serde::Deserialize, serde::Serialize, Copy)]
-#[serde(rename_all = "snake_case")]
-pub enum CardType {
-    Credit,
-    Debit,
 }
 
 #[derive(Debug, Serialize, Clone, Deserialize)]
