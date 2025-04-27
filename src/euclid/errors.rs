@@ -6,7 +6,7 @@ pub enum EuclidErrors {
     FailedToParseJsonInput,
 
     #[error("Failed to serialize to pretty-printed String of JSON")]
-    FailedToSerializeToJson,
+    FailedToDeserializeJsonToString,
 
     #[error("Incorrect request received : {0}")]
     InvalidRequest(String),
@@ -25,6 +25,9 @@ pub enum EuclidErrors {
 
     #[error("Routing rule validation failed")]
     FailedToValidateRoutingRule,
+
+    #[error("Active routing_algorithm not found for: {0}")]
+    ActiveRoutingAlgorithmNotFound(String),
 
     #[error("Storage error")]
     StorageError,
@@ -109,11 +112,24 @@ impl axum::response::IntoResponse for EuclidErrors {
             )
                 .into_response(),
 
-            EuclidErrors::FailedToSerializeToJson => (
+            EuclidErrors::FailedToDeserializeJsonToString => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
                 axum::Json(ApiErrorResponse::new(
                     error_codes::TE_04,
                     "Failed to serialize Json ".to_string(),
+                    None,
+                )),
+            )
+                .into_response(),
+
+            EuclidErrors::ActiveRoutingAlgorithmNotFound(msg) => (
+                hyper::StatusCode::BAD_REQUEST,
+                axum::Json(ApiErrorResponse::new(
+                    error_codes::TE_04,
+                    format!(
+                    "No active routing algorithm found for the created_by entity : {}",
+                    msg
+                ),
                     None,
                 )),
             )
