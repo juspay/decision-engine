@@ -110,7 +110,7 @@ jobs:
           checksum: true
 
       - name: Make ci-checks.sh executable
-        run: chmod +x /scripts/ci-checks.sh
+        run: chmod +x scripts/ci-checks.sh
 
       - name: Cargo hack
         if: ${{ github.event_name == 'push' }}
@@ -175,7 +175,7 @@ jobs:
           save-if: ${{ github.event_name == 'push' }}
 
       - name: Make ci-checks.sh executable
-        run: chmod +x /scripts/ci-checks.sh
+        run: chmod +x scripts/ci-checks.sh
 
       - name: Run clippy
         shell: bash

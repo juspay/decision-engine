@@ -59,7 +59,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2.7.7
 
       - name: Make ci-checks.sh executable
-        run: chmod +x /scripts/ci-checks.sh
+        run: chmod +x scripts/ci-checks.sh
 
       - name: Run rustfmt check
         run: just fmt -- --check
