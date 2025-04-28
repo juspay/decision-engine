@@ -34,7 +34,7 @@ unresponsive_timeout = 10
 max_feed_count = 200
 
 [cache]
-tti = 7200 # i.e. 2 hours
+tti = 7200          # i.e. 2 hours
 max_capacity = 5000
 
 [secrets]
@@ -144,3 +144,17 @@ strength = "strong"
 relation = "positive"
 pred = 1
 succ = 3
+
+[debit_routing_config]
+fraud_check_fee = 0.01
+
+[debit_routing_config.network_fee]
+visa = { percentage = 0.1375, fixed_amount = 0.020 }
+star = { percentage = 0.1000, fixed_amount = 0.015 }
+
+[debit_routing_config.interchange_fee]
+regulated = { percentage = 0.05, fixed_amount = 0.21 }
+
+[debit_routing_config.interchange_fee.non_regulated]
+merchant_category_code_0001.visa = { percentage = 1.65, fixed_amount = 0.15 }
+merchant_category_code_0001.star = { percentage = 1.63, fixed_amount = 0.15 }

@@ -1,4 +1,5 @@
 use crate::decider::gatewaydecider::types;
+use crate::decider::network_decider;
 
 use super::schema;
 use diesel::mysql::Mysql;
@@ -143,7 +144,7 @@ pub struct GatewayPaymentMethodFlow {
 #[diesel(table_name = schema::co_badged_cards_info)]
 pub struct CoBadgedCardInfo {
     /// The unique identifier for the co-badged card info
-    pub id: i64,
+    pub id: String,
     /// Represents the minimum value of the primary card brand's BIN range in which a
     /// specific BIN value falls. It is a 19-digit number, padded with zeros.
     pub card_bin_min: i64,
@@ -155,19 +156,19 @@ pub struct CoBadgedCardInfo {
     /// The card network
     pub card_network: types::NETWORK,
     /// The issuing bank country
-    pub country_code: types::CountryAlpha2,
+    pub country_code: network_decider::types::CountryAlpha2,
     /// The card type eg. credit, debit
-    pub card_type: types::CardType,
+    pub card_type: network_decider::types::CardType,
     /// Field regulated refers to government-imposed limits on interchange fees for card transactions
     pub regulated: bool,
     /// The name of the regulated entity
-    pub regulated_name: Option<String>,
+    pub regulated_name: Option<network_decider::types::RegulatedName>,
     /// Prepaid cards are a type of payment card that can be loaded with funds in advance and used for transactions
     pub prepaid: bool,
     /// Identifies if the card is reloadable with additional funds. This helps distinguish between one-time-use and reloadable prepaid cards.
     pub reloadable: bool,
     /// Indicates whether the bin range is associated with a PAN or a tokenized card.
-    pub pan_or_token: types::PanOrToken,
+    pub pan_or_token: network_decider::types::PanOrToken,
     /// The length of the card bin
     pub card_bin_length: i16,
     /// The `card_brand_is_additional` field is used to indicate whether a BIN range is associated with a primary or secondary card network
@@ -521,13 +522,3 @@ pub struct UserEligibilityInfo {
     pub disabled: Option<BitBool>,
 }
 
-#[derive(Debug, Clone, Identifiable, Insertable, Queryable)]
-#[diesel(table_name = schema::routing_algorithm)]
-pub struct RoutingAlgorithm {
-    pub id: String,
-    pub name: String,
-    pub description: Option<String>,
-    pub algorithm_data: String,
-    pub created_at: PrimitiveDateTime,
-    pub modified_at: PrimitiveDateTime,
-}

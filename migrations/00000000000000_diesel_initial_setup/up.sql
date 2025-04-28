@@ -409,6 +409,7 @@ CREATE TABLE tenant_config_filter (
 DROP TABLE IF EXISTS routing_algorithm;
 CREATE TABLE routing_algorithm (
     id VARCHAR(255) NOT NULL PRIMARY KEY,
+    created_by VARCHAR(255) NOT NULL,
     name VARCHAR(255) NOT NULL,
     description TEXT,
     algorithm_data JSON NOT NULL,

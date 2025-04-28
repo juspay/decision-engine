@@ -6,7 +6,9 @@ use std::string::String;
 
 use crate::error::ApiError;
 
-#[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Serialize, Deserialize, Eq, Hash)]
+#[derive(
+    Debug, Clone, PartialOrd, Ord, PartialEq, Serialize, Deserialize, Eq, Hash, strum::Display,
+)]
 pub enum Gateway {
     ADYEN,
     AFTERPAY,
@@ -208,12 +210,6 @@ pub enum Gateway {
     WIBMO,
     NDPS,
     DEFAULT,
-}
-
-impl fmt::Display for Gateway {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.to_string())
-    }
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]

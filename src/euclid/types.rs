@@ -1,6 +1,14 @@
+use crate::decider::network_decider;
 use crate::euclid::ast::{Output, Program, ValueType};
+use diesel::prelude::AsChangeset;
+use diesel::Identifiable;use diesel::Insertable;
+use diesel::{Queryable, Selectable};
 use serde::{Deserialize, Serialize};
+use time::PrimitiveDateTime;
 use std::{collections::HashMap, fmt, ops::Deref};
+use crate::storage::schema;
+
+use super::utils::generate_random_id;
 
 pub type Metadata = HashMap<String, serde_json::Value>;
 
@@ -18,12 +26,13 @@ pub enum DataType {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RoutingRule {
     pub name: String,
+    pub created_by: String,
     pub algorithm: Program,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct RoutingRequest {
-    pub routing_id: String,
+    pub created_by: String,
     pub parameters: HashMap<String, Option<ValueType>>,
 }
 
@@ -64,6 +73,80 @@ pub struct RoutingEvaluateResponse {
     pub output: serde_json::Value,
     pub evaluated_output: Vec<String>,
     pub eligible_connectors: Vec<String>,
+}
+
+// #[derive(AsChangeset, Debug, Clone, Identifiable, Insertable, Queryable, Selectable)]
+#[derive(AsChangeset, Insertable, Debug, serde::Serialize, serde::Deserialize, Identifiable, Queryable)]
+#[diesel(table_name = schema::routing_algorithm)]
+pub struct RoutingAlgorithm {
+    pub id: String,
+    pub created_by: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub algorithm_data: String,
+    pub created_at: PrimitiveDateTime,
+    pub modified_at: PrimitiveDateTime,
+}
+
+
+#[derive(Serialize)]
+pub struct JsonifiedRoutingAlgorithm {
+    pub id: String,
+    pub created_by: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub algorithm_data: serde_json::Value,
+    pub created_at: PrimitiveDateTime,
+    pub modified_at: PrimitiveDateTime,
+}
+
+impl From<RoutingAlgorithm> for JsonifiedRoutingAlgorithm {
+    fn from(ra: RoutingAlgorithm) -> Self {
+        let algorithm_data: serde_json::Value =
+            serde_json::from_str(&ra.algorithm_data).unwrap_or_else(|_| serde_json::Value::Null);
+
+        JsonifiedRoutingAlgorithm {
+            id: ra.id,
+            created_by: ra.created_by,
+            name: ra.name,
+            description: ra.description,
+            algorithm_data,
+            created_at: ra.created_at,
+            modified_at: ra.modified_at,
+        }
+    }
+}
+
+#[derive(AsChangeset, Insertable, Debug, serde::Serialize, serde::Deserialize, Identifiable, Queryable)]
+#[diesel(table_name = schema::routing_algorithm_mapper)]
+#[diesel(primary_key(created_by))]
+pub struct RoutingAlgorithmMapper {
+    pub created_by: String,
+    pub routing_algorithm_id: String,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct ActivateRoutingConfigRequest {
+    pub created_by: String,
+    pub routing_algorithm_id: String,
+}
+
+impl RoutingAlgorithmMapper {
+    pub fn new(
+        created_by: String,
+        routing_algorithm_id: String,
+    ) -> Self {
+        Self {
+            created_by,
+            routing_algorithm_id
+        }
+    }
+}
+
+#[derive(AsChangeset, Debug, serde::Serialize, serde::Deserialize, Queryable, Selectable)]
+#[diesel(table_name = schema::routing_algorithm_mapper)]
+pub struct RoutingAlgorithmMapperUpdate {
+    pub routing_algorithm_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, thiserror::Error)]

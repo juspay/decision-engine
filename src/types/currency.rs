@@ -2,7 +2,18 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::ApiError;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    strum::Display,
+    strum::EnumIter,
+    strum::EnumString,
+    Hash,
+)]
 pub enum Currency {
     AED,
     ALL,

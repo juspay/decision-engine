@@ -1,14 +1,14 @@
 use crate::{
-    api_client::ApiClientConfig, crypto::secrets_manager::{
+    api_client::ApiClientConfig,
+    crypto::secrets_manager::{
         secrets_interface::SecretManager, secrets_management::SecretsManagementConfig,
     },
     error,
     euclid::types::TomlConfig,
-    logger::config::Log,
     logger,
+    logger::config::Log,
 };
 use error_stack::ResultExt;
-use crate::utils; // Import the utils module
 use masking::ExposeInterface;
 use redis_interface::RedisSettings;
 use std::{
@@ -16,6 +16,7 @@ use std::{
     ops::{Deref, DerefMut},
     path::PathBuf,
 };
+use crate::decider::network_decider;
 
 #[derive(Clone, serde::Deserialize, Debug)]
 pub struct GlobalConfig {
@@ -34,6 +35,8 @@ pub struct GlobalConfig {
     pub api_client: ApiClientConfig,
     #[serde(default)]
     pub routing_config: Option<TomlConfig>,
+    #[serde(default)]
+    pub debit_routing_config: network_decider::types::DebitRoutingConfig,
 }
 
 #[derive(Clone, Debug)]
@@ -42,6 +45,7 @@ pub struct TenantConfig {
     pub open_router_secrets: Secrets,
     pub tenant_secrets: TenantSecrets,
     pub routing_config: Option<TomlConfig>,
+    pub debit_routing_config: network_decider::types::DebitRoutingConfig,
 }
 
 impl TenantConfig {
@@ -61,6 +65,7 @@ impl TenantConfig {
                 .get(&tenant_id)
                 .cloned()
                 .unwrap(),
+            debit_routing_config: global_config.debit_routing_config.clone(),
         }
     }
 }
@@ -239,12 +244,9 @@ impl GlobalConfig {
                 "database_password",
             ))?;
 
-
         for tenant_secrets in self.tenant_secrets.values_mut() {
             if tenant_secrets.master_key.is_empty() {
-                logger::debug!(
-                    "Skipping decryption of master key for tenant as it is empty"
-                );
+                logger::debug!("Skipping decryption of master key for tenant as it is empty");
                 // Skip decryption if master_key is empty
                 continue;
             }
@@ -266,9 +268,7 @@ impl GlobalConfig {
         {
             for tenant_secrets in self.tenant_secrets.values_mut() {
                 if tenant_secrets.public_key.clone().expose().is_empty() {
-                    logger::debug!(
-                        "Skipping decryption of public key for tenant as it is empty"
-                    );
+                    logger::debug!("Skipping decryption of public key for tenant as it is empty");
                     continue; // Skip decryption if public_key is empty
                 }
                 tenant_secrets.public_key = secret_management_client
@@ -277,10 +277,14 @@ impl GlobalConfig {
                     .change_context(error::ConfigurationError::KmsDecryptError("public_key"))?;
             }
 
-            if self.secrets.open_router_private_key.clone().expose().is_empty() {
-                logger::debug!(
-                    "Skipping decryption of open_router_private_key as it is empty"
-                );
+            if self
+                .secrets
+                .open_router_private_key
+                .clone()
+                .expose()
+                .is_empty()
+            {
+                logger::debug!("Skipping decryption of open_router_private_key as it is empty");
             } else {
                 self.secrets.open_router_private_key = secret_management_client
                     .get_secret(self.secrets.open_router_private_key.clone())

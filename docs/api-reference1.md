@@ -94,3 +94,337 @@ curl --location 'http://localhost:8080/update-gateway-score' \
 ```
 Success
 ```
+
+# 🚦 Euclid Routing Engine
+
+**Euclid** is a pluggable, dynamic routing rule evaluation engine designed to power **payment connector selection** based on customizable business rules.
+
+It enables merchants and platforms to define their own routing algorithms—such as **priority-based**, **volume-split**, or **hybrid logic**—and evaluate transaction parameters against them **in real time**.
+
+---
+
+## ✅ Features
+
+- 🔧 **Flexible DSL (Domain-Specific Language)** for defining complex routing logic  
+- 📡 **APIs to create, update, and evaluate** routing algorithms dynamically  
+- 🧠 **Condition-based evaluation** using payment metadata (e.g. method type, amount, etc.)
+
+---
+
+## 💡 Use Cases
+
+- 🎯 **Prioritizing gateways** based on card type, transaction amount, or other dynamic criteria  
+- 🔁 **Implementing fallback strategies** for gateway outages or errors  
+- ⚙️ **Adapting routing behavior** without code changes or redeployments
+
+---
+
+## Create Routing Algorithm (Euclid):
+### Request:
+```
+curl --location 'http://localhost:8080/routing/create' \
+--header 'Content-Type: application/json' \
+--data '{
+   "name": "Priority Based Config",
+   "created_by": "merchant_1",
+   "algorithm": {
+       "globals": {},
+       "defaultSelection": {
+           "priority": ["stripe", "adyen", "checkout"]
+       },
+       "rules": [
+           {
+               "name": "Card Rule",
+               "routingType": "priority",
+               "output": {
+                   "priority": ["stripe", "adyen"]
+               },
+               "statements": [
+                   {
+                       "condition": [
+                           {
+                               "lhs": "payment_method",
+                               "comparison": "equal",
+                               "value": {
+                                   "type": "enum_variant",
+                                   "value": "card"
+                               },
+                               "metadata": {}
+                           },
+                           {
+                               "lhs": "amount",
+                               "comparison": "greater_than",
+                               "value": {
+                                   "type": "number",
+                                   "value": 1000
+                               },
+                               "metadata": {}
+                           }
+                       ]
+                   }
+               ]
+           }
+       ],
+       "metadata": {}
+   }
+}'
+```
+
+### Response:
+```
+{
+   "rule_id": "routing_e641380c-6f24-4405-8454-5ae6cbceb7a0",
+   "name": "Priority Based Config",
+   "created_at": "2025-04-22 11:45:03.411134513",
+   "modified_at": "2025-04-22 11:45:03.411134513"
+}
+```
+
+## Activate Routing rule for a creator_id.
+### Request
+```
+curl --location 'http://localhost:8080/routing/activate' \
+--header 'Content-Type: application/json' \
+--data '{
+    "created_by": "merchant_1",
+    "routing_algorithm_id": "routing_49ffa266-28ca-40be-9b90-f978190aa571"
+}'
+```
+
+### Response
+```
+status_code: 200
+```
+
+## Evaluate Payment parameters using Routing Algorithm (Euclid):
+### Request:
+```
+curl --location 'http://localhost:8080/routing/evaluate' \
+--header 'Content-Type: application/json' \
+--data '{
+ "created_by": "merchant_1",
+ "parameters": {
+   "payment_method": {
+     "type": "enum_variant",
+     "value": "card"
+   },
+   "amount": {
+     "type": "number",
+     "value": 100
+   }
+ }
+}
+'
+```
+
+
+### Response:
+```
+{
+   "status": "default_selection",
+   "output": {
+       "type": "priority",
+       "connectors": [
+           "stripe",
+           "adyen",
+           "checkout"
+       ]
+   },
+   "evaluated_output": [
+       "stripe"
+   ],
+   "eligible_connectors": []
+}
+```
+
+## List all Routing rules for a creator_id.
+### Request
+```
+curl --location --request POST 'http://localhost:8080/routing/list/merchant_1234' \
+--header 'Content-Type: application/json'
+```
+
+### Response
+```
+[
+    {
+        "id": "routing_7db79cc9-c49a-4f94-8e1c-5ed19c2388df",
+        "created_by": "merchant_1234",
+        "name": "My Algo",
+        "description": "Test algo",
+        "algorithm_data": {
+            "rules": [
+                {
+                    "name": "Card Rule",
+                    "output": {
+                        "priority": [
+                            "stripe",
+                            "adyen"
+                        ]
+                    },
+                    "statements": [
+                        {
+                            "nested": null,
+                            "condition": [
+                                {
+                                    "lhs": "payment_method",
+                                    "value": {
+                                        "type": "enum_variant",
+                                        "value": "card"
+                                    },
+                                    "metadata": {},
+                                    "comparison": "equal"
+                                },
+                                {
+                                    "lhs": "amount",
+                                    "value": {
+                                        "type": "number",
+                                        "value": 1000
+                                    },
+                                    "metadata": {},
+                                    "comparison": "greater_than"
+                                }
+                            ]
+                        }
+                    ],
+                    "routingType": "priority"
+                }
+            ],
+            "globals": {},
+            "metadata": {},
+            "defaultSelection": {
+                "priority": [
+                    "stripe",
+                    "adyen",
+                    "checkout"
+                ]
+            }
+        },
+        "created_at": "2025-04-24 09:30:44.0",
+        "modified_at": "2025-04-24 09:30:44.0"
+    },
+    {
+        "id": "routing_b15157b3-5c3d-4ea7-b2af-6dc773ff1bf6",
+        "created_by": "merchant_1234",
+        "name": "My Algo",
+        "description": "Test algo",
+        "algorithm_data": {
+            "rules": [
+                {
+                    "name": "Card Rule",
+                    "output": {
+                        "priority": [
+                            "stripe",
+                            "adyen"
+                        ]
+                    },
+                    "statements": [
+                        {
+                            "nested": null,
+                            "condition": [
+                                {
+                                    "lhs": "payment_method",
+                                    "value": {
+                                        "type": "enum_variant",
+                                        "value": "card"
+                                    },
+                                    "metadata": {},
+                                    "comparison": "equal"
+                                },
+                                {
+                                    "lhs": "amount",
+                                    "value": {
+                                        "type": "number",
+                                        "value": 1000
+                                    },
+                                    "metadata": {},
+                                    "comparison": "greater_than"
+                                }
+                            ]
+                        }
+                    ],
+                    "routingType": "priority"
+                }
+            ],
+            "globals": {},
+            "metadata": {},
+            "defaultSelection": {
+                "priority": [
+                    "stripe",
+                    "adyen",
+                    "checkout"
+                ]
+            }
+        },
+        "created_at": "2025-04-24 08:50:26.0",
+        "modified_at": "2025-04-24 08:50:26.0"
+    }
+]
+```
+
+## List active Routing rule for a creator_id.
+### Request
+```
+curl --location --request POST 'http://localhost:8080/routing/list/active/merchant_1' \
+--header 'Content-Type: application/json'
+```
+
+### Response
+```
+{
+    "id": "routing_49ffa266-28ca-40be-9b90-f978190aa571",
+    "created_by": "merchant_1",
+    "name": "My Algo",
+    "description": "Test algo",
+    "algorithm_data": {
+        "rules": [
+            {
+                "name": "Card Rule",
+                "output": {
+                    "priority": [
+                        "stripe",
+                        "adyen"
+                    ]
+                },
+                "statements": [
+                    {
+                        "nested": null,
+                        "condition": [
+                            {
+                                "lhs": "payment_method",
+                                "value": {
+                                    "type": "enum_variant",
+                                    "value": "card"
+                                },
+                                "metadata": {},
+                                "comparison": "equal"
+                            },
+                            {
+                                "lhs": "amount",
+                                "value": {
+                                    "type": "number",
+                                    "value": 10000
+                                },
+                                "metadata": {},
+                                "comparison": "greater_than"
+                            }
+                        ]
+                    }
+                ],
+                "routingType": "priority"
+            }
+        ],
+        "globals": {},
+        "metadata": {},
+        "defaultSelection": {
+            "priority": [
+                "stripe",
+                "adyen",
+                "checkout"
+            ]
+        }
+    },
+    "created_at": "2025-04-24 10:26:58.0",
+    "modified_at": "2025-04-24 10:26:58.0"
+}
+```
