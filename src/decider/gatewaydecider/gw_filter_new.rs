@@ -477,13 +477,14 @@ pub async fn filterGatewaysForEmi(this: &mut DeciderFlow<'_>) -> GatewayList {
     );
 
     if txn_detail.isEmi {
+        let is_mandate_txn = Utils::is_mandate_transaction(&txn_detail);
         let si_on_emi_card_supported_gateways: HashSet<Gateway> = findByNameFromRedis::<HashSet<Gateway>>(C::SI_ON_EMI_CARD_SUPPORTED_GATEWAYS.get_key())
             .await
             .unwrap_or_default()
             .into_iter()
             .collect();
 
-        let st = if Utils::is_mandate_transaction(&txn_detail) {
+        let st = if is_mandate_txn {
             functional_gateways
                 .into_iter()
                 .filter(|gw| si_on_emi_card_supported_gateways.contains(gw))
@@ -492,17 +493,48 @@ pub async fn filterGatewaysForEmi(this: &mut DeciderFlow<'_>) -> GatewayList {
             functional_gateways
         };
 
+        let st_filtered = if is_mandate_txn {
+            let card_brand = Utils::get_card_brand().await;
+            let si_on_emi_disabled_card_brand_gateway_mapping: HashMap<String, Vec<Gateway>> = 
+                findByNameFromRedis::<HashMap<String, Vec<Gateway>>>(C::SI_ON_EMI_DISABLED_CARD_BRAND_GATEWAY_MAPPING.get_key())
+                .await
+                .unwrap_or_default();
+            
+            let card_brand_str = card_brand.as_deref().unwrap_or("");
+            let disabled_gws = si_on_emi_disabled_card_brand_gateway_mapping
+                .get(card_brand_str)
+                .cloned()
+                .unwrap_or_default();
+            
+            logDebugV::<String>("GW_Filtering".to_string(),
+                vec![
+                    "For txn with id =".to_string(),
+                    txn_detail.txnId.review(ETTD::transaction_id_text()),
+                    "Filtering out gateways:".to_string(),
+                    format!("{:?}", disabled_gws),
+                    "for card brand:".to_string(),
+                    card_brand.unwrap_or_else(|| "UNKNOWN".to_string())
+                ]
+            );
+            
+            st.into_iter()
+                .filter(|gw| !disabled_gws.contains(gw))
+                .collect()
+        } else {
+            st
+        };
+
         let gws = if Utils::check_no_or_low_cost_emi(&txn_card_info) {
             let no_or_low_cost_emi_supported_gateways: HashSet<Gateway> = findByNameFromRedis::<HashSet<Gateway>>(C::NO_OR_LOW_COST_EMI_SUPPORTED_GATEWAYS.get_key())
                 .await
                 .unwrap_or_default()
                 .into_iter()
                 .collect();
-            st.into_iter()
+            st_filtered.into_iter()
                 .filter(|gw| no_or_low_cost_emi_supported_gateways.contains(gw))
                 .collect()
         } else {
-            st
+            st_filtered
         };
 
         let juspay_bank_code = Utils::get_juspay_bank_code_from_internal_metadata(&txn_detail);
