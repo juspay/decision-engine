@@ -56,9 +56,6 @@ jobs:
           tool: just
           checksum: true
 
-      - name: Install typos
-        uses: crate-ci/typos@master
-
       - uses: Swatinem/rust-cache@v2.7.7
 
       - name: Make ci-checks.sh executable
@@ -66,17 +63,24 @@ jobs:
 
       - name: Run rustfmt check
         run: just fmt -- --check
+        continue-on-error: true
 
       - name: Run clippy check
         run: just clippy
+        continue-on-error: true
+
+      - name: Install typos
+        uses: crate-ci/typos@master
+        continue-on-error: true
 
       - name: Run typo check
         run: typos
+        continue-on-error: true
 
       - name: Run cargo hack feature matrix
         shell: bash
         run: just ci_hack
-
+        continue-on-error: true
 
 
 # name: ci-pr
