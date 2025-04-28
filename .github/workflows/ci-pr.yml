@@ -37,6 +37,9 @@ jobs:
         with:
           make-default: true
 
+      - name: Make install-jq.sh executable
+        run: chmod +x .github/scripts/install-jq.sh
+
       - name: Install jq
         shell: bash
         run: .github/scripts/install-jq.sh
@@ -57,6 +60,9 @@ jobs:
         run: chmod +x .github/scripts/ci-checks.sh
 
       - uses: Swatinem/rust-cache@v2.7.7
+
+      - name: Make ci-checks.sh executable
+        run: chmod +x /scripts/ci-checks.sh
 
       - name: Run CI Checks
         shell: bash
