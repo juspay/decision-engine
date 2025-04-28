@@ -61,6 +61,12 @@ jobs:
       - name: Make ci-checks.sh executable
         run: chmod +x scripts/ci-checks.sh
 
+      - name: Install Rust (nightly + rustfmt)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+          components: rustfmt
+
       - name: Run rustfmt check
         run: just fmt -- --check
         continue-on-error: true
@@ -73,15 +79,11 @@ jobs:
         uses: crate-ci/typos@master
         continue-on-error: true
 
-      - name: Run typo check
-        run: typos
-        continue-on-error: true
-
       - name: Run cargo hack feature matrix
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: just ci_hack
-        continue-on-error: true
-
 
 # name: ci-pr
 #
