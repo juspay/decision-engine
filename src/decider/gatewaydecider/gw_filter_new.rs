@@ -506,15 +506,11 @@ pub async fn filterGatewaysForEmi(this: &mut DeciderFlow<'_>) -> GatewayList {
                 .cloned()
                 .unwrap_or_default();
             
-            logDebugV::<String>("GW_Filtering".to_string(),
-                vec![
-                    "For txn with id =".to_string(),
-                    txn_detail.txnId.review(ETTD::transaction_id_text()),
-                    "Filtering out gateways:".to_string(),
-                    format!("{:?}", disabled_gws),
-                    "for card brand:".to_string(),
-                    card_brand.unwrap_or_else(|| "UNKNOWN".to_string())
-                ]
+            logger::debug!(
+                "For txn with id = {:?}, Filtering out gateways: {:?} for card brand: {:?}",
+                txn_detail.txnId.review(ETTD::transaction_id_text()),
+                disabled_gws,
+                card_brand.unwrap_or_else(|| "UNKNOWN".to_string())
             );
             
             st.into_iter()
