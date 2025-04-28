@@ -132,6 +132,14 @@ where
         .route(
             "/rule/get",
             post(routes::rule_configuration::get_rule_config),
+        )
+        .route(
+            "/rule/update",
+            post(routes::rule_configuration::update_rule_config),
+        )
+        .route(
+            "/rule/delete",
+            post(routes::rule_configuration::delete_rule_config),
         );
     let router = router.route("/update-score", post(routes::update_score::update_score));
     let router = router.route(

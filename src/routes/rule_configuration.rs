@@ -2,9 +2,7 @@ use crate::app::get_tenant_app_state;
 use crate::types::merchant as ETM;
 use crate::{error, logger, storage::types::ServiceConfigurationNew, types};
 use axum::Json;
-use chrono::format;
 use error_stack::ResultExt;
-use serde_json::{json, Value};
 
 #[axum::debug_handler]
 pub async fn create_rule_config(
@@ -136,4 +134,35 @@ pub async fn get_rule_config(
             }))
         }
     }
+}
+
+#[axum::debug_handler]
+pub async fn update_rule_config(
+    Json(payload): Json<types::routing_configuration::RoutingRule>,
+) -> Result<(), error::ContainerError<error::RuleConfigurationError>> {
+    logger::debug!("Received rule configuration: {:?}", payload);
+    let state = get_tenant_app_state().await;
+
+    let mid = payload.merchant_id.clone();
+    ETM::merchant_iframe_preferences::getMerchantIPrefsByMId(mid.clone())
+        .await
+        .ok_or(error::RuleConfigurationError::MerchantNotFound)?;
+
+    // Update DB call for updating the rule configuration
+    Ok(())
+}
+
+#[axum::debug_handler]
+pub async fn delete_rule_config(
+    Json(payload): Json<types::routing_configuration::FetchRoutingRule>,
+) -> Result<(), error::ContainerError<error::RuleConfigurationError>> {
+    logger::debug!("Received rule fetch request: {:?}", payload);
+
+    let mid = payload.merchant_id.clone();
+    ETM::merchant_iframe_preferences::getMerchantIPrefsByMId(mid.clone())
+        .await
+        .ok_or(error::RuleConfigurationError::MerchantNotFound)?;
+
+    // Delete DB call for deleting the rule configuration
+    Ok(())
 }
