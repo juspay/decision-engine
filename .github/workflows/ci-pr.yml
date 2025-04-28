@@ -16,7 +16,7 @@ env:
 
 jobs:
   check-pr:
-    name: PR Checks (Clippy + Cargo Hack)
+    name: PR Checks (fmt + clippy + typos + cargo hack)
     runs-on: ubuntu-latest
 
     env:
@@ -30,7 +30,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
-          components: clippy
+          components: clippy, rustfmt
 
       - name: Install mold linker
         uses: rui314/setup-mold@v1
@@ -56,15 +56,24 @@ jobs:
           tool: just
           checksum: true
 
-      - name: Make script executable
-        run: chmod +x .github/scripts/ci-checks.sh
+      - name: Install typos
+        uses: crate-ci/typos@master
 
       - uses: Swatinem/rust-cache@v2.7.7
 
       - name: Make ci-checks.sh executable
         run: chmod +x /scripts/ci-checks.sh
 
-      - name: Run CI Checks
+      - name: Run rustfmt check
+        run: just fmt -- --check
+
+      - name: Run clippy check
+        run: just clippy
+
+      - name: Run typo check
+        run: typos
+
+      - name: Run cargo hack feature matrix
         shell: bash
         run: just ci_hack
 
