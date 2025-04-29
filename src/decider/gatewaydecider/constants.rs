@@ -346,6 +346,13 @@ impl SC::ServiceConfigKey for SI_ON_EMI_CARD_SUPPORTED_GATEWAYS {
     }
 }
 
+pub struct SI_ON_EMI_DISABLED_CARD_BRAND_GATEWAY_MAPPING;
+impl SC::ServiceConfigKey for SI_ON_EMI_DISABLED_CARD_BRAND_GATEWAY_MAPPING {
+    fn get_key(&self) -> String {
+        "SI_ON_EMI_DISABLED_CARD_BRAND_GATEWAY_MAPPING".to_string()
+    }
+}
+
 pub struct TOKEN_PROVIDER_GATEWAY_MAPPING;
 impl SC::ServiceConfigKey for TOKEN_PROVIDER_GATEWAY_MAPPING {
     fn get_key(&self) -> String {
