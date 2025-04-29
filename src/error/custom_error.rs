@@ -100,6 +100,8 @@ pub enum RuleConfigurationError {
     MerchantNotFound,
     #[error(" Rule Configuration not found")]
     ConfigurationNotFound,
+    #[error(" Rule Configuration already exists")]
+    ConfigurationAlreadyExists,
 }
 
 impl axum::response::IntoResponse for RuleConfigurationError {
@@ -137,6 +139,15 @@ impl axum::response::IntoResponse for RuleConfigurationError {
                 axum::Json(crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
                     "Rule configuration not found".to_string(),
+                    None,
+                )),
+            )
+                .into_response(),
+            RuleConfigurationError::ConfigurationAlreadyExists => (
+                hyper::StatusCode::BAD_REQUEST,
+                axum::Json(crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_04,
+                    "Rule configuration already exists".to_string(),
                     None,
                 )),
             )

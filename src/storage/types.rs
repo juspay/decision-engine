@@ -398,6 +398,12 @@ pub struct ServiceConfigurationNew {
     pub new_value_status: Option<String>,
 }
 
+#[derive(AsChangeset, Debug, serde::Serialize, serde::Deserialize, Queryable, Selectable)]
+#[diesel(table_name = schema::service_configuration)]
+pub struct ServiceConfigurationUpdate {
+    pub value: Option<String>,
+}
+
 #[derive(Debug, Clone, Identifiable, Queryable)]
 #[diesel(table_name = schema::tenant_config)]
 pub struct TenantConfig {
@@ -521,4 +527,3 @@ pub struct UserEligibilityInfo {
     pub provider_name: String,
     pub disabled: Option<BitBool>,
 }
-

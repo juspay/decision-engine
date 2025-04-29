@@ -16,6 +16,7 @@ use diesel::{
     helper_types::Filter,
     insertable::CanInsertInSingleQuery,
     mysql::Mysql,
+    query_builder::DeleteStatement,
     query_builder::QueryFragment,
     query_builder::UpdateStatement,
     query_builder::{InsertStatement, IntoUpdateTarget},
@@ -44,6 +45,10 @@ pub enum MeshError {
     NoFieldsToUpdate,
     #[error("An error occurred when generating typed SQL query")]
     QueryGenerationFailed,
+    #[error("No rows to be updated")]
+    NoRowstoUpdate,
+    #[error("No rows to be deleted")]
+    NoRowstoDelete,
     // InsertFailed,
     #[error("An unknown error occurred")]
     Others,
@@ -123,6 +128,28 @@ where
         Ok(value) => Ok(value),
         Err(err) => {
             logger::error!("Error while updating: {:?} {:?}", err, debug_values);
+            Err(MeshError::NotFound)
+        }
+    }
+}
+
+pub async fn generic_delete<T, P>(conn: &MysqlPoolConn, predicate: P) -> StorageResult<usize>
+where
+    T: FilterDsl<P> + HasTable<Table = T> + Table + 'static,
+    Filter<T, P>: IntoUpdateTarget,
+    DeleteStatement<
+        <Filter<T, P> as HasTable>::Table,
+        <Filter<T, P> as IntoUpdateTarget>::WhereClause,
+    >: AsQuery + QueryFragment<Mysql> + QueryId + Send + 'static,
+{
+    let query = diesel::delete(<T as HasTable>::table().filter(predicate));
+    logger::debug!(query = %debug_query::<Mysql, _>(&query).to_string());
+
+    match track_database_call::<T, _, _>(query.execute_async(conn), DatabaseOperation::Delete).await
+    {
+        Ok(value) => Ok(value),
+        Err(err) => {
+            logger::error!("Error while deleting: {:?}", err);
             Err(MeshError::NotFound)
         }
     }

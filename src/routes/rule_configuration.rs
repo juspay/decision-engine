@@ -1,6 +1,5 @@
-use crate::app::get_tenant_app_state;
 use crate::types::merchant as ETM;
-use crate::{error, logger, storage::types::ServiceConfigurationNew, types};
+use crate::{error, logger, types};
 use axum::Json;
 use error_stack::ResultExt;
 
@@ -9,7 +8,6 @@ pub async fn create_rule_config(
     Json(payload): Json<types::routing_configuration::RoutingRule>,
 ) -> Result<(), error::ContainerError<error::RuleConfigurationError>> {
     logger::debug!("Received rule configuration: {:?}", payload);
-    let state = get_tenant_app_state().await;
 
     let mid = payload.merchant_id.clone();
     ETM::merchant_iframe_preferences::getMerchantIPrefsByMId(mid.clone())
@@ -40,17 +38,17 @@ pub async fn create_rule_config(
         ),
     };
 
-    let config = ServiceConfigurationNew {
-        name,
-        value: config,
-        new_value: None,
-        previous_value: None,
-        new_value_status: None,
-    };
-
-    crate::generics::generic_insert(&state.db, config)
+    match types::service_configuration::find_config_by_name(name.clone())
         .await
-        .change_context(error::RuleConfigurationError::StorageError)?;
+        .change_context(error::RuleConfigurationError::StorageError)?
+    {
+        Some(_) => {
+            return Err(error::RuleConfigurationError::ConfigurationAlreadyExists.into());
+        }
+        None => types::service_configuration::insert_config(name, config)
+            .await
+            .change_context(error::RuleConfigurationError::StorageError)?,
+    }
 
     Ok(())
 }
@@ -140,8 +138,7 @@ pub async fn get_rule_config(
 pub async fn update_rule_config(
     Json(payload): Json<types::routing_configuration::RoutingRule>,
 ) -> Result<(), error::ContainerError<error::RuleConfigurationError>> {
-    logger::debug!("Received rule configuration: {:?}", payload);
-    let state = get_tenant_app_state().await;
+    logger::debug!("Received rule update configuration: {:?}", payload);
 
     let mid = payload.merchant_id.clone();
     ETM::merchant_iframe_preferences::getMerchantIPrefsByMId(mid.clone())
@@ -149,6 +146,34 @@ pub async fn update_rule_config(
         .ok_or(error::RuleConfigurationError::MerchantNotFound)?;
 
     // Update DB call for updating the rule configuration
+    let (name, config) = match payload.config {
+        types::routing_configuration::ConfigVariant::SuccessRate(config) => (
+            format!("SR_V3_INPUT_CONFIG_{}", mid),
+            serde_json::to_string(&config)
+                .map_err(|_| error::RuleConfigurationError::StorageError)
+                .ok(),
+        ),
+        types::routing_configuration::ConfigVariant::Elimination(config) => {
+            let db_config = types::gateway_routing_input::GatewaySuccessRateBasedRoutingInput::from_elimination_threshold(config.threshold);
+            (
+                format!("DEFAULT_SR_BASED_GATEWAY_ELIMINATION_INPUT"), // Need to decide on key name
+                serde_json::to_string(&db_config)
+                    .map_err(|_| error::RuleConfigurationError::StorageError)
+                    .ok(),
+            )
+        }
+        types::routing_configuration::ConfigVariant::DebitRouting(config) => (
+            format!("DEBIT_ROUTING_CONFIG_{}", mid),
+            serde_json::to_string(&config)
+                .map_err(|_| error::RuleConfigurationError::StorageError)
+                .ok(),
+        ),
+    };
+
+    types::service_configuration::update_config(name, config)
+        .await
+        .change_context(error::RuleConfigurationError::StorageError)?;
+
     Ok(())
 }
 
@@ -156,7 +181,7 @@ pub async fn update_rule_config(
 pub async fn delete_rule_config(
     Json(payload): Json<types::routing_configuration::FetchRoutingRule>,
 ) -> Result<(), error::ContainerError<error::RuleConfigurationError>> {
-    logger::debug!("Received rule fetch request: {:?}", payload);
+    logger::debug!("Received rule delete request: {:?}", payload);
 
     let mid = payload.merchant_id.clone();
     ETM::merchant_iframe_preferences::getMerchantIPrefsByMId(mid.clone())
@@ -164,5 +189,21 @@ pub async fn delete_rule_config(
         .ok_or(error::RuleConfigurationError::MerchantNotFound)?;
 
     // Delete DB call for deleting the rule configuration
+    let config_name = match payload.algorithm {
+        types::routing_configuration::AlgorithmType::SuccessRate => {
+            format!("SR_V3_INPUT_CONFIG_{}", mid)
+        }
+        types::routing_configuration::AlgorithmType::Elimination => {
+            format!("DEFAULT_SR_BASED_GATEWAY_ELIMINATION_INPUT")
+        }
+        types::routing_configuration::AlgorithmType::DebitRouting => {
+            format!("DEBIT_ROUTING_CONFIG_{}", mid)
+        }
+    };
+
+    types::service_configuration::delete_config(config_name)
+        .await
+        .change_context(error::RuleConfigurationError::StorageError)?;
+
     Ok(())
 }
