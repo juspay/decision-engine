@@ -7,9 +7,10 @@ use error_stack::ResultExt as _;
 impl types::DebitRoutingConfig {
     pub fn get_non_regulated_interchange_fee(
         &self,
-        merchant_category_code: &str,
+        merchant_category_code: &types::MerchantCategoryCode,
         network: &gateway_decider_types::NETWORK,
     ) -> CustomResult<&types::NetworkProcessingData, error::ApiError> {
+        logger::debug!("Fetching interchange fee for non regulated banks in debit routing {:?}", merchant_category_code);
         self.interchange_fee
             .non_regulated
             .0

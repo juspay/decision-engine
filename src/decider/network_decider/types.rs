@@ -23,7 +23,7 @@ impl TryInto<CoBadgedCardRequest> for serde_json::Value {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, strum::EnumString, strum::Display)]
+#[derive(Debug, Clone, Serialize, Deserialize, strum::EnumString, strum::Display, Hash, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum MerchantCategoryCode {
     #[serde(rename = "merchant_category_code_0001")]
@@ -94,8 +94,10 @@ pub enum CountryAlpha2 {
 #[diesel(sql_type = sql_types::Text)]
 pub enum RegulatedName {
     #[serde(rename = "GOVERNMENT NON-EXEMPT INTERCHANGE FEE (WITH FRAUD)")]
+    #[strum(serialize = "GOVERNMENT NON-EXEMPT INTERCHANGE FEE (WITH FRAUD)")]
     NonExemptWithFraud,
     #[serde(rename = "GOVERNMENT EXEMPT INTERCHANGE FEE")]
+    #[strum(serialize = "GOVERNMENT EXEMPT INTERCHANGE FEE")]
     ExemptFraud,
 }
 
@@ -116,7 +118,9 @@ pub enum RegulatedName {
 #[serde(rename_all = "snake_case")]
 #[diesel(sql_type =  ::diesel::sql_types::Text)]
 pub enum CardType {
+    #[strum(serialize = "credit")]
     Credit,
+    #[strum(serialize = "debit")]
     Debit,
 }
 
@@ -137,7 +141,9 @@ pub enum CardType {
 #[diesel(sql_type = sql_types::Text)]
 #[serde(rename_all = "snake_case")]
 pub enum PanOrToken {
+    #[strum(serialize = "pan")]
     Pan,
+    #[strum(serialize = "token")]
     Token,
 }
 
@@ -170,7 +176,10 @@ pub struct NetworkInterchangeFee {
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub struct NoneRegulatedNetworkProcessingData(
-    pub HashMap<String, HashMap<gatewaydecider::types::NETWORK, NetworkProcessingData>>,
+    pub  HashMap<
+        MerchantCategoryCode,
+        HashMap<gatewaydecider::types::NETWORK, NetworkProcessingData>,
+    >,
 );
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
