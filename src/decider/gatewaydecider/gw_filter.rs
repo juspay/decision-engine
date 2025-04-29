@@ -2186,7 +2186,7 @@ pub async fn filterGatewaysForEmi(this: &mut DeciderFlow<'_>) -> GatewayList {
                 let gbes_v2_list_ = SGBES::getGatewayBankEmiSupportV2(
                     txn_detail.emiBank.clone(),
                     gws.clone(),
-                    scope.to_string(),
+                    scope_.to_string(),
                     txn_detail.emiTenure,
                 )
                 .await;
@@ -2217,10 +2217,10 @@ pub async fn filterGatewaysForEmi(this: &mut DeciderFlow<'_>) -> GatewayList {
                     logger::info!(
                         tag = "GBESV2 Entry Not Found",
                         action = "GBESV2 Entry Not Found",
-                        "GBESV2 Entry Not Found For emiBank - {:?}, gateways - {:?}, scope - {:?}, tenure - {:?}",
+                        "GBESV2 Entry Not Found For emiBank - {:?}, gateways - {:?}, scope_ - {:?}, tenure - {:?}",
                         txn_detail.emiBank,
                         gws.clone(),
-                        scope,
+                        scope_,
                         txn_detail.emiTenure
                     );
                 }
@@ -2246,7 +2246,7 @@ pub async fn filterGatewaysForEmi(this: &mut DeciderFlow<'_>) -> GatewayList {
                 let gbes_list_ = SGBES::getGatewayBankEmiSupport(
                     txn_detail.emiBank.clone(),
                     gws.clone(),
-                    scope.to_string(),
+                    scope_.to_string(),
                 )
                 .await;
 
