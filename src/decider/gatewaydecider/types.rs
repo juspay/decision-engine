@@ -230,16 +230,23 @@ pub struct GBESV2Metadata {
 )]
 #[diesel(sql_type = sql_types::Text)]
 pub enum NETWORK {
-    #[serde(alias = "visa")]
+    #[serde(alias = "visa", alias = "Visa")]
     VISA,
+    #[serde(alias = "amex", alias = "Amex")]
     AMEX,
+    #[serde(alias = "dinersclub", alias = "DinersClub")]
     DINERS,
+    #[serde(alias = "rupay", alias = "RuPay")]
     RUPAY,
+    #[serde(alias = "mastercard", alias = "Mastercard")]
     MASTERCARD,
-    #[serde(alias = "star")]
+    #[serde(alias = "star", alias = "Star")]
     STAR,
+    #[serde(alias = "pulse", alias = "Pulse")]
     PULSE,
+    #[serde(alias = "accel", alias = "Accel")]
     ACCEL,
+    #[serde(alias = "nyce", alias = "Nyce")]
     NYCE,
 }
 
