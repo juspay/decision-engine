@@ -102,6 +102,8 @@ pub enum RuleConfigurationError {
     ConfigurationNotFound,
     #[error(" Rule Configuration already exists")]
     ConfigurationAlreadyExists,
+    #[error("Failed to deserialize configuration")]
+    DeserializationError,
 }
 
 impl axum::response::IntoResponse for RuleConfigurationError {
@@ -112,6 +114,15 @@ impl axum::response::IntoResponse for RuleConfigurationError {
                 axum::Json(crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
                     "Storage error".to_string(),
+                    None,
+                )),
+            )
+                .into_response(),
+            RuleConfigurationError::DeserializationError => (
+                hyper::StatusCode::INTERNAL_SERVER_ERROR,
+                axum::Json(crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_04,
+                    "Failed to deserialize configuration".to_string(),
                     None,
                 )),
             )

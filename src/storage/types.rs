@@ -251,6 +251,12 @@ pub struct MerchantAccountNew {
     pub enabled: BitBool,
 }
 
+#[derive(AsChangeset, Debug, serde::Serialize, serde::Deserialize, Queryable, Selectable)]
+#[diesel(table_name = schema::merchant_account)]
+pub struct MerchantAccountUpdate {
+    pub gateway_success_rate_based_decider_input: Option<String>,
+}
+
 #[derive(Debug, Clone, Identifiable, Queryable)]
 #[diesel(table_name = schema::merchant_config)]
 pub struct MerchantConfig {

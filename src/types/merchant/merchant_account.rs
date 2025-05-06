@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 // use db::eulermeshimpl::{mesh_config, throw_missing_tenant_error, throw_tenant_mismatch_error, default_tenant_account_id};
 // use db::mesh::internal::*;
 use crate::error::ApiError;
-use crate::storage::types::{BitBool, MerchantAccount as DBMerchantAccount, MerchantAccountNew};
+use crate::storage::types::{
+    BitBool, MerchantAccount as DBMerchantAccount, MerchantAccountNew, MerchantAccountUpdate,
+};
 // use types::utils::dbconfig::get_euler_db_conf;
 // use types::locker::id::{LockerId, to_locker_id};
 use crate::app::get_tenant_app_state;
@@ -222,6 +224,35 @@ pub async fn delete_merchant_account(
 
     if rows == 0 {
         return Err(crate::generics::MeshError::NoRowstoDelete);
+    }
+
+    Ok(())
+}
+
+pub async fn update_merchant_account(
+    merchant_id: String,
+    value: Option<String>,
+) -> Result<(), crate::generics::MeshError> {
+    let app_state = get_tenant_app_state().await;
+    let values = MerchantAccountUpdate {
+        gateway_success_rate_based_decider_input: value,
+    };
+    let conn = &app_state
+        .db
+        .get_conn()
+        .await
+        .map_err(|_| crate::generics::MeshError::DatabaseConnectionError)?;
+    // Use Diesel's query builder with multiple conditions
+    let rows = crate::generics::generic_update::<
+        <DBMerchantAccount as HasTable>::Table,
+        MerchantAccountUpdate,
+        _,
+    >(&conn, dsl::merchant_id.eq(merchant_id), values)
+    .await
+    .map_err(|_| crate::generics::MeshError::Others)?;
+
+    if rows == 0 {
+        return Err(crate::generics::MeshError::NoRowstoUpdate);
     }
 
     Ok(())
