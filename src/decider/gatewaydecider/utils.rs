@@ -199,7 +199,7 @@ pub fn is_emandate_supported_payment_method(
 pub fn is_emandate_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
     matches!(
         txn_detail.txnObjectType,
-        ETTD::TxnObjectType::EmandateRegister | ETTD::TxnObjectType::TpvEmandateRegister
+        ETTD::TxnObjectType::EmandateRegister | ETTD::TxnObjectType::TpvEmandateRegister | ETTD::TxnObjectType::EmandatePayment | ETTD::TxnObjectType::TpvEmandatePayment
     )
 }
 
@@ -244,7 +244,9 @@ fn get_merchant_gateway_card_info_feature_name(
 }
 
 pub fn is_mandate_transaction(txn: &ETTD::TxnDetail) -> bool {
-    matches!(txn.txnObjectType, ETTD::TxnObjectType::MandateRegister)
+    matches!(txn.txnObjectType, 
+            ETTD::TxnObjectType::MandateRegister
+        |   ETTD::TxnObjectType::MandatePayment)
 }
 
 pub async fn get_merchant_wise_mandate_bin_eligible_gateways(
