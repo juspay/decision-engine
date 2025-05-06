@@ -1,5 +1,8 @@
 use crate::redis::commands::RedisConnectionWrapper;
-use axum::{extract::Request, routing::post};
+use axum::{
+    extract::Request,
+    routing::{delete, get, post},
+};
 use axum_server::{tls_rustls::RustlsConfig, Handle};
 use error_stack::ResultExt;
 use std::sync::Arc;
@@ -123,11 +126,15 @@ where
         )
         .route(
             "/routing/list/:created_by",
-            axum::routing::post(crate::euclid::handlers::routing_rules::list_all_routing_algorithm_id),
+            axum::routing::post(
+                crate::euclid::handlers::routing_rules::list_all_routing_algorithm_id,
+            ),
         )
         .route(
             "/routing/list/active/:created_by",
-            axum::routing::post(crate::euclid::handlers::routing_rules::list_active_routing_algorithm),
+            axum::routing::post(
+                crate::euclid::handlers::routing_rules::list_active_routing_algorithm,
+            ),
         )
         .route(
             "/routing/evaluate",
@@ -152,6 +159,18 @@ where
         .route(
             "/rule/delete",
             post(routes::rule_configuration::delete_rule_config),
+        )
+        .route(
+            "/merchant-account/create",
+            post(routes::merchant_account_config::create_merchant_config),
+        )
+        .route(
+            "/merchant-account/:merchant-id",
+            get(routes::merchant_account_config::get_merchant_config),
+        )
+        .route(
+            "/merchant-account/:merchant-id",
+            delete(routes::merchant_account_config::delete_merchant_config),
         );
     let router = router.route("/update-score", post(routes::update_score::update_score));
     let router = router.route(

@@ -240,6 +240,17 @@ pub struct MerchantAccount {
     pub merchant_category_code: Option<String>,
 }
 
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = schema::merchant_account)]
+pub struct MerchantAccountNew {
+    pub merchant_id: Option<String>,
+    pub date_created: PrimitiveDateTime,
+    pub use_code_for_gateway_priority: BitBool,
+    pub gateway_success_rate_based_decider_input: Option<String>,
+    pub internal_metadata: Option<String>,
+    pub enabled: BitBool,
+}
+
 #[derive(Debug, Clone, Identifiable, Queryable)]
 #[diesel(table_name = schema::merchant_config)]
 pub struct MerchantConfig {
@@ -312,13 +323,10 @@ pub struct BitBool(pub bool);
 
 impl ToSql<Binary, Mysql> for BitBool {
     fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Mysql>) -> diesel::serialize::Result {
-        match *self {
-            BitBool(true) => {
-                out.write_all(b"1")?;
-            }
-            BitBool(false) => {
-                out.write_all(b"0")?;
-            }
+        if self.0 {
+            out.write_all(&[1u8])?;
+        } else {
+            out.write_all(&[0u8])?;
         }
         Ok(IsNull::No)
     }
