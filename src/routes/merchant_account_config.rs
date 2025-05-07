@@ -7,7 +7,7 @@ use error_stack::ResultExt;
 pub async fn get_merchant_config(
     Path(merchant_id): Path<String>,
 ) -> Result<
-    Json<ETM::merchant_account::MerchantAccount>,
+    Json<ETM::merchant_account::MerchantAccountResponse>,
     error::ContainerError<error::MerchantAccountConfigurationError>,
 > {
     logger::debug!(
@@ -18,7 +18,7 @@ pub async fn get_merchant_config(
         .await
         .ok_or(error::MerchantAccountConfigurationError::MerchantNotFound)?;
 
-    Ok(Json(merchant_account))
+    Ok(Json(merchant_account.into()))
 }
 
 #[axum::debug_handler]
@@ -29,6 +29,13 @@ pub async fn create_merchant_config(
         "Received request to create merchant account configuration: {:?}",
         payload
     );
+
+    let merchant_account =
+        ETM::merchant_account::load_merchant_by_merchant_id(payload.merchant_id.clone()).await;
+
+    if merchant_account.is_some() {
+        return Err(error::MerchantAccountConfigurationError::MerchantAlreadyExists.into());
+    }
 
     ETM::merchant_account::insert_merchant_account(payload)
         .await

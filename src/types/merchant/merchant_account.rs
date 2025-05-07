@@ -95,6 +95,23 @@ impl TryFrom<MerchantAccountCreateRequest> for MerchantAccountNew {
         })
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MerchantAccountResponse {
+    pub merchant_id: String,
+    pub gateway_success_rate_based_decider_input: Option<String>,
+}
+
+impl From<MerchantAccount> for MerchantAccountResponse {
+    fn from(value: MerchantAccount) -> Self {
+        Self {
+            merchant_id: value.merchantId.0.clone(),
+            gateway_success_rate_based_decider_input: Some(
+                value.gatewaySuccessRateBasedDeciderInput,
+            ),
+        }
+    }
+}
 // The following functions are placeholders for the Haskell functions.
 // They should be implemented as per the Rust project requirements.
 
