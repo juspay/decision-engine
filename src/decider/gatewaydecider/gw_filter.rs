@@ -585,12 +585,13 @@ fn validateMga(
     txnCI: &TxnCardInfo,
     mTxnObjType: TxnObjectType,
     mgaEligibleSeamlessGateways: &[String],
+    is_otm_flow: bool
 ) -> bool {
     if mgaEligibleSeamlessGateways.contains(&mga.gateway) && isCardOrNbTxn(txnCI) {
         Utils::is_seamless(mga)
     } else if isMandateRegister(mTxnObjType.clone()) {
         Utils::is_subscription(mga)
-    } else if (isEmandateRegister(mTxnObjType) && !isOTMflow){
+    } else if (isEmandateRegister(mTxnObjType) && !is_otm_flow){
         Utils::is_emandate_enabled(mga)
     } else {
         !Utils::is_only_subscription(mga)
@@ -1465,8 +1466,8 @@ pub async fn filterGatewaysForValidationType(
     // Handle Card Mandate transactions
     if Utils::is_mandate_transaction(&txn_detail) && Utils::is_card_transaction(&txn_card_info) {
         // Get excluded gateways from Redis
-        let uniqueGwLs: Vec<String> = st.into_iter().collect();
-        let brand = txnCardInfo
+        let uniqueGwLs: Vec<String> = st.clone().into_iter().collect();
+        let brand = txn_card_info
                     .cardSwitchProvider
                     .as_ref()
                     .map(|provider| provider.peek().to_string())
@@ -1476,7 +1477,7 @@ pub async fn filterGatewaysForValidationType(
         
         let updatedSt = if let Some(cardPaymentMethod) = mPmEntryDB {
             let uniqueGwLs: Vec<String> = st.into_iter().collect();
-            let      =
+            let allGPMfEntries =
                 GPMF::find_all_gpmf_by_gateway_payment_flow_payment_method(
                     uniqueGwLs.clone(),
                     cardPaymentMethod.id,
@@ -1516,7 +1517,7 @@ pub async fn filterGatewaysForValidationType(
                 .collect()
         } else {
             Vec::new()
-        }
+        };
 
         let card_mandate_bin_filter_excluded_gateways =
             findByNameFromRedis(C::CARD_MANDATE_BIN_FILTER_EXCLUDED_GATEWAYS.get_key())
@@ -1532,7 +1533,7 @@ pub async fn filterGatewaysForValidationType(
             macc.clone(),
             bin_list,
             updatedSt,
-            txn_card_info.authType,
+            txn_card_info.authType.clone(),
             Some(ETGCI::ValidationType::CardMandate),
         )
         .await?;
