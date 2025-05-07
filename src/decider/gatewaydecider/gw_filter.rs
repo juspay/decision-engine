@@ -385,6 +385,7 @@ pub async fn getFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList {
                         &txn_card_info,
                         txn_detail.txnObjectType.clone(),
                         &mga_eligible_seamless_gateways,
+                        &txn_detail
                     )
                 })
                 .collect()
@@ -572,8 +573,11 @@ pub fn isMgaEligible(
     txnCI: &TxnCardInfo,
     mTxnObjType: TxnObjectType,
     mgaEligibleSeamlessGateways: &[String],
+    txn_detail: &TxnDetail
 ) -> bool {
-    validateMga(mga, txnCI, mTxnObjType, mgaEligibleSeamlessGateways)
+    let payment_flow_list = Utils::get_payment_flow_list_from_txn_detail(&txn_detail);
+    let is_otm_flow = payment_flow_list.contains(&"ONE_TIME_MANDATE".to_string());
+    validateMga(mga, txnCI, mTxnObjType, mgaEligibleSeamlessGateways, is_otm_flow)
 }
 
 fn validateMga(
@@ -581,12 +585,13 @@ fn validateMga(
     txnCI: &TxnCardInfo,
     mTxnObjType: TxnObjectType,
     mgaEligibleSeamlessGateways: &[String],
+    is_otm_flow: bool
 ) -> bool {
     if mgaEligibleSeamlessGateways.contains(&mga.gateway) && isCardOrNbTxn(txnCI) {
         Utils::is_seamless(mga)
     } else if isMandateRegister(mTxnObjType.clone()) {
         Utils::is_subscription(mga)
-    } else if isEmandateRegister(mTxnObjType) {
+    } else if (isEmandateRegister(mTxnObjType) && !is_otm_flow){
         Utils::is_emandate_enabled(mga)
     } else {
         !Utils::is_only_subscription(mga)
@@ -1461,13 +1466,65 @@ pub async fn filterGatewaysForValidationType(
     // Handle Card Mandate transactions
     if Utils::is_mandate_transaction(&txn_detail) && Utils::is_card_transaction(&txn_card_info) {
         // Get excluded gateways from Redis
+        let uniqueGwLs: Vec<String> = st.clone().into_iter().collect();
+        let brand = txn_card_info
+                    .cardSwitchProvider
+                    .as_ref()
+                    .map(|provider| provider.peek().to_string())
+                    .unwrap_or_else(|| "DEFAULT".to_string());
+        let mPmEntryDB = ETP::get_by_name(brand).await;
+        
+        
+        let updatedSt = if let Some(cardPaymentMethod) = mPmEntryDB {
+            let uniqueGwLs: Vec<String> = st.into_iter().collect();
+            let allGPMfEntries =
+                GPMF::find_all_gpmf_by_gateway_payment_flow_payment_method(
+                    uniqueGwLs.clone(),
+                    cardPaymentMethod.id,
+                    PaymentFlow::CVVLESS,
+                )
+                .await;
+            let mgaList = Utils::get_mgas(this).unwrap_or_default();
+            let gmpfGws: Vec<String> = allGPMfEntries
+                .iter()
+                .map(|gpmf| gpmf.gateway.clone())
+                .collect();
+            let filteredMga: Vec<MerchantGatewayAccount> = mgaList
+                .into_iter()
+                .filter(|mga| gmpfGws.contains(&mga.gateway))
+                .collect();
+            let mgaIds: Vec<i64> = filteredMga
+                .iter()
+                .map(|mga| mga.id.merchantGwAccId)
+                .collect();
+            let gpmfIds: Vec<GatewayPaymentMethodFlowId> =
+                allGPMfEntries.iter().map(|gpmf| gpmf.id.clone()).collect();
+            let mgpmfEntries =
+                MGPMF::get_all_mgpmf_by_mga_id_and_gpmf_ids(mgaIds, gpmfIds)
+                    .await;
+            let filteredMgaList: Vec<i64> = mgpmfEntries
+                .iter()
+                .map(|mgpmf| mgpmf.merchantGatewayAccountId)
+                .collect();
+            let finalFilteredMga: Vec<MerchantGatewayAccount> = filteredMga
+                .into_iter()
+                .filter(|mga| filteredMgaList.contains(&mga.id.merchantGwAccId))
+                .collect();
+            Utils::set_mgas(this, finalFilteredMga.clone());
+            finalFilteredMga
+                .into_iter()
+                .map(|mga| mga.gateway)
+                .collect()
+        } else {
+            Vec::new()
+        };
+
         let card_mandate_bin_filter_excluded_gateways =
             findByNameFromRedis(C::CARD_MANDATE_BIN_FILTER_EXCLUDED_GATEWAYS.get_key())
                 .await
                 .unwrap_or_else(Vec::new);
-
         let bin_wise_filter_excluded_gateways =
-            intersect(&card_mandate_bin_filter_excluded_gateways, &st);
+            intersect(&card_mandate_bin_filter_excluded_gateways, &updatedSt);
         let bin_list = Utils::get_bin_list(txn_card_info.card_isin.clone());
 
         // Filter gateways based on card info
@@ -1475,8 +1532,8 @@ pub async fn filterGatewaysForValidationType(
             this,
             macc.clone(),
             bin_list,
-            st,
-            None,
+            updatedSt,
+            txn_card_info.authType.clone(),
             Some(ETGCI::ValidationType::CardMandate),
         )
         .await?;
@@ -1562,50 +1619,48 @@ pub async fn filterGatewaysForValidationType(
     // Handle TPV or E-Mandate transactions
     else if Utils::is_tpv_transaction(&txn_detail)
         || (Utils::is_emandate_transaction(&txn_detail)
-            && Utils::is_emandate_supported_payment_method(&txn_card_info))
-    {
-        // Determine validation type and get enabled MGAs
-        let (validation_type, e_mgas) = if Utils::is_emandate_transaction(&txn_detail) {
-            let e_mgas = SETMA::get_emandate_enabled_mga(
-                macc.merchantId.clone(),
-                possible_ref_ids_of_merchant,
-            )
-            .await;
-
-            let v_type = if Utils::is_tpv_mandate_transaction(&txn_detail) {
-                ETGCI::ValidationType::TpvEmandate
-            } else {
-                ETGCI::ValidationType::Emandate
-            };
-
-            (v_type, e_mgas)
-        } else {
-            let e_mgas = ETMA::getEnabledMgasByMerchantIdAndRefId(
-                macc.merchantId.0.clone(),
-                possible_ref_ids_of_merchant
-                    .into_iter()
-                    .map(|s| s.mga_reference_id)
-                    .collect(),
-            )
-            .await;
-
-            (ETGCI::ValidationType::Tpv, e_mgas)
-        };
+            && Utils::is_emandate_supported_payment_method(&txn_card_info)) {
+    
 
         // Check if we should skip processing for one-time mandate flow
         let payment_flow_list = Utils::get_payment_flow_list_from_txn_detail(&txn_detail);
         let is_otm_flow = payment_flow_list.contains(&"ONE_TIME_MANDATE".to_string());
 
-        if (validation_type == ETGCI::ValidationType::TpvEmandate
-            || validation_type == ETGCI::ValidationType::Emandate)
-            && is_otm_flow
+        if is_otm_flow
         {
             logger::info!(
                 "Skipping processing for OTM flow for txn_id {:?}",
                 txn_detail.txnId.clone()
             );
-        } else {
-            // Filter enabled gateway accounts
+        } else // Filter enabled gateway accounts
+            {
+                // Determine validation type and get enabled MGAs
+            let (validation_type, e_mgas) = if Utils::is_emandate_transaction(&txn_detail) {
+                let e_mgas = SETMA::get_emandate_enabled_mga(
+                    macc.merchantId.clone(),
+                    possible_ref_ids_of_merchant,
+                )
+                .await;
+    
+                let v_type = if Utils::is_tpv_mandate_transaction(&txn_detail) {
+                    ETGCI::ValidationType::TpvEmandate
+                } else {
+                    ETGCI::ValidationType::Emandate
+                };
+    
+                (v_type, e_mgas)
+            } else {
+                let e_mgas = ETMA::getEnabledMgasByMerchantIdAndRefId(
+                    macc.merchantId.0.clone(),
+                    possible_ref_ids_of_merchant
+                        .into_iter()
+                        .map(|s| s.mga_reference_id)
+                        .collect(),
+                )
+                .await;
+    
+                (ETGCI::ValidationType::Tpv, e_mgas)
+            };
             let enabled_gateway_accounts = e_mgas
                 .into_iter()
                 .filter(|mga| {
