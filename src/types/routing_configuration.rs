@@ -2,8 +2,6 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RoutingRule {
-    pub name: String,
-    pub description: String,
     pub merchant_id: String,
     pub config: ConfigVariant,
 }
@@ -24,14 +22,10 @@ pub enum AlgorithmType {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
+#[serde(rename_all = "camelCase")]
 pub enum ConfigVariant {
-    #[serde(rename = "success_rate")]
     SuccessRate(SuccessRateData),
-
-    #[serde(rename = "elimination")]
     Elimination(EliminationData),
-
-    #[serde(rename = "debit_routing")]
     DebitRouting(DebitRoutingData),
 }
 
@@ -68,11 +62,13 @@ pub struct GatewayWiseExtraScore {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EliminationData {
     pub threshold: f64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DebitRoutingData {
     pub merchant_category_code: String,
     pub acquirer_country: String,

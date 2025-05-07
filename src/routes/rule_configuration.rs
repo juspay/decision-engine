@@ -101,8 +101,6 @@ pub async fn get_rule_config(
                     .map_err(|_| error::RuleConfigurationError::StorageError)?;
 
             Ok(Json(types::routing_configuration::RoutingRule {
-                name: config_name,
-                description: "Success Rate Configuration".to_string(),
                 merchant_id: mid,
                 config: types::routing_configuration::ConfigVariant::SuccessRate(
                     success_rate_config,
@@ -110,7 +108,6 @@ pub async fn get_rule_config(
             }))
         }
         types::routing_configuration::AlgorithmType::Elimination => {
-            let config_name = format!("DEFAULT_SR_BASED_GATEWAY_ELIMINATION_INPUT");
             let db_config = merchant_account.gatewaySuccessRateBasedDeciderInput;
 
             let config = serde_json::from_str::<
@@ -123,8 +120,6 @@ pub async fn get_rule_config(
             };
 
             Ok(Json(types::routing_configuration::RoutingRule {
-                name: config_name,
-                description: "Elimination Configuration".to_string(),
                 merchant_id: mid,
                 config: types::routing_configuration::ConfigVariant::Elimination(
                     elimination_config,
@@ -144,8 +139,6 @@ pub async fn get_rule_config(
                     .map_err(|_| error::RuleConfigurationError::StorageError)?;
 
             Ok(Json(types::routing_configuration::RoutingRule {
-                name: config_name,
-                description: "Debit Routing Configuration".to_string(),
                 merchant_id: mid,
                 config: types::routing_configuration::ConfigVariant::DebitRouting(
                     debit_routing_config,

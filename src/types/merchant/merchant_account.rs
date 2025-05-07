@@ -197,9 +197,7 @@ where
     let config =
         MerchantAccountNew::try_from(value).map_err(|_| crate::generics::MeshError::Others)?;
 
-    crate::generics::generic_insert(&app_state.db, config)
-        .await
-        .map_err(|_| crate::generics::MeshError::Others)?;
+    crate::generics::generic_insert(&app_state.db, config).await?;
 
     Ok(())
 }
@@ -215,16 +213,11 @@ pub async fn delete_merchant_account(
         .await
         .map_err(|_| crate::generics::MeshError::DatabaseConnectionError)?;
     // Use Diesel's query builder with multiple conditions
-    let rows = crate::generics::generic_delete::<<DBMerchantAccount as HasTable>::Table, _>(
+    crate::generics::generic_delete::<<DBMerchantAccount as HasTable>::Table, _>(
         &conn,
         dsl::merchant_id.eq(merchant_id),
     )
-    .await
-    .map_err(|_| crate::generics::MeshError::Others)?;
-
-    if rows == 0 {
-        return Err(crate::generics::MeshError::NoRowstoDelete);
-    }
+    .await?;
 
     Ok(())
 }
@@ -243,17 +236,11 @@ pub async fn update_merchant_account(
         .await
         .map_err(|_| crate::generics::MeshError::DatabaseConnectionError)?;
     // Use Diesel's query builder with multiple conditions
-    let rows = crate::generics::generic_update::<
+    crate::generics::generic_update::<
         <DBMerchantAccount as HasTable>::Table,
         MerchantAccountUpdate,
         _,
     >(&conn, dsl::merchant_id.eq(merchant_id), values)
-    .await
-    .map_err(|_| crate::generics::MeshError::Others)?;
-
-    if rows == 0 {
-        return Err(crate::generics::MeshError::NoRowstoUpdate);
-    }
-
+    .await?;
     Ok(())
 }

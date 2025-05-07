@@ -125,7 +125,13 @@ where
 
     match track_database_call::<T, _, _>(query.execute_async(conn), DatabaseOperation::Update).await
     {
-        Ok(value) => Ok(value),
+        Ok(value) => {
+            logger::debug!("Updated rows: {:?}", value);
+            if value == 0 {
+                return Err(crate::generics::MeshError::NoRowstoUpdate);
+            }
+            Ok(value)
+        }
         Err(err) => {
             logger::error!("Error while updating: {:?} {:?}", err, debug_values);
             Err(MeshError::NotFound)
@@ -147,7 +153,13 @@ where
 
     match track_database_call::<T, _, _>(query.execute_async(conn), DatabaseOperation::Delete).await
     {
-        Ok(value) => Ok(value),
+        Ok(value) => {
+            logger::debug!("Deleted rows: {:?}", value);
+            if value == 0 {
+                return Err(crate::generics::MeshError::NoRowstoDelete);
+            }
+            Ok(value)
+        }
         Err(err) => {
             logger::error!("Error while deleting: {:?}", err);
             Err(MeshError::NotFound)
