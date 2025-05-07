@@ -24,7 +24,7 @@ pub async fn get_merchant_config(
 #[axum::debug_handler]
 pub async fn create_merchant_config(
     Json(payload): Json<ETM::merchant_account::MerchantAccountCreateRequest>,
-) -> Result<(), error::ContainerError<error::MerchantAccountConfigurationError>> {
+) -> Result<Json<String>, error::ContainerError<error::MerchantAccountConfigurationError>> {
     logger::debug!(
         "Received request to create merchant account configuration: {:?}",
         payload
@@ -36,7 +36,7 @@ pub async fn create_merchant_config(
 
     logger::debug!("Merchant account configuration created successfully");
 
-    Ok(())
+    Ok(Json("Merchant account created successfully".to_string()))
 }
 
 #[axum::debug_handler]
