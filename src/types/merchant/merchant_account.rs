@@ -207,11 +207,7 @@ pub async fn delete_merchant_account(
 ) -> Result<(), crate::generics::MeshError> {
     let app_state = get_tenant_app_state().await;
 
-    let conn = &app_state
-        .db
-        .get_conn()
-        .await
-        .map_err(|_| crate::generics::MeshError::DatabaseConnectionError)?;
+    let conn = &app_state.db.get_conn().await?;
     // Use Diesel's query builder with multiple conditions
     crate::generics::generic_delete::<<DBMerchantAccount as HasTable>::Table, _>(
         &conn,
@@ -230,11 +226,7 @@ pub async fn update_merchant_account(
     let values = MerchantAccountUpdate {
         gateway_success_rate_based_decider_input: value,
     };
-    let conn = &app_state
-        .db
-        .get_conn()
-        .await
-        .map_err(|_| crate::generics::MeshError::DatabaseConnectionError)?;
+    let conn = &app_state.db.get_conn().await?;
     // Use Diesel's query builder with multiple conditions
     crate::generics::generic_update::<
         <DBMerchantAccount as HasTable>::Table,
