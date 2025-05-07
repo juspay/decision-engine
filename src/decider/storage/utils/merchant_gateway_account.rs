@@ -93,7 +93,7 @@ fn filter_morpheus(
     mgas: Vec<ETM::merchant_gateway_account::MerchantGatewayAccount>,
 ) -> Vec<ETM::merchant_gateway_account::MerchantGatewayAccount> {
     mgas.into_iter()
-        .filter(|mga| mga.gateway != "morpheus".to_string())
+        .filter(|mga| mga.gateway != "MORPHEUS".to_string())
         .collect()
 }
 
@@ -102,7 +102,7 @@ pub fn is_only_one_paylater(
 ) -> bool {
     match mgas.as_slice() {
         [] => false,
-        [mga] => mga.gateway == "paylater".to_string(),
+        [mga] => mga.gateway == "PAYLATER".to_string(),
         _ => false,
     }
 }
