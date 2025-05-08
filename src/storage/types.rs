@@ -329,10 +329,13 @@ pub struct BitBool(pub bool);
 
 impl ToSql<Binary, Mysql> for BitBool {
     fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Mysql>) -> diesel::serialize::Result {
-        if self.0 {
-            out.write_all(&[1u8])?;
-        } else {
-            out.write_all(&[0u8])?;
+        match *self {
+            BitBool(true) => {
+                out.write_all(b"1")?;
+            }
+            BitBool(false) => {
+                out.write_all(b"0")?;
+            }
         }
         Ok(IsNull::No)
     }
