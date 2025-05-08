@@ -13,7 +13,7 @@ use crate::storage::schema::txn_detail;
 use crate::types::gateway_routing_input::{
     EliminationLevel, EliminationSuccessRateInput, GatewaySuccessRateBasedRoutingInput,
     GatewayWiseSuccessRateBasedRoutingInput, GlobalGatewayScore, GlobalScore, GlobalScoreLog,
-    SelectionLevel,
+    SelectionLevel, GatewayScore,
 };
 use crate::types::payment_flow::PaymentFlow;
 use crate::types::tenant::tenant_config::ModuleName;
@@ -65,7 +65,7 @@ use std::primitive;
 use std::string::String as T;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::vec::Vec;
-
+use crate::feedback::gateway_elimination_scoring::flow::{getTTLForKey};
 use super::types::{
     transform_gateway_wise_success_rate_based_routing, ConfigSource, DebugScoringEntry,
     DeciderGatewayWiseSuccessRateBasedRoutingInput, Dimension, DownTime, FilterLevel, Gateway,
@@ -2341,9 +2341,8 @@ pub async fn update_gateway_score_based_on_success_rate(
                     );
 
                     if is_reset_score_enabled_for_merchant {
-                        // let reset_enabled_gateway_list =
-                        //     evaluate_reset_gateway_score(&filtered_gateway_success_rate_inputs, &txn_detail);
-                        let reset_enabled_gateway_list: Vec<String> = vec![];
+                        let reset_enabled_gateway_list =
+                            evaluate_reset_gateway_score(filtered_gateway_success_rate_inputs.clone(), txn_detail.clone()).await;
 
                         if !reset_enabled_gateway_list.is_empty() {
                             decider_flow.writer.resetGatewayList =
@@ -2451,13 +2450,16 @@ pub async fn update_gateway_score_based_on_success_rate(
                 // };
 
                 let reset_gw_list = decider_flow.writer.resetGatewayList.clone();
-                trigger_reset_gateway_score(
-                    decider_flow,
-                    gateway_success_rate_inputs,
-                    txn_detail.clone(),
-                    reset_gw_list,
-                    is_reset_score_enabled_for_merchant,
-                );
+                if (!reset_gw_list.is_empty()){     
+                    trigger_reset_gateway_score(
+                        decider_flow,
+                        gateway_success_rate_inputs,
+                        txn_detail.clone(),
+                        reset_gw_list,
+                        is_reset_score_enabled_for_merchant,
+                        gateway_redis_key_map.clone(),
+                    ).await;
+                }
 
                 let gateway_decider_approach = get_decider_approach(decider_flow);
                 let (gw_score, downtime, sr_based_elimination_approach_info_res) =
@@ -2682,7 +2684,7 @@ pub async fn evaluate_reset_gateway_score(
                 logger::debug!(
                     tag="evaluateResetGatewayScore",
                     action = "evaluateResetGatewayScore",
-                    "Adding gateway {} to resetAPI Request for {:?} for level {:?}",
+                    "Adding gateway {} to reset Request for {:?} for level {:?}",
                     it.gateway, txnDetail.txnId, it.eliminationLevel
                 );
                 acc.push(it.gateway.clone());
@@ -2693,12 +2695,13 @@ pub async fn evaluate_reset_gateway_score(
     acc
 }
 
-pub fn trigger_reset_gateway_score(
+pub async fn trigger_reset_gateway_score(
     decider_flow: &mut DeciderFlow<'_>,
     gateway_success_rate_inputs: Vec<GatewayWiseSuccessRateBasedRoutingInput>,
     txn_detail: ETTD::TxnDetail,
     reset_gateway_list: Vec<String>,
     is_reset_score_enabled_for_merchant: bool,
+    gateway_redis_key_map: GatewayRedisKeyMap,
 ) {
     logger::info!(
         tag="scoringFlow",
@@ -2712,16 +2715,17 @@ pub fn trigger_reset_gateway_score(
             action = "scoringFlow",
             "Reset Gateway Scores is enabled for {:?} and merchantId {:?}",
             txn_detail.txnId,
-            Utils::get_m_id(txn_detail.merchantId)
+            Utils::get_m_id(txn_detail.clone().merchantId)
         );
-        let reset_gateway_sr_list = reset_gateway_list.iter().fold(Vec::new(), |mut acc, it| {
-
+        let mut reset_gateway_sr_list = Vec::new();
+        for it in &reset_gateway_list {
             logger::info!(
                 tag="scoringFlow",
                 action = "scoringFlow",
                 "Adding gateway {:?} to resetAPI Request for {:?}",
                 it, txn_detail.txnId
             );
+            
             let m_sr_input = get_gateway_success_rate_input(it, &gateway_success_rate_inputs);
             let oref = decider_flow.get().dpOrder.clone();
             let macc = decider_flow.get().dpMerchantAccount.clone();
@@ -2730,29 +2734,36 @@ pub fn trigger_reset_gateway_score(
                 macc.enableGatewayReferenceIdBasedRouting,
                 &oref,
             );
-            match m_sr_input {
-                Some(sr_input) => {
-                    let gw_ref_id = Utils::get_gateway_reference_id(meta, it, oref, pl_ref_id_map);
-                    let reset_gateway_input = ResetGatewayInput {
-                        gateway: it.clone(),
-                        eliminationThreshold: sr_input.eliminationThreshold,
-                        eliminationMaxCount: sr_input.softTxnResetCount.map(|v| v as i64),
-                        gatewayEliminationThreshold: sr_input.gatewayLevelEliminationThreshold,
-                        gatewayReferenceId: gw_ref_id.map(|id| id.mga_reference_id),
-                    };
-                    acc.push(reset_gateway_input);
-                }
-                None => {
-                    logger::info!(
-                        tag="scoringFlow",
-                        action = "scoringFlow",
-                        "No SR Input for {:?} and {:?}",
-                        it, txn_detail.txnId
-                    );
-                }
+            
+            if let Some(sr_input) = m_sr_input {
+                let gw_ref_id = Utils::get_gateway_reference_id(meta, it, oref, pl_ref_id_map);
+                let hard_ttl = getTTLForKey(ScoreKeyType::ELIMINATION_MERCHANT_KEY).await;
+                let soft_ttl = getKeyTTLFromMerchantDimension(
+                    merchantGatewayScoreDimension(sr_input.clone()),
+                ).await;
+                let reset_gateway_input = ResetGatewayInput {
+                    gateway: it.clone(),
+                    eliminationThreshold: sr_input.eliminationThreshold,
+                    eliminationMaxCount: sr_input.softTxnResetCount.map(|v| v as i64),
+                    gatewayEliminationThreshold: sr_input.gatewayLevelEliminationThreshold,
+                    gatewayReferenceId: gw_ref_id.map(|id| id.mga_reference_id),
+                    key: gateway_redis_key_map.get(it).cloned(),
+                    hardTtl: hard_ttl,
+                    softTtl: soft_ttl,
+                };
+                
+                // Now these await calls are in an async context
+                reset_gateway_score(decider_flow,txn_detail.clone(), reset_gateway_input.clone()).await;
+                reset_gateway_sr_list.push(reset_gateway_input.clone());
+            } else {
+                logger::info!(
+                    tag="scoringFlow",
+                    action = "scoringFlow",
+                    "No SR Input for {:?} and {:?}",
+                    it, txn_detail.txnId
+                );
             }
-            acc
-        });
+        }
 
         let reset_approach = Utils::get_reset_approach(decider_flow);
         match reset_approach {
@@ -2777,14 +2788,13 @@ pub fn trigger_reset_gateway_score(
             txn_detail.txnId,
             reset_gateway_sr_list
         );
-        // reset_gateway_score(txn_detail, reset_gateway_sr_list);
     } else {
         logger::info!(
             tag="scoringFlow",
             action = "scoringFlow",
             "Reset Gateway Scores is not enabled for {:?} and merchantId {:?}",
             txn_detail.txnId,
-            Utils::get_m_id(txn_detail.merchantId)
+            Utils::get_m_id(txn_detail.clone().merchantId)
         );
     }
 }
@@ -2799,42 +2809,116 @@ fn get_gateway_success_rate_input(
         .cloned()
 }
 
-// pub fn reset_gateway_score(
-//     txn_detail: ETTD::TxnDetail,
-//     reset_gateway_sr_list: Vec<ResetGatewayInput>,
-// ) -> DeciderFlow<()> {
-//     if !reset_gateway_sr_list.is_empty() {
-//         let endpoint = ENV::euler_endpoint();
-//         let params = ResetCallParams {
-//             txn_detail_id: txn_detail.id.to_string(),
-//             txn_id: review(ETTD::transaction_id_text(), txn_detail.txn_id.clone()),
-//             merchant_id: Utils::get_m_id(txn_detail.merchant_id.clone()),
-//             order_id: Ord::un_order_id(txn_detail.order_id.clone()),
-//             reset_gateway_score_req_arr: reset_gateway_sr_list,
-//         };
-//         log_debug_v::<String>(
-//             "resetGatewayScore",
-//             format!(
-//                 "Reset score call to Euler with Endpoint: {:?}, params: {:?}, for {:?}",
-//                 endpoint, params, txn_detail.txn_id
-//             ),
-//         );
-//         let url = Client::parse_base_url(endpoint.as_str()).unwrap();
-//         let m_cell_selector = language::get_option_local::<Options::XCellSelectorHeader>();
-//         language::call_api(
-//             Some(T::ManagerSelector::TlsManager),
-//             url,
-//             EC_RESET_GATEWAY_SCORE,
-//             |_| None,
-//             reset_gw_score_call(Some("HS".to_string()), m_cell_selector, params),
-//         );
-//     } else {
-//         log_debug_v::<String>(
-//             "resetGatewayScore",
-//             format!("Not eligible to send reset gateway score callback {:?}", txn_detail.txn_id),
-//         );
-//     }
-// }
+pub async fn reset_gateway_score(
+    decider_flow: &mut DeciderFlow<'_>,
+    txn_detail: ETTD::TxnDetail,
+    reset_gateway_input: ResetGatewayInput,
+){
+    let current_timestamp = get_current_date_in_millis();
+    match (reset_gateway_input.clone().key,reset_gateway_input.clone().eliminationThreshold, reset_gateway_input.clone().eliminationMaxCount){
+        (Some(key), Some(threshold), Some(max_count)) => {
+           
+           let penality_factor = Utils::get_penality_factor_(decider_flow).await;
+           let score = get_merchant_elimination_gateway_score (key.clone()).await;
+           let (is_eligible_for_reset, reset_cached_gateway_score) = match score {
+                Some(score) => {
+                    let current_score = score.score;
+                    let transaction_count = score.transactionCount;
+                    let last_reset_time = score.lastResetTimestamp;
+                    let is_eligible_for_reset_ = Utils::is_reset_eligibile(
+                        Some(reset_gateway_input.clone().softTtl),
+                        current_timestamp.clone(),
+                        threshold.clone(),
+                        score.clone(),
+                    );
+                    if is_eligible_for_reset_{
+                        let reset_score = Utils::get_reset_score(threshold, penality_factor, max_count as i32);
+                        let reset_cached_gateway_score_ = GatewayScore {
+                            score: reset_score,
+                            transactionCount: transaction_count,
+                            lastResetTimestamp: current_timestamp.clone() as i64,
+                            timestamp: score.clone().timestamp,
+                        };
+                        (true, reset_cached_gateway_score_)
+                    }
+                    else{
+                        logger::info!(
+                            tag="scoringFresetKeyScorelow",
+                            action = "resetKeyScore",
+                           "Key {:?} is not eligible for reset",
+                            key.clone()
+                        );
+                        (false, score)
+                    }
+                }
+                None => {
+                    let default_gw_score = GatewayScore {
+                        score: 1.0,
+                        transactionCount: 0,
+                        lastResetTimestamp: current_timestamp.clone() as i64,
+                        timestamp: current_timestamp.clone() as i64,
+                    };
+                    logger::info!(
+                        tag = "hard Reset",
+                        action = "hard Reset",
+                        "Score for key {:?} is being hard reset",
+                        key
+                    );
+                    (false, default_gw_score)
+                }
+               
+            };
+            let elapsed_time = current_timestamp.saturating_sub(reset_cached_gateway_score.timestamp as u128);
+            let remaining_ttl = (reset_gateway_input.hardTtl as u128).saturating_sub(elapsed_time);
+            let safe_remaining_ttl = if remaining_ttl < 0 { reset_gateway_input.hardTtl as i64} else { remaining_ttl as i64 };
+            let result = Utils::writeToCacheWithTTL(key.clone(), reset_cached_gateway_score.clone(), safe_remaining_ttl).await;
+            match result {
+                Ok(_) => {
+                    if is_eligible_for_reset {
+                        logger::info!(
+                            tag="scoringFlow",
+                            action = "scoringFlow",
+                            "Resetting Gateway Score for {:?} with new score {:?}",
+                            txn_detail.txnId,
+                            reset_cached_gateway_score
+                        );
+                    } else {
+                        logger::info!(
+                            tag="scoringFlow",
+                            action = "scoringFlow",
+                            "Gateway Score is not eligible for reset for {:?}",
+                            txn_detail.txnId
+                        );
+                    }
+                }
+                Err(e) => {
+                    logger::error!(
+                        tag="scoringFlow",
+                        action = "scoringFlow",
+                        "Failed to reset Gateway Score for {:?} with error: {:?}",
+                        txn_detail.txnId,
+                        e
+                    );
+                }
+            }
+            
+          
+        }
+        _ => {
+            logger::info!(
+                tag="scoringFlow",
+                action = "scoringFlow",
+                "Reset Gateway Score is not enabled for {:?} and merchantId {:?}",
+                txn_detail.txnId,
+                Utils::get_m_id(txn_detail.clone().merchantId)
+            );
+
+        }
+    }
+}
+    
+
+
 
 // fn reset_gw_score_call(param1: Option<Text>, param2: Option<Text>, params: ResetCallParams) -> T::EulerClient<A::Value> {
 //     T::client::<ResetGWScoreAPI>(param1, param2, params)

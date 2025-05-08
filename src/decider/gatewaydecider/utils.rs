@@ -11,7 +11,7 @@ use crate::types::user_eligibility_info::{
     get_eligibility_info, identifier_name_to_text, IdentifierName,
 };
 use crate::utils::{generate_random_number, get_current_date_in_millis};
-use crate::{decider, logger};
+use crate::{decider, feedback, logger};
 use diesel::Identifiable;
 use fred::prelude::{KeysInterface, ListInterface};
 use masking::PeekInterface;
@@ -28,6 +28,7 @@ use std::string::String;
 use std::vec::Vec;
 use time::format_description::parse;
 use time::{Date, OffsetDateTime};
+use crate::feedback::gateway_elimination_scoring::flow::{eliminationV2RewardFactor,getPenaltyFactor};
 
 // // use eulerhs::prelude::*;
 // // use eulerhs::language::*;
@@ -67,7 +68,7 @@ use crate::types::txn_details::types as ETTD;
 use crate::types::txn_offer as ETTO;
 // use juspay::extra::parsing as P;
 use crate::types::gateway as ETG;
-use crate::types::gateway_routing_input::GatewaySuccessRateBasedRoutingInput;
+use crate::types::gateway_routing_input::{ GatewaySuccessRateBasedRoutingInput, GatewayScore};
 use crate::types::token_bin_info as ETTB;
 // // use utils::config::constants as Config;
 // // use utils::logging as EWL;
@@ -83,6 +84,7 @@ use crate::types::isin_routes as ETIsinR;
 // // use eulerhs::types as EHT;
 // // use configs::env_vars as ENV;
 use crate::types::gateway_card_info::ValidationType;
+use crate::error::StorageError;
 
 pub fn either_decode_t<T: for<'de> Deserialize<'de>>(text: &str) -> Result<T, String> {
     from_slice(text.as_bytes()).map_err(|e| e.to_string())
@@ -720,17 +722,11 @@ pub async fn get_split_settlement_details(
 }
 
 pub async fn metric_tracker_log(stage: &str, flowtype: &str, log_data: MessageFormat) {
-    if let Some(true) = RService::findByNameFromRedis(C::metricTrackingLogDataKey.get_key()).await {
-        crate::logger::info!(
-            "metric_tracking_log: {:?}",
-            serde_json::to_string(&log_data).ok()
-        );
-
-        logger::info!(
-            "metric_tracking_log: log_data: {:?}",
-            serde_json::to_string(&log_data).ok()
-        );
-    }
+    crate::logger::info!(
+        "metric_tracking_log: {:?}",
+        serde_json::to_string(&log_data).ok()
+    );
+    
 }
 
 pub fn get_metric_log_format(decider_flow: &mut DeciderFlow<'_>, stage: &str) -> MessageFormat {
@@ -2656,6 +2652,81 @@ pub fn route_random_traffic_to_explore(
     let explore_hedging_percent = hedging_percent * (functional_gateways.len() as f64);
     num < explore_hedging_percent
 }
+
+pub fn is_reset_eligibile(
+    soft_ttl: Option<f64>,
+    current_time_in_millis: u128,
+    threshold: f64,
+    cached_gateway_score: GatewayScore,
+) -> bool {
+    cached_gateway_score.score < threshold
+        && cached_gateway_score.lastResetTimestamp < (current_time_in_millis - soft_ttl.unwrap_or(0.0) as u128).try_into().unwrap()
+}
+pub fn get_reset_score(min_threshold: f64, penalty_factor: f64, max_allowed_failures: i32) -> f64 {
+    let reduction_factor = 1.0 - (penalty_factor / 100.0);
+    let power = (max_allowed_failures - 1) as f64;
+    let denominator = reduction_factor.powf(power);
+    let result = min_threshold / denominator;
+    result.min(1.0)
+}
+
+pub async fn writeToCacheWithTTL(
+    key: String,
+    cached_gateway_score: GatewayScore,
+    ttl: i64,
+) -> Result<i32, StorageError> {
+    //from CachedGatewayScore comvert encoded_score to a encoded jasson that can be used as a value for redis sextx
+    let encoded_score =
+        serde_json::to_string(&cached_gateway_score).unwrap_or_else(|_| "".to_string());
+
+    let primary_write =
+        addToCacheWithExpiry("kv_redis".to_string(), key.clone(), encoded_score, ttl).await;
+
+    match primary_write {
+        Ok(_) => Ok(0),
+        Err(err) => Err(err),
+    }
+}
+
+// Original Haskell function: addToCacheWithExpiry
+pub async fn addToCacheWithExpiry(
+    redis_name: String,
+    key: String,
+    value: String,
+    ttl: i64,
+) -> Result<(), StorageError> {
+    let app_state = get_tenant_app_state().await;
+    let cached_resp = app_state.redis_conn.setx(&key, &value, ttl).await;
+    match cached_resp {
+        Ok(_) => Ok(()),
+        Err(error) => Err(StorageError::InsertError),
+    }
+}
+
+pub async fn get_penality_factor_(
+  decider_flow: &mut DeciderFlow<'_>,
+)  -> f64{
+    let merchant = decider_flow.get().dpMerchantAccount.clone();
+    let txn_detail = decider_flow.get().dpTxnDetail.clone();
+    let txn_card_info = decider_flow.get().dpTxnCardInfo.clone();
+    let merchant_id = get_m_id(merchant.merchantId);
+    let is_elimination_v2_enabled = isFeatureEnabled(C::ENABLE_ELIMINATION_V2.get_key(), merchant_id.clone(), feedback::constants::kvRedis()).await;
+    if is_elimination_v2_enabled {
+        let m_reward_factor = eliminationV2RewardFactor( &merchant_id, &txn_card_info, &txn_detail).await;
+        match m_reward_factor {
+            Some(reward_factor) => {
+                return (1.0 - reward_factor)
+            }
+            None => {
+                return getPenaltyFactor (ScoreKeyType::ELIMINATION_MERCHANT_KEY ).await;
+            }
+            
+        }
+    }else {
+        return getPenaltyFactor(ScoreKeyType::ELIMINATION_MERCHANT_KEY).await;
+    }
+}
+
 
 // fn push_to_stream(decided_gateway: OptionETG::Gateway, final_decider_approach: types::GatewayDeciderApproach, m_priority_logic_tag: Option, current_gateway_score_map: GatewayScoreMap) -> DeciderFlow<()> {
 //     if let Some(decided_gateway) = decided_gateway {

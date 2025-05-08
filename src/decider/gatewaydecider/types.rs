@@ -1594,13 +1594,16 @@ pub enum Dimension {
     FOURTH,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ResetGatewayInput {
     pub gateway: String,
     pub eliminationThreshold: Option<f64>,
     pub eliminationMaxCount: Option<i64>,
     pub gatewayEliminationThreshold: Option<f64>,
     pub gatewayReferenceId: Option<String>,
+    pub key: Option <String>,
+    pub hardTtl: u128,
+    pub softTtl: f64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
