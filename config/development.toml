@@ -44,6 +44,7 @@ open_router_private_key = ""
 public = { master_key = "", public_key = "", schema = "public" }
 
 [routing_config.keys]
+billing_country = { type = "enum", values = "India, NL"}
 payment_method = { type = "enum", values = "card, bank_debit, bank_transfer" }
 amount = { type = "integer" }
 metadata = { type = "udf" }
