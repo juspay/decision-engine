@@ -1637,6 +1637,7 @@ pub async fn filterGatewaysForValidationType(
                 // Determine validation type and get enabled MGAs
             let (validation_type, e_mgas) = if Utils::is_emandate_transaction(&txn_detail) {
                 let e_mgas = SETMA::get_emandate_enabled_mga(
+                    this,
                     macc.merchantId.clone(),
                     possible_ref_ids_of_merchant,
                 )
@@ -1661,6 +1662,13 @@ pub async fn filterGatewaysForValidationType(
     
                 (ETGCI::ValidationType::Tpv, e_mgas)
             };
+            if matches!(validation_type,ETGCI::ValidationType::TpvEmandate | ETGCI::ValidationType::Emandate) && is_otm_flow {
+                return Ok(returnGwListWithLog(
+                    this,
+                    DeciderFilterName::FilterFunctionalGatewaysForValidationType,
+                    true,
+                ))
+            }            
             let enabled_gateway_accounts = e_mgas
                 .into_iter()
                 .filter(|mga| {
