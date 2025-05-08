@@ -99,6 +99,7 @@ pub enum RuleConfigurationError {
     #[error("Merchant not found")]
     MerchantNotFound,
     #[error("Rule Configuration not found")]
+    ConfigurationNotFound,
     #[error(" Rule Configuration already exists")]
     ConfigurationAlreadyExists,
     #[error("Failed to deserialize configuration")]
