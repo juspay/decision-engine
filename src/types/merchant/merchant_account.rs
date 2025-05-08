@@ -1,8 +1,11 @@
+use crate::utils::date_time;
 use serde::{Deserialize, Serialize};
 // use db::eulermeshimpl::{mesh_config, throw_missing_tenant_error, throw_tenant_mismatch_error, default_tenant_account_id};
 // use db::mesh::internal::*;
 use crate::error::ApiError;
-use crate::storage::types::MerchantAccount as DBMerchantAccount;
+use crate::storage::types::{
+    BitBool, MerchantAccount as DBMerchantAccount, MerchantAccountNew, MerchantAccountUpdate,
+};
 // use types::utils::dbconfig::get_euler_db_conf;
 // use types::locker::id::{LockerId, to_locker_id};
 use crate::app::get_tenant_app_state;
@@ -71,6 +74,44 @@ pub struct MerchantAccount {
     pub merchantCategoryCode: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MerchantAccountCreateRequest {
+    pub merchant_id: String,
+    pub gateway_success_rate_based_decider_input: Option<String>,
+}
+
+impl TryFrom<MerchantAccountCreateRequest> for MerchantAccountNew {
+    type Error = ApiError;
+
+    fn try_from(value: MerchantAccountCreateRequest) -> Result<Self, ApiError> {
+        Ok(Self {
+            merchant_id: Some(value.merchant_id),
+            date_created: date_time::now(),
+            use_code_for_gateway_priority: BitBool(true),
+            gateway_success_rate_based_decider_input: value
+                .gateway_success_rate_based_decider_input,
+            internal_metadata: None,
+            enabled: BitBool(true),
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MerchantAccountResponse {
+    pub merchant_id: String,
+    pub gateway_success_rate_based_decider_input: Option<String>,
+}
+
+impl From<MerchantAccount> for MerchantAccountResponse {
+    fn from(value: MerchantAccount) -> Self {
+        Self {
+            merchant_id: value.merchantId.0.clone(),
+            gateway_success_rate_based_decider_input: Some(
+                value.gatewaySuccessRateBasedDeciderInput,
+            ),
+        }
+    }
+}
 // The following functions are placeholders for the Haskell functions.
 // They should be implemented as per the Rust project requirements.
 
@@ -91,9 +132,15 @@ impl TryFrom<DBMerchantAccount> for MerchantAccount {
             useCodeForGatewayPriority: value.use_code_for_gateway_priority.0,
             internalHashKey: value.internal_hash_key,
             userId: value.user_id,
-            secondaryMerchantAccountId: value.secondary_merchant_account_id.map(|mid| to_merchant_pid(mid)),
-            enableGatewayReferenceIdBasedRouting: value.enable_gateway_reference_id_based_routing.map(|f| f.0),
-            gatewaySuccessRateBasedDeciderInput: value.gateway_success_rate_based_decider_input.unwrap_or("".to_string()),
+            secondaryMerchantAccountId: value
+                .secondary_merchant_account_id
+                .map(|mid| to_merchant_pid(mid)),
+            enableGatewayReferenceIdBasedRouting: value
+                .enable_gateway_reference_id_based_routing
+                .map(|f| f.0),
+            gatewaySuccessRateBasedDeciderInput: value
+                .gateway_success_rate_based_decider_input
+                .unwrap_or("".to_string()),
             internalMetadata: value.internal_metadata,
             installmentEnabled: value.installment_enabled.map(|f| f.0),
             tenantAccountId: value.tenant_account_id,
@@ -155,4 +202,54 @@ pub async fn load_merchant_by_merchant_id(merchant_id: String) -> Option<Merchan
             .and_then(|db_merchant| MerchantAccount::try_from(db_merchant).ok()),
         Err(_) => None, // Silently handle errors and return None
     }
+}
+
+pub async fn insert_merchant_account<T>(value: T) -> Result<(), crate::generics::MeshError>
+where
+    MerchantAccountNew: TryFrom<T>,
+{
+    // Perform the query using Diesel's generic_find_all
+    let app_state = get_tenant_app_state().await;
+
+    let config =
+        MerchantAccountNew::try_from(value).map_err(|_| crate::generics::MeshError::Others)?;
+
+    crate::generics::generic_insert(&app_state.db, config).await?;
+
+    Ok(())
+}
+
+pub async fn delete_merchant_account(
+    merchant_id: String,
+) -> Result<(), crate::generics::MeshError> {
+    let app_state = get_tenant_app_state().await;
+
+    let conn = &app_state.db.get_conn().await?;
+    // Use Diesel's query builder with multiple conditions
+    crate::generics::generic_delete::<<DBMerchantAccount as HasTable>::Table, _>(
+        &conn,
+        dsl::merchant_id.eq(merchant_id),
+    )
+    .await?;
+
+    Ok(())
+}
+
+pub async fn update_merchant_account(
+    merchant_id: String,
+    value: Option<String>,
+) -> Result<(), crate::generics::MeshError> {
+    let app_state = get_tenant_app_state().await;
+    let values = MerchantAccountUpdate {
+        gateway_success_rate_based_decider_input: value,
+    };
+    let conn = &app_state.db.get_conn().await?;
+    // Use Diesel's query builder with multiple conditions
+    crate::generics::generic_update::<
+        <DBMerchantAccount as HasTable>::Table,
+        MerchantAccountUpdate,
+        _,
+    >(&conn, dsl::merchant_id.eq(merchant_id), values)
+    .await?;
+    Ok(())
 }

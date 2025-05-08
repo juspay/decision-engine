@@ -1,10 +1,13 @@
-use crate::{redis::commands::RedisConnectionWrapper};
-use axum::{extract::Request, routing::post};
+use crate::redis::commands::RedisConnectionWrapper;
+use axum::{
+    extract::Request,
+    routing::{delete, get, post},
+};
 use axum_server::{tls_rustls::RustlsConfig, Handle};
 use error_stack::ResultExt;
+use std::sync::Arc;
 use tokio::signal::unix::{signal, SignalKind};
 use tower_http::trace as tower_trace;
-use std::sync::Arc;
 
 use crate::{
     api_client::ApiClient,
@@ -103,7 +106,7 @@ where
         logger::error!("SIGTERM signal received, shutting down...");
         let app_state = APP_STATE.get().expect("GlobalAppState not set");
         app_state.set_not_ready(); // Set readiness flag to false
-        // Wait for 60 seconds before shutting down
+                                   // Wait for 60 seconds before shutting down
         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
         handle_clone.shutdown(); // Trigger axum_server shutdown
     });
@@ -123,11 +126,15 @@ where
         )
         .route(
             "/routing/list/:created_by",
-            axum::routing::post(crate::euclid::handlers::routing_rules::list_all_routing_algorithm_id),
+            axum::routing::post(
+                crate::euclid::handlers::routing_rules::list_all_routing_algorithm_id,
+            ),
         )
         .route(
             "/routing/list/active/:created_by",
-            axum::routing::post(crate::euclid::handlers::routing_rules::list_active_routing_algorithm),
+            axum::routing::post(
+                crate::euclid::handlers::routing_rules::list_active_routing_algorithm,
+            ),
         )
         .route(
             "/routing/evaluate",
@@ -136,10 +143,36 @@ where
         .route(
             "/decision_gateway",
             post(routes::decision_gateway::decision_gateway),
+        )
+        .route(
+            "/rule/create",
+            post(routes::rule_configuration::create_rule_config),
+        )
+        .route(
+            "/rule/get",
+            post(routes::rule_configuration::get_rule_config),
+        )
+        .route(
+            "/rule/update",
+            post(routes::rule_configuration::update_rule_config),
+        )
+        .route(
+            "/rule/delete",
+            post(routes::rule_configuration::delete_rule_config),
+        )
+        .route(
+            "/merchant-account/create",
+            post(routes::merchant_account_config::create_merchant_config),
+        )
+        .route(
+            "/merchant-account/:merchant-id",
+            get(routes::merchant_account_config::get_merchant_config),
+        )
+        .route(
+            "/merchant-account/:merchant-id",
+            delete(routes::merchant_account_config::delete_merchant_config),
         );
-    let router = router.route(
-        "/update-score",
-        post(routes::update_score::update_score));
+    let router = router.route("/update-score", post(routes::update_score::update_score));
     let router = router.route(
         "/decide-gateway",
         post(routes::decide_gateway::decide_gateway),
@@ -175,7 +208,6 @@ where
         global_app_state.global_config.server,
         global_app_state.global_config.log
     );
-
 
     if let Some(tls_config) = &global_app_state.global_config.tls {
         let tcp_listener = std::net::TcpListener::bind(socket_addr)?;

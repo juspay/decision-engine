@@ -119,3 +119,25 @@ pub struct GatewaySuccessRateBasedRoutingInput {
     #[serde(rename = "defaultEliminationV2SuccessRate")]
     pub defaultEliminationV2SuccessRate: Option<f64>,
 }
+
+impl GatewaySuccessRateBasedRoutingInput {
+    pub fn from_elimination_threshold(elimination_threshold: f64) -> Self {
+        Self {
+            gatewayWiseInputs: None,
+            defaultEliminationThreshold: elimination_threshold,
+            defaultEliminationLevel: EliminationLevel::PAYMENT_METHOD,
+            defaultSelectionLevel: None,
+            enabledPaymentMethodTypes: vec![],
+            eliminationV2SuccessRateInputs: None,
+            globalGatewayWiseInputs: None,
+            defaultGlobalEliminationThreshold: None,
+            defaultGlobalEliminationMaxCountThreshold: None,
+            defaultGlobalEliminationLevel: None,
+            defaultGlobalSelectionMaxCountThreshold: None,
+            selectionTransactionCountThreshold: None,
+            defaultGlobalSoftTxnResetCount: None,
+            defaultGatewayLevelEliminationThreshold: None,
+            defaultEliminationV2SuccessRate: None,
+        }
+    }
+}

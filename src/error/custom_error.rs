@@ -90,6 +90,160 @@ pub enum EntityDBError {
     NotFoundError,
 }
 
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum RuleConfigurationError {
+    #[error("Storage error")]
+    StorageError,
+    #[error("Invalid Rule Configuration error")]
+    InvalidRuleConfiguration,
+    #[error("Merchant not found")]
+    MerchantNotFound,
+    #[error("Rule Configuration not found")]
+    ConfigurationNotFound,
+    #[error(" Rule Configuration already exists")]
+    ConfigurationAlreadyExists,
+    #[error("Failed to deserialize configuration")]
+    DeserializationError,
+}
+
+impl axum::response::IntoResponse for RuleConfigurationError {
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            RuleConfigurationError::StorageError => (
+                hyper::StatusCode::INTERNAL_SERVER_ERROR,
+                axum::Json(crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_04,
+                    "Storage error".to_string(),
+                    None,
+                )),
+            )
+                .into_response(),
+            RuleConfigurationError::DeserializationError => (
+                hyper::StatusCode::INTERNAL_SERVER_ERROR,
+                axum::Json(crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_04,
+                    "Failed to deserialize configuration".to_string(),
+                    None,
+                )),
+            )
+                .into_response(),
+            RuleConfigurationError::InvalidRuleConfiguration => (
+                hyper::StatusCode::BAD_REQUEST,
+                axum::Json(crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_04,
+                    "Invalid routing rule configuration".to_string(),
+                    None,
+                )),
+            )
+                .into_response(),
+            RuleConfigurationError::MerchantNotFound => (
+                hyper::StatusCode::NOT_FOUND,
+                axum::Json(crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_04,
+                    "MerchantId not found".to_string(),
+                    None,
+                )),
+            )
+                .into_response(),
+            RuleConfigurationError::ConfigurationNotFound => (
+                hyper::StatusCode::NOT_FOUND,
+                axum::Json(crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_04,
+                    "Rule configuration not found".to_string(),
+                    None,
+                )),
+            )
+                .into_response(),
+            RuleConfigurationError::ConfigurationAlreadyExists => (
+                hyper::StatusCode::BAD_REQUEST,
+                axum::Json(crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_04,
+                    "Rule configuration already exists".to_string(),
+                    None,
+                )),
+            )
+                .into_response(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum MerchantAccountConfigurationError {
+    #[error("Storage error")]
+    StorageError,
+    #[error("Invalid Configuration error")]
+    InvalidConfiguration,
+    #[error("Merchant account not found")]
+    MerchantNotFound,
+    #[error(" Merchant account already exists")]
+    MerchantAlreadyExists,
+    #[error(" Merchant account deletion failed")]
+    MerchantDeletionFailed,
+    #[error(" Merchant account insertion failed")]
+    MerchantInsertionFailed,
+}
+
+impl axum::response::IntoResponse for MerchantAccountConfigurationError {
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            MerchantAccountConfigurationError::StorageError => (
+                hyper::StatusCode::INTERNAL_SERVER_ERROR,
+                axum::Json(crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_04,
+                    "Storage error".to_string(),
+                    None,
+                )),
+            )
+                .into_response(),
+            MerchantAccountConfigurationError::InvalidConfiguration => (
+                hyper::StatusCode::BAD_REQUEST,
+                axum::Json(crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_04,
+                    "Invalid merchant account configuration".to_string(),
+                    None,
+                )),
+            )
+                .into_response(),
+            MerchantAccountConfigurationError::MerchantNotFound => (
+                hyper::StatusCode::NOT_FOUND,
+                axum::Json(crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_04,
+                    "MerchantId not found".to_string(),
+                    None,
+                )),
+            )
+                .into_response(),
+            MerchantAccountConfigurationError::MerchantAlreadyExists => (
+                hyper::StatusCode::BAD_REQUEST,
+                axum::Json(crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_04,
+                    "Merchant account already exists".to_string(),
+                    None,
+                )),
+            )
+                .into_response(),
+            MerchantAccountConfigurationError::MerchantDeletionFailed => (
+                hyper::StatusCode::INTERNAL_SERVER_ERROR,
+                axum::Json(crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_04,
+                    "Merchant account deletion failed".to_string(),
+                    None,
+                )),
+            )
+                .into_response(),
+            MerchantAccountConfigurationError::MerchantInsertionFailed => (
+                hyper::StatusCode::INTERNAL_SERVER_ERROR,
+                axum::Json(crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_04,
+                    "Merchant account insertion failed".to_string(),
+                    None,
+                )),
+            )
+                .into_response(),
+        }
+    }
+}
+
 pub trait NotFoundError {
     fn is_not_found(&self) -> bool;
 }

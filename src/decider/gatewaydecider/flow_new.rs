@@ -44,38 +44,42 @@ use crate::types::txn_details::types as ETTD;
 pub async fn deciderFullPayloadHSFunction(
     dreq_: T::DomainDeciderRequestForApiCallV2,
 ) -> Result<(T::DecidedGateway), T::ErrorResponse> {
-    let merchant_prefs =
-        match ETM::merchant_iframe_preferences::getMerchantIPrefsByMId(dreq_.merchantId.clone())
+    let merchant_account =
+        ETM::merchant_account::load_merchant_by_merchant_id(dreq_.merchantId.clone())
             .await
-        {
-            Some(prefs) => prefs,
-            None => {
-                logger::error!(
-                    tag = "getMerchantPrefsByMId",
-                    action = "getMerchantPrefsByMId",
-                    "Merchant iframe preferences not found for id: {:?}",
-                    dreq_.merchantId
-                );
-                Err(T::ErrorResponse {
-                    status: "400".to_string(),
-                    error_code: "DATA_NOT_FOUND".to_string(),
-                    error_message: "merchant iframe preferences not found".to_string(),
-                    priority_logic_tag: None,
-                    routing_approach: None,
-                    filter_wise_gateways: None,
-                    error_info: UnifiedError {
-                        code: "MERCHANT_IFRAME_PREFERENCES_NOT_FOUND".to_string(),
-                        user_message:
-                            "merchant iframe preferences not found with the given merchant id"
-                                .to_string(),
-                        developer_message: "merchant iframe preferences not found".to_string(),
-                    },
-                    priority_logic_output: None,
-                    is_dynamic_mga_enabled: false,
-                })?
-            }
-        };
+            .ok_or(T::ErrorResponse {
+                status: "Invalid Request".to_string(),
+                error_code: "invalid_request_error".to_string(),
+                error_message: "Merchant not found".to_string(),
+                priority_logic_tag: None,
+                routing_approach: None,
+                filter_wise_gateways: None,
+                error_info: UnifiedError {
+                    code: "MERCHANT_NOT_FOUND".to_string(),
+                    user_message: "Merchant not found".to_string(),
+                    developer_message: "Merchant not found".to_string(),
+                },
+                priority_logic_output: None,
+                is_dynamic_mga_enabled: false,
+            })?;
     let enforced_gateway_filter = handleEnforcedGateway(dreq_.clone().eligibleGatewayList);
+
+    // check if type formation is correct
+    let merchant_prefs = ETM::merchant_iframe_preferences::MerchantIframePreferences {
+        id: ETM::merchant_iframe_preferences::to_merchant_iframe_prefs_pid(
+            crate::types::merchant::id::merchant_pid_to_text(merchant_account.id.clone()),
+        ),
+        merchantId: merchant_account.merchantId.clone(),
+        dynamicSwitchingEnabled: enforced_gateway_filter
+            .as_ref()
+            .map(|list| !(list.len() <= 1))
+            .unwrap_or(false),
+        isinRoutingEnabled: false,
+        issuerRoutingEnabled: false,
+        txnFailureGatewayPenality: false,
+        cardBrandRoutingEnabled: false,
+    };
+
     let dreq = dreq_.to_domain_decider_request().await;
     let resolve_bin = match Utils::fetch_extended_card_bin(&dreq.txnCardInfo.clone()) {
         Some(card_bin) => Some(card_bin),
@@ -98,7 +102,7 @@ pub async fn deciderFullPayloadHSFunction(
         card_isin: resolve_bin,
         ..dreq.txnCardInfo
     };
-    //
+
     let decider_params = T::DeciderParams {
         dpMerchantAccount: dreq.merchantAccount,
         dpOrder: dreq.orderReference,
