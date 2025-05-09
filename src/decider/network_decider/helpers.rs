@@ -10,7 +10,10 @@ impl types::DebitRoutingConfig {
         merchant_category_code: &types::MerchantCategoryCode,
         network: &gateway_decider_types::NETWORK,
     ) -> CustomResult<&types::NetworkProcessingData, error::ApiError> {
-        logger::debug!("Fetching interchange fee for non regulated banks in debit routing {:?}", merchant_category_code);
+        logger::debug!(
+            "Fetching interchange fee for non regulated banks in debit routing {:?}",
+            merchant_category_code
+        );
         self.interchange_fee
             .non_regulated
             .0
@@ -142,4 +145,20 @@ pub fn sort_networks(
         .into_iter()
         .map(|(network, _fee)| network)
         .collect()
+}
+
+impl gateway_decider_types::NETWORK {
+    pub fn is_global_network(&self) -> bool {
+        match self {
+            gateway_decider_types::NETWORK::VISA
+            | gateway_decider_types::NETWORK::AMEX
+            | gateway_decider_types::NETWORK::DINERS
+            | gateway_decider_types::NETWORK::RUPAY
+            | gateway_decider_types::NETWORK::MASTERCARD => true,
+            gateway_decider_types::NETWORK::STAR
+            | gateway_decider_types::NETWORK::PULSE
+            | gateway_decider_types::NETWORK::ACCEL
+            | gateway_decider_types::NETWORK::NYCE => false,
+        }
+    }
 }
