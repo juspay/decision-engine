@@ -1601,7 +1601,7 @@ pub struct ResetGatewayInput {
     pub eliminationMaxCount: Option<i64>,
     pub gatewayEliminationThreshold: Option<f64>,
     pub gatewayReferenceId: Option<String>,
-    pub key: Option <String>,
+    pub key: Option<String>,
     pub hardTtl: u128,
     pub softTtl: f64,
 }
