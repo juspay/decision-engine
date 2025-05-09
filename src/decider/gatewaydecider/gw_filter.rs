@@ -1977,17 +1977,33 @@ pub async fn filterGatewaysCardInfo(
                 .collect::<Vec<_>>();
 
             let eligible_gateway_card_info_prime = match m_validation_type {
-                Some(ref v_type) => eligible_gateway_card_infos
+                Some(ref v_type) => eligible_gateway_card_infos.clone()
                     .into_iter()
                     .filter(|ci| {
                         ci.validationType.clone().map(|v| v.to_string()) == Some(v_type.to_string())
                     })
                     .collect::<Vec<_>>(),
-                None => eligible_gateway_card_infos
+                None => eligible_gateway_card_infos.clone()
                     .into_iter()
                     .filter(|ci| ci.authType == m_auth_type.as_ref().map(|auth| auth.to_string()))
                     .collect::<Vec<_>>(),
             };
+
+            logger::info!(
+                tag = "filterGatewaysCardInfo",
+                action = "filterGatewaysCardInfo",
+                "merchant_validation_required_gws - {:?}, gci_validation_gws - {:?}, gcis - {:?}, gcis_without_merchant_validation - {:?}, gcis_with_merchant_validation - {:?}, gci_ids - {:?}, mgcis_enabled_gcis - {:?},mgcis_enabled_gci_ids - {:?}, gcis_after_merchant_validation - {:?}, eligible_gateway_card_infos - {:?}",
+                merchant_validation_required_gws,
+                gci_validation_gws,
+                gcis,
+                gcis_without_merchant_validation,
+                gcis_with_merchant_validation,
+                gci_ids,
+                mgcis_enabled_gcis,
+                mgcis_enabled_gci_ids,
+                gcis_after_merchant_validation,
+                eligible_gateway_card_infos,
+            );
 
             logger::debug!(
                 "gcisWithoutMerchantValidation {:?}",
