@@ -52,16 +52,13 @@ pub async fn get_enabled_mgas_by_merchant_id_and_ref_id(
 }
 
 pub async fn get_emandate_enabled_mga(
+    this: &mut DeciderFlow<'_>,
     mid: MerchantId,
     ref_ids: Vec<MgaReferenceId>,
 ) -> Vec<ETM::merchant_gateway_account::MerchantGatewayAccount> {
-    let ref_ids_strings: Vec<String> = ref_ids
-        .iter()
-        .map(|x| x.mga_reference_id.clone())
-        .collect::<Vec<String>>();
+
     let enabled_mgas =
-        ETM::merchant_gateway_account::getEnabledMgasByMerchantIdAndRefId(mid.0, ref_ids_strings)
-            .await;
+        get_enabled_mgas_by_merchant_id_and_ref_id(this,mid, ref_ids).await;
     enabled_mgas
         .into_iter()
         .filter(is_emandate_enabled)
