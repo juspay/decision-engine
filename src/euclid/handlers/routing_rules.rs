@@ -42,8 +42,10 @@ pub async fn routing_create(
         let new_algo = RoutingAlgorithm {
             id: algorithm_id.clone(),
             created_by: config.created_by,
-            name: "My Algo".into(),
-            description: Some("Test algo".into()),
+            name: config.name.clone(),
+            description: Some(config.description),
+            metadata: Some(serde_json::to_string(&config.metadata)
+            .change_context(EuclidErrors::FailedToDeserializeJsonToString)?),
             algorithm_data: serde_json::to_string(&data)
                 .change_context(EuclidErrors::FailedToDeserializeJsonToString)?,
             created_at: timestamp,

@@ -26,8 +26,10 @@ pub enum DataType {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RoutingRule {
     pub name: String,
+    pub description: String,
     pub created_by: String,
     pub algorithm: Program,
+    pub metadata: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
@@ -84,6 +86,7 @@ pub struct RoutingAlgorithm {
     pub name: String,
     pub description: Option<String>,
     pub algorithm_data: String,
+    pub metadata: Option<String>,
     pub created_at: PrimitiveDateTime,
     pub modified_at: PrimitiveDateTime,
 }
