@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 // use db::mesh::internal::*;
 use crate::error::ApiError;
 use crate::storage::types::{
-    BitBool, MerchantAccount as DBMerchantAccount, MerchantAccountNew, MerchantAccountUpdate,
+    BitBool, BitBoolWrite, MerchantAccount as DBMerchantAccount, MerchantAccountNew,
+    MerchantAccountUpdate,
 };
 // use types::utils::dbconfig::get_euler_db_conf;
 // use types::locker::id::{LockerId, to_locker_id};
@@ -87,11 +88,11 @@ impl TryFrom<MerchantAccountCreateRequest> for MerchantAccountNew {
         Ok(Self {
             merchant_id: Some(value.merchant_id),
             date_created: date_time::now(),
-            use_code_for_gateway_priority: BitBool(true),
+            use_code_for_gateway_priority: BitBoolWrite(true),
             gateway_success_rate_based_decider_input: value
                 .gateway_success_rate_based_decider_input,
             internal_metadata: None,
-            enabled: BitBool(true),
+            enabled: BitBoolWrite(true),
         })
     }
 }
