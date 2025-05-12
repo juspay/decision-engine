@@ -245,10 +245,10 @@ pub struct MerchantAccount {
 pub struct MerchantAccountNew {
     pub merchant_id: Option<String>,
     pub date_created: PrimitiveDateTime,
-    pub use_code_for_gateway_priority: BitBool,
+    pub use_code_for_gateway_priority: BitBoolWrite,
     pub gateway_success_rate_based_decider_input: Option<String>,
     pub internal_metadata: Option<String>,
-    pub enabled: BitBool,
+    pub enabled: BitBoolWrite,
 }
 
 #[derive(AsChangeset, Debug, serde::Serialize, serde::Deserialize, Queryable, Selectable)]
@@ -342,6 +342,33 @@ impl ToSql<Binary, Mysql> for BitBool {
 }
 
 impl FromSql<Binary, Mysql> for BitBool {
+    fn from_sql(bytes: <Mysql as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
+        match bytes.as_bytes().first() {
+            Some(&1) => Ok(Self(true)),
+            _ => Ok(Self(false)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, FromSqlRow, AsExpression, Serialize)]
+#[diesel(sql_type = Binary)]
+pub struct BitBoolWrite(pub bool);
+
+impl ToSql<Binary, Mysql> for BitBoolWrite {
+    fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Mysql>) -> diesel::serialize::Result {
+        match *self {
+            BitBoolWrite(true) => {
+                out.write_all(&[1u8])?;
+            }
+            BitBoolWrite(false) => {
+                out.write_all(&[0u8])?;
+            }
+        }
+        Ok(IsNull::No)
+    }
+}
+
+impl FromSql<Binary, Mysql> for BitBoolWrite {
     fn from_sql(bytes: <Mysql as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
         match bytes.as_bytes().first() {
             Some(&1) => Ok(Self(true)),
