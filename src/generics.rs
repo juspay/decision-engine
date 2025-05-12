@@ -152,7 +152,7 @@ where
 
     track_database_call::<T, _, _>(query.execute_async(conn), DatabaseOperation::Update)
         .await
-        .change_context(MeshError::NotFound)
+        .change_context(MeshError::Others)
         .attach_printable(debug_values)
 }
 
