@@ -499,6 +499,7 @@ diesel::table! {
         name -> Text,
         description -> Nullable<Text>,
         algorithm_data -> Text,
+        metadata -> Nullable<Text>,
         created_at -> Timestamp,
         modified_at -> Timestamp,
     }

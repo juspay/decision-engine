@@ -6,7 +6,7 @@ pub enum EuclidErrors {
     FailedToParseJsonInput,
 
     #[error("Failed to serialize to pretty-printed String of JSON")]
-    FailedToDeserializeJsonToString,
+    FailedToSerializeJsonToString,
 
     #[error("Incorrect request received : {0}")]
     InvalidRequest(String),
@@ -112,7 +112,7 @@ impl axum::response::IntoResponse for EuclidErrors {
             )
                 .into_response(),
 
-            EuclidErrors::FailedToDeserializeJsonToString => (
+            EuclidErrors::FailedToSerializeJsonToString => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
                 axum::Json(ApiErrorResponse::new(
                     error_codes::TE_04,
