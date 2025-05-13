@@ -41,10 +41,14 @@ impl CoBadgedCardInfoList {
         }
     }
 
-    pub fn get_global_network_card(&self) -> Option<&types::CoBadgedCardInfoDomainData> {
+    pub fn get_global_network_card(
+        &self,
+    ) -> CustomResult<&types::CoBadgedCardInfoDomainData, error::ApiError> {
         self.0
             .iter()
             .find(|card| card.card_network.is_global_network())
+            .ok_or(error::ApiError::UnknownError)
+            .attach_printable("Missing global network card in co-badged card info")
     }
 
     pub fn filter_cards(self) -> Self {
@@ -92,15 +96,9 @@ impl CoBadgedCardInfoList {
     ) -> CustomResult<bool, error::ApiError> {
         logger::debug!("Validating if the transaction is local or international");
 
-        let global_card = self
-            .get_global_network_card()
-            .ok_or(error::ApiError::UnknownError)
-            .attach_printable("No global network card found for local transaction check")?;
+        let global_card = self.get_global_network_card()?;
 
-        let issuer_country = global_card
-            .country_code
-            .ok_or(error::ApiError::UnknownError)
-            .attach_printable("Country code missing in global network card")?;
+        let issuer_country = global_card.get_country_code()?;
 
         Ok(*acquirer_country == issuer_country)
     }
@@ -117,10 +115,7 @@ impl CoBadgedCardInfoList {
     ) -> CustomResult<types::CoBadgedCardInfoResponse, error::ApiError> {
         logger::debug!("Constructing co-badged card info response");
 
-        let global_card = self
-            .get_global_network_card()
-            .ok_or(error::ApiError::UnknownError)
-            .attach_printable("No global network card found for response construction")?;
+        let global_card = self.get_global_network_card()?;
 
         Ok(types::CoBadgedCardInfoResponse {
             co_badged_card_networks: self.extract_networks(),

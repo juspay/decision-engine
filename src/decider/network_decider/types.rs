@@ -148,20 +148,12 @@ impl CoBadgedCardInfoDomainData {
 }
 
 impl TryFrom<storage_types::CoBadgedCardInfo> for CoBadgedCardInfoDomainData {
-    type Error = String;
+    type Error = error_stack::Report<error::ApiError>;
 
     fn try_from(
         db_co_badged_cards_info_record: storage_types::CoBadgedCardInfo,
     ) -> Result<Self, Self::Error> {
-        let parsed_network = db_co_badged_cards_info_record
-            .card_network
-            .parse::<gatewaydecider::types::NETWORK>()
-            .map_err(|error| {
-                format!(
-                    "Failed to parse network for card id {}: {}",
-                    db_co_badged_cards_info_record.id, error
-                )
-            })?;
+        let parsed_network = db_co_badged_cards_info_record.get_parsed_card_network()?;
 
         Ok(Self {
             id: db_co_badged_cards_info_record.id,

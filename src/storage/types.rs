@@ -1,5 +1,7 @@
-use crate::decider::gatewaydecider::types;
+use crate::decider::gatewaydecider::{self, types};
 use crate::decider::network_decider;
+use crate::error;
+use crate::utils::CustomResult;
 
 use super::schema;
 use diesel::mysql::Mysql;
@@ -10,6 +12,7 @@ use diesel::{
     backend::Backend, deserialize::FromSql, serialize::ToSql, AsExpression, Identifiable,
     Queryable, Selectable,
 };
+use error_stack::ResultExt;
 use serde::Serialize;
 use serde::{self, Deserialize};
 use std::io::Write;
@@ -181,6 +184,18 @@ pub struct CoBadgedCardInfo {
     pub modified_at: PrimitiveDateTime,
     /// The name of the provider that last updated the card information.
     pub last_updated_provider: Option<String>,
+}
+
+impl CoBadgedCardInfo {
+    pub fn get_parsed_card_network(&self) -> CustomResult<types::NETWORK, error::ApiError> {
+        self.card_network
+            .parse::<gatewaydecider::types::NETWORK>()
+            .change_context(error::ApiError::ParsingError("NETWORK"))
+            .attach_printable(format!(
+                "Failed to parse network for co-badged record id {}: Invalid enum variant {:?} for enum NETWORK",
+                self.id, self.card_network
+            ))
+    }
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
