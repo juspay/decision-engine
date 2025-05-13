@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use crate::decider::gatewaydecider;
 use crate::error;
+use crate::{decider::gatewaydecider, utils::CustomResult};
 use diesel::sql_types;
 use error_stack::{Report, ResultExt};
 use serde::{Deserialize, Serialize};
@@ -125,6 +125,26 @@ pub struct CoBadgedCardInfoDomainData {
     pub created_at: time::PrimitiveDateTime,
     pub modified_at: time::PrimitiveDateTime,
     pub last_updated_provider: Option<String>,
+}
+
+impl CoBadgedCardInfoDomainData {
+    pub fn get_country_code(&self) -> CustomResult<CountryAlpha2, error::ApiError> {
+        self.country_code
+            .ok_or(error::ApiError::UnknownError)
+            .attach_printable("Missing country code in co-badged card info")
+    }
+
+    pub fn get_card_type(&self) -> CustomResult<CardType, error::ApiError> {
+        self.card_type
+            .ok_or(error::ApiError::UnknownError)
+            .attach_printable("Missing card type in co-badged card info")
+    }
+
+    pub fn get_is_regulated(&self) -> CustomResult<bool, error::ApiError> {
+        self.regulated
+            .ok_or(error::ApiError::UnknownError)
+            .attach_printable("Missing is regulated in co-badged card info")
+    }
 }
 
 impl TryFrom<storage_types::CoBadgedCardInfo> for CoBadgedCardInfoDomainData {

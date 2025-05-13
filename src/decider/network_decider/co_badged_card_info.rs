@@ -34,7 +34,7 @@ impl CoBadgedCardInfoList {
             true
         } else {
             logger::debug!(
-                "More than one global network present: count = {}",
+                "Invalid co-badged network list length, expected 1 global network, found {}",
                 global_network_count
             );
             false
@@ -124,19 +124,10 @@ impl CoBadgedCardInfoList {
 
         Ok(types::CoBadgedCardInfoResponse {
             co_badged_card_networks: self.extract_networks(),
-            issuer_country: global_card
-                .country_code
-                .ok_or(error::ApiError::UnknownError)
-                .attach_printable("Country code missing in global network card")?,
-            is_regulated: global_card
-                .regulated
-                .ok_or(error::ApiError::UnknownError)
-                .attach_printable("Regulated field missing in global network card")?,
+            issuer_country: global_card.get_country_code()?,
+            is_regulated: global_card.get_is_regulated()?,
             regulated_name: global_card.regulated_name.clone(),
-            card_type: global_card
-                .card_type
-                .ok_or(error::ApiError::UnknownError)
-                .attach_printable("Card type missing in global network card")?,
+            card_type: global_card.get_card_type()?,
         })
     }
 }
