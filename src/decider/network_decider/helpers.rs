@@ -83,6 +83,8 @@ impl types::CoBadgedCardRequest {
             .calculate_network_fees(app_state, &co_badged_card_info, amount)
             .await?;
 
+        logger::debug!("Total fees per debit network: {:?}", networks);
+
         let sorted_networks = sort_networks(networks);
 
         Some(types::DebitRoutingOutput {

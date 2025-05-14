@@ -34,7 +34,7 @@ impl CoBadgedCardInfoList {
             true
         } else {
             logger::debug!(
-                "Invalid co-badged network list length, expected 1 global network, found {}",
+                "Invalid number of global networks: expected 1, found {}",
                 global_network_count
             );
             false
@@ -53,7 +53,7 @@ impl CoBadgedCardInfoList {
 
     pub fn filter_cards(self) -> Self {
         logger::debug!(
-            "Filtering co-badged cards (global network only), Total cards before filtering: {}",
+            "Filtering co-badged cards, Total cards before filtering: {}",
             self.0.len()
         );
 
@@ -254,8 +254,11 @@ pub fn apply_fraud_check_fee_if_applicable(
     if is_regulated {
         if let Some(regulated_name) = regulated_name_optional {
             match regulated_name {
-                types::RegulatedName::Unknown(_) => {
-                    logger::debug!("Unknown regulated bank name, fraud check fee not applicable");
+                types::RegulatedName::Unknown(bank_name) => {
+                    logger::debug!(
+                        "Fraud check fee not applicable due to unknown regulated bank name: {}",
+                        bank_name
+                    );
                 }
                 types::RegulatedName::NonExemptWithFraud => {
                     logger::debug!("Regulated bank with non exemption for fraud");

@@ -196,8 +196,10 @@ impl TryFrom<storage_types::CoBadgedCardInfo> for CoBadgedCardInfoDomainData {
 #[serde(rename_all = "snake_case")]
 #[diesel(sql_type =  ::diesel::sql_types::Text)]
 pub enum CardType {
+    #[strum(serialize = "Credit")]
     #[strum(serialize = "credit")]
     Credit,
+    #[strum(serialize = "Debit")]
     #[strum(serialize = "debit")]
     Debit,
 }
