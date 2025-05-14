@@ -1,5 +1,7 @@
-use crate::decider::gatewaydecider::types;
+use crate::decider::gatewaydecider::{self, types};
 use crate::decider::network_decider;
+use crate::error;
+use crate::utils::CustomResult;
 
 use super::schema;
 use diesel::mysql::Mysql;
@@ -10,6 +12,7 @@ use diesel::{
     backend::Backend, deserialize::FromSql, serialize::ToSql, AsExpression, Identifiable,
     Queryable, Selectable,
 };
+use error_stack::ResultExt;
 use serde::Serialize;
 use serde::{self, Deserialize};
 use std::io::Write;
@@ -154,31 +157,45 @@ pub struct CoBadgedCardInfo {
     /// The issuing bank name
     pub issuing_bank_name: Option<String>,
     /// The card network
-    pub card_network: types::NETWORK,
+    pub card_network: String,
     /// The issuing bank country
-    pub country_code: network_decider::types::CountryAlpha2,
+    pub country_code: Option<network_decider::types::CountryAlpha2>,
     /// The card type eg. credit, debit
-    pub card_type: network_decider::types::CardType,
+    pub card_type: Option<network_decider::types::CardType>,
     /// Field regulated refers to government-imposed limits on interchange fees for card transactions
-    pub regulated: bool,
+    pub regulated: Option<bool>,
     /// The name of the regulated entity
     pub regulated_name: Option<network_decider::types::RegulatedName>,
     /// Prepaid cards are a type of payment card that can be loaded with funds in advance and used for transactions
-    pub prepaid: bool,
+    pub prepaid: Option<bool>,
     /// Identifies if the card is reloadable with additional funds. This helps distinguish between one-time-use and reloadable prepaid cards.
-    pub reloadable: bool,
+    pub reloadable: Option<bool>,
     /// Indicates whether the bin range is associated with a PAN or a tokenized card.
     pub pan_or_token: network_decider::types::PanOrToken,
     /// The length of the card bin
     pub card_bin_length: i16,
+    /// The length of the provider bin
+    pub bin_provider_bin_length: i16,
     /// The `card_brand_is_additional` field is used to indicate whether a BIN range is associated with a primary or secondary card network
     pub card_brand_is_additional: bool,
     /// The `domestic_only` field is a Visa-only indicator that shows whether a BIN or Account Range is restricted to domestic use only
-    pub domestic_only: bool,
+    pub domestic_only: Option<bool>,
     pub created_at: PrimitiveDateTime,
     pub modified_at: PrimitiveDateTime,
     /// The name of the provider that last updated the card information.
     pub last_updated_provider: Option<String>,
+}
+
+impl CoBadgedCardInfo {
+    pub fn get_parsed_card_network(&self) -> CustomResult<types::NETWORK, error::ApiError> {
+        self.card_network
+            .parse::<gatewaydecider::types::NETWORK>()
+            .change_context(error::ApiError::ParsingError("NETWORK"))
+            .attach_printable(format!(
+                "Failed to parse network for co-badged record id {}: Invalid enum variant {:?} for enum NETWORK",
+                self.id, self.card_network
+            ))
+    }
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
