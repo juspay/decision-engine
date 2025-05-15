@@ -4,7 +4,7 @@
 
 ### Sample curl for decide-gateway
 
-#### Request:
+#### Request: SR BASED ROUTING
 ```bash
 curl --location 'http://localhost:8080/decide-gateway' \
 --header 'Content-Type: application/json' \
@@ -69,6 +69,69 @@ curl --location 'http://localhost:8080/decide-gateway' \
     "is_scheduled_outage": false,
     "is_dynamic_mga_enabled": false,
     "gateway_mga_id_map": null
+}
+```
+
+#### Request: DEBIT ROUTING
+```bash
+curl --location 'http://localhost:8080/decide-gateway' \
+--header 'Content-Type: application/json' \
+--data '{
+  "merchantId": "pro_OiJkBiFuCYbYAkCG9X02",
+  "eligibleGatewayList": ["PAYU", "RAZORPAY", "PAYTM_V2"],
+  "rankingAlgorithm": "NTW_BASED_ROUTING",
+  "eliminationEnabled": true,
+  "paymentInfo": {
+    "paymentId": "PAY12345",
+    "amount": 100.50,
+    "currency": "USD",
+    "customerId": "CUST12345",
+    "udfs": null,
+    "preferredGateway": null,
+    "paymentType": "ORDER_PAYMENT",
+    "metadata": "{\"merchant_category_code\":\"merchant_category_code_0001\",\"acquirer_country\":\"US\"}",
+    "internalMetadata": null,
+    "isEmi": false,
+    "emiBank": null,
+    "emiTenure": null,
+    "paymentMethodType": "UPI",
+    "paymentMethod": "UPI_PAY",
+    "paymentSource": null,
+    "authType": null,
+    "cardIssuerBankName": null,
+    "cardIsin": "440000",
+    "cardType": null,
+    "cardSwitchProvider": null
+  }
+}'
+```
+
+#### Response:
+```json
+{
+  "decided_gateway": "PAYU",
+  "gateway_priority_map": null,
+  "filter_wise_gateways": null,
+  "priority_logic_tag": null,
+  "routing_approach": "NONE",
+  "gateway_before_evaluation": null,
+  "priority_logic_output": null,
+  "debit_routing_output": {
+    "co_badged_card_networks": [
+      "STAR",
+      "VISA"
+    ],
+    "issuer_country": "US",
+    "is_regulated": false,
+    "regulated_name": "GOVERNMENT EXEMPT INTERCHANGE FEE",
+    "card_type": "debit"
+  },
+  "reset_approach": "NO_RESET",
+  "routing_dimension": null,
+  "routing_dimension_level": null,
+  "is_scheduled_outage": false,
+  "is_dynamic_mga_enabled": false,
+  "gateway_mga_id_map": null
 }
 ```
 
