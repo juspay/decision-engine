@@ -61,3 +61,60 @@ Check the [CHANGELOG.md](CHANGELOG.md) file for details.
 ## Copyright and License
 
 This product is licensed under the [AGPL V3](LICENSE) License.
+
+# Decision Engine Python SDK
+
+A simple Python SDK for interacting with the Decision Engine APIs (`/decide-gateway` and `/update-gateway-score`).
+
+## Installation
+
+```
+pip install -r requirements.txt
+```
+
+## Usage
+
+````python
+from decision_engine_sdk.client import DecisionEngineClient
+
+# Initialize the client (default base_url is http://localhost:8080)
+client = DecisionEngineClient()
+
+# Example: Decide Gateway
+payload = {
+    "merchantId": "test_merchant1",
+    "eligibleGatewayList": ["GatewayA", "GatewayB", "GatewayC"],
+    "rankingAlgorithm": "SR_BASED_ROUTING",
+    "eliminationEnabled": True,
+    "paymentInfo": {
+        "paymentId": "PAY12359",
+        "amount": 100.50,
+        "currency": "USD",
+        "customerId": "CUST12345",
+        "paymentType": "ORDER_PAYMENT",
+        "paymentMethodType": "UPI",
+        "paymentMethod": "UPI_PAY",
+        "isEmi": False
+    }
+}
+response = client.decide_gateway(payload)
+print(response)
+
+# Example: Update Gateway Score
+score_payload = {
+    "merchantId": "test_merchant1",
+    "gateway": "RAZORPAY",
+    "status": "FAILURE",
+    "paymentId": "PAY12359"
+}
+score_response = client.update_gateway_score(score_payload)
+print(score_response)
+````
+
+## Error Handling
+
+The SDK raises `requests.HTTPError` for HTTP errors by default.
+
+## License
+
+MIT

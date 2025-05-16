@@ -312,3 +312,66 @@ make update-config
 | `defaultBucketSize` | Last 'n' transactions to consider for computing SR scores |
 | `defaultHedgingPercent` | Percentage of traffic for exploration of lower-ranked gateways |
 | `subLevelInputConfig` | Define granular configs at PMT/PM level |
+
+# Using the Decision Engine Python SDK
+
+The Decision Engine Python SDK provides a simple way to interact with the `/decide-gateway` and `/update-gateway-score` APIs from your Python applications.
+
+## Installation
+
+1. Clone or download the SDK code into your project directory.
+2. Install the required dependencies:
+
+```sh
+pip install -r requirements.txt
+```
+
+## Usage
+
+```python
+from decision_engine_sdk.client import DecisionEngineClient
+
+# Initialize the client (default base_url is http://localhost:8080)
+client = DecisionEngineClient()
+
+# Example: Decide Gateway
+payload = {
+    "merchantId": "test_merchant_1",
+    "eligibleGatewayList": ["GatewayA", "GatewayB", "GatewayC"],
+    "rankingAlgorithm": "SR_BASED_ROUTING",
+    "eliminationEnabled": True,
+    "paymentInfo": {
+        "paymentId": "PAY12359",
+        "amount": 100.50,
+        "currency": "USD",
+        "customerId": "CUST12345",
+        "paymentType": "ORDER_PAYMENT",
+        "paymentMethodType": "UPI",
+        "paymentMethod": "UPI_PAY",
+        "isEmi": False
+    }
+}
+response = client.decide_gateway(payload)
+print(response)
+
+# Example: Update Gateway Score
+score_payload = {
+    "merchantId": "test_merchant_1",
+    "gateway": "RAZORPAY",
+    "status": "FAILURE",
+    "paymentId": "PAY12359"
+}
+score_response = client.update_gateway_score(score_payload)
+print(score_response)
+```
+
+## Error Handling
+
+- The SDK raises `requests.HTTPError` for HTTP errors by default.
+- For `/update-gateway-score`, the response may be plain text (e.g., "Success").
+
+## Notes
+
+- Ensure your Decision Engine server is running and accessible at the specified `base_url`.
+- The merchant must be created in the system before making API calls.
+- Adjust payload fields as per your business requirements and API documentation.
