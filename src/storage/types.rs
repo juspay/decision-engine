@@ -144,7 +144,7 @@ pub struct GatewayPaymentMethodFlow {
 #[derive(
     Clone, Debug, Queryable, Identifiable, Selectable, serde::Deserialize, serde::Serialize,
 )]
-#[diesel(table_name = schema::co_badged_cards_info)]
+#[diesel(table_name = schema::co_badged_cards_info_test)]
 pub struct CoBadgedCardInfo {
     /// The unique identifier for the co-badged card info
     pub id: String,

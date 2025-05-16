@@ -418,8 +418,8 @@ CREATE TABLE routing_algorithm (
 );
 SET FOREIGN_KEY_CHECKS = 1;
 
-DROP TABLE IF EXISTS co_badged_cards_info;
-CREATE TABLE co_badged_cards_info (
+DROP TABLE IF EXISTS co_badged_cards_info_test;
+CREATE TABLE co_badged_cards_info_test (
     id VARCHAR(64) PRIMARY KEY,
     card_bin_min BIGINT NOT NULL,
     card_bin_max BIGINT NOT NULL,
@@ -441,4 +441,4 @@ CREATE TABLE co_badged_cards_info (
     last_updated_provider VARCHAR(128)
 );
 
-CREATE INDEX co_badged_cards_card_bin_min_card_bin_max_index ON co_badged_cards_info (card_bin_min, card_bin_max);
+CREATE INDEX co_badged_cards_card_bin_min_card_bin_max_index ON co_badged_cards_info_test (card_bin_min, card_bin_max);
