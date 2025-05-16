@@ -2,7 +2,7 @@ use crate::storage::types::CoBadgedCardInfo;
 use crate::utils::CustomResult;
 use crate::{error, generics};
 
-use crate::storage::schema::co_badged_cards_info::dsl;
+use crate::storage::schema::co_badged_cards_info_test::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
 use error_stack::ResultExt;

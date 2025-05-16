@@ -28,7 +28,7 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
-    co_badged_cards_info (id) {
+    co_badged_cards_info_test (id) {
         id -> Varchar,
         card_bin_min -> BigInt,
         card_bin_max -> BigInt,
