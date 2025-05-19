@@ -1,4 +1,5 @@
 use crate::app::get_tenant_app_state;
+use crate::logger;
 use serde::{Deserialize, Serialize};
 // use db::euler_mesh_impl::mesh_config;
 // use db::mesh::internal;
@@ -14,6 +15,7 @@ use crate::types::payment::payment_method::{text_to_payment_method_type, Payment
 // use types::utils::dbconfig::get_euler_db_conf;
 // use eulerhs::language::MonadFlow;
 use crate::error::ApiError;
+use std::clone;
 use std::cmp::PartialEq;
 use std::fmt::Debug;
 use std::fmt::Display;
@@ -153,13 +155,23 @@ pub async fn get_enabled_gateway_card_info_for_gateways(
 ) -> Vec<GatewayCardInfo> {
     // Early return if both input lists are empty
     if card_bins.is_empty() && gateways.is_empty() {
+        logger::info!(
+            tag = "get_enabled_gateway_card_info_for_gateways",
+            action = "get_enabled_gateway_card_info_for_gateways",
+            "card_bins and gateways are empty"
+        );
         return Vec::new();
     }
     let app_state = get_tenant_app_state().await;
 
     // Convert gateways to strings
-    let gateway_strings: Vec<Option<String>> = gateways.into_iter().map(|g| Some(g)).collect();
-
+    let gateway_strings: Vec<Option<String>> = gateways.clone().into_iter().map(|g| Some(g)).collect();
+    
+    logger::info!(
+        tag = "get_enabled_gateway_card_info_for_gateways",
+        action = "get_enabled_gateway_card_info_for_gateways",
+        "gateway_strings: {:?}, gateways: {:?}, card_bins: {:?}", gateway_strings.clone(), gateways.clone(), card_bins.clone()
+    );
     // Execute database query with three conditions
     match crate::generics::generic_find_all::<
         <DBGatewayCardInfo as HasTable>::Table,
@@ -174,11 +186,27 @@ pub async fn get_enabled_gateway_card_info_for_gateways(
     )
     .await
     {
-        Ok(db_results) => db_results
+        Ok(db_results) => {
+            logger::info!(
+                tag = "get_enabled_gateway_card_info_for_gateways",
+                action = "get_enabled_gateway_card_info_for_gateways",
+                "db_results: {:?}",
+                db_results
+            );
+            db_results
             .into_iter()
             .filter_map(|db_record| GatewayCardInfo::try_from(db_record).ok())
-            .collect(),
-        Err(_) => Vec::new(), // Silently handle any errors by returning empty vec
+            .collect()
+        },
+        Err(e) => {
+            logger::info!(
+                tag = "get_enabled_gateway_card_info_for_gateways",
+                action = "get_enabled_gateway_card_info_for_gateways",
+                "Error fetching data from DB: {:?}",
+                e
+            );
+            Vec::new()
+        }, // Silently handle any errors by returning empty vec
     }
 }
 
