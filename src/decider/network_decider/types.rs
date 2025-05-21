@@ -147,10 +147,23 @@ pub enum PanOrToken {
     Token,
 }
 
+#[cfg(not(feature = "db_migration"))]
 crate::impl_to_sql_from_sql_text_mysql!(CardType);
+#[cfg(not(feature = "db_migration"))]
 crate::impl_to_sql_from_sql_text_mysql!(RegulatedName);
+#[cfg(not(feature = "db_migration"))]
 crate::impl_to_sql_from_sql_text_mysql!(PanOrToken);
+#[cfg(not(feature = "db_migration"))]
 crate::impl_to_sql_from_sql_text_mysql!(CountryAlpha2);
+
+#[cfg(feature = "db_migration")]
+crate::impl_to_sql_from_sql_text_pg!(CardType);
+#[cfg(feature = "db_migration")]
+crate::impl_to_sql_from_sql_text_pg!(RegulatedName);
+#[cfg(feature = "db_migration")]
+crate::impl_to_sql_from_sql_text_pg!(PanOrToken);
+#[cfg(feature = "db_migration")]
+crate::impl_to_sql_from_sql_text_pg!(CountryAlpha2);
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct DebitRoutingOutput {

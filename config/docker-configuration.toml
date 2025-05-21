@@ -18,6 +18,14 @@ host = "host.docker.internal"
 port = 3306
 dbname = "jdb"
 
+[pg_database]
+pg_username = "db_user"
+pg_password = "db_pass"
+pg_host = "postgresql"
+pg_port = 5432
+pg_dbname = "decision_engine_db"
+
+
 [redis]
 host = "host.docker.internal"
 port = 6379

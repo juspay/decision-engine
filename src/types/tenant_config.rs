@@ -12,7 +12,10 @@ use crate::storage::types::TenantConfig as DBTenantConfig;
 // use ghc::generics::Generic;
 // use ghc::typelits::KnownSymbol;
 // use named::*;
+#[cfg(not(feature = "db_migration"))]
 use crate::storage::schema::tenant_config::dsl;
+#[cfg(feature = "db_migration")]
+use crate::storage::schema_pg::tenant_config::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
 use std::option::Option;

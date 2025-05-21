@@ -5,7 +5,13 @@
 // Local Imports
 use crate::{app::get_tenant_app_state, decider::storage::utils::merchant_gateway_account, feedback::constants::{
     defaultGWScoringPenaltyFactor, defaultGWScoringRewardFactor, defaultMerchantArrMaxLength, defaultMinimumGatewayScore, defaultScoreGlobalKeysTTL, defaultScoreKeysTTL, ecRedis, ecRedis2, kvRedis, kvRedis2, ENFORCE_GW_SCORE_KV_REDIS, GATEWAY_SCORE_THIRD_DIMENSION_TTL
-}, redis::types::ServiceConfigKey, storage::schema::gateway_bank_emi_support::gateway, types::{card::txn_card_info::TxnCardInfo, merchant, merchant_config::types::PfMcConfig, txn_details::types::TxnDetail}};
+}, redis::types::ServiceConfigKey,types::{card::txn_card_info::TxnCardInfo, merchant, merchant_config::types::PfMcConfig, txn_details::types::TxnDetail}};
+
+ #[cfg(not(feature = "db_migration"))]
+ use crate::storage::schema::gateway_bank_emi_support::gateway;
+ #[cfg(eature = "db_migration")]
+ use crate::storage::schema_pg::gateway_bank_emi_support::gateway;
+
 
 use crate::feedback::constants as C;
 

@@ -22,6 +22,7 @@ use crate::decider::network_decider;
 pub struct GlobalConfig {
     pub server: Server,
     pub database: Database,
+    pub pg_database: PgDatabase,
     pub secrets: Secrets,
     #[serde[default]]
     pub secrets_management: SecretsManagementConfig,
@@ -93,6 +94,15 @@ pub struct Database {
     pub port: u16,
     pub dbname: String,
     pub pool_size: Option<usize>,
+}
+#[derive(Clone, serde::Deserialize, Debug)]
+pub struct PgDatabase {
+    pub pg_username: String,
+    pub pg_password: masking::Secret<String>,
+    pub pg_host: String,
+    pub pg_port: u16,
+    pub pg_dbname: String,
+    pub pg_pool_size: Option<usize>,
 }
 
 #[derive(Clone, serde::Deserialize, Debug)]

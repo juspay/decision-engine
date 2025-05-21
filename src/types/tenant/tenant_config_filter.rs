@@ -3,7 +3,10 @@ use serde::{Serialize, Deserialize};
 use std::string::String;
 use crate::{app::get_tenant_app_state, error::ApiError, storage::types::TenantConfigFilter as DBTenantConfigFilter};
 use diesel::*;
+#[cfg(not(feature = "db_migration"))]
 use crate::storage::schema::tenant_config_filter::{dsl, filter_group_id, dimension_value};
+#[cfg(feature = "db_migration")]
+use crate::storage::schema_pg::tenant_config_filter::{dsl, filter_group_id, dimension_value};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TenantConfigFilterId {

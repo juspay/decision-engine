@@ -10,7 +10,10 @@ use crate::storage::types::TokenBinInfo as DBTokenBinInfo;
 // use juspay::extra::parsing::{Parsed, Step, parseField, project};
 // use named::*;
 // use sequelize::{Clause::Is, Term::In};
+#[cfg(not(feature = "db_migration"))]
 use crate::storage::schema::token_bin_info::dsl;
+#[cfg(feature = "db_migration")]
+use crate::storage::schema_pg::token_bin_info::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
 

@@ -8,9 +8,14 @@ use crate::types::merchant::id::merchant_pid_to_text;
 // use eulerhs::extra::combinators::to_domain_all;
 // use eulerhs::language::MonadFlow;
 use crate::types::merchant::merchant_account::MerchantAccount;
-
+#[cfg(not(feature = "db_migration"))]
 use crate::storage::schema::gateway_card_info::dsl;
+#[cfg(not(feature = "db_migration"))]
 use crate::storage::schema::merchant_gateway_card_info::dsl as m_dsl;
+#[cfg(feature = "db_migration")]
+use crate::storage::schema_pg::gateway_card_info::dsl;
+#[cfg(feature = "db_migration")]
+use crate::storage::schema_pg::merchant_gateway_card_info::dsl as m_dsl;
 use diesel::associations::HasTable;
 use diesel::*;
 use std::clone::Clone;

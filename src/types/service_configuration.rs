@@ -1,5 +1,8 @@
 use crate::app::get_tenant_app_state;
+#[cfg(not(feature = "db_migration"))]
 use crate::storage::schema::service_configuration::dsl;
+#[cfg(feature = "db_migration")]
+use crate::storage::schema_pg::service_configuration::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
 use std::option::Option;

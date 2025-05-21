@@ -18,7 +18,10 @@ use crate::types::money::internal::Money;
 // use prelude::*;
 // use sequelize::{Clause, Term};
 // use test::quickcheck::Arbitrary;
+#[cfg(not(feature = "db_migration"))]
 use crate::storage::schema::merchant_gateway_card_info::dsl;
+#[cfg(feature = "db_migration")]
+use crate::storage::schema_pg::merchant_gateway_card_info::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
 

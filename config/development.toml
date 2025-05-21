@@ -18,6 +18,14 @@ host = "127.0.0.1"
 port = 3306
 dbname = "jdb"
 
+[pg_database]
+pg_username = "db_user"
+pg_password = "db_pass"
+pg_host = "localhost"
+pg_port = 5432
+pg_dbname = "decision_engine_db"
+
+
 [redis]
 host = "127.0.0.1"
 port = 6379

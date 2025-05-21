@@ -1,5 +1,8 @@
 use crate::app::get_tenant_app_state;
+#[cfg(not(feature = "db_migration"))]
 use crate::storage::schema::merchant_priority_logic::dsl;
+#[cfg(feature = "db_migration")]
+use crate::storage::schema_pg::merchant_priority_logic::dsl;
 use crate::storage::types::MerchantPriorityLogic as DBMerchantPriorityLogic;
 use diesel::associations::HasTable;
 use diesel::*;

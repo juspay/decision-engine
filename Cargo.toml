@@ -8,7 +8,7 @@ rust-version = "1.85.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["middleware"]
+default = ["middleware","db_migration"]
 release = ["middleware", "kms-aws"]
 kms-aws = ["dep:aws-config", "dep:aws-sdk-kms"]
 kms-hashicorp-vault = ["dep:vaultrs"]
@@ -17,6 +17,7 @@ middleware = []
 console = ["tokio/tracing", "dep:console-subscriber"]
 external_key_manager = []
 external_key_manager_mtls = ["external_key_manager", "reqwest/rustls-tls"]
+db_migration = []
 
 [dependencies]
 aws-config = { version = "1.5.5", optional = true }
@@ -49,8 +50,8 @@ tracing-subscriber = { version = "0.3.18", default-features = true, features = [
 ] }
 console-subscriber = { version = "0.4.0", optional = true }
 
-diesel = { version = "2.2.5", features = ["mysql", "serde_json", "time"] }
-diesel-async = { version = "0.5.0", features = ["mysql", "deadpool"] }
+diesel = { version = "2.2.5", features = ["mysql", "serde_json", "time","postgres"] }
+diesel-async = { version = "0.5.0", features = ["mysql", "deadpool","postgres"] }
 serde_with = "1.11.0"
 
 serde_json = "1.0.127"

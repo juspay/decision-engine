@@ -7,7 +7,11 @@ use crate::euclid::{
     },
     utils::{generate_random_id, is_valid_enum_value, validate_routing_rule},
 };
+#[cfg(not(feature = "db_migration"))]
 use crate::storage::schema::routing_algorithm::dsl;
+#[cfg(feature = "db_migration")]
+use crate::storage::schema_pg::routing_algorithm::dsl;
+
 use crate::euclid::{
         errors::EuclidErrors,
         types::{RoutingAlgorithmMapper, RoutingAlgorithmMapperUpdate},
@@ -60,7 +64,10 @@ pub async fn routing_create(
     }
 }
 
+#[cfg(not(feature = "db_migration"))]
 use crate::storage::schema::routing_algorithm_mapper::dsl as mapper_dsl;
+#[cfg(feature = "db_migration")]
+use crate::storage::schema_pg::routing_algorithm_mapper::dsl as mapper_dsl;
 pub async fn activate_routing_rule(
     Json(payload): Json<ActivateRoutingConfigRequest>,
 ) -> Result<(), ContainerError<EuclidErrors>> {

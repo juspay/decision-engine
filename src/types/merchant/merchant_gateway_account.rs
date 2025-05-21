@@ -17,7 +17,11 @@ use std::option::Option;
 use std::string::String;
 use std::vec::Vec;
 // use std::text::Text;
+
+#[cfg(not(feature = "db_migration"))]
 use crate::storage::schema::merchant_gateway_account::dsl;
+#[cfg(feature = "db_migration")]
+use crate::storage::schema_pg::merchant_gateway_account::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
 use std::fmt::Debug;

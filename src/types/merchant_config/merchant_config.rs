@@ -6,7 +6,10 @@ use time::PrimitiveDateTime;
 
 use crate::app::get_tenant_app_state;
 use crate::error::ApiError;
+#[cfg(not(feature = "db_migration"))]
 use crate::storage::schema::merchant_config::dsl;
+#[cfg(feature = "db_migration")]
+use crate::storage::schema_pg::merchant_config::dsl;
 use crate::storage::types::MerchantConfig as DBMerchantConfig;
 use crate::types::merchant::id::{merchant_pid_to_text, MerchantPId};
 use crate::types::merchant_config::types::{ConfigCategory, ConfigName, ConfigStatus};

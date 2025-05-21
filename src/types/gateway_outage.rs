@@ -25,7 +25,10 @@ use crate::types::card::card_type::CardType;
 // use eulerhs::extra::aeson::aesonOmitNothingFields;
 use crate::storage::types::GatewayOutage as DBGatewayOutage;
 
+#[cfg(not(feature = "db_migration"))]
 use crate::storage::schema::gateway_outage::dsl;
+#[cfg(feature = "db_migration")]
+use crate::storage::schema_pg::gateway_outage::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
 
