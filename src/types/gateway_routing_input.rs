@@ -87,6 +87,7 @@ pub struct EliminationSuccessRateInput {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct GatewaySuccessRateBasedRoutingInput {
     #[serde(rename = "gatewayWiseInputs")]
     pub gatewayWiseInputs: Option<Vec<GatewayWiseSuccessRateBasedRoutingInput>>,
@@ -125,6 +126,28 @@ impl GatewaySuccessRateBasedRoutingInput {
         Self {
             gatewayWiseInputs: None,
             defaultEliminationThreshold: elimination_threshold,
+            defaultEliminationLevel: EliminationLevel::PAYMENT_METHOD,
+            defaultSelectionLevel: None,
+            enabledPaymentMethodTypes: vec![],
+            eliminationV2SuccessRateInputs: None,
+            globalGatewayWiseInputs: None,
+            defaultGlobalEliminationThreshold: None,
+            defaultGlobalEliminationMaxCountThreshold: None,
+            defaultGlobalEliminationLevel: None,
+            defaultGlobalSelectionMaxCountThreshold: None,
+            selectionTransactionCountThreshold: None,
+            defaultGlobalSoftTxnResetCount: None,
+            defaultGatewayLevelEliminationThreshold: None,
+            defaultEliminationV2SuccessRate: None,
+        }
+    }
+}
+
+impl Default for GatewaySuccessRateBasedRoutingInput {
+    fn default() -> Self {
+        Self {
+            gatewayWiseInputs: None,
+            defaultEliminationThreshold: 0.0,
             defaultEliminationLevel: EliminationLevel::PAYMENT_METHOD,
             defaultSelectionLevel: None,
             enabledPaymentMethodTypes: vec![],
