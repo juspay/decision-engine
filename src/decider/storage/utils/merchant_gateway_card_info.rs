@@ -3,6 +3,7 @@ use crate::storage::schema::juspay_bank_code as j_dsl;
 
 use crate::storage::schema::merchant_gateway_card_info as m_dsl;
 use crate::storage::types::BitBool;
+use crate::storage::types::BitFlag;
 use crate::storage::types::{
     GatewayCardInfo as DBGatewayCardInfo, JuspayBankCode as DBJuspayBankCode,
     MerchantGatewayCardInfo as DBMerchantGatewayCardInfo,

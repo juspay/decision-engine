@@ -3,7 +3,7 @@ use crate::logger;
 use serde::{Deserialize, Serialize};
 // use db::euler_mesh_impl::mesh_config;
 // use db::mesh::internal;
-use crate::storage::types::{BitBool, GatewayCardInfo as DBGatewayCardInfo};
+use crate::storage::types::{BitBool, GatewayCardInfo as DBGatewayCardInfo,BitFlag};
 use crate::types::bank_code::{to_bank_code_id, BankCodeId};
 use crate::types::gateway::{GatewayAny};
 // use juspay::extra::parsing::{
@@ -163,7 +163,7 @@ pub async fn get_enabled_gateway_card_info_for_gateways(
         return Vec::new();
     }
     let app_state = get_tenant_app_state().await;
-
+    let gateways = vec!["GOCASHFREE".to_string(), "PAYU".to_string()];
     // Convert gateways to strings
     let gateway_strings: Vec<Option<String>> = gateways.clone().into_iter().map(|g| Some(g)).collect();
     

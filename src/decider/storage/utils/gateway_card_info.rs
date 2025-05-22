@@ -1,6 +1,6 @@
 // use db::eulermeshimpl::mesh_config;
 // use db::mesh::internal::*;
-use crate::storage::types::{BitBool, GatewayCardInfo as DBGatewayCardInfo, MerchantGatewayCardInfo as DBMerchantGatewayCardInfo};
+use crate::storage::types::{BitBool, BitFlag, GatewayCardInfo as DBGatewayCardInfo, MerchantGatewayCardInfo as DBMerchantGatewayCardInfo};
 use crate::types::gateway_card_info::GatewayCardInfo;
 // use types::utils::dbconfig::get_euler_db_conf;
 use crate::types::merchant::id::merchant_pid_to_text;

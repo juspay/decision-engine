@@ -192,7 +192,10 @@ where
 {
     let conn = match storage.get_conn().await {
         Ok(conn) => Ok(conn),
-        Err(err) => Err(MeshError::Others),
+        Err(err) => {
+            println!("Error getting connection: {:?}", err);
+            Err(MeshError::Others)
+        }
     }?;
     generic_filter::<T, _, _>(&conn, predicate).await
 }
@@ -208,9 +211,13 @@ where
 
     track_database_call::<T, _, _>(query.get_results_async(conn), DatabaseOperation::Filter)
         .await
-        .map_err(|err| match err {
-            DieselError::NotFound => MeshError::NotFound,
-            _ => MeshError::Others,
+        .map_err(|err| {
+            print!("Error while filtering: {:?}", err);
+            logger::error!(action = "generic_filter", error = ?err, "Diesel query failed");
+            match err {
+                DieselError::NotFound => MeshError::NotFound,
+                _ => MeshError::Others,
+            }
         })
 }
 

@@ -185,7 +185,9 @@ pub async fn newGwFilters(
     ErrorResponse,
 > {
     let _ = getFunctionalGateways(this).await;
-    let gws = filterFunctionalGateways(this).await;
+    let gws = vec!["GOCASHFREE".to_string(), "PAYU".to_string()];
+    setGws(this, gws.clone());
+
     if gws.is_empty() {
         let txnId = this.get().dpTxnDetail.txnId.clone();
         let merchantId = this.get().dpTxnDetail.merchantId.clone();
@@ -209,8 +211,8 @@ pub async fn newGwFilters(
         .await;
         Ok((vec![], vec![]))
     } else {
-        let _ = filterGatewaysForBrand(this).await;
         filterGatewaysForAuthType(this).await?;
+        let _ = filterGatewaysForBrand(this).await;
         filterGatewaysForValidationType(this).await?;
         let _ = filterGatewaysForEmi(this).await;
         let _ = filterGatewaysForTxnOfferDetails(this).await;
@@ -1029,8 +1031,9 @@ pub async fn filterGatewaysForAuthType(
     let txn_card_info = this.get().dpTxnCardInfo.clone();
     let macc = this.get().dpMerchantAccount.clone();
     let dynamic_mga_enabled = Utils::get_is_merchant_enabled_for_dynamic_mga_selection(this).await;
+    let card_isin = "544670".to_string();
     // Only proceed with filtering if card ISIN is available
-    if let Some(ref card_isin) = txn_card_info.card_isin {
+    if true {
         // Filter for OTP authentication type
         if txn_card_info
             .authType
@@ -1845,15 +1848,11 @@ pub async fn filterGatewaysCardInfo(
     m_auth_type: Option<AuthType>,
     m_validation_type: Option<ETGCI::ValidationType>,
 ) -> Result<Vec<GatewayCardInfo>, ErrorResponse> {
-    let appState = this.state().clone();
-    if !enabled_gateways.is_empty()
-        && card_bins.iter().all(|bin| bin.is_some())
-        && (m_auth_type.is_some() || m_validation_type.is_some())
+    let appState = this.state().clone();   
+    
+    if true
     {
-        if m_validation_type
-            .clone()
-            .map(|vt| vt == ETGCI::ValidationType::CardMandate)
-            .unwrap_or(false)
+        if false
         {
             let merchant_wise_mandate_supported_gateway: Vec<String> =
                 Utils::get_merchant_wise_mandate_bin_eligible_gateways(
@@ -1907,7 +1906,7 @@ pub async fn filterGatewaysCardInfo(
         } else {
             let mut merchant_validation_required_gws = Vec::new();
             let mut gci_validation_gws = Vec::new();
-
+            
             for gw in enabled_gateways.iter().cloned() {
                 if Utils::is_merchant_wise_auth_type_check_needed(
                     &merchant_account,
@@ -1922,10 +1921,15 @@ pub async fn filterGatewaysCardInfo(
                     gci_validation_gws.push(gw);
                 }
             }
-
+          
+            println!("merchant_validation_required_gws {:?}",merchant_validation_required_gws);
+            println!("gci_validation_gws {:?}",gci_validation_gws);
+            println!("enabled_gateways {:?}",enabled_gateways);
+            
             let gcis =
                 ETGCI::get_enabled_gateway_card_info_for_gateways(card_bins, enabled_gateways)
                     .await;
+            println!("gcis_value : {:?}",gcis);    
 
             let gcis_without_merchant_validation = gcis
                 .iter()

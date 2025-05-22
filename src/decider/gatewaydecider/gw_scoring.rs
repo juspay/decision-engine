@@ -2141,6 +2141,12 @@ pub async fn get_success_rate_routing_inputs(
         "Gateway Decider Input Decode Error",
         &merchant_acc.gatewaySuccessRateBasedDeciderInput,
     );
+    logger::debug!(
+        tag="get_success_rate_routing_inputs",
+        action = "get_success_rate_routing_inputs",
+        "DEFAULT_SR_BASED_GATEWAY_ELIMINATION_INPUT : {:?} and merchant_acc.gatewaySuccessRateBasedDeciderInput : {:?}" ,
+        redis_input,decoded_input
+    );
     (redis_input, decoded_input)
 }
 

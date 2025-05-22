@@ -6,7 +6,7 @@ use crate::utils::CustomResult;
 use super::schema;
 use diesel::mysql::Mysql;
 use diesel::serialize::{IsNull, Output};
-use diesel::sql_types::Binary;
+use diesel::sql_types::{Binary, Integer, Nullable};
 use diesel::*;
 use diesel::{
     backend::Backend, deserialize::FromSql, serialize::ToSql, AsExpression, Identifiable,
@@ -358,11 +358,97 @@ impl ToSql<Binary, Mysql> for BitBool {
     }
 }
 
+// impl ToSql<Integer, Mysql> for BitBool {
+//     fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Mysql>) -> diesel::serialize::Result {
+//         match *self {
+//             BitBool(value) if value == true => {
+//                 println!("Serializing BitBool: Found value 1");
+//                 out.write_all(&[1u8])?;
+//             }
+//             BitBool(value) if value == false => {
+//                 println!("Serializing BitBool: Found value 0");
+//                 out.write_all(&[0u8])?;
+//             }
+//             _ => todo!(),
+//         }
+//         Ok(IsNull::No)
+//     }
+// }
+
 impl FromSql<Binary, Mysql> for BitBool {
     fn from_sql(bytes: <Mysql as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
         match bytes.as_bytes().first() {
-            Some(&1) => Ok(Self(true)),
-            _ => Ok(Self(false)),
+            Some(&1) => {
+                println!("Deserializing BitBool: Found value 1");
+                Ok(Self(true))
+            }
+            _ => {
+                println!("Deserializing BitBool: Found value 0");
+                Ok(Self(false))
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, FromSqlRow, AsExpression, Serialize)]
+#[diesel(sql_type = Integer)]
+pub struct BitFlag(pub i8);
+
+impl ToSql<Integer, Mysql> for BitFlag {
+    fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Mysql>) -> diesel::serialize::Result {
+        match *self {
+            BitFlag(value) if value == 1 => {
+                println!("Serializing BitFlag: Found value 1");
+                out.write_all(&[1u8])?;
+            }
+            BitFlag(value) if value == 0 => {
+                println!("Serializing BitFlag: Found value 0");
+                out.write_all(&[0u8])?;
+            }
+            _ => todo!(),
+        }
+        Ok(IsNull::No)
+    }
+}
+
+impl FromSql<Integer, Mysql> for BitFlag {
+    fn from_sql(bytes: <Mysql as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
+        println!("Deserializing BitFlag:");
+        let first = bytes.as_bytes().first().copied();
+        println!("Deserializing BitFlag: {:?}", first);
+        match first {
+            Some(0) => {
+                println!("Deserializing BitFlag: Found value 0");
+                Ok(BitFlag(0))
+            }
+            Some(1) => {
+                println!("Deserializing BitFlag: Found value 1");
+                Ok(BitFlag(1))
+            }
+            None => {
+                println!("Deserializing BitFlag: Found NULL value");
+                Err("Unexpected NULL for BitFlag".into())
+            }
+            _ => {
+                println!("Deserializing BitFlag: Found invalid value");
+                Err("Invalid value for BitFlag".into())
+            }
+        }
+    }
+}
+
+
+impl FromSql<Binary, Mysql> for BitFlag {
+    fn from_sql(bytes: <Mysql as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
+        match bytes.as_bytes().first() {
+            Some(&1) => {
+                println!("Deserializing BitBool222: Found value 1");
+                Ok(Self(1))
+            }
+            _ => {
+                println!("Deserializing BitBool222: Found value 0");
+                Ok(Self(0))
+            }
         }
     }
 }

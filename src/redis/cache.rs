@@ -63,6 +63,7 @@ where
     A: for<'de> Deserialize<'de>,
 {
     let res = service_configuration::find_config_by_name(key).await;
+    println!("findByNameFromRedisHelper value: {:?}", res);
 
     match res {
         Ok(m_service_config) => match m_service_config {
