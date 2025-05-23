@@ -174,6 +174,16 @@ impl SC::ServiceConfigKey for GATEWAY_SCORE_SECOND_DIMENSION_SOFT_TTL {
 pub const gwScoreSecondDimensionTtl: GATEWAY_SCORE_SECOND_DIMENSION_SOFT_TTL =
     GATEWAY_SCORE_SECOND_DIMENSION_SOFT_TTL;
 
+pub struct ShouldConsumeResultFromRouter;
+impl SC::ServiceConfigKey for ShouldConsumeResultFromRouter {
+    fn get_key(&self) -> String {
+            "SHOULD_CONSUME_RESULT_FROM_ROUTER".to_string()
+    }
+}
+
+pub const SHOULD_CONSUME_RESULT_FROM_ROUTER: ShouldConsumeResultFromRouter =
+    ShouldConsumeResultFromRouter;
+
 pub struct GATEWAY_SCORE_THIRD_DIMENSION_SOFT_TTL;
 impl SC::ServiceConfigKey for GATEWAY_SCORE_THIRD_DIMENSION_SOFT_TTL {
     fn get_key(&self) -> String {
