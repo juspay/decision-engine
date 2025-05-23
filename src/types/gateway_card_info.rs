@@ -1,5 +1,6 @@
 use crate::app::get_tenant_app_state;
 use crate::logger;
+use diesel::sql_types::{Bool};
 use serde::{Deserialize, Serialize};
 // use db::euler_mesh_impl::mesh_config;
 // use db::mesh::internal;
@@ -26,6 +27,7 @@ use std::vec::Vec;
 use crate::storage::schema::gateway_card_info::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
+use diesel::dsl::sql;
 
 // use super::payment::payment_method::text_to_payment_method_type;
 
@@ -180,9 +182,12 @@ pub async fn get_enabled_gateway_card_info_for_gateways(
     >(
         &app_state.db,
         dsl::isin
-            .eq_any(card_bins)
-            .and(dsl::gateway.eq_any(gateway_strings))
-            .and(dsl::disabled.eq(BitBool(false)).or(dsl::disabled.is_null())),
+        .eq_any(card_bins)
+        .and(dsl::gateway.eq_any(gateway_strings))
+        .and(
+            sql::<Bool>("disabled = 0")
+                .or(dsl::disabled.is_null()),
+        ),
     )
     .await
     {
