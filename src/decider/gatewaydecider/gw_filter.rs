@@ -1116,6 +1116,12 @@ pub async fn filterGatewaysForAuthType(
         )
         .await;
 
+        logger::debug!(
+            action = "filterFunctionalGatewaysForAuthType",
+            "BIN eligibility check feature flag: {:?}",
+            mb_feature
+        );
+
         // Apply additional filtering if BIN eligibility check is not disabled
         if mb_feature.is_none() {
             let stt = getGws(this);
