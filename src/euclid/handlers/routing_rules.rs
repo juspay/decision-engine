@@ -48,8 +48,11 @@ pub async fn routing_create(
             created_by: config.created_by,
             name: config.name.clone(),
             description: Some(config.description),
+            #[cfg(not(feature = "db_migration"))]
             metadata: Some(serde_json::to_string(&config.metadata)
             .change_context(EuclidErrors::FailedToSerializeJsonToString)?),
+            #[cfg(feature = "db_migration")]
+            metadata: config.metadata.clone(),
             algorithm_data: serde_json::to_string(&data)
                 .change_context(EuclidErrors::FailedToSerializeJsonToString)?,
             created_at: timestamp,

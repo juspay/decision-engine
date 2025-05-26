@@ -92,6 +92,9 @@ pub struct RoutingAlgorithm {
     pub algorithm_data: String,
     // #[cfg(feature = "db_migration")]  
     // pub algorithm_data: serde_json::Value,
+    #[cfg(feature = "db_migration")]
+    pub metadata: Option<serde_json::Value>,
+    #[cfg(not(feature = "db_migration"))]
     pub metadata: Option<String>,
     pub created_at: PrimitiveDateTime,
     pub modified_at: PrimitiveDateTime,
