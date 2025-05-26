@@ -2,9 +2,9 @@ use crate::storage::types::CoBadgedCardInfo;
 use crate::utils::CustomResult;
 use crate::{error, generics};
 #[cfg(not(feature = "db_migration"))]
-use crate::storage::schema::co_badged_cards_info::dsl;
+use crate::storage::schema::co_badged_cards_info_test::dsl;
 #[cfg(feature = "db_migration")]
-use crate::storage::schema_pg::co_badged_cards_info::dsl;
+use crate::storage::schema_pg::co_badged_cards_info_test::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
 use error_stack::ResultExt;

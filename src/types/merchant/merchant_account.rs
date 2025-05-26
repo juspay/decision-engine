@@ -208,7 +208,7 @@ pub async fn load_merchant_by_merchant_id(merchant_id: String) -> Option<Merchan
     }
 }
 
-pub async fn insert_merchant_account<T>(value: T) -> Result<(), crate::generics::MeshError>
+pub async fn insert_merchant_account<T>(value: T) -> error_stack::Result<(), crate::generics::MeshError>
 where
     MerchantAccountNew: TryFrom<T>,
 {
@@ -242,7 +242,7 @@ pub async fn delete_merchant_account(
 pub async fn update_merchant_account(
     merchant_id: String,
     value: Option<String>,
-) -> Result<(), crate::generics::MeshError> {
+) -> error_stack::Result<(), crate::generics::MeshError> {
     let app_state = get_tenant_app_state().await;
     let values = MerchantAccountUpdate {
         gateway_success_rate_based_decider_input: value,

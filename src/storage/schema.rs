@@ -28,22 +28,23 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
-    co_badged_cards_info (id) {
+    co_badged_cards_info_test (id) {
         id -> Varchar,
         card_bin_min -> BigInt,
         card_bin_max -> BigInt,
         issuing_bank_name -> Nullable<Text>,
         card_network -> Varchar,
-        country_code -> Text,
-        card_type -> diesel::sql_types::Text,
-        regulated -> Bool,
+        country_code -> Nullable<Text>,
+        card_type -> Nullable<Text>,
+        regulated -> Nullable<Bool>,
         regulated_name -> Nullable<Text>,
-        prepaid -> Bool,
-        reloadable -> Bool,
-        pan_or_token -> diesel::sql_types::Text,
+        prepaid -> Nullable<Bool>,
+        reloadable -> Nullable<Bool>,
+        pan_or_token -> Text,
         card_bin_length -> SmallInt,
+        bin_provider_bin_length -> SmallInt,
         card_brand_is_additional -> Bool,
-        domestic_only -> Bool,
+        domestic_only -> Nullable<Bool>,
         created_at -> Timestamp,
         modified_at -> Timestamp,
         last_updated_provider -> Nullable<Varchar>,
@@ -499,6 +500,7 @@ diesel::table! {
         name -> Text,
         description -> Nullable<Text>,
         algorithm_data -> Text,
+        metadata -> Nullable<Text>,
         created_at -> Timestamp,
         modified_at -> Timestamp,
     }

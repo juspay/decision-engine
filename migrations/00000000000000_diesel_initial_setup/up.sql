@@ -418,26 +418,27 @@ CREATE TABLE routing_algorithm (
 );
 SET FOREIGN_KEY_CHECKS = 1;
 
-DROP TABLE IF EXISTS co_badged_cards_info;
-CREATE TABLE co_badged_cards_info (
+DROP TABLE IF EXISTS co_badged_cards_info_test;
+CREATE TABLE co_badged_cards_info_test (
     id VARCHAR(64) PRIMARY KEY,
     card_bin_min BIGINT NOT NULL,
     card_bin_max BIGINT NOT NULL,
     issuing_bank_name TEXT,
     card_network VARCHAR(32) NOT NULL,
-    country_code TEXT NOT NULL,
-    card_type TEXT NOT NULL,
-    regulated BOOLEAN NOT NULL,
+    country_code TEXT,
+    card_type TEXT,
+    regulated BOOLEAN,
     regulated_name TEXT,
-    prepaid BOOLEAN NOT NULL,
-    reloadable BOOLEAN NOT NULL,
+    prepaid BOOLEAN,
+    reloadable BOOLEAN,
     pan_or_token TEXT NOT NULL,
     card_bin_length SMALLINT NOT NULL,
+    bin_provider_bin_length SMALLINT NOT NULL,
     card_brand_is_additional BOOLEAN NOT NULL,
-    domestic_only BOOLEAN NOT NULL,
+    domestic_only BOOLEAN,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     modified_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     last_updated_provider VARCHAR(128)
 );
 
-CREATE INDEX co_badged_cards_card_bin_min_card_bin_max_index ON co_badged_cards_info (card_bin_min, card_bin_max);
+CREATE INDEX co_badged_cards_card_bin_min_card_bin_max_index ON co_badged_cards_info_test (card_bin_min, card_bin_max);

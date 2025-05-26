@@ -42,6 +42,7 @@ use diesel::{
     result::Error as DieselError,
     AsChangeset, Insertable, Table,
 };
+use error_stack::Report;
 use error_stack::ResultExt;
 
 // use crate::{errors, MysqlPooledConn, StorageResult};
@@ -80,8 +81,9 @@ pub enum DatabaseOperation {
     UpdateOne,
     Count,
 }
+
 #[cfg(not(feature = "db_migration"))]
-pub async fn generic_insert<T, V>(storage: &Storage, values: V) -> StorageResult<usize>
+pub async fn generic_insert<T, V>(storage: &Storage, values: V) -> Result<usize, Report<MeshError>>
 where
     T: HasTable<Table = T> + Table + 'static + Debug,
     V: Debug + Insertable<T>,
@@ -93,8 +95,9 @@ where
     let mut conn = storage.get_conn().await.map_err(|_| MeshError::Others)?;
     generic_insert_core::<T, _>(&mut conn, values).await
 }
+
 #[cfg(feature = "db_migration")]
-pub async fn generic_insert<T, V>(storage: &Storage, values: V) -> StorageResult<usize>
+pub async fn generic_insert<T, V>(storage: &Storage, values: V) -> Result<usize, Report<MeshError>>
 where
     T: HasTable<Table = T> + Table + 'static + Debug,
     V: Debug + Insertable<T>,
@@ -103,14 +106,15 @@ where
     InsertStatement<T, <V as Insertable<T>>::Values>:
         AsQuery + ExecuteDsl<PgConnection, Pg> + Send,
 {
-    logger::debug!("Inserting values: {:?}", values);
     let mut conn = storage.get_conn().await.map_err(|_| MeshError::Others)?;
-    logger::debug!("DB connected successfully");
     generic_insert_core::<T, _>(&mut conn, values).await
 }
 
 #[cfg(not(feature = "db_migration"))]
-pub async fn generic_insert_core<T, V>(conn: &MysqlPoolConn, values: V) -> StorageResult<usize>
+pub async fn generic_insert_core<T, V>(
+    conn: &MysqlPoolConn,
+    values: V,
+) -> Result<usize, Report<MeshError>>
 where
     T: HasTable<Table = T> + Table + 'static + Debug,
     V: Debug + Insertable<T>,
@@ -121,19 +125,18 @@ where
 {
     let debug_values = format!("{values:?}");
     let query = diesel::insert_into(<T as HasTable>::table()).values(values);
-    logger::debug!(query = %debug_query::<Mysql, _>(&query).to_string());
+    logger::debug!(action = "generic_insert", "Debug query : {:?}", debug_query::<Mysql, _>(&query).to_string());
 
-    match track_database_call::<T, _, _>(query.execute_async(conn), DatabaseOperation::Insert).await
-    {
-        Ok(value) => Ok(value),
-        Err(err) => {
-            print!("Error: {:?}", err);
-            Err(MeshError::NotFound)
-        }
-    }
+    track_database_call::<T, _, _>(query.execute_async(conn), DatabaseOperation::Insert)
+        .await
+        .change_context(MeshError::Others)
 }
+
 #[cfg(feature = "db_migration")]
-pub async fn generic_insert_core<T, V>(conn: &PgPoolConn, values: V) -> StorageResult<usize>
+pub async fn generic_insert_core<T, V>(
+    conn: &PgPoolConn,
+    values: V,
+) -> Result<usize, Report<MeshError>>
 where
     T: HasTable<Table = T> + Table + 'static + Debug,
     V: Debug + Insertable<T>,
@@ -142,26 +145,21 @@ where
     InsertStatement<T, <V as Insertable<T>>::Values>:
         AsQuery + ExecuteDsl<PgConnection, Pg> + Send,
 {
-    // let debug_values = format!("{values:?}");=
-
+    let debug_values = format!("{values:?}");
     let query = diesel::insert_into(<T as HasTable>::table()).values(values);
-    logger::debug!(query = %debug_query::<Pg, _>(&query).to_string());
+    logger::debug!(action = "generic_insert", "Debug query : {:?}", debug_query::<Pg, _>(&query).to_string());
 
-    match track_database_call::<T, _, _>(query.execute_async(conn), DatabaseOperation::Insert).await
-    {
-        Ok(value) => Ok(value),
-        Err(err) => {
-            print!("Error: {:?}", err);
-            Err(MeshError::NotFound)
-        }
-    }
+    track_database_call::<T, _, _>(query.execute_async(conn), DatabaseOperation::Insert)
+        .await
+        .change_context(MeshError::Others)
 }
+// Returns error incase of entry not found in DB or due to other issues
 #[cfg(not(feature = "db_migration"))]
 pub async fn generic_update<T, V, P>(
     conn: &MysqlPoolConn,
     predicate: P,
     values: V,
-) -> StorageResult<usize>
+) -> Result<usize, Report<MeshError>>
 where
     T: FilterDsl<P> + HasTable<Table = T> + Table + 'static,
     V: AsChangeset<Target = <Filter<T, P> as HasTable>::Table> + Debug,
@@ -172,33 +170,22 @@ where
         <V as AsChangeset>::Changeset,
     >: AsQuery + QueryFragment<Mysql> + QueryId + Send + 'static,
 {
-    let debug_values = format!("{values:?}");
-
-    let query = diesel::update(<T as HasTable>::table().filter(predicate)).set(values);
-    logger::debug!(query = %debug_query::<Mysql, _>(&query).to_string());
-
-    match track_database_call::<T, _, _>(query.execute_async(conn), DatabaseOperation::Update).await
-    {
-        Ok(value) => {
-            logger::debug!("Updated rows: {:?}", value);
-            if value == 0 {
-                return Err(crate::generics::MeshError::NoRowstoUpdate);
+    generic_update_if_present::<T, _, _>(conn, predicate, values)
+        .await
+        .and_then(|res| {
+            logger::debug!("Updated rows: {:?}", res);
+            if res == 0 {
+                return Err(report!(crate::generics::MeshError::NoRowstoUpdate));
             }
-            Ok(value)
-        }
-        Err(err) => {
-            logger::error!("Error while updating: {:?} {:?}", err, debug_values);
-            Err(MeshError::NotFound)
-        }
-    }
+            Ok(res)
+        })
 }
-
 #[cfg(feature = "db_migration")]
 pub async fn generic_update<T, V, P>(
     conn: &PgPoolConn,
     predicate: P,
     values: V,
-) -> StorageResult<usize>
+) -> Result<usize, Report<MeshError>>
 where
     T: FilterDsl<P> + HasTable<Table = T> + Table + 'static,
     V: AsChangeset<Target = <Filter<T, P> as HasTable>::Table> + Debug,
@@ -209,26 +196,71 @@ where
         <V as AsChangeset>::Changeset,
     >: AsQuery + QueryFragment<Pg> + QueryId + Send + 'static,
 {
-    let debug_values = format!("{values:?}");
+    generic_update_if_present::<T, _, _>(conn, predicate, values)
+        .await
+        .and_then(|res| {
+            logger::debug!("Updated rows: {:?}", res);
+            if res == 0 {
+                return Err(report!(crate::generics::MeshError::NoRowstoUpdate));
+            }
+            Ok(res)
+        })
+}
+// Returns 0 incase of entry not found in DB and errors due to other issues
+#[cfg(not(feature = "db_migration"))]
+pub async fn generic_update_if_present<T, V, P>(
+    conn: &MysqlPoolConn,
+    predicate: P,
+    values: V,
+) -> Result<usize, Report<MeshError>>
+where
+    T: FilterDsl<P> + HasTable<Table = T> + Table + 'static,
+    V: AsChangeset<Target = <Filter<T, P> as HasTable>::Table> + Debug,
+    Filter<T, P>: IntoUpdateTarget,
+    UpdateStatement<
+        <Filter<T, P> as HasTable>::Table,
+        <Filter<T, P> as IntoUpdateTarget>::WhereClause,
+        <V as AsChangeset>::Changeset,
+    >: AsQuery + QueryFragment<Mysql> + QueryId + Send + 'static,
+{
+    let debug_values = format!("Error while updating: {values:?}");
 
     let query = diesel::update(<T as HasTable>::table().filter(predicate)).set(values);
-    logger::debug!(query = %debug_query::<Pg, _>(&query).to_string());
+    logger::debug!(action = "generic_update_if_present", "Debug Query {:?}", debug_query::<Mysql, _>(&query).to_string());
 
-    match track_database_call::<T, _, _>(query.execute_async(conn), DatabaseOperation::Update).await
-    {
-        Ok(value) => {
-            logger::debug!("Updated rows: {:?}", value);
-            if value == 0 {
-                return Err(crate::generics::MeshError::NoRowstoUpdate);
-            }
-            Ok(value)
-        }
-        Err(err) => {
-            logger::error!("Error while updating: {:?} {:?}", err, debug_values);
-            Err(MeshError::NotFound)
-        }
-    }
+    track_database_call::<T, _, _>(query.execute_async(conn), DatabaseOperation::Update)
+        .await
+        .change_context(MeshError::Others)
+        .attach_printable(debug_values)
 }
+
+#[cfg(feature = "db_migration")]
+pub async fn generic_update_if_present<T, V, P>(
+    conn: &PgPoolConn,
+    predicate: P,
+    values: V,
+) -> Result<usize, Report<MeshError>>
+where
+    T: FilterDsl<P> + HasTable<Table = T> + Table + 'static,
+    V: AsChangeset<Target = <Filter<T, P> as HasTable>::Table> + Debug,
+    Filter<T, P>: IntoUpdateTarget,
+    UpdateStatement<
+        <Filter<T, P> as HasTable>::Table,
+        <Filter<T, P> as IntoUpdateTarget>::WhereClause,
+        <V as AsChangeset>::Changeset,
+    >: AsQuery + QueryFragment<Pg> + QueryId + Send + 'static,
+{
+    let debug_values = format!("Error while updating: {values:?}");
+
+    let query = diesel::update(<T as HasTable>::table().filter(predicate)).set(values);
+    logger::debug!(action = "generic_update_if_present", "Debug Query {:?}", debug_query::<Pg, _>(&query).to_string());
+
+    track_database_call::<T, _, _>(query.execute_async(conn), DatabaseOperation::Update)
+        .await
+        .change_context(MeshError::Others)
+        .attach_printable(debug_values)
+}
+
 #[cfg(not(feature = "db_migration"))]
 pub async fn generic_delete<T, P>(conn: &MysqlPoolConn, predicate: P) -> StorageResult<usize>
 where
@@ -240,7 +272,7 @@ where
     >: AsQuery + QueryFragment<Mysql> + QueryId + Send + 'static,
 {
     let query = diesel::delete(<T as HasTable>::table().filter(predicate));
-    logger::debug!(query = %debug_query::<Mysql, _>(&query).to_string());
+    logger::debug!(action = "generic_delete", "Debug Query {:?}", debug_query::<Mysql, _>(&query).to_string());
 
     match track_database_call::<T, _, _>(query.execute_async(conn), DatabaseOperation::Delete).await
     {
@@ -268,7 +300,7 @@ where
     >: AsQuery + QueryFragment<Pg> + QueryId + Send + 'static,
 {
     let query = diesel::delete(<T as HasTable>::table().filter(predicate));
-    logger::debug!(query = %debug_query::<Pg, _>(&query).to_string());
+    logger::debug!(action = "generic_delete", "Debug Query {:?}", debug_query::<Pg, _>(&query).to_string());
 
     match track_database_call::<T, _, _>(query.execute_async(conn), DatabaseOperation::Delete).await
     {
@@ -285,7 +317,6 @@ where
         }
     }
 }
-
 #[cfg(not(feature = "db_migration"))]
 pub async fn generic_find_all<T, P, R>(storage: &Storage, predicate: P) -> StorageResult<Vec<R>>
 where
@@ -320,7 +351,7 @@ where
     R: Send + 'static,
 {
     let query = T::table().filter(predicate);
-    logger::debug!(query = %debug_query::<Mysql, _>(&query).to_string());
+    logger::info!(action = "generic_filter", "Debug Query {:?}", debug_query::<Mysql, _>(&query).to_string());
 
     track_database_call::<T, _, _>(query.get_results_async(conn), DatabaseOperation::Filter)
         .await
@@ -354,7 +385,7 @@ where
     R: Send + 'static,
 {
     let query = <T as HasTable>::table().filter(predicate);
-    logger::debug!(query = %debug_query::<Mysql, _>(&query).to_string());
+    logger::debug!(action = "generic_find_one_core", "Debug Query {:?}", debug_query::<Mysql, _>(&query).to_string());
 
     track_database_call::<T, _, _>(query.get_result_async(conn), DatabaseOperation::FindOne)
         .await
@@ -520,7 +551,7 @@ where
     R: Send + 'static,
 {
     let query = <T as HasTable>::table().find(id.to_owned());
-    logger::debug!(query = %debug_query::<Mysql, _>(&query).to_string());
+    logger::debug!(action = "generic_find_by_id_core", "Debug Query {:?}", debug_query::<Mysql, _>(&query).to_string());
 
     match track_database_call::<T, _, _>(query.first_async(conn), DatabaseOperation::FindOne).await
     {
@@ -534,6 +565,7 @@ where
         },
     }
 }
+
 #[cfg(feature = "db_migration")]
 async fn generic_find_by_id_core<T, Pk, R>(conn: &PgPoolConn, id: Pk) -> StorageResult<R>
 where
@@ -544,7 +576,7 @@ where
     R: Send + 'static,
 {
     let query = <T as HasTable>::table().find(id.to_owned());
-    logger::debug!(query = %debug_query::<Pg, _>(&query).to_string());
+    logger::debug!(action = "generic_find_by_id_core", "Debug Query {:?}", debug_query::<Pg, _>(&query).to_string());
 
     match track_database_call::<T, _, _>(query.first_async(conn), DatabaseOperation::FindOne).await
     {

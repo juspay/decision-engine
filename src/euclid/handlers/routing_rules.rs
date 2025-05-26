@@ -3,7 +3,8 @@ use crate::euclid::{
     cgraph,
     interpreter::InterpreterBackend,
     types::{
-        ActivateRoutingConfigRequest, Context, JsonifiedRoutingAlgorithm, RoutingDictionaryRecord, RoutingEvaluateResponse, RoutingRequest, RoutingRule
+        ActivateRoutingConfigRequest, Context, JsonifiedRoutingAlgorithm, RoutingDictionaryRecord,
+        RoutingEvaluateResponse, RoutingRequest, RoutingRule,
     },
     utils::{generate_random_id, is_valid_enum_value, validate_routing_rule},
 };
@@ -13,10 +14,10 @@ use crate::storage::schema::routing_algorithm::dsl;
 use crate::storage::schema_pg::routing_algorithm::dsl;
 
 use crate::euclid::{
-        errors::EuclidErrors,
-        types::{RoutingAlgorithmMapper, RoutingAlgorithmMapperUpdate},
+    errors::EuclidErrors,
+    types::{RoutingAlgorithmMapper, RoutingAlgorithmMapperUpdate},
 };
-use crate::{logger, euclid::types::RoutingAlgorithm};
+use crate::{euclid::types::RoutingAlgorithm, logger};
 use axum::{extract::Path, Json};
 use diesel::{associations::HasTable, ExpressionMethods};
 use error_stack::ResultExt;
@@ -45,9 +46,12 @@ pub async fn routing_create(
         let new_algo = RoutingAlgorithm {
             id: algorithm_id.clone(),
             created_by: config.created_by,
-            name: "My Algo".into(),
-            description: Some("Test algo".into()),
-            algorithm_data: serde_json::to_string(&data).change_context(EuclidErrors::FailedToDeserializeJsonToString)?,
+            name: config.name.clone(),
+            description: Some(config.description),
+            metadata: Some(serde_json::to_string(&config.metadata)
+            .change_context(EuclidErrors::FailedToSerializeJsonToString)?),
+            algorithm_data: serde_json::to_string(&data)
+                .change_context(EuclidErrors::FailedToSerializeJsonToString)?,
             created_at: timestamp,
             modified_at: timestamp,
         };
@@ -87,26 +91,23 @@ pub async fn activate_routing_rule(
         routing_algorithm_id: payload.routing_algorithm_id.clone(),
     };
 
-    match crate::generics::generic_update::<
+    let rows_affected = crate::generics::generic_update_if_present::<
         <RoutingAlgorithmMapper as HasTable>::Table,
         RoutingAlgorithmMapperUpdate,
         _,
     >(conn, predicate, values)
     .await
-    {
-        Ok(rows_affected) if rows_affected > 0 => Ok(()),
-        Ok(_) => {
-            // Creator is non-existent in mapper table
-            let mapper_entry = RoutingAlgorithmMapper::new(
-                payload.created_by,
-                payload.routing_algorithm_id
-            );
-            crate::generics::generic_insert(&state.db, mapper_entry)
-                .await
-                .map_err(|_| ContainerError::from(EuclidErrors::StorageError))?;
-            return Ok(());
-        }
-        Err(_err) => return Err(EuclidErrors::StorageError.into()),
+    .change_context(EuclidErrors::StorageError)?;
+
+    if rows_affected > 0 {
+        return Ok(());
+    } else {
+        let mapper_entry =
+            RoutingAlgorithmMapper::new(payload.created_by, payload.routing_algorithm_id);
+        crate::generics::generic_insert(&state.db, mapper_entry)
+            .await
+            .change_context(EuclidErrors::StorageError)?;
+        return Ok(());
     }
 }
 
@@ -114,36 +115,47 @@ pub async fn list_all_routing_algorithm_id(
     Path(created_by): Path<String>,
 ) -> Result<Json<Vec<JsonifiedRoutingAlgorithm>>, ContainerError<EuclidErrors>> {
     let state = get_tenant_app_state().await;
-    Ok(Json(crate::generics::generic_find_all::<
-        <RoutingAlgorithm as HasTable>::Table,
-        _,
-        RoutingAlgorithm,
-    >(&state.db, dsl::created_by.eq(created_by))
-    .await
-    .change_context(EuclidErrors::StorageError)?
-    .into_iter().map(Into::into).collect()))
+    Ok(Json(
+        crate::generics::generic_find_all::<
+            <RoutingAlgorithm as HasTable>::Table,
+            _,
+            RoutingAlgorithm,
+        >(&state.db, dsl::created_by.eq(created_by))
+        .await
+        .change_context(EuclidErrors::StorageError)?
+        .into_iter()
+        .map(Into::into)
+        .collect(),
+    ))
 }
 
 #[axum::debug_handler]
-pub async fn list_active_routing_algorithm (
+pub async fn list_active_routing_algorithm(
     Path(created_by): Path<String>,
 ) -> Result<Json<JsonifiedRoutingAlgorithm>, ContainerError<EuclidErrors>> {
     let state = get_tenant_app_state().await;
-    let active_routing_algorithm_id = crate::generics::generic_find_one::<
-        <RoutingAlgorithmMapper as HasTable>::Table,
-        _,
-        RoutingAlgorithmMapper,
-    >(&state.db, mapper_dsl::created_by.eq(created_by.clone()))
-    .await
-    .change_context(EuclidErrors::ActiveRoutingAlgorithmNotFound(created_by.clone()))?.routing_algorithm_id;
+    let active_routing_algorithm_id =
+        crate::generics::generic_find_one::<
+            <RoutingAlgorithmMapper as HasTable>::Table,
+            _,
+            RoutingAlgorithmMapper,
+        >(&state.db, mapper_dsl::created_by.eq(created_by.clone()))
+        .await
+        .change_context(EuclidErrors::ActiveRoutingAlgorithmNotFound(
+            created_by.clone(),
+        ))?
+        .routing_algorithm_id;
 
-    Ok(Json(crate::generics::generic_find_one::<
-        <RoutingAlgorithm as HasTable>::Table,
-        _,
-        RoutingAlgorithm,
-    >(&state.db, dsl::id.eq(active_routing_algorithm_id))
-    .await
-    .change_context(EuclidErrors::StorageError)?.into()))
+    Ok(Json(
+        crate::generics::generic_find_one::<
+            <RoutingAlgorithm as HasTable>::Table,
+            _,
+            RoutingAlgorithm,
+        >(&state.db, dsl::id.eq(active_routing_algorithm_id))
+        .await
+        .change_context(EuclidErrors::StorageError)?
+        .into(),
+    ))
 }
 
 pub async fn routing_evaluate(
@@ -160,9 +172,15 @@ pub async fn routing_evaluate(
         <RoutingAlgorithmMapper as HasTable>::Table,
         _,
         RoutingAlgorithmMapper,
-    >(&state.db, mapper_dsl::created_by.eq(payload.created_by.clone()))
+    >(
+        &state.db,
+        mapper_dsl::created_by.eq(payload.created_by.clone()),
+    )
     .await
-    .change_context(EuclidErrors::ActiveRoutingAlgorithmNotFound(payload.created_by))?.routing_algorithm_id;
+    .change_context(EuclidErrors::ActiveRoutingAlgorithmNotFound(
+        payload.created_by,
+    ))?
+    .routing_algorithm_id;
 
     let parameters = payload.parameters.clone();
 

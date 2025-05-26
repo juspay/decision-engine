@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 
-use crate::decider::gatewaydecider;
 use crate::error;
+use crate::{decider::gatewaydecider, utils::CustomResult};
 use diesel::sql_types;
 use error_stack::{Report, ResultExt};
 use serde::{Deserialize, Serialize};
 
+use crate::storage::types as storage_types;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoBadgedCardRequest {
     pub merchant_category_code: MerchantCategoryCode,
@@ -23,7 +24,9 @@ impl TryInto<CoBadgedCardRequest> for serde_json::Value {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, strum::EnumString, strum::Display, Hash, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, strum::EnumString, strum::Display, Hash, PartialEq, Eq,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum MerchantCategoryCode {
     #[serde(rename = "merchant_category_code_0001")]
@@ -85,7 +88,6 @@ pub enum CountryAlpha2 {
     PartialEq,
     serde::Deserialize,
     serde::Serialize,
-    Copy,
     strum::Display,
     strum::EnumString,
     diesel::AsExpression,
@@ -96,9 +98,85 @@ pub enum RegulatedName {
     #[serde(rename = "GOVERNMENT NON-EXEMPT INTERCHANGE FEE (WITH FRAUD)")]
     #[strum(serialize = "GOVERNMENT NON-EXEMPT INTERCHANGE FEE (WITH FRAUD)")]
     NonExemptWithFraud,
-    #[serde(rename = "GOVERNMENT EXEMPT INTERCHANGE FEE")]
-    #[strum(serialize = "GOVERNMENT EXEMPT INTERCHANGE FEE")]
-    ExemptFraud,
+
+    #[serde(untagged)]
+    #[strum(default)]
+    Unknown(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct CoBadgedCardInfoDomainData {
+    pub id: String,
+    pub card_bin_min: i64,
+    pub card_bin_max: i64,
+    pub issuing_bank_name: Option<String>,
+    pub card_network: gatewaydecider::types::NETWORK,
+    pub country_code: Option<CountryAlpha2>,
+    pub card_type: Option<CardType>,
+    pub regulated: Option<bool>,
+    pub regulated_name: Option<RegulatedName>,
+    pub prepaid: Option<bool>,
+    pub reloadable: Option<bool>,
+    pub pan_or_token: PanOrToken,
+    pub card_bin_length: i16,
+    pub bin_provider_bin_length: i16,
+    pub card_brand_is_additional: bool,
+    pub domestic_only: Option<bool>,
+    pub created_at: time::PrimitiveDateTime,
+    pub modified_at: time::PrimitiveDateTime,
+    pub last_updated_provider: Option<String>,
+}
+
+impl CoBadgedCardInfoDomainData {
+    pub fn get_country_code(&self) -> CustomResult<CountryAlpha2, error::ApiError> {
+        self.country_code
+            .ok_or(error::ApiError::UnknownError)
+            .attach_printable("Missing country code in co-badged card info")
+    }
+
+    pub fn get_card_type(&self) -> CustomResult<CardType, error::ApiError> {
+        self.card_type
+            .ok_or(error::ApiError::UnknownError)
+            .attach_printable("Missing card type in co-badged card info")
+    }
+
+    pub fn get_is_regulated(&self) -> CustomResult<bool, error::ApiError> {
+        self.regulated
+            .ok_or(error::ApiError::UnknownError)
+            .attach_printable("Missing is regulated in co-badged card info")
+    }
+}
+
+impl TryFrom<storage_types::CoBadgedCardInfo> for CoBadgedCardInfoDomainData {
+    type Error = error_stack::Report<error::ApiError>;
+
+    fn try_from(
+        db_co_badged_cards_info_record: storage_types::CoBadgedCardInfo,
+    ) -> Result<Self, Self::Error> {
+        let parsed_network = db_co_badged_cards_info_record.get_parsed_card_network()?;
+
+        Ok(Self {
+            id: db_co_badged_cards_info_record.id,
+            card_bin_min: db_co_badged_cards_info_record.card_bin_min,
+            card_bin_max: db_co_badged_cards_info_record.card_bin_max,
+            issuing_bank_name: db_co_badged_cards_info_record.issuing_bank_name,
+            card_network: parsed_network,
+            country_code: db_co_badged_cards_info_record.country_code,
+            card_type: db_co_badged_cards_info_record.card_type,
+            regulated: db_co_badged_cards_info_record.regulated,
+            regulated_name: db_co_badged_cards_info_record.regulated_name,
+            prepaid: db_co_badged_cards_info_record.prepaid,
+            reloadable: db_co_badged_cards_info_record.reloadable,
+            pan_or_token: db_co_badged_cards_info_record.pan_or_token,
+            card_bin_length: db_co_badged_cards_info_record.card_bin_length,
+            bin_provider_bin_length: db_co_badged_cards_info_record.bin_provider_bin_length,
+            card_brand_is_additional: db_co_badged_cards_info_record.card_brand_is_additional,
+            domestic_only: db_co_badged_cards_info_record.domestic_only,
+            created_at: db_co_badged_cards_info_record.created_at,
+            modified_at: db_co_badged_cards_info_record.modified_at,
+            last_updated_provider: db_co_badged_cards_info_record.last_updated_provider,
+        })
+    }
 }
 
 #[derive(
@@ -118,8 +196,10 @@ pub enum RegulatedName {
 #[serde(rename_all = "snake_case")]
 #[diesel(sql_type =  ::diesel::sql_types::Text)]
 pub enum CardType {
+    #[strum(serialize = "Credit")]
     #[strum(serialize = "credit")]
     Credit,
+    #[strum(serialize = "Debit")]
     #[strum(serialize = "debit")]
     Debit,
 }

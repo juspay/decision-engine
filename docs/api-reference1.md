@@ -4,7 +4,7 @@
 
 ### Sample curl for decide-gateway
 
-#### Request:
+#### Request: SR BASED ROUTING
 ```bash
 curl --location 'http://localhost:8080/decide-gateway' \
 --header 'Content-Type: application/json' \
@@ -72,6 +72,69 @@ curl --location 'http://localhost:8080/decide-gateway' \
 }
 ```
 
+#### Request: DEBIT ROUTING
+```bash
+curl --location 'http://localhost:8080/decide-gateway' \
+--header 'Content-Type: application/json' \
+--data '{
+  "merchantId": "pro_OiJkBiFuCYbYAkCG9X02",
+  "eligibleGatewayList": ["PAYU", "RAZORPAY", "PAYTM_V2"],
+  "rankingAlgorithm": "NTW_BASED_ROUTING",
+  "eliminationEnabled": true,
+  "paymentInfo": {
+    "paymentId": "PAY12345",
+    "amount": 100.50,
+    "currency": "USD",
+    "customerId": "CUST12345",
+    "udfs": null,
+    "preferredGateway": null,
+    "paymentType": "ORDER_PAYMENT",
+    "metadata": "{\"merchant_category_code\":\"merchant_category_code_0001\",\"acquirer_country\":\"US\"}",
+    "internalMetadata": null,
+    "isEmi": false,
+    "emiBank": null,
+    "emiTenure": null,
+    "paymentMethodType": "UPI",
+    "paymentMethod": "UPI_PAY",
+    "paymentSource": null,
+    "authType": null,
+    "cardIssuerBankName": null,
+    "cardIsin": "440000",
+    "cardType": null,
+    "cardSwitchProvider": null
+  }
+}'
+```
+
+#### Response:
+```json
+{
+  "decided_gateway": "PAYU",
+  "gateway_priority_map": null,
+  "filter_wise_gateways": null,
+  "priority_logic_tag": null,
+  "routing_approach": "NONE",
+  "gateway_before_evaluation": null,
+  "priority_logic_output": null,
+  "debit_routing_output": {
+    "co_badged_card_networks": [
+      "STAR",
+      "VISA"
+    ],
+    "issuer_country": "US",
+    "is_regulated": false,
+    "regulated_name": "GOVERNMENT EXEMPT INTERCHANGE FEE",
+    "card_type": "debit"
+  },
+  "reset_approach": "NO_RESET",
+  "routing_dimension": null,
+  "routing_dimension_level": null,
+  "is_scheduled_outage": false,
+  "is_dynamic_mga_enabled": false,
+  "gateway_mga_id_map": null
+}
+```
+
 ## Update Gateway Score API
 
 ### Sample curl for update-gateway-score
@@ -119,7 +182,7 @@ It enables merchants and platforms to define their own routing algorithms—such
 
 ---
 
-## Create Routing Algorithm (Euclid):
+## 👉 Create Routing Algorithm (Euclid):
 ### Request:
 ```
 curl --location 'http://localhost:8080/routing/create' \
@@ -180,7 +243,7 @@ curl --location 'http://localhost:8080/routing/create' \
 }
 ```
 
-## Activate Routing rule for a creator_id.
+## 👉 Activate Routing rule for a creator_id.
 ### Request
 ```
 curl --location 'http://localhost:8080/routing/activate' \
@@ -196,7 +259,7 @@ curl --location 'http://localhost:8080/routing/activate' \
 status_code: 200
 ```
 
-## Evaluate Payment parameters using Routing Algorithm (Euclid):
+## 👉 Evaluate Payment parameters using Routing Algorithm (Euclid):
 ### Request:
 ```
 curl --location 'http://localhost:8080/routing/evaluate' \
@@ -237,7 +300,7 @@ curl --location 'http://localhost:8080/routing/evaluate' \
 }
 ```
 
-## List all Routing rules for a creator_id.
+## 👉 List all Routing rules for a creator_id.
 ### Request
 ```
 curl --location --request POST 'http://localhost:8080/routing/list/merchant_1234' \
@@ -362,7 +425,7 @@ curl --location --request POST 'http://localhost:8080/routing/list/merchant_1234
 ]
 ```
 
-## List active Routing rule for a creator_id.
+## 👉 List active Routing rule for a creator_id.
 ### Request
 ```
 curl --location --request POST 'http://localhost:8080/routing/list/active/merchant_1' \
@@ -428,3 +491,184 @@ curl --location --request POST 'http://localhost:8080/routing/list/active/mercha
     "modified_at": "2025-04-24 10:26:58.0"
 }
 ```
+
+## 👉 Advanced Rule Creation Examples
+### 1. 🔹 Volume Split Rule (with fallback)
+```
+curl --location 'http://127.0.0.1:8080/routing' \
+--header 'Content-Type: application/json' \
+--header 'api-key: *****' \
+--data '
+{
+   "name": "advanced config",
+   "description": "It is my ADVANCED config",
+   "profile_id": "pro_rfW0Fv5J0Cct1Bnw2EuS",
+   "algorithm": {
+       "type": "advanced",
+       "data": {
+           "defaultSelection": {
+               "type": "priority",
+               "data": [
+                   {
+                       "connector": "stripe",
+                       "merchant_connector_id": "mca_aHTJXYcakT5Nlx48kuSh"
+                   }
+               ]
+           },
+           "rules": [
+               {
+                   "name": "cybersource first",
+                   "connectorSelection": {
+                       "type": "volume_split",
+                       "data": [
+                           {
+                               "split": 60,
+                               "connector": "cybersource",
+                               "merchant_connector_id": "mca_rJu5LzTmK2SjYgoRMWZ4"
+                           },
+                           {
+                               "split": 40,
+                               "connector": "stripe",
+                               "merchant_connector_id": "mca_aHTJXYcakT5Nlx48kuSh"
+                           }
+                       ]
+                   },
+                   "statements": [
+                       {
+                           "condition": [
+                               {
+                                   "lhs": "billing_country",
+                                   "comparison": "equal",
+                                   "value": {
+                                       "type": "enum_variant",
+                                       "value": "Netherlands"
+                                   },
+                                   "metadata": {}
+                               },
+                               {
+                                   "lhs": "amount",
+                                   "comparison": "greater_than",
+                                   "value": {
+                                       "type": "number",
+                                       "value": 1000
+                                   },
+                                   "metadata": {}
+                               }
+                           ],
+                           "nested": null
+                       }
+                   ]
+               }
+           ],
+           "metadata": {}
+       }
+   }
+}'
+```
+
+### 2. 🔀 Nested Rule with Fallback
+```
+curl --location 'http://127.0.0.1:8080/routing' \
+--header 'Content-Type: application/json' \
+--header 'api-key: *****' \
+--data '
+{
+   "name": "advanced config",
+   "description": "It is my ADVANCED config",
+   "profile_id": "pro_rfW0Fv5J0Cct1Bnw2EuS",
+   "algorithm": {
+       "type": "advanced",
+       "data": {
+           "defaultSelection": {
+               "type": "priority",
+               "data": [
+                   {
+                       "connector": "stripe",
+                       "merchant_connector_id": "mca_aHTJXYcakT5Nlx48kuSh"
+                   }
+               ]
+           },
+           "rules": [
+               {
+                   "name": "cybersource first",
+                   "connectorSelection": {
+                       "type": "priority",
+                       "data": [
+                           {
+                               "connector": "cybersource",
+                               "merchant_connector_id": "mca_rJu5LzTmK2SjYgoRMWZ4"
+                           }
+                       ]
+                   },
+                   "statements": [
+                       {
+                           "condition": [
+                               {
+                                   "lhs": "upi",
+                                   "comparison": "equal",
+                                   "value": {
+                                       "type": "enum_variant",
+                                       "value": "upi_collect"
+                                   },
+                                   "metadata": {}
+                               }
+                           ],
+                           "nested": [
+                               {
+                                   "condition": [
+                                       {
+                                           "lhs": "amount",
+                                           "comparison": "greater_than",
+                                           "value": {
+                                               "type": "number",
+                                               "value": 5000
+                                           },
+                                           "metadata": {}
+                                       },
+                                       {
+                                           "lhs": "currency",
+                                           "comparison": "equal",
+                                           "value": {
+                                               "type": "enum_variant",
+                                               "value": "USD"
+                                           },
+                                           "metadata": {}
+                                       }
+                                   ]
+                               },
+                               {
+                                   "condition": [
+                                       {
+                                           "lhs": "amount",
+                                           "comparison": "greater_than",
+                                           "value": {
+                                               "type": "number",
+                                               "value": 10000
+                                           },
+                                           "metadata": {}
+                                       }
+                                   ]
+                               }
+                           ]
+                       }
+                   ]
+               }
+           ],
+           "metadata": {}
+       }
+   }
+}'
+```
+
+### 💡 What Happens on Evaluation?
+
+If the input has:
+
+- `upi = upi_collect` **AND**
+- **EITHER**:
+  - `amount > 5000` **AND** `currency == USD`
+  - **OR** `amount > 10000`
+
+🔄 **Then** the rule `"cybersource first"` matches → returns `cybersource`.
+
+📆 **Otherwise** → returns fallback `defaultSelection` → `stripe`.

@@ -26,7 +26,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    co_badged_cards_info (id) {
+    co_badged_cards_info_test (id) {
         #[max_length = 64]
         id -> Varchar,
         card_bin_min -> Int8,
@@ -34,16 +34,17 @@ diesel::table! {
         issuing_bank_name -> Nullable<Text>,
         #[max_length = 32]
         card_network -> Varchar,
-        country_code -> Text,
-        card_type -> Text,
-        regulated -> Bool,
+        country_code -> Nullable<Text>,
+        card_type -> Nullable<Text>,
+        regulated -> Nullable<Bool>,
         regulated_name -> Nullable<Text>,
-        prepaid -> Bool,
-        reloadable -> Bool,
+        prepaid -> Nullable<Bool>,
+        reloadable -> Nullable<Bool>,
         pan_or_token -> Text,
         card_bin_length -> Int2,
+        bin_provider_bin_length -> Int2,
         card_brand_is_additional -> Bool,
-        domestic_only -> Bool,
+        domestic_only -> Nullable<Bool>,
         created_at -> Timestamp,
         modified_at -> Timestamp,
         #[max_length = 128]
@@ -347,6 +348,7 @@ diesel::table! {
         name -> Varchar,
         description -> Nullable<Text>,
         algorithm_data -> Text,
+        metadata -> Nullable<Text>,
         created_at -> Timestamp,
         modified_at -> Timestamp,
     }
@@ -514,7 +516,7 @@ diesel::table! {
 diesel::allow_tables_to_appear_in_same_query!(
     card_brand_routes,
     card_info,
-    co_badged_cards_info,
+    co_badged_cards_info_test,
     emi_bank_code,
     feature,
     gateway_bank_emi_support,

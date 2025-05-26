@@ -29,7 +29,7 @@ pub async fn find_config_by_name(
 pub async fn insert_config(
     name: String,
     value: Option<String>,
-) -> Result<(), crate::generics::MeshError> {
+) -> error_stack::Result<(), crate::generics::MeshError> {
     let app_state = get_tenant_app_state().await;
 
     let config = ServiceConfigurationNew {
@@ -48,7 +48,7 @@ pub async fn insert_config(
 pub async fn update_config(
     name: String,
     value: Option<String>,
-) -> Result<(), crate::generics::MeshError> {
+) -> error_stack::Result<(), crate::generics::MeshError> {
     let app_state = get_tenant_app_state().await;
     let values = ServiceConfigurationUpdate { value };
     let conn = &app_state
