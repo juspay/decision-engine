@@ -24,7 +24,7 @@ pub struct GlobalConfig {
     pub database: Database,
     pub pg_database: PgDatabase,
     pub secrets: Secrets,
-    #[serde[default]]
+    #[serde(default)]
     pub secrets_management: SecretsManagementConfig,
     pub log: Log,
     #[cfg(feature = "limit")]

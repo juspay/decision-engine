@@ -87,7 +87,7 @@ pub struct RoutingAlgorithm {
     pub id: String,
     pub created_by: String,
     pub name: String,
-    pub description: Option<String>,
+    pub description: String,
     // #[cfg(not(feature = "db_migration"))]
     pub algorithm_data: String,
     // #[cfg(feature = "db_migration")]  
@@ -105,7 +105,7 @@ pub struct JsonifiedRoutingAlgorithm {
     pub id: String,
     pub created_by: String,
     pub name: String,
-    pub description: Option<String>,
+    pub description: String,
     pub algorithm_data: serde_json::Value,
     pub created_at: PrimitiveDateTime,
     pub modified_at: PrimitiveDateTime,
@@ -120,7 +120,7 @@ impl From<RoutingAlgorithm> for JsonifiedRoutingAlgorithm {
             id: ra.id,
             created_by: ra.created_by,
             name: ra.name,
-            description: ra.description,
+            description: ra.description, // Handle Option for Jsonified version
             algorithm_data,
             created_at: ra.created_at,
             modified_at: ra.modified_at,

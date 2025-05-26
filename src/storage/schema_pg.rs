@@ -346,7 +346,7 @@ diesel::table! {
         created_by -> Varchar,
         #[max_length = 255]
         name -> Varchar,
-        description -> Nullable<Text>,
+        description -> Text,
         algorithm_data -> Text,
         metadata -> Nullable<Json>,
         created_at -> Timestamp,

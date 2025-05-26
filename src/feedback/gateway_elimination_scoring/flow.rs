@@ -9,7 +9,7 @@ use crate::{app::get_tenant_app_state, decider::storage::utils::merchant_gateway
 
  #[cfg(not(feature = "db_migration"))]
  use crate::storage::schema::gateway_bank_emi_support::gateway;
- #[cfg(eature = "db_migration")]
+ #[cfg(feature = "db_migration")]
  use crate::storage::schema_pg::gateway_bank_emi_support::gateway;
 
 
