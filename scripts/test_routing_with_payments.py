@@ -346,10 +346,17 @@ def setup_and_run():
     profile_id = 'pro_JCV5mBmpUAUMyA42xrIE'
     print(f"Using profile ID: {profile_id}")
     
+    # Dictionary to store merchant_connector_ids
+    merchant_connector_ids = {}
+    
     # Step 2: Create test connectors
     print("\n📋 Creating test connectors...")
     for connector in TEST_CONNECTORS:
-        api_client.create_connector(profile_id, connector["name"], connector["label"])
+        connector_data = api_client.create_connector(profile_id, connector["name"], connector["label"])
+        if connector_data and "merchant_connector_id" in connector_data:
+            merchant_connector_id = connector_data["merchant_connector_id"]
+            merchant_connector_ids[connector["name"]] = merchant_connector_id
+            print(f"Stored merchant_connector_id for {connector['name']}: {merchant_connector_id}")
     
     # Step 3: Enable success rate algorithm
     print("\n🔄 Enabling success rate algorithm...")
