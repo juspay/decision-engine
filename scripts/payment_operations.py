@@ -16,6 +16,29 @@ STATUS_MAP = {
 SUCCESS_CARD = {"number": "4242424242424242", "label": "success"}
 FAIL_CARD = {"number": "4000000000000002", "label": "fail"}
 
+def build_connector_card_pool(success_rates):
+    card_pools = {}
+    for connector, success_percent in success_rates.items():
+        pool = [SUCCESS_CARD] * success_percent + [FAIL_CARD] * (100 - success_percent)
+        card_pools[connector] = pool
+    return card_pools
+
+def get_user_defined_success_rates(connector_map):
+    print("\n🎯 Define success rates for each connector (0-100):")
+    success_rates = {}
+    for connector in connector_map:
+        while True:
+            try:
+                rate = int(input(f"  ➤ {connector}: "))
+                if 0 <= rate <= 100:
+                    success_rates[connector] = rate
+                    break
+                else:
+                    print("Please enter a value between 0 and 100.")
+            except ValueError:
+                print("Invalid input. Please enter an integer.")
+    return success_rates
+
 def build_card_pool(success_percent):
     """Build a pool of cards with the given success percentage"""
     return [SUCCESS_CARD] * success_percent + [FAIL_CARD] * (100 - success_percent)
@@ -207,19 +230,18 @@ def simulate_payments(total_payments=30, initial_success_percent=60,
     force_fail_start = total_payments // 2
     force_fail_end = force_fail_start + (total_payments // 4)
 
+    success_rates = get_user_defined_success_rates(connector_map)
+    card_pools = build_connector_card_pool(success_rates)
+
     print(f"🔁 Starting payment simulation: {total_payments} payments\n")
 
     for i in range(1, total_payments + 1):
-        card_pool = (
-            build_card_pool(initial_success_percent) if i <= force_fail_start or i > force_fail_end
-            else build_card_pool(0)
-        )
-
-        card = random.choice(card_pool)
         payment_id = f"PAY_SIM_{i:05d}"
 
         print(f"\n🔸 Payment {i}: ID = {payment_id}")
         decided_gateway, routing_approach = decide_gateway(payment_id, connector_map)
+        card_pool = card_pools.get(decided_gateway, [SUCCESS_CARD] * 50 + [FAIL_CARD] * 50)
+        card = random.choice(card_pool)
         if not decided_gateway:
             print(f"❌ Gateway not decided for {payment_id}")
             continue
