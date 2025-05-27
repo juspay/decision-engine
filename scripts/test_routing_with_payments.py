@@ -15,8 +15,11 @@ INTER_PAYMENT_SLEEP_SEC = 0
 API_BASE_URL = "https://sandbox.hyperswitch.io"
 APP_BASE_URL = "https://app.hyperswitch.io"
 PAYMENT_URL = f"{API_BASE_URL}/payments"
-PROFILE_ID = "pro_E8nxlLXc77DTqwo4QISv"
-MERCHANT_ID = "merchant_1703154093"
+PROFILE_ID = "pro_UJ68AkfFHb9gIGqQ8TMR"
+BEARER_TOKEN = "BEARER TOKEN"
+MERCHANT_ID = "merchant_1721906783"
+GIMINI_API_KEY = ""
+API_KEY = "API KEY"
 HEADERS = {
     "Content-Type": "application/json",
     "Accept": "application/json",
@@ -191,7 +194,7 @@ class HyperswitchAPI:
         """Activate routing configuration"""
         url = f"{API_BASE_URL}/routing/{routing_id}/activate"
         auth_header = {
-            "Authorization": "Bearer bearer_token"
+            "Authorization": "Bearer {BEARER_TOKEN}"
         }
         self.headers.update(auth_header)
         try:
@@ -466,7 +469,7 @@ def setup_and_run():
     api_client = HyperswitchAPI(API_KEY, MERCHANT_ID)
     
     # Step 1: Create business profile or use existing one
-    profile_id = 'pro_JCV5mBmpUAUMyA42xrIE'
+    profile_id = PROFILE_ID
     print(f"Using profile ID: {profile_id}")
     
     # Dictionary to store merchant_connector_ids
