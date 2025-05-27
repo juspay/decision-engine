@@ -1,9 +1,10 @@
 import uuid
 import os
 from dotenv import load_dotenv
-from decision_engine_api import DecisionEngineAPI, test_decision_engine_endpoints
-from hyperswitch_api import HyperswitchAPI, setup_and_run_demo
-from payment_operations import (
+# Use relative imports to fix Pylance warnings
+from .decision_engine_api import DecisionEngineAPI, test_decision_engine_endpoints
+from .hyperswitch_api import HyperswitchAPI, setup_and_run_demo
+from .payment_operations import (
     simulate_payments, STATUS_MAP, SUCCESS_CARD, FAIL_CARD
 )
 
