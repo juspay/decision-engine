@@ -4,30 +4,44 @@ import json
 import time
 import textwrap
 import uuid
+import pprint
+import os
+from dotenv import load_dotenv
 
 # ---------------------------- CONFIGS ---------------------------- #
+
+# Load environment variables from .env file if it exists
+load_dotenv()
 
 TOTAL_PAYMENTS = 30
 INITIAL_SUCCESS_PERCENT = 60
 INITIAL_DELAY_SEC = 0
 INTER_PAYMENT_SLEEP_SEC = 0
 
+DECISION_ENGINE_API = "https://sandbox.juspay.io"
 API_BASE_URL = "https://sandbox.hyperswitch.io"
 APP_BASE_URL = "https://app.hyperswitch.io"
 PAYMENT_URL = f"{API_BASE_URL}/payments"
-PROFILE_ID = "pro_UJ68AkfFHb9gIGqQ8TMR"
-BEARER_TOKEN = "BEARER TOKEN"
-MERCHANT_ID = "merchant_1721906783"
-GIMINI_API_KEY = ""
-API_KEY = "API KEY"
+
+# Load API credentials from environment or use defaults
+PROFILE_ID = os.getenv("PROFILE_ID", "pro_UJ68AkfFHb9gIGqQ8TMR")
+BEARER_TOKEN = os.getenv("BEARER_TOKEN", "BEARER TOKEN")
+MERCHANT_ID = os.getenv("MERCHANT_ID", "merchant_1721906783")
+GIMINI_API_KEY = os.getenv("GIMINI_API_KEY", "")
+API_KEY = os.getenv("API_KEY", "API KEY")
+
+# Print configuration information
+print(f"🔑 Using API Key: {API_KEY[:5]}... (truncated for security)")
+print(f"🆔 Using Merchant ID: {MERCHANT_ID}")
+print(f"📋 Using Profile ID: {PROFILE_ID}")
+
 HEADERS = {
     "Content-Type": "application/json",
     "Accept": "application/json",
     "api-key": API_KEY
 }
 
-# Test connector configuration
-TEST_CONNECTORS = [
+CREATE_CONNECTORS = [
     {"name": "fauxpay", "label": "fauxpay_test"},
     {"name": "paypal_test", "label": "paypal_test"},
     {"name": "pretendpay", "label": "pretendpay_test"},
@@ -194,7 +208,7 @@ class HyperswitchAPI:
         """Activate routing configuration"""
         url = f"{API_BASE_URL}/routing/{routing_id}/activate"
         auth_header = {
-            "Authorization": "Bearer {BEARER_TOKEN}"
+            "Authorization": f"Bearer {BEARER_TOKEN}"
         }
         self.headers.update(auth_header)
         try:
@@ -460,6 +474,281 @@ def simulate_payments():
 
     send_logs_to_gemini(payment_results)
 
+class DecisionEngineAPI:
+    """A class to interact with the Decision Engine API endpoints"""
+    
+    def __init__(self, base_url=DECISION_ENGINE_API):
+        self.base_url = base_url
+        self.headers = {
+            "Content-Type": "application/json"
+        }
+    
+    def create_rule_success_rate(self, merchant_id="test_merchant_123"):
+        """Create a success rate rule"""
+        url = f"{self.base_url}/rule/create"
+        payload = {
+            "merchant_id": merchant_id,
+            "config": {
+                "type": "successRate",
+                "data": {
+                    "defaultLatencyThreshold": 90,
+                    "defaultSuccessRate": 0.5,
+                    "defaultBucketSize": 200,
+                    "defaultHedgingPercent": 5,
+                    "subLevelInputConfig": [
+                        {
+                            "paymentMethodType": "upi",
+                            "paymentMethod": "upi_collect",
+                            "bucketSize": 250,
+                            "hedgingPercent": 1
+                        }
+                    ]
+                }
+            }
+        }
+        
+        try:
+            response = requests.post(url, headers=self.headers, json=payload)
+            response.raise_for_status()
+            print(f"✅ Created success rate rule for merchant: {merchant_id}")
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Failed to create success rate rule: {str(e)}")
+            if hasattr(e, 'response') and e.response is not None:
+                print(f"Response: {e.response.text}")
+            return None
+    
+    def create_rule_elimination(self, merchant_id="test_merchant_123"):
+        """Create an elimination rule"""
+        url = f"{self.base_url}/rule/create"
+        payload = {
+            "merchant_id": merchant_id,
+            "config": {
+                "type": "elimination",
+                "data": {
+                    "threshold": 0.35
+                }
+            }
+        }
+        
+        try:
+            response = requests.post(url, headers=self.headers, json=payload)
+            response.raise_for_status()
+            print(f"✅ Created elimination rule for merchant: {merchant_id}")
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Failed to create elimination rule: {str(e)}")
+            if hasattr(e, 'response') and e.response is not None:
+                print(f"Response: {e.response.text}")
+            return None
+    
+    def create_rule_debit_routing(self, merchant_id="test_merchant_123"):
+        """Create a debit routing rule"""
+        url = f"{self.base_url}/rule/create"
+        payload = {
+            "merchant_id": merchant_id,
+            "config": {
+                "type": "debitRouting",
+                "data": {
+                    "merchantCategoryCode": "mcc0001",
+                    "acquirerCountry": "ecuador"
+                }
+            }
+        }
+        
+        try:
+            response = requests.post(url, headers=self.headers, json=payload)
+            response.raise_for_status()
+            print(f"✅ Created debit routing rule for merchant: {merchant_id}")
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Failed to create debit routing rule: {str(e)}")
+            if hasattr(e, 'response') and e.response is not None:
+                print(f"Response: {e.response.text}")
+            return None
+    
+    def get_rule(self, merchant_id="test_merchant_123", algorithm="successRate"):
+        """Fetch a rule by merchant ID and algorithm"""
+        url = f"{self.base_url}/rule/get"
+        payload = {
+            "merchant_id": merchant_id,
+            "algorithm": algorithm
+        }
+        
+        try:
+            response = requests.post(url, headers=self.headers, json=payload)
+            response.raise_for_status()
+            print(f"✅ Fetched {algorithm} rule for merchant: {merchant_id}")
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Failed to fetch rule: {str(e)}")
+            if hasattr(e, 'response') and e.response is not None:
+                print(f"Response: {e.response.text}")
+            return None
+    
+    def update_rule_debit_routing(self, merchant_id="test_merchant_123"):
+        """Update a debit routing rule"""
+        url = f"{self.base_url}/rule/update"
+        payload = {
+            "merchant_id": merchant_id,
+            "config": {
+                "type": "debitRouting",
+                "data": {
+                    "merchantCategoryCode": "mcc0001",
+                    "acquirerCountry": "ecuador"
+                }
+            }
+        }
+        
+        try:
+            response = requests.post(url, headers=self.headers, json=payload)
+            response.raise_for_status()
+            print(f"✅ Updated debit routing rule for merchant: {merchant_id}")
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Failed to update rule: {str(e)}")
+            if hasattr(e, 'response') and e.response is not None:
+                print(f"Response: {e.response.text}")
+            return None
+    
+    def delete_rule(self, merchant_id="test_merchant_123", algorithm="successRate"):
+        """Delete a rule by merchant ID and algorithm"""
+        url = f"{self.base_url}/rule/delete"
+        payload = {
+            "merchant_id": merchant_id,
+            "algorithm": algorithm
+        }
+        
+        try:
+            response = requests.post(url, headers=self.headers, json=payload)
+            response.raise_for_status()
+            print(f"✅ Deleted {algorithm} rule for merchant: {merchant_id}")
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Failed to delete rule: {str(e)}")
+            if hasattr(e, 'response') and e.response is not None:
+                print(f"Response: {e.response.text}")
+            return None
+    
+    def create_merchant_account(self, merchant_id="test_merchant_123"):
+        """Create a merchant account"""
+        url = f"{self.base_url}/merchant-account/create"
+        payload = {
+            "merchant_id": merchant_id
+        }
+        
+        try:
+            response = requests.post(url, headers=self.headers, json=payload)
+            response.raise_for_status()
+            print(f"✅ Created merchant account: {merchant_id}")
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Failed to create merchant account: {str(e)}")
+            if hasattr(e, 'response') and e.response is not None:
+                print(f"Response: {e.response.text}")
+            return None
+    
+    def get_merchant_account(self, merchant_id="test_merchant_123"):
+        """Fetch a merchant account by ID"""
+        url = f"{self.base_url}/merchant-account/{merchant_id}"
+        
+        try:
+            response = requests.get(url, headers=self.headers)
+            response.raise_for_status()
+            print(f"✅ Fetched merchant account: {merchant_id}")
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Failed to fetch merchant account: {str(e)}")
+            if hasattr(e, 'response') and e.response is not None:
+                print(f"Response: {e.response.text}")
+            return None
+    
+    def delete_merchant_account(self, merchant_id="test_merchant_123"):
+        """Delete a merchant account by ID"""
+        url = f"{self.base_url}/merchant-account/{merchant_id}"
+        
+        try:
+            response = requests.delete(url, headers=self.headers)
+            response.raise_for_status()
+            print(f"✅ Deleted merchant account: {merchant_id}")
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Failed to delete merchant account: {str(e)}")
+            if hasattr(e, 'response') and e.response is not None:
+                print(f"Response: {e.response.text}")
+            return None
+
+def test_decision_engine_endpoints():
+    """Test all the Decision Engine API endpoints"""
+    print("\n🔍 Testing Decision Engine API Endpoints")
+    print("---------------------------------------")
+    
+    # Initialize API client
+    de_api = DecisionEngineAPI()
+    merchant_id = "test_merchant_123"
+    
+    # Test merchant account operations
+    print("\n📋 Testing Merchant Account Operations...")
+    
+    # Create merchant account
+    print("\n▶️ Creating merchant account...")
+    create_result = de_api.create_merchant_account(merchant_id)
+    if create_result:
+        print(f"Create merchant result: {json.dumps(create_result, indent=2)}")
+    
+    # Get merchant account
+    print("\n▶️ Fetching merchant account...")
+    account_result = de_api.get_merchant_account(merchant_id)
+    if account_result:
+        print(f"Merchant account: {json.dumps(account_result, indent=2)}")
+    
+    # Test rule operations
+    print("\n📋 Testing Rule Operations...")
+    
+    # Create success rate rule
+    print("\n▶️ Creating success rate rule...")
+    sr_result = de_api.create_rule_success_rate(merchant_id)
+    if sr_result:
+        print(f"Success rate rule created: {json.dumps(sr_result, indent=2)}")
+    
+    # Create elimination rule
+    print("\n▶️ Creating elimination rule...")
+    elim_result = de_api.create_rule_elimination(merchant_id)
+    if elim_result:
+        print(f"Elimination rule created: {json.dumps(elim_result, indent=2)}")
+    
+    # Create debit routing rule
+    print("\n▶️ Creating debit routing rule...")
+    dr_result = de_api.create_rule_debit_routing(merchant_id)
+    if dr_result:
+        print(f"Debit routing rule created: {json.dumps(dr_result, indent=2)}")
+    
+    # Get rules
+    print("\n▶️ Fetching success rate rule...")
+    get_sr_result = de_api.get_rule(merchant_id, "successRate")
+    if get_sr_result:
+        print(f"Success rate rule: {json.dumps(get_sr_result, indent=2)}")
+    
+    # Update debit routing rule
+    print("\n▶️ Updating debit routing rule...")
+    update_dr_result = de_api.update_rule_debit_routing(merchant_id)
+    if update_dr_result:
+        print(f"Updated debit routing rule: {json.dumps(update_dr_result, indent=2)}")
+    
+    # Delete success rate rule
+    print("\n▶️ Deleting success rate rule...")
+    delete_sr_result = de_api.delete_rule(merchant_id, "successRate")
+    if delete_sr_result:
+        print(f"Success rate rule deletion result: {json.dumps(delete_sr_result, indent=2)}")
+    
+    # Delete merchant account
+    print("\n▶️ Deleting merchant account...")
+    delete_result = de_api.delete_merchant_account(merchant_id)
+    if delete_result:
+        print(f"Delete merchant result: {json.dumps(delete_result, indent=2)}")
+    
+    print("\n✅ Decision Engine API Testing completed!")
+
 def setup_and_run():
     """Main function to set up the environment and run the simulation"""
     print("🚀 Setting up Success Rate Routing Demo")
@@ -477,7 +766,7 @@ def setup_and_run():
     
     # Step 2: Create test connectors
     print("\n📋 Creating test connectors...")
-    for connector in TEST_CONNECTORS:
+    for connector in CREATE_CONNECTORS:
         connector_data = api_client.create_connector(profile_id, connector["name"], connector["label"])
         if connector_data and "merchant_connector_id" in connector_data:
             merchant_connector_id = connector_data["merchant_connector_id"]
@@ -514,4 +803,8 @@ def setup_and_run():
 
 
 if __name__ == "__main__":
+    # Test Decision Engine endpoints
+    test_decision_engine_endpoints()
+    
+    # Run the main simulation
     setup_and_run()
