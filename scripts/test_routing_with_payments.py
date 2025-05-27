@@ -49,11 +49,6 @@ CREATE_CONNECTORS = [
 ]
 GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GIMINI_API_KEY}"
 
-CONNECTOR_MAP = {
-    "pretendpay": "mca_d8F6FwL4z6HEOljk0xRR",
-    "fauxpay": "mca_R5ufT3y8ppixWuL1NQVM"
-}
-
 STATUS_MAP = {
     "charged": "CHARGED",
     "succeeded": "CHARGED",
@@ -239,6 +234,32 @@ class HyperswitchAPI:
             print("⚠️ Continuing with setup...")
             return {}
 
+def fetch_connector_map():
+    url = f"{APP_BASE_URL}/api/account/{MERCHANT_ID}/profile/connectors"
+    headers = {
+        "accept": "*/*",
+        "api-key": API_KEY,
+        "content-type": "application/json"
+    }
+
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        connector_map = {}
+
+        for item in response.json():
+            if item.get("profile_id") == PROFILE_ID and not item.get("disabled", False):
+                connector_map[item["connector_name"]] = item["merchant_connector_id"]
+
+        return connector_map
+
+    except requests.RequestException as e:
+        print(f"❌ Failed to fetch connector map: {e}")
+        return {}
+
+CONNECTOR_MAP = fetch_connector_map()
+print("✅ CONNECTOR_MAP loaded:", CONNECTOR_MAP)
+
 def build_card_pool(success_percent):
     return [SUCCESS_CARD] * success_percent + [FAIL_CARD] * (100 - success_percent)
 
@@ -274,7 +295,7 @@ def decide_gateway(payment_id):
             for connector, score in priority_map.items():
                 print(f"   - {connector}: {int(score * 100)}%")
 
-        return data.get("decided_gateway")
+        return data.get("decided_gateway"), data.get("routing_approach", "UNKNOWN")
 
     except Exception as e:
         print(f"❌ Failed to call decide-gateway: {e}")
@@ -386,6 +407,7 @@ def send_logs_to_gemini(payment_results):
     - Number of successes and failures
     - Success percentage per connector
     - Most common failure reasons
+    - Ratio of exploitation vs exploration
     - Suggestions to improve routing or connector reliability
     Respond in markdown format.
 
@@ -435,7 +457,7 @@ def simulate_payments():
         payment_id = f"PAY_SIM_{i:05d}"
 
         print(f"\n🔸 Payment {i}: ID = {payment_id}")
-        decided_gateway = decide_gateway(payment_id)
+        decided_gateway, routing_approach = decide_gateway(payment_id)
         if not decided_gateway:
             print(f"❌ Gateway not decided for {payment_id}")
             continue
@@ -458,14 +480,17 @@ def simulate_payments():
         status = STATUS_MAP.get(raw_status, "FAILURE")
         error_message = resp_json.get("error_message", "None")
 
-        print(f"✅ Card: {card['label'].upper()} | Gateway: {decided_gateway} | Status: {status} | Error: {error_message}")
+        mode = "Exploitation" if routing_approach == "SR_SELECTION_V3_ROUTING" else "Exploration"
+        print(f"✅ Card: {card['label'].upper()} | Gateway: {decided_gateway} | routing_approach: {routing_approach} | Mode: {mode} | Status: {status} | Error: {error_message}")
 
         payment_results.append({
             "payment_id": payment_id,
             "card_type": card["label"].upper(),
             "gateway": decided_gateway,
             "status": status,
-            "error": error_message
+            "error": error_message,
+            "routing_approach": routing_approach,
+            "mode": "Exploitation" if routing_approach == "SR_SELECTION_V3_ROUTING" else "Exploration"
         })
 
         update_gateway_score(decided_gateway, status, payment_id)
@@ -803,8 +828,4 @@ def setup_and_run():
 
 
 if __name__ == "__main__":
-    # Test Decision Engine endpoints
-    test_decision_engine_endpoints()
-    
-    # Run the main simulation
-    setup_and_run()
+    simulate_payments()
