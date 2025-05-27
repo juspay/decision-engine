@@ -106,7 +106,6 @@ pub enum RegulatedName {
 
 #[derive(Debug, Clone)]
 pub struct CoBadgedCardInfoDomainData {
-    pub id: String,
     pub card_bin_min: i64,
     pub card_bin_max: i64,
     pub issuing_bank_name: Option<String>,
@@ -122,9 +121,6 @@ pub struct CoBadgedCardInfoDomainData {
     pub bin_provider_bin_length: i16,
     pub card_brand_is_additional: bool,
     pub domestic_only: Option<bool>,
-    pub created_at: time::PrimitiveDateTime,
-    pub modified_at: time::PrimitiveDateTime,
-    pub last_updated_provider: Option<String>,
 }
 
 impl CoBadgedCardInfoDomainData {
@@ -156,7 +152,6 @@ impl TryFrom<storage_types::CoBadgedCardInfo> for CoBadgedCardInfoDomainData {
         let parsed_network = db_co_badged_cards_info_record.get_parsed_card_network()?;
 
         Ok(Self {
-            id: db_co_badged_cards_info_record.id,
             card_bin_min: db_co_badged_cards_info_record.card_bin_min,
             card_bin_max: db_co_badged_cards_info_record.card_bin_max,
             issuing_bank_name: db_co_badged_cards_info_record.issuing_bank_name,
@@ -172,9 +167,6 @@ impl TryFrom<storage_types::CoBadgedCardInfo> for CoBadgedCardInfoDomainData {
             bin_provider_bin_length: db_co_badged_cards_info_record.bin_provider_bin_length,
             card_brand_is_additional: db_co_badged_cards_info_record.card_brand_is_additional,
             domestic_only: db_co_badged_cards_info_record.domestic_only,
-            created_at: db_co_badged_cards_info_record.created_at,
-            modified_at: db_co_badged_cards_info_record.modified_at,
-            last_updated_provider: db_co_badged_cards_info_record.last_updated_provider,
         })
     }
 }

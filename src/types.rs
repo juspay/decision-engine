@@ -2,6 +2,7 @@ pub mod bank_code;
 pub mod card;
 pub mod country;
 pub mod currency;
+pub mod pagos;
 pub mod customer;
 pub mod emi_bank_code;
 pub mod feature;

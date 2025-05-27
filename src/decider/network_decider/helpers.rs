@@ -107,7 +107,7 @@ impl types::CoBadgedCardRequest {
         }
 
         let card_isin = card_isin_optional?;
-        co_badged_card_info::get_co_badged_cards_info(app_state, card_isin, &self.acquirer_country)
+        co_badged_card_info::get_co_badged_cards_info(app_state, card_isin)
             .await
             .map_err(|error| {
                 logger::warn!(?error, "Failed to fetch co-badged card info");
