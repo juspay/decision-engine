@@ -6,8 +6,7 @@ Follow the steps below to set up and run the project locally.
 
 ```bash
 git clone https://github.com/juspay/decision-engine.git
-cd decision-engine/crates/open-router
-```
+cd decision-engine
 
 ---
 
