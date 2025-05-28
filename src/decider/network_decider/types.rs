@@ -239,6 +239,7 @@ pub struct DebitRoutingOutput {
     pub is_regulated: bool,
     pub regulated_name: Option<RegulatedName>,
     pub card_type: CardType,
+    pub saving_percentage: f64,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]
