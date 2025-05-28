@@ -199,11 +199,7 @@ where
                 if let Some(visitor) = extensions.get::<Storage<'_>>() {
                     for key in &incoming_api_keys {
                         if let Some(value) = visitor.values.get(*key) {
-                            if let Some(value) = storage.values.get(*key) {
-                                if !value.is_null() {
-                                    map_serializer.serialize_entry(*key, value)?;
-                                }
-                            }
+                            map_serializer.serialize_entry(*key, value)?;
                             explicit_entries_set.insert(*key);
                         }
                     }
@@ -362,7 +358,6 @@ where
             map_serializer.serialize_entry(FN, name)?;
             map_serializer.serialize_entry(FULL_NAME, &format!("{}::{}", metadata.target(), name))?;
         }
-        map_serializer.serialize_entry(FULL_NAME, &format_args!("{}::{}", metadata.target(), name))?;
         map_serializer.serialize_entry("message_number", &MESSAGE_NUMBER.fetch_add(1, Ordering::SeqCst))?;
         explicit_entries_set.insert("message_number");
         explicit_entries_set.insert("timestamp");
@@ -424,9 +419,7 @@ where
         let mut buffer = Vec::new();
         let mut serializer = serde_json::Serializer::new(&mut buffer);
         let mut map_serializer = serializer.serialize_map(None)?;
-        let message = Self::span_message(span, ty);
         let mut storage = Storage::default();
-        storage.record_value(MESSAGE, message.into());
 
         self.common_serialize(
             &mut map_serializer,
@@ -457,7 +450,6 @@ where
         event.record(&mut storage);
 
         let name = span.map_or("?", SpanRef::name);
-        Self::event_message(span, event, &mut storage);
 
         self.common_serialize(&mut map_serializer, event.metadata(), *span, &storage, name)?;
 
@@ -465,40 +457,6 @@ where
         Ok(buffer)
     }
 
-    ///
-    /// Format message of a span.
-    ///
-    /// Example: "[FN_WITHOUT_COLON - START]"
-    ///
-    fn span_message<S>(span: &SpanRef<'_, S>, ty: RecordType) -> String
-    where
-        S: Subscriber + for<'a> LookupSpan<'a>,
-    {
-        format!("[{} - {}]", span.metadata().name().to_uppercase(), ty)
-    }
-
-    ///
-    /// Format message of an event.
-    ///
-    /// Examples: "[FN_WITHOUT_COLON - EVENT] Message"
-    ///
-    fn event_message<S>(
-        span: &Option<&SpanRef<'_, S>>,
-        event: &Event<'_>,
-        storage: &mut Storage<'_>,
-    ) where
-        S: Subscriber + for<'a> LookupSpan<'a>,
-    {
-        let message = storage
-            .values
-            .entry(MESSAGE)
-            .or_insert_with(|| event.metadata().target().into());
-
-        // Prepend the span name to the message if span exists.
-        if let (Some(span), Value::String(a)) = (span, message) {
-            *a = format!("{} {}", Self::span_message(span, RecordType::Event), a,);
-        }
-    }
 }
 
 /// Format the current time in a custom format: "YYYY-MM-DD HH:MM:SS.mmm"
