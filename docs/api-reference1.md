@@ -158,6 +158,250 @@ curl --location 'http://localhost:8080/update-gateway-score' \
 Success
 ```
 
+## Config APIs
+
+#### Request: Success Rate Config Create
+```bash
+curl -X POST http://localhost:8080/rule/create \
+  -H "Content-Type: application/json" \
+  -d '{
+    "merchant_id": "test_merchant_123",
+    "config": {
+      "type": "successRate",
+      "data": {
+        "defaultLatencyThreshold": 90,
+        "defaultSuccessRate": 0.5,
+        "defaultBucketSize": 200,
+        "defaultHedgingPercent": 5,
+        "subLevelInputConfig": [
+          {
+            "paymentMethodType": "upi",
+            "paymentMethod": "upi_collect",
+            "bucketSize": 250,
+            "hedgingPercent": 1
+          }
+        ]
+      }
+    }
+  }'
+```
+
+#### Response:
+```json
+{
+  "Success Rate Configuration created successfully"
+}
+```
+
+#### Request: Success Rate Config retrieve
+```bash
+curl -X POST http://localhost:8080/rule/get \
+     -H "Content-Type: application/json" \
+     -d '{
+           "merchant_id": "test_merchant_123",
+           "algorithm": "successRate"
+         }'
+```
+
+#### Response:
+```json
+{
+   "merchant_id": "test_merchant_123",
+    "config": {
+      "type": "successRate",
+      "data": {
+        "defaultLatencyThreshold": 90,
+        "defaultSuccessRate": 0.5,
+        "defaultBucketSize": 200,
+        "defaultHedgingPercent": 5,
+        "subLevelInputConfig": [
+          {
+            "paymentMethodType": "upi",
+            "paymentMethod": "upi_collect",
+            "bucketSize": 250,
+            "hedgingPercent": 1
+          }
+        ]
+      }
+    }
+}
+```
+
+#### Request: Success Rate Config update
+```bash
+curl -X POST http://localhost:8080/rule/update \
+  -H "Content-Type: application/json" \
+  -d '{
+    "merchant_id": "test_merchant_123",
+    "config": {
+      "type": "successRate",
+      "data": {
+        "defaultLatencyThreshold": 90,
+        "defaultSuccessRate": 0.5,
+        "defaultBucketSize": 200,
+        "defaultHedgingPercent": 5,
+        "subLevelInputConfig": [
+          {
+            "paymentMethodType": "upi",
+            "paymentMethod": "upi_collect",
+            "bucketSize": 250,
+            "hedgingPercent": 1
+          }
+        ]
+      }
+    }
+  }'
+```
+
+#### Response:
+```json
+{
+  "Success Rate Configuration updated successfully"
+}
+```
+
+#### Request: Success Rate Config delete
+```bash
+curl -X POST http://localhost:8080/rule/delete \
+     -H "Content-Type: application/json" \
+     -d '{
+           "merchant_id": "test_merchant_123",
+           "algorithm": "successRate"
+         }'
+```
+
+#### Response:
+```json
+{
+  "Success Rate Configuration deleted successfully"
+}
+```
+
+#### Request: Elimination Config Create
+```bash
+curl -X POST http://localhost:8080/rule/create \
+  -H "Content-Type: application/json" \
+  -d '{
+    "merchant_id": "test_merchant_123",
+    "config": {
+      "type": "elimination",
+      "data": {
+        "threshold": 0.35
+      }
+    }
+  }'
+```
+
+#### Response:
+```json
+{
+  "Elimination Configuration created successfully"
+}
+```
+
+#### Request: Elimination Config retrieve
+```bash
+curl -X POST http://localhost:8080/rule/get \
+     -H "Content-Type: application/json" \
+     -d '{
+           "merchant_id": "test_merchant_123",
+           "algorithm": "elimination"
+         }'
+```
+
+#### Response:
+```json
+{
+    "merchant_id": "test_merchant_123",
+    "config": {
+      "type": "elimination",
+      "data": {
+        "threshold": 0.35
+      }
+    }
+}
+```
+
+#### Request: Elimination Config update
+```bash
+curl -X POST http://localhost:8080/rule/update \
+  -H "Content-Type: application/json" \
+  -d '{
+    "merchant_id": "test_merchant_123",
+    "config": {
+      "type": "elimination",
+      "data": {
+        "threshold": 0.35
+      }
+    }
+  }'
+```
+
+#### Response:
+```json
+{
+  "Elimination Configuration updated successfully"
+}
+```
+
+#### Request: Elimination Config delete
+```bash
+curl -X POST http://localhost:8080/rule/delete \
+     -H "Content-Type: application/json" \
+     -d '{
+           "merchant_id": "test_merchant_123",
+           "algorithm": "elimination"
+         }'
+```
+
+#### Response:
+```json
+{
+  "Elimination Configuration deleted successfully"
+}
+```
+
+#### Request: Merchant account create
+```bash
+curl --location --request POST 'http://localhost:8080/merchant-account/create' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+  "merchant_id": "test_merchant_123"  
+}'
+```
+
+#### Response:
+```json
+{
+  "Merchant account created successfully"
+}
+```
+
+#### Request: Merchant account retrieve
+```bash
+curl -X GET http://localhost:8080/merchant-account/test_merchant_123            
+```
+
+#### Response:
+```json
+{
+    "merchant_id": "test_merchant_123",
+    "gateway_success_rate_based_decider_input": null
+}
+```
+
+#### Request: Merchant account delete
+```bash
+curl -X DELETE http://localhost:8080/merchant-account/test_merchant_123  
+```     
+
+#### Response:
+```json
+{
+    "Merchant account deleted successfully"
+}
+```
+
 # 🚦 Euclid Routing Engine
 
 **Euclid** is a pluggable, dynamic routing rule evaluation engine designed to power **payment connector selection** based on customizable business rules.
