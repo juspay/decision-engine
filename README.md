@@ -25,6 +25,10 @@ To learn more, refer to this blog: [https://juspay.io/blog/juspay-orchestrator-a
 
 ![](https://cdn.sanity.io/images/9sed75bn/production/fd872ae5b086e7a60011ad9d4d5c7988e1084d03-1999x1167.png)  
 
+### How it can fit into your existing architecture
+
+<img width="639" alt="image" src="https://github.com/user-attachments/assets/272ad222-8a91-4bb2-aa3a-e1fc9c28e3da" />
+
 ## Try it out
  
  Check the [SETUP.md](/docs/setup-guide1.md) for detailed steps to try out the application.
