@@ -130,9 +130,8 @@ impl CoBadgedCardInfoList {
 pub async fn get_co_badged_cards_info(
     app_state: &app::TenantAppState,
     card_isin: String,
-    acquirer_country: &types::CountryAlpha2,
 ) -> CustomResult<Option<types::CoBadgedCardInfoResponse>, error::ApiError> {
-    // pad the card number to 19 digits to match the co-badged card bin length
+    // Pad the card number to 19 digits to match the co-badged card bin length
     let card_number_str = CoBadgedCardInfoList::pad_card_number_to_19_digit(card_isin);
 
     let parsed_number: i64 = card_number_str
@@ -187,18 +186,7 @@ pub async fn get_co_badged_cards_info(
                 .flatten()
                 .and_then(|filtered_list| filtered_list.is_valid_length().then_some(filtered_list));
 
-            filtered_list_optional
-                .and_then(|filtered_list| {
-                    filtered_list
-                        .is_local_transaction(acquirer_country)
-                        .change_context(error::ApiError::UnknownError)
-                        .attach_printable(
-                            "Failed to check if the transaction is local or international",
-                        )
-                        .map(|is_local_transaction| is_local_transaction.then_some(filtered_list))
-                        .transpose()
-                })
-                .transpose()
+            Ok(filtered_list_optional)
         }
     }?;
 
