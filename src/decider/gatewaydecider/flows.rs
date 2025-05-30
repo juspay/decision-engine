@@ -23,6 +23,7 @@ use super::utils::is_mandate_transaction;
 use super::utils::is_tpv_mandate_transaction;
 use super::utils::is_tpv_transaction;
 use crate::decider::storage::utils::txn_card_info::is_google_pay_txn;
+use crate::redis::types::ServiceConfigKey;
 use crate::types::card::card_type::card_type_to_text;
 use crate::types::card::card_type::CardType;
 use crate::types::card::txn_card_info::AuthType;
@@ -38,6 +39,7 @@ use crate::types::merchant as ETM;
 use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
 use crate::types::payment::payment_method::PaymentMethodType;
 use crate::types::txn_details::types as ETTD;
+use crate::redis::feature::{isFeatureEnabled};
 // use utils::errors::predefined_errors as Errs;
 // use juspay::extra::parsing::{Parsed, parse};
 // use juspay::extra::secret::{SecretContext, makeSecret};
@@ -678,19 +680,23 @@ pub async fn runDeciderFlow(
         ..decider_flow.writer.gateway_scoring_data.clone()
     };
     let app_state = get_tenant_app_state().await;
-    app_state
-        .redis_conn
-        .setx(
-            &key,
-            serde_json::to_string(&updated_gateway_scoring_data.clone())
-                .unwrap_or_default()
-                .as_str(),
-            C::gatewayScoreKeysTTL,
-        )
-        .await
-        .unwrap_or_default();
-    updated_gateway_scoring_data;
-
+    if (isFeatureEnabled(
+        C::SHOULD_CONSUME_RESULT_FROM_ROUTER.get_key(),
+        Utils::get_m_id(deciderParams.dpMerchantAccount.merchantId.clone()),
+        "kv_redis".to_string()).await){
+        app_state
+            .redis_conn
+            .setx(
+                &key,
+                serde_json::to_string(&updated_gateway_scoring_data.clone())
+                    .unwrap_or_default()
+                    .as_str(),
+                C::gatewayScoreKeysTTL,
+            )
+            .await
+            .unwrap_or_default();
+        updated_gateway_scoring_data;
+    } 
     match dResult {
         Ok(result) => Ok((
             result,

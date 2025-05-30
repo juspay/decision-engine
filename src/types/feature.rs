@@ -7,6 +7,8 @@ use crate::types::merchant::id::{merchant_id_to_text, to_merchant_id, MerchantId
 // use juspay::extra::parsing::{Parsed, Step, around, lift_pure, mandated, parse_field, project};
 // use eulerhs::extra::combinators::to_domain_all;
 // use eulerhs::language::MonadFlow;
+use diesel::dsl::sql;
+use diesel::sql_types::Bool;
 
 use diesel::*;
 use serde::{Deserialize, Serialize};
@@ -107,7 +109,7 @@ pub async fn get_db_feature_enabled(
         dsl::name
             .eq(feature_name.to_owned())
             .and(dsl::merchant_id.eq(merchant_id_str))
-            .and(dsl::enabled.eq(BitBool(enabled))),
+            .and(sql::<Bool>(&format!("enabled = {}", enabled))),
     )
     .await
 

@@ -158,31 +158,255 @@ curl --location 'http://localhost:8080/update-gateway-score' \
 Success
 ```
 
-# 🚦 Euclid Routing Engine
+## Config APIs
 
-**Euclid** is a pluggable, dynamic routing rule evaluation engine designed to power **payment connector selection** based on customizable business rules.
+#### Request: Success Rate Config Create
+```bash
+curl -X POST http://localhost:8080/rule/create \
+  -H "Content-Type: application/json" \
+  -d '{
+    "merchant_id": "test_merchant_123",
+    "config": {
+      "type": "successRate",
+      "data": {
+        "defaultLatencyThreshold": 90,
+        "defaultSuccessRate": 0.5,
+        "defaultBucketSize": 200,
+        "defaultHedgingPercent": 5,
+        "subLevelInputConfig": [
+          {
+            "paymentMethodType": "upi",
+            "paymentMethod": "upi_collect",
+            "bucketSize": 250,
+            "hedgingPercent": 1
+          }
+        ]
+      }
+    }
+  }'
+```
+
+#### Response:
+```json
+{
+  "Success Rate Configuration created successfully"
+}
+```
+
+#### Request: Success Rate Config retrieve
+```bash
+curl -X POST http://localhost:8080/rule/get \
+     -H "Content-Type: application/json" \
+     -d '{
+           "merchant_id": "test_merchant_123",
+           "algorithm": "successRate"
+         }'
+```
+
+#### Response:
+```json
+{
+   "merchant_id": "test_merchant_123",
+    "config": {
+      "type": "successRate",
+      "data": {
+        "defaultLatencyThreshold": 90,
+        "defaultSuccessRate": 0.5,
+        "defaultBucketSize": 200,
+        "defaultHedgingPercent": 5,
+        "subLevelInputConfig": [
+          {
+            "paymentMethodType": "upi",
+            "paymentMethod": "upi_collect",
+            "bucketSize": 250,
+            "hedgingPercent": 1
+          }
+        ]
+      }
+    }
+}
+```
+
+#### Request: Success Rate Config update
+```bash
+curl -X POST http://localhost:8080/rule/update \
+  -H "Content-Type: application/json" \
+  -d '{
+    "merchant_id": "test_merchant_123",
+    "config": {
+      "type": "successRate",
+      "data": {
+        "defaultLatencyThreshold": 90,
+        "defaultSuccessRate": 0.5,
+        "defaultBucketSize": 200,
+        "defaultHedgingPercent": 5,
+        "subLevelInputConfig": [
+          {
+            "paymentMethodType": "upi",
+            "paymentMethod": "upi_collect",
+            "bucketSize": 250,
+            "hedgingPercent": 1
+          }
+        ]
+      }
+    }
+  }'
+```
+
+#### Response:
+```json
+{
+  "Success Rate Configuration updated successfully"
+}
+```
+
+#### Request: Success Rate Config delete
+```bash
+curl -X POST http://localhost:8080/rule/delete \
+     -H "Content-Type: application/json" \
+     -d '{
+           "merchant_id": "test_merchant_123",
+           "algorithm": "successRate"
+         }'
+```
+
+#### Response:
+```json
+{
+  "Success Rate Configuration deleted successfully"
+}
+```
+
+#### Request: Elimination Config Create
+```bash
+curl -X POST http://localhost:8080/rule/create \
+  -H "Content-Type: application/json" \
+  -d '{
+    "merchant_id": "test_merchant_123",
+    "config": {
+      "type": "elimination",
+      "data": {
+        "threshold": 0.35
+      }
+    }
+  }'
+```
+
+#### Response:
+```json
+{
+  "Elimination Configuration created successfully"
+}
+```
+
+#### Request: Elimination Config retrieve
+```bash
+curl -X POST http://localhost:8080/rule/get \
+     -H "Content-Type: application/json" \
+     -d '{
+           "merchant_id": "test_merchant_123",
+           "algorithm": "elimination"
+         }'
+```
+
+#### Response:
+```json
+{
+    "merchant_id": "test_merchant_123",
+    "config": {
+      "type": "elimination",
+      "data": {
+        "threshold": 0.35
+      }
+    }
+}
+```
+
+#### Request: Elimination Config update
+```bash
+curl -X POST http://localhost:8080/rule/update \
+  -H "Content-Type: application/json" \
+  -d '{
+    "merchant_id": "test_merchant_123",
+    "config": {
+      "type": "elimination",
+      "data": {
+        "threshold": 0.35
+      }
+    }
+  }'
+```
+
+#### Response:
+```json
+{
+  "Elimination Configuration updated successfully"
+}
+```
+
+#### Request: Elimination Config delete
+```bash
+curl -X POST http://localhost:8080/rule/delete \
+     -H "Content-Type: application/json" \
+     -d '{
+           "merchant_id": "test_merchant_123",
+           "algorithm": "elimination"
+         }'
+```
+
+#### Response:
+```json
+{
+  "Elimination Configuration deleted successfully"
+}
+```
+
+#### Request: Merchant account create
+```bash
+curl --location --request POST 'http://localhost:8080/merchant-account/create' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+  "merchant_id": "test_merchant_123"  
+}'
+```
+
+#### Response:
+```json
+{
+  "Merchant account created successfully"
+}
+```
+
+#### Request: Merchant account retrieve
+```bash
+curl -X GET http://localhost:8080/merchant-account/test_merchant_123            
+```
+
+#### Response:
+```json
+{
+    "merchant_id": "test_merchant_123",
+    "gateway_success_rate_based_decider_input": null
+}
+```
+
+#### Request: Merchant account delete
+```bash
+curl -X DELETE http://localhost:8080/merchant-account/test_merchant_123  
+```     
+
+#### Response:
+```json
+{
+    "Merchant account deleted successfully"
+}
+```
+
+# Priority Logic V2 
 
 It enables merchants and platforms to define their own routing algorithms—such as **priority-based**, **volume-split**, or **hybrid logic**—and evaluate transaction parameters against them **in real time**.
 
----
-
-## ✅ Features
-
-- 🔧 **Flexible DSL (Domain-Specific Language)** for defining complex routing logic  
-- 📡 **APIs to create, update, and evaluate** routing algorithms dynamically  
-- 🧠 **Condition-based evaluation** using payment metadata (e.g. method type, amount, etc.)
-
----
-
-## 💡 Use Cases
-
-- 🎯 **Prioritizing gateways** based on card type, transaction amount, or other dynamic criteria  
-- 🔁 **Implementing fallback strategies** for gateway outages or errors  
-- ⚙️ **Adapting routing behavior** without code changes or redeployments
-
----
-
-## 👉 Create Routing Algorithm (Euclid):
+## Create Routing Algorithm:
 ### Request:
 ```
 curl --location 'http://localhost:8080/routing/create' \
@@ -243,7 +467,7 @@ curl --location 'http://localhost:8080/routing/create' \
 }
 ```
 
-## 👉 Activate Routing rule for a creator_id.
+## Activate Routing rule for a creator_id.
 ### Request
 ```
 curl --location 'http://localhost:8080/routing/activate' \
@@ -259,7 +483,7 @@ curl --location 'http://localhost:8080/routing/activate' \
 status_code: 200
 ```
 
-## 👉 Evaluate Payment parameters using Routing Algorithm (Euclid):
+## Evaluate Payment parameters using Routing Algorithm (Euclid):
 ### Request:
 ```
 curl --location 'http://localhost:8080/routing/evaluate' \
@@ -300,7 +524,7 @@ curl --location 'http://localhost:8080/routing/evaluate' \
 }
 ```
 
-## 👉 List all Routing rules for a creator_id.
+## List all Routing rules for a creator_id.
 ### Request
 ```
 curl --location --request POST 'http://localhost:8080/routing/list/merchant_1234' \
@@ -425,7 +649,7 @@ curl --location --request POST 'http://localhost:8080/routing/list/merchant_1234
 ]
 ```
 
-## 👉 List active Routing rule for a creator_id.
+## List active Routing rule for a creator_id.
 ### Request
 ```
 curl --location --request POST 'http://localhost:8080/routing/list/active/merchant_1' \
@@ -492,8 +716,8 @@ curl --location --request POST 'http://localhost:8080/routing/list/active/mercha
 }
 ```
 
-## 👉 Advanced Rule Creation Examples
-### 1. 🔹 Volume Split Rule (with fallback)
+## Advanced Rule Creation Examples
+### 1. Volume Split Rule (with fallback)
 ```
 curl --location 'http://127.0.0.1:8080/routing' \
 --header 'Content-Type: application/json' \
@@ -566,7 +790,7 @@ curl --location 'http://127.0.0.1:8080/routing' \
 }'
 ```
 
-### 2. 🔀 Nested Rule with Fallback
+### 2. Nested Rule with Fallback
 ```
 curl --location 'http://127.0.0.1:8080/routing' \
 --header 'Content-Type: application/json' \
@@ -660,7 +884,7 @@ curl --location 'http://127.0.0.1:8080/routing' \
 }'
 ```
 
-### 💡 What Happens on Evaluation?
+### What Happens on Evaluation?
 
 If the input has:
 

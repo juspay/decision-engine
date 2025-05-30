@@ -384,10 +384,10 @@ impl ToSql<Binary, Mysql> for BitBool {
     fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Mysql>) -> diesel::serialize::Result {
         match *self {
             BitBool(true) => {
-                out.write_all(b"1")?;
+                out.write_all(&[1u8])?;
             }
             BitBool(false) => {
-                out.write_all(b"0")?;
+                out.write_all(&[0u8])?;
             }
         }
         Ok(IsNull::No)

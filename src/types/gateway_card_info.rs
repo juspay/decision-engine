@@ -1,5 +1,6 @@
 use crate::app::get_tenant_app_state;
 use crate::logger;
+use diesel::sql_types::{Bool};
 use serde::{Deserialize, Serialize};
 // use db::euler_mesh_impl::mesh_config;
 // use db::mesh::internal;
@@ -29,6 +30,7 @@ use crate::storage::schema::gateway_card_info::dsl;
 use crate::storage::schema_pg::gateway_card_info::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
+use diesel::dsl::sql;
 
 // use super::payment::payment_method::text_to_payment_method_type;
 
