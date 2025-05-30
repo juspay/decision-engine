@@ -1,0 +1,37 @@
+FROM rust:bookworm AS builder
+
+ARG EXTRA_FEATURES=""
+
+WORKDIR /open_router
+
+ENV CARGO_NET_RETRY=10
+ENV RUSTUP_MAX_RETRIES=10
+ENV CARGO_INCREMENTAL=0
+
+RUN apt-get update && apt-get install -y libmariadb-dev libssl-dev clang && rm -rf /var/lib/apt/lists/*
+
+
+COPY . .
+
+RUN RUSTFLAGS="-A warnings" cargo build --release --no-default-features --features middleware,kms-aws,postgres ${EXTRA_FEATURES}
+
+
+FROM debian:bookworm
+
+ARG CONFIG_DIR=/local/config
+ARG BIN_DIR=/local
+ARG BINARY=open_router
+
+
+RUN apt-get update \
+    && apt-get install -y ca-certificates tzdata libpq-dev curl procps libmariadb3
+
+EXPOSE 8080
+
+RUN mkdir -p ${CONFIG_DIR}
+
+COPY --from=builder /open_router/target/release/${BINARY} ${BIN_DIR}/${BINARY}
+
+WORKDIR ${BIN_DIR}
+
+CMD ["./open_router"]
