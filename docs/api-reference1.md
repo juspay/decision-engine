@@ -402,31 +402,11 @@ curl -X DELETE http://localhost:8080/merchant-account/test_merchant_123
 }
 ```
 
-# 🚦 Euclid Routing Engine
-
-**Euclid** is a pluggable, dynamic routing rule evaluation engine designed to power **payment connector selection** based on customizable business rules.
+# Priority Logic V2 
 
 It enables merchants and platforms to define their own routing algorithms—such as **priority-based**, **volume-split**, or **hybrid logic**—and evaluate transaction parameters against them **in real time**.
 
----
-
-## ✅ Features
-
-- 🔧 **Flexible DSL (Domain-Specific Language)** for defining complex routing logic  
-- 📡 **APIs to create, update, and evaluate** routing algorithms dynamically  
-- 🧠 **Condition-based evaluation** using payment metadata (e.g. method type, amount, etc.)
-
----
-
-## 💡 Use Cases
-
-- 🎯 **Prioritizing gateways** based on card type, transaction amount, or other dynamic criteria  
-- 🔁 **Implementing fallback strategies** for gateway outages or errors  
-- ⚙️ **Adapting routing behavior** without code changes or redeployments
-
----
-
-## 👉 Create Routing Algorithm (Euclid):
+## Create Routing Algorithm:
 ### Request:
 ```
 curl --location 'http://localhost:8080/routing/create' \
@@ -487,7 +467,7 @@ curl --location 'http://localhost:8080/routing/create' \
 }
 ```
 
-## 👉 Activate Routing rule for a creator_id.
+## Activate Routing rule for a creator_id.
 ### Request
 ```
 curl --location 'http://localhost:8080/routing/activate' \
@@ -503,7 +483,7 @@ curl --location 'http://localhost:8080/routing/activate' \
 status_code: 200
 ```
 
-## 👉 Evaluate Payment parameters using Routing Algorithm (Euclid):
+## Evaluate Payment parameters using Routing Algorithm (Euclid):
 ### Request:
 ```
 curl --location 'http://localhost:8080/routing/evaluate' \
@@ -544,7 +524,7 @@ curl --location 'http://localhost:8080/routing/evaluate' \
 }
 ```
 
-## 👉 List all Routing rules for a creator_id.
+## List all Routing rules for a creator_id.
 ### Request
 ```
 curl --location --request POST 'http://localhost:8080/routing/list/merchant_1234' \
@@ -669,7 +649,7 @@ curl --location --request POST 'http://localhost:8080/routing/list/merchant_1234
 ]
 ```
 
-## 👉 List active Routing rule for a creator_id.
+## List active Routing rule for a creator_id.
 ### Request
 ```
 curl --location --request POST 'http://localhost:8080/routing/list/active/merchant_1' \
@@ -736,8 +716,8 @@ curl --location --request POST 'http://localhost:8080/routing/list/active/mercha
 }
 ```
 
-## 👉 Advanced Rule Creation Examples
-### 1. 🔹 Volume Split Rule (with fallback)
+## Advanced Rule Creation Examples
+### 1. Volume Split Rule (with fallback)
 ```
 curl --location 'http://127.0.0.1:8080/routing' \
 --header 'Content-Type: application/json' \
@@ -810,7 +790,7 @@ curl --location 'http://127.0.0.1:8080/routing' \
 }'
 ```
 
-### 2. 🔀 Nested Rule with Fallback
+### 2. Nested Rule with Fallback
 ```
 curl --location 'http://127.0.0.1:8080/routing' \
 --header 'Content-Type: application/json' \
@@ -904,7 +884,7 @@ curl --location 'http://127.0.0.1:8080/routing' \
 }'
 ```
 
-### 💡 What Happens on Evaluation?
+### What Happens on Evaluation?
 
 If the input has:
 
