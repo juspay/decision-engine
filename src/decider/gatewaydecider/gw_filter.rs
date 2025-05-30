@@ -6,6 +6,7 @@ use crate::redis::feature::{isFeatureEnabled, isFeatureEnabledByDimension};
 use crate::redis::types::ServiceConfigKey;
 use crate::types::bank_code::find_bank_code;
 use crate::types::card::card_type as ETCA;
+use crate::types::card::txn_card_info::{self as ETTCa, auth_type_to_text};
 use crate::types::card::vault_provider::VaultProvider;
 use crate::types::gateway as ETG;
 use crate::types::gateway as GT;
@@ -1887,6 +1888,7 @@ pub async fn filterGatewaysCardInfo(
                         ci.gateway.is_some()
                             && merchant_wise_mandate_supported_gateway_prime.contains(&ci.gateway)
                             && ci.validationType == Some(ETGCI::ValidationType::CardMandate)
+                            && ci.authType.clone().unwrap_or_else(|| "THREE_DS".to_string()) == auth_type_to_text(&m_auth_type.clone().unwrap_or(AuthType::THREE_DS))
                     })
                     .collect::<Vec<_>>()
             } else {
@@ -1903,7 +1905,7 @@ pub async fn filterGatewaysCardInfo(
                 ETGCI::get_enabled_gateway_card_info_for_gateways(card_bins, filtered_gateways)
                     .await
                     .into_iter()
-                    .filter(|ci| ci.validationType == Some(ETGCI::ValidationType::CardMandate))
+                    .filter(|ci| (ci.validationType == Some(ETGCI::ValidationType::CardMandate) && ci.authType.clone().unwrap_or_else(|| "THREE_DS".to_string()) == auth_type_to_text(&m_auth_type.clone().unwrap_or(AuthType::THREE_DS))))
                     .collect::<Vec<GatewayCardInfo>>();
 
             Ok(eligible_gateway_card_info_prime
