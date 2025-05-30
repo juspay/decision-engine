@@ -9,7 +9,7 @@ rust-version = "1.85.0"
 
 [features]
 default = ["middleware","mysql"]
-release = ["middleware", "kms-aws"]
+release = ["middleware", "kms-aws","mysql"]
 kms-aws = ["dep:aws-config", "dep:aws-sdk-kms"]
 kms-hashicorp-vault = ["dep:vaultrs"]
 limit = []
