@@ -30,6 +30,33 @@ macro_rules! impl_to_sql_from_sql_text_mysql {
         }
     };
 }
+#[macro_export]
+macro_rules! impl_to_sql_from_sql_text_pg {
+    ($type:ty) => {
+        impl ::diesel::serialize::ToSql<::diesel::sql_types::Text, ::diesel::pg::Pg>
+            for $type
+        {
+            fn to_sql<'b>(
+                &'b self,
+                out: &mut ::diesel::serialize::Output<'b, '_, ::diesel::pg::Pg>,
+            ) -> ::diesel::serialize::Result {
+                use ::std::io::Write;
+                out.write_all(self.to_string().as_bytes())?;
+                Ok(::diesel::serialize::IsNull::No)
+            }
+        }
+
+        impl ::diesel::deserialize::FromSql<::diesel::sql_types::Text, ::diesel::pg::Pg>
+            for $type
+        {
+            fn from_sql(value: ::diesel::pg::PgValue) -> ::diesel::deserialize::Result<Self> {
+                use ::core::str::FromStr;
+                let s = ::core::str::from_utf8(value.as_bytes())?;
+                <$type>::from_str(s).map_err(|_| "Unrecognized enum variant".into())
+            }
+        }
+    };
+}
 
 pub fn deserialize_hashmap<'a, D, K, V>(deserializer: D) -> Result<HashMap<K, HashSet<V>>, D::Error>
 where

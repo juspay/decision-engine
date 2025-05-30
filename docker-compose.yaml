@@ -117,6 +117,27 @@ services:
       timeout: 10s
       retries: 10
 
+  postgresql:  
+    image: postgres:latest  
+    container_name: open-router-postgres  
+    restart: unless-stopped  
+    environment:
+      - POSTGRES_USER=db_user
+      - POSTGRES_PASSWORD=db_pass
+      - POSTGRES_DB=decision_engine_db
+    volumes:  
+      - postgres-data:/var/lib/postgresql/data  
+    ports:  
+      - "5432:5432"
+    networks:
+        - open-router-network
+    healthcheck:
+        test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
+        interval: 5s
+        retries: 3
+        start_period: 5s
+        timeout: 5s
+
   redis:
     image: redis:7
     container_name: open-router-redis
@@ -143,6 +164,19 @@ services:
     entrypoint: ["/bin/sh", "-c", "mysql -h mysql -uroot -proot jdb < /app/migrations/up.sql"]
     networks:
       - open-router-network
+  
+  db-migrator-postgres:
+    image: postgres:latest
+    container_name: db-migrator
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    volumes:
+      - ./migrations_pg/00000000000000_diesel_postgresql_initial_setup/up.sql:/app/migrations_pg/up.sql
+    working_dir: /app
+    entrypoint: ["/bin/sh", "-c", "psql -h postgresql -U db_user -d decision_engine_db -f /app/migrations_pg/up.sql"]
+    networks:
+      - open-router-network
 
   routing-config:
     image: python:3.10-slim
@@ -164,3 +198,4 @@ networks:
 volumes:
   mysql-data:
   redis-data:
+  postgres-data:

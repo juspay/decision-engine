@@ -1,5 +1,8 @@
 use crate::app::get_tenant_app_state;
+#[cfg(feature = "mysql")]
 use crate::storage::schema::merchant_gateway_payment_method_flow::dsl;
+#[cfg(feature = "postgres")]
+use crate::storage::schema_pg::merchant_gateway_payment_method_flow::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
 use serde::{Deserialize, Serialize};

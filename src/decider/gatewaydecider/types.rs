@@ -250,7 +250,10 @@ pub enum NETWORK {
     NYCE,
 }
 
+#[cfg(feature = "mysql")]
 crate::impl_to_sql_from_sql_text_mysql!(NETWORK);
+#[cfg(feature = "postgres")]
+crate::impl_to_sql_from_sql_text_pg!(NETWORK);
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GatewayScoringTypeLogData {

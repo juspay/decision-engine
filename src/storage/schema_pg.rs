@@ -2,18 +2,17 @@
 
 diesel::table! {
     card_brand_routes (id) {
-        id -> Bigint,
+        id -> Int8,
         card_brand -> Text,
-        date_created -> Datetime,
-        last_updated -> Datetime,
-        merchant_account_id -> Bigint,
-        preference_score -> Double,
+        date_created -> Timestamp,
+        last_updated -> Timestamp,
+        merchant_account_id -> Int8,
+        preference_score -> Float8,
         preferred_gateway -> Text,
     }
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
     card_info (card_isin) {
         card_isin -> Text,
         card_switch_provider -> Text,
@@ -27,12 +26,13 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
     co_badged_cards_info_test (id) {
+        #[max_length = 64]
         id -> Varchar,
-        card_bin_min -> BigInt,
-        card_bin_max -> BigInt,
+        card_bin_min -> Int8,
+        card_bin_max -> Int8,
         issuing_bank_name -> Nullable<Text>,
+        #[max_length = 32]
         card_network -> Varchar,
         country_code -> Nullable<Text>,
         card_type -> Nullable<Text>,
@@ -41,31 +41,30 @@ diesel::table! {
         prepaid -> Nullable<Bool>,
         reloadable -> Nullable<Bool>,
         pan_or_token -> Text,
-        card_bin_length -> SmallInt,
-        bin_provider_bin_length -> SmallInt,
+        card_bin_length -> Int2,
+        bin_provider_bin_length -> Int2,
         card_brand_is_additional -> Bool,
         domestic_only -> Nullable<Bool>,
         created_at -> Timestamp,
         modified_at -> Timestamp,
+        #[max_length = 128]
         last_updated_provider -> Nullable<Varchar>,
     }
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
     emi_bank_code (id) {
-        id -> Bigint,
+        id -> Int8,
         emi_bank -> Text,
-        juspay_bank_code_id -> Bigint,
-        last_updated -> Nullable<Datetime>,
+        juspay_bank_code_id -> Int8,
+        last_updated -> Nullable<Timestamp>,
     }
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
     feature (id) {
-        id -> BigInt,
-        enabled -> Bit,
+        id -> Int4,
+        enabled -> Bool,
         name -> Text,
         merchant_id -> Nullable<Text>,
     }
@@ -73,24 +72,24 @@ diesel::table! {
 
 diesel::table! {
     gateway_bank_emi_support (id) {
-        id -> Bigint,
+        id -> Int8,
         gateway -> Text,
         bank -> Text,
-        juspay_bank_code_id -> Nullable<Bigint>,
+        juspay_bank_code_id -> Nullable<Int8>,
         scope -> Nullable<Text>,
     }
 }
 
 diesel::table! {
     gateway_bank_emi_support_v2 (id) {
-        id -> Bigint,
-        version -> Bigint,
+        id -> Int8,
+        version -> Int8,
         #[max_length = 255]
         gateway -> Varchar,
-        juspay_bank_code_id -> Bigint,
+        juspay_bank_code_id -> Int8,
         #[max_length = 255]
         card_type -> Varchar,
-        tenure -> Integer,
+        tenure -> Int4,
         #[max_length = 255]
         gateway_emi_code -> Varchar,
         #[max_length = 255]
@@ -98,20 +97,20 @@ diesel::table! {
         #[max_length = 255]
         scope -> Varchar,
         metadata -> Nullable<Text>,
-        date_created -> Nullable<Datetime>,
-        last_updated -> Nullable<Datetime>,
+        date_created -> Nullable<Timestamp>,
+        last_updated -> Nullable<Timestamp>,
     }
 }
 
 diesel::table! {
     gateway_card_info (id) {
-        id -> Bigint,
+        id -> Int8,
         isin -> Nullable<Text>,
         gateway -> Nullable<Text>,
         card_issuer_bank_name -> Nullable<Text>,
         auth_type -> Nullable<Text>,
-        juspay_bank_code_id -> Nullable<Bigint>,
-        disabled -> Nullable<Bit>,
+        juspay_bank_code_id -> Nullable<Int8>,
+        disabled -> Nullable<Bool>,
         validation_type -> Nullable<Text>,
         payment_method_type -> Nullable<Text>,
     }
@@ -121,13 +120,13 @@ diesel::table! {
     gateway_outage (id) {
         #[max_length = 255]
         id -> Varchar,
-        version -> Integer,
-        end_time -> Datetime,
+        version -> Int4,
+        end_time -> Timestamp,
         #[max_length = 255]
         gateway -> Nullable<Varchar>,
         #[max_length = 255]
         merchant_id -> Nullable<Varchar>,
-        start_time -> Datetime,
+        start_time -> Timestamp,
         #[max_length = 255]
         bank -> Nullable<Varchar>,
         #[max_length = 255]
@@ -135,9 +134,9 @@ diesel::table! {
         #[max_length = 255]
         payment_method -> Nullable<Varchar>,
         description -> Nullable<Text>,
-        date_created -> Nullable<Datetime>,
-        last_updated -> Nullable<Datetime>,
-        juspay_bank_code_id -> Nullable<Bigint>,
+        date_created -> Nullable<Timestamp>,
+        last_updated -> Nullable<Timestamp>,
+        juspay_bank_code_id -> Nullable<Int8>,
         metadata -> Nullable<Text>,
     }
 }
@@ -146,12 +145,12 @@ diesel::table! {
     gateway_payment_method_flow (id) {
         id -> Text,
         gateway_payment_flow_id -> Text,
-        payment_method_id -> Nullable<Bigint>,
-        date_created -> Datetime,
-        last_updated -> Datetime,
+        payment_method_id -> Nullable<Int8>,
+        date_created -> Timestamp,
+        last_updated -> Timestamp,
         gateway -> Text,
         payment_flow_id -> Text,
-        juspay_bank_code_id -> Nullable<Bigint>,
+        juspay_bank_code_id -> Nullable<Int8>,
         gateway_bank_code -> Nullable<Text>,
         currency_configs -> Nullable<Text>,
         #[sql_name = "dsl"]
@@ -160,39 +159,38 @@ diesel::table! {
         non_combination_flows -> Nullable<Text>,
         #[sql_name = "country_code_alpha_3"]
         country_code_alpha3 -> Nullable<Text>,
-        disabled -> Bit,
+        disabled -> Bool,
         payment_method_type -> Nullable<Text>,
     }
 }
 
 diesel::table! {
     isin_routes (id) {
-        id -> Bigint,
+        id -> Int8,
         isin -> Text,
         merchant_id -> Text,
         preferred_gateway -> Text,
-        preference_score -> Double,
-        date_created -> Datetime,
-        last_updated -> Datetime,
+        preference_score -> Float8,
+        date_created -> Timestamp,
+        last_updated -> Timestamp,
     }
 }
 
 diesel::table! {
     issuer_routes (id) {
-        id -> Bigint,
+        id -> Int8,
         issuer -> Text,
         merchant_id -> Text,
         preferred_gateway -> Text,
-        preference_score -> Double,
-        date_created -> Datetime,
-        last_updated -> Datetime,
+        preference_score -> Float8,
+        date_created -> Timestamp,
+        last_updated -> Timestamp,
     }
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
     juspay_bank_code (id) {
-        id -> Bigint,
+        id -> Int8,
         bank_code -> Text,
         bank_name -> Text,
     }
@@ -200,25 +198,25 @@ diesel::table! {
 
 diesel::table! {
     merchant_account (id) {
-        id -> Bigint,
+        id -> Int8,
         merchant_id -> Nullable<Text>,
-        date_created -> Datetime,
-        gateway_decided_by_health_enabled -> Nullable<Bit>,
+        date_created -> Timestamp,
+        gateway_decided_by_health_enabled -> Nullable<Bool>,
         gateway_priority -> Nullable<Text>,
         gateway_priority_logic -> Nullable<Text>,
         internal_hash_key -> Nullable<Text>,
         locker_id -> Nullable<Text>,
         token_locker_id -> Nullable<Text>,
-        user_id -> Nullable<Bigint>,
-        settlement_account_id -> Nullable<Bigint>,
-        secondary_merchant_account_id -> Nullable<Bigint>,
-        use_code_for_gateway_priority -> Bit,
-        enable_gateway_reference_id_based_routing -> Nullable<Bit>,
+        user_id -> Nullable<Int8>,
+        settlement_account_id -> Nullable<Int8>,
+        secondary_merchant_account_id -> Nullable<Int8>,
+        use_code_for_gateway_priority -> Bool,
+        enable_gateway_reference_id_based_routing -> Nullable<Bool>,
         gateway_success_rate_based_decider_input -> Nullable<Text>,
         internal_metadata -> Nullable<Text>,
-        enabled -> Bit,
+        enabled -> Bool,
         country -> Nullable<Text>,
-        installment_enabled -> Nullable<Bit>,
+        installment_enabled -> Nullable<Bool>,
         tenant_account_id -> Nullable<Text>,
         priority_logic_config -> Nullable<Text>,
         merchant_category_code -> Nullable<Text>,
@@ -226,28 +224,27 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
     merchant_config (id) {
         id -> Text,
-        merchant_account_id -> Bigint,
+        merchant_account_id -> Int8,
         config_category -> Text,
         config_name -> Text,
         status -> Text,
         config_value -> Nullable<Text>,
-        date_created -> Datetime,
-        last_updated -> Datetime,
+        date_created -> Timestamp,
+        last_updated -> Timestamp,
     }
 }
 
 diesel::table! {
     merchant_gateway_account (id) {
-        id -> Bigint,
+        id -> Int8,
         account_details -> Text,
         gateway -> Text,
         merchant_id -> Text,
         payment_methods -> Nullable<Text>,
         supported_payment_flows -> Nullable<Text>,
-        disabled -> Nullable<Bit>,
+        disabled -> Nullable<Bool>,
         reference_id -> Nullable<Text>,
         supported_currencies -> Nullable<Text>,
         gateway_identifier -> Nullable<Text>,
@@ -258,50 +255,49 @@ diesel::table! {
 
 diesel::table! {
     merchant_gateway_account_sub_info (id) {
-        id -> Bigint,
-        merchant_gateway_account_id -> Bigint,
+        id -> Int8,
+        merchant_gateway_account_id -> Int8,
         sub_info_type -> Text,
         sub_id_type -> Text,
         juspay_sub_account_id -> Text,
         gateway_sub_account_id -> Text,
-        disabled -> Bit,
+        disabled -> Bool,
     }
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
     merchant_gateway_card_info (id) {
-        id -> Bigint,
-        disabled -> Bit,
-        gateway_card_info_id -> Bigint,
-        merchant_account_id -> Bigint,
-        emandate_register_max_amount -> Nullable<Double>,
-        merchant_gateway_account_id -> Nullable<Bigint>,
+        id -> Int8,
+        disabled -> Bool,
+        gateway_card_info_id -> Int8,
+        merchant_account_id -> Int8,
+        emandate_register_max_amount -> Nullable<Float8>,
+        merchant_gateway_account_id -> Nullable<Int8>,
     }
 }
 
 diesel::table! {
     merchant_gateway_payment_method_flow (id) {
-        id -> Bigint,
+        id -> Int8,
         gateway_payment_method_flow_id -> Text,
-        merchant_gateway_account_id -> Bigint,
+        merchant_gateway_account_id -> Int8,
         currency_configs -> Nullable<Text>,
-        date_created -> Datetime,
-        last_updated -> Datetime,
-        disabled -> Nullable<Bit>,
+        date_created -> Timestamp,
+        last_updated -> Timestamp,
+        disabled -> Nullable<Bool>,
         gateway_bank_code -> Nullable<Text>,
     }
 }
 
 diesel::table! {
     merchant_iframe_preferences (id) {
-        id -> Bigint,
+        id -> Int8,
         merchant_id -> Text,
-        dynamic_switching_enabled -> Nullable<Bit>,
-        isin_routing_enabled -> Nullable<Bit>,
-        issuer_routing_enabled -> Nullable<Bit>,
-        txn_failure_gateway_penality -> Nullable<Bit>,
-        card_brand_routing_enabled -> Nullable<Bit>,
+        dynamic_switching_enabled -> Nullable<Bool>,
+        isin_routing_enabled -> Nullable<Bool>,
+        issuer_routing_enabled -> Nullable<Bool>,
+        txn_failure_gateway_penality -> Nullable<Bool>,
+        card_brand_routing_enabled -> Nullable<Bool>,
     }
 }
 
@@ -309,10 +305,10 @@ diesel::table! {
     merchant_priority_logic (id) {
         #[max_length = 255]
         id -> Varchar,
-        version -> Bigint,
-        date_created -> Datetime,
-        last_updated -> Datetime,
-        merchant_account_id -> Bigint,
+        version -> Int8,
+        date_created -> Timestamp,
+        last_updated -> Timestamp,
+        merchant_account_id -> Int8,
         #[max_length = 255]
         status -> Varchar,
         priority_logic -> Text,
@@ -320,20 +316,20 @@ diesel::table! {
         name -> Nullable<Varchar>,
         description -> Nullable<Text>,
         priority_logic_rules -> Nullable<Text>,
-        is_active_logic -> Bit,
+        is_active_logic -> Bool,
     }
 }
 
 diesel::table! {
     payment_method (id) {
-        id -> Bigint,
-        date_created -> Datetime,
-        last_updated -> Datetime,
+        id -> Int8,
+        date_created -> Timestamp,
+        last_updated -> Timestamp,
         name -> Text,
         #[sql_name = "type"]
-        pm_type -> Text,
+        type_ -> Text,
         description -> Nullable<Text>,
-        juspay_bank_code_id -> Nullable<Bigint>,
+        juspay_bank_code_id -> Nullable<Int8>,
         display_name -> Nullable<Text>,
         nick_name -> Nullable<Text>,
         sub_type -> Nullable<Text>,
@@ -343,8 +339,33 @@ diesel::table! {
 }
 
 diesel::table! {
+    routing_algorithm (id) {
+        #[max_length = 255]
+        id -> Varchar,
+        #[max_length = 255]
+        created_by -> Varchar,
+        #[max_length = 255]
+        name -> Varchar,
+        description -> Text,
+        algorithm_data -> Text,
+        metadata -> Nullable<Json>,
+        created_at -> Timestamp,
+        modified_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    routing_algorithm_mapper (created_by) {
+        #[max_length = 255]
+        created_by -> Varchar,
+        #[max_length = 255]
+        routing_algorithm_id -> Varchar,
+    }
+}
+
+diesel::table! {
     service_configuration (id) {
-        id -> Bigint,
+        id -> Int8,
         name -> Text,
         value -> Nullable<Text>,
         new_value -> Nullable<Text>,
@@ -357,8 +378,8 @@ diesel::table! {
     tenant_config (id) {
         #[max_length = 255]
         id -> Varchar,
-        #[max_length = 255]
         #[sql_name = "type"]
+        #[max_length = 255]
         tenant_type -> Varchar,
         #[max_length = 255]
         module_key -> Varchar,
@@ -374,7 +395,6 @@ diesel::table! {
         #[max_length = 255]
         status -> Varchar,
         #[max_length = 3]
-        #[sql_name = "country_code_alpha_3"]
         country_code_alpha3 -> Nullable<Varchar>,
     }
 }
@@ -390,7 +410,7 @@ diesel::table! {
         #[max_length = 255]
         config_value -> Varchar,
         #[max_length = 255]
-        tenant_config_id -> Varchar
+        tenant_config_id -> Varchar,
     }
 }
 
@@ -399,72 +419,72 @@ diesel::table! {
         token_bin -> Text,
         card_bin -> Text,
         provider -> Text,
-        date_created -> Nullable<Datetime>,
-        last_updated -> Nullable<Datetime>,
+        date_created -> Nullable<Timestamp>,
+        last_updated -> Nullable<Timestamp>,
     }
 }
 
 diesel::table! {
     txn_card_info (id) {
-        id -> Bigint,
+        id -> Int8,
         txn_id -> Text,
         card_isin -> Nullable<Text>,
         card_issuer_bank_name -> Nullable<Text>,
         card_switch_provider -> Nullable<Text>,
         card_type -> Nullable<Text>,
         name_on_card -> Nullable<Text>,
-        txn_detail_id -> Nullable<Bigint>,
-        date_created -> Nullable<Datetime>,
+        txn_detail_id -> Nullable<Int8>,
+        date_created -> Nullable<Timestamp>,
         payment_method_type -> Nullable<Text>,
         payment_method -> Nullable<Text>,
         payment_source -> Nullable<Text>,
         auth_type -> Nullable<Text>,
-        partition_key -> Nullable<Datetime>,
+        partition_key -> Nullable<Timestamp>,
     }
 }
 
 diesel::table! {
     txn_detail (id) {
-        id -> Bigint,
+        id -> Int8,
         order_id -> Text,
         status -> Text,
         txn_id -> Text,
         txn_type -> Text,
-        date_created -> Nullable<Datetime>,
-        add_to_locker -> Nullable<Bit>,
+        date_created -> Nullable<Timestamp>,
+        add_to_locker -> Nullable<Bool>,
         merchant_id -> Nullable<Text>,
         gateway -> Nullable<Text>,
-        express_checkout -> Nullable<Bit>,
-        is_emi -> Nullable<Bit>,
+        express_checkout -> Nullable<Bool>,
+        is_emi -> Nullable<Bool>,
         emi_bank -> Nullable<Text>,
-        emi_tenure -> Nullable<Integer>,
+        emi_tenure -> Nullable<Int4>,
         txn_uuid -> Nullable<Text>,
-        merchant_gateway_account_id -> Nullable<Bigint>,
-        net_amount -> Nullable<Double>,
-        txn_amount -> Nullable<Double>,
+        merchant_gateway_account_id -> Nullable<Int8>,
+        net_amount -> Nullable<Float8>,
+        txn_amount -> Nullable<Float8>,
         txn_object_type -> Nullable<Text>,
         source_object -> Nullable<Text>,
         source_object_id -> Nullable<Text>,
         currency -> Nullable<Text>,
-        surcharge_amount -> Nullable<Double>,
-        tax_amount -> Nullable<Double>,
+        surcharge_amount -> Nullable<Float8>,
+        tax_amount -> Nullable<Float8>,
         internal_metadata -> Nullable<Text>,
         metadata -> Nullable<Text>,
-        offer_deduction_amount -> Nullable<Double>,
+        offer_deduction_amount -> Nullable<Float8>,
         internal_tracking_info -> Nullable<Text>,
-        partition_key -> Nullable<Datetime>,
+        partition_key -> Nullable<Timestamp>,
         txn_amount_breakup -> Nullable<Text>,
     }
 }
 
 diesel::table! {
     txn_offer (id) {
-        id -> Bigint,
-        version -> Bigint,
-        discount_amount -> Bigint,
+        id -> Int8,
+        version -> Int8,
+        discount_amount -> Int8,
         offer_id -> Text,
         signature -> Text,
-        txn_detail_id -> Bigint,
+        txn_detail_id -> Int8,
     }
 }
 
@@ -474,11 +494,11 @@ diesel::table! {
         txn_detail_id -> Text,
         offer_id -> Text,
         status -> Text,
-        date_created -> Nullable<Datetime>,
-        last_updated -> Nullable<Datetime>,
+        date_created -> Nullable<Timestamp>,
+        last_updated -> Nullable<Timestamp>,
         gateway_info -> Nullable<Text>,
         internal_metadata -> Nullable<Text>,
-        partition_key -> Nullable<Datetime>,
+        partition_key -> Nullable<Timestamp>,
     }
 }
 
@@ -489,35 +509,14 @@ diesel::table! {
         identifier_name -> Text,
         identifier_value -> Text,
         provider_name -> Text,
-        disabled -> Nullable<Bit>,
-    }
-}
-
-diesel::table! {
-    routing_algorithm (id) {
-        id -> Text,
-        created_by -> Text,
-        name -> Text,
-        description -> Text,
-        algorithm_data -> Text,
-        metadata -> Nullable<Text>,
-        created_at -> Timestamp,
-        modified_at -> Timestamp,
-    }
-}
-
-diesel::table! {
-    routing_algorithm_mapper (created_by) {
-        #[max_length = 255]
-        created_by -> Varchar,
-        #[max_length = 255]
-        routing_algorithm_id -> Varchar,
+        disabled -> Nullable<Bool>,
     }
 }
 
 diesel::allow_tables_to_appear_in_same_query!(
     card_brand_routes,
     card_info,
+    co_badged_cards_info_test,
     emi_bank_code,
     feature,
     gateway_bank_emi_support,
@@ -537,8 +536,11 @@ diesel::allow_tables_to_appear_in_same_query!(
     merchant_iframe_preferences,
     merchant_priority_logic,
     payment_method,
+    routing_algorithm,
+    routing_algorithm_mapper,
     service_configuration,
     tenant_config,
+    tenant_config_filter,
     token_bin_info,
     txn_card_info,
     txn_detail,

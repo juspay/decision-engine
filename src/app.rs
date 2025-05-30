@@ -56,7 +56,10 @@ impl TenantAppState {
         api_client: ApiClient,
     ) -> error_stack::Result<Self, error::ConfigurationError> {
         let db = storage::Storage::new(
+            #[cfg(feature = "mysql")]
             &global_config.database,
+            #[cfg(feature = "postgres")]
+            &global_config.pg_database,
             &tenant_config.tenant_secrets.schema,
         )
         .await
