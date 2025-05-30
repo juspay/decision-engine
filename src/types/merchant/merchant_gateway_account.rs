@@ -18,9 +18,9 @@ use std::string::String;
 use std::vec::Vec;
 // use std::text::Text;
 
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 use crate::storage::schema::merchant_gateway_account::dsl;
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 use crate::storage::schema_pg::merchant_gateway_account::dsl;
 use diesel::associations::HasTable;
 use diesel::*;

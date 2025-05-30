@@ -7,9 +7,9 @@ use crate::{app::get_tenant_app_state, decider::storage::utils::merchant_gateway
     defaultGWScoringPenaltyFactor, defaultGWScoringRewardFactor, defaultMerchantArrMaxLength, defaultMinimumGatewayScore, defaultScoreGlobalKeysTTL, defaultScoreKeysTTL, ecRedis, ecRedis2, kvRedis, kvRedis2, ENFORCE_GW_SCORE_KV_REDIS, GATEWAY_SCORE_THIRD_DIMENSION_TTL
 }, redis::types::ServiceConfigKey,types::{card::txn_card_info::TxnCardInfo, merchant, merchant_config::types::PfMcConfig, txn_details::types::TxnDetail}};
 
- #[cfg(not(feature = "db_migration"))]
+ #[cfg(feature = "mysql")]
  use crate::storage::schema::gateway_bank_emi_support::gateway;
- #[cfg(feature = "db_migration")]
+ #[cfg(feature = "postgres")]
  use crate::storage::schema_pg::gateway_bank_emi_support::gateway;
 
 

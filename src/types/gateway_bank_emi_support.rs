@@ -19,9 +19,9 @@ use std::vec::Vec;
 // use sequelize::{Clause::{And, Is}, Term::{Eq, In, Null}};
 // use test::quickcheck::Arbitrary;
 
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 use crate::storage::schema::gateway_bank_emi_support::dsl;
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 use crate::storage::schema_pg::gateway_bank_emi_support::dsl;
 use diesel::associations::HasTable;
 use diesel::*;

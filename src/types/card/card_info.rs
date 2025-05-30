@@ -20,9 +20,9 @@ use crate::types::card::isin::{to_isin, Isin};
 // use named::*;
 // use optics::core::review;
 // use sequelize::{Clause, Term};
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 use crate::storage::schema::card_info::dsl;
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 use crate::storage::schema_pg::card_info::dsl;
 use diesel::*;
 

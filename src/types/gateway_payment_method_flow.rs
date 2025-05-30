@@ -28,9 +28,9 @@ use crate::types::gateway_payment_flow::to_gateway_payment_flow_id;
 // use db::mesh::internal::{MeshError, find_all_rows};
 // use eulerhs::extra::combinators::to_domain_all;
 // use db::eulermeshimpl::mesh_config;
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 use crate::storage::schema::gateway_payment_method_flow::dsl;
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 use crate::storage::schema_pg::gateway_payment_method_flow::dsl;
 use diesel::associations::HasTable;
 use diesel::*;

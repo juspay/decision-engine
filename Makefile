@@ -13,6 +13,9 @@ docker-it-run:
 init:
 	docker-compose run --rm db-migrator && docker-compose up open-router
 
+init-pg:
+	docker-compose run --rm db-migrator-postgres && docker-compose up open-router
+	
 run:
 	docker-compose up open-router
 

@@ -5,22 +5,22 @@ use std::fmt::Debug;
 
 use crate::logger;
 
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 use crate::storage::MysqlPoolConn;
 
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 use crate::storage::PgPoolConn;
 
 use crate::storage::Storage;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::query_builder::QueryId;
 use diesel::query_dsl::methods::ExecuteDsl;
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 use diesel::{
     mysql::Mysql,
     MysqlConnection,
 };
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 use diesel::{
     pg::Pg,
     PgConnection,
@@ -82,7 +82,7 @@ pub enum DatabaseOperation {
     Count,
 }
 
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 pub async fn generic_insert<T, V>(storage: &Storage, values: V) -> Result<usize, Report<MeshError>>
 where
     T: HasTable<Table = T> + Table + 'static + Debug,
@@ -96,7 +96,7 @@ where
     generic_insert_core::<T, _>(&mut conn, values).await
 }
 
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 pub async fn generic_insert<T, V>(storage: &Storage, values: V) -> Result<usize, Report<MeshError>>
 where
     T: HasTable<Table = T> + Table + 'static + Debug,
@@ -110,7 +110,7 @@ where
     generic_insert_core::<T, _>(&mut conn, values).await
 }
 
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 pub async fn generic_insert_core<T, V>(
     conn: &MysqlPoolConn,
     values: V,
@@ -132,7 +132,7 @@ where
         .change_context(MeshError::Others)
 }
 
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 pub async fn generic_insert_core<T, V>(
     conn: &PgPoolConn,
     values: V,
@@ -154,7 +154,7 @@ where
         .change_context(MeshError::Others)
 }
 // Returns error incase of entry not found in DB or due to other issues
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 pub async fn generic_update<T, V, P>(
     conn: &MysqlPoolConn,
     predicate: P,
@@ -180,7 +180,7 @@ where
             Ok(res)
         })
 }
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 pub async fn generic_update<T, V, P>(
     conn: &PgPoolConn,
     predicate: P,
@@ -207,7 +207,7 @@ where
         })
 }
 // Returns 0 incase of entry not found in DB and errors due to other issues
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 pub async fn generic_update_if_present<T, V, P>(
     conn: &MysqlPoolConn,
     predicate: P,
@@ -234,7 +234,7 @@ where
         .attach_printable(debug_values)
 }
 
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 pub async fn generic_update_if_present<T, V, P>(
     conn: &PgPoolConn,
     predicate: P,
@@ -261,7 +261,7 @@ where
         .attach_printable(debug_values)
 }
 
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 pub async fn generic_delete<T, P>(conn: &MysqlPoolConn, predicate: P) -> StorageResult<usize>
 where
     T: FilterDsl<P> + HasTable<Table = T> + Table + 'static,
@@ -289,7 +289,7 @@ where
         }
     }
 }
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 pub async fn generic_delete<T, P>(conn: &PgPoolConn, predicate: P) -> StorageResult<usize>
 where
     T: FilterDsl<P> + HasTable<Table = T> + Table + 'static,
@@ -317,7 +317,7 @@ where
         }
     }
 }
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 pub async fn generic_find_all<T, P, R>(storage: &Storage, predicate: P) -> StorageResult<Vec<R>>
 where
     T: FilterDsl<P> + HasTable<Table = T> + Table + 'static,
@@ -330,7 +330,7 @@ where
     }?;
     generic_filter::<T, _, _>(&conn, predicate).await
 }
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 pub async fn generic_find_all<T, P, R>(storage: &Storage, predicate: P) -> StorageResult<Vec<R>>
 where
     T: FilterDsl<P> + HasTable<Table = T> + Table + 'static,
@@ -343,7 +343,7 @@ where
     }?;
     generic_filter::<T, _, _>(&conn, predicate).await
 }
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 async fn generic_filter<T, P, R>(conn: &MysqlPoolConn, predicate: P) -> StorageResult<Vec<R>>
 where
     T: FilterDsl<P> + HasTable<Table = T> + Table + 'static,
@@ -360,7 +360,7 @@ where
             _ => MeshError::Others,
         })
 }
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 async fn generic_filter<T, P, R>(conn: &PgPoolConn, predicate: P) -> StorageResult<Vec<R>>
 where
     T: FilterDsl<P> + HasTable<Table = T> + Table + 'static,
@@ -377,7 +377,7 @@ where
             _ => MeshError::Others,
         })
 }
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 async fn generic_find_one_core<T, P, R>(conn: &MysqlPoolConn, predicate: P) -> StorageResult<R>
 where
     T: FilterDsl<P> + HasTable<Table = T> + Table + 'static,
@@ -400,7 +400,7 @@ where
             }
         })
 }
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 async fn generic_find_one_core<T, P, R>(conn: &PgPoolConn, predicate: P) -> StorageResult<R>
 where
     T: FilterDsl<P> + HasTable<Table = T> + Table + 'static,
@@ -423,7 +423,7 @@ where
             }
         })
 }
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 pub async fn generic_find_one<T, P, R>(storage: &Storage, predicate: P) -> StorageResult<R>
 where
     T: FilterDsl<P> + HasTable<Table = T> + Table + 'static,
@@ -436,7 +436,7 @@ where
     }?;
     generic_find_one_core::<T, _, _>(&conn, predicate).await
 }
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 pub async fn generic_find_one<T, P, R>(storage: &Storage, predicate: P) -> StorageResult<R>
 where
     T: FilterDsl<P> + HasTable<Table = T> + Table + 'static,
@@ -449,7 +449,7 @@ where
     }?;
     generic_find_one_core::<T, _, _>(&conn, predicate).await
 }
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 pub async fn generic_find_one_optional<T, P, R>(
     storage: &Storage,
     predicate: P,
@@ -471,7 +471,7 @@ where
     }?;
     to_optional(generic_find_one_core::<T, _, _>(&conn, predicate).await)
 }
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 pub async fn generic_find_one_optional<T, P, R>(
     storage: &Storage,
     predicate: P,
@@ -493,7 +493,7 @@ where
     }?;
     to_optional(generic_find_one_core::<T, _, _>(&conn, predicate).await)
 }
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 pub async fn generic_find_by_id_optional<T, Pk, R>(
     storage: &Storage,
     id: Pk,
@@ -512,7 +512,7 @@ where
     }?;
     to_optional(generic_find_by_id_core::<T, _, _>(&conn, id).await)
 }
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 pub async fn generic_find_by_id_optional<T, Pk, R>(
     storage: &Storage,
     id: Pk,
@@ -541,7 +541,7 @@ where
     output
 }
 
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 async fn generic_find_by_id_core<T, Pk, R>(conn: &MysqlPoolConn, id: Pk) -> StorageResult<R>
 where
     T: FindDsl<Pk> + HasTable<Table = T> + LimitDsl + Table + 'static,
@@ -566,7 +566,7 @@ where
     }
 }
 
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 async fn generic_find_by_id_core<T, Pk, R>(conn: &PgPoolConn, id: Pk) -> StorageResult<R>
 where
     T: FindDsl<Pk> + HasTable<Table = T> + LimitDsl + Table + 'static,

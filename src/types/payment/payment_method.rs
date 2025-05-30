@@ -12,9 +12,9 @@ use crate::error::ApiError;
 use crate::storage::types::PaymentMethod as DBPaymentMethod;
 use crate::types::bank_code::{to_bank_code_id, BankCodeId};
 
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 use crate::storage::schema::payment_method::dsl;
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 use crate::storage::schema_pg::payment_method::dsl;
 use diesel::associations::HasTable;
 use diesel::*;

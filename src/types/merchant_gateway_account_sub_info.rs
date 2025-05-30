@@ -17,9 +17,9 @@ use crate::types::merchant::merchant_gateway_account::{to_merchant_gw_acc_id, Me
 // use prelude::hiding::id;
 // use sequelize::{Clause, Term};
 // use test::quickcheck::Arbitrary;
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 use crate::storage::schema::merchant_gateway_account_sub_info::dsl;
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 use crate::storage::schema_pg::merchant_gateway_account_sub_info::dsl;
 use diesel::associations::HasTable;
 use diesel::*;

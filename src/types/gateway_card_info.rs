@@ -24,9 +24,9 @@ use std::option::Option;
 use std::string::String;
 use std::vec::Vec;
 
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 use crate::storage::schema::gateway_card_info::dsl;
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 use crate::storage::schema_pg::gateway_card_info::dsl;
 use diesel::associations::HasTable;
 use diesel::*;

@@ -7,9 +7,9 @@ use time::PrimitiveDateTime;
 // use types::utils::dbconfig::get_euler_db_conf;
 // use db::eulermeshimpl::mesh_config;
 // use sequelize::{Clause, Term, Where};
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 use crate::storage::schema::emi_bank_code::dsl;
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 use crate::storage::schema_pg::emi_bank_code::dsl;
 use diesel::associations::HasTable;
 use diesel::*;

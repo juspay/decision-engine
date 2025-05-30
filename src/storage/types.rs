@@ -5,13 +5,13 @@ use diesel::sql_types::Bool;
 use crate::error;
 use crate::utils::CustomResult;
 
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 use super::schema;
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 use super::schema_pg;
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 use diesel::mysql::Mysql;
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 use diesel::pg::Pg;
 use diesel::serialize::{IsNull, Output};
 use diesel::sql_types::Binary;
@@ -27,8 +27,8 @@ use std::io::Write;
 use time::PrimitiveDateTime;
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::card_brand_routes))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::card_brand_routes))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::card_brand_routes))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::card_brand_routes))]
 pub struct CardBrandRoutes {
     pub id: i64,
     pub card_brand: String,
@@ -40,8 +40,8 @@ pub struct CardBrandRoutes {
 }
 
 #[derive(Debug, Clone, Queryable, Deserialize, Identifiable, Serialize, Selectable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::card_info, primary_key(card_isin), check_for_backend(diesel::mysql::Mysql)))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::card_info, primary_key(card_isin), check_for_backend(Pg)))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::card_info, primary_key(card_isin), check_for_backend(diesel::mysql::Mysql)))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::card_info, primary_key(card_isin), check_for_backend(Pg)))]
 pub struct CardInfo {
     pub card_isin: String,
     pub card_switch_provider: String,
@@ -54,8 +54,8 @@ pub struct CardInfo {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable, Deserialize, Serialize, Selectable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::emi_bank_code))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::emi_bank_code))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::emi_bank_code))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::emi_bank_code))]
 pub struct EmiBankCode {
     pub id: i64,
     pub emi_bank: String,
@@ -64,13 +64,13 @@ pub struct EmiBankCode {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable, Serialize, Selectable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::feature))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::feature))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::feature))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::feature))]
 
 pub struct Feature {
-    #[cfg(not(feature = "db_migration"))]
+    #[cfg(feature = "mysql")]
     pub id: i64,
-    #[cfg(feature = "db_migration")]
+    #[cfg(feature = "postgres")]
     pub id: i32,
     pub enabled: BitBool,
     pub name: String,
@@ -78,8 +78,8 @@ pub struct Feature {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::gateway_bank_emi_support))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::gateway_bank_emi_support))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::gateway_bank_emi_support))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::gateway_bank_emi_support))]
 pub struct GatewayBankEmiSupport {
     pub id: i64,
     pub gateway: String,
@@ -89,8 +89,8 @@ pub struct GatewayBankEmiSupport {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::gateway_bank_emi_support_v2))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::gateway_bank_emi_support_v2))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::gateway_bank_emi_support_v2))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::gateway_bank_emi_support_v2))]
 pub struct GatewayBankEmiSupportV2 {
     pub id: i64,
     pub version: i64,
@@ -107,8 +107,8 @@ pub struct GatewayBankEmiSupportV2 {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable, Serialize, Selectable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::gateway_card_info))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::gateway_card_info))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::gateway_card_info))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::gateway_card_info))]
 pub struct GatewayCardInfo {
     pub id: i64,
     pub isin: Option<String>,
@@ -122,8 +122,8 @@ pub struct GatewayCardInfo {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::gateway_outage))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::gateway_outage))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::gateway_outage))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::gateway_outage))]
 pub struct GatewayOutage {
     pub id: String,
     pub version: i32,
@@ -142,8 +142,8 @@ pub struct GatewayOutage {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::gateway_payment_method_flow))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::gateway_payment_method_flow))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::gateway_payment_method_flow))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::gateway_payment_method_flow))]
 pub struct GatewayPaymentMethodFlow {
     pub id: String,
     pub gateway_payment_flow_id: String,
@@ -165,8 +165,8 @@ pub struct GatewayPaymentMethodFlow {
 #[derive(
     Clone, Debug, Queryable, Identifiable, Selectable, serde::Deserialize, serde::Serialize,
 )]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::co_badged_cards_info_test))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::co_badged_cards_info_test, check_for_backend(Pg)))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::co_badged_cards_info_test))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::co_badged_cards_info_test, check_for_backend(Pg)))]
 pub struct CoBadgedCardInfo {
     /// The unique identifier for the co-badged card info
     pub id: String,
@@ -221,8 +221,8 @@ impl CoBadgedCardInfo {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::isin_routes))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::isin_routes))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::isin_routes))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::isin_routes))]
 pub struct IsinRoutes {
     pub id: i64,
     pub isin: String,
@@ -234,8 +234,8 @@ pub struct IsinRoutes {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::issuer_routes))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::issuer_routes))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::issuer_routes))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::issuer_routes))]
 pub struct IssuerRoutes {
     pub id: i64,
     pub issuer: String,
@@ -247,8 +247,8 @@ pub struct IssuerRoutes {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::juspay_bank_code))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::juspay_bank_code))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::juspay_bank_code))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::juspay_bank_code))]
 pub struct JuspayBankCode {
     pub id: i64,
     pub bank_code: String,
@@ -256,8 +256,8 @@ pub struct JuspayBankCode {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::merchant_account))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::merchant_account))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::merchant_account))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::merchant_account))]
 pub struct MerchantAccount {
     pub id: i64,
     pub merchant_id: Option<String>,
@@ -284,8 +284,8 @@ pub struct MerchantAccount {
 }
 
 #[derive(Debug, Clone, Insertable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::merchant_account))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::merchant_account))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::merchant_account))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::merchant_account))]
 pub struct MerchantAccountNew {
     pub merchant_id: Option<String>,
     pub date_created: PrimitiveDateTime,
@@ -296,15 +296,15 @@ pub struct MerchantAccountNew {
 }
 
 #[derive(AsChangeset, Debug, serde::Serialize, serde::Deserialize, Queryable, Selectable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::merchant_account))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::merchant_account))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::merchant_account))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::merchant_account))]
 pub struct MerchantAccountUpdate {
     pub gateway_success_rate_based_decider_input: Option<String>,
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::merchant_config))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::merchant_config))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::merchant_config))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::merchant_config))]
 pub struct MerchantConfig {
     pub id: String,
     pub merchant_account_id: i64,
@@ -317,8 +317,8 @@ pub struct MerchantConfig {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::merchant_gateway_account))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::merchant_gateway_account))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::merchant_gateway_account))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::merchant_gateway_account))]
 pub struct MerchantGatewayAccount {
     pub id: i64,
     pub account_details: String,
@@ -335,8 +335,8 @@ pub struct MerchantGatewayAccount {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::merchant_gateway_account_sub_info))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::merchant_gateway_account_sub_info))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::merchant_gateway_account_sub_info))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::merchant_gateway_account_sub_info))]
 pub struct MerchantGatewayAccountSubInfo {
     pub id: i64,
     pub merchant_gateway_account_id: i64,
@@ -348,8 +348,8 @@ pub struct MerchantGatewayAccountSubInfo {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::merchant_gateway_card_info))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::merchant_gateway_card_info))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::merchant_gateway_card_info))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::merchant_gateway_card_info))]
 pub struct MerchantGatewayCardInfo {
     pub id: i64,
     pub disabled: BitBool,
@@ -360,8 +360,8 @@ pub struct MerchantGatewayCardInfo {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::merchant_gateway_payment_method_flow))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::merchant_gateway_payment_method_flow))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::merchant_gateway_payment_method_flow))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::merchant_gateway_payment_method_flow))]
 pub struct MerchantGatewayPaymentMethodFlow {
     pub id: i64,
     pub gateway_payment_method_flow_id: String,
@@ -375,11 +375,11 @@ pub struct MerchantGatewayPaymentMethodFlow {
 
 
 #[derive(Debug, Clone, PartialEq, FromSqlRow, AsExpression, Serialize)]
-#[cfg_attr(not(feature = "db_migration"), diesel(sql_type = Bit))]
-#[cfg_attr(feature = "db_migration", diesel(sql_type = Bool))]
+#[cfg_attr(feature = "mysql", diesel(sql_type = Bit))]
+#[cfg_attr(feature = "postgres", diesel(sql_type = Bool))]
 pub struct BitBool(pub bool);
 
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 impl ToSql<Binary, Mysql> for BitBool {
     fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Mysql>) -> diesel::serialize::Result {
         match *self {
@@ -394,7 +394,7 @@ impl ToSql<Binary, Mysql> for BitBool {
     }
 }
 
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 impl FromSql<Binary, Mysql> for BitBool {
     fn from_sql(bytes: <Mysql as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
         match bytes.as_bytes().first() {
@@ -403,20 +403,20 @@ impl FromSql<Binary, Mysql> for BitBool {
         }
     }
 }
-#[cfg(feature = "db_migration")]
-impl ToSql<Bool, Pg> for BitBool { // Assuming Bit for PostgreSQL means BOOLEAN or TINYINT(1)
-    fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> diesel::serialize::Result { // Should be Pg instead of Mysql if db_migration is on
+#[cfg(feature = "postgres")]
+impl ToSql<Bool, Pg> for BitBool { 
+    fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> diesel::serialize::Result { 
         match *self {
-            BitBool(true) => out.write_all(&[1])?, // This is more like a BIT(1) representation
+            BitBool(true) => out.write_all(&[1])?,
             BitBool(false) => out.write_all(&[0])?,
         }
         Ok(IsNull::No)
     }
 }
 
-#[cfg(feature = "db_migration")]
-impl FromSql<Bool, Pg> for BitBool { // Assuming Bit for PostgreSQL, should be Pg
-    fn from_sql(bytes: <Pg as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> { // Should be Pg
+#[cfg(feature = "postgres")]
+impl FromSql<Bool, Pg> for BitBool { 
+    fn from_sql(bytes: <Pg as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> { 
         match bytes.as_bytes().first() {
             Some(&1) => Ok(BitBool(true)),
             _ => Ok(BitBool(false)),
@@ -426,11 +426,11 @@ impl FromSql<Bool, Pg> for BitBool { // Assuming Bit for PostgreSQL, should be P
 
 
 #[derive(Debug, Clone, PartialEq, FromSqlRow, AsExpression, Serialize)]
-#[cfg_attr(not(feature = "db_migration"), diesel(sql_type = Bit))]// This remains as is, not targeted by the example
-#[cfg_attr(feature = "db_migration", diesel(sql_type = Bool))]
+#[cfg_attr(feature = "mysql", diesel(sql_type = Bit))]
+#[cfg_attr(feature = "postgres", diesel(sql_type = Bool))]
 pub struct BitBoolWrite(pub bool);
 
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 impl ToSql<Binary, Mysql> for BitBoolWrite {
     fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Mysql>) -> diesel::serialize::Result {
         match *self {
@@ -445,7 +445,7 @@ impl ToSql<Binary, Mysql> for BitBoolWrite {
     }
 }
 
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 impl FromSql<Binary, Mysql> for BitBoolWrite {
     fn from_sql(bytes: <Mysql as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
         match bytes.as_bytes().first() {
@@ -455,7 +455,7 @@ impl FromSql<Binary, Mysql> for BitBoolWrite {
     }
 }
 
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 impl ToSql<Bool, Pg> for BitBoolWrite { 
     fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> diesel::serialize::Result { 
         match *self {
@@ -466,7 +466,7 @@ impl ToSql<Bool, Pg> for BitBoolWrite {
     }
 }
 
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 impl FromSql<Bool, Pg> for BitBoolWrite { 
     fn from_sql(bytes: <Pg as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> { // Should be Pg
         match bytes.as_bytes().first() {
@@ -477,8 +477,8 @@ impl FromSql<Bool, Pg> for BitBoolWrite {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::merchant_iframe_preferences))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::merchant_iframe_preferences))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::merchant_iframe_preferences))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::merchant_iframe_preferences))]
 pub struct MerchantIframePreferences {
     pub id: i64,
     pub merchant_id: String,
@@ -490,8 +490,8 @@ pub struct MerchantIframePreferences {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::merchant_priority_logic))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::merchant_priority_logic))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::merchant_priority_logic))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::merchant_priority_logic))]
 pub struct MerchantPriorityLogic {
     pub id: String,
     pub version: i64,
@@ -507,8 +507,8 @@ pub struct MerchantPriorityLogic {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::payment_method))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::payment_method))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::payment_method))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::payment_method))]
 pub struct PaymentMethod {
     pub id: i64,
     pub date_created: PrimitiveDateTime,
@@ -524,8 +524,8 @@ pub struct PaymentMethod {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::service_configuration))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::service_configuration))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::service_configuration))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::service_configuration))]
 pub struct ServiceConfiguration {
     pub id: i64,
     pub name: String,
@@ -536,8 +536,8 @@ pub struct ServiceConfiguration {
 }
 
 #[derive(Debug, Clone, Insertable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::service_configuration))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::service_configuration))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::service_configuration))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::service_configuration))]
 pub struct ServiceConfigurationNew {
     pub name: String,
     pub value: Option<String>,
@@ -547,15 +547,15 @@ pub struct ServiceConfigurationNew {
 }
 
 #[derive(AsChangeset, Debug, serde::Serialize, serde::Deserialize, Queryable, Selectable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::service_configuration))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::service_configuration))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::service_configuration))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::service_configuration))]
 pub struct ServiceConfigurationUpdate {
     pub value: Option<String>,
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::tenant_config))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::tenant_config))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::tenant_config))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::tenant_config))]
 pub struct TenantConfig {
     pub id: String,
     pub _type: String,
@@ -570,8 +570,8 @@ pub struct TenantConfig {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::tenant_config_filter))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::tenant_config_filter))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::tenant_config_filter))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::tenant_config_filter))]
 pub struct TenantConfigFilter {
     pub id: String,
     pub filter_group_id: String,
@@ -581,8 +581,8 @@ pub struct TenantConfigFilter {
 }
 
 #[derive(Debug, Clone, Queryable, Deserialize, Identifiable, Serialize, Selectable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::token_bin_info, primary_key(token_bin), check_for_backend(diesel::mysql::Mysql)))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::token_bin_info, primary_key(token_bin), check_for_backend(diesel::pg::Pg)))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::token_bin_info, primary_key(token_bin), check_for_backend(diesel::mysql::Mysql)))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::token_bin_info, primary_key(token_bin), check_for_backend(diesel::pg::Pg)))]
 pub struct TokenBinInfo {
     pub token_bin: String,
     pub card_bin: String,
@@ -592,8 +592,8 @@ pub struct TokenBinInfo {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::txn_card_info))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::txn_card_info))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::txn_card_info))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::txn_card_info))]
 pub struct TxnCardInfo {
     pub id: i64,
     pub txn_id: String,
@@ -612,8 +612,8 @@ pub struct TxnCardInfo {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::txn_detail))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::txn_detail))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::txn_detail))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::txn_detail))]
 pub struct TxnDetail {
     pub id: i64,
     pub order_id: String,
@@ -647,8 +647,8 @@ pub struct TxnDetail {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::txn_offer))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::txn_offer))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::txn_offer))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::txn_offer))]
 pub struct TxnOffer {
     pub id: i64,
     pub version: i64,
@@ -659,8 +659,8 @@ pub struct TxnOffer {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::txn_offer_detail))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::txn_offer_detail))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::txn_offer_detail))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::txn_offer_detail))]
 pub struct TxnOfferDetail {
     pub id: String,
     pub txn_detail_id: String,
@@ -674,8 +674,8 @@ pub struct TxnOfferDetail {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(not(feature = "db_migration"), diesel(table_name = schema::user_eligibility_info))]
-#[cfg_attr(feature = "db_migration", diesel(table_name = schema_pg::user_eligibility_info))]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::user_eligibility_info))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::user_eligibility_info))]
 pub struct UserEligibilityInfo {
     pub id: String,
     pub flow_type: String,

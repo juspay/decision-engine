@@ -21,7 +21,9 @@ use crate::decider::network_decider;
 #[derive(Clone, serde::Deserialize, Debug)]
 pub struct GlobalConfig {
     pub server: Server,
+    #[cfg(feature = "mysql")]
     pub database: Database,
+    #[cfg(feature = "postgres")]
     pub pg_database: PgDatabase,
     pub secrets: Secrets,
     #[serde(default)]
@@ -247,13 +249,25 @@ impl GlobalConfig {
             .await
             .expect("Failed to create secret management client");
 
-        self.database.password = secret_management_client
+        #[cfg(feature = "mysql")]
+        {
+            self.database.password = secret_management_client
             .get_secret(self.database.password.clone())
             .await
             .change_context(error::ConfigurationError::KmsDecryptError(
                 "database_password",
             ))?;
-
+        }
+        #[cfg(feature = "postgres")]
+        {
+            self.pg_database.pg_password = secret_management_client
+            .get_secret(self.pg_database.pg_password.clone())
+            .await
+            .change_context(error::ConfigurationError::KmsDecryptError(
+                "pg_database_password",
+            ))?;
+        }
+    
         for tenant_secrets in self.tenant_secrets.values_mut() {
             if tenant_secrets.master_key.is_empty() {
                 logger::debug!("Skipping decryption of master key for tenant as it is empty");

@@ -7,9 +7,9 @@ use crate::{
 use crate::generics::StorageResult;
 use bb8::PooledConnection;
 
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 use diesel::PgConnection;
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 use diesel_async::{
     AsyncPgConnection,
     pooled_connection::{
@@ -17,9 +17,9 @@ use diesel_async::{
         deadpool::{Object, Pool},
     },
 };
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 use diesel::MysqlConnection;
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 use diesel_async::{
     AsyncMysqlConnection,
     pooled_connection::{
@@ -33,9 +33,9 @@ use masking::PeekInterface;
 
 pub mod consts;
 pub mod db;
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 pub mod schema;
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 pub mod schema_pg;
 pub mod types;
 pub mod utils;
@@ -45,33 +45,33 @@ pub trait State {}
 /// Storage State that is to be passed through the application
 #[derive(Clone)]
 pub struct Storage {
-    #[cfg(feature = "db_migration")]
+    #[cfg(feature = "postgres")]
     pg_pool: PgPool,
-    #[cfg(not(feature = "db_migration"))]
+    #[cfg(feature = "mysql")]
     pg_pool: MysqlPool,
 }
 
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 pub type PgPooledConn = async_bb8_diesel::ConnectionManager<PgConnection>;
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 pub type PgPoolConn = async_bb8_diesel::Connection<diesel::PgConnection>;
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 pub type PgPool = bb8::Pool<PgPooledConn>;
 
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 pub type MysqlPooledConn = async_bb8_diesel::ConnectionManager<MysqlConnection>;
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 pub type MysqlPoolConn = async_bb8_diesel::Connection<diesel::MysqlConnection>;
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 pub type MysqlPool = bb8::Pool<MysqlPooledConn>;
 
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 type DeadPoolConnType = Object<AsyncPgConnection>;
 
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 type DeadPoolConnType = Object<AsyncMysqlConnection>;
 
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 impl Storage {
     /// Create a new storage interface from configuration
     pub async fn new(
@@ -117,7 +117,7 @@ impl Storage {
         }
     }
 }
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 impl Storage {
         /// Create a new storage interface from configuration
     pub async fn new(
@@ -172,7 +172,7 @@ impl Storage {
     async fn test(&self) -> Result<(), ContainerError<Self::Error>>;
 }
 
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 pub async fn diesel_make_pg_pool(
     database: &PgDatabase,
     schema: &str,
@@ -199,7 +199,7 @@ pub async fn diesel_make_pg_pool(
         .attach_printable("Failed to create PostgreSQL connection pool")
 }
 
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 pub async fn diesel_make_mysql_pool(
     database: &Database,
     schema: &str,

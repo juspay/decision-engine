@@ -15,9 +15,9 @@ use std::option::Option;
 use std::string::String;
 // use named::Named;
 // use optics_core::review;
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 use crate::storage::schema::merchant_iframe_preferences::dsl;
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 use crate::storage::schema_pg::merchant_iframe_preferences::dsl;
 use crate::storage::types::BitBool;
 use diesel::associations::HasTable;

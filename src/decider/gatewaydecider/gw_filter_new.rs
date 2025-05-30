@@ -1,9 +1,9 @@
 use crate::decider::gatewaydecider::types::*;
 use crate::redis::feature::{isFeatureEnabled, isFeatureEnabledByDimension};
 use crate::redis::types::ServiceConfigKey;
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 use crate::storage::schema::txn_detail;
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 use crate::storage::schema_pg::txn_detail;
 
 use crate::types::bank_code::find_bank_code;

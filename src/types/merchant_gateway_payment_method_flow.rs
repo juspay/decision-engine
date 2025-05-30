@@ -1,7 +1,7 @@
 use crate::app::get_tenant_app_state;
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 use crate::storage::schema::merchant_gateway_payment_method_flow::dsl;
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 use crate::storage::schema_pg::merchant_gateway_payment_method_flow::dsl;
 use diesel::associations::HasTable;
 use diesel::*;

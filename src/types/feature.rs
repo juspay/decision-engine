@@ -28,28 +28,28 @@ use std::string::String;
 // use test::quickcheck_instances_time::*;
 // use data_int::Int64;
 // use data_text::Text;
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 use crate::storage::schema::feature::dsl;
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 use crate::storage::schema_pg::feature::dsl;
 use diesel::associations::HasTable;
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct FeaturePId {
-    #[cfg(not(feature = "db_migration"))]
+    #[cfg(feature = "mysql")]
     pub featurePId: i64,
-    #[cfg(feature = "db_migration")]
+    #[cfg(feature = "postgres")]
     pub featurePId: i32,
 }
 
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 pub fn to_feature_pid(other_id: i64) -> FeaturePId {
     FeaturePId {
         featurePId: other_id,
     }
 }
 
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 pub fn to_feature_pid(other_id: i32) -> FeaturePId {
     FeaturePId {
         featurePId: other_id,

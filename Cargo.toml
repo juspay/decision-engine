@@ -8,7 +8,7 @@ rust-version = "1.85.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["middleware"]
+default = ["middleware","mysql"]
 release = ["middleware", "kms-aws"]
 kms-aws = ["dep:aws-config", "dep:aws-sdk-kms"]
 kms-hashicorp-vault = ["dep:vaultrs"]
@@ -17,7 +17,8 @@ middleware = []
 console = ["tokio/tracing", "dep:console-subscriber"]
 external_key_manager = []
 external_key_manager_mtls = ["external_key_manager", "reqwest/rustls-tls"]
-db_migration = []
+postgres = []
+mysql = []
 
 [dependencies]
 aws-config = { version = "1.5.5", optional = true }

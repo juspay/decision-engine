@@ -8,9 +8,9 @@ use crate::euclid::{
     },
     utils::{generate_random_id, is_valid_enum_value, validate_routing_rule},
 };
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 use crate::storage::schema::routing_algorithm::dsl;
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 use crate::storage::schema_pg::routing_algorithm::dsl;
 
 use crate::euclid::{
@@ -48,10 +48,10 @@ pub async fn routing_create(
             created_by: config.created_by,
             name: config.name.clone(),
             description: config.description,
-            #[cfg(not(feature = "db_migration"))]
+            #[cfg(feature = "mysql")]
             metadata: Some(serde_json::to_string(&config.metadata)
             .change_context(EuclidErrors::FailedToSerializeJsonToString)?),
-            #[cfg(feature = "db_migration")]
+            #[cfg(feature = "postgres")]
             metadata: config.metadata.clone(),
             algorithm_data: serde_json::to_string(&data)
                 .change_context(EuclidErrors::FailedToSerializeJsonToString)?,
@@ -71,9 +71,9 @@ pub async fn routing_create(
     }
 }
 
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 use crate::storage::schema::routing_algorithm_mapper::dsl as mapper_dsl;
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 use crate::storage::schema_pg::routing_algorithm_mapper::dsl as mapper_dsl;
 pub async fn activate_routing_rule(
     Json(payload): Json<ActivateRoutingConfigRequest>,

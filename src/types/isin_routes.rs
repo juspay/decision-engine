@@ -17,9 +17,9 @@ use time::PrimitiveDateTime;
 // use prelude::*;
 // use sequelize::{Clause, Term};
 // use test::quickcheck::Arbitrary;
-#[cfg(not(feature = "db_migration"))]
+#[cfg(feature = "mysql")]
 use crate::storage::schema::isin_routes::dsl;
-#[cfg(feature = "db_migration")]
+#[cfg(feature = "postgres")]
 use crate::storage::schema_pg::isin_routes::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
