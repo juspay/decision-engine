@@ -59,6 +59,7 @@ services:
   open-router-pg:
     image: gauravjuspay1903/open-router-postgres:latest
     pull_policy: always
+    platform: linux/amd64
     container_name: open-router-pg 
     restart: unless-stopped
     ports:
