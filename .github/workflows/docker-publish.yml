@@ -37,10 +37,10 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}/open-router-postgres
+          images: ghcr.io/${{ github.repository }}
           tags: |
             type=ref,event=branch,separator=_
-            type=raw,value=${{ env.SHORT_SHA }}
+            type=raw,value=pg-${{ env.SHORT_SHA }}
 
       - name: Build and push Docker image (Dockerfile.postgres)
         uses: docker/build-push-action@v5
