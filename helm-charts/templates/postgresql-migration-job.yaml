@@ -1,0 +1,63 @@
+{{- if and .Values.dbMigration.enabled .Values.dbMigration.postgresql.enabled .Values.decisionEngine.usePostgreSQL -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "decision-engine.postgresqlMigrationName" . }}-script
+  labels:
+    {{- include "decision-engine.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pg-migration
+data:
+  up.sql: |-
+{{ .Values.dbMigration.postgresql.initSqlScript | default (include "decision-engine.defaultPgMigrationScript" .) | indent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "decision-engine.postgresqlMigrationName" . }}
+  labels:
+    {{- include "decision-engine.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pg-migration
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": hook-succeeded
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        {{- include "decision-engine.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: pg-migration
+    spec:
+      restartPolicy: OnFailure
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "decision-engine.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: wait-for-postgresql
+          image: busybox:1.28
+          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.postgresqlHost" . }} 5432; do echo waiting for postgresql; sleep 2; done;']
+      containers:
+        - name: migration
+          image: "{{ .Values.dbMigration.postgresql.image.repository }}:{{ .Values.dbMigration.postgresql.image.tag }}"
+          imagePullPolicy: {{ .Values.dbMigration.postgresql.image.pullPolicy }}
+          env:
+            - name: PGPASSWORD
+              value: {{ .Values.postgresql.auth.password | quote }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              psql -h {{ include "decision-engine.postgresqlHost" . }} -U {{ .Values.postgresql.auth.username }} -d {{ .Values.postgresql.auth.database }} -f /app/migrations_pg/up.sql
+          volumeMounts:
+            - name: migration-script
+              mountPath: /app/migrations_pg
+      volumes:
+        - name: migration-script
+          configMap:
+            name: {{ include "decision-engine.postgresqlMigrationName" . }}-script
+{{- end }}

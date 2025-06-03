@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "decision-engine.fullname" . }}-config
+  labels:
+    {{- include "decision-engine.labels" . | nindent 4 }}
+data:
+  development.toml: |-
+    {{- include "decision-engine.configFile" . | nindent 4 }}
