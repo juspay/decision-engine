@@ -17,7 +17,10 @@ use crate::types::merchant::id::{to_merchant_id, to_merchant_pid, MerchantId, Me
 // use eulerhs::extra::combinators::to_domain_all;
 // use eulerhs::language::{MonadFlow, log_error, throw_exception, get_option_local, TenantConfigObj, TenantConfig};
 // use eulerhs::prelude::{bool, from_maybe, when};
+#[cfg(feature = "mysql")]
 use crate::storage::schema::merchant_account::dsl;
+#[cfg(feature = "postgres")]
+use crate::storage::schema_pg::merchant_account::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
 use std::cmp::PartialEq;

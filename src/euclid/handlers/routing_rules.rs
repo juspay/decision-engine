@@ -8,11 +8,15 @@ use crate::euclid::{
     },
     utils::{generate_random_id, is_valid_enum_value, validate_routing_rule},
 };
+#[cfg(feature = "mysql")]
+use crate::storage::schema::routing_algorithm::dsl;
+#[cfg(feature = "postgres")]
+use crate::storage::schema_pg::routing_algorithm::dsl;
+
 use crate::euclid::{
     errors::EuclidErrors,
     types::{RoutingAlgorithmMapper, RoutingAlgorithmMapperUpdate},
 };
-use crate::storage::schema::routing_algorithm::dsl;
 use crate::{euclid::types::RoutingAlgorithm, logger};
 use axum::{extract::Path, Json};
 use diesel::{associations::HasTable, ExpressionMethods};
@@ -43,9 +47,12 @@ pub async fn routing_create(
             id: algorithm_id.clone(),
             created_by: config.created_by,
             name: config.name.clone(),
-            description: Some(config.description),
+            description: config.description,
+            #[cfg(feature = "mysql")]
             metadata: Some(serde_json::to_string(&config.metadata)
             .change_context(EuclidErrors::FailedToSerializeJsonToString)?),
+            #[cfg(feature = "postgres")]
+            metadata: config.metadata.clone(),
             algorithm_data: serde_json::to_string(&data)
                 .change_context(EuclidErrors::FailedToSerializeJsonToString)?,
             created_at: timestamp,
@@ -64,7 +71,10 @@ pub async fn routing_create(
     }
 }
 
+#[cfg(feature = "mysql")]
 use crate::storage::schema::routing_algorithm_mapper::dsl as mapper_dsl;
+#[cfg(feature = "postgres")]
+use crate::storage::schema_pg::routing_algorithm_mapper::dsl as mapper_dsl;
 pub async fn activate_routing_rule(
     Json(payload): Json<ActivateRoutingConfigRequest>,
 ) -> Result<(), ContainerError<EuclidErrors>> {

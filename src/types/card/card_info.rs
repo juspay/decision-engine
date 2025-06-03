@@ -20,7 +20,10 @@ use crate::types::card::isin::{to_isin, Isin};
 // use named::*;
 // use optics::core::review;
 // use sequelize::{Clause, Term};
+#[cfg(feature = "mysql")]
 use crate::storage::schema::card_info::dsl;
+#[cfg(feature = "postgres")]
+use crate::storage::schema_pg::card_info::dsl;
 use diesel::*;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Eq)]

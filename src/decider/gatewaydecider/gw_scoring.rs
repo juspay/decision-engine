@@ -9,7 +9,10 @@ use crate::decider::gatewaydecider::types::{
 use crate::logger;
 use crate::merchant_config_util::{isMerchantEnabledForPaymentFlows, isPaymentFlowEnabledWithHierarchyCheck};
 use crate::redis::types::ServiceConfigKey;
+#[cfg(feature = "mysql")]
 use crate::storage::schema::txn_detail;
+#[cfg(feature = "postgres")]
+use crate::storage::schema_pg::txn_detail;
 use crate::types::gateway_routing_input::{
     EliminationLevel, EliminationSuccessRateInput, GatewaySuccessRateBasedRoutingInput,
     GatewayWiseSuccessRateBasedRoutingInput, GlobalGatewayScore, GlobalScore, GlobalScoreLog,

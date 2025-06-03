@@ -1,5 +1,8 @@
 use crate::app::get_tenant_app_state;
+#[cfg(feature = "mysql")]
 use crate::storage::schema::service_configuration::dsl;
+#[cfg(feature = "postgres")]
+use crate::storage::schema_pg::service_configuration::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
 use std::option::Option;

@@ -227,10 +227,23 @@ pub enum PanOrToken {
     Token,
 }
 
+#[cfg(feature = "mysql")]
 crate::impl_to_sql_from_sql_text_mysql!(CardType);
+#[cfg(feature = "mysql")]
 crate::impl_to_sql_from_sql_text_mysql!(RegulatedName);
+#[cfg(feature = "mysql")]
 crate::impl_to_sql_from_sql_text_mysql!(PanOrToken);
+#[cfg(feature = "mysql")]
 crate::impl_to_sql_from_sql_text_mysql!(CountryAlpha2);
+
+#[cfg(feature = "postgres")]
+crate::impl_to_sql_from_sql_text_pg!(CardType);
+#[cfg(feature = "postgres")]
+crate::impl_to_sql_from_sql_text_pg!(RegulatedName);
+#[cfg(feature = "postgres")]
+crate::impl_to_sql_from_sql_text_pg!(PanOrToken);
+#[cfg(feature = "postgres")]
+crate::impl_to_sql_from_sql_text_pg!(CountryAlpha2);
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct DebitRoutingOutput {
@@ -239,6 +252,7 @@ pub struct DebitRoutingOutput {
     pub is_regulated: bool,
     pub regulated_name: Option<RegulatedName>,
     pub card_type: CardType,
+    pub saving_percentage: f64,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]
