@@ -11,7 +11,7 @@ on:
 
 jobs:
   build-and-push-dockerfile:
-    runs-on: ubuntu-latest
+    runs-on: dosa-juspay-08
     permissions:
       contents: read
       packages: write
