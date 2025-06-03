@@ -59,7 +59,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          push: false
+          push: true
         env:
           CARGO_INCREMENTAL: ${{ github.event_name == 'pull_request' && '1' || '0' }}
           RUSTFLAGS: "-A warnings"
@@ -121,7 +121,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          push: false
+          push: true
         env:
           CARGO_INCREMENTAL: ${{ github.event_name == 'pull_request' && '1' || '0' }}
           RUSTFLAGS: "-A warnings"
