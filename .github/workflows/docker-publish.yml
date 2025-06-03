@@ -21,7 +21,7 @@ jobs:
             os: ubuntu-latest
           - platform: linux/arm64
             os: ubuntu-24.04-arm
-    runs-on: ${{ matrix.include.os }}
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -54,8 +54,8 @@ jobs:
         with:
           context: .
           file: Dockerfile.postgres
-          platforms: ${{ matrix.include.platform }}
-          tags: ${{ steps.meta.outputs.tags }}-${{ matrix.include.platform }}
+          platforms: ${{ matrix.platform }}
+          tags: ${{ steps.meta.outputs.tags }}-${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -83,7 +83,7 @@ jobs:
             os: ubuntu-latest
           - platform: linux/arm64
             os: ubuntu-24.04-arm
-    runs-on: ${{ matrix.include.os }}
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -116,8 +116,8 @@ jobs:
         with:
           context: .
           file: Dockerfile
-          platforms: ${{ matrix.include.platform }}
-          tags: ${{ steps.meta.outputs.tags }}-${{ matrix.include.platform }}
+          platforms: ${{ matrix.platform }}
+          tags: ${{ steps.meta.outputs.tags }}-${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
