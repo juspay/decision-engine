@@ -21,7 +21,8 @@ jobs:
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
-        
+      - name: Install sccache
+        run: cargo install sccache
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -56,6 +57,10 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+        env:
+          CARGO_INCREMENTAL: ${{ github.event_name == 'pull_request' && '1' || '0' }}
+          RUSTFLAGS: "-A warnings"
+          SCCACHE_ENABLE: "true"
 
   build-and-push-groovy-dockerfile:
     runs-on: ubuntu-latest
