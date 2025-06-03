@@ -7,7 +7,7 @@ Follow the steps below to set up and run the project locally.
 ```bash
 git clone https://github.com/juspay/decision-engine.git
 cd decision-engine
-
+```
 ---
 
 ## 2. Install Docker
@@ -29,6 +29,11 @@ If you're setting up the environment for the first time, run:
 
 ```bash
 make init
+```
+
+To build it with postgres DB use this instead
+```
+make init-pg
 ```
 
 This command performs the following under the hood:
