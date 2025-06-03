@@ -11,10 +11,17 @@ on:
 
 jobs:
   build-and-push-postgres-dockerfile:
-    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            os: ubuntu-latest
+          - platform: linux/arm64
+            os: ubuntu-24.04-arm
+    runs-on: ${{ matrix.include.os }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -42,16 +49,28 @@ jobs:
             type=ref,event=branch,separator=_
             type=raw,value=${{ env.SHORT_SHA }}
 
-      - name: Build and push Docker image (Dockerfile.postgres)
+      - name: Build Docker image (Dockerfile.postgres)
         uses: docker/build-push-action@v5
         with:
           context: .
           file: Dockerfile.postgres
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          platforms: ${{ matrix.include.platform }}
+          tags: ${{ steps.meta.outputs.tags }}-${{ matrix.include.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          push: false
+        env:
+          CARGO_INCREMENTAL: ${{ github.event_name == 'pull_request' && '1' || '0' }}
+          RUSTFLAGS: "-A warnings"
+          SCCACHE_ENABLE: "true"
+
+      - name: Create and push manifest list
+        run: |
+          docker manifest create ghcr.io/${{ github.repository }}/postgres:${{ steps.meta.outputs.tags }} \
+            ghcr.io/${{ github.repository }}/postgres:${{ steps.meta.outputs.tags }}-linux-amd64 \
+            ghcr.io/${{ github.repository }}/postgres:${{ steps.meta.outputs.tags }}-linux-arm64
+          docker manifest push ghcr.io/${{ github.repository }}/postgres:${{ steps.meta.outputs.tags }}
 
   build-and-push-dockerfile:
     permissions:
@@ -59,14 +78,12 @@ jobs:
       packages: write
     strategy:
       matrix:
-        platform: [linux/amd64, linux/arm64]
-        os: [ubuntu-latest, ubuntu-24.04-arm]
         include:
           - platform: linux/amd64
             os: ubuntu-latest
           - platform: linux/arm64
             os: ubuntu-24.04-arm
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.include.os }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -99,8 +116,8 @@ jobs:
         with:
           context: .
           file: Dockerfile
-          platforms: ${{ matrix.platform }}
-          tags: ${{ steps.meta.outputs.tags }}-${{ matrix.platform }}
+          platforms: ${{ matrix.include.platform }}
+          tags: ${{ steps.meta.outputs.tags }}-${{ matrix.include.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
