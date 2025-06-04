@@ -3,9 +3,10 @@ replicaCount: 1
 
 image:
   # Updated to include the registry URL
-  repository: ghcr.io/juspay/decision-engine
+  repository: ghcr.io/juspay/decision-engine/postgres
   pullPolicy: Always
-  tag: "6fd7386"
+  version: "d35b018" 
+  tag: "d35b018-linux-arm64"
 
 # Configure these if your images are in a private registry
 imagePullSecrets: 
@@ -179,10 +180,6 @@ dbMigration:
       pullPolicy: "IfNotPresent"
     migrations:
       path: "/app/migrations_pg"
-    # Initial SQL script content can be provided here, or it can be mounted from a ConfigMap
-    initSqlScript: |
-      -- This will be the initial migration script
-      -- It should contain all the necessary table creation statements
   # MySQL migrations (not used with PostgreSQL)
   mysql:
     enabled: false
