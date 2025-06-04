@@ -39,6 +39,11 @@ spec:
         - name: wait-for-groovy-runner
           image: busybox:1.28
           command: ['sh', '-c', 'until nc -z {{ include "decision-engine.groovyRunnerName" . }} {{ .Values.groovyRunner.service.port }}; do echo waiting for groovy-runner; sleep 2; done;']
+        {{- if .Values.decisionEngine.useMySQL }}
+        - name: wait-for-mysql
+          image: busybox:1.28
+          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.mysqlHost" . }} 3306; do echo waiting for mysql; sleep 2; done;']
+        {{- end }}
       containers:
         - name: {{ .Chart.Name }}
           securityContext:

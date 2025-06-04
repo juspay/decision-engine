@@ -106,10 +106,7 @@ decisionEngine:
     clientIdleTimeout: 90
     poolMaxIdlePerHost: 10
     identity: ""
-  # Routing config
-  routingConfig:
-    enabled: false
-    # Additional routing config settings can be added here
+
 
 # MySQL configuration (used when decisionEngine.useMySQL is true)
 mysql:
@@ -183,10 +180,16 @@ dbMigration:
   # MySQL migrations (not used with PostgreSQL)
   mysql:
     enabled: false
+    image:
+      pullPolicy: IfNotPresent
+    scriptUrls:
+      - https://raw.githubusercontent.com/juspay/decision-engine/431b1b2/migrations/00000000000000_diesel_initial_setup/up.sql
+      - https://raw.githubusercontent.com/juspay/decision-engine/431b1b2/migrations/2025-04-23-103603_add_routing_algorithm_mapper_table/up.sql
+      - https://raw.githubusercontent.com/juspay/decision-engine/431b1b2/migrations/2025-05-09-112540_add_metadata_to_routing_algorithm/up.sql
 
 # Routing Config Job
 routingConfig:
-  enabled: true
+  enabled: false
   image:
     repository: "python"
     tag: "3.10-slim"

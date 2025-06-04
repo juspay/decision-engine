@@ -16,12 +16,3 @@ dbMigration:
   enabled: true
   postgresql:
     enabled: true
-    # This is a minimal example migration that creates a test table
-    initSqlScript: |
-      -- Example migration script for PostgreSQL
-      DROP TABLE IF EXISTS test_table;
-      CREATE TABLE test_table (
-        id SERIAL PRIMARY KEY,
-        name VARCHAR(255) NOT NULL,
-        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );

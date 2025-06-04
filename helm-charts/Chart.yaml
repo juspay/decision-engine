@@ -9,6 +9,10 @@ dependencies:
     version: ~12.5.5
     repository: https://charts.bitnami.com/bitnami
     condition: postgresql.enabled
+  - name: mysql
+    version: ~13.0.0
+    repository: https://charts.bitnami.com/bitnami
+    condition: mysql.enabled
   - name: redis
     version: ~17.11.3
     repository: https://charts.bitnami.com/bitnami

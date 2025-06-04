@@ -19,7 +19,7 @@ This chart bootstraps a [Decision Engine](https://github.com/juspay/decision-eng
 The easiest way to install the chart is using the provided install script:
 
 ```bash
-cd helm-charts/decision-engine
+cd helm-charts
 ./install.sh
 ```
 
