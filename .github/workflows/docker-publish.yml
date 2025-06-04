@@ -67,13 +67,6 @@ jobs:
           RUSTFLAGS: "-A warnings"
           SCCACHE_ENABLE: "true"
 
-      - name: Create and push manifest list
-        run: |
-          docker manifest create ghcr.io/${{ github.repository }}/postgres:${{ steps.meta.outputs.tags }} \
-            ghcr.io/${{ github.repository }}/postgres:${{ steps.meta.outputs.tags }}-linux-amd64 \
-            ghcr.io/${{ github.repository }}/postgres:${{ steps.meta.outputs.tags }}-linux-arm64
-          docker manifest push ghcr.io/${{ github.repository }}/postgres:${{ steps.meta.outputs.tags }}
-
   build-and-push-dockerfile:
     permissions:
       contents: read
@@ -128,13 +121,6 @@ jobs:
           CARGO_INCREMENTAL: ${{ github.event_name == 'pull_request' && '1' || '0' }}
           RUSTFLAGS: "-A warnings"
           SCCACHE_ENABLE: "true"
-
-      - name: Create and push manifest list
-        run: |
-          docker manifest create ghcr.io/${{ github.repository }}:${{ steps.meta.outputs.tags }} \
-            ghcr.io/${{ github.repository }}:${{ steps.meta.outputs.tags }}-linux-amd64 \
-            ghcr.io/${{ github.repository }}:${{ steps.meta.outputs.tags }}-linux-arm64
-          docker manifest push ghcr.io/${{ github.repository }}:${{ steps.meta.outputs.tags }}
 
   build-and-push-groovy-dockerfile:
     runs-on: ubuntu-latest
