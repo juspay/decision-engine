@@ -11,10 +11,19 @@ on:
 
 jobs:
   build-and-push-postgres-dockerfile:
-    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            tag: linux-amd64
+            os: ubuntu-latest
+          - platform: linux/arm64
+            tag: linux-arm64
+            os: ubuntu-24.04-arm
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -42,22 +51,36 @@ jobs:
             type=ref,event=branch,separator=_
             type=raw,value=${{ env.SHORT_SHA }}
 
-      - name: Build and push Docker image (Dockerfile.postgres)
+      - name: Build Docker image (Dockerfile.postgres)
         uses: docker/build-push-action@v5
         with:
           context: .
           file: Dockerfile.postgres
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          platforms: ${{ matrix.platform }}
+          tags: ${{ steps.meta.outputs.tags }}-${{ matrix.tag }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          push: true
+        env:
+          CARGO_INCREMENTAL: ${{ github.event_name == 'pull_request' && '1' || '0' }}
+          RUSTFLAGS: "-A warnings"
+          SCCACHE_ENABLE: "true"
 
   build-and-push-dockerfile:
-    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            tag: linux-amd64
+            os: ubuntu-latest
+          - platform: linux/arm64
+            tag: linux-arm64
+            os: ubuntu-24.04-arm
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -85,16 +108,21 @@ jobs:
             type=ref,event=branch,separator=_
             type=raw,value=${{ env.SHORT_SHA }}
 
-      - name: Build and push Docker image (Dockerfile)
+      - name: Build Docker image (Dockerfile)
         uses: docker/build-push-action@v5
         with:
           context: .
           file: Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          platforms: ${{ matrix.platform }}
+          tags: ${{ steps.meta.outputs.tags }}-${{ matrix.tag }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          push: true
+        env:
+          CARGO_INCREMENTAL: ${{ github.event_name == 'pull_request' && '1' || '0' }}
+          RUSTFLAGS: "-A warnings"
+          SCCACHE_ENABLE: "true"
 
   build-and-push-groovy-dockerfile:
     runs-on: ubuntu-latest
@@ -105,6 +133,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -134,6 +165,7 @@ jobs:
           context: .
           file: groovy.Dockerfile
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
