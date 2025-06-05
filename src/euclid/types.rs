@@ -27,10 +27,12 @@ pub enum DataType {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RoutingRule {
+    pub rule_id: Option<String>,
     pub name: String,
     pub description: String,
     pub created_by: String,
     pub algorithm: Program,
+    #[serde(default)]
     pub metadata: Option<serde_json::Value>,
 }
 
@@ -81,7 +83,6 @@ pub struct RoutingEvaluateResponse {
 
 // #[derive(AsChangeset, Debug, Clone, Identifiable, Insertable, Queryable, Selectable)]
 #[derive(AsChangeset, Insertable, Debug, serde::Serialize, serde::Deserialize, Identifiable, Queryable, Selectable)]
-#[diesel(check_for_backend(diesel::mysql::Mysql))]
 #[cfg_attr(feature = "mysql", diesel(table_name = schema::routing_algorithm))]
 #[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::routing_algorithm))]
 pub struct RoutingAlgorithm {
