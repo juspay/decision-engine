@@ -27,10 +27,12 @@ pub enum DataType {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RoutingRule {
+    pub rule_id: Option<String>,
     pub name: String,
     pub description: String,
     pub created_by: String,
     pub algorithm: Program,
+    #[serde(default)]
     pub metadata: Option<serde_json::Value>,
 }
 

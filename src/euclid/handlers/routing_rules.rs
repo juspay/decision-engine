@@ -41,7 +41,14 @@ pub async fn routing_create(
     let utc_date_time = time::OffsetDateTime::now_utc();
     let timestamp = time::PrimitiveDateTime::new(utc_date_time.date(), utc_date_time.time());
     let data = serde_json::to_value(config.algorithm.clone());
-    let algorithm_id = generate_random_id("routing");
+
+    // To support migration of Hyperswitch created rules
+    let algorithm_id = if let Some(id) = config.rule_id {
+        id
+    } else {
+        generate_random_id("routing")
+    };
+
     if let Ok(data) = data {
         let new_algo = RoutingAlgorithm {
             id: algorithm_id.clone(),
