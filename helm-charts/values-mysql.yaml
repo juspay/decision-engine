@@ -1,0 +1,39 @@
+image:
+  # Updated to include the registry URL
+  repository: ghcr.io/juspay/decision-engine
+  pullPolicy: Always
+  version: "431b1b2"
+  tag: "431b1b2-linux-arm64"
+
+# Decision Engine configurations
+decisionEngine:
+  useMySQL: true
+  usePostgreSQL: false
+
+dbMigration:
+  enabled: true
+  mysql:
+    enabled: true
+
+# MySQL configuration (used when decisionEngine.useMySQL is true)
+mysql:
+  enabled: true
+  auth:
+    rootPassword: "root"
+    database: "jdb"
+  primary:
+    persistence:
+      enabled: true
+      size: 8Gi
+
+# PostgreSQL configuration (used when decisionEngine.usePostgreSQL is true)
+postgresql:
+  enabled: false
+  auth:
+    username: "db_user"
+    password: "db_pass"
+    database: "decision_engine_db"
+  primary:
+    persistence:
+      enabled: true
+      size: 8Gi
