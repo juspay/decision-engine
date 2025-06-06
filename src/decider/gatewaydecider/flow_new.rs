@@ -118,6 +118,7 @@ pub async fn deciderFullPayloadHSFunction(
         dpPriorityLogicOutput: dreq.priorityLogicOutput,
         dpPriorityLogicScript: dreq.priorityLogicScript,
         dpEDCCApplied: dreq.isEdccApplied,
+        dpShouldConsumeResult: dreq.shouldConsumeResult,
     };
 
     if dreq_.rankingAlgorithm == Some(RankingAlgorithm::NTW_BASED_ROUTING) {
