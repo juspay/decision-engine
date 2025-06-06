@@ -12,6 +12,7 @@ pub mod logger;
 pub mod merchant_config_util;
 #[cfg(feature = "middleware")]
 pub mod middleware;
+pub mod pagos_client;
 pub mod redis;
 pub mod routes;
 pub mod storage;
