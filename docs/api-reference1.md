@@ -71,6 +71,20 @@ curl --location 'http://localhost:8080/decide-gateway' \
     "gateway_mga_id_map": null
 }
 ```
+##### Routing Approach
+This field available in the response for the decide-gateway api call provides visibility into the routing logic applied by the decision engine for a transaction. The possible values are as follows:
+
+- **SR_SELECTION_V3_ROUTING** : Routing is based on the gateway with the highest Success Rate (SR) score for the merchant, evaluated at the dimension on which routing is happening
+
+- **SR_V3_DOWNTIME_ROUTING** : Routing uses SR-based selection, but one or more (not all) eligible gateways have been deprioritized due to downtime (i.e., having a score below the elimination threshold). The system selects the best available gateway (based on SR) amongst the gateways which are not facing downtime.
+
+- **SR_V3_ALL_DOWNTIME_ROUTING** : All eligible gateways are facing downtime and have been deprioritized via elimination. Routing still uses SR scores at the configured dimension level to select the best among the degraded options.
+
+- **SR_V3_HEDGING** : Routing is done across all eligible gateways irrespective of their SR performance. This mode is used for exploration and evaluation of gateway SR performance and is controlled via configuration in the SR routing setup.
+
+- **SR_V3_DOWNTIME_HEDGING** : Routing follows the hedging strategy, where SR performance is not a strict criterion. However, one or more (but not all) eligible gateways are facing downtime. The system prefers gateways that are currently healthy while maintaining the exploration objective.
+
+- **SR_V3_ALL_DOWNTIME_HEDGING** :  Routing follows the configured hedging strategy, but all eligible gateways are experiencing downtime. In this scenario, routing proceeds without reprioritization, in accordance with the defined hedging configuration.
 
 #### Request: DEBIT ROUTING
 ```bash
