@@ -716,7 +716,7 @@ curl --location --request POST 'http://localhost:8080/routing/list/active/mercha
 }
 ```
 
-### 2. Volume split rule with fallback
+### 1. Volume split rule with fallback
 ```
 curl --location 'http://127.0.0.1:8082/routing/create' \
 --header 'Content-Type: application/json' \
