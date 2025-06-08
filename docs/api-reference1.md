@@ -842,7 +842,7 @@ If the input has:
 
 - **Both Of**:
   - `amount > 100` **AND**
-  - `billing_country == Netherland`
+  - `billing_country == Netherlands`
 - **EITHER**:
   - `payment_method == card` **OR**
   - `payment_method == upi`
