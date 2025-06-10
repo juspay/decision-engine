@@ -177,6 +177,7 @@ jobs:
           push: true
           tags: ghcr.io/${{ github.repository }}/postgres:${{ env.SHORT_SHA }}
           manifest: ghcr.io/${{ github.repository }}/postgres:${{ env.SHORT_SHA }}
+          driver: docker-container
 
       - name: Delete temporary images
         run: |
@@ -219,6 +220,7 @@ jobs:
           push: true
           tags: ghcr.io/${{ github.repository }}:${{ env.SHORT_SHA }}
           manifest: ghcr.io/${{ github.repository }}:${{ env.SHORT_SHA }}
+          driver: docker-container
 
       - name: Delete temporary images
         run: |
