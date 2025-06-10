@@ -177,8 +177,8 @@ jobs:
 
       - name: Delete temporary images
         run: |
-          docker image rm ghcr.io/${{ github.repository }}/postgres:${{ env.SHORT_SHA }}-linux-amd64
-          docker image rm ghcr.io/${{ github.repository }}/postgres:${{ env.SHORT_SHA }}-linux-arm64
+          docker rmi ghcr.io/${{ github.repository }}/postgres:${{ env.SHORT_SHA }}-linux-amd64
+          docker rmi ghcr.io/${{ github.repository }}/postgres:${{ env.SHORT_SHA }}-linux-arm64
 
   create-manifest:
     needs: [build-and-push-dockerfile]
@@ -216,8 +216,8 @@ jobs:
 
       - name: Delete temporary images
         run: |
-          docker image rm ghcr.io/${{ github.repository }}:${{ env.SHORT_SHA }}-linux-amd64
-          docker image rm ghcr.io/${{ github.repository }}:${{ env.SHORT_SHA }}-linux-arm64
+          docker rmi ghcr.io/${{ github.repository }}:${{ env.SHORT_SHA }}-linux-amd64
+          docker rmi ghcr.io/${{ github.repository }}:${{ env.SHORT_SHA }}-linux-arm64
 
   build-and-push-groovy-dockerfile:
     runs-on: ubuntu-latest
