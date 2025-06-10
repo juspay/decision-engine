@@ -18,29 +18,40 @@
 //     utils,
 // };
 
-use axum::body::to_bytes;
 use crate::decider::gatewaydecider::types::{ErrorResponse, UnifiedError};
 use crate::feedback::gateway_scoring_service::check_and_update_gateway_score_;
-use crate::feedback::types::UpdateScorePayload;
+use crate::feedback::types::{UpdateScorePayload, UpdateScoreResponse};
+use axum::body::to_bytes;
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
 
+impl IntoResponse for UpdateScoreResponse {
+    fn into_response(self) -> axum::http::Response<axum::body::Body> {
+        let body = serde_json::to_string(&self).unwrap();
+        axum::http::Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "application/json")
+            .body(axum::body::Body::from(body))
+            .unwrap()
+    }
+}
 
 #[axum::debug_handler]
-pub async fn update_gateway_score(req: axum::http::Request<axum::body::Body>) -> Result<&'static str, ErrorResponse>
-{
-
+pub async fn update_gateway_score(
+    req: axum::http::Request<axum::body::Body>,
+) -> Result<UpdateScoreResponse, ErrorResponse> {
     let headers = req.headers();
     for (name, value) in headers.iter() {
-        crate::logger::debug!(tag="UpdateGatewayScore","Header: {}: {:?}", name, value);
+        crate::logger::debug!(tag = "UpdateGatewayScore", "Header: {}: {:?}", name, value);
     }
     let body = match to_bytes(req.into_body(), usize::MAX).await {
         Ok(body) => {
-            crate::logger::debug!(tag="UpdateGatewayScore","Body: {:?}", body);
+            crate::logger::debug!(tag = "UpdateGatewayScore", "Body: {:?}", body);
 
-            
             body
         }
         Err(e) => {
-            crate::logger::debug!(tag="UpdateGatewayScore","Error: {:?}", e);
+            crate::logger::debug!(tag = "UpdateGatewayScore", "Error: {:?}", e);
             return Err(ErrorResponse {
                 status: "400".to_string(),
                 error_code: "400".to_string(),
@@ -48,7 +59,7 @@ pub async fn update_gateway_score(req: axum::http::Request<axum::body::Body>) ->
                 priority_logic_tag: None,
                 routing_approach: None,
                 filter_wise_gateways: None,
-                error_info: UnifiedError{
+                error_info: UnifiedError {
                     code: "INVALID_INPUT".to_string(),
                     user_message: "Invalid request params. Please verify your input.".to_string(),
                     developer_message: e.to_string(),
@@ -64,17 +75,17 @@ pub async fn update_gateway_score(req: axum::http::Request<axum::body::Body>) ->
         Ok(payload) => {
             let result = check_and_update_gateway_score_(payload).await;
             match result {
-                Ok(success) => {
-                    Ok("Success")
-                }
+                Ok(success) => Ok(UpdateScoreResponse {
+                    message: "Success".to_string(),
+                }),
                 Err(e) => {
                     println!("Error: {:?}", e);
                     Err(e)
+                }
             }
         }
-        }
         Err(e) => {
-            crate::logger::debug!(tag="UpdateScoreRequest","Error: {:?}", e);
+            crate::logger::debug!(tag = "UpdateScoreRequest", "Error: {:?}", e);
             return Err(ErrorResponse {
                 status: "400".to_string(),
                 error_code: "400".to_string(),
@@ -82,7 +93,7 @@ pub async fn update_gateway_score(req: axum::http::Request<axum::body::Body>) ->
                 priority_logic_tag: None,
                 routing_approach: None,
                 filter_wise_gateways: None,
-                error_info: UnifiedError{
+                error_info: UnifiedError {
                     code: "INVALID_INPUT".to_string(),
                     user_message: "Invalid request params. Please verify your input.".to_string(),
                     developer_message: e.to_string(),
@@ -92,6 +103,4 @@ pub async fn update_gateway_score(req: axum::http::Request<axum::body::Body>) ->
             });
         }
     }
-
-    
 }
