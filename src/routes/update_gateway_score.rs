@@ -22,24 +22,14 @@ use crate::decider::gatewaydecider::types::{ErrorResponse, UnifiedError};
 use crate::feedback::gateway_scoring_service::check_and_update_gateway_score_;
 use crate::feedback::types::{UpdateScorePayload, UpdateScoreResponse};
 use axum::body::to_bytes;
+use axum::extract::Json;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-
-impl IntoResponse for UpdateScoreResponse {
-    fn into_response(self) -> axum::http::Response<axum::body::Body> {
-        let body = serde_json::to_string(&self).unwrap();
-        axum::http::Response::builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", "application/json")
-            .body(axum::body::Body::from(body))
-            .unwrap()
-    }
-}
 
 #[axum::debug_handler]
 pub async fn update_gateway_score(
     req: axum::http::Request<axum::body::Body>,
-) -> Result<UpdateScoreResponse, ErrorResponse> {
+) -> Result<Json<UpdateScoreResponse>, ErrorResponse> {
     let headers = req.headers();
     for (name, value) in headers.iter() {
         crate::logger::debug!(tag = "UpdateGatewayScore", "Header: {}: {:?}", name, value);
@@ -75,9 +65,9 @@ pub async fn update_gateway_score(
         Ok(payload) => {
             let result = check_and_update_gateway_score_(payload).await;
             match result {
-                Ok(success) => Ok(UpdateScoreResponse {
+                Ok(success) => Ok(Json(UpdateScoreResponse {
                     message: "Success".to_string(),
-                }),
+                })),
                 Err(e) => {
                     println!("Error: {:?}", e);
                     Err(e)
