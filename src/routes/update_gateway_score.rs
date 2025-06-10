@@ -23,8 +23,6 @@ use crate::feedback::gateway_scoring_service::check_and_update_gateway_score_;
 use crate::feedback::types::{UpdateScorePayload, UpdateScoreResponse};
 use axum::body::to_bytes;
 use axum::extract::Json;
-use axum::http::StatusCode;
-use axum::response::IntoResponse;
 
 #[axum::debug_handler]
 pub async fn update_gateway_score(
