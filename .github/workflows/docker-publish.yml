@@ -171,7 +171,7 @@ jobs:
 
       - name: Create manifest
         run: |
-          docker buildx imagetools create ghcr.io/${{ github.repository }}/postgres:${{ env.SHORT_SHA }} \
+          docker buildx imagetools create --tag ghcr.io/${{ github.repository }}/postgres:${{ env.SHORT_SHA }} \
             ghcr.io/${{ github.repository }}/postgres:${{ env.SHORT_SHA }}-linux-amd64 \
             ghcr.io/${{ github.repository }}/postgres:${{ env.SHORT_SHA }}-linux-arm64
 
@@ -210,7 +210,7 @@ jobs:
 
       - name: Create manifest
         run: |
-          docker buildx imagetools create ghcr.io/${{ github.repository }}:${{ env.SHORT_SHA }} \
+          docker buildx imagetools create --tag ghcr.io/${{ github.repository }}:${{ env.SHORT_SHA }} \
             ghcr.io/${{ github.repository }}:${{ env.SHORT_SHA }}-linux-amd64 \
             ghcr.io/${{ github.repository }}:${{ env.SHORT_SHA }}-linux-arm64
 
