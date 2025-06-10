@@ -1,0 +1,59 @@
+{{- if and .Values.dbMigration.enabled .Values.dbMigration.mysql.enabled .Values.decisionEngine.useMySQL -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "decision-engine.mysqlMigrationName" . }}
+  labels:
+    {{- include "decision-engine.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mysql-migration
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": hook-succeeded
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        {{- include "decision-engine.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: mysql-migration
+    spec:
+      restartPolicy: OnFailure
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "decision-engine.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: wait-for-mysql
+          image: busybox:1.28
+          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.mysqlHost" . }} 3306; do echo waiting for mysql; sleep 2; done;']
+      containers:
+        - name: migration
+          image: "debian:stable-slim"
+          imagePullPolicy: {{ .Values.dbMigration.mysql.image.pullPolicy }}
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              value: {{ .Values.mysql.auth.rootPassword | quote }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              # Download and execute SQL scripts
+              apt-get update && apt-get install -y curl default-mysql-client
+              version={{ .Values.image.version }}
+              host={{ include "decision-engine.mysqlHost" . }}
+              db_name={{ .Values.mysql.auth.database  }}
+              {{- range $url := .Values.dbMigration.mysql.scriptUrls }}
+              echo "Downloading {{ $url }}"
+              curl -sSL "{{ $url }}" -o /tmp/init.sql
+              if [ -f /tmp/init.sql ]; then
+                mysql --host="$host" -u root -p"$MYSQL_ROOT_PASSWORD" -e "SOURCE /tmp/init.sql" $db_name
+              else
+                echo "Error: /tmp/init.sql not found"
+                exit 1
+              fi
+              {{- end }}
+{{- end }}

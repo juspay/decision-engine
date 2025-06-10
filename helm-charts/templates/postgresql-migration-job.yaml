@@ -1,0 +1,72 @@
+{{- if and .Values.dbMigration.enabled .Values.dbMigration.postgresql.enabled .Values.decisionEngine.usePostgreSQL -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "decision-engine.postgresqlMigrationName" . }}-script
+  labels:
+    {{- include "decision-engine.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pg-migration
+data:
+  up.sql: ""
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "decision-engine.postgresqlMigrationName" . }}
+  labels:
+    {{- include "decision-engine.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pg-migration
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": hook-succeeded
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        {{- include "decision-engine.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: pg-migration
+    spec:
+      restartPolicy: OnFailure
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "decision-engine.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: wait-for-postgresql
+          image: busybox:1.28
+          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.postgresqlHost" . }} 5432; do echo waiting for postgresql; sleep 2; done;']
+      containers:
+        - name: migration
+          image: "postgres:15-alpine"
+          imagePullPolicy: {{ .Values.dbMigration.postgresql.image.pullPolicy }}
+          env:
+            - name: PGPASSWORD
+              value: {{ .Values.postgresql.auth.password | quote }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              # Download the SQL script and execute it
+              apk add curl
+              version={{ .Values.image.version }}
+              url="https://raw.githubusercontent.com/juspay/decision-engine/$version/migrations_pg/00000000000000_diesel_postgresql_initial_setup/up.sql"
+              curl -sSL $url -o /tmp/init.sql
+              if [ -f /tmp/init.sql ]; then
+                psql -h {{ include "decision-engine.postgresqlHost" . }} -U {{ .Values.postgresql.auth.username }} -d {{ .Values.postgresql.auth.database }} -f /tmp/init.sql
+              else
+                echo "Error: /tmp/init.sql not found"
+                exit 1
+              fi
+          volumeMounts:
+            - name: migration-script
+              mountPath: /app/config
+      volumes:
+        - name: migration-script
+          configMap:
+            name: {{ include "decision-engine.postgresqlMigrationName" . }}-script
+{{- end }}

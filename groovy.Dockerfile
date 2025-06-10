@@ -1,18 +1,23 @@
 FROM ubuntu:focal
 
 RUN apt-get update \
-        && apt-get -y install tar cron zip software-properties-common curl \
-        qemu-user-static binfmt-support
+        && apt-get -y install tar cron zip software-properties-common curl
 
-# Install OpenJDK 8 (works on both arm64 and amd64)
-RUN apt-get update && apt-get install -y openjdk-8-jdk
+RUN mkdir -p /usr/lib/jvm
 
-# Set up Java environment
-RUN mkdir -p /usr/java/ \
-    && ln -s /usr/lib/jvm/java-8-openjdk-$(dpkg --print-architecture) /usr/java/jdk1.8.0 \
-    && ln -s /usr/java/jdk1.8.0 /usr/java/latest \
-    && ln -s /usr/java/jdk1.8.0 /usr/lib/jvm/default-java \
-    && apt clean
+RUN curl https://jp-build-packages-apsouth1.s3.ap-south-1.amazonaws.com/build-assets/jdk-7u71-linux-x64.tar.gz -o /usr/lib/jvm/jdk-7u71-linux-x64.tar.gz
+
+RUN cd /usr/lib/jvm \
+        && tar xfvz jdk-7u71-linux-x64.tar.gz \
+        && mv jdk1.7.0_71 java-7-oracle \
+        && rm jdk-7u71-linux-x64.tar.gz \
+        && mkdir -p /usr/java/ \
+        && ln -s /usr/lib/jvm/java-7-oracle /usr/java/jdk1.7.0 \
+        && ln -s /usr/java/jdk1.7.0 /usr/java/latest \
+        && ln -s /usr/java/jdk1.7.0 /usr/lib/jvm/default-java \
+        && ln -s /usr/java/jdk1.7.0/bin/java /usr/bin/java \
+        && ln -s /usr/java/jdk1.7.0 /usr/lib/java \
+        && apt clean
 
 ENV JAVA_HOME=/usr/java/latest
 

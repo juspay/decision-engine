@@ -34,14 +34,21 @@ pub async fn routing_create(
     let config: RoutingRule = serde_json::from_value(payload.clone())
         .change_context(EuclidErrors::InvalidRuleConfiguration)?;
 
-    logger::debug!("Received routing config: {}", config.name);
+    logger::debug!("Received routing config: {:?}", config);
 
     validate_routing_rule(&config, &state.config.routing_config)?;
 
     let utc_date_time = time::OffsetDateTime::now_utc();
     let timestamp = time::PrimitiveDateTime::new(utc_date_time.date(), utc_date_time.time());
     let data = serde_json::to_value(config.algorithm.clone());
-    let algorithm_id = generate_random_id("routing");
+
+    // To support migration of Hyperswitch created rules
+    let algorithm_id = if let Some(id) = config.rule_id {
+        id
+    } else {
+        generate_random_id("routing")
+    };
+
     if let Ok(data) = data {
         let new_algo = RoutingAlgorithm {
             id: algorithm_id.clone(),
@@ -61,10 +68,15 @@ pub async fn routing_create(
 
         crate::generics::generic_insert(&state.db, new_algo)
             .await
-            .map_err(|_| ContainerError::from(EuclidErrors::StorageError))?;
+            .map_err(|e|  {
+                logger::error!("{:?}",e);
+                ContainerError::from(EuclidErrors::StorageError)
+            }
+            )?;
 
         let response =
             RoutingDictionaryRecord::new(algorithm_id, config.name, timestamp, timestamp);
+        logger::info!("Response: {response:?}");
         Ok(Json(response))
     } else {
         Err(ContainerError::from(EuclidErrors::StorageError))
@@ -223,10 +235,15 @@ pub async fn routing_evaluate(
         <RoutingAlgorithm as HasTable>::Table,
         _,
         RoutingAlgorithm,
-    >(&state.db, dsl::id.eq(active_routing_algorithm_id))
+    >(&state.db, dsl::id.eq(active_routing_algorithm_id.clone()))
     .await
+    .map_err(|e| {
+        logger::error!(?e, "Failed to fetch RoutingAlgorithm for ID {:?}", active_routing_algorithm_id);
+        e
+    })
     .change_context(EuclidErrors::StorageError)?;
 
+    logger::debug!("Fetched routing algorithm: {:?}", algorithm);
     let program: ast::Program = serde_json::from_str(&algorithm.algorithm_data)
         .map_err(|_| EuclidErrors::InvalidRequest("Invalid algorithm data format".into()))?;
 
@@ -256,6 +273,7 @@ pub async fn routing_evaluate(
         evaluated_output: interpreter_result.evaluated_output.clone(),
         eligible_connectors,
     };
+    logger::info!("Response: {response:?}");
 
     Ok(Json(response))
 }
