@@ -63,7 +63,7 @@ jobs:
             type=ref,event=branch,separator=_
             type=raw,value=${{ env.SHORT_SHA }}
 
-      - name: Build and push Docker image (Dockerfile.postgres)
+      - name: Build Docker image (Dockerfile.postgres)
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -96,6 +96,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -109,7 +111,12 @@ jobs:
 
       - name: Extract short SHA
         id: vars
-        run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
+        run: |
+          if [[ -n "${{ github.event.inputs.ref }}" ]]; then
+            echo "SHORT_SHA=${{ github.event.inputs.ref }}" >> $GITHUB_ENV
+          else
+            echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
+          fi
 
       - name: Extract metadata for Docker
         id: meta
@@ -120,7 +127,7 @@ jobs:
             type=ref,event=branch,separator=_
             type=raw,value=${{ env.SHORT_SHA }}
 
-      - name: Build and push Docker image (Dockerfile)
+      - name: Build Docker image (Dockerfile)
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -143,6 +150,18 @@ jobs:
       contents: read
       packages: write
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
+      - name: Extract short SHA
+        id: vars
+        run: |
+          if [[ -n "${{ github.event.inputs.ref }}" ]]; then
+            echo "SHORT_SHA=${{ github.event.inputs.ref }}" >> $GITHUB_ENV
+          else
+            echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
+          fi
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -171,12 +190,26 @@ jobs:
       contents: read
       packages: write
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
+      
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Extract short SHA
+        id: vars
+        run: |
+          if [[ -n "${{ github.event.inputs.ref }}" ]]; then
+            echo "SHORT_SHA=${{ github.event.inputs.ref }}" >> $GITHUB_ENV
+          else
+            echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
+          fi
 
       - name: Create manifest
         uses: docker/build-push-action@v5
@@ -200,8 +233,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
+        
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -214,7 +251,12 @@ jobs:
 
       - name: Extract short SHA
         id: vars
-        run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
+        run: |
+          if [[ -n "${{ github.event.inputs.ref }}" ]]; then
+            echo "SHORT_SHA=${{ github.event.inputs.ref }}" >> $GITHUB_ENV
+          else
+            echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
+          fi
 
       - name: Extract metadata for Docker
         id: meta
