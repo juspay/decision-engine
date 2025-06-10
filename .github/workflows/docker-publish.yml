@@ -170,14 +170,10 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create manifest
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ghcr.io/${{ github.repository }}/postgres:${{ env.SHORT_SHA }}
-          manifest: ghcr.io/${{ github.repository }}/postgres:${{ env.SHORT_SHA }}
-          driver: docker-container
+        run: |
+          docker buildx imagetools create ghcr.io/${{ github.repository }}/postgres:${{ env.SHORT_SHA }} \
+            ghcr.io/${{ github.repository }}/postgres:${{ env.SHORT_SHA }}-linux-amd64 \
+            ghcr.io/${{ github.repository }}/postgres:${{ env.SHORT_SHA }}-linux-arm64
 
       - name: Delete temporary images
         run: |
@@ -213,14 +209,10 @@ jobs:
           fi
 
       - name: Create manifest
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ghcr.io/${{ github.repository }}:${{ env.SHORT_SHA }}
-          manifest: ghcr.io/${{ github.repository }}:${{ env.SHORT_SHA }}
-          driver: docker-container
+        run: |
+          docker buildx imagetools create ghcr.io/${{ github.repository }}:${{ env.SHORT_SHA }} \
+            ghcr.io/${{ github.repository }}:${{ env.SHORT_SHA }}-linux-amd64 \
+            ghcr.io/${{ github.repository }}:${{ env.SHORT_SHA }}-linux-arm64
 
       - name: Delete temporary images
         run: |
