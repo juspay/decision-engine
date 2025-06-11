@@ -17,13 +17,15 @@ clippy *FLAGS:
 
     FEATURES="$(cargo metadata --all-features --format-version 1 --no-deps | \
         jq -r '
-            [ ( .workspace_members | sort ) as $package_ids # Store workspace crate package IDs in `package_ids` array
-            | .packages[] | select( IN(.id; $package_ids[]) ) | .features | keys[] ] | unique # Select all unique features from all workspace crates
-            | join(",") # Construct a comma-separated string of features for passing to `cargo`
+            [ ( .workspace_members | sort ) as $package_ids
+            | .packages[] | select( IN(.id; $package_ids[]) ) | .features | keys[] ] | unique
+            | select( . != "mysql" and . != "postgres" )
+            | join(",")
     ')"
 
     set -x
-    cargo clippy {{ check_flags }} --features "${FEATURES}"  {{ FLAGS }}
+    cargo clippy {{ check_flags }} --features "${FEATURES},mysql"  {{ FLAGS }}
+    cargo clippy {{ check_flags }} --features "${FEATURES},postgres"  {{ FLAGS }}
     set +x
 alias c := check
 
@@ -33,13 +35,15 @@ check *FLAGS:
 
     FEATURES="$(cargo metadata --all-features --format-version 1 --no-deps | \
         jq -r '
-            [ ( .workspace_members | sort ) as $package_ids # Store workspace crate package IDs in `package_ids` array
-            | .packages[] | select( IN(.id; $package_ids[]) ) | .features | keys[] ] | unique # Select all unique features from all workspace crates
-            | join(",") # Construct a comma-separated string of features for passing to `cargo`
+            [ ( .workspace_members | sort ) as $package_ids
+            | .packages[] | select( IN(.id; $package_ids[]) ) | .features | keys[] ] | unique
+            | select( . != "mysql" and . != "postgres" )
+            | join(",")
     ')"
 
     set -x
-    cargo check {{ check_flags }} --features "${FEATURES}" {{ FLAGS }}
+    cargo check {{ check_flags }} --features "${FEATURES},mysql"  {{ FLAGS }}
+    cargo check {{ check_flags }} --features "${FEATURES},postgres"  {{ FLAGS }}
     set +x
 alias cl := clippy
 
