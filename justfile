@@ -18,14 +18,16 @@ clippy *FLAGS:
     FEATURES="$(cargo metadata --all-features --format-version 1 --no-deps | \
         jq -r '
             [ ( .workspace_members | sort ) as $package_ids
-            | .packages[] | select( IN(.id; $package_ids[]) ) | .features | keys[] | select( . != "mysql" and . != "postgres") ]
+                | .packages[] | select( IN(.id; $package_ids[]) ) | .features | keys[] 
+                | select( . != "mysql" and . != "postgres" and . != "default" and . != "release") 
+            ]
             | unique
             | join(",")
     ')"
 
     set -x
-    cargo clippy {{ check_flags }} --features "${FEATURES},mysql"  {{ FLAGS }}
-    cargo clippy {{ check_flags }} --features "${FEATURES},postgres"  {{ FLAGS }}
+    cargo clippy {{ check_flags }} --features "${FEATURES},mysql,default,release"  {{ FLAGS }}
+    cargo clippy --no-default-features --features "${FEATURES},postgres"  {{ FLAGS }}
     set +x
 alias c := check
 
@@ -36,14 +38,16 @@ check *FLAGS:
     FEATURES="$(cargo metadata --all-features --format-version 1 --no-deps | \
         jq -r '
             [ ( .workspace_members | sort ) as $package_ids
-            | .packages[] | select( IN(.id; $package_ids[]) ) | .features | keys[] | select( . != "mysql" and . != "postgres") ]
+                | .packages[] | select( IN(.id; $package_ids[]) ) | .features | keys[] 
+                | select( . != "mysql" and . != "postgres" and . != "default" and . != "release") 
+            ]
             | unique
             | join(",")
     ')"
 
     set -x
-    cargo check {{ check_flags }} --features "${FEATURES},mysql"  {{ FLAGS }}
-    cargo check {{ check_flags }} --features "${FEATURES},postgres"  {{ FLAGS }}
+    cargo check {{ check_flags }} --features "${FEATURES},mysql,default,release"  {{ FLAGS }}
+    cargo check --no-default-features --features "${FEATURES},postgres"  {{ FLAGS }}
     set +x
 alias cl := clippy
 
