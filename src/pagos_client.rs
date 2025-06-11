@@ -1,12 +1,7 @@
-use error_stack::ResultExt;
-use masking::ExposeInterface;
 use reqwest::header;
 
 use crate::{
-    app::TenantAppState,
-    error::ApiError,
-    logger,
-    types::pagos::PagosPanDetailsResponse,
+    app::TenantAppState, error::ApiError, logger, types::pagos::PagosPanDetailsResponse,
     utils::CustomResult,
 };
 
@@ -79,7 +74,7 @@ impl PagosApiClient {
                 .text()
                 .await
                 .map_err(PagosClientError::NetworkError)?;
-            logger::debug!(pagos_api_response_body = %body_text, "Pagos API successful response");
+
             Ok(serde_json::from_str::<PagosPanDetailsResponse>(&body_text)
                 .map_err(PagosClientError::DeserializationError)?)
         } else {
@@ -101,23 +96,14 @@ pub async fn fetch_pan_details_internal(
     app_state: &TenantAppState,
     card_isin: &str,
 ) -> CustomResult<PagosPanDetailsResponse, ApiError> {
-    let pagos_config = app_state
-        .config
-        .pagos_api
-        .as_ref()
-        .ok_or(error_stack::Report::new(
-            ApiError::ParsingError("Pagos API configuration not found"),
+    let pagos_client = app_state.pagos_client.as_ref().ok_or_else(|| {
+        error_stack::Report::new(ApiError::ParsingError(
+            "Pagos API client not initialized for tenant",
         ))
         .attach_printable(
-            "Pagos API configuration not found for tenant when fetching PAN details internally",
-        )?;
-
-    let pagos_client = PagosApiClient::new(
-        pagos_config.base_url.clone(),
-        pagos_config.api_key.clone().expose().clone(),
-    )
-    .change_context(ApiError::UnknownError)
-    .attach_printable("Failed to initialize Pagos API client during internal fetch")?;
+            "Pagos API client not available in TenantAppState when fetching PAN details",
+        )
+    })?;
 
     pagos_client.get_pan_details(card_isin).await.map_err(|e| {
         logger::error!(error = %e, card_isin = %card_isin, "Failed to fetch PAN details from Pagos internally");

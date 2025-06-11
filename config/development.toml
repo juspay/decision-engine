@@ -200,4 +200,4 @@ merchant_category_code_0001.star = { percentage = 1.63, fixed_amount = 0.15 }
 [pagos_api]
 base_url = "https://parrot.prod.pagosapi.com" # Pagos API base URL
 api_key = "your_pagos_api_key_here"           # Your Pagos API Key (sensitive, manage securely)
-use_api_for_co_badged_lookup = true           # Set to true to use Pagos API for co-badged card info, false for DB lookup
+use_api_for_co_badged_lookup = false           # Set to true to use Pagos API for co-badged card info, false for DB lookup

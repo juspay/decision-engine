@@ -240,6 +240,8 @@ pub enum NETWORK {
     RUPAY,
     #[serde(alias = "mastercard", alias = "Mastercard")]
     MASTERCARD,
+    #[serde(alias = "discover", alias = "Discover")]
+    DISCOVER,
     #[serde(alias = "star", alias = "Star")]
     STAR,
     #[serde(alias = "pulse", alias = "Pulse")]

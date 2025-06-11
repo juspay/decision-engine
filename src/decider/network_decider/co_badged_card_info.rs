@@ -1,5 +1,6 @@
 use crate::app;
 use crate::{
+    types::pagos,
     decider::{gatewaydecider, network_decider::types, storage::utils::co_badged_card_info},
     error, logger, pagos_client,
     utils::CustomResult,
@@ -7,8 +8,8 @@ use crate::{
 use error_stack::ResultExt;
 
 fn get_parsed_bin_range_from_pagos(
-    pagos_card_details: &crate::types::pagos::PagosCardDetails,
-    additional_brand_info: Option<&crate::types::pagos::PagosAdditionalCardBrand>,
+    pagos_card_details: &pagos::PagosCardDetails,
+    additional_brand_info: Option<&pagos::PagosAdditionalCardBrand>,
     card_brand_to_parse: &str,
 ) -> CustomResult<(i64, i64), error::ApiError> {
     let (bin_min_str_opt, bin_max_str_opt) = if let Some(brand_info_ref) = additional_brand_info {
@@ -58,8 +59,8 @@ fn get_parsed_bin_range_from_pagos(
 }
 
 fn try_convert_pagos_card_to_domain_data(
-    pagos_card_details: &crate::types::pagos::PagosCardDetails,
-    additional_brand_info: Option<&crate::types::pagos::PagosAdditionalCardBrand>,
+    pagos_card_details: &pagos::PagosCardDetails,
+    additional_brand_info: Option<&pagos::PagosAdditionalCardBrand>,
     card_brand_to_parse: &str,
 ) -> CustomResult<types::CoBadgedCardInfoDomainData, error::ApiError> {
     let parsed_network = card_brand_to_parse

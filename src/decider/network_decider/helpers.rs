@@ -156,7 +156,8 @@ impl gateway_decider_types::NETWORK {
             | gateway_decider_types::NETWORK::AMEX
             | gateway_decider_types::NETWORK::DINERS
             | gateway_decider_types::NETWORK::RUPAY
-            | gateway_decider_types::NETWORK::MASTERCARD => true,
+            | gateway_decider_types::NETWORK::MASTERCARD
+            | gateway_decider_types::NETWORK::DISCOVER => true,
             gateway_decider_types::NETWORK::STAR
             | gateway_decider_types::NETWORK::PULSE
             | gateway_decider_types::NETWORK::ACCEL
