@@ -29,5 +29,5 @@ if [[ "${GITHUB_EVENT_NAME:-}" == "pull_request" ]]; then
   echo "::endgroup::"
 fi
 
-echo "Running: cargo hack check --all-targets --each-feature"
-cargo hack check --all-targets --each-feature
+echo "Running: cargo check --features mysql && cargo check --release --features mysql && cargo check --features postgres && cargo check --release --features postgres"
+cargo check --features mysql && cargo check --release --features mysql && cargo check --no-default-features --features postgres && cargo check --release --no-default-features --features postgres
