@@ -155,7 +155,7 @@ helm delete my-release
 | `dbMigration.enabled`                     | Enable database migration                                  | `true`          |
 | `dbMigration.postgresql.enabled`          | Enable PostgreSQL migration                                | `true`          |
 | `dbMigration.postgresql.image.repository` | PostgreSQL migration image repository                      | `"postgres"`    |
-| `dbMigration.postgresql.image.version`        | PostgreSQL migration image tag                             | `"latest"`      |
+| `dbMigration.postgresql.image.tag`        | PostgreSQL migration image tag                             | `"latest"`      |
 | `dbMigration.postgresql.image.pullPolicy` | PostgreSQL migration image pull policy                     | `"IfNotPresent"` |
 | `dbMigration.postgresql.migrations.path`  | PostgreSQL migrations path                                 | `"/app/migrations_pg"` |
 | `dbMigration.postgresql.initSqlScript`    | PostgreSQL initial SQL script                              | `"-- This will be the initial migration script"` |
@@ -167,7 +167,7 @@ helm delete my-release
 |------------------------------------------|------------------------------------------------------------|-----------------|
 | `routingConfig.enabled`                  | Enable routing config job                                  | `true`          |
 | `routingConfig.image.repository`         | Routing config image repository                            | `"python"`      |
-| `routingConfig.image.version`                | Routing config image tag                                   | `"3.10-slim"`   |
+| `routingConfig.image.tag`                | Routing config image tag                                   | `"3.10-slim"`   |
 | `routingConfig.image.pullPolicy`         | Routing config image pull policy                           | `"IfNotPresent"` |
 | `routingConfig.command`                  | Routing config command                                     | `["bash", "run_setup.sh"]` |
 | `routingConfig.configVolume.enabled`     | Enable routing config volume                               | `true`          |
