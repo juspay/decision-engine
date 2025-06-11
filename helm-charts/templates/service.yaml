@@ -4,6 +4,7 @@ metadata:
   name: {{ include "decision-engine.fullname" . }}
   labels:
     {{- include "decision-engine.labels" . | nindent 4 }}
+    app.kubernetes.io/component: decision-engine
 spec:
   type: {{ .Values.service.type }}
   ports:
@@ -13,3 +14,4 @@ spec:
       name: http
   selector:
     {{- include "decision-engine.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: decision-engine
