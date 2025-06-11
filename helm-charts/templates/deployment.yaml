@@ -4,13 +4,13 @@ metadata:
   name: {{ include "decision-engine.fullname" . }}
   labels:
     {{- include "decision-engine.labels" . | nindent 4 }}
-    app.kubernetes.io/component: decision-engine
+    app.kubernetes.io/component: {{ .Values.decisionEngine.metadata.labels.component }}
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
       {{- include "decision-engine.selectorLabels" . | nindent 6 }}
-      app.kubernetes.io/component: decision-engine
+      app.kubernetes.io/component: {{ .Values.decisionEngine.metadata.labels.component }}
   template:
     metadata:
       {{- with .Values.podAnnotations }}
@@ -19,7 +19,7 @@ spec:
       {{- end }}
       labels:
         {{- include "decision-engine.selectorLabels" . | nindent 8 }}
-        app.kubernetes.io/component: decision-engine
+        app.kubernetes.io/component: {{ .Values.decisionEngine.metadata.labels.component }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
