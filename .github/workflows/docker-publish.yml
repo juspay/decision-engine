@@ -4,9 +4,6 @@ on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
       ref:
@@ -175,11 +172,6 @@ jobs:
             ghcr.io/${{ github.repository }}/postgres:${{ env.SHORT_SHA }}-linux-amd64 \
             ghcr.io/${{ github.repository }}/postgres:${{ env.SHORT_SHA }}-linux-arm64
 
-      - name: Delete temporary images
-        run: |
-          docker rmi ghcr.io/${{ github.repository }}/postgres:${{ env.SHORT_SHA }}-linux-amd64
-          docker rmi ghcr.io/${{ github.repository }}/postgres:${{ env.SHORT_SHA }}-linux-arm64
-
   create-manifest:
     needs: [build-and-push-dockerfile]
     runs-on: ubuntu-latest
@@ -213,11 +205,6 @@ jobs:
           docker buildx imagetools create --tag ghcr.io/${{ github.repository }}:${{ env.SHORT_SHA }} \
             ghcr.io/${{ github.repository }}:${{ env.SHORT_SHA }}-linux-amd64 \
             ghcr.io/${{ github.repository }}:${{ env.SHORT_SHA }}-linux-arm64
-
-      - name: Delete temporary images
-        run: |
-          docker rmi ghcr.io/${{ github.repository }}:${{ env.SHORT_SHA }}-linux-amd64
-          docker rmi ghcr.io/${{ github.repository }}:${{ env.SHORT_SHA }}-linux-arm64
 
   build-and-push-groovy-dockerfile:
     runs-on: ubuntu-latest
