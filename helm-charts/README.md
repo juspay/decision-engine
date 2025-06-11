@@ -78,7 +78,7 @@ helm delete my-release
 |---------------------|---------------------------------------------------------------------------------------|-----------------|
 | `replicaCount`      | Number of Decision Engine replicas                                                    | `1`             |
 | `image.repository`  | Decision Engine image repository                                                      | `decision-engine` |
-| `image.tag`         | Decision Engine image tag                                                             | `latest`        |
+| `image.version`         | Decision Engine image tag                                                             | `latest`        |
 | `image.pullPolicy`  | Decision Engine image pull policy                                                     | `Always`        |
 | `imagePullSecrets`  | Image pull secrets                                                                    | `[]`            |
 | `nameOverride`      | Override the name of the chart                                                        | `""`            |
@@ -137,7 +137,7 @@ helm delete my-release
 |-----------------------------------------|------------------------------------------------------------|-----------------|
 | `groovyRunner.enabled`                  | Deploy Groovy Runner                                       | `true`          |
 | `groovyRunner.image.repository`         | Groovy Runner image repository                             | `"groovy-runner"` |
-| `groovyRunner.image.tag`                | Groovy Runner image tag                                    | `"latest"`      |
+| `groovyRunner.image.version`                | Groovy Runner image tag                                    | `"latest"`      |
 | `groovyRunner.image.pullPolicy`         | Groovy Runner image pull policy                            | `"Always"`      |
 | `groovyRunner.service.port`             | Groovy Runner service port                                 | `8085`          |
 | `groovyRunner.resources`                | Groovy Runner resources                                    | `{}`            |
@@ -155,7 +155,7 @@ helm delete my-release
 | `dbMigration.enabled`                     | Enable database migration                                  | `true`          |
 | `dbMigration.postgresql.enabled`          | Enable PostgreSQL migration                                | `true`          |
 | `dbMigration.postgresql.image.repository` | PostgreSQL migration image repository                      | `"postgres"`    |
-| `dbMigration.postgresql.image.tag`        | PostgreSQL migration image tag                             | `"latest"`      |
+| `dbMigration.postgresql.image.version`        | PostgreSQL migration image tag                             | `"latest"`      |
 | `dbMigration.postgresql.image.pullPolicy` | PostgreSQL migration image pull policy                     | `"IfNotPresent"` |
 | `dbMigration.postgresql.migrations.path`  | PostgreSQL migrations path                                 | `"/app/migrations_pg"` |
 | `dbMigration.postgresql.initSqlScript`    | PostgreSQL initial SQL script                              | `"-- This will be the initial migration script"` |
@@ -167,7 +167,7 @@ helm delete my-release
 |------------------------------------------|------------------------------------------------------------|-----------------|
 | `routingConfig.enabled`                  | Enable routing config job                                  | `true`          |
 | `routingConfig.image.repository`         | Routing config image repository                            | `"python"`      |
-| `routingConfig.image.tag`                | Routing config image tag                                   | `"3.10-slim"`   |
+| `routingConfig.image.version`                | Routing config image tag                                   | `"3.10-slim"`   |
 | `routingConfig.image.pullPolicy`         | Routing config image pull policy                           | `"IfNotPresent"` |
 | `routingConfig.command`                  | Routing config command                                     | `["bash", "run_setup.sh"]` |
 | `routingConfig.configVolume.enabled`     | Enable routing config volume                               | `true`          |
