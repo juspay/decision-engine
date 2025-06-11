@@ -2,7 +2,7 @@
 
 db_user := env_var_or_default('DB_USER', 'db_user')
 db_password := env_var_or_default('DB_PASSWORD', 'db_pass')
-db_host := env_var_or_default('DB_HOST', 'postgresql')
+db_host := env_var_or_default('DB_HOST', 'localhost')
 db_port := env_var_or_default('DB_PORT', '5432')
 db_name := env_var_or_default('DB_NAME', 'decision_engine_db')
 default_db_url := 'postgresql://' + db_user + ':' + db_password + '@' + db_host + ':' + db_port + '/' + db_name

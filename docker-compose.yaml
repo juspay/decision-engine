@@ -195,6 +195,7 @@ services:
         condition: service_healthy
     environment:
       - PGPASSWORD=db_pass
+      - DATABASE_URL=postgresql://db_user:db_pass@postgresql:5432/decision_engine_db
     volumes:
       - .:/app
     working_dir: /app
