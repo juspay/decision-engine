@@ -5,7 +5,6 @@ use axum::{
 };
 use axum_server::{tls_rustls::RustlsConfig, Handle};
 use error_stack::ResultExt;
-use masking::ExposeInterface;
 use std::sync::Arc;
 use tokio::signal::unix::{signal, SignalKind};
 use tower_http::trace as tower_trace;
@@ -71,14 +70,11 @@ impl TenantAppState {
             .expect("Failed to create Redis connection Pool");
 
         let pagos_client = if let Some(pagos_conf) = &tenant_config.pagos_api {
-            Some(
-                PagosApiClient::new(
-                    pagos_conf.base_url.clone(),
-                    pagos_conf.api_key.clone().expose().clone(),
-                )
-                .change_context(error::ConfigurationError::PagosClientSetupError)
-                .attach_printable("Failed to initialize Pagos API client during TenantAppState creation")?,
-            )
+            Some(PagosApiClient::new(
+                api_client.clone(),
+                pagos_conf.base_url.clone(),
+                pagos_conf.api_key.clone(),
+            ))
         } else {
             None
         };
