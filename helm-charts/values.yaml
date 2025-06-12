@@ -105,7 +105,9 @@ decisionEngine:
     clientIdleTimeout: 90
     poolMaxIdlePerHost: 10
     identity: ""
-
+  metadata:
+    labels:
+      component: decision-engine
 
 # MySQL configuration (used when decisionEngine.useMySQL is true)
 mysql:
@@ -162,6 +164,9 @@ groovyRunner:
     periodSeconds: 5
     timeoutSeconds: 5
     failureThreshold: 5
+  metadata:
+    labels:
+      component: groovy-runner
 
 # Database Migration Job
 dbMigration:

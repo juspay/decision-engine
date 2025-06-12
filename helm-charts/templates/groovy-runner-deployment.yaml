@@ -5,18 +5,18 @@ metadata:
   name: {{ include "decision-engine.groovyRunnerName" . }}
   labels:
     {{- include "decision-engine.labels" . | nindent 4 }}
-    app.kubernetes.io/component: groovy-runner
+    app.kubernetes.io/component: {{ .Values.groovyRunner.metadata.labels.component }}
 spec:
   replicas: 1
   selector:
     matchLabels:
       {{- include "decision-engine.selectorLabels" . | nindent 6 }}
-      app.kubernetes.io/component: groovy-runner
+      app.kubernetes.io/component: {{ .Values.groovyRunner.metadata.labels.component }}
   template:
     metadata:
       labels:
         {{- include "decision-engine.selectorLabels" . | nindent 8 }}
-        app.kubernetes.io/component: groovy-runner
+        app.kubernetes.io/component: {{ .Values.groovyRunner.metadata.labels.component }}
       annotations:
     spec:
       {{- with .Values.imagePullSecrets }}
