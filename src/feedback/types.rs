@@ -7,11 +7,11 @@ use serde::{Deserialize, Serialize};
 use time::PrimitiveDateTime;
 // use database::beam as B;
 // use chrono::{Local, Utc};
-use std::string::String;
 use crate::types::gateway as ETG;
-use crate::types::txn_details::types::{Offset, TxnStatus};
 use crate::types::payment::payment_method::PaymentMethodType;
-use time::{OffsetDateTime};
+use crate::types::txn_details::types::{Offset, TxnStatus};
+use std::string::String;
+use time::OffsetDateTime;
 // use eulerhs::types::MeshError;
 
 // // Converted type synonyms
@@ -235,13 +235,18 @@ pub enum TxnObjectType {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct UpdateScorePayload{
+pub struct UpdateScorePayload {
     pub merchantId: String,
     pub gateway: String,
     pub gatewayReferenceId: Option<String>,
     pub status: TxnStatus,
     pub paymentId: String,
     pub enforceDynamicRoutingFailure: Option<bool>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct UpdateScoreResponse {
+    pub message: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

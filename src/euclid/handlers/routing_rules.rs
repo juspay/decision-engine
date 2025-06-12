@@ -8,11 +8,15 @@ use crate::euclid::{
     },
     utils::{generate_random_id, is_valid_enum_value, validate_routing_rule},
 };
+#[cfg(feature = "mysql")]
+use crate::storage::schema::routing_algorithm::dsl;
+#[cfg(feature = "postgres")]
+use crate::storage::schema_pg::routing_algorithm::dsl;
+
 use crate::euclid::{
     errors::EuclidErrors,
     types::{RoutingAlgorithmMapper, RoutingAlgorithmMapperUpdate},
 };
-use crate::storage::schema::routing_algorithm::dsl;
 use crate::{euclid::types::RoutingAlgorithm, logger};
 use axum::{extract::Path, Json};
 use diesel::{associations::HasTable, ExpressionMethods};
@@ -30,22 +34,32 @@ pub async fn routing_create(
     let config: RoutingRule = serde_json::from_value(payload.clone())
         .change_context(EuclidErrors::InvalidRuleConfiguration)?;
 
-    logger::debug!("Received routing config: {}", config.name);
+    logger::debug!("Received routing config: {:?}", config);
 
     validate_routing_rule(&config, &state.config.routing_config)?;
 
     let utc_date_time = time::OffsetDateTime::now_utc();
     let timestamp = time::PrimitiveDateTime::new(utc_date_time.date(), utc_date_time.time());
     let data = serde_json::to_value(config.algorithm.clone());
-    let algorithm_id = generate_random_id("routing");
+
+    // To support migration of Hyperswitch created rules
+    let algorithm_id = if let Some(id) = config.rule_id {
+        id
+    } else {
+        generate_random_id("routing")
+    };
+
     if let Ok(data) = data {
         let new_algo = RoutingAlgorithm {
             id: algorithm_id.clone(),
             created_by: config.created_by,
             name: config.name.clone(),
-            description: Some(config.description),
+            description: config.description,
+            #[cfg(feature = "mysql")]
             metadata: Some(serde_json::to_string(&config.metadata)
             .change_context(EuclidErrors::FailedToSerializeJsonToString)?),
+            #[cfg(feature = "postgres")]
+            metadata: config.metadata.clone(),
             algorithm_data: serde_json::to_string(&data)
                 .change_context(EuclidErrors::FailedToSerializeJsonToString)?,
             created_at: timestamp,
@@ -54,17 +68,25 @@ pub async fn routing_create(
 
         crate::generics::generic_insert(&state.db, new_algo)
             .await
-            .map_err(|_| ContainerError::from(EuclidErrors::StorageError))?;
+            .map_err(|e|  {
+                logger::error!("{:?}",e);
+                ContainerError::from(EuclidErrors::StorageError)
+            }
+            )?;
 
         let response =
             RoutingDictionaryRecord::new(algorithm_id, config.name, timestamp, timestamp);
+        logger::info!("Response: {response:?}");
         Ok(Json(response))
     } else {
         Err(ContainerError::from(EuclidErrors::StorageError))
     }
 }
 
+#[cfg(feature = "mysql")]
 use crate::storage::schema::routing_algorithm_mapper::dsl as mapper_dsl;
+#[cfg(feature = "postgres")]
+use crate::storage::schema_pg::routing_algorithm_mapper::dsl as mapper_dsl;
 pub async fn activate_routing_rule(
     Json(payload): Json<ActivateRoutingConfigRequest>,
 ) -> Result<(), ContainerError<EuclidErrors>> {
@@ -213,10 +235,15 @@ pub async fn routing_evaluate(
         <RoutingAlgorithm as HasTable>::Table,
         _,
         RoutingAlgorithm,
-    >(&state.db, dsl::id.eq(active_routing_algorithm_id))
+    >(&state.db, dsl::id.eq(active_routing_algorithm_id.clone()))
     .await
+    .map_err(|e| {
+        logger::error!(?e, "Failed to fetch RoutingAlgorithm for ID {:?}", active_routing_algorithm_id);
+        e
+    })
     .change_context(EuclidErrors::StorageError)?;
 
+    logger::debug!("Fetched routing algorithm: {:?}", algorithm);
     let program: ast::Program = serde_json::from_str(&algorithm.algorithm_data)
         .map_err(|_| EuclidErrors::InvalidRequest("Invalid algorithm data format".into()))?;
 
@@ -246,6 +273,7 @@ pub async fn routing_evaluate(
         evaluated_output: interpreter_result.evaluated_output.clone(),
         eligible_connectors,
     };
+    logger::info!("Response: {response:?}");
 
     Ok(Json(response))
 }

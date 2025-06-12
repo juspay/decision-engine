@@ -5,10 +5,9 @@ Follow the steps below to set up and run the project locally.
 ## 1. Clone the Repository
 
 ```bash
-git clone {repo-url}
-cd {repo-directory}/crates/open-router
+git clone https://github.com/juspay/decision-engine.git
+cd decision-engine
 ```
-
 ---
 
 ## 2. Install Docker
@@ -30,6 +29,11 @@ If you're setting up the environment for the first time, run:
 
 ```bash
 make init
+```
+
+To build it with postgres DB use this instead
+```
+make init-pg
 ```
 
 This command performs the following under the hood:
@@ -184,7 +188,7 @@ curl --location 'http://localhost:8080/update-gateway-score' \
 
 ## Configuration Options
 
-### 1. Priority Logic (PL) to be updated in this (file)[https://github.com/juspay/decision-engine/blob/main/crates/open-router/routing-config/priority_logic.txt]
+### 1. Priority Logic (PL) to be updated in this file - [https://github.com/juspay/decision-engine/blob/main/routing-config/priority_logic.txt]
 
 ```groovy
 def priorities = ['A','B','C','D','E'] // Default priorities if no rule matches
@@ -213,8 +217,7 @@ else {
 }
 ```
 
-### 2. SR and ER routing configs to be update in this (file)[https://github.com/juspay/decision-engine/blob/main/crates/open-router/routing-config/config.yaml]
-
+### 2. SR and ER routing configs to be update in this file - [https://github.com/juspay/decision-engine/blob/main/routing-config/config.yaml]
 ```yaml
 merchant_id: test_merchant1
 priority_logic:

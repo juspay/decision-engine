@@ -13,11 +13,17 @@ docker-it-run:
 init:
 	docker-compose run --rm db-migrator && docker-compose up open-router
 
+init-pg:
+	docker-compose run --rm db-migrator-postgres && docker-compose up open-router-pg
+	
 run:
 	docker-compose up open-router
 
 init-local:
 	docker-compose run --rm db-migrator && docker-compose up --build open-router-local
+
+init-local-pg:
+	docker-compose run --rm db-migrator-postgres && docker-compose up --build open-router-local
 
 run-local:
 	docker-compose up open-router-local

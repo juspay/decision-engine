@@ -9,7 +9,10 @@ use crate::decider::gatewaydecider::types::{
 use crate::logger;
 use crate::merchant_config_util::{isMerchantEnabledForPaymentFlows, isPaymentFlowEnabledWithHierarchyCheck};
 use crate::redis::types::ServiceConfigKey;
+#[cfg(feature = "mysql")]
 use crate::storage::schema::txn_detail;
+#[cfg(feature = "postgres")]
+use crate::storage::schema_pg::txn_detail;
 use crate::types::gateway_routing_input::{
     EliminationLevel, EliminationSuccessRateInput, GatewaySuccessRateBasedRoutingInput,
     GatewayWiseSuccessRateBasedRoutingInput, GlobalGatewayScore, GlobalScore, GlobalScoreLog,
@@ -2870,6 +2873,7 @@ pub async fn reset_gateway_score(
             };
             let elapsed_time = current_timestamp.saturating_sub(reset_cached_gateway_score.timestamp as u128);
             let remaining_ttl = (reset_gateway_input.hardTtl as u128).saturating_sub(elapsed_time);
+            #[allow(clippy::absurd_extreme_comparisons)]
             let safe_remaining_ttl = if remaining_ttl < 0 { reset_gateway_input.hardTtl as i64} else { remaining_ttl as i64 };
             let result = Utils::writeToCacheWithTTL(key.clone(), reset_cached_gateway_score.clone(), safe_remaining_ttl).await;
             match result {

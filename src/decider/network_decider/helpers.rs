@@ -85,14 +85,18 @@ impl types::CoBadgedCardRequest {
 
         logger::debug!("Total fees per debit network: {:?}", networks);
 
-        let sorted_networks = sort_networks(networks);
+        let sorted_networks = sort_networks(networks.clone());
+
+        let saving_percentage =
+            calculate_and_round_saving_percentage(&sorted_networks, &networks, amount);
 
         Some(types::DebitRoutingOutput {
-            co_badged_card_networks: sorted_networks,
+            co_badged_card_networks: sorted_networks.clone(),
             issuer_country: co_badged_card_info.issuer_country,
             is_regulated: co_badged_card_info.is_regulated,
             regulated_name: co_badged_card_info.regulated_name,
             card_type: co_badged_card_info.card_type.clone(),
+            saving_percentage,
         })
     }
 
@@ -147,6 +151,56 @@ pub fn sort_networks(
         .into_iter()
         .map(|(network, _fee)| network)
         .collect()
+}
+
+// Helper function to calculate and round the saving percentage
+fn calculate_and_round_saving_percentage(
+    sorted_network_types: &[gateway_decider_types::NETWORK],
+    network_costs: &[(gateway_decider_types::NETWORK, f64)],
+    transaction_amount: f64,
+) -> f64 {
+    let mut saving_percentage_value: f64 = 0.0;
+
+    if !sorted_network_types.is_empty() {
+        let first_chosen_network = sorted_network_types[0].clone();
+
+        if first_chosen_network.is_global_network() {
+            // If the first network is already global, savings are 0.
+            // saving_percentage_value is already 0.0
+        } else {
+            // The first network is not global, try to find a global one for comparison.
+            let cost_first_opt = network_costs
+                .iter()
+                .find(|(n, _)| *n == first_chosen_network)
+                .map(|(_, cost)| *cost);
+
+            let global_network_for_comparison_opt = sorted_network_types
+                .iter()
+                .find(|n_type| n_type.is_global_network());
+
+            if let (Some(cost_first), Some(global_network_type)) =
+                (cost_first_opt, global_network_for_comparison_opt)
+            {
+                let cost_global_for_comparison_opt = network_costs
+                    .iter()
+                    .find(|(n, _)| *n == *global_network_type)
+                    .map(|(_, cost)| *cost);
+
+                if let Some(cost_global) = cost_global_for_comparison_opt {
+                    let difference = cost_global - cost_first;
+                    if transaction_amount > 0.0 {
+                        let raw_percentage = (difference / transaction_amount) * 100.0;
+
+                        // Round to 2 decimal places
+                        saving_percentage_value = (raw_percentage * 100.0).round() / 100.0;
+                    }
+                }
+            }
+        }
+    }
+
+    // sorted_network_types is empty, percentage remains 0.0
+    saving_percentage_value
 }
 
 impl gateway_decider_types::NETWORK {

@@ -1,0 +1,68 @@
+{{- if .Values.groovyRunner.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "decision-engine.groovyRunnerName" . }}
+  labels:
+    {{- include "decision-engine.labels" . | nindent 4 }}
+    app.kubernetes.io/component: groovy-runner
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "decision-engine.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: groovy-runner
+  template:
+    metadata:
+      labels:
+        {{- include "decision-engine.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: groovy-runner
+      annotations:
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "decision-engine.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: groovy-runner
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.groovyRunner.image.repository }}:{{ .Values.groovyRunner.image.version | default "latest" }}"
+          imagePullPolicy: {{ .Values.groovyRunner.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.groovyRunner.service.port }}
+              protocol: TCP
+          {{- if .Values.groovyRunner.healthcheck.enabled }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.groovyRunner.healthcheck.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.groovyRunner.healthcheck.initialDelaySeconds }}
+            periodSeconds: {{ .Values.groovyRunner.healthcheck.periodSeconds }}
+            timeoutSeconds: {{ .Values.groovyRunner.healthcheck.timeoutSeconds }}
+            failureThreshold: {{ .Values.groovyRunner.healthcheck.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.groovyRunner.healthcheck.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.groovyRunner.healthcheck.initialDelaySeconds }}
+            periodSeconds: {{ .Values.groovyRunner.healthcheck.periodSeconds }}
+            timeoutSeconds: {{ .Values.groovyRunner.healthcheck.timeoutSeconds }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.groovyRunner.resources | nindent 12 }}
+      nodeSelector:
+        kubernetes.io/arch: arm64
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

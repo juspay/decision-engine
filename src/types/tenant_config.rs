@@ -12,7 +12,10 @@ use crate::storage::types::TenantConfig as DBTenantConfig;
 // use ghc::generics::Generic;
 // use ghc::typelits::KnownSymbol;
 // use named::*;
+#[cfg(feature = "mysql")]
 use crate::storage::schema::tenant_config::dsl;
+#[cfg(feature = "postgres")]
+use crate::storage::schema_pg::tenant_config::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
 use std::option::Option;

@@ -5,7 +5,10 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BankCodeId(pub i64);
+#[cfg(feature = "mysql")]
 use crate::storage::{schema::juspay_bank_code::dsl, types::JuspayBankCode as DBBankCode};
+#[cfg(feature = "postgres")]
+use crate::storage::{schema_pg::juspay_bank_code::dsl, types::JuspayBankCode as DBBankCode};
 
 pub fn to_bank_code_id(id: i64) -> BankCodeId {
     BankCodeId(id)

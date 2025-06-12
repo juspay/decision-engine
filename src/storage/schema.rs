@@ -498,7 +498,7 @@ diesel::table! {
         id -> Text,
         created_by -> Text,
         name -> Text,
-        description -> Nullable<Text>,
+        description -> Text,
         algorithm_data -> Text,
         metadata -> Nullable<Text>,
         created_at -> Timestamp,

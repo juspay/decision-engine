@@ -356,6 +356,7 @@ pub async fn get_co_badged_cards_info(
         fetch_co_badged_info_from_pagos_api(app_state, &card_isin).await
     } else {
         logger::debug!("Fetching co-badged card info from DB");
+        // Pad the card number to 19 digits to match the co-badged card bin length
         let card_number_str = CoBadgedCardInfoList::pad_card_number_to_19_digit(card_isin.clone());
         let parsed_number: i64 = card_number_str
             .parse::<i64>()

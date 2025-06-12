@@ -1,7 +1,11 @@
 use crate::decider::gatewaydecider::types::*;
 use crate::redis::feature::{isFeatureEnabled, isFeatureEnabledByDimension};
 use crate::redis::types::ServiceConfigKey;
+#[cfg(feature = "mysql")]
 use crate::storage::schema::txn_detail;
+#[cfg(feature = "postgres")]
+use crate::storage::schema_pg::txn_detail;
+
 use crate::types::bank_code::find_bank_code;
 use crate::types::card::vault_provider::VaultProvider;
 use crate::types::gateway_bank_emi_support::GatewayBankEmiSupport;

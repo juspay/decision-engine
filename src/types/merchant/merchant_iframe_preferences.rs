@@ -15,7 +15,10 @@ use std::option::Option;
 use std::string::String;
 // use named::Named;
 // use optics_core::review;
+#[cfg(feature = "mysql")]
 use crate::storage::schema::merchant_iframe_preferences::dsl;
+#[cfg(feature = "postgres")]
+use crate::storage::schema_pg::merchant_iframe_preferences::dsl;
 use crate::storage::types::BitBool;
 use diesel::associations::HasTable;
 use diesel::*;

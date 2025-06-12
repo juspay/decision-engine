@@ -24,7 +24,10 @@ use std::option::Option;
 use std::string::String;
 use std::vec::Vec;
 
+#[cfg(feature = "mysql")]
 use crate::storage::schema::gateway_card_info::dsl;
+#[cfg(feature = "postgres")]
+use crate::storage::schema_pg::gateway_card_info::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
 use diesel::dsl::sql;
@@ -184,10 +187,7 @@ pub async fn get_enabled_gateway_card_info_for_gateways(
         dsl::isin
             .eq_any(card_bins)
             .and(dsl::gateway.eq_any(gateway_strings))
-            .and(
-                sql::<Bool>("disabled = 0")
-                    .or(dsl::disabled.is_null()),
-            ),
+            .and(dsl::disabled.eq(BitBool(false)).or(dsl::disabled.is_null())),
     )
     .await
     {

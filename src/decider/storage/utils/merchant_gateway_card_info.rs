@@ -1,7 +1,17 @@
+#[cfg(feature = "mysql")]
 use crate::storage::schema::gateway_card_info as g_dsl;
+#[cfg(feature = "mysql")]
 use crate::storage::schema::juspay_bank_code as j_dsl;
 
+#[cfg(feature = "postgres")]
+use crate::storage::schema_pg::gateway_card_info as g_dsl;
+#[cfg(feature = "postgres")]
+use crate::storage::schema_pg::juspay_bank_code as j_dsl;
+
+#[cfg(feature = "mysql")]
 use crate::storage::schema::merchant_gateway_card_info as m_dsl;
+#[cfg(feature = "postgres")]
+use crate::storage::schema_pg::merchant_gateway_card_info as m_dsl;
 use crate::storage::types::BitBool;
 use crate::storage::types::{
     GatewayCardInfo as DBGatewayCardInfo, JuspayBankCode as DBJuspayBankCode,

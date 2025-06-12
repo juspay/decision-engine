@@ -15,7 +15,10 @@ use crate::storage::types::{BitBool, UserEligibilityInfo as DBUserEligibilityInf
 use crate::error::ApiError;
 use crate::types::payment_flow::PaymentFlow;
 
+#[cfg(feature = "mysql")]
 use crate::storage::schema::user_eligibility_info::dsl;
+#[cfg(feature = "postgres")]
+use crate::storage::schema_pg::user_eligibility_info::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
 
