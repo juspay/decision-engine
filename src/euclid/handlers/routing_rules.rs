@@ -1,5 +1,5 @@
 use crate::euclid::{
-    ast::{self, ComparisonType, Output, ValueType},
+    ast::{self, ComparisonType, ConnectorInfo, Output, ValueType},
     cgraph,
     interpreter::InterpreterBackend,
     types::{
@@ -322,15 +322,15 @@ fn format_output(output: &Output) -> Value {
 fn perform_eligibility_analysis(
     constraint_graph: &cgraph::ConstraintGraph,
     ctx: cgraph::CheckCtx,
-    output: &[String],
-) -> Vec<String> {
-    let mut eligible_connectors = Vec::<String>::with_capacity(output.len());
+    output: &[ConnectorInfo],
+) -> Vec<ConnectorInfo> {
+    let mut eligible_connectors = Vec::<ConnectorInfo>::with_capacity(output.len());
 
     for out in output {
         let clause = cgraph::Clause {
             key: "output".to_string(),
             comparison: ComparisonType::Equal,
-            value: ValueType::EnumVariant(out.clone()),
+            value: ValueType::EnumVariant(out.connector.clone()),
         };
 
         if let Ok(true) = constraint_graph.check_clause_validity(clause, &ctx) {

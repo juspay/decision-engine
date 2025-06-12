@@ -6,6 +6,8 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 
+use super::ast::ConnectorInfo;
+
 pub struct InterpreterBackend {
     _program: ast::Program,
 }
@@ -174,7 +176,7 @@ impl fmt::Display for RoutingError {
 impl Error for RoutingError {}
 type RoutingResult<T> = Result<T, RoutingError>;
 
-pub fn perform_volume_split(splits: Vec<VolumeSplit<String>>) -> RoutingResult<String> {
+pub fn perform_volume_split(splits: Vec<VolumeSplit<ConnectorInfo>>) -> RoutingResult<ConnectorInfo> {
     let weights: Vec<u8> = splits.iter().map(|sp| sp.split).collect();
     let weighted_index =
         WeightedIndex::new(weights).map_err(|_| RoutingError::VolumeSplitFailed)?;
@@ -187,8 +189,8 @@ pub fn perform_volume_split(splits: Vec<VolumeSplit<String>>) -> RoutingResult<S
 }
 
 pub fn perform_volume_split_priority(
-    splits: Vec<VolumeSplit<Vec<String>>>,
-) -> RoutingResult<Vec<String>> {
+    splits: Vec<VolumeSplit<Vec<ConnectorInfo>>>,
+) -> RoutingResult<Vec<ConnectorInfo>> {
     let weights: Vec<u8> = splits.iter().map(|sp| sp.split).collect();
     let weighted_index =
         WeightedIndex::new(weights).map_err(|_| RoutingError::VolumeSplitFailed)?;
@@ -200,7 +202,7 @@ pub fn perform_volume_split_priority(
         .ok_or(RoutingError::VolumeSplitFailed)
 }
 
-pub fn evaluate_output(output: &Output) -> RoutingResult<(Vec<String>, Vec<String>)> {
+pub fn evaluate_output(output: &Output) -> RoutingResult<(Vec<ConnectorInfo>, Vec<ConnectorInfo>)> {
     match output {
         Output::Priority(connectors) => {
             let first_connector = connectors.first().cloned();
