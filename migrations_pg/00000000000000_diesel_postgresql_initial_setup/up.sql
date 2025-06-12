@@ -54,7 +54,7 @@ CREATE TABLE merchant_priority_logic (
 DROP TABLE IF EXISTS tenant_config;
 CREATE TABLE tenant_config (
     id VARCHAR(255) PRIMARY KEY,
-    type VARCHAR(255) NOT NULL,
+    tenant_type VARCHAR(255) NOT NULL,
     module_key VARCHAR(255) NOT NULL,
     module_name VARCHAR(255) NOT NULL,
     tenant_account_id VARCHAR(255) NOT NULL,
@@ -111,15 +111,15 @@ CREATE TABLE gateway_payment_method_flow (
     gateway_bank_code TEXT,
     currency_configs TEXT,
     gateway_dsl TEXT,
-    non_combinable_flows TEXT,
-    country_code_alpha_3 TEXT,
+    non_combination_flows TEXT,
+    country_code_alpha3 TEXT,
     disabled BOOLEAN NOT NULL,
     payment_method_type TEXT
 );
 
 DROP TABLE IF EXISTS merchant_iframe_preferences;
 CREATE TABLE merchant_iframe_preferences (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     merchant_id TEXT NOT NULL,
     dynamic_switching_enabled BOOLEAN,
     isin_routing_enabled BOOLEAN,
@@ -130,7 +130,7 @@ CREATE TABLE merchant_iframe_preferences (
 
 DROP TABLE IF EXISTS token_bin_info;
 CREATE TABLE token_bin_info (
-    token_bin TEXT NOT NULL,
+    token_bin TEXT PRIMARY KEY,
     card_bin TEXT NOT NULL,
     provider TEXT NOT NULL,
     date_created TIMESTAMP,
@@ -404,7 +404,7 @@ CREATE TABLE routing_algorithm (
     id VARCHAR(255) PRIMARY KEY,
     created_by VARCHAR(255) NOT NULL,
     name VARCHAR(255) NOT NULL,
-    description TEXT,
+    description TEXT NOT NULL,
     algorithm_data TEXT NOT NULL,
     metadata JSONB,
     created_at TIMESTAMP NOT NULL,
