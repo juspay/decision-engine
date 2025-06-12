@@ -1,10 +1,224 @@
 use crate::app;
 use crate::{
+    types::pagos,
     decider::{gatewaydecider, network_decider::types, storage::utils::co_badged_card_info},
-    error, logger,
+    error, logger, pagos_client,
     utils::CustomResult,
 };
 use error_stack::ResultExt;
+
+fn get_parsed_bin_range_from_pagos(
+    pagos_card_details: &pagos::PagosCardDetails,
+    additional_brand_info: Option<&pagos::PagosAdditionalCardBrand>,
+    card_brand_to_parse: &str,
+) -> CustomResult<(i64, i64), error::ApiError> {
+    let (bin_min_str_opt, bin_max_str_opt) = if let Some(brand_info_ref) = additional_brand_info {
+        (
+            brand_info_ref.bin_min.as_ref(),
+            brand_info_ref.bin_max.as_ref(),
+        )
+    } else {
+        (
+            pagos_card_details.bin_min.as_ref(),
+            pagos_card_details.bin_max.as_ref(),
+        )
+    };
+
+    let final_bin_min: i64 = bin_min_str_opt
+        .ok_or_else(|| error::ApiError::ParsingError("Missing bin_min from Pagos response"))
+        .attach_printable_lazy(|| {
+            format!("Missing bin_min for card_brand: {}", card_brand_to_parse)
+        })?
+        .parse::<i64>()
+        .change_context(error::ApiError::ParsingError(
+            "Failed to parse bin_min from Pagos response to i64",
+        ))
+        .attach_printable_lazy(|| {
+            format!(
+                "Failed to parse bin_min for card_brand: {}",
+                card_brand_to_parse
+            )
+        })?;
+
+    let final_bin_max: i64 = bin_max_str_opt
+        .ok_or_else(|| error::ApiError::ParsingError("Missing bin_max from Pagos response"))
+        .attach_printable_lazy(|| {
+            format!("Missing bin_max for card_brand: {}", card_brand_to_parse)
+        })?
+        .parse::<i64>()
+        .change_context(error::ApiError::ParsingError(
+            "Failed to parse bin_max from Pagos response to i64",
+        ))
+        .attach_printable_lazy(|| {
+            format!(
+                "Failed to parse bin_max for card_brand: {}",
+                card_brand_to_parse
+            )
+        })?;
+    Ok((final_bin_min, final_bin_max))
+}
+
+fn try_convert_pagos_card_to_domain_data(
+    pagos_card_details: &pagos::PagosCardDetails,
+    additional_brand_info: Option<&pagos::PagosAdditionalCardBrand>,
+    card_brand_to_parse: &str,
+) -> CustomResult<types::CoBadgedCardInfoDomainData, error::ApiError> {
+    let parsed_network = card_brand_to_parse
+        .parse::<gatewaydecider::types::NETWORK>()
+        .change_context(error::ApiError::ParsingError("NETWORK"))
+        .attach_printable_lazy(|| {
+            format!(
+                "Failed to parse card_brand from Pagos: {}",
+                card_brand_to_parse
+            )
+        })?;
+
+    let card_brand_is_additional = additional_brand_info.is_some();
+
+    let (final_bin_min, final_bin_max) = get_parsed_bin_range_from_pagos(
+        pagos_card_details,
+        additional_brand_info,
+        card_brand_to_parse,
+    )?;
+
+    let pan_or_token = pagos_card_details
+        .pan_or_token
+        .clone()
+        .ok_or_else(|| error::ApiError::ParsingError("Missing pan_or_token from Pagos response"))?;
+
+    Ok(types::CoBadgedCardInfoDomainData {
+        card_bin_min: final_bin_min,
+        card_bin_max: final_bin_max,
+        issuing_bank_name: pagos_card_details
+            .bank
+            .as_ref()
+            .and_then(|bank_details| bank_details.name.clone()),
+        card_network: parsed_network,
+        country_code: pagos_card_details
+            .country
+            .as_ref()
+            .and_then(|country_details| country_details.alpha2.clone()),
+        card_type: pagos_card_details
+            .card_type
+            .as_ref()
+            .and_then(|pagos_card_type| pagos_card_type.to_domain_card_type()),
+        regulated: pagos_card_details.cost.as_ref().and_then(|cost| {
+            cost.interchange
+                .as_ref()
+                .and_then(|interchange_details| interchange_details.regulated)
+        }),
+        regulated_name: pagos_card_details.cost.as_ref().and_then(|cost| {
+            cost.interchange
+                .as_ref()
+                .and_then(|interchange_details| interchange_details.regulated_name.clone())
+        }),
+        prepaid: pagos_card_details.prepaid,
+        reloadable: pagos_card_details.reloadable,
+        pan_or_token,
+        // Card bin length will be present for a successful Pagos response
+        // If the Pagos response does not provide bin_length, default to 0
+        // Setting bin_length to 0 is safe as it will not be used in the domain logic
+        card_bin_length: pagos_card_details.bin_length.unwrap_or(0),
+
+        // Bin provider bin length will be present for a successful Pagos response
+        // If the Pagos response does not provide pagos_bin_length, default to 0
+        // Setting pagos_bin_length to 0 is safe as it will not be used in the domain logic
+        bin_provider_bin_length: pagos_card_details.pagos_bin_length.unwrap_or(0),
+
+        card_brand_is_additional,
+        domestic_only: pagos_card_details.domestic_only,
+    })
+}
+
+async fn fetch_co_badged_info_from_db(
+    app_state: &app::TenantAppState,
+    parsed_card_number: i64,
+) -> CustomResult<Vec<types::CoBadgedCardInfoDomainData>, error::ApiError> {
+    let co_badged_card_infos_record =
+        co_badged_card_info::find_co_badged_cards_info_by_card_bin(app_state, parsed_card_number)
+            .await;
+
+    match co_badged_card_infos_record {
+        Err(error) => {
+            logger::error!(
+                "Error while fetching co-badged card info record from DB: {:?}",
+                error
+            );
+            Err(error::ApiError::UnknownError)
+                .attach_printable("Error while fetching co-badged card info record from DB")
+        }
+        Ok(co_badged_card_infos) => {
+            logger::debug!("Co-badged card info record retrieved successfully from DB");
+
+            let parsed_cards: Vec<types::CoBadgedCardInfoDomainData> = co_badged_card_infos
+                .into_iter()
+                .filter_map(|raw_co_badged_card_info| {
+                    match raw_co_badged_card_info.clone().try_into() {
+                        Ok(parsed) => Some(parsed),
+                        Err(error) => {
+                            logger::warn!(
+                                "Skipping co-badged card from DB with card_network = {:?} due to error: {}",
+                                raw_co_badged_card_info.card_network,
+                                error
+                            );
+                            None
+                        }
+                    }
+                })
+                .collect();
+            Ok(parsed_cards)
+        }
+    }
+}
+
+async fn fetch_co_badged_info_from_pagos_api(
+    app_state: &app::TenantAppState,
+    card_isin: &str,
+) -> CustomResult<Vec<types::CoBadgedCardInfoDomainData>, error::ApiError> {
+    match pagos_client::fetch_pan_details_internal(app_state, card_isin).await {
+        Ok(pagos_response) => {
+            logger::debug!(
+                ?pagos_response,
+                "Pagos PAN details fetched successfully internally"
+            );
+            let mut domain_data_list = Vec::new();
+
+            if let Some(primary_card_brand_str) = &pagos_response.card.card_brand {
+                match try_convert_pagos_card_to_domain_data(
+                    &pagos_response.card,
+                    None,
+                    primary_card_brand_str,
+                ) {
+                    Ok(primary_data) => domain_data_list.push(primary_data),
+                    Err(error) => {
+                        logger::error!("Error converting primary Pagos card details: {:?}", error);
+                        return Err(error);
+                    }
+                }
+            }
+
+            if let Some(additional_brands) = &pagos_response.card.additional_card_brands {
+                for brand_info in additional_brands {
+                    if let Some(additional_card_brand_str) = &brand_info.card_brand {
+                        match try_convert_pagos_card_to_domain_data(
+                            &pagos_response.card,
+                            Some(brand_info),
+                            additional_card_brand_str,
+                        ) {
+                            Ok(additional_data) => domain_data_list.push(additional_data),
+                            Err(error) => {
+                                logger::error!("Error converting additional Pagos card details for brand {}: {:?}", additional_card_brand_str, error);
+                                return Err(error);
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(domain_data_list)
+        }
+        Err(error) => Err(error),
+    }
+}
 
 pub struct CoBadgedCardInfoList(Vec<types::CoBadgedCardInfoDomainData>);
 
@@ -131,66 +345,54 @@ pub async fn get_co_badged_cards_info(
     app_state: &app::TenantAppState,
     card_isin: String,
 ) -> CustomResult<Option<types::CoBadgedCardInfoResponse>, error::ApiError> {
-    // Pad the card number to 19 digits to match the co-badged card bin length
-    let card_number_str = CoBadgedCardInfoList::pad_card_number_to_19_digit(card_isin);
+    let use_api_lookup = app_state
+        .config
+        .pagos_api
+        .as_ref()
+        .map_or(false, |pc| pc.use_api_for_co_badged_lookup);
 
-    let parsed_number: i64 = card_number_str
-        .parse::<i64>()
-        .change_context(error::ApiError::UnknownError)
-        .attach_printable(
-            "Failed to convert card number to integer in co-badged cards info flow",
-        )?;
+    let co_badged_cards_data_result = if use_api_lookup {
+        logger::debug!("Fetching co-badged card info from Pagos API");
+        fetch_co_badged_info_from_pagos_api(app_state, &card_isin).await
+    } else {
+        logger::debug!("Fetching co-badged card info from DB");
+        // Pad the card number to 19 digits to match the co-badged card bin length
+        let card_number_str = CoBadgedCardInfoList::pad_card_number_to_19_digit(card_isin.clone());
+        let parsed_number: i64 = card_number_str
+            .parse::<i64>()
+            .change_context(error::ApiError::UnknownError)
+            .attach_printable(
+                "Failed to convert card number to integer in co-badged cards info flow (DB path)",
+            )?;
+        fetch_co_badged_info_from_db(app_state, parsed_number).await
+    };
 
-    let co_badged_card_infos_record =
-        co_badged_card_info::find_co_badged_cards_info_by_card_bin(app_state, parsed_number).await;
-
-    let filtered_co_badged_card_info_list_optional = match co_badged_card_infos_record {
+    let co_badged_cards_data = match co_badged_cards_data_result {
+        Ok(data) => data,
         Err(error) => {
-            logger::error!(
-                "Error while fetching co-badged card info record: {:?}",
-                error
-            );
-            Err(error::ApiError::UnknownError)
-                .attach_printable("Error while fetching co-badged card info record")
+            logger::error!("Failed to fetch co-badged card info: {:?}", error);
+            return Err(error);
         }
-        Ok(co_badged_card_infos) => {
-            logger::debug!("Co-badged card info record retrieved successfully");
+    };
 
-            // Parse the co-badged card info records into domain data
-            let parsed_cards: Vec<types::CoBadgedCardInfoDomainData> = co_badged_card_infos
-                .into_iter()
-                .filter_map(|raw_co_badged_card_info| {
-                    match raw_co_badged_card_info.clone().try_into() {
-                        Ok(parsed) => Some(parsed),
-                        Err(error) => {
-                            logger::warn!(
-                                "Skipping co-badged card with card_network = {:?} due to error: {}",
-                                raw_co_badged_card_info.card_network,
-                                error
-                            );
-                            None
-                        }
-                    }
-                })
-                .collect();
+    if co_badged_cards_data.is_empty() {
+        logger::debug!("No co-badged card data found from the selected source.");
+        return Ok(None);
+    }
 
-            let co_badged_card_infos_list = CoBadgedCardInfoList(parsed_cards);
+    let co_badged_card_infos_list = CoBadgedCardInfoList(co_badged_cards_data);
 
-            let filtered_list_optional = co_badged_card_infos_list
-                .is_valid_length()
-                .then(|| {
-                    co_badged_card_infos_list
-                        .is_only_one_global_network_present()
-                        .then_some(co_badged_card_infos_list.filter_cards())
-                })
-                .flatten()
-                .and_then(|filtered_list| filtered_list.is_valid_length().then_some(filtered_list));
+    let filtered_list_optional = co_badged_card_infos_list
+        .is_valid_length()
+        .then(|| {
+            co_badged_card_infos_list
+                .is_only_one_global_network_present()
+                .then_some(co_badged_card_infos_list.filter_cards())
+        })
+        .flatten()
+        .and_then(|filtered_list| filtered_list.is_valid_length().then_some(filtered_list));
 
-            Ok(filtered_list_optional)
-        }
-    }?;
-
-    let co_badged_cards_info_response = filtered_co_badged_card_info_list_optional
+    let co_badged_cards_info_response = filtered_list_optional
         .map(|filtered_list| filtered_list.get_co_badged_cards_info_response())
         .transpose()
         .attach_printable("Failed to construct co-badged card info response")?;

@@ -17,11 +17,11 @@ tti = 7200          # Idle time after a get/insert of a cache entry to free the 
 max_capacity = 5000 # Max capacity of a single table cache
 
 [database]
-username = "sam"   # username for the database
-password = "damn"  # password of the database
-host = "localhost" # the host where the database is hosted on
-port = 5432        # the port of the database
-dbname = "open_router"  # the name of the database where the cards are stored
+username = "sam"       # username for the database
+password = "damn"      # password of the database
+host = "localhost"     # the host where the database is hosted on
+port = 5432            # the port of the database
+dbname = "open_router" # the name of the database where the cards are stored
 
 [secrets]
 open_router_private_key = "" # the open_router private key to used used and the private key present with the tenant
@@ -69,3 +69,8 @@ client_idle_timeout = 90    # timeout for idle sockets being kept-alive
 pool_max_idle_per_host = 10 # maximum idle connection per host allowed in the pool.
 identity = ""               # identity to be used for client certificate authentication in mtls.
 
+
+[pagos_api]
+base_url = "https://parrot.prod.pagosapi.com" # Corrected Pagos API base URL
+api_key = "your_pagos_api_key_here"           # Your Pagos API Key (sensitive, manage securely)
+use_api_for_co_badged_lookup = false          # Set to true to use Pagos API for co-badged card info, false for DB lookup (default)
