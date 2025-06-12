@@ -84,13 +84,13 @@ default_db_url := 'postgresql://' + db_user + ':' + db_password + '@' + db_host 
 database_url := env_var_or_default('DATABASE_URL', default_db_url)
 default_migration_params := ''
 
-v1_migration_dir := source_directory() / 'migrations_pg'
-v1_config_file_dir := source_directory() / 'diesel_pg.toml'
+pg_migration_dir := source_directory() / 'migrations_pg'
+pg_config_file_dir := source_directory() / 'diesel_pg.toml'
 
 default_operation := 'run'
 
 [private]
-run_migration operation=default_operation migration_dir=v1_migration_dir config_file_dir=v1_config_file_dir url=database_url *other_params=default_migration_params:
+run_migration operation=default_operation migration_dir=pg_migration_dir config_file_dir=pg_config_file_dir url=database_url *other_params=default_migration_params:
     diesel migration \
         --database-url '{{ url }}' \
         {{ operation }} \
@@ -99,7 +99,7 @@ run_migration operation=default_operation migration_dir=v1_migration_dir config_
         {{ other_params }}
 
 # Run database migrations for postgres
-migrate-pg operation=default_operation *args='': (run_migration operation v1_migration_dir v1_config_file_dir database_url args)
+migrate-pg operation=default_operation *args='': (run_migration operation pg_migration_dir pg_config_file_dir database_url args)
 
 # Drop database if exists and then create a new 'hyperswitch_db' Database
 resurrect database_name=db_name:
