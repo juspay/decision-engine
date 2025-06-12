@@ -30,11 +30,8 @@ spec:
         - name: groovy-runner
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
-          image: "{{ .Values.groovyRunner.image.repository }}:{{ .Values.groovyRunner.image.tag | default "latest" }}"
+          image: "{{ .Values.groovyRunner.image.repository }}:{{ .Values.groovyRunner.image.version | default "latest" }}"
           imagePullPolicy: {{ .Values.groovyRunner.image.pullPolicy }}
-          {{- if .Values.groovyRunner.image.platform }}
-          platform: {{ .Values.groovyRunner.image.platform }}
-          {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.groovyRunner.service.port }}

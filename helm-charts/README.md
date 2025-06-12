@@ -78,7 +78,7 @@ helm delete my-release
 |---------------------|---------------------------------------------------------------------------------------|-----------------|
 | `replicaCount`      | Number of Decision Engine replicas                                                    | `1`             |
 | `image.repository`  | Decision Engine image repository                                                      | `decision-engine` |
-| `image.tag`         | Decision Engine image tag                                                             | `latest`        |
+| `image.version`         | Decision Engine image tag                                                             | `latest`        |
 | `image.pullPolicy`  | Decision Engine image pull policy                                                     | `Always`        |
 | `imagePullSecrets`  | Image pull secrets                                                                    | `[]`            |
 | `nameOverride`      | Override the name of the chart                                                        | `""`            |
@@ -137,7 +137,7 @@ helm delete my-release
 |-----------------------------------------|------------------------------------------------------------|-----------------|
 | `groovyRunner.enabled`                  | Deploy Groovy Runner                                       | `true`          |
 | `groovyRunner.image.repository`         | Groovy Runner image repository                             | `"groovy-runner"` |
-| `groovyRunner.image.tag`                | Groovy Runner image tag                                    | `"latest"`      |
+| `groovyRunner.image.version`                | Groovy Runner image tag                                    | `"latest"`      |
 | `groovyRunner.image.pullPolicy`         | Groovy Runner image pull policy                            | `"Always"`      |
 | `groovyRunner.service.port`             | Groovy Runner service port                                 | `8085`          |
 | `groovyRunner.resources`                | Groovy Runner resources                                    | `{}`            |
