@@ -1,5 +1,8 @@
 use crate::app::get_tenant_app_state;
 use crate::decider::gatewaydecider::types::{self, DeciderFlow};
+use crate::feedback::gateway_elimination_scoring::flow::{
+    eliminationV2RewardFactor, getPenaltyFactor,
+};
 use crate::redis::feature::isFeatureEnabled;
 use crate::redis::types::ServiceConfigKey;
 use crate::types::card::card_type::card_type_to_text;
@@ -28,7 +31,6 @@ use std::string::String;
 use std::vec::Vec;
 use time::format_description::parse;
 use time::{Date, OffsetDateTime};
-use crate::feedback::gateway_elimination_scoring::flow::{eliminationV2RewardFactor,getPenaltyFactor};
 
 // // use eulerhs::prelude::*;
 // // use eulerhs::language::*;
@@ -68,7 +70,7 @@ use crate::types::txn_details::types as ETTD;
 use crate::types::txn_offer as ETTO;
 // use juspay::extra::parsing as P;
 use crate::types::gateway as ETG;
-use crate::types::gateway_routing_input::{ GatewaySuccessRateBasedRoutingInput, GatewayScore};
+use crate::types::gateway_routing_input::{GatewayScore, GatewaySuccessRateBasedRoutingInput};
 use crate::types::token_bin_info as ETTB;
 // // use utils::config::constants as Config;
 // // use utils::logging as EWL;
@@ -83,8 +85,8 @@ use crate::types::isin_routes as ETIsinR;
 // // use eulerhs::tenant_redis_layer as RC;
 // // use eulerhs::types as EHT;
 // // use configs::env_vars as ENV;
-use crate::types::gateway_card_info::ValidationType;
 use crate::error::StorageError;
+use crate::types::gateway_card_info::ValidationType;
 
 pub fn either_decode_t<T: for<'de> Deserialize<'de>>(text: &str) -> Result<T, String> {
     from_slice(text.as_bytes()).map_err(|e| e.to_string())
@@ -201,7 +203,10 @@ pub fn is_emandate_supported_payment_method(
 pub fn is_emandate_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
     matches!(
         txn_detail.txnObjectType,
-        ETTD::TxnObjectType::EmandateRegister | ETTD::TxnObjectType::TpvEmandateRegister | ETTD::TxnObjectType::EmandatePayment | ETTD::TxnObjectType::TpvEmandatePayment
+        ETTD::TxnObjectType::EmandateRegister
+            | ETTD::TxnObjectType::TpvEmandateRegister
+            | ETTD::TxnObjectType::EmandatePayment
+            | ETTD::TxnObjectType::TpvEmandatePayment
     )
 }
 
@@ -246,9 +251,10 @@ fn get_merchant_gateway_card_info_feature_name(
 }
 
 pub fn is_mandate_transaction(txn: &ETTD::TxnDetail) -> bool {
-    matches!(txn.txnObjectType, 
-            ETTD::TxnObjectType::MandateRegister
-        |   ETTD::TxnObjectType::MandatePayment)
+    matches!(
+        txn.txnObjectType,
+        ETTD::TxnObjectType::MandateRegister | ETTD::TxnObjectType::MandatePayment
+    )
 }
 
 pub async fn get_merchant_wise_mandate_bin_eligible_gateways(
@@ -436,14 +442,13 @@ pub fn get_value<T: DeserializeOwned>(key: &str, json_text: &str) -> Option<T> {
     let obj = parsed.as_object()?;
     let val = obj.get(key)?;
 
-    serde_json::from_value(val.clone()).ok()
+    serde_json::from_value(val.clone())
+        .ok()
         .or_else(|| match val {
-            Value::String(s) => {
-                match s.as_str() {
-                    "True" => serde_json::from_str("true").ok(),
-                    "False" => serde_json::from_str("false").ok(),
-                    _ => serde_json::from_str(s).ok()
-                }
+            Value::String(s) => match s.as_str() {
+                "True" => serde_json::from_str("true").ok(),
+                "False" => serde_json::from_str("false").ok(),
+                _ => serde_json::from_str(s).ok(),
             },
             _ => None,
         })
@@ -726,7 +731,6 @@ pub async fn metric_tracker_log(stage: &str, flowtype: &str, log_data: MessageFo
         "metric_tracking_log: {:?}",
         serde_json::to_string(&log_data).ok()
     );
-    
 }
 
 pub fn get_metric_log_format(decider_flow: &mut DeciderFlow<'_>, stage: &str) -> MessageFormat {
@@ -2660,7 +2664,10 @@ pub fn is_reset_eligibile(
     cached_gateway_score: GatewayScore,
 ) -> bool {
     cached_gateway_score.score < threshold
-        && cached_gateway_score.lastResetTimestamp < (current_time_in_millis - soft_ttl.unwrap_or(0.0) as u128).try_into().unwrap()
+        && cached_gateway_score.lastResetTimestamp
+            < (current_time_in_millis - soft_ttl.unwrap_or(0.0) as u128)
+                .try_into()
+                .unwrap()
 }
 pub fn get_reset_score(min_threshold: f64, penalty_factor: f64, max_allowed_failures: i32) -> f64 {
     let reduction_factor = 1.0 - (penalty_factor / 100.0);
@@ -2703,30 +2710,30 @@ pub async fn addToCacheWithExpiry(
     }
 }
 
-pub async fn get_penality_factor_(
-  decider_flow: &mut DeciderFlow<'_>,
-)  -> f64{
+pub async fn get_penality_factor_(decider_flow: &mut DeciderFlow<'_>) -> f64 {
     let merchant = decider_flow.get().dpMerchantAccount.clone();
     let txn_detail = decider_flow.get().dpTxnDetail.clone();
     let txn_card_info = decider_flow.get().dpTxnCardInfo.clone();
     let merchant_id = get_m_id(merchant.merchantId);
-    let is_elimination_v2_enabled = isFeatureEnabled(C::ENABLE_ELIMINATION_V2.get_key(), merchant_id.clone(), feedback::constants::kvRedis()).await;
+    let is_elimination_v2_enabled = isFeatureEnabled(
+        C::ENABLE_ELIMINATION_V2.get_key(),
+        merchant_id.clone(),
+        feedback::constants::kvRedis(),
+    )
+    .await;
     if is_elimination_v2_enabled {
-        let m_reward_factor = eliminationV2RewardFactor( &merchant_id, &txn_card_info, &txn_detail).await;
+        let m_reward_factor =
+            eliminationV2RewardFactor(&merchant_id, &txn_card_info, &txn_detail).await;
         match m_reward_factor {
-            Some(reward_factor) => {
-                return (1.0 - reward_factor)
-            }
+            Some(reward_factor) => return (1.0 - reward_factor),
             None => {
-                return getPenaltyFactor (ScoreKeyType::ELIMINATION_MERCHANT_KEY ).await;
+                return getPenaltyFactor(ScoreKeyType::ELIMINATION_MERCHANT_KEY).await;
             }
-            
         }
-    }else {
+    } else {
         return getPenaltyFactor(ScoreKeyType::ELIMINATION_MERCHANT_KEY).await;
     }
 }
-
 
 // fn push_to_stream(decided_gateway: OptionETG::Gateway, final_decider_approach: types::GatewayDeciderApproach, m_priority_logic_tag: Option, current_gateway_score_map: GatewayScoreMap) -> DeciderFlow<()> {
 //     if let Some(decided_gateway) = decided_gateway {

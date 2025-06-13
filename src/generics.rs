@@ -15,16 +15,6 @@ use crate::storage::Storage;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::query_builder::QueryId;
 use diesel::query_dsl::methods::ExecuteDsl;
-#[cfg(feature = "mysql")]
-use diesel::{
-    mysql::Mysql,
-    MysqlConnection,
-};
-#[cfg(feature = "postgres")]
-use diesel::{
-    pg::Pg,
-    PgConnection,
-};
 use diesel::{
     associations::HasTable,
     debug_query,
@@ -42,6 +32,10 @@ use diesel::{
     result::Error as DieselError,
     AsChangeset, Insertable, Table,
 };
+#[cfg(feature = "mysql")]
+use diesel::{mysql::Mysql, MysqlConnection};
+#[cfg(feature = "postgres")]
+use diesel::{pg::Pg, PgConnection};
 use error_stack::Report;
 use error_stack::ResultExt;
 
@@ -103,8 +97,7 @@ where
     V: Debug + Insertable<T>,
     <T as QuerySource>::FromClause: QueryFragment<Pg> + Debug,
     <V as Insertable<T>>::Values: CanInsertInSingleQuery<Pg> + QueryFragment<Pg> + 'static,
-    InsertStatement<T, <V as Insertable<T>>::Values>:
-        AsQuery + ExecuteDsl<PgConnection, Pg> + Send,
+    InsertStatement<T, <V as Insertable<T>>::Values>: AsQuery + ExecuteDsl<PgConnection, Pg> + Send,
 {
     let mut conn = storage.get_conn().await.map_err(|_| MeshError::Others)?;
     generic_insert_core::<T, _>(&mut conn, values).await
@@ -125,7 +118,11 @@ where
 {
     let debug_values = format!("{values:?}");
     let query = diesel::insert_into(<T as HasTable>::table()).values(values);
-    logger::debug!(action = "generic_insert", "Debug query : {:?}", debug_query::<Mysql, _>(&query).to_string());
+    logger::debug!(
+        action = "generic_insert",
+        "Debug query : {:?}",
+        debug_query::<Mysql, _>(&query).to_string()
+    );
 
     track_database_call::<T, _, _>(query.execute_async(conn), DatabaseOperation::Insert)
         .await
@@ -142,12 +139,15 @@ where
     V: Debug + Insertable<T>,
     <T as QuerySource>::FromClause: QueryFragment<Pg> + Debug,
     <V as Insertable<T>>::Values: CanInsertInSingleQuery<Pg> + QueryFragment<Pg> + 'static,
-    InsertStatement<T, <V as Insertable<T>>::Values>:
-        AsQuery + ExecuteDsl<PgConnection, Pg> + Send,
+    InsertStatement<T, <V as Insertable<T>>::Values>: AsQuery + ExecuteDsl<PgConnection, Pg> + Send,
 {
     let debug_values = format!("{values:?}");
     let query = diesel::insert_into(<T as HasTable>::table()).values(values);
-    logger::debug!(action = "generic_insert", "Debug query : {:?}", debug_query::<Pg, _>(&query).to_string());
+    logger::debug!(
+        action = "generic_insert",
+        "Debug query : {:?}",
+        debug_query::<Pg, _>(&query).to_string()
+    );
 
     track_database_call::<T, _, _>(query.execute_async(conn), DatabaseOperation::Insert)
         .await
@@ -226,7 +226,11 @@ where
     let debug_values = format!("Error while updating: {values:?}");
 
     let query = diesel::update(<T as HasTable>::table().filter(predicate)).set(values);
-    logger::debug!(action = "generic_update_if_present", "Debug Query {:?}", debug_query::<Mysql, _>(&query).to_string());
+    logger::debug!(
+        action = "generic_update_if_present",
+        "Debug Query {:?}",
+        debug_query::<Mysql, _>(&query).to_string()
+    );
 
     track_database_call::<T, _, _>(query.execute_async(conn), DatabaseOperation::Update)
         .await
@@ -253,7 +257,11 @@ where
     let debug_values = format!("Error while updating: {values:?}");
 
     let query = diesel::update(<T as HasTable>::table().filter(predicate)).set(values);
-    logger::debug!(action = "generic_update_if_present", "Debug Query {:?}", debug_query::<Pg, _>(&query).to_string());
+    logger::debug!(
+        action = "generic_update_if_present",
+        "Debug Query {:?}",
+        debug_query::<Pg, _>(&query).to_string()
+    );
 
     track_database_call::<T, _, _>(query.execute_async(conn), DatabaseOperation::Update)
         .await
@@ -272,7 +280,11 @@ where
     >: AsQuery + QueryFragment<Mysql> + QueryId + Send + 'static,
 {
     let query = diesel::delete(<T as HasTable>::table().filter(predicate));
-    logger::debug!(action = "generic_delete", "Debug Query {:?}", debug_query::<Mysql, _>(&query).to_string());
+    logger::debug!(
+        action = "generic_delete",
+        "Debug Query {:?}",
+        debug_query::<Mysql, _>(&query).to_string()
+    );
 
     match track_database_call::<T, _, _>(query.execute_async(conn), DatabaseOperation::Delete).await
     {
@@ -300,7 +312,11 @@ where
     >: AsQuery + QueryFragment<Pg> + QueryId + Send + 'static,
 {
     let query = diesel::delete(<T as HasTable>::table().filter(predicate));
-    logger::debug!(action = "generic_delete", "Debug Query {:?}", debug_query::<Pg, _>(&query).to_string());
+    logger::debug!(
+        action = "generic_delete",
+        "Debug Query {:?}",
+        debug_query::<Pg, _>(&query).to_string()
+    );
 
     match track_database_call::<T, _, _>(query.execute_async(conn), DatabaseOperation::Delete).await
     {
@@ -351,7 +367,11 @@ where
     R: Send + 'static,
 {
     let query = T::table().filter(predicate);
-    logger::info!(action = "generic_filter", "Debug Query {:?}", debug_query::<Mysql, _>(&query).to_string());
+    logger::info!(
+        action = "generic_filter",
+        "Debug Query {:?}",
+        debug_query::<Mysql, _>(&query).to_string()
+    );
 
     track_database_call::<T, _, _>(query.get_results_async(conn), DatabaseOperation::Filter)
         .await
@@ -385,7 +405,11 @@ where
     R: Send + 'static,
 {
     let query = <T as HasTable>::table().filter(predicate);
-    logger::debug!(action = "generic_find_one_core", "Debug Query {:?}", debug_query::<Mysql, _>(&query).to_string());
+    logger::debug!(
+        action = "generic_find_one_core",
+        "Debug Query {:?}",
+        debug_query::<Mysql, _>(&query).to_string()
+    );
 
     track_database_call::<T, _, _>(query.get_result_async(conn), DatabaseOperation::FindOne)
         .await
@@ -551,7 +575,11 @@ where
     R: Send + 'static,
 {
     let query = <T as HasTable>::table().find(id.to_owned());
-    logger::debug!(action = "generic_find_by_id_core", "Debug Query {:?}", debug_query::<Mysql, _>(&query).to_string());
+    logger::debug!(
+        action = "generic_find_by_id_core",
+        "Debug Query {:?}",
+        debug_query::<Mysql, _>(&query).to_string()
+    );
 
     match track_database_call::<T, _, _>(query.first_async(conn), DatabaseOperation::FindOne).await
     {
@@ -576,7 +604,11 @@ where
     R: Send + 'static,
 {
     let query = <T as HasTable>::table().find(id.to_owned());
-    logger::debug!(action = "generic_find_by_id_core", "Debug Query {:?}", debug_query::<Pg, _>(&query).to_string());
+    logger::debug!(
+        action = "generic_find_by_id_core",
+        "Debug Query {:?}",
+        debug_query::<Pg, _>(&query).to_string()
+    );
 
     match track_database_call::<T, _, _>(query.first_async(conn), DatabaseOperation::FindOne).await
     {

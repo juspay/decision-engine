@@ -43,12 +43,14 @@ pub fn setup(
 
                 tracing::subscriber::set_global_default(subscriber_pretty)
                     .expect("Unable to set global subscriber");
-                return TelemetryGuard { _log_guards: guards };
+                return TelemetryGuard {
+                    _log_guards: guards,
+                };
             }
 
             config::LogFormat::Json => {
-                let formatting_layer = FormattingLayer::new(service_name, console_writer)
-                    .with_filter(console_filter);
+                let formatting_layer =
+                    FormattingLayer::new(service_name, console_writer).with_filter(console_filter);
 
                 let subscriber = tracing_subscriber::registry()
                     .with(StorageSubscription)

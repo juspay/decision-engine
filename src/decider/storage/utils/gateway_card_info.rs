@@ -1,13 +1,15 @@
 // use db::eulermeshimpl::mesh_config;
 // use db::mesh::internal::*;
-use crate::storage::types::{BitBool, GatewayCardInfo as DBGatewayCardInfo, MerchantGatewayCardInfo as DBMerchantGatewayCardInfo};
+use crate::storage::types::{
+    BitBool, GatewayCardInfo as DBGatewayCardInfo,
+    MerchantGatewayCardInfo as DBMerchantGatewayCardInfo,
+};
 use crate::types::gateway_card_info::GatewayCardInfo;
 // use types::utils::dbconfig::get_euler_db_conf;
 use crate::types::merchant::id::merchant_pid_to_text;
 // use juspay::extra::parsing::{Parsed, Step, around, lift_pure, mandated, parse_field, project};
 // use eulerhs::extra::combinators::to_domain_all;
 // use eulerhs::language::MonadFlow;
-use crate::types::merchant::merchant_account::MerchantAccount;
 #[cfg(feature = "mysql")]
 use crate::storage::schema::gateway_card_info::dsl;
 #[cfg(feature = "mysql")]
@@ -16,6 +18,7 @@ use crate::storage::schema::merchant_gateway_card_info::dsl as m_dsl;
 use crate::storage::schema_pg::gateway_card_info::dsl;
 #[cfg(feature = "postgres")]
 use crate::storage::schema_pg::merchant_gateway_card_info::dsl as m_dsl;
+use crate::types::merchant::merchant_account::MerchantAccount;
 use diesel::associations::HasTable;
 use diesel::*;
 use std::clone::Clone;
@@ -24,10 +27,11 @@ use std::string::String;
 use std::vec::Vec;
 //use crate::errors::{ApiError, UnifiedError}; // Import the ApiError and UnifiedError types
 
-use crate::{error::{ApiError}};
-use crate::{decider::gatewaydecider::{
-    types::{ ErrorResponse, UnifiedError},
-}, logger};
+use crate::error::ApiError;
+use crate::{
+    decider::gatewaydecider::types::{ErrorResponse, UnifiedError},
+    logger,
+};
 
 pub async fn getSupportedGatewayCardInfoForBins(
     app_state: &crate::app::TenantAppState,
@@ -41,9 +45,12 @@ pub async fn getSupportedGatewayCardInfoForBins(
         DBGatewayCardInfo,
     >(
         &app_state.db,
-        dsl::isin.eq_any(card_bins.clone())
+        dsl::isin
+            .eq_any(card_bins.clone())
             .and(dsl::disabled.eq(Some(BitBool(false)))),
-    ).await {
+    )
+    .await
+    {
         Ok(records) => records,
         Err(_) => Vec::new(),
     };
@@ -60,7 +67,8 @@ pub async fn getSupportedGatewayCardInfoForBins(
         DBMerchantGatewayCardInfo,
     >(
         &app_state.db,
-        m_dsl::merchant_account_id.eq(merchant_pid_to_text(input_merchant_account.id))
+        m_dsl::merchant_account_id
+            .eq(merchant_pid_to_text(input_merchant_account.id))
             .and(m_dsl::disabled.eq(BitBool(false)))
             .and(m_dsl::gateway_card_info_id.eq_any(gcis)),
     )
@@ -86,11 +94,11 @@ pub async fn getSupportedGatewayCardInfoForBins(
         .into_iter()
         .map(GatewayCardInfo::try_from)
         .collect();
-    
+
     let parsed_gci_records = match gci_records {
         Ok(records) => records,
         Err(err) => {
-            logger::error!( "parseGatewayCardInfo: {:?}", err);
+            logger::error!("parseGatewayCardInfo: {:?}", err);
             return Err(ErrorResponse {
                 status: "500".to_string(),
                 error_code: "INTERNAL_SERVER_ERROR".to_string(),
@@ -109,5 +117,4 @@ pub async fn getSupportedGatewayCardInfoForBins(
         }
     };
     Ok(parsed_gci_records)
-    
 }

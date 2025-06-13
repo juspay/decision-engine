@@ -1,16 +1,17 @@
+use super::utils::generate_random_id;
 use crate::decider::network_decider;
 use crate::euclid::ast::{Output, Program, ValueType};
-use diesel::prelude::AsChangeset;
-use diesel::Identifiable;use diesel::Insertable;
-use diesel::{Queryable, Selectable};
-use serde::{Deserialize, Serialize};
-use time::PrimitiveDateTime;
-use std::{collections::HashMap, fmt, ops::Deref};
 #[cfg(feature = "mysql")]
 use crate::storage::schema;
 #[cfg(feature = "postgres")]
 use crate::storage::schema_pg;
-use super::utils::generate_random_id;
+use diesel::prelude::AsChangeset;
+use diesel::Identifiable;
+use diesel::Insertable;
+use diesel::{Queryable, Selectable};
+use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, fmt, ops::Deref};
+use time::PrimitiveDateTime;
 
 pub type Metadata = HashMap<String, serde_json::Value>;
 
@@ -82,7 +83,16 @@ pub struct RoutingEvaluateResponse {
 }
 
 // #[derive(AsChangeset, Debug, Clone, Identifiable, Insertable, Queryable, Selectable)]
-#[derive(AsChangeset, Insertable, Debug, serde::Serialize, serde::Deserialize, Identifiable, Queryable, Selectable)]
+#[derive(
+    AsChangeset,
+    Insertable,
+    Debug,
+    serde::Serialize,
+    serde::Deserialize,
+    Identifiable,
+    Queryable,
+    Selectable,
+)]
 #[cfg_attr(feature = "mysql", diesel(table_name = schema::routing_algorithm))]
 #[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::routing_algorithm))]
 pub struct RoutingAlgorithm {
@@ -92,7 +102,7 @@ pub struct RoutingAlgorithm {
     pub description: String,
     // #[cfg(feature = "mysql")]
     pub algorithm_data: String,
-    // #[cfg(feature = "postgres")]  
+    // #[cfg(feature = "postgres")]
     // pub algorithm_data: serde_json::Value,
     #[cfg(feature = "postgres")]
     pub metadata: Option<serde_json::Value>,
@@ -130,7 +140,9 @@ impl From<RoutingAlgorithm> for JsonifiedRoutingAlgorithm {
     }
 }
 
-#[derive(AsChangeset, Insertable, Debug, serde::Serialize, serde::Deserialize, Identifiable, Queryable)]
+#[derive(
+    AsChangeset, Insertable, Debug, serde::Serialize, serde::Deserialize, Identifiable, Queryable,
+)]
 #[cfg_attr(feature = "mysql", diesel(table_name = schema::routing_algorithm_mapper))]
 #[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::routing_algorithm_mapper))]
 #[diesel(primary_key(created_by))]
@@ -146,13 +158,10 @@ pub struct ActivateRoutingConfigRequest {
 }
 
 impl RoutingAlgorithmMapper {
-    pub fn new(
-        created_by: String,
-        routing_algorithm_id: String,
-    ) -> Self {
+    pub fn new(created_by: String, routing_algorithm_id: String) -> Self {
         Self {
             created_by,
-            routing_algorithm_id
+            routing_algorithm_id,
         }
     }
 }

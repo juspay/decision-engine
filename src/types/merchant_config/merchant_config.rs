@@ -98,9 +98,9 @@ pub async fn load_merchant_config_by_mpid_category_and_name(
     )
     .await
     {
-        Ok(db_record) => {
-            MerchantConfig::try_from(db_record).and_then(parse_merchant_config).ok()
-        }
+        Ok(db_record) => MerchantConfig::try_from(db_record)
+            .and_then(parse_merchant_config)
+            .ok(),
         Err(_) => None,
     }
 }

@@ -128,9 +128,7 @@ where
         return Ok(None);
     }
 
-    let format = time::macros::format_description!(
-        "[year]-[month]-[day]T[hour]:[minute]:[second]"
-    );
+    let format = time::macros::format_description!("[year]-[month]-[day]T[hour]:[minute]:[second]");
 
     match time::PrimitiveDateTime::parse(&s.unwrap(), &format) {
         Ok(o) => Ok(Some(o)),

@@ -1,7 +1,7 @@
 use super::ast::{Comparison, ComparisonType, IfStatement, Rule, ValueType};
 use super::errors::EuclidErrors;
-use crate::euclid::types::{KeyConfig, TomlConfig, RoutingRule};
 use crate::error::{ApiError, ContainerError};
+use crate::euclid::types::{KeyConfig, RoutingRule, TomlConfig};
 use std::collections::HashMap;
 use uuid::Uuid;
 

@@ -56,8 +56,10 @@ pub async fn routing_create(
             name: config.name.clone(),
             description: config.description,
             #[cfg(feature = "mysql")]
-            metadata: Some(serde_json::to_string(&config.metadata)
-            .change_context(EuclidErrors::FailedToSerializeJsonToString)?),
+            metadata: Some(
+                serde_json::to_string(&config.metadata)
+                    .change_context(EuclidErrors::FailedToSerializeJsonToString)?,
+            ),
             #[cfg(feature = "postgres")]
             metadata: config.metadata.clone(),
             algorithm_data: serde_json::to_string(&data)
@@ -68,11 +70,10 @@ pub async fn routing_create(
 
         crate::generics::generic_insert(&state.db, new_algo)
             .await
-            .map_err(|e|  {
-                logger::error!("{:?}",e);
+            .map_err(|e| {
+                logger::error!("{:?}", e);
                 ContainerError::from(EuclidErrors::StorageError)
-            }
-            )?;
+            })?;
 
         let response =
             RoutingDictionaryRecord::new(algorithm_id, config.name, timestamp, timestamp);
@@ -238,7 +239,11 @@ pub async fn routing_evaluate(
     >(&state.db, dsl::id.eq(active_routing_algorithm_id.clone()))
     .await
     .map_err(|e| {
-        logger::error!(?e, "Failed to fetch RoutingAlgorithm for ID {:?}", active_routing_algorithm_id);
+        logger::error!(
+            ?e,
+            "Failed to fetch RoutingAlgorithm for ID {:?}",
+            active_routing_algorithm_id
+        );
         e
     })
     .change_context(EuclidErrors::StorageError)?;
