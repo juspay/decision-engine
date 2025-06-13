@@ -132,10 +132,7 @@ pub async fn get_arr_active_tenant_config_by_tenant_id_module_name_module_key_an
     // Convert ModuleName and ConfigType to strings for database query
     let app_state = get_tenant_app_state().await;
     let module_name_str = module_name_to_text(&m_name);
-    let config_type_strs: Vec<String> = arr_config_type
-        .iter()
-        .map(config_type_to_text)
-        .collect();
+    let config_type_strs: Vec<String> = arr_config_type.iter().map(config_type_to_text).collect();
     let active_status_str = config_status_to_text(&ConfigStatus::ACTIVE);
 
     // Use Diesel's query builder with multiple conditions
@@ -168,10 +165,7 @@ pub async fn get_arr_active_tenant_config_by_tenant_id_module_name_module_key_an
     // Convert input types to string for database query
     let app_state = get_tenant_app_state().await;
     let module_name_str = module_name_to_text(&m_name);
-    let config_type_strs: Vec<String> = arr_config_type
-        .iter()
-        .map(config_type_to_text)
-        .collect();
+    let config_type_strs: Vec<String> = arr_config_type.iter().map(config_type_to_text).collect();
     let country_code_str = country_iso_to_text(country_code);
 
     // Perform query using Diesel's generic_find_all
@@ -195,7 +189,6 @@ pub async fn get_arr_active_tenant_config_by_tenant_id_module_name_module_key_an
         Err(_) => Vec::new(), // Silently handle any errors by returning empty vec
     }
 }
-
 
 pub async fn get_tenant_config_by_tenant_id_and_module_name_and_module_key_and_type(
     t_id: String,

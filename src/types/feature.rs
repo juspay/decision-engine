@@ -112,7 +112,6 @@ pub async fn get_db_feature_enabled(
             .and(sql::<Bool>(&format!("enabled = {}", enabled))),
     )
     .await
-
 }
 
 pub async fn get_feature_enabled(

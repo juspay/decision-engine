@@ -82,7 +82,7 @@ where
 pub fn extractValue<A>(value: String) -> Option<A>
 where
     A: for<'de> Deserialize<'de>,
-{   
+{
     value.parse_struct("generic type").ok()
 }
 
@@ -118,11 +118,11 @@ where
 // }
 
 // fn usePreviousValue<T>(fallback_val: &Option<Text>) -> Option<Option<T>> {
-    // logger::error!(
-    //     tag = "SERVICE_CONFIG_DECODE_FAIL",
-    //     "{} : DECODE FAIL FOR VALUE, FALLING BACK TO PREVIOUS_VALUE",
-    //     service_config.name
-    // );
+// logger::error!(
+//     tag = "SERVICE_CONFIG_DECODE_FAIL",
+//     "{} : DECODE FAIL FOR VALUE, FALLING BACK TO PREVIOUS_VALUE",
+//     service_config.name
+// );
 //     incrementConfigDecodeFailureCount(&service_config.name);
 //     match fallback_val {
 //         Some(fallback_val) => extractValueWithDecode(fallback_val),
@@ -314,12 +314,12 @@ where
 //     match result {
 //         Ok(x) => Ok(x),
 //         Err(err) => {
-    // logger::error!(
-    //     tag = "Redis exists",
-    //     "{}",
-    //     err.to_string()
-    // );
-    
+// logger::error!(
+//     tag = "Redis exists",
+//     "{}",
+//     err.to_string()
+// );
+
 //             Err(err)
 //         }
 //     }
@@ -337,11 +337,11 @@ where
 //     match result {
 //         Ok(x) => Ok(x),
 //         Err(err) => {
-            // logger::error!(
-            //     tag = "Redis exists",
-            //     "{:?}",
-            //     err
-            // );
+// logger::error!(
+//     tag = "Redis exists",
+//     "{:?}",
+//     err
+// );
 //             Err(err)
 //         }
 //     }
@@ -353,11 +353,11 @@ where
 //     match result {
 //         Ok(x) => Ok(x as i32),
 //         Err(err) => {
-            // logger::error!(
-            //     tag = "Redis incr",
-            //     "{}",
-            //     err.to_string()
-            // );
+// logger::error!(
+//     tag = "Redis incr",
+//     "{}",
+//     err.to_string()
+// );
 //             Err(err.to_string())
 //         }
 //     }
@@ -369,11 +369,11 @@ where
 //     match result {
 //         Ok(x) => Ok(x as i32),
 //         Err(err) => {
-            // logger::error!(
-            //     tag = "Redis decr",
-            //     "{:?}",
-            //     err
-            // );
+// logger::error!(
+//     tag = "Redis decr",
+//     "{:?}",
+//     err
+// );
 //             Err(err.to_string())
 //         }
 //     }
@@ -421,11 +421,11 @@ where
 //     ) {
 //         Ok(res) => Some(res),
 //         Err(err) => {
-            // logger::error!(
-            //     tag = "getFromStream",
-            //     "{}",
-            //     err
-            // );
+// logger::error!(
+//     tag = "getFromStream",
+//     "{}",
+//     err
+// );
 //             None
 //         }
 //     }
@@ -441,11 +441,11 @@ where
 //     match result {
 //         Ok(res) => res,
 //         Err(err) => {
-                // logger::error!(
-                //     tag = "delFromStream",
-                //     "{}",
-                //     err
-                // );
+// logger::error!(
+//     tag = "delFromStream",
+//     "{}",
+//     err
+// );
 //             0
 //         }
 //     }
@@ -462,19 +462,19 @@ where
 //     match result {
 //         Ok(R::Ok) | Ok(R::Pong) => true,
 //         Ok(R::Status(status)) => {
-                // logger::error!(
-                //     tag = "createStreamGroup",
-                //     "{}",
-                //     Text::decode_utf8(&status)
-                // );
+// logger::error!(
+//     tag = "createStreamGroup",
+//     "{}",
+//     Text::decode_utf8(&status)
+// );
 //             false
 //         }
 //         Err(err) => {
-                // logger::error!(
-                //     tag = "createStreamGroup",
-                //     "{:?}",
-                //     err
-                // );
+// logger::error!(
+//     tag = "createStreamGroup",
+//     "{:?}",
+//     err
+// );
 //             false
 //         }
 //     }
@@ -489,11 +489,11 @@ where
 //     match result {
 //         Ok(res) => res,
 //         Err(err) => {
-            // logger::error!(
-            //     tag = "getStreamLength",
-            //     "{}",
-            //     err.to_string()
-            // );
+// logger::error!(
+//     tag = "getStreamLength",
+//     "{}",
+//     err.to_string()
+// );
 //             0
 //         }
 //     }

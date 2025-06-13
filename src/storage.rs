@@ -7,25 +7,25 @@ use crate::{
 use crate::generics::StorageResult;
 use bb8::PooledConnection;
 
-#[cfg(feature = "postgres")]
-use diesel::PgConnection;
-#[cfg(feature = "postgres")]
-use diesel_async::{
-    AsyncPgConnection,
-    pooled_connection::{
-        self,
-        deadpool::{Object, Pool},
-    },
-};
 #[cfg(feature = "mysql")]
 use diesel::MysqlConnection;
+#[cfg(feature = "postgres")]
+use diesel::PgConnection;
 #[cfg(feature = "mysql")]
 use diesel_async::{
-    AsyncMysqlConnection,
     pooled_connection::{
         self,
         deadpool::{Object, Pool},
     },
+    AsyncMysqlConnection,
+};
+#[cfg(feature = "postgres")]
+use diesel_async::{
+    pooled_connection::{
+        self,
+        deadpool::{Object, Pool},
+    },
+    AsyncPgConnection,
 };
 
 use error_stack::ResultExt;
@@ -78,39 +78,33 @@ impl Storage {
         database: &PgDatabase,
         schema: &str,
     ) -> error_stack::Result<Self, error::StorageError> {
-            let database_url = format!(
-                "postgres://{}:{}@{}:{}/{}?application_name={}&options=-c search_path%3D{}",
-                database.pg_username,
-                database.pg_password.peek(),
-                database.pg_host,
-                database.pg_port,
-                database.pg_dbname,
-                schema,
-                schema
-            );
+        let database_url = format!(
+            "postgres://{}:{}@{}:{}/{}?application_name={}&options=-c search_path%3D{}",
+            database.pg_username,
+            database.pg_password.peek(),
+            database.pg_host,
+            database.pg_port,
+            database.pg_dbname,
+            schema,
+            schema
+        );
 
-            let config =
-                pooled_connection::AsyncDieselConnectionManager::<AsyncPgConnection>::new(
-                    database_url,
-                );
-            let pool = Pool::builder(config);
+        let config =
+            pooled_connection::AsyncDieselConnectionManager::<AsyncPgConnection>::new(database_url);
+        let pool = Pool::builder(config);
 
-            let pool = match database.pg_pool_size {
-                Some(value) => pool.max_size(value),
-                None => pool,
-            };
+        let pool = match database.pg_pool_size {
+            Some(value) => pool.max_size(value),
+            None => pool,
+        };
 
-            let pool = diesel_make_pg_pool(database, schema, false).await?;
-            return Ok(Self { pg_pool: pool });
-
+        let pool = diesel_make_pg_pool(database, schema, false).await?;
+        return Ok(Self { pg_pool: pool });
     }
     pub async fn get_conn(
         &self,
-    ) -> StorageResult<
-        PooledConnection<'_, async_bb8_diesel::ConnectionManager<
-            PgConnection,
-        >>,
-    > {
+    ) -> StorageResult<PooledConnection<'_, async_bb8_diesel::ConnectionManager<PgConnection>>>
+    {
         match self.pg_pool.get().await {
             Ok(conn) => Ok(conn),
             Err(err) => Err(crate::generics::MeshError::DatabaseConnectionError),
@@ -119,16 +113,15 @@ impl Storage {
 }
 #[cfg(feature = "mysql")]
 impl Storage {
-        /// Create a new storage interface from configuration
+    /// Create a new storage interface from configuration
     pub async fn new(
-            //featire flag
+        //featire flag
         database: &Database,
         schema: &str,
     ) -> error_stack::Result<Self, error::StorageError> {
-        
         let database_url = format!(
             "mysql://{}:{}@{}:{}/{}?application_name={}&options=-c search_path%3D{}",
-            database.username,                    
+            database.username,
             database.password.peek(),
             database.host,
             database.port,
@@ -136,17 +129,17 @@ impl Storage {
             schema,
             schema
         );
-    
+
         let config = pooled_connection::AsyncDieselConnectionManager::<AsyncMysqlConnection>::new(
-                        database_url,
+            database_url,
         );
         let pool = Pool::builder(config);
-    
+
         let pool = match database.pool_size {
-                Some(value) => pool.max_size(value),
-                None => pool,
+            Some(value) => pool.max_size(value),
+            None => pool,
         };
-    
+
         let pool = diesel_make_mysql_pool(database, schema, false).await?;
         return Ok(Self { pg_pool: pool });
     }
@@ -154,11 +147,8 @@ impl Storage {
     /// Get connection from database pool for accessing data
     pub async fn get_conn(
         &self,
-    ) -> StorageResult<
-        PooledConnection<'_, async_bb8_diesel::ConnectionManager<
-            MysqlConnection,
-        >>,
-    > {
+    ) -> StorageResult<PooledConnection<'_, async_bb8_diesel::ConnectionManager<MysqlConnection>>>
+    {
         match self.pg_pool.get().await {
             Ok(conn) => Ok(conn),
             Err(err) => Err(crate::generics::MeshError::DatabaseConnectionError),
@@ -166,8 +156,7 @@ impl Storage {
     }
 }
 
-    
-    pub(crate) trait TestInterface {
+pub(crate) trait TestInterface {
     type Error;
     async fn test(&self) -> Result<(), ContainerError<Self::Error>>;
 }

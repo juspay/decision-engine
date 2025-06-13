@@ -54,10 +54,7 @@ impl RedisConnectionWrapper {
         self.conn.get_and_deserialize_key(key, type_name).await
     }
 
-    pub async fn get_key_string(
-        &self,
-        key: &str,
-    ) -> Result<String, errors::RedisError> {
+    pub async fn get_key_string(&self, key: &str) -> Result<String, errors::RedisError> {
         self.conn
             .get_key(key)
             .await
@@ -132,7 +129,13 @@ impl RedisConnectionWrapper {
             .change_context(errors::RedisError::IncrementHashFieldFailed)
     }
 
-    pub async fn setXWithOption(&self, key: &str, value: &str, ttl: i64, option: SetOptions) -> Result<bool, errors::RedisError> {
+    pub async fn setXWithOption(
+        &self,
+        key: &str,
+        value: &str,
+        ttl: i64,
+        option: SetOptions,
+    ) -> Result<bool, errors::RedisError> {
         // implement the redis query to set if it doesn't exist
         self.conn
             .pool
@@ -141,8 +144,8 @@ impl RedisConnectionWrapper {
             .change_context(errors::RedisError::SetHashFailed)
     }
     pub async fn exists(&self, key: &str) -> Result<bool, errors::RedisError> {
-        self.conn.
-            pool
+        self.conn
+            .pool
             .exists(key)
             .await
             .change_context(errors::RedisError::GetFailed)

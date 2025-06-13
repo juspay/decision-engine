@@ -131,7 +131,6 @@ impl SC::ServiceConfigKey for UPDATE_SCORE_LOCK_FEATURE_ENABLED_MERCHANT {
     }
 }
 
-
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct UPDATE_GATEWAY_SCORE_LOCK_FLAG_TTL;
 
@@ -217,8 +216,6 @@ impl SC::ServiceConfigKey for OUTAGE_REWARD_FACTOR {
         "outage_reward_factor".to_string()
     }
 }
-
-
 
 // Original Haskell data type: GATEWAY_SCORE_OUTAGE_TTL
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -373,14 +370,9 @@ pub fn defaultMerchantArrMaxLength() -> i32 {
     40
 }
 
-
-
 pub fn defaultUpdateGatewayScoreLockFlagTtl() -> i32 {
     300
-} 
-
-
-
+}
 
 pub fn defaultSrV3LatencyThresholdInSecs() -> f64 {
     300 as f64

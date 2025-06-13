@@ -150,12 +150,17 @@ pub async fn get_eligibility_info(
             .and(dsl::provider_name.eq(provider_name))
             .and(dsl::flow_type.eq(flow_type))
             .and(
-                dsl::disabled.eq(Some(BitBool(false))).or(dsl::disabled.is_null())
+                dsl::disabled
+                    .eq(Some(BitBool(false)))
+                    .or(dsl::disabled.is_null()),
             ),
-    ).await {
-        Ok(db_results) => db_results.into_iter()
-                                   .filter_map(|db_record| UserEligibilityInfo::try_from(db_record).ok())
-                                   .collect(),
+    )
+    .await
+    {
+        Ok(db_results) => db_results
+            .into_iter()
+            .filter_map(|db_record| UserEligibilityInfo::try_from(db_record).ok())
+            .collect(),
         Err(_) => Vec::new(), // Silently handle any errors by returning empty vec
     }
 }

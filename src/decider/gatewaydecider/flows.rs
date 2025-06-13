@@ -33,13 +33,13 @@ use crate::types::card::vault_provider::VaultProvider;
 use crate::app::get_tenant_app_state;
 use crate::decider::gatewaydecider::constants as C;
 use crate::logger;
+use crate::redis::feature::isFeatureEnabled;
 use crate::types::card::txn_card_info::TxnCardInfo;
 use crate::types::gateway_card_info::ValidationType;
 use crate::types::merchant as ETM;
 use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
 use crate::types::payment::payment_method::PaymentMethodType;
 use crate::types::txn_details::types as ETTD;
-use crate::redis::feature::{isFeatureEnabled};
 // use utils::errors::predefined_errors as Errs;
 // use juspay::extra::parsing::{Parsed, parse};
 // use juspay::extra::secret::{SecretContext, makeSecret};
@@ -75,11 +75,11 @@ use crate::redis::feature::{isFeatureEnabled};
 //             let merchant_acc = match ETM::loadMerchantByMerchantId(req.orderReference.merchantId) {
 //                 Some(acc) => acc,
 //                 None => {
-                        // logger::error!(
-                        //     tag = "getMaccByMerchantId",
-                        //     "Merchant account for id: {}",
-                        //     req.orderReference.merchantId
-                        // );
+// logger::error!(
+//     tag = "getMaccByMerchantId",
+//     "Merchant account for id: {}",
+//     req.orderReference.merchantId
+// );
 //                     L::throwException(Errs::internalError(
 //                         Some("merchant account with the given merchant id not found."),
 //                         Some("merchant account with the given merchant id not found."),
@@ -104,17 +104,17 @@ use crate::redis::feature::{isFeatureEnabled};
 //                     None => req.txnCardInfo.cardIsin,
 //                 },
 //             };
-                // logger::debug!(
-                //     tag = "resolveBin of txnCardInfo",
-                //     "{:?}",
-                //     resolve_bin.clone()
-                // );
+// logger::debug!(
+//     tag = "resolveBin of txnCardInfo",
+//     "{:?}",
+//     resolve_bin.clone()
+// );
 //             let request = T::transformRequest(req, merchant_acc, resolve_bin);
-                // logger::debug!(
-                //     tag = "enforeced gateway list",
-                //     "{}",
-                //     request.enforceGatewayList.to_string()
-                // );
+// logger::debug!(
+//     tag = "enforeced gateway list",
+//     "{}",
+//     request.enforceGatewayList.to_string()
+// );
 //             let decider_response = deciderFullPayloadHSFunction(request);
 //             decider_response
 //         }
@@ -218,11 +218,11 @@ fn handleEnforcedGateway(gateway_list: Option<Vec<String>>) -> Option<Vec<String
 //     let merchant_prefs = match ETM::getMerchantIPrefsByMId(dreq.txnDetail.merchantId).await {
 //         Some(prefs) => prefs,
 //         None => {
-            // logger::error!(
-            //     tag = "getMerchantPrefsByMId",
-            //     "Merchant iframe preferences not found for id: {}",
-            //     dreq.txnDetail.merchantId
-            // );
+// logger::error!(
+//     tag = "getMerchantPrefsByMId",
+//     "Merchant iframe preferences not found for id: {}",
+//     dreq.txnDetail.merchantId
+// );
 //             L::throwException(Errs::internalError(
 //                 Some("merchant iframe preferences not found"),
 //                 Some("merchant iframe preferences not found with the given merchant id"),
@@ -241,11 +241,11 @@ fn handleEnforcedGateway(gateway_list: Option<Vec<String>>) -> Option<Vec<String
 //             None => dreq.txnCardInfo.cardIsin,
 //         },
 //     };
-        // logger::debug!(
-        //     tag = "resolveBin of txnCardInfo",
-        //     "{:?}",
-        //     resolve_bin.clone()
-        // );
+// logger::debug!(
+//     tag = "resolveBin of txnCardInfo",
+//     "{:?}",
+//     resolve_bin.clone()
+// );
 //     let m_vault_provider = Utils::getVaultProvider(dreq.cardToken);
 //     let update_txn_card_info = dreq.txnCardInfo.clone().with_card_isin(resolve_bin);
 //     let decider_params = T::DeciderParams {
@@ -683,7 +683,10 @@ pub async fn runDeciderFlow(
     if (isFeatureEnabled(
         C::SHOULD_CONSUME_RESULT_FROM_ROUTER.get_key(),
         Utils::get_m_id(deciderParams.dpMerchantAccount.merchantId.clone()),
-        "kv_redis".to_string()).await){
+        "kv_redis".to_string(),
+    )
+    .await)
+    {
         app_state
             .redis_conn
             .setx(
@@ -696,7 +699,7 @@ pub async fn runDeciderFlow(
             .await
             .unwrap_or_default();
         updated_gateway_scoring_data;
-    } 
+    }
     match dResult {
         Ok(result) => Ok((
             result,

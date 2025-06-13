@@ -1,10 +1,10 @@
-use crate::storage::types::CoBadgedCardInfo;
-use crate::utils::CustomResult;
-use crate::{error, generics};
 #[cfg(feature = "mysql")]
 use crate::storage::schema::co_badged_cards_info_test::dsl;
 #[cfg(feature = "postgres")]
 use crate::storage::schema_pg::co_badged_cards_info_test::dsl;
+use crate::storage::types::CoBadgedCardInfo;
+use crate::utils::CustomResult;
+use crate::{error, generics};
 use diesel::associations::HasTable;
 use diesel::*;
 use error_stack::ResultExt;

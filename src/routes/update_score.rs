@@ -1,11 +1,11 @@
-use axum::body::to_bytes;
-use serde::{Deserialize, Serialize};
 use crate::decider::gatewaydecider::types::{ErrorResponse, UnifiedError};
-use crate::logger;
 use crate::feedback::gateway_scoring_service::check_and_update_gateway_score;
-use crate::types::txn_details::types::TxnDetail;
+use crate::logger;
 use crate::types::card::txn_card_info::TxnCardInfo;
+use crate::types::txn_details::types::TxnDetail;
+use axum::body::to_bytes;
 use cpu_time::ProcessTime;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct UpdateScoreRequest {
@@ -13,11 +13,13 @@ struct UpdateScoreRequest {
     txn_card_info: TxnCardInfo,
     log_message: String,
     enforce_dynaic_routing_failure: Option<bool>,
-    gateway_reference_id : Option<String>,
+    gateway_reference_id: Option<String>,
 }
 
 #[axum::debug_handler]
-pub async fn update_score(req: axum::http::Request<axum::body::Body>) -> Result<&'static str, ErrorResponse> {
+pub async fn update_score(
+    req: axum::http::Request<axum::body::Body>,
+) -> Result<&'static str, ErrorResponse> {
     // Extract headers and URI
     let cpu_start = ProcessTime::now();
     let headers = req.headers().clone();
@@ -31,11 +33,7 @@ pub async fn update_score(req: axum::http::Request<axum::body::Body>) -> Result<
     let request_time = time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_else(|_| "unknown".to_string());
-    let query_params = original_url
-        .splitn(2, '?')
-        .nth(1)
-        .unwrap_or("")
-        .to_string();
+    let query_params = original_url.splitn(2, '?').nth(1).unwrap_or("").to_string();
 
     // Buffer the body into memory
     let body_bytes = match to_bytes(req.into_body(), usize::MAX).await {
@@ -56,7 +54,6 @@ pub async fn update_score(req: axum::http::Request<axum::body::Body>) -> Result<
                 priority_logic_output: None,
                 is_dynamic_mga_enabled: false,
             };
-
 
             // Log the error
             let latency = start_time.elapsed().as_millis() as u64;
@@ -114,7 +111,6 @@ pub async fn update_score(req: axum::http::Request<axum::body::Body>) -> Result<
                     is_dynamic_mga_enabled: false,
                 };
 
-
                 // Log the error
                 let latency = start_time.elapsed().as_millis() as u64;
                 let cpu_time = cpu_start.elapsed().as_millis() as u64;
@@ -148,11 +144,18 @@ pub async fn update_score(req: axum::http::Request<axum::body::Body>) -> Result<
             let log_message = payload.log_message;
             let enforce_failure = payload.enforce_dynaic_routing_failure.unwrap_or(false);
             let gateway_reference_id = payload.gateway_reference_id;
-            
+
             jemalloc_ctl::epoch::advance().unwrap();
             let allocated_before = jemalloc_ctl::stats::allocated::read().unwrap_or(0);
 
-            check_and_update_gateway_score(txn_detail, txn_card_info, log_message.as_str(), enforce_failure, gateway_reference_id).await;
+            check_and_update_gateway_score(
+                txn_detail,
+                txn_card_info,
+                log_message.as_str(),
+                enforce_failure,
+                gateway_reference_id,
+            )
+            .await;
 
             jemalloc_ctl::epoch::advance().unwrap();
             let allocated_after = jemalloc_ctl::stats::allocated::read().unwrap_or(0);

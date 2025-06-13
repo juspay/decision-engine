@@ -56,9 +56,7 @@ pub async fn get_emandate_enabled_mga(
     mid: MerchantId,
     ref_ids: Vec<MgaReferenceId>,
 ) -> Vec<ETM::merchant_gateway_account::MerchantGatewayAccount> {
-
-    let enabled_mgas =
-        get_enabled_mgas_by_merchant_id_and_ref_id(this,mid, ref_ids).await;
+    let enabled_mgas = get_enabled_mgas_by_merchant_id_and_ref_id(this, mid, ref_ids).await;
     enabled_mgas
         .into_iter()
         .filter(is_emandate_enabled)

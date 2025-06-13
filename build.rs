@@ -31,7 +31,7 @@ mod cargo_workspace {
     /// is available to the corresponding crate at compile time.
     ///
     /// # Panics
-    /// 
+    ///
     ///
     /// Panics if running the `cargo metadata` command fails.
     #[allow(clippy::expect_used)]

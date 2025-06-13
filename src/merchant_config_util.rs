@@ -28,7 +28,10 @@ use crate::{
     decider::{
         configs::env_vars::enable_merchant_config_entity_lookup,
         gatewaydecider::constants::MERCHANT_CONFIG_ENTITY_LEVEL_LOOKUP_CUTOVER,
-    }, logger, redis::{cache::findByNameFromRedis, types::ServiceConfigKey}, types::{
+    },
+    logger,
+    redis::{cache::findByNameFromRedis, types::ServiceConfigKey},
+    types::{
         country::country_iso::CountryISO,
         merchant::id::MerchantPId,
         merchant_config::{
@@ -48,7 +51,7 @@ use crate::{
             get_arr_active_tenant_config_by_tenant_id_module_name_module_key_and_arr_type_and_country,
             TenantConfig,
         },
-    }
+    },
 };
 
 // Converted data types
@@ -155,10 +158,7 @@ pub async fn isMerchantEnabledForPaymentFlows(
     let are_all_pfs_enabled = mc_arr.iter().all(|mc| mc.status == ConfigStatus::ENABLED);
     if !is_valid_length {
         logMerConfigLengthMisMatchError(
-            payment_flows
-                .iter()
-                .map(payment_flows_to_text)
-                .collect(),
+            payment_flows.iter().map(payment_flows_to_text).collect(),
             mc_arr
                 .into_iter()
                 .filter_map(|mc| Some(mc.clone()))
@@ -194,12 +194,12 @@ pub async fn isMerchantEnabledForPaymentFlows(
 // ) -> bool {
 //     let res = isPaymentFlowEnabledForMerchant(mer_acc_id, payment_flow);
 //     if !res && is_flow_enabled_at_default_entity_level {
-        // logger::error!(
-        //     tag = "MERCHANT_CONFIG_LEVEL_LOOKUP_FLOW",
-        //     "Payment flow {} is not enabled at merchant config for merchant account id {}",
-        //     payment_flow,
-        //     merchantPId(mer_acc_id),
-        // );
+// logger::error!(
+//     tag = "MERCHANT_CONFIG_LEVEL_LOOKUP_FLOW",
+//     "Payment flow {} is not enabled at merchant config for merchant account id {}",
+//     payment_flow,
+//     merchantPId(mer_acc_id),
+// );
 //     }
 //     res
 // }
@@ -314,22 +314,22 @@ pub async fn isPaymentFlowEnabledForMerchant(
 // fn verifyIfPfIsEnabledAtMc(pf: &PaymentFlow, mer_acc_id: &MerchantPId) -> bool {
 //     let res = isPaymentFlowEnabledForMerchant(mer_acc_id, pf);
 //     if !res {
-            // logger::error!(
-            //     tag = "MERCHANT_CONFIG_LEVEL_LOOKUP_FLOW",
-            //     "Payment flow {} is not enabled at merchant config for merchant account id {}",
-            //     pf,
-            //     merchantPId(mer_acc_id)
-            // );
+// logger::error!(
+//     tag = "MERCHANT_CONFIG_LEVEL_LOOKUP_FLOW",
+//     "Payment flow {} is not enabled at merchant config for merchant account id {}",
+//     pf,
+//     merchantPId(mer_acc_id)
+// );
 //     }
 //     res
 // }
 
 // // Original Haskell function: logMerConfigLengthMisMatchError
 pub fn logMerConfigLengthMisMatchError(pfs: Vec<String>, mc_arr: Vec<MerchantConfig>) {
-
     logger::error!(
         "Merchant config length mismatch for payment flows: {:?} and merchant config: {:?}",
-        pfs, mc_arr
+        pfs,
+        mc_arr
     );
 }
 
@@ -371,12 +371,12 @@ pub async fn getMerchantConfigValueForPaymentFlow(
 //     match m_mer_config {
 //         Some(mer_config) => decodeConfigValue::<Val>(mer_config),
 //         None => {
-            // logger::error!(
-            //     tag = "MERCHANT_CONFIG_LEVEL_LOOKUP_FLOW",
-            //     "Payment flow {} is not enabled at merchant config for merchant account id {}",
-            //     pf,
-            //     merchant_p_id_val.merchantPId
-            // );
+// logger::error!(
+//     tag = "MERCHANT_CONFIG_LEVEL_LOOKUP_FLOW",
+//     "Payment flow {} is not enabled at merchant config for merchant account id {}",
+//     pf,
+//     merchant_p_id_val.merchantPId
+// );
 //             None
 //         }
 //     }
@@ -388,11 +388,11 @@ pub async fn getMerchantConfigValueForPaymentFlow(
 //     match mer_config.configValue.as_ref().and_then(|v| A.eitherDecodeStrict(&encodeUtf8(v)).ok()) {
 //         Some(v) => Some(v),
 //         None => {
-            // logger::error!(
-            //     tag = "MERCHANT_CONFIG_LEVEL_LOOKUP_FLOW",
-            //     "Decoding merchant_config.config_value failed for ID: {}",
-            //     MCTypes::merchantConfigPId(&mer_config.id)
-            // );
+// logger::error!(
+//     tag = "MERCHANT_CONFIG_LEVEL_LOOKUP_FLOW",
+//     "Decoding merchant_config.config_value failed for ID: {}",
+//     MCTypes::merchantConfigPId(&mer_config.id)
+// );
 //             None
 //         }
 //     }
@@ -467,8 +467,8 @@ fn decodeConfigValue(mer_config: &MerchantConfig) -> Option<Value> {
         Some(Ok(v)) => Some(v),
         Some(Err(e)) => {
             logger::error!(
-                action="MERCHANT_CONFIG_LEVEL_LOOKUP_FLOW",
-                tag="MERCHANT_CONFIG_LEVEL_LOOKUP_FLOW",
+                action = "MERCHANT_CONFIG_LEVEL_LOOKUP_FLOW",
+                tag = "MERCHANT_CONFIG_LEVEL_LOOKUP_FLOW",
                 "Decoding merchant_config.config_value failed with an error: {}",
                 e
             );
@@ -476,8 +476,8 @@ fn decodeConfigValue(mer_config: &MerchantConfig) -> Option<Value> {
         }
         None => {
             logger::error!(
-                action="MERCHANT_CONFIG_LEVEL_LOOKUP_FLOW",
-                tag="MERCHANT_CONFIG_LEVEL_LOOKUP_FLOW",
+                action = "MERCHANT_CONFIG_LEVEL_LOOKUP_FLOW",
+                tag = "MERCHANT_CONFIG_LEVEL_LOOKUP_FLOW",
                 "merchant_config.config_value is NULL for ID: {:?}",
                 mer_config.id
             );
@@ -549,12 +549,7 @@ fn checkIfEnabledByTenant(config_value: &str, error_tag: &str) -> bool {
         Ok(ConfigStatus::ENABLED) => true,
         Ok(ConfigStatus::DISABLED) => false,
         Err(e) => {
-            logger::error!(
-                action = error_tag,
-                tag = error_tag,
-                "Error: {}",
-                e
-            );
+            logger::error!(action = error_tag, tag = error_tag, "Error: {}", e);
             false
         }
     }
@@ -656,11 +651,11 @@ pub async fn getPaymentFlowInfoFromTenantConfig(
 
 // fn logErrorForConfigsEnabledAtMA(pf: &PaymentFlow, merchant_p_id: &str) {
 //     logger::error!(
-    //     tag = "MERCHANT_CONFIG_LEVEL_LOOKUP_FLOW",
-    //     "Merchant Config entry isn't present for Payment flow {} for merchant account id {}",
-    //     pf,
-    //     merchant_p_id
-    // );
+//     tag = "MERCHANT_CONFIG_LEVEL_LOOKUP_FLOW",
+//     "Merchant Config entry isn't present for Payment flow {} for merchant account id {}",
+//     pf,
+//     merchant_p_id
+// );
 // }
 
 // fn decodeConfigValue(
@@ -675,10 +670,10 @@ pub async fn getPaymentFlowInfoFromTenantConfig(
 //             Some(v) => MAConfigs::SC(v),
 //             None => {
 //                 logger::error!(
-                    //     tag = "MERCHANT_CONFIG_LEVEL_LOOKUP_FLOW",
-                    //     "Decoding merchant_config.config_value failed for Payment flow {}",
-                    //     pf
-                    // );
+//     tag = "MERCHANT_CONFIG_LEVEL_LOOKUP_FLOW",
+//     "Decoding merchant_config.config_value failed for Payment flow {}",
+//     pf
+// );
 //                 ma_configs.clone()
 //             }
 //         },
@@ -688,19 +683,19 @@ pub async fn getPaymentFlowInfoFromTenantConfig(
 //             Some(v) => MAConfigs::ARC(v),
 //             None => {
 //                 logger::error!(
-                //     tag = "MERCHANT_CONFIG_LEVEL_LOOKUP_FLOW",
-                //     "Decoding merchant_config.config_value failed for Payment flow {}",
-                //     pf
-                // );
+//     tag = "MERCHANT_CONFIG_LEVEL_LOOKUP_FLOW",
+//     "Decoding merchant_config.config_value failed for Payment flow {}",
+//     pf
+// );
 //                 ma_configs.clone()
 //             }
 //         },
 //         _ => {
-                // logger::error!(
-                //     tag = "MERCHANT_CONFIG_LEVEL_LOOKUP_FLOW",
-                //     "Payment flow {} not supported for merchant_config.config_value decode",
-                //     pf
-                // );
+// logger::error!(
+//     tag = "MERCHANT_CONFIG_LEVEL_LOOKUP_FLOW",
+//     "Payment flow {} not supported for merchant_config.config_value decode",
+//     pf
+// );
 //             MAConfigs::NotExist
 //         }
 //     }
@@ -747,10 +742,10 @@ pub async fn getPaymentFlowInfoFromTenantConfig(
 //     match fetchConfigValueFromTenantConfig(&getOverrideEntry(&tenant_config)) {
 //         ConfigResult::DECODE_ERROR(err) => {
 //             logger::error!(
-                //     tag = "FETCH_TENANT_CONFIG_WITH_OVERRIDE_DECODE_ERR",
-                //     "{}",
-                //     err
-                // );
+//     tag = "FETCH_TENANT_CONFIG_WITH_OVERRIDE_DECODE_ERR",
+//     "{}",
+//     err
+// );
 //             None
 //         }
 //         ConfigResult::CONFIG_DISABLED => None,
@@ -759,10 +754,10 @@ pub async fn getPaymentFlowInfoFromTenantConfig(
 //             match fetchConfigValueFromMerchantConfig(m_acc_id, &merchant_config_key, config_category) {
 //                 ConfigResult::DECODE_ERROR(err) => {
 //                     logger::error!(
-                        //     tag = "FETCH_MERCHANT_CONFIG_DECODE_ERR",
-                        //     "{}",
-                        //     err
-                        // );
+//     tag = "FETCH_MERCHANT_CONFIG_DECODE_ERR",
+//     "{}",
+//     err
+// );
 //                     None
 //                 }
 //                 ConfigResult::CONFIG_DISABLED => None,
@@ -770,10 +765,10 @@ pub async fn getPaymentFlowInfoFromTenantConfig(
 //                 ConfigResult::NULL => match fetchConfigValueFromTenantConfig(&getFallbackEntry(&tenant_config)) {
 //                     ConfigResult::DECODE_ERROR(err) => {
 //                         logger::info!(
-                            //     tag = "FETCH_TENANT_CONFIG_WITH_FALLBACK_DECODE_ERR",
-                            //     "{}",
-                            //     err
-                            // );
+//     tag = "FETCH_TENANT_CONFIG_WITH_FALLBACK_DECODE_ERR",
+//     "{}",
+//     err
+// );
 //                         None
 //                     }
 //                     ConfigResult::CONFIG_DISABLED => None,

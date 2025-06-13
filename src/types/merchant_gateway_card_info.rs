@@ -48,12 +48,10 @@ impl From<DBMerchantGatewayCardInfo> for MerchantGatewayCardInfo {
     fn from(db_type: DBMerchantGatewayCardInfo) -> Self {
         Self {
             id: to_mgci_pid(db_type.id),
-            disabled: db_type.disabled.0 ,
+            disabled: db_type.disabled.0,
             gatewayCardInfoId: to_gci_pid(db_type.gateway_card_info_id),
             merchantAccountId: to_merchant_pid(db_type.merchant_account_id),
-            emandateRegisterMaxAmount: db_type
-                .emandate_register_max_amount
-                .map(Money::from_double),
+            emandateRegisterMaxAmount: db_type.emandate_register_max_amount.map(Money::from_double),
             merchantGatewayAccountId: db_type
                 .merchant_gateway_account_id
                 .map(to_merchant_gw_acc_id),
@@ -70,15 +68,17 @@ pub async fn find_all_mgcis_by_macc_and_gci_p_id_db(
     let app_state = get_tenant_app_state().await;
     // Use Diesel's query builder with multiple conditions
     crate::generics::generic_find_all::<
-            <DBMerchantGatewayCardInfo as HasTable>::Table,
-            _,
-            DBMerchantGatewayCardInfo
-        >(
-            &app_state.db,
-            dsl::gateway_card_info_id.eq_any(gci_id_values)
-                .and(dsl::merchant_account_id.eq(m_pid.0))
-                .and(dsl::disabled.eq(BitBool(false))),
-        ).await
+        <DBMerchantGatewayCardInfo as HasTable>::Table,
+        _,
+        DBMerchantGatewayCardInfo,
+    >(
+        &app_state.db,
+        dsl::gateway_card_info_id
+            .eq_any(gci_id_values)
+            .and(dsl::merchant_account_id.eq(m_pid.0))
+            .and(dsl::disabled.eq(BitBool(false))),
+    )
+    .await
 }
 
 pub async fn find_all_mgcis_by_macc_and_gci_p_id(

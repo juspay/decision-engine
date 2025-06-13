@@ -113,22 +113,18 @@ pub async fn find_all_priority_logic_by_merchant_pid(mpid: i64) -> Vec<MerchantP
     }
 }
 
-pub async fn find_priority_logic_by_id(
-    
-    mpl_id: String,
-) -> Option<MerchantPriorityLogic> {
+pub async fn find_priority_logic_by_id(mpl_id: String) -> Option<MerchantPriorityLogic> {
     // Perform the database query using Diesel
     let app_state = get_tenant_app_state().await;
     match crate::generics::generic_find_one_optional::<
-            <DBMerchantPriorityLogic as HasTable>::Table,
-            _,
-            DBMerchantPriorityLogic
-        >(
-            &app_state.db,
-            dsl::id.eq(mpl_id),
-        ).await {
-            Ok(Some(db_record)) => Some(MerchantPriorityLogic::from(db_record)),
-            Ok(None) => None,
-            Err(_) => None, // Silently handle any errors by returning None
-        }
+        <DBMerchantPriorityLogic as HasTable>::Table,
+        _,
+        DBMerchantPriorityLogic,
+    >(&app_state.db, dsl::id.eq(mpl_id))
+    .await
+    {
+        Ok(Some(db_record)) => Some(MerchantPriorityLogic::from(db_record)),
+        Ok(None) => None,
+        Err(_) => None, // Silently handle any errors by returning None
+    }
 }

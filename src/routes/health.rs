@@ -55,8 +55,6 @@ pub async fn ready() -> (StatusCode, Json<HealthRespPayload>) {
     }
 }
 
-
-
 #[derive(Debug, serde::Serialize, Default)]
 pub struct Diagnostics {
     key_custodian_locked: bool,
