@@ -32,9 +32,20 @@ pub struct RoutingRule {
     pub name: String,
     pub description: String,
     pub created_by: String,
-    pub algorithm: Program,
+    pub algorithm: StaticRoutingAlgorithm,
     #[serde(default)]
     pub metadata: Option<serde_json::Value>,
+}
+
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(
+    tag = "type",
+    content = "data",
+    rename_all = "snake_case",
+)]
+pub enum StaticRoutingAlgorithm {
+    Advanced(Program),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]

@@ -31,6 +31,7 @@ pub async fn routing_create(
     Json(payload): Json<Value>,
 ) -> Result<Json<RoutingDictionaryRecord>, error::ContainerError<EuclidErrors>> {
     let state = get_tenant_app_state().await;
+
     let config: RoutingRule = serde_json::from_value(payload.clone())
         .change_context(EuclidErrors::InvalidRuleConfiguration)?;
 
@@ -40,47 +41,40 @@ pub async fn routing_create(
 
     let utc_date_time = time::OffsetDateTime::now_utc();
     let timestamp = time::PrimitiveDateTime::new(utc_date_time.date(), utc_date_time.time());
-    let data = serde_json::to_value(config.algorithm.clone());
 
-    // To support migration of Hyperswitch created rules
-    let algorithm_id = if let Some(id) = config.rule_id {
-        id
-    } else {
-        generate_random_id("routing")
+    let algorithm_id = config
+        .rule_id
+        .unwrap_or_else(|| generate_random_id("routing"));
+
+    let new_algo = RoutingAlgorithm {
+        id: algorithm_id.clone(),
+        created_by: config.created_by,
+        name: config.name.clone(),
+        description: config.description,
+        #[cfg(feature = "mysql")]
+        metadata: Some(
+            serde_json::to_string(&config.metadata)
+                .change_context(EuclidErrors::FailedToSerializeJsonToString)?,
+        ),
+        #[cfg(feature = "postgres")]
+        metadata: config.metadata.clone(),
+        algorithm_data: serde_json::to_string(&config.algorithm)
+            .change_context(EuclidErrors::FailedToSerializeJsonToString)?,
+        created_at: timestamp,
+        modified_at: timestamp,
     };
 
-    if let Ok(data) = data {
-        let new_algo = RoutingAlgorithm {
-            id: algorithm_id.clone(),
-            created_by: config.created_by,
-            name: config.name.clone(),
-            description: config.description,
-            #[cfg(feature = "mysql")]
-            metadata: Some(serde_json::to_string(&config.metadata)
-            .change_context(EuclidErrors::FailedToSerializeJsonToString)?),
-            #[cfg(feature = "postgres")]
-            metadata: config.metadata.clone(),
-            algorithm_data: serde_json::to_string(&data)
-                .change_context(EuclidErrors::FailedToSerializeJsonToString)?,
-            created_at: timestamp,
-            modified_at: timestamp,
-        };
+    crate::generics::generic_insert(&state.db, new_algo)
+        .await
+        .map_err(|e| {
+            logger::error!("{:?}", e);
+            ContainerError::from(EuclidErrors::StorageError)
+        })?;
 
-        crate::generics::generic_insert(&state.db, new_algo)
-            .await
-            .map_err(|e|  {
-                logger::error!("{:?}",e);
-                ContainerError::from(EuclidErrors::StorageError)
-            }
-            )?;
+    let response = RoutingDictionaryRecord::new(algorithm_id, config.name, timestamp, timestamp);
+    logger::info!("Response: {response:?}");
 
-        let response =
-            RoutingDictionaryRecord::new(algorithm_id, config.name, timestamp, timestamp);
-        logger::info!("Response: {response:?}");
-        Ok(Json(response))
-    } else {
-        Err(ContainerError::from(EuclidErrors::StorageError))
-    }
+    Ok(Json(response))
 }
 
 #[cfg(feature = "mysql")]
