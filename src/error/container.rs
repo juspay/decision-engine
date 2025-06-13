@@ -1,7 +1,11 @@
 use std::error::Error;
 
+use axum::http;
+
 pub struct ContainerError<E> {
     pub(crate) error: error_stack::Report<E>,
+    pub(crate) status_code: Option<http::StatusCode>,
+    pub(crate) payload: Option<Box<dyn std::any::Any + Send + Sync>>,
 }
 
 impl<E: Sync + Send + 'static> ContainerError<E> {
@@ -42,6 +46,8 @@ where
         let new_error = value.error.current_context().into();
         Self {
             error: value.error.change_context(new_error),
+            status_code: None,
+            payload: None,
         }
     }
 }
@@ -54,13 +60,19 @@ where
     fn from(value: T) -> Self {
         Self {
             error: error_stack::Report::from(value),
+            status_code: None,
+            payload: None,
         }
     }
 }
 
 impl<T> From<error_stack::Report<T>> for ContainerError<T> {
     fn from(error: error_stack::Report<T>) -> Self {
-        Self { error }
+        Self {
+            error,
+            status_code: None,
+            payload: None,
+        }
     }
 }
 
@@ -85,6 +97,8 @@ where
             Ok(value) => Ok(value),
             Err(err) => Err(ContainerError {
                 error: error_stack::Report::from(err).change_context(error),
+                status_code: None,
+                payload: None,
             }),
         }
     }
@@ -97,4 +111,28 @@ macro_rules! error_transform {
         {
         }
     };
+}
+
+impl<E: Sync + Send + 'static + std::error::Error + error_stack::Context> ContainerError<E> {
+    pub fn status_code(&self) -> http::StatusCode {
+        self.status_code.unwrap_or(http::StatusCode::INTERNAL_SERVER_ERROR)
+    }
+
+    pub fn new_with_status_code_and_payload<T: 'static + Send + Sync>(
+        error: E,
+        status: http::StatusCode,
+        payload: T,
+    ) -> Self {
+        Self {
+            error: error_stack::Report::new(error),
+            status_code: Some(status),
+            payload: Some(Box::new(payload)),
+        }
+    }
+
+    pub fn downcast_ref<T: 'static>(&self) -> Option<&T> {
+        self.payload
+            .as_ref()
+            .and_then(|p| p.downcast_ref::<T>())
+    }
 }

@@ -6,6 +6,8 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 
+use super::ast::ConnectorInfo;
+
 pub struct InterpreterBackend {
     _program: ast::Program,
 }
@@ -18,12 +20,16 @@ impl InterpreterBackend {
     ) -> Result<bool, types::InterpreterError> {
         use ast::{ComparisonType::*, ValueType::*};
 
-        let value = ctx
-            .get(&comparison.lhs)
-            .ok_or_else(|| types::InterpreterError {
-                error_type: types::InterpreterErrorType::InvalidKey(comparison.lhs.clone()),
-                metadata: comparison.metadata.clone(),
-            })?;
+        let ctx_value = ctx.get(&comparison.lhs);
+        if ctx_value.is_none() {
+            crate::logger::warn!(
+                missing_context_key = %comparison.lhs,
+                "Context key not found while evaluating condition, skipping rule"
+            );
+            return Ok(false);
+        }
+
+        let value = ctx_value.and_then(|v| v.as_ref());
 
         if let Some(val) = value {
             match (val, &comparison.comparison, &comparison.value) {
@@ -38,7 +44,7 @@ impl InterpreterBackend {
                 (MetadataVariant(m1), Equal, MetadataVariant(m2)) => Ok(m1 == m2),
                 (MetadataVariant(m1), NotEqual, MetadataVariant(m2)) => Ok(m1 != m2),
                 (StrValue(s1), Equal, StrValue(s2)) => Ok(s1 == s2),
-                (StrValue(s1), NotEqual, StrValue(s2)) => Ok(s1 == s2),
+                (StrValue(s1), NotEqual, StrValue(s2)) => Ok(s1 != s2),
                 (val, Equal, GlobalRef(name)) => Ok(globals
                     .get(name)
                     .map(|set| set.contains(val))
@@ -174,7 +180,7 @@ impl fmt::Display for RoutingError {
 impl Error for RoutingError {}
 type RoutingResult<T> = Result<T, RoutingError>;
 
-pub fn perform_volume_split(splits: Vec<VolumeSplit<String>>) -> RoutingResult<String> {
+pub fn perform_volume_split(splits: Vec<VolumeSplit<ConnectorInfo>>) -> RoutingResult<ConnectorInfo> {
     let weights: Vec<u8> = splits.iter().map(|sp| sp.split).collect();
     let weighted_index =
         WeightedIndex::new(weights).map_err(|_| RoutingError::VolumeSplitFailed)?;
@@ -187,8 +193,8 @@ pub fn perform_volume_split(splits: Vec<VolumeSplit<String>>) -> RoutingResult<S
 }
 
 pub fn perform_volume_split_priority(
-    splits: Vec<VolumeSplit<Vec<String>>>,
-) -> RoutingResult<Vec<String>> {
+    splits: Vec<VolumeSplit<Vec<ConnectorInfo>>>,
+) -> RoutingResult<Vec<ConnectorInfo>> {
     let weights: Vec<u8> = splits.iter().map(|sp| sp.split).collect();
     let weighted_index =
         WeightedIndex::new(weights).map_err(|_| RoutingError::VolumeSplitFailed)?;
@@ -200,7 +206,7 @@ pub fn perform_volume_split_priority(
         .ok_or(RoutingError::VolumeSplitFailed)
 }
 
-pub fn evaluate_output(output: &Output) -> RoutingResult<(Vec<String>, Vec<String>)> {
+pub fn evaluate_output(output: &Output) -> RoutingResult<(Vec<ConnectorInfo>, Vec<ConnectorInfo>)> {
     match output {
         Output::Priority(connectors) => {
             let first_connector = connectors.first().cloned();
