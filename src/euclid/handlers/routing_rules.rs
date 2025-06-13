@@ -1,13 +1,13 @@
-use crate::euclid::{
+use crate::{error::ApiErrorResponse, euclid::{
     ast::{self, ComparisonType, ConnectorInfo, Output, ValueType},
     cgraph,
     interpreter::InterpreterBackend,
     types::{
         ActivateRoutingConfigRequest, Context, JsonifiedRoutingAlgorithm, RoutingDictionaryRecord,
-        RoutingEvaluateResponse, RoutingRequest, RoutingRule,
+        RoutingEvaluateResponse, RoutingRequest, RoutingRule, StaticRoutingAlgorithm,
     },
     utils::{generate_random_id, is_valid_enum_value, validate_routing_rule},
-};
+}};
 #[cfg(feature = "mysql")]
 use crate::storage::schema::routing_algorithm::dsl;
 #[cfg(feature = "postgres")]
@@ -29,7 +29,7 @@ use serde_json::{json, Value};
 
 pub async fn routing_create(
     Json(payload): Json<Value>,
-) -> Result<Json<RoutingDictionaryRecord>, error::ContainerError<EuclidErrors>> {
+) -> Result<Json<RoutingDictionaryRecord>, ContainerError<EuclidErrors>> {
     let state = get_tenant_app_state().await;
 
     let config: RoutingRule = serde_json::from_value(payload.clone())
@@ -37,7 +37,27 @@ pub async fn routing_create(
 
     logger::debug!("Received routing config: {:?}", config);
 
-    validate_routing_rule(&config, &state.config.routing_config)?;
+    if let Err(err) = validate_routing_rule(&config, &state.config.routing_config) {
+        let source = err.get_inner();
+
+        if let EuclidErrors::FailedToValidateRoutingRule = source {
+            if let Some(validation_messages) = err.downcast_ref::<Vec<String>>() {
+                let detailed_error = validation_messages.join("; ");
+                logger::error!("Routing rule validation failed with errors: {detailed_error}");
+
+            return Err(ContainerError::new_with_status_code_and_payload(
+                EuclidErrors::FailedToValidateRoutingRule,
+                axum::http::StatusCode::BAD_REQUEST,
+                ApiErrorResponse::new(
+                    "INVALID_REQUEST_DATA",
+                    format!("Routing rule validation failed: {}", detailed_error),
+                    None,
+                ),
+            ));
+            }
+        }
+        return Err(err.into());
+    }
 
     let utc_date_time = time::OffsetDateTime::now_utc();
     let timestamp = time::PrimitiveDateTime::new(utc_date_time.date(), utc_date_time.time());
@@ -238,10 +258,23 @@ pub async fn routing_evaluate(
     .change_context(EuclidErrors::StorageError)?;
 
     logger::debug!("Fetched routing algorithm: {:?}", algorithm);
-    let program: ast::Program = serde_json::from_str(&algorithm.algorithm_data)
-        .map_err(|_| EuclidErrors::InvalidRequest("Invalid algorithm data format".into()))?;
+    let algorithm_data: StaticRoutingAlgorithm = serde_json::from_str(&algorithm.algorithm_data)
+    .map_err(|e| {
+        logger::error!(
+            error = ?e,
+            raw_data = %algorithm.algorithm_data,
+            "Failed to parse algorithm_data into StaticRoutingAlgorithm"
+        );
+        EuclidErrors::InvalidRequest(format!("Invalid algorithm data format: {}", e))
+    })?;
+
+    let program = match algorithm_data {
+        StaticRoutingAlgorithm::Advanced(p) => p,
+    };
 
     let context = Context::new(parameters.clone());
+
+    logger::debug!("routing_evaluation: context keys = {:?}", parameters.keys());
     let interpreter_result = InterpreterBackend::eval_program(&program, &context).map_err(|e| {
         EuclidErrors::InvalidRequest(format!("Interpreter error: {:?}", e.error_type))
     })?;

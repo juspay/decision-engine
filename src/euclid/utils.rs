@@ -63,27 +63,6 @@ pub fn get_keys_by_type(config: &TomlConfig) -> HashMap<String, Vec<String>> {
     result
 }
 
-// pub fn validate_routing_rule(
-//     rule: &RoutingRule,
-//     config: &Option<TomlConfig>,
-// ) -> Result<(), ContainerError<EuclidErrors>> {
-//     let config = config
-//         .clone()
-//         .ok_or_else(|| error_stack::report!(EuclidErrors::GlobalRoutingConfigsUnavailable))?;
-//
-//     let mut errors = Vec::new();
-//
-//     for rule in &rule.algorithm {
-//         validate_rule(rule, &config, &mut errors);
-//     }
-//
-//     if errors.is_empty() {
-//         Ok(())
-//     } else {
-//         Err(EuclidErrors::FailedToValidateRoutingRule.into())
-//     }
-// }
-
 pub fn validate_routing_rule(
     rule: &RoutingRule,
     config: &Option<TomlConfig>,
@@ -105,7 +84,13 @@ pub fn validate_routing_rule(
     if errors.is_empty() {
         Ok(())
     } else {
-        Err(EuclidErrors::FailedToValidateRoutingRule.into())
+        let detailed_message = errors.join("; ");
+        crate::logger::error!("Routing rule validation failed with errors: {detailed_message}");
+        Err(EuclidErrors::InvalidRequest(format!(
+            "Routing rule validation failed: {}",
+            detailed_message
+        ))
+        .into())
     }
 }
 

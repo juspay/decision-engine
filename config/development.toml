@@ -5,7 +5,7 @@ log_format = "default"
 
 [server]
 host = "127.0.0.1"
-port = 8080
+port = 8082
 
 [limit]
 request_count = 1
@@ -59,7 +59,7 @@ metadata = {type = "udf"}
 pay_later = {type = "enum", values = "Affirm, Alma, AfterpayClearpay, Klarna, PayBright, Atome, Walley"}
 gift_card = {type = "enum", values = "Givex, PaySafeCard"}
 wallet = {type = "enum", values = "AmazonPay, ApplePay, GooglePay, Paypal, AliPay, AliPayHk, Dana, MbWay, MobilePay, SamsungPay, Twint, Vipps, TouchNGo, Swish, WeChatPay, GoPay, Gcash, Momo, KakaoPay, Cashapp, Mifinity, Paze"}
-upi = {type = "enum", values = "UpiCollect, UpiIntent"}
+upi = {type = "enum", values = "upi_collect, upi_intent"}
 voucher = {type = "enum", values = "Boleto, Efecty, PagoEfectivo, RedCompra, RedPagos, Indomaret, Alfamart, Oxxo, SevenEleven, Lawson, MiniStop, FamilyMart, Seicomart, PayEasy"}
 bank_transfer = {type = "enum", values = "Ach, SepaBankTransfer, Bacs, Multibanco, Pix, Pse, PermataBankTransfer, BcaBankTransfer, BniVa, BriVa, CimbVa, DanamonVa, MandiriVa, LocalBankTransfer, InstantBankTransfer"}
 bank_redirect = {type = "enum", values = "Giropay, Ideal, Sofort, Eft, Eps, BancontactCard, Blik, LocalBankRedirect, OnlineBankingThailand, OnlineBankingCzechRepublic, OnlineBankingFinland, OnlineBankingFpx, OnlineBankingPoland, OnlineBankingSlovakia, Przelewy24, Trustly, Bizum, Interac, OpenBankingUk, OpenBankingPIS"}

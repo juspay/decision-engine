@@ -104,7 +104,7 @@ pub struct RoutingAlgorithm {
     pub description: String,
     // #[cfg(feature = "mysql")]
     pub algorithm_data: String,
-    // #[cfg(feature = "postgres")]  
+    // #[cfg(feature = "postgres")]
     // pub algorithm_data: serde_json::Value,
     #[cfg(feature = "postgres")]
     pub metadata: Option<serde_json::Value>,
