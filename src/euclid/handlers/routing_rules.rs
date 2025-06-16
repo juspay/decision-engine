@@ -1,13 +1,13 @@
-use crate::euclid::{
-    ast::{self, ComparisonType, Output, ValueType},
+use crate::{error::ApiErrorResponse, euclid::{
+    ast::{self, ComparisonType, ConnectorInfo, Output, ValueType},
     cgraph,
     interpreter::InterpreterBackend,
     types::{
         ActivateRoutingConfigRequest, Context, JsonifiedRoutingAlgorithm, RoutingDictionaryRecord,
-        RoutingEvaluateResponse, RoutingRequest, RoutingRule,
+        RoutingEvaluateResponse, RoutingRequest, RoutingRule, StaticRoutingAlgorithm,
     },
     utils::{generate_random_id, is_valid_enum_value, validate_routing_rule},
-};
+}};
 #[cfg(feature = "mysql")]
 use crate::storage::schema::routing_algorithm::dsl;
 #[cfg(feature = "postgres")]
@@ -29,58 +29,72 @@ use serde_json::{json, Value};
 
 pub async fn routing_create(
     Json(payload): Json<Value>,
-) -> Result<Json<RoutingDictionaryRecord>, error::ContainerError<EuclidErrors>> {
+) -> Result<Json<RoutingDictionaryRecord>, ContainerError<EuclidErrors>> {
     let state = get_tenant_app_state().await;
+
     let config: RoutingRule = serde_json::from_value(payload.clone())
         .change_context(EuclidErrors::InvalidRuleConfiguration)?;
 
     logger::debug!("Received routing config: {:?}", config);
 
-    validate_routing_rule(&config, &state.config.routing_config)?;
+    if let Err(err) = validate_routing_rule(&config, &state.config.routing_config) {
+        let source = err.get_inner();
+
+        if let EuclidErrors::FailedToValidateRoutingRule = source {
+            if let Some(validation_messages) = err.downcast_ref::<Vec<String>>() {
+                let detailed_error = validation_messages.join("; ");
+                logger::error!("Routing rule validation failed with errors: {detailed_error}");
+
+            return Err(ContainerError::new_with_status_code_and_payload(
+                EuclidErrors::FailedToValidateRoutingRule,
+                axum::http::StatusCode::BAD_REQUEST,
+                ApiErrorResponse::new(
+                    "INVALID_REQUEST_DATA",
+                    format!("Routing rule validation failed: {}", detailed_error),
+                    None,
+                ),
+            ));
+            }
+        }
+        return Err(err.into());
+    }
 
     let utc_date_time = time::OffsetDateTime::now_utc();
     let timestamp = time::PrimitiveDateTime::new(utc_date_time.date(), utc_date_time.time());
-    let data = serde_json::to_value(config.algorithm.clone());
 
-    // To support migration of Hyperswitch created rules
-    let algorithm_id = if let Some(id) = config.rule_id {
-        id
-    } else {
-        generate_random_id("routing")
+    let algorithm_id = config
+        .rule_id
+        .unwrap_or_else(|| generate_random_id("routing"));
+
+    let new_algo = RoutingAlgorithm {
+        id: algorithm_id.clone(),
+        created_by: config.created_by,
+        name: config.name.clone(),
+        description: config.description,
+        #[cfg(feature = "mysql")]
+        metadata: Some(
+            serde_json::to_string(&config.metadata)
+                .change_context(EuclidErrors::FailedToSerializeJsonToString)?,
+        ),
+        #[cfg(feature = "postgres")]
+        metadata: config.metadata.clone(),
+        algorithm_data: serde_json::to_string(&config.algorithm)
+            .change_context(EuclidErrors::FailedToSerializeJsonToString)?,
+        created_at: timestamp,
+        modified_at: timestamp,
     };
 
-    if let Ok(data) = data {
-        let new_algo = RoutingAlgorithm {
-            id: algorithm_id.clone(),
-            created_by: config.created_by,
-            name: config.name.clone(),
-            description: config.description,
-            #[cfg(feature = "mysql")]
-            metadata: Some(serde_json::to_string(&config.metadata)
-            .change_context(EuclidErrors::FailedToSerializeJsonToString)?),
-            #[cfg(feature = "postgres")]
-            metadata: config.metadata.clone(),
-            algorithm_data: serde_json::to_string(&data)
-                .change_context(EuclidErrors::FailedToSerializeJsonToString)?,
-            created_at: timestamp,
-            modified_at: timestamp,
-        };
+    crate::generics::generic_insert(&state.db, new_algo)
+        .await
+        .map_err(|e| {
+            logger::error!("{:?}", e);
+            ContainerError::from(EuclidErrors::StorageError)
+        })?;
 
-        crate::generics::generic_insert(&state.db, new_algo)
-            .await
-            .map_err(|e|  {
-                logger::error!("{:?}",e);
-                ContainerError::from(EuclidErrors::StorageError)
-            }
-            )?;
+    let response = RoutingDictionaryRecord::new(algorithm_id, config.name, timestamp, timestamp);
+    logger::info!("Response: {response:?}");
 
-        let response =
-            RoutingDictionaryRecord::new(algorithm_id, config.name, timestamp, timestamp);
-        logger::info!("Response: {response:?}");
-        Ok(Json(response))
-    } else {
-        Err(ContainerError::from(EuclidErrors::StorageError))
-    }
+    Ok(Json(response))
 }
 
 #[cfg(feature = "mysql")]
@@ -244,10 +258,23 @@ pub async fn routing_evaluate(
     .change_context(EuclidErrors::StorageError)?;
 
     logger::debug!("Fetched routing algorithm: {:?}", algorithm);
-    let program: ast::Program = serde_json::from_str(&algorithm.algorithm_data)
-        .map_err(|_| EuclidErrors::InvalidRequest("Invalid algorithm data format".into()))?;
+    let algorithm_data: StaticRoutingAlgorithm = serde_json::from_str(&algorithm.algorithm_data)
+    .map_err(|e| {
+        logger::error!(
+            error = ?e,
+            raw_data = %algorithm.algorithm_data,
+            "Failed to parse algorithm_data into StaticRoutingAlgorithm"
+        );
+        EuclidErrors::InvalidRequest(format!("Invalid algorithm data format: {}", e))
+    })?;
+
+    let program = match algorithm_data {
+        StaticRoutingAlgorithm::Advanced(p) => p,
+    };
 
     let context = Context::new(parameters.clone());
+
+    logger::debug!("routing_evaluation: context keys = {:?}", parameters.keys());
     let interpreter_result = InterpreterBackend::eval_program(&program, &context).map_err(|e| {
         EuclidErrors::InvalidRequest(format!("Interpreter error: {:?}", e.error_type))
     })?;
@@ -322,15 +349,15 @@ fn format_output(output: &Output) -> Value {
 fn perform_eligibility_analysis(
     constraint_graph: &cgraph::ConstraintGraph,
     ctx: cgraph::CheckCtx,
-    output: &[String],
-) -> Vec<String> {
-    let mut eligible_connectors = Vec::<String>::with_capacity(output.len());
+    output: &[ConnectorInfo],
+) -> Vec<ConnectorInfo> {
+    let mut eligible_connectors = Vec::<ConnectorInfo>::with_capacity(output.len());
 
     for out in output {
         let clause = cgraph::Clause {
             key: "output".to_string(),
             comparison: ComparisonType::Equal,
-            value: ValueType::EnumVariant(out.clone()),
+            value: ValueType::EnumVariant(out.connector.clone()),
         };
 
         if let Ok(true) = constraint_graph.check_clause_validity(clause, &ctx) {
