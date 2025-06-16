@@ -1,0 +1,199 @@
+# Default values for decision-engine
+replicaCount: 1
+
+image:
+  # Updated to include the registry URL
+  repository: ghcr.io/juspay/decision-engine/postgres
+  pullPolicy: Always
+  version: "v1.0.0"
+
+# Configure these if your images are in a private registry
+imagePullSecrets: 
+  # - name: regcred
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+  hosts:
+    - host: chart-example.local
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls: []
+  #  - secretName: chart-example-tls
+  #    hosts:
+  #      - chart-example.local
+
+resources: {}
+  # limits:
+  #   cpu: 100m
+  #   memory: 128Mi
+  # requests:
+  #   cpu: 100m
+  #   memory: 128Mi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# Decision Engine configurations
+decisionEngine:
+  # Set to false to use PostgreSQL instead of MySQL
+  useMySQL: false
+  # Set to true to enable PostgreSQL support
+  usePostgreSQL: true
+  # Set to true to enable Redis support
+  useRedis: true
+  # Configuration for logging
+  logging:
+    level: "DEBUG"
+    format: "default"
+  # API server configurations
+  server:
+    host: "0.0.0.0"
+    port: 8080
+  # Rate limiting
+  rateLimit:
+    requestCount: 1
+    duration: 60
+  # Cache settings
+  cache:
+    tti: 7200
+    maxCapacity: 5000
+  # Secrets management
+  secrets:
+    openRouterPrivateKey: ""
+    secretsManager: "no_encryption"
+    awsKms:
+      keyId: "us-west-2"
+      region: "abc"
+  # API client settings
+  apiClient:
+    clientIdleTimeout: 90
+    poolMaxIdlePerHost: 10
+    identity: ""
+
+
+# MySQL configuration (used when decisionEngine.useMySQL is true)
+mysql:
+  enabled: false
+  auth:
+    rootPassword: "root"
+    database: "jdb"
+  primary:
+    persistence:
+      enabled: true
+      size: 8Gi
+
+# PostgreSQL configuration (used when decisionEngine.usePostgreSQL is true)
+postgresql:
+  enabled: true
+  auth:
+    username: "db_user"
+    password: "db_pass"
+    database: "decision_engine_db"
+  primary:
+    persistence:
+      enabled: true
+      size: 8Gi
+
+# Redis configuration
+redis:
+  enabled: true
+  auth:
+    enabled: false
+  master:
+    persistence:
+      enabled: true
+      size: 8Gi
+  replica:
+    replicaCount: 1
+    persistence:
+      enabled: true
+      size: 8Gi
+
+# Groovy Runner configuration
+groovyRunner:
+  enabled: true
+  image:
+    repository: "ghcr.io/juspay/decision-engine/groovy-runner"
+    version: "v1.0.0"
+    pullPolicy: "Always"
+  service:
+    port: 8085
+  resources: {}
+  healthcheck:
+    enabled: true
+    path: "/health"
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 5
+
+# Database Migration Job
+dbMigration:
+  enabled: true
+  # PostgreSQL migrations
+  postgresql:
+    enabled: true
+    image:
+      repository: "postgres"
+      tag: "latest"
+      pullPolicy: "IfNotPresent"
+    migrations:
+      path: "/app/migrations_pg"
+  # MySQL migrations (not used with PostgreSQL)
+  mysql:
+    enabled: false
+    image:
+      pullPolicy: IfNotPresent
+    scriptUrls:
+      - https://raw.githubusercontent.com/juspay/decision-engine/431b1b2/migrations/00000000000000_diesel_initial_setup/up.sql
+      - https://raw.githubusercontent.com/juspay/decision-engine/431b1b2/migrations/2025-04-23-103603_add_routing_algorithm_mapper_table/up.sql
+      - https://raw.githubusercontent.com/juspay/decision-engine/431b1b2/migrations/2025-05-09-112540_add_metadata_to_routing_algorithm/up.sql
+
+# Routing Config Job
+routingConfig:
+  enabled: false
+  image:
+    repository: "python"
+    tag: "3.10-slim"
+    pullPolicy: "IfNotPresent"
+  command: ["bash", "run_setup.sh"]
+  configVolume:
+    enabled: true
+    # Path to mount routing config files
+    mountPath: "/app"

@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "decision-engine.fullname" . }}
+  labels:
+    {{- include "decision-engine.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "decision-engine.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "decision-engine.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "decision-engine.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        {{- if .Values.decisionEngine.usePostgreSQL }}
+        - name: wait-for-postgresql
+          image: busybox:1.28
+          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.postgresqlHost" . }} 5432; do echo waiting for postgresql; sleep 2; done;']
+        {{- end }}
+        {{- if .Values.decisionEngine.useRedis }}
+        - name: wait-for-redis
+          image: busybox:1.28
+          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.redisHost" . }} 6379; do echo waiting for redis; sleep 2; done;']
+        {{- end }}
+        - name: wait-for-groovy-runner
+          image: busybox:1.28
+          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.groovyRunnerName" . }} {{ .Values.groovyRunner.service.port }}; do echo waiting for groovy-runner; sleep 2; done;']
+        {{- if .Values.decisionEngine.useMySQL }}
+        - name: wait-for-mysql
+          image: busybox:1.28
+          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.mysqlHost" . }} 3306; do echo waiting for mysql; sleep 2; done;']
+        {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.version | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.decisionEngine.server.port }}
+              protocol: TCP
+          env:
+            - name: GROOVY_RUNNER_HOST
+              value: "{{ include "decision-engine.groovyRunnerName" . }}:{{ .Values.groovyRunner.service.port }}"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: config-volume
+              mountPath: /local/config/development.toml
+              subPath: development.toml
+      volumes:
+        - name: config-volume
+          configMap:
+            name: {{ include "decision-engine.fullname" . }}-config
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

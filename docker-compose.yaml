@@ -56,6 +56,28 @@ services:
     environment:
       - GROOVY_RUNNER_HOST=host.docker.internal:8085
 
+  open-router-pg:
+    image: ghcr.io/juspay/decision-engine/postgres:e78b96d
+    pull_policy: always
+    platform: linux/amd64
+    container_name: open-router-pg 
+    restart: unless-stopped
+    ports:
+      - "8080:8080" 
+    depends_on:
+      db-migrator-postgres: 
+        condition: service_completed_successfully
+      groovy-runner-local: 
+        condition: service_healthy
+      routing-config:
+        condition: service_completed_successfully
+    volumes:
+      - ./config/docker-configuration.toml:/local/config/development.toml
+    networks:
+      - open-router-network
+    environment:
+      - GROOVY_RUNNER_HOST=host.docker.internal:8085
+
   groovy-runner:
     image: ghcr.io/juspay/open-router/groovy-runner:main
     pull_policy: always
@@ -174,6 +196,8 @@ services:
     volumes:
       - ./migrations_pg/00000000000000_diesel_postgresql_initial_setup/up.sql:/app/migrations_pg/up.sql
     working_dir: /app
+    environment:
+      - PGPASSWORD=db_pass
     entrypoint: ["/bin/sh", "-c", "psql -h postgresql -U db_user -d decision_engine_db -f /app/migrations_pg/up.sql"]
     networks:
       - open-router-network
