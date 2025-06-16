@@ -43,25 +43,27 @@ def build_card_pool(success_percent):
     """Build a pool of cards with the given success percentage"""
     return [SUCCESS_CARD] * success_percent + [FAIL_CARD] * (100 - success_percent)
 
-def decide_gateway(payment_id, connector_map, juspay_url='https://sandbox.juspay.in/decide-gateway'):
+def decide_gateway(payment_id, connector_map, merchant_id):
     """Call the decide-gateway endpoint to get the gateway decision"""
+    juspay_url = "https://integ-api.hyperswitch.io/decide-gateway"
     headers = {
         'Content-Type': 'application/json',
-        'x-merchantid': 'hyperswitchTest',
+        'x-merchantid': merchant_id,
+        'x-feature': 'decision-engine',
     }
     payload = {
-        "merchantId": "hyperswitchTest",
+        "merchantId": merchant_id,
         "eligibleGatewayList": list(connector_map.keys()),
         "rankingAlgorithm": "SR_BASED_ROUTING",
-        "eliminationEnabled": True,
+        "eliminationEnabled": False,
         "paymentInfo": {
             "paymentId": payment_id,
             "amount": 100.50,
             "currency": "USD",
             "customerId": "CUST12345",
             "paymentType": "ORDER_PAYMENT",
-            "paymentMethodType": "CARD",
-            "paymentMethod": "VISA"
+            "paymentMethodType": "UNKNOWN",
+            "paymentMethod": "custom_pm"
         }
     }
     try:
@@ -81,13 +83,15 @@ def decide_gateway(payment_id, connector_map, juspay_url='https://sandbox.juspay
         print(f"❌ Failed to call decide-gateway: {e}")
         return None, None
 
-def update_gateway_score(gateway, status, payment_id, juspay_url='https://sandbox.juspay.in/update-gateway-score'):
+def update_gateway_score(gateway, status, payment_id, profile_id):
     """Update the gateway score based on payment result"""
+    juspay_url = "https://integ-api.hyperswitch.io/update-gateway-score"
     headers = {
         'Content-Type': 'application/json',
+        'x-feature': 'decision-engine',
     }
     payload = {
-        "merchantId": "hyperswitchTest",
+        "merchantId": profile_id,
         "gateway": gateway,
         "gatewayReferenceId": None,
         "status": status,
@@ -221,7 +225,7 @@ def send_logs_to_gemini(payment_results, gemini_api_url):
     except Exception as e:
         print(f"❌ Gemini API request failed: {str(e)}")
 
-def simulate_payments(total_payments=30, initial_success_percent=60, 
+def simulate_payments(total_payments=1, initial_success_percent=60,
                      payment_url=None, profile_id=None, connector_map=None,
                      headers=None, gemini_api_url=None, sleep_sec=0):
     """Simulate a series of payments using routing decisions"""
@@ -239,7 +243,7 @@ def simulate_payments(total_payments=30, initial_success_percent=60,
         payment_id = f"PAY_SIM_{i:05d}"
 
         print(f"\n🔸 Payment {i}: ID = {payment_id}")
-        decided_gateway, routing_approach = decide_gateway(payment_id, connector_map)
+        decided_gateway, routing_approach = decide_gateway(payment_id, connector_map, profile_id)
         card_pool = card_pools.get(decided_gateway, [SUCCESS_CARD] * 50 + [FAIL_CARD] * 50)
         card = random.choice(card_pool)
         if not decided_gateway:
@@ -252,7 +256,6 @@ def simulate_payments(total_payments=30, initial_success_percent=60,
             continue
 
         payload = generate_payload(card["number"], decided_gateway, mca_id, profile_id)
-
         try:
             response = requests.post(payment_url, headers=headers, data=json.dumps(payload))
             resp_json = response.json()
@@ -277,11 +280,11 @@ def simulate_payments(total_payments=30, initial_success_percent=60,
             "mode": "Exploitation" if routing_approach == "SR_SELECTION_V3_ROUTING" else "Exploration"
         })
 
-        update_gateway_score(decided_gateway, status, payment_id)
+        update_gateway_score(decided_gateway, status, payment_id, profile_id)
 
         time.sleep(sleep_sec)
 
     if gemini_api_url:
         send_logs_to_gemini(payment_results, gemini_api_url)
-    
+
     return payment_results

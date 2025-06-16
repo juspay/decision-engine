@@ -3,8 +3,8 @@ import json
 import uuid
 
 # Default API endpoints
-API_BASE_URL = "https://sandbox.hyperswitch.io"
-APP_BASE_URL = "https://app.hyperswitch.io"
+API_BASE_URL = "https://integ.hyperswitch.io"
+APP_BASE_URL = "https://integ.hyperswitch.io"
 
 class HyperswitchAPI:
     def __init__(self, api_key, merchant_id, bearer_token=None):
@@ -22,7 +22,7 @@ class HyperswitchAPI:
         """Create a new business profile"""
         url = f"{APP_BASE_URL}/api/account/{self.merchant_id}/business_profile"
         payload = {"profile_name": profile_name}
-        
+
         try:
             response = requests.post(url, headers=self.headers, json=payload)
             response.raise_for_status()
@@ -41,11 +41,11 @@ class HyperswitchAPI:
     def create_connector(self, profile_id, connector_name, connector_label):
         """Create a test connector for the profile"""
         url = f"{APP_BASE_URL}/api/account/{self.merchant_id}/connectors"
-        
+
         # Add profile ID to headers
         headers = self.headers.copy()
         headers["X-Profile-Id"] = profile_id
-        
+
         payload = {
             "connector_type": "payment_processor",
             "profile_id": profile_id,
@@ -86,7 +86,7 @@ class HyperswitchAPI:
             "pm_auth_config": None,
             "connector_wallets_details": None
         }
-        
+
         try:
             response = requests.post(url, headers=headers, json=payload)
             response.raise_for_status()
@@ -103,7 +103,7 @@ class HyperswitchAPI:
     def enable_success_rate_algorithm(self, profile_id):
         """Enable success rate algorithm for the profile"""
         url = f"{API_BASE_URL}/account/{self.merchant_id}/business_profile/{profile_id}/dynamic_routing/success_based/toggle?enable=dynamic_connector_selection"
-        
+
         try:
             response = requests.post(url, headers=self.headers)
             response.raise_for_status()
@@ -119,7 +119,7 @@ class HyperswitchAPI:
     def configure_routing_rules(self, profile_id, routing_id):
         """Configure routing rules for the success rate algorithm"""
         url = f"{API_BASE_URL}/account/{self.merchant_id}/business_profile/{profile_id}/dynamic_routing/success_based/config/{routing_id}"
-        
+
         payload = {
             "config": {
                 "min_aggregates_size": 5,
@@ -130,7 +130,7 @@ class HyperswitchAPI:
                 }
             }
         }
-        
+
         try:
             response = requests.patch(url, headers=self.headers, json=payload)
             response.raise_for_status()
@@ -168,7 +168,7 @@ class HyperswitchAPI:
     def set_volume_split(self, profile_id, split_percentage=100):
         """Set volume split percentage"""
         url = f"{API_BASE_URL}/account/{self.merchant_id}/business_profile/{profile_id}/dynamic_routing/set_volume_split?split={split_percentage}"
-        
+
         try:
             response = requests.post(url, headers=self.headers)
             print(f"✅ Set volume split to {split_percentage}% for profile: {profile_id}")
@@ -179,7 +179,7 @@ class HyperswitchAPI:
                 print(f"Response: {e.response.text}")
             print("⚠️ Continuing with setup...")
             return {}
-            
+
     def fetch_connector_map(self, profile_id):
         """Fetch connector mappings for a specific profile"""
         url = f"{APP_BASE_URL}/api/account/{self.merchant_id}/profile/connectors"
@@ -209,16 +209,16 @@ def setup_and_run_demo(api_key, merchant_id, profile_id, bearer_token, connector
     """Main function to set up the environment and run the simulation"""
     print("🚀 Setting up Success Rate Routing Demo")
     print("---------------------------------------")
-    
+
     # Initialize API client
     api_client = HyperswitchAPI(api_key, merchant_id, bearer_token)
-    
+
     # Step 1: Use existing profile
     print(f"Using profile ID: {profile_id}")
-    
+
     # Dictionary to store merchant_connector_ids
     merchant_connector_ids = {}
-    
+
     # Step 2: Create test connectors
     print("\n📋 Creating test connectors...")
     for connector in connectors:
@@ -227,31 +227,31 @@ def setup_and_run_demo(api_key, merchant_id, profile_id, bearer_token, connector
             merchant_connector_id = connector_data["merchant_connector_id"]
             merchant_connector_ids[connector["name"]] = merchant_connector_id
             print(f"Stored merchant_connector_id for {connector['name']}: {merchant_connector_id}")
-    
+
     # Step 3: Enable success rate algorithm
     print("\n🔄 Enabling success rate algorithm...")
     routing_response = api_client.enable_success_rate_algorithm(profile_id)
     routing_id = routing_response.get("id")
-    
+
     if routing_id:
         print(f"Routing ID: {routing_id}")
-        
+
         # Step 4: Configure routing rules
         api_client.configure_routing_rules(profile_id, routing_id)
-        
+
         # Step 5: Activate routing
         api_client.activate_routing(routing_id)
     else:
         print("❌ Failed to get routing ID from response")
         routing_id = f"rout_{uuid.uuid4().hex[:10]}"
         print(f"Using generated routing ID: {routing_id}")
-    
+
     # Step 6: Set volume split
     api_client.set_volume_split(profile_id)
-    
+
     print("\n🔄 Setup complete! Starting payment simulation...\n")
-    
+
     # Step 7: Simulate payments
     simulate_payments_function()
-    
+
     print("\n✅ Success Rate Routing Demo completed!")
