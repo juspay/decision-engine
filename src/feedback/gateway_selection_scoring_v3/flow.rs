@@ -102,7 +102,7 @@ pub async fn updateSrV3Score(
                     txn_detail.clone(),
                     txn_card_info.clone(),
                 ).await;
-                if ["Card", "UPI"].contains(&payment_method_type.as_str()) {
+                if ["CARD", "UPI"].contains(&payment_method_type.as_str()) {
                     let key3d_for_gateway_selection =
                         unified_sr_v3_key.clone().unwrap_or_else(|| "".to_string());
                     if key3d_for_gateway_selection != key_for_gateway_selection {
