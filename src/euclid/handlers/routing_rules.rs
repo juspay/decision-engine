@@ -357,7 +357,7 @@ fn perform_eligibility_analysis(
         let clause = cgraph::Clause {
             key: "output".to_string(),
             comparison: ComparisonType::Equal,
-            value: ValueType::EnumVariant(out.connector.clone()),
+            value: ValueType::EnumVariant(out.gateway_name.clone()),
         };
 
         if let Ok(true) = constraint_graph.check_clause_validity(clause, &ctx) {
