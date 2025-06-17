@@ -1112,7 +1112,7 @@ pub async fn getFailureReasonWithFilter(
             }
         }
         "filterFunctionalGatewaysForConsumerFinance" => {
-            if txn_card_info.paymentMethodType == "ConsumerFinance" {
+            if txn_card_info.paymentMethodType == "CONSUMER_FINANCE" {
                 "No functional gateways supporting Consumer Finance transaction.".to_string()
             } else {
                 "Gateways configured supports only Consumer Finance transaction.".to_string()

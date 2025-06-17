@@ -2919,7 +2919,7 @@ pub async fn filterGatewaysForConsumerFinance(this: &mut DeciderFlow<'_>) -> Vec
         .into_iter()
         .collect::<HashSet<_>>();
 
-    if txn_card_info.paymentMethodType == "ConsumerFinance" {
+    if txn_card_info.paymentMethodType == "CONSUMER_FINANCE" {
         let consumer_finance_also_gateways: Vec<String> =
             findByNameFromRedis::<Vec<String>>(C::CONSUMER_FINANCE_ALSO_GATEWAYS.get_key())
                 .await
