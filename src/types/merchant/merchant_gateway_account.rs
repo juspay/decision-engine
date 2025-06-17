@@ -59,6 +59,7 @@ pub fn to_supported_payment_flows(
 }
 
 #[derive(Debug, PartialEq, Eq, Ord, PartialOrd, Clone, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct MerchantGwAccId {
     #[serde(rename = "merchantGwAccId")]
     pub merchantGwAccId: i64,

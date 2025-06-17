@@ -5,8 +5,7 @@ image:
   # Updated to include the registry URL
   repository: ghcr.io/juspay/decision-engine/postgres
   pullPolicy: Always
-  version: "d35b018" 
-  tag: "d35b018-linux-arm64"
+  version: "v1.0.0"
 
 # Configure these if your images are in a private registry
 imagePullSecrets: 
@@ -106,7 +105,9 @@ decisionEngine:
     clientIdleTimeout: 90
     poolMaxIdlePerHost: 10
     identity: ""
-
+  metadata:
+    labels:
+      component: decision-engine
 
 # MySQL configuration (used when decisionEngine.useMySQL is true)
 mysql:
@@ -151,9 +152,8 @@ groovyRunner:
   enabled: true
   image:
     repository: "ghcr.io/juspay/decision-engine/groovy-runner"
-    tag: "0a8cdc1"
+    version: "v1.0.0"
     pullPolicy: "Always"
-    platform: "linux/arm64"
   service:
     port: 8085
   resources: {}
@@ -164,6 +164,9 @@ groovyRunner:
     periodSeconds: 5
     timeoutSeconds: 5
     failureThreshold: 5
+  metadata:
+    labels:
+      component: groovy-runner
 
 # Database Migration Job
 dbMigration:
