@@ -1108,13 +1108,13 @@ fn check_scheduled_outage_metadata(
                 |x: _, y| x == Some(y),
                 Some(None),
                 scheduled_outage_metadata.flowType.clone(),
-            ) && match &txn_card_info.paymentMethodType {
-                value if value == "Card" => schedule_equal_to(
+            ) && match txn_card_info.paymentMethodType.as_str() {
+                "CARD" => schedule_equal_to(
                     |x, y| x == y,
                     txn_card_info.card_type.clone(),
                     scheduled_outage_metadata.cardType.clone(),
                 ),
-                value if value == "UPI" => txn_card_info
+                "UPI" => txn_card_info
                     .paymentSource
                     .as_ref()
                     .map_or(false, |payment_source| {
