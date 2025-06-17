@@ -9,5 +9,5 @@
 use crate::types::{card::txn_card_info::TxnCardInfo};
 
 pub fn is_google_pay_txn(tci: TxnCardInfo) -> bool {
-    tci.paymentMethodType == "Wallet" && tci.paymentMethod == "GOOGLEPAY"
+    tci.paymentMethodType == "WALLET" && tci.paymentMethod == "GOOGLEPAY"
 }
