@@ -1,3 +1,4 @@
+use super::ast::ConnectorInfo;
 use super::utils::generate_random_id;
 use crate::decider::network_decider;
 use crate::euclid::ast::{Output, Program, ValueType};
@@ -5,8 +6,13 @@ use crate::euclid::ast::{Output, Program, ValueType};
 use crate::storage::schema;
 #[cfg(feature = "postgres")]
 use crate::storage::schema_pg;
-use super::ast::ConnectorInfo;
-use super::utils::generate_random_id;
+use diesel::prelude::AsChangeset;
+use diesel::Identifiable;
+use diesel::Insertable;
+use diesel::{Queryable, Selectable};
+use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, fmt, ops::Deref};
+use time::PrimitiveDateTime;
 
 pub type Metadata = HashMap<String, serde_json::Value>;
 
@@ -32,13 +38,8 @@ pub struct RoutingRule {
     pub metadata: Option<serde_json::Value>,
 }
 
-
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(
-    tag = "type",
-    content = "data",
-    rename_all = "snake_case",
-)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum StaticRoutingAlgorithm {
     Advanced(Program),
 }
