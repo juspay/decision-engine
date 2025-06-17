@@ -2,10 +2,13 @@ use crate::{
     config::Database,
     config::PgDatabase,
     error::{self, ContainerError},
+    logger
 };
 
 use crate::generics::StorageResult;
 use bb8::PooledConnection;
+use std::time::Duration;
+use tokio::time;
 
 #[cfg(feature = "mysql")]
 use diesel::MysqlConnection;
@@ -147,11 +150,26 @@ impl Storage {
     /// Get connection from database pool for accessing data
     pub async fn get_conn(
         &self,
-    ) -> StorageResult<PooledConnection<'_, async_bb8_diesel::ConnectionManager<MysqlConnection>>>
-    {
-        match self.pg_pool.get().await {
-            Ok(conn) => Ok(conn),
-            Err(err) => Err(crate::generics::MeshError::DatabaseConnectionError),
+    ) -> StorageResult<
+        PooledConnection<'_, async_bb8_diesel::ConnectionManager<
+            MysqlConnection,
+        >>,
+    > {
+        let timeout_duration = Duration::from_secs(10); 
+        match time::timeout(timeout_duration, self.pg_pool.get()).await {
+            Ok(Ok(conn)) => {
+                logger::info!(action = "DB_CONNECTION_SUCCESS","connection to db successful");
+
+                Ok(conn)
+            }
+            Ok(Err(_err)) => {
+                logger::error!(action = "DB_CONNECTION_FAILURE","Failed to get connection from pool: {:?}", _err);
+                Err(crate::generics::MeshError::DatabaseConnectionError)
+            }
+            Err(_elapsed) =>{
+                logger::error!(action = "DB_CONNECTION_FAILURE","time exceeded for DB connection: {:?}", _elapsed);
+                 Err(crate::generics::MeshError::DatabaseConnectionError)
+            } // timeout occurred
         }
     }
 }

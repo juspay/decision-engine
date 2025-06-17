@@ -868,6 +868,7 @@ pub struct DomainDeciderRequest {
     pub priorityLogicOutput: Option<GatewayPriorityLogicOutput>,
     pub priorityLogicScript: Option<String>,
     pub isEdccApplied: Option<bool>,
+    pub shouldConsumeResult: Option<bool>,
 }
 
 // impl Given<SecretContext> for DomainDeciderRequest {}
@@ -932,6 +933,7 @@ impl DomainDeciderRequestForApiCallV2 {
                 metadata: self.paymentInfo.metadata.clone(),
                 internalMetadata: self.paymentInfo.internalMetadata.clone(),
             },
+            shouldConsumeResult: None,
             orderMetadata: ETOMV2::OrderMetadataV2 {
                 id: ETOMV2::to_order_metadata_v2_pid(1),
                 date_created: OffsetDateTime::now_utc(),
@@ -1194,6 +1196,7 @@ pub struct DeciderParams {
     pub dpPriorityLogicOutput: Option<GatewayPriorityLogicOutput>,
     pub dpPriorityLogicScript: Option<String>,
     pub dpEDCCApplied: Option<bool>,
+    pub dpShouldConsumeResult: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

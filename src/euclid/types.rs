@@ -5,13 +5,8 @@ use crate::euclid::ast::{Output, Program, ValueType};
 use crate::storage::schema;
 #[cfg(feature = "postgres")]
 use crate::storage::schema_pg;
-use diesel::prelude::AsChangeset;
-use diesel::Identifiable;
-use diesel::Insertable;
-use diesel::{Queryable, Selectable};
-use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt, ops::Deref};
-use time::PrimitiveDateTime;
+use super::ast::ConnectorInfo;
+use super::utils::generate_random_id;
 
 pub type Metadata = HashMap<String, serde_json::Value>;
 
@@ -32,9 +27,20 @@ pub struct RoutingRule {
     pub name: String,
     pub description: String,
     pub created_by: String,
-    pub algorithm: Program,
+    pub algorithm: StaticRoutingAlgorithm,
     #[serde(default)]
     pub metadata: Option<serde_json::Value>,
+}
+
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(
+    tag = "type",
+    content = "data",
+    rename_all = "snake_case",
+)]
+pub enum StaticRoutingAlgorithm {
+    Advanced(Program),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
@@ -47,7 +53,7 @@ pub struct RoutingRequest {
 pub struct BackendOutput {
     pub rule_name: Option<String>,
     pub output: Output,
-    pub evaluated_output: Vec<String>,
+    pub evaluated_output: Vec<ConnectorInfo>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -78,8 +84,8 @@ impl RoutingDictionaryRecord {
 pub struct RoutingEvaluateResponse {
     pub status: String,
     pub output: serde_json::Value,
-    pub evaluated_output: Vec<String>,
-    pub eligible_connectors: Vec<String>,
+    pub evaluated_output: Vec<ConnectorInfo>,
+    pub eligible_connectors: Vec<ConnectorInfo>,
 }
 
 // #[derive(AsChangeset, Debug, Clone, Identifiable, Insertable, Queryable, Selectable)]

@@ -1,5 +1,7 @@
 use super::ast::{Comparison, ComparisonType, IfStatement, Rule, ValueType};
 use super::errors::EuclidErrors;
+use super::types::StaticRoutingAlgorithm;
+use crate::euclid::types::{KeyConfig, TomlConfig, RoutingRule};
 use crate::error::{ApiError, ContainerError};
 use crate::euclid::types::{KeyConfig, RoutingRule, TomlConfig};
 use std::collections::HashMap;
@@ -70,16 +72,26 @@ pub fn validate_routing_rule(
         .clone()
         .ok_or_else(|| error_stack::report!(EuclidErrors::GlobalRoutingConfigsUnavailable))?;
 
+    let program = match &rule.algorithm {
+        StaticRoutingAlgorithm::Advanced(p) => p,
+    };
+
     let mut errors = Vec::new();
 
-    for rule in &rule.algorithm.rules {
+    for rule in &program.rules {
         validate_rule(rule, &config, &mut errors);
     }
 
     if errors.is_empty() {
         Ok(())
     } else {
-        Err(EuclidErrors::FailedToValidateRoutingRule.into())
+        let detailed_message = errors.join("; ");
+        crate::logger::error!("Routing rule validation failed with errors: {detailed_message}");
+        Err(EuclidErrors::InvalidRequest(format!(
+            "Routing rule validation failed: {}",
+            detailed_message
+        ))
+        .into())
     }
 }
 

@@ -200,6 +200,7 @@ pub async fn deciderFullPayloadHSFunction(
         dpPriorityLogicOutput: dreq.priorityLogicOutput,
         dpPriorityLogicScript: dreq.priorityLogicScript,
         dpEDCCApplied: dreq.isEdccApplied,
+        dpShouldConsumeResult: dreq.shouldConsumeResult,
     };
     runDeciderFlow(decider_params).await
 }
@@ -680,13 +681,7 @@ pub async fn runDeciderFlow(
         ..decider_flow.writer.gateway_scoring_data.clone()
     };
     let app_state = get_tenant_app_state().await;
-    if (isFeatureEnabled(
-        C::SHOULD_CONSUME_RESULT_FROM_ROUTER.get_key(),
-        Utils::get_m_id(deciderParams.dpMerchantAccount.merchantId.clone()),
-        "kv_redis".to_string(),
-    )
-    .await)
-    {
+    if deciderParams.dpShouldConsumeResult.unwrap_or(false) {
         app_state
             .redis_conn
             .setx(
