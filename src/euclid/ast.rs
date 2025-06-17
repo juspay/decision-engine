@@ -150,8 +150,8 @@ pub enum Output {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct ConnectorInfo {
-    pub connector: String,
-    pub mca_id: Option<String>,
+    pub gateway_name: String,
+    pub gateway_id: Option<String>,
 }
 
 pub type Globals = HashMap<String, HashSet<ValueType>>;
