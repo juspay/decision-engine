@@ -63,7 +63,6 @@ use crate::types::merchant_gateway_card_info as ETMGCI;
 // // use types::money as Money;
 use crate::types::card::txn_card_info::{self as ETTCa, auth_type_to_text};
 use crate::types::order as ETO;
-use crate::types::payment::payment_method::PaymentMethodType;
 use crate::types::txn_details::types as ETTD;
 use crate::types::txn_offer as ETTO;
 // use juspay::extra::parsing as P;
@@ -186,15 +185,16 @@ pub fn is_emandate_supported_payment_method(
     txn_card_info: &ETCa::txn_card_info::TxnCardInfo,
 ) -> bool {
     matches!(
-        txn_card_info.paymentMethodType,
-        PaymentMethodType::Card
-            | PaymentMethodType::NB
-            | PaymentMethodType::Wallet
-            | PaymentMethodType::UPI
-            | PaymentMethodType::Aadhaar
-            | PaymentMethodType::Papernach
-            | PaymentMethodType::PAN
-            | PaymentMethodType::Rtp
+        txn_card_info.paymentMethodType.as_str(),
+        "CARD"
+        | "NB"
+        | "WALLET"
+        | "UPI"
+        | "AADHAAR"
+        | "PAPERNACH"
+        | "PAN"
+        | "RTP"
+
     )
 }
 
@@ -604,11 +604,11 @@ pub fn is_emandate_amount_filter_needed(
 ) -> bool {
     is_emandate_register_transaction(txn_detail)
         && matches!(
-            txn_card_info.paymentMethodType,
-            PaymentMethodType::Card
-                | PaymentMethodType::NB
-                | PaymentMethodType::Aadhaar
-                | PaymentMethodType::PAN
+            txn_card_info.paymentMethodType.as_str(),
+            "CARD"
+            | "NB"
+            | "AADHAAR"
+            | "PAN"
         )
 }
 
@@ -745,7 +745,7 @@ pub fn get_metric_log_format(decider_flow: &mut DeciderFlow<'_>, stage: &str) ->
         model: txn_detail.txnObjectType.to_string(),
         log_type: "APP_EVENT".to_string(),
         payment_method: txn_card_info.paymentMethod.clone(),
-        payment_method_type: txn_card_info.paymentMethodType.to_text().to_string(),
+        payment_method_type: txn_card_info.paymentMethodType.clone(),
         payment_source: payment_source_m,
         source_object: txn_detail.sourceObject.clone(),
         txn_detail_id: txn_detail.id.clone(),
@@ -809,7 +809,6 @@ pub async fn log_gateway_decider_approach(
             payment_method_type: txn_card_info
                 .clone()
                 .paymentMethodType
-                .to_text()
                 .to_string(),
             payment_source: payment_source_m,
             source_object: txn_detail.sourceObject,
@@ -1898,8 +1897,7 @@ pub async fn get_gateway_scoring_data(
     .await;
     let merchant_id = merchant_id_to_text(merchant.merchantId.clone());
     let order_type = txn_detail.txnObjectType.to_string();
-    let payment_method_type =
-        PaymentMethodType::to_text(&txn_card_info.paymentMethodType).to_uppercase();
+    let payment_method_type = txn_card_info.paymentMethodType.to_uppercase();
     let m_source_object = if txn_card_info.paymentMethod == "UPI" {
         txn_detail.sourceObject.clone().unwrap_or_default()
     } else {
@@ -1932,8 +1930,8 @@ pub async fn get_gateway_scoring_data(
         is_gri_enabled_for_sr_routing,
         decider_flow.get().dpTxnDetail.dateCreated.clone(),
     );
-    let updated_gateway_scoring_data = match txn_card_info.paymentMethodType {
-        PaymentMethodType::UPI => {
+    let updated_gateway_scoring_data = match txn_card_info.paymentMethodType.as_str() {
+        "UPI" => {
             let handle_and_package_based_routing = isFeatureEnabled(
                 C::HANDLE_PACKAGE_BASED_ROUTING_CUTOVER.get_key(),
                 merchant_id.clone(),
@@ -1953,7 +1951,7 @@ pub async fn get_gateway_scoring_data(
                 handle_and_package_based_routing;
             default_gateway_scoring_data
         }
-        PaymentMethodType::Card => {
+        "CARD" => {
             let sr_evaluation_at_auth_level = isFeatureEnabled(
                 C::ENABLE_SELECTION_BASED_AUTH_TYPE_EVALUATION.get_key(),
                 merchant_id.clone(),

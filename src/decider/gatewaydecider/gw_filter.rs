@@ -35,7 +35,7 @@ use crate::types::gateway_payment_method_flow::{
 use crate::types::merchant_gateway_account_sub_info::{self as ETMGASI, SubIdType, SubInfoType};
 use crate::types::merchant_gateway_payment_method_flow as MGPMF;
 use crate::types::order::Order;
-use crate::types::payment::payment_method::{self as ETP, PaymentMethodType};
+use crate::types::payment::payment_method::{self as ETP};
 use crate::types::payment_flow::PaymentFlow;
 use std::collections::{HashMap, HashSet};
 // use crate::types::metadata::Meta;
@@ -892,7 +892,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
             .await
             .unwrap_or_default();
     let filtered_gateways: Vec<String> =
-        if txnCardInfo.paymentMethodType == PaymentMethodType::MerchantContainer {
+        if txnCardInfo.paymentMethodType == "MERCHANT_CONTAINER" {
             st.into_iter()
                 .filter(|gw| merchantContainerSupportedGateways.contains(gw))
                 .collect()
@@ -2567,11 +2567,11 @@ async fn getGatewaysAcceptingPaymentMethod(
 
 fn getPaymentMethodForNonCardTransaction(txn_card_info: &TxnCardInfo) -> String {
     if matches!(
-        txn_card_info.paymentMethodType,
-        ETP::PaymentMethodType::ConsumerFinance
-            | ETP::PaymentMethodType::UPI
-            | ETP::PaymentMethodType::Reward
-            | ETP::PaymentMethodType::Cash
+        txn_card_info.paymentMethodType.as_str(),
+        "CONSUMER_FINANCE" 
+        | "UPI" 
+        | "REWARD" 
+        | "CASH"
     ) {
         txn_card_info.paymentMethod.clone()
     } else {
@@ -2919,7 +2919,7 @@ pub async fn filterGatewaysForConsumerFinance(this: &mut DeciderFlow<'_>) -> Vec
         .into_iter()
         .collect::<HashSet<_>>();
 
-    if txn_card_info.paymentMethodType == ETP::PaymentMethodType::ConsumerFinance {
+    if txn_card_info.paymentMethodType == "ConsumerFinance" {
         let consumer_finance_also_gateways: Vec<String> =
             findByNameFromRedis::<Vec<String>>(C::CONSUMER_FINANCE_ALSO_GATEWAYS.get_key())
                 .await
@@ -2969,7 +2969,7 @@ pub async fn filterGatewaysForUpi(this: &mut DeciderFlow<'_>) -> Vec<String> {
     //Convert upi_only_gateways to <HashSet<_>>
     let upi_only_gateways_hashset = upi_only_gateways.into_iter().collect::<HashSet<_>>();
 
-    if txn_card_info.paymentMethodType == ETP::PaymentMethodType::UPI {
+    if txn_card_info.paymentMethodType == "UPI" {
         let upi_also_gateway: Vec<String> =
             findByNameFromRedis::<Vec<String>>(C::UPI_ALSO_GATEWAYS.get_key())
                 .await
@@ -3016,7 +3016,7 @@ pub async fn filterGatewaysForTxnType(this: &mut DeciderFlow<'_>) -> Vec<String>
         None => (),
         Some(txn_type) => {
             let mgas = Utils::get_mgas(this).unwrap_or_default();
-            let (st, curr_mgas) = if txn_card_info.paymentMethodType == ETP::PaymentMethodType::UPI
+            let (st, curr_mgas) = if txn_card_info.paymentMethodType == "UPI"
                 && txn_card_info.paymentMethod == "UPI"
             {
                 let functional_mgas: Vec<_> = mgas
@@ -3214,7 +3214,7 @@ pub async fn filterGatewaysForReward(this: &mut DeciderFlow<'_>) -> Vec<String> 
             .into_iter()
             .collect();
     let filtered_gws = if card_type == Some(ETCA::CardType::Reward)
-        || payment_method_type == ETP::PaymentMethodType::Reward
+        || payment_method_type == "REWARD"
     {
         st.into_iter()
             .filter(|gw| reward_also_gateways.contains(gw) || reward_only_gateways.contains(gw))
@@ -3235,7 +3235,7 @@ pub async fn filterGatewaysForReward(this: &mut DeciderFlow<'_>) -> Vec<String> 
 pub async fn filterGatewaysForCash(this: &mut DeciderFlow<'_>) -> Vec<String> {
     let st = getGws(this);
     let payment_method_type = this.get().dpTxnCardInfo.paymentMethodType.clone();
-    if payment_method_type != ETP::PaymentMethodType::Cash {
+    if payment_method_type != "CASH" {
         let cash_only_gateways: Vec<String> = findByNameFromRedis(C::CASH_ONLY_GATEWAYS.get_key())
             .await
             .unwrap_or_else(Vec::new)

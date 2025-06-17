@@ -1,6 +1,6 @@
 use crate::error::ApiError;
 use crate::types::card::card_type::CardType;
-use crate::types::payment::payment_method::PaymentMethodType;
+use crate::utils::StringExt;
 use masking::Secret;
 use serde::{Deserialize, Deserializer, Serialize};
 use time::{OffsetDateTime, PrimitiveDateTime};
@@ -163,7 +163,7 @@ pub struct TxnCardInfo {
     #[serde(rename = "dateCreated")]
     pub dateCreated: OffsetDateTime,
     #[serde(rename = "paymentMethodType")]
-    pub paymentMethodType: PaymentMethodType,
+    pub paymentMethodType: String,
     #[serde(rename = "paymentMethod")]
     pub paymentMethod: String,
     #[serde(rename = "paymentSource")]

@@ -41,7 +41,6 @@ use crate::types::card::txn_card_info::TxnCardInfo;
 use crate::types::merchant::id as MID;
 use crate::types::merchant::merchant_account as MA;
 use crate::types::merchant::merchant_account::MerchantAccount;
-use crate::types::payment::payment_method::PaymentMethodType as PMT;
 // use utils::redis::feature as cutover::is_feature_enabled;
 // use prelude::{from_integral, foldable::length, map_m, error};
 // use data::foldable::{for_, foldl};
@@ -284,7 +283,7 @@ pub async fn getGatewayScoringType(
     let time_difference = getTimeFromTxnCreatedInMills(txn_detail.clone());
     let merchant_sr_v3_input_config =
         findByNameFromRedis(SR_V3_INPUT_CONFIG(get_m_id(merchant_id)).get_key()).await;
-    let pmt = txn_card_info.paymentMethodType.to_text();
+    let pmt = txn_card_info.paymentMethodType;
     let pm = get_payment_method(
         pmt.to_string(),
         txn_card_info.paymentMethod,
@@ -543,7 +542,6 @@ pub async fn updateGatewayScore(
             txn_card_info
                 .clone()
                 .paymentMethodType
-                .to_text()
                 .to_string(),
         )
         .get_key(),
@@ -751,7 +749,7 @@ pub async fn isUpdateWithinLatencyWindow(
                 //     .await
                 //     .unwrap_or(C.defaultGatewayScoreLatencyCheckInMins);
                 let merchant_id = MID::merchant_id_to_text(txn_detail.merchantId.clone());
-                let pmt = txn_card_info.paymentMethodType.to_text().to_string();
+                let pmt = txn_card_info.paymentMethodType;
                 let pm = GU::get_payment_method(
                     pmt,
                     txn_card_info.paymentMethod,
@@ -777,7 +775,7 @@ pub async fn isUpdateWithinLatencyWindow(
 
 async fn checkExemptIfMandateTxn(txn_detail: &TxnDetail, txn_card_info: &TxnCardInfo) -> bool {
     let is_recurring = isRecurringTxn(Some(txn_detail.txnObjectType.clone()));
-    let is_nb_pmt = txn_card_info.paymentMethodType == (PMT::NB);
+    let is_nb_pmt = txn_card_info.paymentMethodType == ("NB");
     let is_penny_reg_txn = isPennyMandateRegTxn(txn_detail.clone());
     is_recurring || (is_nb_pmt && is_penny_reg_txn)
 }

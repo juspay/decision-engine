@@ -51,7 +51,6 @@ use crate::{
         merchant::{
             merchant_account::MerchantAccount, merchant_gateway_account::MerchantGatewayAccount,
         },
-        payment::payment_method::PaymentMethodType as PMT,
         txn_details::types::TxnDetail,
         merchant::id as MID
     },
@@ -103,7 +102,7 @@ pub async fn updateSrV3Score(
                     txn_detail.clone(),
                     txn_card_info.clone(),
                 ).await;
-                if [PMT::Card, PMT::UPI].contains(&payment_method_type) {
+                if ["Card", "UPI"].contains(&payment_method_type.as_str()) {
                     let key3d_for_gateway_selection =
                         unified_sr_v3_key.clone().unwrap_or_else(|| "".to_string());
                     if key3d_for_gateway_selection != key_for_gateway_selection {
@@ -311,7 +310,7 @@ fn getStatus(maybe_popped_status_block: Option<SrV3DebugBlock>, popped_status: S
 pub async fn getSrV3MerchantBucketSize(txn_detail: TxnDetail, txn_card_info: TxnCardInfo) -> i32 {
     let merchant_sr_v3_input_config:Option<SrV3InputConfig>  =
         findByNameFromRedis(C::SR_V3_INPUT_CONFIG(MID::merchant_id_to_text(txn_detail.merchantId)).get_key()).await;
-    let pmt = txn_card_info.paymentMethodType.to_text();
+    let pmt = txn_card_info.paymentMethodType;
     let pm = GU::get_payment_method(
         (&pmt).to_string(),
         txn_card_info.paymentMethod,

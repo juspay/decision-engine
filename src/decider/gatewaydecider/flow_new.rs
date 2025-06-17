@@ -38,7 +38,6 @@ use crate::types::card::txn_card_info::TxnCardInfo;
 use crate::types::gateway_card_info::ValidationType;
 use crate::types::merchant as ETM;
 use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
-use crate::types::payment::payment_method::PaymentMethodType;
 use crate::types::txn_details::types as ETTD;
 
 pub async fn deciderFullPayloadHSFunction(

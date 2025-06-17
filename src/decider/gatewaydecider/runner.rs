@@ -25,7 +25,6 @@ use crate::{
             udfs::get_udf,
             Order,
         },
-        payment::payment_method::PaymentMethodType,
         tenant::{
             tenant_config::{ConfigType, FilterDimension, ModuleName},
             tenant_config_filter::get_tenant_config_filter_by_group_id_and_dimension_value,
@@ -237,7 +236,7 @@ pub fn make_payment_info(
                 .card_type
                 .as_ref()
                 .map(|ct| card_type_to_text(&ct))
-                .or_else(|| Some(txnCardInfo.paymentMethodType.to_text().to_string())),
+                .or_else(|| Some(txnCardInfo.paymentMethodType)),
             paymentMethod: txnCardInfo
                 .cardIssuerBankName
                 .clone()

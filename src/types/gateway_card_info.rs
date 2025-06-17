@@ -11,7 +11,6 @@ use crate::types::gateway::{GatewayAny};
 //     Parsed, Step, ParsingErrorType, ParsingErrorType::UnexpectedTextValue, around, lift_either,
 //     lift_pure, mandated, non_negative, parse_field, project,
 // };
-use crate::types::payment::payment_method::{text_to_payment_method_type, PaymentMethodType};
 // use eulerhs::extra::combinators::to_domain_all;
 // use types::utils::dbconfig::get_euler_db_conf;
 // use eulerhs::language::MonadFlow;
@@ -62,7 +61,7 @@ pub struct GatewayCardInfo {
     #[serde(rename = "validationType")]
     pub validationType: Option<ValidationType>,
     #[serde(rename = "paymentMethodType")]
-    pub paymentMethodType: Option<PaymentMethodType>,
+    pub paymentMethodType: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -128,8 +127,7 @@ impl TryFrom<DBGatewayCardInfo> for GatewayCardInfo {
                 .transpose()?,
             paymentMethodType: db_gci
                 .payment_method_type
-                .map(|payment_method_type| text_to_payment_method_type(payment_method_type))
-                .transpose()?,
+                .map(|payment_method_type| payment_method_type),
         })
     }
 }

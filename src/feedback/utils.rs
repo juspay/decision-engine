@@ -218,10 +218,7 @@ pub fn getTxnCardInfoFromApiPayload(
         card_type: None,
         nameOnCard: None,
         dateCreated: gateway_scoring_data.dateCreated,
-        paymentMethodType: ETP::PaymentMethodType::from_text(
-            &gateway_scoring_data.paymentMethodType.clone(),
-        )
-        .unwrap_or(ETP::PaymentMethodType::Unknown),
+        paymentMethodType: gateway_scoring_data.paymentMethodType.clone(),
         paymentMethod: gateway_scoring_data.paymentMethod.clone(),
         paymentSource: gateway_scoring_data.paymentSource.clone(),
         authType: gateway_scoring_data
