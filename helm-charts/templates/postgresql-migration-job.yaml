@@ -19,7 +19,7 @@ metadata:
   annotations:
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "0"
-    "helm.sh/hook-delete-policy": hook-succeeded
+    "helm.sh/hook-delete-policy": before-hook-creation
 spec:
   backoffLimit: 6
   template:
@@ -42,26 +42,45 @@ spec:
           command: ['sh', '-c', 'until nc -z {{ include "decision-engine.postgresqlHost" . }} 5432; do echo waiting for postgresql; sleep 2; done;']
       containers:
         - name: migration
-          image: "postgres:15-alpine"
+          image: rust:latest
           imagePullPolicy: {{ .Values.dbMigration.postgresql.image.pullPolicy }}
           env:
             - name: PGPASSWORD
               value: {{ .Values.postgresql.auth.password | quote }}
+            - name: DATABASE_URL
+              value: postgresql://{{ .Values.postgresql.auth.username }}:{{ .Values.postgresql.auth.password }}@{{ include "decision-engine.postgresqlHost" . }}:5432/{{ .Values.postgresql.database }}
           command:
             - /bin/sh
             - -c
-            - |
-              # Download the SQL script and execute it
-              apk add curl
-              version={{ .Values.image.version }}
-              url="https://raw.githubusercontent.com/juspay/decision-engine/$version/migrations_pg/00000000000000_diesel_postgresql_initial_setup/up.sql"
-              curl -sSL $url -o /tmp/init.sql
-              if [ -f /tmp/init.sql ]; then
-                psql -h {{ include "decision-engine.postgresqlHost" . }} -U {{ .Values.postgresql.auth.username }} -d {{ .Values.postgresql.auth.database }} -f /tmp/init.sql
-              else
-                echo "Error: /tmp/init.sql not found"
-                exit 1
-              fi
+            - |-
+             version={{ .Values.image.version }}
+             echo "INFO: Starting migration process for version: $version"
+
+             DOWNLOAD_URL="https://github.com/juspay/decision-engine/refs/tags/$version.tar.gz"
+
+             echo "INFO: Downloading source code from $DOWNLOAD_URL"
+             # -L: follow redirects
+             # -f: fail script if server returns an error (e.g., 404). Requires "set -e".
+             # -sS: silent mode, but still show errors.
+             curl -LfsS -o decision-engine.tar.gz "$DOWNLOAD_URL"
+
+
+             tar -xzvf decision-engine.tar.gz --transform 's|[^/]*/|decision-engine/|'
+
+             echo "INFO: Changing directory to ./decision-engine"
+             cd decision-engine
+
+             echo "INFO: Contents of ./decision-engine (current directory):"
+             ls -la
+
+             echo "INFO: Installing tools (diesel_cli, just)..."
+             cargo install diesel_cli --no-default-features --features postgres
+             cargo install just
+
+             echo "INFO: Running database migrations using 'just migrate-pg'..."
+             just migrate-pg
+
+             echo "INFO: Migration job completed successfully."
           volumeMounts:
             - name: migration-script
               mountPath: /app/config
