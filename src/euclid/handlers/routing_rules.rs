@@ -84,6 +84,7 @@ pub async fn routing_create(
         metadata: config.metadata.clone(),
         algorithm_data: serde_json::to_string(&config.algorithm)
             .change_context(EuclidErrors::FailedToSerializeJsonToString)?,
+        algorithm_for: config.algorithm_for.to_string(),
         created_at: timestamp,
         modified_at: timestamp,
     };

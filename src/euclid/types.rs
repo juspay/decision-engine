@@ -34,6 +34,7 @@ pub struct RoutingRule {
     pub description: String,
     pub created_by: String,
     pub algorithm: StaticRoutingAlgorithm,
+    pub algorithm_for: AlgorithmType,
     #[serde(default)]
     pub metadata: Option<serde_json::Value>,
 }
@@ -42,6 +43,13 @@ pub struct RoutingRule {
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum StaticRoutingAlgorithm {
     Advanced(Program),
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, strum::Display)]
+#[serde(rename_all = "snake_case")]
+pub enum AlgorithmType {
+    Payment,
+    Payout,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
@@ -109,6 +117,7 @@ pub struct RoutingAlgorithm {
     pub description: String,
     // #[cfg(feature = "mysql")]
     pub algorithm_data: String,
+    pub algorithm_for: String,
     // #[cfg(feature = "postgres")]
     // pub algorithm_data: serde_json::Value,
     #[cfg(feature = "postgres")]
@@ -156,6 +165,7 @@ impl From<RoutingAlgorithm> for JsonifiedRoutingAlgorithm {
 pub struct RoutingAlgorithmMapper {
     pub created_by: String,
     pub routing_algorithm_id: String,
+    pub algorithm_for: String,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]

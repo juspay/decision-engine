@@ -500,6 +500,7 @@ diesel::table! {
         name -> Text,
         description -> Text,
         algorithm_data -> Text,
+        algorithm_for -> Text,
         metadata -> Nullable<Text>,
         created_at -> Timestamp,
         modified_at -> Timestamp,
@@ -512,6 +513,7 @@ diesel::table! {
         created_by -> Varchar,
         #[max_length = 255]
         routing_algorithm_id -> Varchar,
+        algorithm_for -> Text,
     }
 }
 
