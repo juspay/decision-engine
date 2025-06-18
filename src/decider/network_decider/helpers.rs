@@ -94,7 +94,7 @@ impl types::CoBadgedCardRequest {
         let network_saving_infos = Self::calculate_network_saving_infos(network_costs, amount);
 
         Some(types::DebitRoutingOutput {
-            co_badged_card_networks: network_saving_infos,
+            co_badged_card_networks_info: network_saving_infos,
             issuer_country: co_badged_card_info.issuer_country,
             is_regulated: co_badged_card_info.is_regulated,
             regulated_name: co_badged_card_info.regulated_name,

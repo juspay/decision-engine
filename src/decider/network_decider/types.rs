@@ -253,7 +253,7 @@ pub struct NetworkSavingInfo {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct DebitRoutingOutput {
-    pub co_badged_card_networks: Vec<NetworkSavingInfo>,
+    pub co_badged_card_networks_info: Vec<NetworkSavingInfo>,
     pub issuer_country: CountryAlpha2,
     pub is_regulated: bool,
     pub regulated_name: Option<RegulatedName>,
