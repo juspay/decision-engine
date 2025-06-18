@@ -2727,6 +2727,15 @@ pub async fn get_penality_factor_(
     }
 }
 
+pub fn get_pf_from_validation_type(vt: &ValidationType) -> Option<PaymentFlow> {
+  match vt {
+    ValidationType::Tpv         => Some(PaymentFlow::TPV),
+    ValidationType::TpvEmandate => Some(PaymentFlow::TPV_EMANDATE),
+    ValidationType::Emandate    => Some(PaymentFlow::EMANDATE),
+    _                           => None,
+  }
+}
+
 
 // fn push_to_stream(decided_gateway: OptionETG::Gateway, final_decider_approach: types::GatewayDeciderApproach, m_priority_logic_tag: Option, current_gateway_score_map: GatewayScoreMap) -> DeciderFlow<()> {
 //     if let Some(decided_gateway) = decided_gateway {

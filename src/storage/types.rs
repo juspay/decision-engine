@@ -332,6 +332,7 @@ pub struct MerchantGatewayAccount {
     pub gateway_identifier: Option<String>,
     pub gateway_type: Option<String>,
     pub supported_txn_type: Option<String>,
+    pub config_source_info: Option<String>,
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]

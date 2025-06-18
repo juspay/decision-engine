@@ -1692,13 +1692,62 @@ pub async fn filterGatewaysForValidationType(
 
             let amount = Utils::effective_amount_with_txn_amount(txn_detail.clone()).await;
 
+            // New Work
+
+            let m_pf = Utils::get_pf_from_validation_type(&validation_type);
+
+            let (empty_csi_mgas , gpmf_source_mgas): (Vec<_>, Vec<_>,) = enabled_gateway_accounts.clone().into_iter().partition(|mga| mga.config_source_info.is_none());
+
+            // --- Second Partition on gpmfSourceMgas ---
+            // (gpmfBasedMgas, nonGpmfInferredMgas) = DL.partition (...) gpmfSourceMgas
+            let (gpmf_based_mgas, non_gpmf_inferred_mgas): (Vec<_>, Vec<_>) =
+                gpmf_source_mgas
+                    .into_iter()
+                    .partition(|mga| {
+                        let config_info_opt = &mga.config_source_info; // This will be Some(ConfigSourceInfo) at this point
+                        
+                        // Access gpmf_inferred_flows within the Some(config_info)
+                        // Equivalent to `(.gpmfInferredFlows) =<< mga.configSourceInfo`
+                        let gpmf_flows_opt: Option<&Vec<PaymentFlow>> = config_info_opt
+                            .as_ref() // Get a reference to the inner ConfigSourceInfo
+                            .and_then(|info| info.gpmf_inferred_flows.as_ref()); // Get a reference to the inner Vec<Option<Flow>>
+
+                        // isNothing ((.gpmfInferredFlows) =<< mga.configSourceInfo)
+                        let is_gpmf_flows_none = gpmf_flows_opt.is_none();
+
+                        // (null $ fromMaybe [] ((.gpmfInferredFlows) =<< mga.configSourceInfo))
+                        let is_gpmf_flows_empty = gpmf_flows_opt.map_or(true, |flows| flows.is_empty());
+                        // `map_or(true, ...)` means: if `gpmf_flows_opt` is `None`, return `true` (it's "empty" in this context).
+                        // If it's `Some(flows)`, check if `flows.is_empty()`.
+
+                        // (isJust mPf && elem mPf (maybe [] ((<$>) Just) ((.gpmfInferredFlows) =<< mga.configSourceInfo)))
+                        let m_pf_is_present_in_gpmf_flows = m_pf.as_ref().map_or(false, |pf_val| {
+                            gpmf_flows_opt.map_or(false, |flows_vec_opt| { flows_vec_opt.contains(pf_val)})
+                        });
+                        // Detailed breakdown of the above line:
+                        // m_pf.as_ref().map_or(false, |pf_val| { ... }): Only proceeds if m_pf is Some(Flow), otherwise false.
+                        // gpmf_flows_opt.map_or(false, |flows_vec_opt| { ... }): Only proceeds if gpmf_inferred_flows is Some(Vec<...>), otherwise false.
+                        // flows_vec_opt.iter().any(|opt_flow| { ... }): Iterates through each Option<Flow> in the inner Vec.
+                        // opt_flow.as_ref().map_or(false, |flow_val| flow_val == pf_val): Checks if the Option<Flow> is Some(Flow) and if that inner Flow matches our m_pf value.
+
+                        is_gpmf_flows_none || is_gpmf_flows_empty || m_pf_is_present_in_gpmf_flows
+                    });
+
+            // --- Concatenation ---
+            // gciBasedMgas = emptyCSIMgas <> nonGpmfInferredMgas
+            // Using `chain` for efficient concatenation of iterators without collecting intermediate vecs
+            let gci_based_mgas: Vec<MerchantGatewayAccount> = empty_csi_mgas
+                .into_iter()
+                .chain(non_gpmf_inferred_mgas.into_iter())
+                .collect();
+                        
             // Filter gateways for payment method and validation type
             let merchant_gateway_card_infos =
                 SETMCI::filter_gateways_for_payment_method_and_validation_type(
                     this.state(),
                     macc,
                     txn_card_info.clone(),
-                    enabled_gateway_accounts.clone(),
+                    gci_based_mgas.clone(),
                     validation_type,
                     transaction_id_to_text(txn_detail.txnId.clone()),
                 )

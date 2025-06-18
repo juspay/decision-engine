@@ -25,6 +25,7 @@ use crate::storage::schema_pg::merchant_gateway_account::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
 use std::fmt::Debug;
+use crate::types::payment_flow::PaymentFlow
 
 // #[derive(Debug, PartialEq, Serialize, Deserialize)]
 // pub struct EulerAccountDetails {
@@ -86,6 +87,25 @@ pub fn to_mga_reference_id(id: String) -> MgaReferenceId {
     }
 }
 
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Serialize, Deserialize)]
+enum FlowConfigSource { GPMF}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConfigSourceInfo {
+    #[serde(rename = "flowConfigSource")]
+    pub flow_config_source: Vec<FlowConfigSource>,
+    #[serde(rename = "gpmfInferredFlows")]
+    pub gpmf_inferred_flows: Option<Vec<PaymentFlow>>,
+}
+
+fn to_config_source_info(csi: String) -> Result<ConfigSourceInfo, ApiError> {
+    match serde_json::from_str::<ConfigSourceInfo>(&csi) {
+        Ok(res) => Ok(res),
+        Err(_) => Err(ApiError::ParsingError("Invalid ConfigSourceInfo value")),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MerchantGatewayAccount {
     #[serde(rename = "id")]
@@ -112,6 +132,8 @@ pub struct MerchantGatewayAccount {
     pub gatewayType: Option<String>,
     #[serde(rename = "supportedTxnType")]
     pub supportedTxnType: Option<String>,
+    #[serde(rename = "configSourceInfo")]
+    pub config_source_info: Option<ConfigSourceInfo>,
 }
 
 impl TryFrom<DBMerchantGatewayAccount> for MerchantGatewayAccount {
@@ -134,6 +156,7 @@ impl TryFrom<DBMerchantGatewayAccount> for MerchantGatewayAccount {
             gatewayIdentifier: value.gateway_identifier,
             gatewayType: value.gateway_type,
             supportedTxnType: value.supported_txn_type,
+            config_source_info: value.config_source_info.map(|csi| to_config_source_info(csi)).transpose()?,
         })
     }
 }
