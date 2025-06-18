@@ -47,6 +47,7 @@ pub enum StaticRoutingAlgorithm {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, strum::Display)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum AlgorithmType {
     Payment,
     Payout,

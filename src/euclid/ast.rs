@@ -26,8 +26,7 @@ pub enum ValueType {
     /// Represents an array of numbers. This is basically used for
     /// "one of the given numbers" operations
     /// eg: payment.method.amount = (1, 2, 3)
-    NumberArray(
-        Vec<u64>),
+    NumberArray(Vec<u64>),
     /// Similar to NumberArray but for enum variants
     /// eg: payment.method.cardtype = (debit, credit)
     EnumVariantArray(Vec<String>),
