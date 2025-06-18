@@ -1,9 +1,9 @@
 use crate::decider::gatewaydecider::{self, types};
 use crate::decider::network_decider;
-use diesel::sql_types::Bit;
-use diesel::sql_types::Bool;
 use crate::error;
 use crate::utils::CustomResult;
+use diesel::sql_types::Bit;
+use diesel::sql_types::Bool;
 
 #[cfg(feature = "mysql")]
 use super::schema;
@@ -373,7 +373,6 @@ pub struct MerchantGatewayPaymentMethodFlow {
     pub gateway_bank_code: Option<String>,
 }
 
-
 #[derive(Debug, Clone, PartialEq, FromSqlRow, AsExpression, Serialize)]
 #[cfg_attr(feature = "mysql", diesel(sql_type = Bit))]
 #[cfg_attr(feature = "postgres", diesel(sql_type = Bool))]
@@ -404,8 +403,8 @@ impl FromSql<Binary, Mysql> for BitBool {
     }
 }
 #[cfg(feature = "postgres")]
-impl ToSql<Bool, Pg> for BitBool { 
-    fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> diesel::serialize::Result { 
+impl ToSql<Bool, Pg> for BitBool {
+    fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> diesel::serialize::Result {
         match *self {
             BitBool(true) => out.write_all(&[1])?,
             BitBool(false) => out.write_all(&[0])?,
@@ -415,15 +414,14 @@ impl ToSql<Bool, Pg> for BitBool {
 }
 
 #[cfg(feature = "postgres")]
-impl FromSql<Bool, Pg> for BitBool { 
-    fn from_sql(bytes: <Pg as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> { 
+impl FromSql<Bool, Pg> for BitBool {
+    fn from_sql(bytes: <Pg as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
         match bytes.as_bytes().first() {
             Some(&1) => Ok(BitBool(true)),
             _ => Ok(BitBool(false)),
         }
     }
 }
-
 
 #[derive(Debug, Clone, PartialEq, FromSqlRow, AsExpression, Serialize)]
 #[cfg_attr(feature = "mysql", diesel(sql_type = Bit))]
@@ -456,10 +454,10 @@ impl FromSql<Binary, Mysql> for BitBoolWrite {
 }
 
 #[cfg(feature = "postgres")]
-impl ToSql<Bool, Pg> for BitBoolWrite { 
-    fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> diesel::serialize::Result { 
+impl ToSql<Bool, Pg> for BitBoolWrite {
+    fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> diesel::serialize::Result {
         match *self {
-            BitBoolWrite(true) => out.write_all(&[1])?, 
+            BitBoolWrite(true) => out.write_all(&[1])?,
             BitBoolWrite(false) => out.write_all(&[0])?,
         }
         Ok(IsNull::No)
@@ -467,8 +465,9 @@ impl ToSql<Bool, Pg> for BitBoolWrite {
 }
 
 #[cfg(feature = "postgres")]
-impl FromSql<Bool, Pg> for BitBoolWrite { 
-    fn from_sql(bytes: <Pg as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> { // Should be Pg
+impl FromSql<Bool, Pg> for BitBoolWrite {
+    fn from_sql(bytes: <Pg as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
+        // Should be Pg
         match bytes.as_bytes().first() {
             Some(&1) => Ok(BitBoolWrite(true)),
             _ => Ok(BitBoolWrite(false)),

@@ -7,12 +7,12 @@ use crate::types::merchant::id::MerchantId;
 use crate::types::money::internal::Money;
 use crate::types::order::id::{OrderId, OrderPrimId, ProductId};
 use crate::types::order::udfs::UDFs;
+use crate::types::txn_details::types::TxnObjectType;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 use std::option::Option;
 use std::string::String;
 use time::OffsetDateTime;
-use crate::types::txn_details::types::TxnObjectType;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OrderStatus {
@@ -170,11 +170,11 @@ impl OrderType {
             _ => None,
         }
     }
-   pub fn from_txn_object_type(txn_type: TxnObjectType) -> Self {
-        match txn_type{
+    pub fn from_txn_object_type(txn_type: TxnObjectType) -> Self {
+        match txn_type {
             TxnObjectType::OrderPayment => Self::OrderPayment,
             TxnObjectType::MandateRegister => Self::MandateRegister,
-            TxnObjectType::EmandateRegister => Self::EmandateRegister ,
+            TxnObjectType::EmandateRegister => Self::EmandateRegister,
             TxnObjectType::MandatePayment => Self::MandatePayment,
             TxnObjectType::EmandatePayment => Self::MandatePayment,
             TxnObjectType::TpvPayment => Self::TpvPayment,
@@ -188,7 +188,6 @@ impl OrderType {
             TxnObjectType::MotoPayment => Self::MotoPayment,
         }
     }
-
 }
 
 pub fn deserialize_udfs_to_hashmap<'de, D>(deserializer: D) -> Result<UDFs, D::Error>

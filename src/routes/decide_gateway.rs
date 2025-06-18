@@ -1,12 +1,13 @@
-use crate::{decider::gatewaydecider::{
-    flow_new::deciderFullPayloadHSFunction,
-    types::{DecidedGateway, DomainDeciderRequestForApiCallV2, ErrorResponse, UnifiedError},
-}, logger};
+use crate::{
+    decider::gatewaydecider::{
+        flow_new::deciderFullPayloadHSFunction,
+        types::{DecidedGateway, DomainDeciderRequestForApiCallV2, ErrorResponse, UnifiedError},
+    },
+    logger,
+};
 use axum::body::to_bytes;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-
-
 
 // impl IntoResponse for ErrorResponse {
 //     fn into_response(self) -> axum::http::Response<axum::body::Body> {
@@ -33,12 +34,10 @@ impl IntoResponse for DecidedGateway {
 #[axum::debug_handler]
 pub async fn decide_gateway(
     req: axum::http::Request<axum::body::Body>,
-) -> Result<DecidedGateway, ErrorResponse>
-    
-{
+) -> Result<DecidedGateway, ErrorResponse> {
     let headers = req.headers();
     for (name, value) in headers.iter() {
-        logger::debug!(tag="DecideGateway","Header: {}: {:?}", name, value);
+        logger::debug!(tag = "DecideGateway", "Header: {}: {:?}", name, value);
     }
     let body = match to_bytes(req.into_body(), usize::MAX).await {
         Ok(body) => {
@@ -46,7 +45,7 @@ pub async fn decide_gateway(
             body
         }
         Err(e) => {
-            logger::debug!(tag="DecideGateway","Error: {:?}", e);
+            logger::debug!(tag = "DecideGateway", "Error: {:?}", e);
             return Err(ErrorResponse {
                 status: "400".to_string(),
                 error_code: "400".to_string(),
@@ -54,7 +53,7 @@ pub async fn decide_gateway(
                 priority_logic_tag: None,
                 routing_approach: None,
                 filter_wise_gateways: None,
-                error_info: UnifiedError{
+                error_info: UnifiedError {
                     code: "INVALID_INPUT".to_string(),
                     user_message: "Invalid request params. Please verify your input.".to_string(),
                     developer_message: e.to_string(),
@@ -64,19 +63,18 @@ pub async fn decide_gateway(
             });
         }
     };
-    let api_decider_request: Result<DomainDeciderRequestForApiCallV2, _> = serde_json::from_slice(&body);
+    let api_decider_request: Result<DomainDeciderRequestForApiCallV2, _> =
+        serde_json::from_slice(&body);
     match api_decider_request {
         Ok(payload) => match deciderFullPayloadHSFunction(payload).await {
-            Ok(decided_gateway) => {
-                Ok(decided_gateway)
-            }
+            Ok(decided_gateway) => Ok(decided_gateway),
             Err(e) => {
-                logger::debug!(tag="DecideGateway","Error: {:?}", e);
+                logger::debug!(tag = "DecideGateway", "Error: {:?}", e);
                 Err(e)
             }
         },
         Err(e) => {
-            logger::debug!(tag="DecideGateway","Error: {:?}", e);
+            logger::debug!(tag = "DecideGateway", "Error: {:?}", e);
             Err(ErrorResponse {
                 status: "400".to_string(),
                 error_code: "400".to_string(),
@@ -84,7 +82,7 @@ pub async fn decide_gateway(
                 priority_logic_tag: None,
                 routing_approach: None,
                 filter_wise_gateways: None,
-                error_info: UnifiedError{
+                error_info: UnifiedError {
                     code: "INVALID_INPUT".to_string(),
                     user_message: "Invalid request params. Please verify your input.".to_string(),
                     developer_message: e.to_string(),

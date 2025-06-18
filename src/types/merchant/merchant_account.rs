@@ -208,7 +208,9 @@ pub async fn load_merchant_by_merchant_id(merchant_id: String) -> Option<Merchan
     }
 }
 
-pub async fn insert_merchant_account<T>(value: T) -> error_stack::Result<(), crate::generics::MeshError>
+pub async fn insert_merchant_account<T>(
+    value: T,
+) -> error_stack::Result<(), crate::generics::MeshError>
 where
     MerchantAccountNew: TryFrom<T>,
 {

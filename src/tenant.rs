@@ -12,7 +12,7 @@ pub struct GlobalAppState {
     pub api_client: ApiClient,
     pub known_tenants: HashSet<String>,
     pub global_config: GlobalConfig,
-    pub readiness_flag : Arc<AtomicBool>
+    pub readiness_flag: Arc<AtomicBool>,
 }
 
 impl GlobalAppState {

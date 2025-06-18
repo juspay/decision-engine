@@ -33,9 +33,7 @@ impl<'a> Storage<'a> {
 
     pub fn record_value(&mut self, key: &'a str, value: serde_json::Value) {
         if super::formatter::IMPLICIT_KEYS.contains(key) {
-            logger::error!(
-                "The key {key} is a reserved entry. Skipping it. value: {value}"
-            );
+            logger::error!("The key {key} is a reserved entry. Skipping it. value: {value}");
         } else {
             self.values.insert(key, value);
         }
@@ -48,7 +46,8 @@ impl<'a> Storage<'a> {
             tag.to_string()
         };
 
-        let category = self.values
+        let category = self
+            .values
             .get("category")
             .and_then(|v| v.as_str())
             .unwrap_or("null")
@@ -60,9 +59,15 @@ impl<'a> Storage<'a> {
 
     pub fn record_additional_values(&mut self) {
         self.record_value("message_number", serde_json::Value::String("1".to_string()));
-        self.record_value("latency", serde_json::Value::Number(serde_json::Number::from(123)));
+        self.record_value(
+            "latency",
+            serde_json::Value::Number(serde_json::Number::from(123)),
+        );
         self.record_value("is_art_enabled", serde_json::Value::Bool(true));
-        self.record_value("error_code", serde_json::Value::String("ERR123".to_string()));
+        self.record_value(
+            "error_code",
+            serde_json::Value::String("ERR123".to_string()),
+        );
     }
 }
 
