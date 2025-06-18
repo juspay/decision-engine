@@ -96,7 +96,13 @@ pub async fn routing_create(
             ContainerError::from(EuclidErrors::StorageError)
         })?;
 
-    let response = RoutingDictionaryRecord::new(algorithm_id, config.name, timestamp, timestamp);
+    let response = RoutingDictionaryRecord::new(
+        algorithm_id,
+        config.name,
+        config.algorithm_for.to_string(),
+        timestamp,
+        timestamp,
+    );
     logger::info!("Response: {response:?}");
 
     Ok(Json(response))
@@ -121,8 +127,21 @@ pub async fn activate_routing_rule(
         .await
         .map_err(|_| EuclidErrors::StorageError)?;
     let predicate = mapper_dsl::created_by.eq(payload.created_by.clone());
+
+    let algorithm_for = crate::generics::generic_find_one::<
+        <RoutingAlgorithm as HasTable>::Table,
+        _,
+        RoutingAlgorithm,
+    >(&state.db, dsl::id.eq(payload.routing_algorithm_id.clone()))
+    .await
+    .change_context(EuclidErrors::RoutingAlgorithmNotFound(
+        payload.routing_algorithm_id.clone(),
+    ))?
+    .algorithm_for;
+
     let values = RoutingAlgorithmMapperUpdate {
         routing_algorithm_id: payload.routing_algorithm_id.clone(),
+        algorithm_for: algorithm_for.clone(),
     };
 
     let rows_affected = crate::generics::generic_update_if_present::<
@@ -136,8 +155,11 @@ pub async fn activate_routing_rule(
     if rows_affected > 0 {
         return Ok(());
     } else {
-        let mapper_entry =
-            RoutingAlgorithmMapper::new(payload.created_by, payload.routing_algorithm_id);
+        let mapper_entry = RoutingAlgorithmMapper::new(
+            payload.created_by,
+            payload.routing_algorithm_id,
+            algorithm_for,
+        );
         crate::generics::generic_insert(&state.db, mapper_entry)
             .await
             .change_context(EuclidErrors::StorageError)?;

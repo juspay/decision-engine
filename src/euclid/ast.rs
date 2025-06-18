@@ -21,7 +21,19 @@ pub enum ValueType {
     MetadataVariant(MetadataValue),
     /// Represents a arbitrary String value
     StrValue(String),
+    /// Represents a global reference, which is a reference to a global variable
     GlobalRef(String),
+    /// Represents an array of numbers. This is basically used for
+    /// "one of the given numbers" operations
+    /// eg: payment.method.amount = (1, 2, 3)
+    NumberArray(Vec<u64>),
+    /// Similar to NumberArray but for enum variants
+    /// eg: payment.method.cardtype = (debit, credit)
+    EnumVariantArray(Vec<String>),
+    /// Like a number array but can include comparisons. Useful for
+    /// conditions like "500 < amount < 1000"
+    /// eg: payment.amount = (> 500, < 1000)
+    NumberComparisonArray(Vec<NumberComparison>),
 }
 
 impl ValueType {
@@ -32,12 +44,15 @@ impl ValueType {
             Self::MetadataVariant(_) => DataType::MetadataValue,
             Self::EnumVariant(_) => DataType::EnumVariant,
             Self::GlobalRef(_) => DataType::GlobalRef,
+            Self::NumberComparisonArray(_) => DataType::Number,
+            Self::NumberArray(_) => DataType::Number,
+            Self::EnumVariantArray(_) => DataType::EnumVariant,
         }
     }
 }
 
 /// Represents a number comparison for "NumberComparisonArrayValue"
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct NumberComparison {
     pub comparison_type: ComparisonType,

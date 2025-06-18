@@ -29,6 +29,9 @@ pub enum EuclidErrors {
     #[error("Active routing_algorithm not found for: {0}")]
     ActiveRoutingAlgorithmNotFound(String),
 
+    #[error("routing_algorithm not found for: {0}")]
+    RoutingAlgorithmNotFound(String),
+
     #[error("Storage error")]
     StorageError,
 }
@@ -128,6 +131,19 @@ impl axum::response::IntoResponse for EuclidErrors {
                     error_codes::TE_04,
                     format!(
                     "No active routing algorithm found for the created_by entity : {}",
+                    msg
+                ),
+                    None,
+                )),
+            )
+                .into_response(),
+
+            EuclidErrors::RoutingAlgorithmNotFound(msg) => (
+                hyper::StatusCode::BAD_REQUEST,
+                axum::Json(ApiErrorResponse::new(
+                    error_codes::TE_04,
+                    format!(
+                    "Routing algorithm not found for the provided id : {}",
                     msg
                 ),
                     None,

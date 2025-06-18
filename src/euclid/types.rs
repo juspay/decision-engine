@@ -69,6 +69,7 @@ pub struct BackendOutput {
 pub struct RoutingDictionaryRecord {
     pub rule_id: String,
     pub name: String,
+    pub algorithm_for: String,
     pub created_at: time::PrimitiveDateTime,
     pub modified_at: time::PrimitiveDateTime,
 }
@@ -77,12 +78,14 @@ impl RoutingDictionaryRecord {
     pub fn new(
         rule_id: String,
         name: String,
+        algorithm_for: String,
         created_at: time::PrimitiveDateTime,
         modified_at: time::PrimitiveDateTime,
     ) -> Self {
         Self {
             rule_id,
             name,
+            algorithm_for,
             created_at,
             modified_at,
         }
@@ -175,10 +178,11 @@ pub struct ActivateRoutingConfigRequest {
 }
 
 impl RoutingAlgorithmMapper {
-    pub fn new(created_by: String, routing_algorithm_id: String) -> Self {
+    pub fn new(created_by: String, routing_algorithm_id: String, algorithm_for: String) -> Self {
         Self {
             created_by,
             routing_algorithm_id,
+            algorithm_for: algorithm_for.to_string(),
         }
     }
 }
@@ -188,6 +192,7 @@ impl RoutingAlgorithmMapper {
 #[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::routing_algorithm_mapper))]
 pub struct RoutingAlgorithmMapperUpdate {
     pub routing_algorithm_id: String,
+    pub algorithm_for: String,
 }
 
 #[derive(Debug, Clone, Serialize, thiserror::Error)]

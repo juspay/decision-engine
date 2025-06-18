@@ -1,4 +1,4 @@
-use super::ast::{Comparison, ComparisonType, IfStatement, Rule, ValueType};
+use super::ast::{self, Comparison, ComparisonType, IfStatement, Rule, ValueType};
 use super::errors::EuclidErrors;
 use super::types::StaticRoutingAlgorithm;
 use crate::error::{ApiError, ContainerError};
@@ -116,6 +116,10 @@ fn validate_statement(
     }
 }
 
+/// validates the comparison operators for different subtle value types present
+/// by throwing required errors for comparisons that can't be performed for a certain value type
+/// for example
+/// can't have greater/less than operations on enum types
 fn validate_condition(
     condition: &Comparison,
     config: &TomlConfig,
@@ -143,6 +147,7 @@ fn validate_condition(
             | ComparisonType::GreaterThanEqual,
         ) => {}
         ("enum", ComparisonType::Equal | ComparisonType::NotEqual) => {}
+
         ("enum", _) => {
             errors.push(format!(
                 "{}: Invalid comparison type '{:?}' for enum key '{}'",
@@ -168,21 +173,59 @@ fn validate_condition(
                 ));
             }
         }
+        ("enum", ValueType::EnumVariantArray(arr)) => {
+            let invalid: Vec<_> = arr
+                .iter()
+                .filter(|v| !is_valid_enum_value(config, &condition.lhs, *v))
+                .cloned()
+                .collect();
+            if !invalid.is_empty() {
+                let valid_values = parse_enum_values(key_config);
+                errors.push(format!(
+                    "{}: Invalid enum values {:?} for key '{}'. Valid values are: {:?}",
+                    context, invalid, condition.lhs, valid_values
+                ));
+            }
+        }
         ("enum", _) => {
             errors.push(format!(
                 "{}: Key '{}' is of type 'enum' but value is not an enum variant",
                 context, condition.lhs
             ));
         }
+
         ("integer", ValueType::Number(_)) => {
             // Number value is valid for integer type
         }
+        // array of literals – only == / != make sense
+        ("integer", ValueType::NumberArray(_)) => {
+            if !matches!(
+                condition.comparison,
+                ComparisonType::Equal | ComparisonType::NotEqual
+            ) {
+                errors.push(format!(
+                    "{context}: Only '==' or '!=' allowed with number arrays for key '{}'",
+                    condition.lhs
+                ));
+            }
+        }
+        // comparison array – interpreter supports **only `==`**
+        ("integer", ValueType::NumberComparisonArray(_)) => {
+            if condition.comparison != ComparisonType::Equal {
+                errors.push(format!(
+                    "{context}: Only '==' allowed with number comparison arrays for key '{}'",
+                    condition.lhs
+                ));
+            }
+        }
+
         ("integer", _) => {
             errors.push(format!(
                 "{}: Key '{}' is of type 'integer' but value is not a number",
                 context, condition.lhs
             ));
         }
+
         ("udf", ValueType::MetadataVariant(_)) => {
             // Metadata value is valid for udf type
         }
