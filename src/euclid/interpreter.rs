@@ -240,6 +240,7 @@ pub fn perform_volume_split_priority(
 
 pub fn evaluate_output(output: &Output) -> RoutingResult<(Vec<ConnectorInfo>, Vec<ConnectorInfo>)> {
     match output {
+        Output::Single(connector) => Ok((vec![connector.clone()], vec![connector.clone()])),
         Output::Priority(connectors) => {
             let first_connector = connectors.first().cloned();
             Ok((

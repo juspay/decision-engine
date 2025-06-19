@@ -1,7 +1,10 @@
 use super::types::{DataType, Metadata};
 use serde::{Deserialize, Serialize};
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct MetadataValue {
@@ -157,6 +160,7 @@ pub struct VolumeSplit<T> {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Output {
+    Single(ConnectorInfo),
     Priority(Vec<ConnectorInfo>),
     VolumeSplit(Vec<VolumeSplit<ConnectorInfo>>),
     VolumeSplitPriority(Vec<VolumeSplit<Vec<ConnectorInfo>>>),
@@ -167,6 +171,15 @@ pub enum Output {
 pub struct ConnectorInfo {
     pub gateway_name: String,
     pub gateway_id: Option<String>,
+}
+
+impl fmt::Display for ConnectorInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.gateway_id {
+            Some(id) => write!(f, "{} ({})", self.gateway_name, id),
+            None => write!(f, "{}", self.gateway_name),
+        }
+    }
 }
 
 pub type Globals = HashMap<String, HashSet<ValueType>>;

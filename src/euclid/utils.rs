@@ -71,26 +71,30 @@ pub fn validate_routing_rule(
         .clone()
         .ok_or_else(|| error_stack::report!(EuclidErrors::GlobalRoutingConfigsUnavailable))?;
 
-    let program = match &rule.algorithm {
-        StaticRoutingAlgorithm::Advanced(p) => p,
-    };
+    match &rule.algorithm {
+        StaticRoutingAlgorithm::Single(_)
+        | StaticRoutingAlgorithm::Priority(_)
+        | StaticRoutingAlgorithm::VolumeSplit(_) => return Ok(()),
+        StaticRoutingAlgorithm::Advanced(program) => {
+            let mut errors = Vec::new();
+            for rule in &program.rules {
+                validate_rule(rule, &config, &mut errors);
+            }
 
-    let mut errors = Vec::new();
-
-    for rule in &program.rules {
-        validate_rule(rule, &config, &mut errors);
-    }
-
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        let detailed_message = errors.join("; ");
-        crate::logger::error!("Routing rule validation failed with errors: {detailed_message}");
-        Err(EuclidErrors::InvalidRequest(format!(
-            "Routing rule validation failed: {}",
-            detailed_message
-        ))
-        .into())
+            if errors.is_empty() {
+                Ok(())
+            } else {
+                let detailed_message = errors.join("; ");
+                crate::logger::error!(
+                    "Routing rule validation failed with errors: {detailed_message}"
+                );
+                Err(EuclidErrors::InvalidRequest(format!(
+                    "Routing rule validation failed: {}",
+                    detailed_message
+                ))
+                .into())
+            }
+        }
     }
 }
 

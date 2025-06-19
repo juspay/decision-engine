@@ -40,9 +40,12 @@ pub struct RoutingRule {
     pub metadata: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, strum::Display)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum StaticRoutingAlgorithm {
+    Single(Box<ConnectorInfo>),
+    Priority(Vec<ConnectorInfo>),
+    VolumeSplit(Vec<super::ast::VolumeSplit<ConnectorInfo>>),
     Advanced(Program),
 }
 
