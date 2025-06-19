@@ -57,8 +57,8 @@ impl SC::ServiceConfigKey for ALT_ID_ENABLED_GATEWAY_FOR_EMIBANK {
     }
 }
 
-pub const altIdEnabledGatewayEmiBank: ALT_ID_ENABLED_GATEWAY_FOR_EMIBANK = ALT_ID_ENABLED_GATEWAY_FOR_EMIBANK;
-
+pub const altIdEnabledGatewayEmiBank: ALT_ID_ENABLED_GATEWAY_FOR_EMIBANK =
+    ALT_ID_ENABLED_GATEWAY_FOR_EMIBANK;
 
 pub struct SR_BASED_TRANSACTION_RESET_COUNT;
 impl SC::ServiceConfigKey for SR_BASED_TRANSACTION_RESET_COUNT {
@@ -177,7 +177,7 @@ pub const gwScoreSecondDimensionTtl: GATEWAY_SCORE_SECOND_DIMENSION_SOFT_TTL =
 pub struct ShouldConsumeResultFromRouter;
 impl SC::ServiceConfigKey for ShouldConsumeResultFromRouter {
     fn get_key(&self) -> String {
-            "SHOULD_CONSUME_RESULT_FROM_ROUTER".to_string()
+        "SHOULD_CONSUME_RESULT_FROM_ROUTER".to_string()
     }
 }
 

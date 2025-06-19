@@ -5,7 +5,7 @@ metadata:
   name: {{ include "decision-engine.groovyRunnerName" . }}
   labels:
     {{- include "decision-engine.labels" . | nindent 4 }}
-    app.kubernetes.io/component: groovy-runner
+    app.kubernetes.io/component: {{ .Values.groovyRunner.metadata.labels.component }}
 spec:
   type: ClusterIP
   ports:
@@ -15,5 +15,5 @@ spec:
       name: http
   selector:
     {{- include "decision-engine.selectorLabels" . | nindent 4 }}
-    app.kubernetes.io/component: groovy-runner
+    app.kubernetes.io/component: {{ .Values.groovyRunner.metadata.labels.component }}
 {{- end }}

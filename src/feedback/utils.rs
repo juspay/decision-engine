@@ -417,7 +417,7 @@ pub async fn updateQueue(
     queue_key: String,
     score_key: String,
     value: String,
-) -> Result<Option<String>, error_stack::Report<redis_interface::errors::RedisError>>  {
+) -> Result<Option<String>, error_stack::Report<redis_interface::errors::RedisError>> {
     let app_state = get_tenant_app_state().await;
     let value_clone = value.clone();
     let r: Result<Vec<String>, error_stack::Report<redis_interface::errors::RedisError>> =
@@ -799,20 +799,20 @@ pub async fn delCache(dbName: String, key: String) -> Result<i32, StorageError> 
 // ) -> Option<T> {
 //     match getCache(&identifier, &key) {
 //         Err(err) => {
-            // logger::error!(
-            //     tag = "redis_fetch_error",
-            //     "Error while getting value from cache {}_: {}",
-            //     key,
-            //     err
-            // );
+// logger::error!(
+//     tag = "redis_fetch_error",
+//     "Error while getting value from cache {}_: {}",
+//     key,
+//     err
+// );
 //             None
 //         }
 //         Ok(None) => {
-                // logger::debug!(
-                //     tag = "redis_fetch_noexist",
-                //     "Could not find value in cache {}",
-                //     key
-                // );
+// logger::debug!(
+//     tag = "redis_fetch_noexist",
+//     "Could not find value in cache {}",
+//     key
+// );
 
 //             None
 //         }
@@ -820,10 +820,10 @@ pub async fn delCache(dbName: String, key: String) -> Result<i32, StorageError> 
 //             Ok(typed_val) => Some(typed_val),
 //             Err(_) => {
 //                logger::error!(
-                //     tag = "decode_error",
-                //     "Error while decoding cached value for {}_",
-                //     key
-                // );
+//     tag = "decode_error",
+//     "Error while decoding cached value for {}_",
+//     key
+// );
 //                 None
 //             }
 //         },

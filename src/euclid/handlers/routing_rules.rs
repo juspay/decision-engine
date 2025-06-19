@@ -1,17 +1,21 @@
-use crate::{error::ApiErrorResponse, euclid::{
-    ast::{self, ComparisonType, ConnectorInfo, Output, ValueType},
-    cgraph,
-    interpreter::InterpreterBackend,
-    types::{
-        ActivateRoutingConfigRequest, Context, JsonifiedRoutingAlgorithm, RoutingDictionaryRecord,
-        RoutingEvaluateResponse, RoutingRequest, RoutingRule, StaticRoutingAlgorithm,
-    },
-    utils::{generate_random_id, is_valid_enum_value, validate_routing_rule},
-}};
 #[cfg(feature = "mysql")]
 use crate::storage::schema::routing_algorithm::dsl;
 #[cfg(feature = "postgres")]
 use crate::storage::schema_pg::routing_algorithm::dsl;
+use crate::{
+    error::ApiErrorResponse,
+    euclid::{
+        ast::{self, ComparisonType, ConnectorInfo, Output, ValueType},
+        cgraph,
+        interpreter::InterpreterBackend,
+        types::{
+            ActivateRoutingConfigRequest, Context, JsonifiedRoutingAlgorithm,
+            RoutingDictionaryRecord, RoutingEvaluateResponse, RoutingRequest, RoutingRule,
+            StaticRoutingAlgorithm,
+        },
+        utils::{generate_random_id, is_valid_enum_value, validate_routing_rule},
+    },
+};
 
 use crate::euclid::{
     errors::EuclidErrors,
@@ -45,15 +49,15 @@ pub async fn routing_create(
                 let detailed_error = validation_messages.join("; ");
                 logger::error!("Routing rule validation failed with errors: {detailed_error}");
 
-            return Err(ContainerError::new_with_status_code_and_payload(
-                EuclidErrors::FailedToValidateRoutingRule,
-                axum::http::StatusCode::BAD_REQUEST,
-                ApiErrorResponse::new(
-                    "INVALID_REQUEST_DATA",
-                    format!("Routing rule validation failed: {}", detailed_error),
-                    None,
-                ),
-            ));
+                return Err(ContainerError::new_with_status_code_and_payload(
+                    EuclidErrors::FailedToValidateRoutingRule,
+                    axum::http::StatusCode::BAD_REQUEST,
+                    ApiErrorResponse::new(
+                        "INVALID_REQUEST_DATA",
+                        format!("Routing rule validation failed: {}", detailed_error),
+                        None,
+                    ),
+                ));
             }
         }
         return Err(err.into());
@@ -252,21 +256,25 @@ pub async fn routing_evaluate(
     >(&state.db, dsl::id.eq(active_routing_algorithm_id.clone()))
     .await
     .map_err(|e| {
-        logger::error!(?e, "Failed to fetch RoutingAlgorithm for ID {:?}", active_routing_algorithm_id);
+        logger::error!(
+            ?e,
+            "Failed to fetch RoutingAlgorithm for ID {:?}",
+            active_routing_algorithm_id
+        );
         e
     })
     .change_context(EuclidErrors::StorageError)?;
 
     logger::debug!("Fetched routing algorithm: {:?}", algorithm);
     let algorithm_data: StaticRoutingAlgorithm = serde_json::from_str(&algorithm.algorithm_data)
-    .map_err(|e| {
-        logger::error!(
-            error = ?e,
-            raw_data = %algorithm.algorithm_data,
-            "Failed to parse algorithm_data into StaticRoutingAlgorithm"
-        );
-        EuclidErrors::InvalidRequest(format!("Invalid algorithm data format: {}", e))
-    })?;
+        .map_err(|e| {
+            logger::error!(
+                error = ?e,
+                raw_data = %algorithm.algorithm_data,
+                "Failed to parse algorithm_data into StaticRoutingAlgorithm"
+            );
+            EuclidErrors::InvalidRequest(format!("Invalid algorithm data format: {}", e))
+        })?;
 
     let program = match algorithm_data {
         StaticRoutingAlgorithm::Advanced(p) => p,
@@ -357,7 +365,7 @@ fn perform_eligibility_analysis(
         let clause = cgraph::Clause {
             key: "output".to_string(),
             comparison: ComparisonType::Equal,
-            value: ValueType::EnumVariant(out.connector.clone()),
+            value: ValueType::EnumVariant(out.gateway_name.clone()),
         };
 
         if let Ok(true) = constraint_graph.check_clause_validity(clause, &ctx) {

@@ -180,7 +180,9 @@ impl fmt::Display for RoutingError {
 impl Error for RoutingError {}
 type RoutingResult<T> = Result<T, RoutingError>;
 
-pub fn perform_volume_split(splits: Vec<VolumeSplit<ConnectorInfo>>) -> RoutingResult<ConnectorInfo> {
+pub fn perform_volume_split(
+    splits: Vec<VolumeSplit<ConnectorInfo>>,
+) -> RoutingResult<ConnectorInfo> {
     let weights: Vec<u8> = splits.iter().map(|sp| sp.split).collect();
     let weighted_index =
         WeightedIndex::new(weights).map_err(|_| RoutingError::VolumeSplitFailed)?;

@@ -115,7 +115,8 @@ macro_rules! error_transform {
 
 impl<E: Sync + Send + 'static + std::error::Error + error_stack::Context> ContainerError<E> {
     pub fn status_code(&self) -> http::StatusCode {
-        self.status_code.unwrap_or(http::StatusCode::INTERNAL_SERVER_ERROR)
+        self.status_code
+            .unwrap_or(http::StatusCode::INTERNAL_SERVER_ERROR)
     }
 
     pub fn new_with_status_code_and_payload<T: 'static + Send + Sync>(
@@ -131,8 +132,6 @@ impl<E: Sync + Send + 'static + std::error::Error + error_stack::Context> Contai
     }
 
     pub fn downcast_ref<T: 'static>(&self) -> Option<&T> {
-        self.payload
-            .as_ref()
-            .and_then(|p| p.downcast_ref::<T>())
+        self.payload.as_ref().and_then(|p| p.downcast_ref::<T>())
     }
 }

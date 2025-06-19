@@ -1,13 +1,12 @@
 #[macro_use]
-
 use serde::{Deserialize, Serialize, Serializer};
+use crate::error::ApiError;
 use std::convert::TryFrom;
 use std::option::Option;
 use std::string::String;
 use std::vec::Vec;
-use crate::error::ApiError;
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize )]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Isin {
     Isin(char, char, char, char, char, char),

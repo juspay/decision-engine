@@ -12,7 +12,9 @@ use std::vec::Vec;
 use time::PrimitiveDateTime;
 // use db::euler_mesh_impl::mesh_config;
 // use db::mesh::internal::*;
-use crate::storage::types::{BitBool, MerchantGatewayPaymentMethodFlow as DBMerchantGatewayPaymentMethodFlow};
+use crate::storage::types::{
+    BitBool, MerchantGatewayPaymentMethodFlow as DBMerchantGatewayPaymentMethodFlow,
+};
 // use types::utils::dbconfig::get_euler_db_conf;
 // use eulerhs::extra::aeson::aeson_omit_nothing_fields;
 // use eulerhs::extra::combinators::to_domain_all;
@@ -57,7 +59,7 @@ impl From<DBMerchantGatewayPaymentMethodFlow> for MerchantGatewayPaymentMethodFl
             currencyConfigs: db_mgpmf.currency_configs,
             dateCreated: db_mgpmf.date_created,
             lastUpdated: db_mgpmf.last_updated,
-            disabled: db_mgpmf.disabled.map(|f| f.0) ,
+            disabled: db_mgpmf.disabled.map(|f| f.0),
             gatewayBankCode: db_mgpmf.gateway_bank_code,
         }
     }

@@ -1,17 +1,17 @@
+use crate::logger::storage::Storage;
 use crate::{
-    decider::gatewaydecider::runner::ResponseBody, error::ApiClientError, logger, storage::consts
+    decider::gatewaydecider::runner::ResponseBody, error::ApiClientError, logger, storage::consts,
 };
 use axum::{body::Body, extract::Request};
 use error_stack::ResultExt;
 use hyper::{StatusCode, Uri};
+use rand::Rng;
 use reqwest::{
     header::{HeaderMap, HeaderValue, CONTENT_TYPE},
     Client,
 };
 use serde::Deserialize;
 use serde_json::Value;
-use rand::Rng;
-use crate::logger::storage::Storage;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 /// Date-time utilities.
@@ -77,7 +77,7 @@ pub fn record_fields_from_header(request: &Request<Body>) -> tracing::Span {
 
     span
 }
-  
+
 /// Effectively, equivalent to `Result<T, error_stack::Report<E>>`
 pub type CustomResult<T, E> = error_stack::Result<T, E>;
 
