@@ -86,8 +86,7 @@ impl types::CoBadgedCardRequest {
         logger::debug!("Total fees per debit network: {:?}", network_costs);
         network_costs.sort_by(|(_, fee1), (_, fee2)| fee1.total_cmp(fee2));
 
-        let network_saving_infos =
-            Self::calculate_network_saving_infos(network_costs, amount)?;
+        let network_saving_infos = Self::calculate_network_saving_infos(network_costs, amount)?;
 
         Some(types::DebitRoutingOutput {
             co_badged_card_networks_info: network_saving_infos,
