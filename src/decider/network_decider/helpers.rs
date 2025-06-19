@@ -83,22 +83,20 @@ impl types::CoBadgedCardRequest {
             .calculate_network_fees(app_state, &co_badged_card_info, amount)
             .await?;
 
-        if network_costs.is_empty() {
-            logger::debug!("No network costs found or calculated, returning None.");
-            return None;
-        }
-
         logger::debug!("Total fees per debit network: {:?}", network_costs);
         network_costs.sort_by(|(_, fee1), (_, fee2)| fee1.total_cmp(fee2));
 
-        let network_saving_infos = Self::calculate_network_saving_infos(network_costs, amount);
+        let network_saving_infos_optional =
+            Self::calculate_network_saving_infos(network_costs, amount);
 
-        Some(types::DebitRoutingOutput {
-            co_badged_card_networks_info: network_saving_infos,
-            issuer_country: co_badged_card_info.issuer_country,
-            is_regulated: co_badged_card_info.is_regulated,
-            regulated_name: co_badged_card_info.regulated_name,
-            card_type: co_badged_card_info.card_type,
+        network_saving_infos_optional.and_then(|network_saving_infos| {
+            Some(types::DebitRoutingOutput {
+                co_badged_card_networks_info: network_saving_infos,
+                issuer_country: co_badged_card_info.issuer_country,
+                is_regulated: co_badged_card_info.is_regulated,
+                regulated_name: co_badged_card_info.regulated_name,
+                card_type: co_badged_card_info.card_type,
+            })
         })
     }
 
@@ -146,18 +144,23 @@ impl types::CoBadgedCardRequest {
         // Takes sorted network_costs by value as it will be consumed by into_iter
         sorted_network_costs: Vec<(gateway_decider_types::NETWORK, f64)>,
         transaction_amount: f64,
-    ) -> Vec<types::NetworkSavingInfo> {
-        // This logic assumes sorted_network_costs is not empty,
-        // as the calling function (sorted_networks_by_fee) checks for emptiness.
+    ) -> Option<Vec<types::NetworkSavingInfo>> {
+        if sorted_network_costs.is_empty() {
+            logger::debug!("No network costs found or calculated, returning None.");
+            return None;
+        }
+
         let first_chosen_network_is_global = sorted_network_costs[0].0.is_global_network();
 
         if first_chosen_network_is_global {
             // If the first chosen (cheapest) network is global, all savings are 0.
             sorted_network_costs
                 .into_iter()
-                .map(|(network, _fee)| types::NetworkSavingInfo {
-                    network,
-                    saving_percentage: 0.0,
+                .map(|(network, _fee)| {
+                    Some(types::NetworkSavingInfo {
+                        network,
+                        saving_percentage: 0.0,
+                    })
                 })
                 .collect()
         } else {
@@ -181,19 +184,21 @@ impl types::CoBadgedCardRequest {
                         }
                         let rounded_percentage =
                             (current_saving_percentage * 100.0).round() / 100.0;
-                        types::NetworkSavingInfo {
+                        Some(types::NetworkSavingInfo {
                             network,
                             saving_percentage: rounded_percentage,
-                        }
+                        })
                     })
                     .collect()
             } else {
                 // No global network found for comparison, so all savings are 0.
                 sorted_network_costs
                     .into_iter()
-                    .map(|(network, _fee)| types::NetworkSavingInfo {
-                        network,
-                        saving_percentage: 0.0,
+                    .map(|(network, _fee)| {
+                        Some(types::NetworkSavingInfo {
+                            network,
+                            saving_percentage: 0.0,
+                        })
                     })
                     .collect()
             }
