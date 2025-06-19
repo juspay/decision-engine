@@ -136,71 +136,62 @@ impl types::CoBadgedCardRequest {
         .flatten()
     }
 
-    // Helper function to calculate per-network savings
+    fn calculate_savings<F>(
+        costs: Vec<(gateway_decider_types::NETWORK, f64)>,
+        calc_savings_percentage: F,
+    ) -> Vec<types::NetworkSavingInfo>
+    where
+        F: Fn(f64) -> f64,
+    {
+        costs
+            .into_iter()
+            .map(|(network, fee)| types::NetworkSavingInfo {
+                network,
+                saving_percentage: calc_savings_percentage(fee),
+            })
+            .collect()
+    }
+
     fn calculate_network_saving_infos(
-        // Takes sorted network_costs by value as it will be consumed by into_iter
         sorted_network_costs: Vec<(gateway_decider_types::NETWORK, f64)>,
         transaction_amount: f64,
     ) -> Option<Vec<types::NetworkSavingInfo>> {
-        let first_chosen_network_is_global = sorted_network_costs
-            .first()
-            .or_else(|| {
-                logger::debug!("No network costs found, returning None.");
-                None
-            })?
-            .0
-            .is_global_network();
+        let zero_savings_fn = |_fee: f64| 0.0;
+        let Some((first_network, _)) = sorted_network_costs.first() else {
+            logger::debug!("No network costs found, returning empty vector.");
+            return None;
+        };
 
-        if first_chosen_network_is_global {
-            // If the first chosen (cheapest) network is global, all savings are 0.
-            sorted_network_costs
-                .into_iter()
-                .map(|(network, _fee)| {
-                    Some(types::NetworkSavingInfo {
-                        network,
-                        saving_percentage: 0.0,
-                    })
-                })
-                .collect()
+        if first_network.is_global_network() {
+            return Some(Self::calculate_savings(
+                sorted_network_costs,
+                zero_savings_fn,
+            ));
+        };
+
+        let baseline_fee_optional = sorted_network_costs
+            .iter()
+            .find(|(network, _)| network.is_global_network())
+            .map(|(_, fee)| *fee);
+
+        if let Some(baseline_fee) = baseline_fee_optional {
+            let calc_savings_fn = |fee: f64| {
+                let saving = baseline_fee - fee;
+                if saving > 0.0 && transaction_amount > 0.0 {
+                    ((saving / transaction_amount) * 10000.0).round() / 100.0
+                } else {
+                    0.0
+                }
+            };
+            Some(Self::calculate_savings(
+                sorted_network_costs,
+                calc_savings_fn,
+            ))
         } else {
-            // First network is local. Find the global network for comparison.
-            let global_network_fee_opt: Option<f64> = sorted_network_costs
-                .iter()
-                .find(|(network, _)| network.is_global_network())
-                .map(|(_, fee)| *fee);
-
-            if let Some(baseline_fee_for_comparison) = global_network_fee_opt {
-                // A global network exists for comparison
-                sorted_network_costs
-                    .into_iter()
-                    .map(|(network, fee)| {
-                        let saving = baseline_fee_for_comparison - fee;
-                        let mut current_saving_percentage = 0.0;
-                        // Only calculate positive savings; if local is more expensive than global, saving is 0 or negative.
-                        // The problem implies savings are benefits, so negative savings are treated as 0.
-                        if saving > 0.0 && transaction_amount > 0.0 {
-                            current_saving_percentage = (saving / transaction_amount) * 100.0;
-                        }
-                        let rounded_percentage =
-                            (current_saving_percentage * 100.0).round() / 100.0;
-                        Some(types::NetworkSavingInfo {
-                            network,
-                            saving_percentage: rounded_percentage,
-                        })
-                    })
-                    .collect()
-            } else {
-                // No global network found for comparison, so all savings are 0.
-                sorted_network_costs
-                    .into_iter()
-                    .map(|(network, _fee)| {
-                        Some(types::NetworkSavingInfo {
-                            network,
-                            saving_percentage: 0.0,
-                        })
-                    })
-                    .collect()
-            }
+            Some(Self::calculate_savings(
+                sorted_network_costs,
+                zero_savings_fn,
+            ))
         }
     }
 }
