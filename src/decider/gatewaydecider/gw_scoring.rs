@@ -1395,7 +1395,7 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                                 ..gsri.clone()
                             };
                             upd_gateway_success_rate_inputs.push(new_gsri);
-                            global_gateway_scores.push(update_global_score_log(
+                            global_gateway_scores.extend(update_global_score_log(
                                 gsri.gateway.clone(),
                                 global_gateway_score,
                             ));
