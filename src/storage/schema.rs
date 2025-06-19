@@ -508,12 +508,14 @@ diesel::table! {
 }
 
 diesel::table! {
-    routing_algorithm_mapper (created_by) {
+    routing_algorithm_mapper (id) {
+        id -> Int4,
         #[max_length = 255]
         created_by -> Varchar,
         #[max_length = 255]
         routing_algorithm_id -> Varchar,
-        algorithm_for -> Text,
+        #[max_length = 64]
+        algorithm_for -> Varchar,
     }
 }
 

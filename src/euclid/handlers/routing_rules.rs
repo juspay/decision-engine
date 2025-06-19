@@ -10,8 +10,8 @@ use crate::{
         interpreter::{evaluate_output, InterpreterBackend},
         types::{
             ActivateRoutingConfigRequest, Context, JsonifiedRoutingAlgorithm,
-            RoutingDictionaryRecord, RoutingEvaluateResponse, RoutingRequest, RoutingRule,
-            StaticRoutingAlgorithm,
+            RoutingAlgorithmMapperNew, RoutingDictionaryRecord, RoutingEvaluateResponse,
+            RoutingRequest, RoutingRule, StaticRoutingAlgorithm,
         },
         utils::{generate_random_id, is_valid_enum_value, validate_routing_rule},
     },
@@ -23,7 +23,7 @@ use crate::euclid::{
 };
 use crate::{euclid::types::RoutingAlgorithm, logger};
 use axum::{extract::Path, Json};
-use diesel::{associations::HasTable, ExpressionMethods};
+use diesel::{associations::HasTable, BoolExpressionMethods, ExpressionMethods};
 use error_stack::ResultExt;
 
 use crate::app::get_tenant_app_state;
@@ -117,7 +117,8 @@ pub async fn activate_routing_rule(
 ) -> Result<(), ContainerError<EuclidErrors>> {
     let state = get_tenant_app_state().await;
     // Update the RoutingAlgorithmMapper table here with new rule_id
-    // Find whether this creator previously has an entry in mapper table
+    // Find whether this creator previously has an entry in mapper table with the same
+    // algorithm_type and routing_algorithm_id
     // If yes go on with updating the rule_id inplace.
     // If not create a new entry in RoutingAlgorithmMapper table.
 
@@ -126,7 +127,12 @@ pub async fn activate_routing_rule(
         .get_conn()
         .await
         .map_err(|_| EuclidErrors::StorageError)?;
-    let predicate = mapper_dsl::created_by.eq(payload.created_by.clone());
+
+    let predicate = Box::new(
+        mapper_dsl::created_by
+            .eq(payload.created_by.clone())
+            .and(mapper_dsl::algorithm_for.eq(payload.algorithm_for.clone())),
+    );
 
     let algorithm_for = crate::generics::generic_find_one::<
         <RoutingAlgorithm as HasTable>::Table,
@@ -155,7 +161,7 @@ pub async fn activate_routing_rule(
     if rows_affected > 0 {
         return Ok(());
     } else {
-        let mapper_entry = RoutingAlgorithmMapper::new(
+        let mapper_entry = RoutingAlgorithmMapperNew::new(
             payload.created_by,
             payload.routing_algorithm_id,
             algorithm_for,

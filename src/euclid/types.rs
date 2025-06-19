@@ -145,6 +145,7 @@ pub struct JsonifiedRoutingAlgorithm {
     pub name: String,
     pub description: String,
     pub algorithm_data: serde_json::Value,
+    pub algorithm_for: String,
     pub created_at: PrimitiveDateTime,
     pub modified_at: PrimitiveDateTime,
 }
@@ -160,6 +161,7 @@ impl From<RoutingAlgorithm> for JsonifiedRoutingAlgorithm {
             name: ra.name,
             description: ra.description,
             algorithm_data,
+            algorithm_for: ra.algorithm_for,
             created_at: ra.created_at,
             modified_at: ra.modified_at,
         }
@@ -171,27 +173,38 @@ impl From<RoutingAlgorithm> for JsonifiedRoutingAlgorithm {
 )]
 #[cfg_attr(feature = "mysql", diesel(table_name = schema::routing_algorithm_mapper))]
 #[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::routing_algorithm_mapper))]
-#[diesel(primary_key(created_by))]
+#[diesel(primary_key(id))]
 pub struct RoutingAlgorithmMapper {
+    pub id: i32,
     pub created_by: String,
     pub routing_algorithm_id: String,
     pub algorithm_for: String,
+}
+
+#[derive(Insertable, Debug, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::routing_algorithm_mapper))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::routing_algorithm_mapper))]
+pub struct RoutingAlgorithmMapperNew {
+    pub created_by: String,
+    pub routing_algorithm_id: String,
+    pub algorithm_for: String,
+}
+
+impl RoutingAlgorithmMapperNew {
+    pub fn new(created_by: String, routing_algorithm_id: String, algorithm_for: String) -> Self {
+        Self {
+            created_by,
+            routing_algorithm_id,
+            algorithm_for,
+        }
+    }
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct ActivateRoutingConfigRequest {
     pub created_by: String,
     pub routing_algorithm_id: String,
-}
-
-impl RoutingAlgorithmMapper {
-    pub fn new(created_by: String, routing_algorithm_id: String, algorithm_for: String) -> Self {
-        Self {
-            created_by,
-            routing_algorithm_id,
-            algorithm_for: algorithm_for.to_string(),
-        }
-    }
+    pub algorithm_for: String,
 }
 
 #[derive(AsChangeset, Debug, serde::Serialize, serde::Deserialize, Queryable, Selectable)]
