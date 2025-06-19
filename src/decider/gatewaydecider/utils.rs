@@ -727,9 +727,11 @@ pub async fn get_split_settlement_details(
 }
 
 pub async fn metric_tracker_log(stage: &str, flowtype: &str, log_data: MessageFormat) {
+    let normalized = serde_json::Value::Object(serde_json::to_value(&log_data).expect("serialize MessageFormat").as_object().unwrap().clone());
+
     crate::logger::info!(
-        "metric_tracking_log: {:?}",
-        serde_json::to_string(&log_data).ok()
+        action = "metric_tracking_log",
+        "{}",normalized.to_string(),
     );
 }
 
