@@ -204,7 +204,6 @@ impl RoutingAlgorithmMapperNew {
 pub struct ActivateRoutingConfigRequest {
     pub created_by: String,
     pub routing_algorithm_id: String,
-    pub algorithm_for: String,
 }
 
 #[derive(AsChangeset, Debug, serde::Serialize, serde::Deserialize, Queryable, Selectable)]

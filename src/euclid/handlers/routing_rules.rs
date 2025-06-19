@@ -112,28 +112,18 @@ pub async fn routing_create(
 use crate::storage::schema::routing_algorithm_mapper::dsl as mapper_dsl;
 #[cfg(feature = "postgres")]
 use crate::storage::schema_pg::routing_algorithm_mapper::dsl as mapper_dsl;
+
 pub async fn activate_routing_rule(
     Json(payload): Json<ActivateRoutingConfigRequest>,
 ) -> Result<(), ContainerError<EuclidErrors>> {
     let state = get_tenant_app_state().await;
-    // Update the RoutingAlgorithmMapper table here with new rule_id
-    // Find whether this creator previously has an entry in mapper table with the same
-    // algorithm_type and routing_algorithm_id
-    // If yes go on with updating the rule_id inplace.
-    // If not create a new entry in RoutingAlgorithmMapper table.
-
     let conn = &state
         .db
         .get_conn()
         .await
         .map_err(|_| EuclidErrors::StorageError)?;
 
-    let predicate = Box::new(
-        mapper_dsl::created_by
-            .eq(payload.created_by.clone())
-            .and(mapper_dsl::algorithm_for.eq(payload.algorithm_for.clone())),
-    );
-
+    // === Step 1: Find algorithm_for from RoutingAlgorithm table ===
     let algorithm_for = crate::generics::generic_find_one::<
         <RoutingAlgorithm as HasTable>::Table,
         _,
@@ -145,32 +135,55 @@ pub async fn activate_routing_rule(
     ))?
     .algorithm_for;
 
-    let values = RoutingAlgorithmMapperUpdate {
-        routing_algorithm_id: payload.routing_algorithm_id.clone(),
-        algorithm_for: algorithm_for.clone(),
-    };
-
-    let rows_affected = crate::generics::generic_update_if_present::<
+    // === Step 2: Try to find existing entry for (created_by, algorithm_for) ===
+    let maybe_existing = crate::generics::generic_find_one::<
         <RoutingAlgorithmMapper as HasTable>::Table,
-        RoutingAlgorithmMapperUpdate,
         _,
-    >(conn, predicate, values)
+        RoutingAlgorithmMapper,
+    >(
+        &state.db,
+        mapper_dsl::created_by
+            .eq(payload.created_by.clone())
+            .and(mapper_dsl::algorithm_for.eq(algorithm_for.clone())),
+    )
     .await
-    .change_context(EuclidErrors::StorageError)?;
+    .ok();
 
-    if rows_affected > 0 {
-        return Ok(());
-    } else {
-        let mapper_entry = RoutingAlgorithmMapperNew::new(
-            payload.created_by,
-            payload.routing_algorithm_id,
-            algorithm_for,
-        );
-        crate::generics::generic_insert(&state.db, mapper_entry)
+    if let Some(existing) = maybe_existing {
+        if existing.routing_algorithm_id != payload.routing_algorithm_id {
+            // === Step 3a: Update routing_algorithm_id in place ===
+            let predicate = mapper_dsl::created_by
+                .eq(payload.created_by.clone())
+                .and(mapper_dsl::algorithm_for.eq(algorithm_for.clone()));
+
+            let values = RoutingAlgorithmMapperUpdate {
+                routing_algorithm_id: payload.routing_algorithm_id.clone(),
+                algorithm_for: algorithm_for.clone(),
+            };
+
+            crate::generics::generic_update_if_present::<
+                <RoutingAlgorithmMapper as HasTable>::Table,
+                RoutingAlgorithmMapperUpdate,
+                _,
+            >(conn, predicate, values)
             .await
             .change_context(EuclidErrors::StorageError)?;
+        }
         return Ok(());
     }
+
+    // === Step 3b: Insert new if not present ===
+    let mapper_entry = RoutingAlgorithmMapperNew::new(
+        payload.created_by,
+        payload.routing_algorithm_id,
+        algorithm_for,
+    );
+
+    crate::generics::generic_insert(&state.db, mapper_entry)
+        .await
+        .change_context(EuclidErrors::StorageError)?;
+
+    Ok(())
 }
 
 pub async fn list_all_routing_algorithm_id(
@@ -194,30 +207,38 @@ pub async fn list_all_routing_algorithm_id(
 #[axum::debug_handler]
 pub async fn list_active_routing_algorithm(
     Path(created_by): Path<String>,
-) -> Result<Json<JsonifiedRoutingAlgorithm>, ContainerError<EuclidErrors>> {
+) -> Result<Json<Vec<JsonifiedRoutingAlgorithm>>, ContainerError<EuclidErrors>> {
     let state = get_tenant_app_state().await;
-    let active_routing_algorithm_id =
-        crate::generics::generic_find_one::<
-            <RoutingAlgorithmMapper as HasTable>::Table,
-            _,
-            RoutingAlgorithmMapper,
-        >(&state.db, mapper_dsl::created_by.eq(created_by.clone()))
-        .await
-        .change_context(EuclidErrors::ActiveRoutingAlgorithmNotFound(
-            created_by.clone(),
-        ))?
-        .routing_algorithm_id;
 
-    Ok(Json(
-        crate::generics::generic_find_one::<
-            <RoutingAlgorithm as HasTable>::Table,
-            _,
-            RoutingAlgorithm,
-        >(&state.db, dsl::id.eq(active_routing_algorithm_id))
-        .await
-        .change_context(EuclidErrors::StorageError)?
-        .into(),
-    ))
+    let active_mappings = crate::generics::generic_find_all::<
+        <RoutingAlgorithmMapper as HasTable>::Table,
+        _,
+        RoutingAlgorithmMapper,
+    >(&state.db, mapper_dsl::created_by.eq(created_by.clone()))
+    .await
+    .change_context(EuclidErrors::ActiveRoutingAlgorithmNotFound(
+        created_by.clone(),
+    ))?;
+
+    let ids: Vec<String> = active_mappings
+        .into_iter()
+        .map(|m| m.routing_algorithm_id)
+        .collect();
+
+    let routing_algorithms = crate::generics::generic_find_all::<
+        <RoutingAlgorithm as HasTable>::Table,
+        _,
+        RoutingAlgorithm,
+    >(&state.db, dsl::id.eq_any(ids))
+    .await
+    .change_context(EuclidErrors::StorageError)?;
+
+    let result = routing_algorithms
+        .into_iter()
+        .map(JsonifiedRoutingAlgorithm::from)
+        .collect();
+
+    Ok(Json(result))
 }
 
 pub async fn routing_evaluate(
