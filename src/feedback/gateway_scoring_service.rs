@@ -85,7 +85,7 @@ use super::constants::{
 };
 use super::utils::getTimeFromTxnCreatedInMills;
 use crate::logger;
-
+use crate::types::payment::payment_method_const::*;
 // Converted data types
 // Original Haskell data type: GatewayLatencyForScoring
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -538,13 +538,8 @@ pub async fn updateGatewayScore(
     };
 
     let should_update_explore_txn = if Cutover::isFeatureEnabled(
-        DC::ENABLE_EXPLORE_AND_EXPLOIT_ON_SRV3(
-            txn_card_info
-                .clone()
-                .paymentMethodType
-                .to_string(),
-        )
-        .get_key(),
+        DC::ENABLE_EXPLORE_AND_EXPLOIT_ON_SRV3(txn_card_info.clone().paymentMethodType.to_string())
+            .get_key(),
         MID::merchant_id_to_text(txn_detail.clone().merchantId),
         C::kvRedis(),
     )
@@ -775,7 +770,7 @@ pub async fn isUpdateWithinLatencyWindow(
 
 async fn checkExemptIfMandateTxn(txn_detail: &TxnDetail, txn_card_info: &TxnCardInfo) -> bool {
     let is_recurring = isRecurringTxn(Some(txn_detail.txnObjectType.clone()));
-    let is_nb_pmt = txn_card_info.paymentMethodType == ("NB");
+    let is_nb_pmt = txn_card_info.paymentMethodType == (NB);
     let is_penny_reg_txn = isPennyMandateRegTxn(txn_detail.clone());
     is_recurring || (is_nb_pmt && is_penny_reg_txn)
 }

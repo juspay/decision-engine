@@ -42,7 +42,7 @@ use serde_json::{from_str, Value};
 use crate::decider::gatewaydecider::types as DeciderTypes;
 
 use super::utils;
-
+use crate::types::payment::payment_method_const::*;
 // use serde_json::Value as AValue;
 // use eulerhs::prelude::*;
 // use data::aeson::{Object, either_decode, (.:)};
@@ -313,7 +313,7 @@ fn go_card_isin(
     let cloned_txn_card_info = txnCardInfo.clone();
 
     FilteredPaymentInfo {
-        paymentMethodType: Some("CARD".to_string()),
+        paymentMethodType: Some(CARD.to_string()),
         paymentMethod: txnCardInfo
             .cardSwitchProvider
             .clone()

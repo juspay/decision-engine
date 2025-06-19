@@ -33,6 +33,7 @@ use crate::decider::gatewaydecider::utils as GU;
 use crate::logger;
 use crate::merchant_config_util as MC;
 use crate::redis::cache::findByNameFromRedis;
+use crate::types::payment::payment_method_const::*;
 use crate::{
     app,
     decider::gatewaydecider::types::GatewayScoringData,
@@ -105,7 +106,7 @@ pub async fn updateSrV3Score(
                 txn_card_info.clone(),
             )
             .await;
-            if ["CARD", "UPI"].contains(&payment_method_type) {
+            if [CARD, UPI].contains(&payment_method_type.as_str()) {
                 let key3d_for_gateway_selection =
                     unified_sr_v3_key.clone().unwrap_or_else(|| "".to_string());
                 if key3d_for_gateway_selection != key_for_gateway_selection {

@@ -71,6 +71,7 @@ use super::types::{
     SuccessRate1AndNConfig,
 };
 use crate::feedback::gateway_elimination_scoring::flow::getTTLForKey;
+use crate::types::payment::payment_method_const::*;
 use std::collections::HashMap as MP;
 use std::iter::Iterator;
 use std::option::Option;
@@ -78,7 +79,6 @@ use std::primitive;
 use std::string::String as T;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::vec::Vec;
-
 // #[derive(Debug, ArtRecordable)]
 // pub struct IOGenMStdGen;
 
@@ -543,65 +543,66 @@ pub async fn get_cached_scores_based_on_srv3(
         "kv_redis".to_string(),
     )
     .await;
-    let updated_score_map_after_reset =
-        if is_srv3_reset_enabled {
-            let upper_reset_factor = Utils::get_sr_v3_upper_reset_factor(
-                merchant_srv3_input_config.clone(),
-                &pmt_str,
-                &pm,
-            )
-            .or_else(|| {
-                Utils::get_sr_v3_upper_reset_factor(default_srv3_input_config.clone(), &pmt_str, &pm)
-            })
-            .unwrap_or(C::defaultSrV3BasedUpperResetFactor);
-            let lower_reset_factor = Utils::get_sr_v3_lower_reset_factor(
-                merchant_srv3_input_config.clone(),
-                &pmt_str,
-                &pm,
-            )
-            .or_else(|| {
-                Utils::get_sr_v3_lower_reset_factor(default_srv3_input_config.clone(), &pmt_str, &pm)
-            })
-            .unwrap_or(C::defaultSrV3BasedLowerResetFactor);
+    let updated_score_map_after_reset = if is_srv3_reset_enabled {
+        let upper_reset_factor =
+            Utils::get_sr_v3_upper_reset_factor(merchant_srv3_input_config.clone(), &pmt_str, &pm)
+                .or_else(|| {
+                    Utils::get_sr_v3_upper_reset_factor(
+                        default_srv3_input_config.clone(),
+                        &pmt_str,
+                        &pm,
+                    )
+                })
+                .unwrap_or(C::defaultSrV3BasedUpperResetFactor);
+        let lower_reset_factor =
+            Utils::get_sr_v3_lower_reset_factor(merchant_srv3_input_config.clone(), &pmt_str, &pm)
+                .or_else(|| {
+                    Utils::get_sr_v3_lower_reset_factor(
+                        default_srv3_input_config.clone(),
+                        &pmt_str,
+                        &pm,
+                    )
+                })
+                .unwrap_or(C::defaultSrV3BasedLowerResetFactor);
+        logger::debug!(
+            tag = "Sr_V3_Upper_Reset_Factor",
+            action = "Sr_V3_Upper_Reset_Factor",
+            "Upper Reset Factor: {:?}",
+            upper_reset_factor
+        );
+        logger::debug!(
+            tag = "Sr_V3_Lower_Reset_Factor",
+            action = "Sr_V3_Lower_Reset_Factor",
+            "Lower Reset Factor: {:?}",
+            lower_reset_factor
+        );
+        let (updated_score_map_after_reset, is_reset_done) = reset_sr_v3_score(
+            score_map.clone(),
+            merchant_bucket_size,
+            sr_gateway_redis_key_map.clone(),
+            upper_reset_factor,
+            lower_reset_factor,
+        )
+        .await;
+        if is_reset_done {
             logger::debug!(
-                tag = "Sr_V3_Upper_Reset_Factor",
-                action = "Sr_V3_Upper_Reset_Factor",
-                "Upper Reset Factor: {:?}",
-                upper_reset_factor
+                tag = "get_cached_scores_based_on_srv3",
+                action = "get_cached_scores_based_on_srv3",
+                "Gateway Score Map After Sr V3 Evaluation And Reset: {:?}",
+                updated_score_map_after_reset
             );
-            logger::debug!(
-                tag = "Sr_V3_Lower_Reset_Factor",
-                action = "Sr_V3_Lower_Reset_Factor",
-                "Lower Reset Factor: {:?}",
-                lower_reset_factor
-            );
-            let (updated_score_map_after_reset, is_reset_done) = reset_sr_v3_score(
-                score_map.clone(),
-                merchant_bucket_size,
-                sr_gateway_redis_key_map.clone(),
-                upper_reset_factor,
-                lower_reset_factor,
+            reset_and_log_metrics(
+                decider_flow,
+                updated_score_map_after_reset.clone(),
+                "SR_SELECTION_V3_EVALUATION_AFTER_RESET".to_string(),
             )
             .await;
-            if is_reset_done {
-                logger::debug!(
-                    tag = "get_cached_scores_based_on_srv3",
-                    action = "get_cached_scores_based_on_srv3",
-                    "Gateway Score Map After Sr V3 Evaluation And Reset: {:?}",
-                    updated_score_map_after_reset
-                );
-                reset_and_log_metrics(
-                    decider_flow,
-                    updated_score_map_after_reset.clone(),
-                    "SR_SELECTION_V3_EVALUATION_AFTER_RESET".to_string(),
-                )
-                .await;
-                Utils::set_reset_approach(decider_flow, ResetApproach::SRV3_RESET);
-            }
-            updated_score_map_after_reset
-        } else {
-            score_map
-        };
+            Utils::set_reset_approach(decider_flow, ResetApproach::SRV3_RESET);
+        }
+        updated_score_map_after_reset
+    } else {
+        score_map
+    };
 
     let is_srv3_extra_score_enabled = M::isFeatureEnabled(
         C::enable_extra_score_on_sr_v3.get_key(),
@@ -991,7 +992,7 @@ pub async fn update_score_for_outage(decider_flow: &mut DeciderFlow<'_>) -> Gate
 // checkScheduledOutage :: ETTD.TxnDetail -> TxnCardInfo -> ETM.MerchantId -> Maybe ETJ.JuspayBankCode -> ETGO.GatewayOutage -> Bool
 // checkScheduledOutage txnDetail txnCardInfo merchantId juspayBankCode scheduledOutage =
 //   (scheduleEqualTo (==) (Just merchantId) scheduledOutage.merchantId)
-//   && (if (txnCardInfo.paymentMethod == "UPI")
+//   && (if (txnCardInfo.paymentMethod == UPI)
 //         then (scheduleEqualTo (==) txnDetail.sourceObject scheduledOutage.paymentMethod)
 //         else scheduleEqualTo (==)  (Just txnCardInfo.paymentMethod) scheduledOutage.paymentMethod)
 //   && (scheduleEqualTo (==) (Just txnCardInfo.paymentMethodType) scheduledOutage.paymentMethodType)
@@ -1027,7 +1028,7 @@ fn check_scheduled_outtage(
         |x: ETM::id::MerchantId, y: ETM::id::MerchantId| x == y,
         Some(merchant_id.clone()),
         scheduled_outage.merchantId.clone(),
-    ) && if txn_card_info.paymentMethodType == "UPI" {
+    ) && if txn_card_info.paymentMethodType == UPI {
         schedule_equal_to(
             |x, y| x == y,
             txn_detail.sourceObject.clone(),
@@ -1109,12 +1110,12 @@ fn check_scheduled_outage_metadata(
                 Some(None),
                 scheduled_outage_metadata.flowType.clone(),
             ) && match txn_card_info.paymentMethodType.as_str() {
-                "CARD" => schedule_equal_to(
+                CARD => schedule_equal_to(
                     |x, y| x == y,
                     txn_card_info.card_type.clone(),
                     scheduled_outage_metadata.cardType.clone(),
                 ),
-                "UPI" => txn_card_info
+                UPI => txn_card_info
                     .paymentSource
                     .as_ref()
                     .map_or(false, |payment_source| {
@@ -1181,7 +1182,7 @@ fn check_duration(
 fn check_pmt_outage(scheduled_outage: ETGO::GatewayOutage) -> bool {
     match scheduled_outage.paymentMethodType.as_deref() {
         None => true,
-        Some("UPI") => true,
+        Some(UPI) => true,
         _ => {
             scheduled_outage.gateway.is_some()
                 || scheduled_outage.bank.is_some()
@@ -1854,17 +1855,16 @@ pub async fn get_sr1_and_sr2_and_n(
     if let Some(gateway_success_rate_merchant_input) = m_gateway_success_rate_merchant_input {
         if let Some(inputs) = gateway_success_rate_merchant_input.eliminationV2SuccessRateInputs {
             let pmt = &txn_card_info.paymentMethodType;
-            let source_obj = if txn_card_info.paymentMethod == "UPI" {
+            let source_obj = if txn_card_info.paymentMethod == UPI {
                 txn_detail.sourceObject.clone()
             } else {
                 Some(txn_card_info.paymentMethod.clone())
             };
-            let pm =
-                if txn_card_info.paymentMethodType == "UPI" {
-                    source_obj.clone()
-                } else {
-                    Some(txn_card_info.paymentMethod.clone())
-                };
+            let pm = if txn_card_info.paymentMethodType == UPI {
+                source_obj.clone()
+            } else {
+                Some(txn_card_info.paymentMethod.clone())
+            };
             let txn_obj_type = txn_detail.txnObjectType.to_string();
 
             filter_using_service_config(merchant_id, pmt.to_string(), pm, txn_obj_type, inputs)
@@ -2251,7 +2251,7 @@ pub async fn update_gateway_score_based_on_success_rate(
         .await;
 
         let payment_method_type = if Utils::is_card_transaction(&txn_card_info) {
-            "CARD"
+            CARD
         } else {
             txn_card_info.paymentMethodType.as_str()
         };

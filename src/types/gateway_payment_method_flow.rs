@@ -1,6 +1,6 @@
 use crate::app::get_tenant_app_state;
 use crate::types::country::country_iso::CountryISO;
-use crate::types::payment::payment_method::{ to_payment_method_id, PaymentMethodId};
+use crate::types::payment::payment_method::{to_payment_method_id, PaymentMethodId};
 use crate::types::payment_flow::*;
 use serde::{Deserialize, Serialize};
 use std::option::Option;

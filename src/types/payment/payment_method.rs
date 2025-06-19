@@ -23,7 +23,6 @@ use std::option::Option;
 use std::string::String;
 use time::PrimitiveDateTime;
 
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaymentMethodId(pub i64);
 

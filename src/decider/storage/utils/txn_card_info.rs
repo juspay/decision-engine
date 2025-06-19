@@ -6,8 +6,9 @@
 // use types::card as ETCa;
 // use types::payment as ETP;
 
-use crate::types::{card::txn_card_info::TxnCardInfo};
+use crate::types::card::txn_card_info::TxnCardInfo;
+use crate::types::payment::payment_method_const::*;
 
 pub fn is_google_pay_txn(tci: TxnCardInfo) -> bool {
-    tci.paymentMethodType == "WALLET" && tci.paymentMethod == "GOOGLEPAY"
+    tci.paymentMethodType == WALLET && tci.paymentMethod == "GOOGLEPAY"
 }
