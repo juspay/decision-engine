@@ -86,17 +86,15 @@ impl types::CoBadgedCardRequest {
         logger::debug!("Total fees per debit network: {:?}", network_costs);
         network_costs.sort_by(|(_, fee1), (_, fee2)| fee1.total_cmp(fee2));
 
-        let network_saving_infos_optional =
-            Self::calculate_network_saving_infos(network_costs, amount);
+        let network_saving_infos =
+            Self::calculate_network_saving_infos(network_costs, amount)?;
 
-        network_saving_infos_optional.and_then(|network_saving_infos| {
-            Some(types::DebitRoutingOutput {
-                co_badged_card_networks_info: network_saving_infos,
-                issuer_country: co_badged_card_info.issuer_country,
-                is_regulated: co_badged_card_info.is_regulated,
-                regulated_name: co_badged_card_info.regulated_name,
-                card_type: co_badged_card_info.card_type,
-            })
+        Some(types::DebitRoutingOutput {
+            co_badged_card_networks_info: network_saving_infos,
+            issuer_country: co_badged_card_info.issuer_country,
+            is_regulated: co_badged_card_info.is_regulated,
+            regulated_name: co_badged_card_info.regulated_name,
+            card_type: co_badged_card_info.card_type,
         })
     }
 
@@ -145,12 +143,14 @@ impl types::CoBadgedCardRequest {
         sorted_network_costs: Vec<(gateway_decider_types::NETWORK, f64)>,
         transaction_amount: f64,
     ) -> Option<Vec<types::NetworkSavingInfo>> {
-        if sorted_network_costs.is_empty() {
-            logger::debug!("No network costs found or calculated, returning None.");
-            return None;
-        }
-
-        let first_chosen_network_is_global = sorted_network_costs[0].0.is_global_network();
+        let first_chosen_network_is_global = sorted_network_costs
+            .first()
+            .or_else(|| {
+                logger::debug!("No network costs found, returning None.");
+                None
+            })?
+            .0
+            .is_global_network();
 
         if first_chosen_network_is_global {
             // If the first chosen (cheapest) network is global, all savings are 0.
