@@ -369,14 +369,7 @@ where
                 if !explicit_entries_set.contains(*key) {
                     if let Some(value) = storage.values.get(*key) {
                         if key == &"message" {
-                            let value = storage.values.get("message").cloned().unwrap_or(Value::String("null".to_string()));
-                            let normalized_value = match &value {
-                                serde_json::Value::String(s) => match serde_json::from_str::<serde_json::Value>(s.as_str()) {
-                                    Ok(parsed) => FormattingLayer::<W>::normalize_json(parsed),
-                                    Err(_) => value.clone(),
-                                },
-                                _ => value.clone(),
-                            };
+                            let normalized_value = get_normalized_message::<W>(&storage);
                             
                             map_serializer.serialize_entry("message", &normalized_value)?;
                             explicit_entries_set.insert("message");
@@ -431,14 +424,7 @@ where
             }
 
             if !explicit_entries_set.contains("message") {
-                let value = storage.values.get("message").cloned().unwrap_or(Value::String("null".to_string()));
-                let normalized_value = match &value {
-                    serde_json::Value::String(s) => match serde_json::from_str::<serde_json::Value>(s.as_str()) {
-                        Ok(parsed) => FormattingLayer::<W>::normalize_json(parsed),
-                        Err(_) => value.clone(),
-                    },
-                    _ => value.clone(),
-                };
+                let normalized_value = get_normalized_message::<W>(&storage);
                 
                 map_serializer.serialize_entry("message", &normalized_value)?;
                 explicit_entries_set.insert("message");
@@ -577,6 +563,22 @@ where
         Ok(buffer)
     }
 }
+
+fn get_normalized_message<W>(storage: &Storage<'_>) -> serde_json::Value
+where
+    W: for<'a> MakeWriter<'a> + 'static,
+{
+    let value = storage.values.get("message").cloned().unwrap_or(Value::String("null".to_string()));
+
+    match &value {
+        serde_json::Value::String(s) => match serde_json::from_str::<serde_json::Value>(s.as_str()) {
+            Ok(parsed) => FormattingLayer::<W>::normalize_json(parsed),
+            Err(_) => value.clone(),
+        },
+        _ => value.clone(),
+    }
+}
+
 
 /// Format the current time in a custom format: "YYYY-MM-DD HH:MM:SS.mmm"
 fn format_time_custom() -> String {
