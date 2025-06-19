@@ -2,8 +2,8 @@
 list:
     @just --list --justfile {{ source_file() }}
 
-
-# Run formatter
+#test fmt 
+# Run formatter 
 fmt *FLAGS:
     cargo +nightly fmt {{ fmt_flags }} {{ FLAGS }}
 fmt_flags := '--all'
