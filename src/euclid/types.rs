@@ -34,6 +34,7 @@ pub struct RoutingRule {
     pub description: String,
     pub created_by: String,
     pub algorithm: StaticRoutingAlgorithm,
+    #[serde(default)]
     pub algorithm_for: AlgorithmType,
     #[serde(default)]
     pub metadata: Option<serde_json::Value>,
@@ -45,12 +46,14 @@ pub enum StaticRoutingAlgorithm {
     Advanced(Program),
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, strum::Display)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, strum::Display)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum AlgorithmType {
+    #[default]
     Payment,
     Payout,
+    ThreeDsAuthentication,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
