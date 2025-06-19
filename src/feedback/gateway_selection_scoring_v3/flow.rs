@@ -33,7 +33,7 @@ use crate::decider::gatewaydecider::utils as GU;
 use crate::logger;
 use crate::merchant_config_util as MC;
 use crate::redis::cache::findByNameFromRedis;
-use crate::types::payment::payment_method_const::*;
+use crate::types::payment::payment_method_type_const::*;
 use crate::{
     app,
     decider::gatewaydecider::types::GatewayScoringData,

@@ -71,7 +71,7 @@ use super::types::{
     SuccessRate1AndNConfig,
 };
 use crate::feedback::gateway_elimination_scoring::flow::getTTLForKey;
-use crate::types::payment::payment_method_const::*;
+use crate::types::payment::payment_method_type_const::*;
 use std::collections::HashMap as MP;
 use std::iter::Iterator;
 use std::option::Option;

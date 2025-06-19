@@ -85,7 +85,7 @@ use super::constants::{
 };
 use super::utils::getTimeFromTxnCreatedInMills;
 use crate::logger;
-use crate::types::payment::payment_method_const::*;
+use crate::types::payment::payment_method_type_const::*;
 // Converted data types
 // Original Haskell data type: GatewayLatencyForScoring
 #[derive(Debug, Serialize, Deserialize, PartialEq)]

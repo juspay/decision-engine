@@ -49,7 +49,7 @@ use crate::types::card::txn_card_info::TxnCardInfo;
 use crate::types::currency::Currency;
 use crate::types::feature as ETF;
 use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
-use crate::types::payment::payment_method_const::*;
+use crate::types::payment::payment_method_type_const::*;
 use crate::types::transaction::id::transaction_id_to_text;
 use crate::types::txn_details::types::TxnObjectType;
 use masking::PeekInterface;

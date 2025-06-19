@@ -38,7 +38,7 @@ use crate::types::card::txn_card_info::TxnCardInfo;
 use crate::types::gateway_card_info::ValidationType;
 use crate::types::merchant as ETM;
 use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
-use crate::types::payment::payment_method_const::*;
+use crate::types::payment::payment_method_type_const::*;
 use crate::types::txn_details::types as ETTD;
 // use utils::errors::predefined_errors as Errs;
 // use juspay::extra::parsing::{Parsed, parse};
