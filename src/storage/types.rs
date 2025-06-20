@@ -374,6 +374,19 @@ pub struct MerchantGatewayPaymentMethodFlow {
     pub gateway_bank_code: Option<String>,
 }
 
+#[derive(Debug, Clone, Identifiable, Queryable)]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::micro_payment_flow))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::micro_payment_flow))]
+pub struct MicroPaymentFlow {
+    pub id: String,
+    pub flow_level: String,
+    pub flow_level_id: String,
+    pub micro_payment_flow_name: String,
+    pub value_type: String,
+    pub value: String,
+    pub date_created: PrimitiveDateTime,
+    pub last_updated: PrimitiveDateTime,
+}
 
 #[derive(Debug, Clone, PartialEq, FromSqlRow, AsExpression, Serialize)]
 #[cfg_attr(feature = "mysql", diesel(sql_type = Bit))]

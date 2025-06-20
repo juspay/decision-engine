@@ -504,3 +504,82 @@ pub struct AddressVerification {
     #[serde(rename = "collectAvsInfo")]
     pub collectAvsInfo: Option<bool>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum FlowLevel {
+  PaymentFlow,
+  GatewayPaymentFlow,
+  GatewayPaymentMethodFlow,
+  MerchantGatewayPaymentMethodFlow,
+}  
+
+pub fn text_to_flow_level(text: String) -> Result<FlowLevel, ApiError> {
+    match text.as_str() {
+        "PAYMENT_FLOW" => Ok(FlowLevel::PaymentFlow),
+        "GATEWAY_PAYMENT_FLOW" => Ok(FlowLevel::GatewayPaymentFlow),
+        "GATEWAY_PAYMENT_METHOD_FLOW" => Ok(FlowLevel::GatewayPaymentMethodFlow),
+        "MERCHANT_GATEWAY_PAYMENT_METHOD_FLOW" => Ok(FlowLevel::MerchantGatewayPaymentMethodFlow),
+        _ => Err(ApiError::ParsingError("Invalid FlowLevel")),
+    }
+}
+
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+
+
+pub struct FlowLevelId {
+    pub flowLevelId: String,
+}
+
+pub fn to_flow_level_id(id: String) -> FlowLevelId {
+    FlowLevelId {
+        flowLevelId: id,
+    }
+}
+
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum MicroPaymentFlowName {
+  RegisterMaxAmount,
+  SupportedFrequencies,
+  BankAccountDetailsSupportMode,
+}
+
+pub fn text_to_micro_payment_flow_name(text: String) -> Result<MicroPaymentFlowName, ApiError> {
+    match text.as_str() {
+        "REGISTER_MAX_AMOUNT" => Ok(MicroPaymentFlowName::RegisterMaxAmount),
+        "SUPPORTED_FREQUENCIES" => Ok(MicroPaymentFlowName::SupportedFrequencies),
+        "BANK_ACCOUNT_DETAILS_SUPPORT_MODE" => Ok(MicroPaymentFlowName::BankAccountDetailsSupportMode),
+        _ => Err(ApiError::ParsingError("Invalid MicroPaymentFlowName")),
+    }
+}
+
+pub fn text_to_micro_payment_flow_type(text: String) -> Result<MicroPaymentFlowType, ApiError> {
+    match text.as_str() {
+        "ARRAY" => Ok(MicroPaymentFlowType::ARRAY),
+        "BOOLEAN" => Ok(MicroPaymentFlowType::BOOLEAN),
+        "DOUBLE" => Ok(MicroPaymentFlowType::DOUBLE),
+        "OBJECT" => Ok(MicroPaymentFlowType::OBJECT),
+        "STRING" => Ok(MicroPaymentFlowType::STRING),
+        _ => Err(ApiError::ParsingError("Invalid MicroPaymentFlowType")),
+    }
+}
+
+pub fn micro_payment_flow_name_to_text(mpfn: &MicroPaymentFlowName) -> String {
+    match mpfn {
+        MicroPaymentFlowName::RegisterMaxAmount => "REGISTER_MAX_AMOUNT".to_string(),
+        MicroPaymentFlowName::SupportedFrequencies => "SUPPORTED_FREQUENCIES".to_string(),
+        MicroPaymentFlowName::BankAccountDetailsSupportMode => "BANK_ACCOUNT_DETAILS_SUPPORT_MODE".to_string(),
+    }
+}
+
+pub fn flow_level_to_text(mpfn: &FlowLevel) -> String {
+    match mpfn {
+        FlowLevel::PaymentFlow => "PAYMENT_FLOW".to_string(),
+        FlowLevel::GatewayPaymentFlow => "GATEWAY_PAYMENT_FLOW".to_string(),
+        FlowLevel::GatewayPaymentMethodFlow => "GATEWAY_PAYMENT_METHOD_FLOW".to_string(),
+        FlowLevel::MerchantGatewayPaymentMethodFlow => "MERCHANT_GATEWAY_PAYMENT_METHOD_FLOW".to_string(),
+    }
+}

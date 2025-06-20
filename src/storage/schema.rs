@@ -253,6 +253,7 @@ diesel::table! {
         gateway_identifier -> Nullable<Text>,
         gateway_type -> Nullable<Text>,
         supported_txn_type -> Nullable<Text>,
+        config_source_info -> Nullable<Text>,
     }
 }
 
@@ -290,6 +291,20 @@ diesel::table! {
         last_updated -> Datetime,
         disabled -> Nullable<Bit>,
         gateway_bank_code -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    micro_payment_flow (id) {
+        id -> Text,
+        flow_level -> Text,
+        flow_level_id -> Text,
+        micro_payment_flow_name -> Text,
+        #[sql_name = "type"]
+        value_type -> Text,
+        value -> Text,
+        date_created -> Datetime,
+        last_updated -> Datetime,
     }
 }
 
@@ -546,3 +561,4 @@ diesel::allow_tables_to_appear_in_same_query!(
     txn_offer_detail,
     user_eligibility_info,
 );
+

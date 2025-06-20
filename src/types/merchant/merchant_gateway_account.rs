@@ -25,7 +25,7 @@ use crate::storage::schema_pg::merchant_gateway_account::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
 use std::fmt::Debug;
-use crate::types::payment_flow::PaymentFlow
+use crate::types::payment_flow::PaymentFlow;
 
 // #[derive(Debug, PartialEq, Serialize, Deserialize)]
 // pub struct EulerAccountDetails {

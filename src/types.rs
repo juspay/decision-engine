@@ -38,3 +38,4 @@ pub mod txn_offer;
 pub mod txn_offer_detail;
 pub mod txn_offer_info;
 pub mod user_eligibility_info;
+pub mod micro_payment_flow;

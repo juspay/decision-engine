@@ -6,7 +6,7 @@ use crate::types::card::card_type::card_type_to_text;
 use crate::types::merchant::id::{merchant_id_to_text, MerchantId};
 use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
 use crate::types::money::internal::Money;
-use crate::types::payment_flow::{payment_flows_to_text, PaymentFlow};
+use crate::types::payment_flow::{payment_flows_to_text, to_flow_level_id, FlowLevel, FlowLevelId, MicroPaymentFlowName, PaymentFlow};
 use crate::types::user_eligibility_info::{
     get_eligibility_info, identifier_name_to_text, IdentifierName,
 };
@@ -85,6 +85,8 @@ use crate::types::isin_routes as ETIsinR;
 // // use configs::env_vars as ENV;
 use crate::types::gateway_card_info::ValidationType;
 use crate::error::StorageError;
+use crate::types::merchant_gateway_payment_method_flow::{ MerchantGatewayPaymentMethodFlow};
+use crate::types::micro_payment_flow:: {find_mpf_by_flow_level_flow_level_ids_mpf_name, MicroPaymentFlowF};
 
 pub fn either_decode_t<T: for<'de> Deserialize<'de>>(text: &str) -> Result<T, String> {
     from_slice(text.as_bytes()).map_err(|e| e.to_string())
@@ -614,6 +616,10 @@ pub fn is_emandate_amount_filter_needed(
 
 pub fn is_emandate_register_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
     txn_detail.txnObjectType == ETTD::TxnObjectType::EmandateRegister
+}
+
+fn is_pmt_eligible_for_emandate_amount_filter(pmt: &PaymentMethodType) -> bool {
+    matches!(pmt, PaymentMethodType::Card | PaymentMethodType::NB | PaymentMethodType::Aadhaar | PaymentMethodType::PAN)
 }
 
 pub async fn get_card_brand(decider_flow: &mut DeciderFlow<'_>) -> Option<String> {
@@ -2734,6 +2740,65 @@ pub fn get_pf_from_validation_type(vt: &ValidationType) -> Option<PaymentFlow> {
     ValidationType::Emandate    => Some(PaymentFlow::EMANDATE),
     _                           => None,
   }
+}
+
+
+pub async fn filter_mgpmf_for_max_register_amount(
+    pf: PaymentFlow,
+    payment_method_type: &PaymentMethodType,
+    merchant_gateway_payment_method_flows: Vec<MerchantGatewayPaymentMethodFlow>,
+    txn_amount: Money,
+) -> Vec<MerchantGatewayPaymentMethodFlow> {
+    if matches!(pf, PaymentFlow::EMANDATE | PaymentFlow::TPV_EMANDATE)
+        && is_pmt_eligible_for_emandate_amount_filter(payment_method_type)
+    {
+        let flow_level_ids = extract_mgpmf_ids_as_flow_level_ids(&merchant_gateway_payment_method_flows);
+
+        let min_amount = Money::from_double(10000.0);
+
+        let mpfs: Vec<MicroPaymentFlowF> = find_mpf_by_flow_level_flow_level_ids_mpf_name(FlowLevel::MerchantGatewayPaymentMethodFlow, flow_level_ids, MicroPaymentFlowName::RegisterMaxAmount).await;
+
+        let filtered_ids: Vec<FlowLevelId> = mpfs
+            .iter()
+            .filter_map(|mpf| {
+              let val= from_str(&mpf.value).ok().unwrap_or(min_amount.clone());
+              if txn_amount <= val {
+                Some(mpf.flowLevelId.clone())
+              } else {
+                None
+              }
+            })
+            .collect();
+
+        merchant_gateway_payment_method_flows
+            .into_iter()
+            // .filter(|mgpmf| filtered_ids.contains(&mgpmf.id))
+            .filter_map(|mgpmf| {
+               match mgpmf.id.map(|id| to_flow_level_id(id.to_string())) {
+                Some(value) => if filtered_ids.contains(&value) {
+                    Some(mgpmf)
+                } else {
+                    None
+                }
+                _ => None
+               }
+
+
+            })
+            .collect()
+    } else {
+        merchant_gateway_payment_method_flows
+    }
+}
+
+
+fn extract_mgpmf_ids_as_flow_level_ids(
+    flows: &[MerchantGatewayPaymentMethodFlow],
+) -> Vec<FlowLevelId> {
+    flows
+        .iter()
+        .filter_map(|flow| flow.id.map(|id| to_flow_level_id(id.to_string())))
+        .collect()
 }
 
 

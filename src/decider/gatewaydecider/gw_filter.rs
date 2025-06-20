@@ -1757,9 +1757,9 @@ pub async fn filterGatewaysForValidationType(
             let merchant_gateway_card_infos =
                 Utils::filter_gateway_card_info_for_max_register_amount(
                     txn_detail.clone(),
-                    txn_card_info,
+                    txn_card_info.clone(),
                     merchant_gateway_card_infos,
-                    amount,
+                    amount.clone(),
                 );
 
             // Extract gateway card info IDs
@@ -1783,10 +1783,10 @@ pub async fn filterGatewaysForValidationType(
 
             let new_st = catMaybes(&nst);
 
-            // Update gateway list and MGAs
-            setGwsAndMgas(
-                this,
-                enabled_gateway_accounts
+
+            // NEW LOGIC 
+            
+            let mgci_matched_final_mgas: Vec<MerchantGatewayAccount>  = gci_based_mgas
                     .into_iter()
                     .filter(|mga| {
                         new_st.contains(&mga.gateway)
@@ -1796,8 +1796,91 @@ pub async fn filterGatewaysForValidationType(
                                 .collect::<Vec<_>>()
                                 .contains(&Some(mga.id.clone()))
                     })
-                    .collect(),
-            );
+                    .collect();
+
+            let mgpmf_matched_final_mgas = match (m_pf.as_ref(), gpmf_based_mgas.is_empty()) {
+                (Some(pf), false) => {
+                    let maybe_jbc = find_bank_code(txn_card_info.paymentMethod).await;            
+                    match maybe_jbc {
+                        None => vec![],
+                        Some(jbc) => {
+                            let gw_list: Vec<String> = gpmf_based_mgas
+                                .iter()
+                                .map(|mga| mga.gateway.clone())
+                                .collect();
+            
+                            // let all_gpmf_entries = GPMF::find_all_by_country_code_gw_pf_id_pmt_jbcid(
+                            //     CountryCode::IND,
+                            //     &gw_list,
+                            //     pf.clone(),
+                            //     txn_card_info.payment_method_type.clone(),
+                            //     jbc.id.clone(),
+                            // )
+                            // .await?;
+
+                            let all_gpmf_entries = GPMF::find_all_gpmf_by_country_code_gw_pf_id_pmt_jbcid_db(
+                                crate::types::country::country_iso::CountryISO::IND,
+                                gw_list,
+                                pf.clone(),
+                                txn_card_info.paymentMethodType.clone(),
+                                jbc.id,
+                                )
+                                .await
+                                .unwrap_or_default();
+                            // Extract MGA IDs and GPMF IDs for further filtering
+                            let mga_ids = gpmf_based_mgas
+                                .iter()
+                                .map(|mga| mga.id.merchantGwAccId)
+                                .collect::<Vec<_>>();
+
+                            let gpmf_ids: Vec<GatewayPaymentMethodFlowId> = all_gpmf_entries
+                                .iter()
+                                .map(|entry| to_gateway_payment_method_flow_id(entry.id.clone()))
+                                .collect();
+
+                            // Get merchant gateway payment method flows that match both MGA and GPMF
+                            let mgpmf_entries =
+                                MGPMF::get_all_mgpmf_by_mga_id_and_gpmf_ids(mga_ids, gpmf_ids).await;
+
+            
+                            // let mga_ids: Vec<String> = gpmf_based_mgas
+                            //     .iter()
+                            //     .map(|mga| mga.id.merchant_gw_acc_id.clone())
+                            //     .collect();
+            
+                            // let gpmf_ids: Vec<String> =
+                            //     all_gpmf_entries.iter().map(|e| e.id.clone()).collect();
+            
+                            // let mgpmf_entries = MGPMF::get_all_by_mga_and_gpmf_ids(&mga_ids, &gpmf_ids).await?;
+            
+                            let max_amount_filtered_entries = Utils::filter_mgpmf_for_max_register_amount(
+                                pf.clone(),
+                                &txn_card_info.paymentMethodType,
+                                mgpmf_entries.clone(),
+                                amount,
+                            );
+
+                            // Extract merchant gateway account IDs that have matching payment method flows
+                            let mgpmf_mga_id_entries = max_amount_filtered_entries
+                                .await.iter()
+                                .map(|entry| entry.merchantGatewayAccountId)
+                                .collect::<Vec<_>>();
+
+                            // Final filtering of MGAs to only those with matching payment flows
+                            gpmf_based_mgas
+                                .into_iter()
+                                .filter(|mga| mgpmf_mga_id_entries.contains(&mga.id.merchantGwAccId))
+                                .collect()
+                        }
+                    }
+                }
+                _ => vec![],
+            };                    
+            
+            // Update gateway list and MGAs
+            
+            let new_gws = [mgci_matched_final_mgas, mgpmf_matched_final_mgas].concat();
+            setGwsAndMgas(this, new_gws);
         }
     }
     // Handle other transaction types
