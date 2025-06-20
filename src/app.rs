@@ -12,7 +12,9 @@ use tower_http::trace as tower_trace;
 use crate::{
     api_client::ApiClient,
     config::{self, GlobalConfig, TenantConfig},
-    error, logger, routes, storage,
+    error, logger,
+    pagos_client::PagosApiClient,
+    routes, storage,
     tenant::GlobalAppState,
     utils,
 };
@@ -43,6 +45,7 @@ pub struct TenantAppState {
     pub redis_conn: Arc<RedisConnectionWrapper>,
     pub config: config::TenantConfig,
     pub api_client: ApiClient,
+    pub pagos_client: Option<PagosApiClient>,
 }
 
 #[allow(clippy::expect_used)]
@@ -69,11 +72,22 @@ impl TenantAppState {
             .await
             .expect("Failed to create Redis connection Pool");
 
+        let pagos_client = if let Some(pagos_conf) = &tenant_config.pagos_api {
+            Some(PagosApiClient::new(
+                api_client.clone(),
+                pagos_conf.base_url.clone(),
+                pagos_conf.api_key.clone(),
+            ))
+        } else {
+            None
+        };
+
         Ok(Self {
             db,
             redis_conn: Arc::new(RedisConnectionWrapper::new(redis_conn)),
             api_client,
             config: tenant_config,
+            pagos_client,
         })
     }
 }
