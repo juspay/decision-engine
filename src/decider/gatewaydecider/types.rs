@@ -342,13 +342,21 @@ pub struct SRMetricLogData {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DeciderGatewayWiseSuccessRateBasedRoutingInput {
     pub gateway: String,
+    #[serde(rename = "elimination_threshold")]
     pub eliminationThreshold: Option<f64>,
+    #[serde(rename = "elimination_max_count_threshold")]
     pub eliminationMaxCountThreshold: Option<i64>,
+    #[serde(rename = "selection_max_count_threshold")]
     pub selectionMaxCountThreshold: Option<i64>,
+    #[serde(rename = "soft_txn_reset_count")]
     pub softTxnResetCount: Option<i64>,
+    #[serde(rename = "gateway_level_elimination_threshold")]
     pub gatewayLevelEliminationThreshold: Option<f64>,
+    #[serde(rename = "elimination_level")]
     pub eliminationLevel: Option<ETGRI::EliminationLevel>,
+    #[serde(rename = "current_score")]
     pub currentScore: Option<f64>,
+    #[serde(rename = "last_reset_time_stamp")]
     pub lastResetTimeStamp: Option<i64>,
 }
 
@@ -403,17 +411,24 @@ pub struct MessageFormat {
     pub auth_type: Option<String>,
     pub bank_code: Option<String>,
     pub x_request_id: Option<String>,
+    #[serde(rename = "data")]
     pub log_data: AValue,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SelectionScoreInfo {
     pub gateway: String,
+    #[serde(rename = "current_score")]
     pub currentScore: f64,
+    #[serde(rename = "score_scope")]
     pub scoreScope: String,
+    #[serde(rename = "selection_merchant_txn_count_threshold")]
     pub selectionMerchantTxnCountThreshold: i64,
+    #[serde(rename = "selection_max_count_threshold")]
     pub selectionMaxCountThreshold: Option<i64>,
+    #[serde(rename = "transaction_count")]
     pub transactionCount: Option<i64>,
+    #[serde(rename = "elimination_level")]
     pub eliminationLevel: Option<ETGRI::EliminationLevel>,
 }
 
@@ -1689,11 +1704,16 @@ pub struct DefaultSRBasedGatewayEliminationInput {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GlobalSREvaluationScoreLog {
+    #[serde(rename = "transaction_count")]
     pub transactionCount: i64,
+    #[serde(rename = "current_score")]
     pub currentScore: f64,
+    #[serde(rename = "merchant_id")]
     pub merchantId: MerchantId,
+    #[serde(rename = "elimination_threshold")]
     pub eliminationThreshold: f64,
-    pub eliminationMaxCountThreshold: i64,
+    #[serde(rename = "elimination_max_count_threshold")]
+    pub eliminationMaxCountThreshold: i64,   
     pub gateway: String,
 }
 
