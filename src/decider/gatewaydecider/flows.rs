@@ -38,7 +38,7 @@ use crate::types::card::txn_card_info::TxnCardInfo;
 use crate::types::gateway_card_info::ValidationType;
 use crate::types::merchant as ETM;
 use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
-use crate::types::payment::payment_method::PaymentMethodType;
+use crate::types::payment::payment_method_type_const::*;
 use crate::types::txn_details::types as ETTD;
 // use utils::errors::predefined_errors as Errs;
 // use juspay::extra::parsing::{Parsed, parse};
@@ -1111,14 +1111,14 @@ pub async fn getFailureReasonWithFilter(
             }
         }
         "filterFunctionalGatewaysForConsumerFinance" => {
-            if txn_card_info.paymentMethodType == PaymentMethodType::ConsumerFinance {
+            if txn_card_info.paymentMethodType == CONSUMER_FINANCE {
                 "No functional gateways supporting Consumer Finance transaction.".to_string()
             } else {
                 "Gateways configured supports only Consumer Finance transaction.".to_string()
             }
         }
         "filterFunctionalGatewaysForUpi" => {
-            if txn_card_info.paymentMethodType == PaymentMethodType::UPI {
+            if txn_card_info.paymentMethodType == UPI {
                 "No functional gateways supporting UPI transaction.".to_string()
             } else if !is_google_pay_txn(txn_card_info.clone()) {
                 "Gateways configured supports only UPI transaction.".to_string()
@@ -1141,7 +1141,7 @@ pub async fn getFailureReasonWithFilter(
         }
         "filterFunctionalGatewaysForReward" => {
             if txn_card_info.card_type == Some(CardType::Reward)
-                || txn_card_info.paymentMethodType == PaymentMethodType::Reward
+                || txn_card_info.paymentMethodType == REWARD
             {
                 "No functional gateways supporting Reward transaction.".to_string()
             } else {
@@ -1149,7 +1149,7 @@ pub async fn getFailureReasonWithFilter(
             }
         }
         "filterFunctionalGatewaysForCash" => {
-            if txn_card_info.paymentMethodType == PaymentMethodType::Cash {
+            if txn_card_info.paymentMethodType == CASH {
                 "No functional gateways supporting CASH transaction.".to_string()
             } else {
                 "Gateways configured supports only CASH transaction.".to_string()

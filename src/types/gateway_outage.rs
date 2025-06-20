@@ -12,7 +12,6 @@ use std::vec::Vec;
 // use std::time::{LocalTime, UTCTime};
 use crate::types::merchant::id::{to_optional_merchant_id, MerchantId};
 // use juspay::extra::parsing::{Parsed, ParsingErrorType, Step, around, liftEither, parseField, project, toUTC};
-use crate::types::payment::payment_method::{text_to_payment_method_type, PaymentMethodType};
 // use eulerhs::extra::combinators::toDomainAll;
 // use eulerhs::language::MonadFlow;
 // use named::{self, Named};
@@ -84,7 +83,7 @@ pub struct GatewayOutage {
     #[serde(rename = "bank")]
     pub bank: Option<String>,
     #[serde(rename = "paymentMethodType")]
-    pub paymentMethodType: Option<PaymentMethodType>,
+    pub paymentMethodType: Option<String>,
     #[serde(rename = "paymentMethod")]
     pub paymentMethod: Option<String>,
     #[serde(rename = "description")]
@@ -111,10 +110,7 @@ impl TryFrom<DBGatewayOutage> for GatewayOutage {
             merchantId: to_optional_merchant_id(db_type.merchant_id),
             startTime: db_type.start_time,
             bank: db_type.bank,
-            paymentMethodType: db_type
-                .payment_method_type
-                .map(text_to_payment_method_type)
-                .transpose()?,
+            paymentMethodType: db_type.payment_method_type,
             paymentMethod: db_type.payment_method,
             description: db_type.description,
             dateCreated: db_type.date_created,
