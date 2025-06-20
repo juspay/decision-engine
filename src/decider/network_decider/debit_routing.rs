@@ -1,5 +1,3 @@
-use error_stack::ResultExt;
-
 use crate::app::get_tenant_app_state;
 use crate::decider::gatewaydecider::{
     types as gateway_decider_types, utils as gateway_decider_utils,
