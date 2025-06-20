@@ -26,8 +26,14 @@ pub enum EuclidErrors {
     #[error("Routing rule validation failed")]
     FailedToValidateRoutingRule,
 
+    #[error("Failed to evaluate output for type : {0}")]
+    FailedToEvaluateOutput(String),
+
     #[error("Active routing_algorithm not found for: {0}")]
     ActiveRoutingAlgorithmNotFound(String),
+
+    #[error("routing_algorithm not found for: {0}")]
+    RoutingAlgorithmNotFound(String),
 
     #[error("Storage error")]
     StorageError,
@@ -134,6 +140,31 @@ impl axum::response::IntoResponse for EuclidErrors {
                 )),
             )
                 .into_response(),
+
+            EuclidErrors::RoutingAlgorithmNotFound(msg) => (
+                hyper::StatusCode::BAD_REQUEST,
+                axum::Json(ApiErrorResponse::new(
+                    error_codes::TE_04,
+                    format!(
+                    "Routing algorithm not found for the provided id : {}",
+                    msg
+                ),
+                    None,
+                )),
+            )
+                .into_response(),
+
+            EuclidErrors::FailedToEvaluateOutput(msg) => (
+                hyper::StatusCode::BAD_REQUEST,
+                axum::Json(ApiErrorResponse::new(
+                    error_codes::TE_04,
+                    format!(
+                    "Failed to evaluate output for algorithm kind : {}",
+                    msg
+                ),
+                    None,
+                )),
+            ).into_response(),
 
             EuclidErrors::RoutingInterpretationFailed => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,

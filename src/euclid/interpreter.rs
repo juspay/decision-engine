@@ -13,6 +13,27 @@ pub struct InterpreterBackend {
 }
 
 impl InterpreterBackend {
+    fn eval_number_comparison_array(
+        num: u64,
+        array: &[ast::NumberComparison],
+    ) -> Result<bool, types::InterpreterError> {
+        for comparison in array {
+            let other = comparison.number;
+            let passed = match comparison.comparison_type {
+                ast::ComparisonType::GreaterThan => num > other,
+                ast::ComparisonType::LessThan => num < other,
+                ast::ComparisonType::LessThanEqual => num <= other,
+                ast::ComparisonType::GreaterThanEqual => num >= other,
+                ast::ComparisonType::Equal => num == other,
+                ast::ComparisonType::NotEqual => num != other,
+            };
+            if !passed {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
     fn eval_comparison(
         comparison: &ast::Comparison,
         ctx: &types::Context,
@@ -35,12 +56,21 @@ impl InterpreterBackend {
             match (val, &comparison.comparison, &comparison.value) {
                 (EnumVariant(e1), Equal, EnumVariant(e2)) => Ok(e1 == e2),
                 (EnumVariant(e1), NotEqual, EnumVariant(e2)) => Ok(e1 != e2),
+                (EnumVariant(e), Equal, EnumVariantArray(evec)) => Ok(evec.iter().any(|v| e == v)),
+                (EnumVariant(e), NotEqual, EnumVariantArray(evec)) => {
+                    Ok(evec.iter().all(|v| e != v))
+                }
                 (Number(n1), Equal, Number(n2)) => Ok(n1 == n2),
                 (Number(n1), NotEqual, Number(n2)) => Ok(n1 != n2),
                 (Number(n1), LessThanEqual, Number(n2)) => Ok(n1 <= n2),
                 (Number(n1), GreaterThanEqual, Number(n2)) => Ok(n1 >= n2),
                 (Number(n1), LessThan, Number(n2)) => Ok(n1 < n2),
                 (Number(n1), GreaterThan, Number(n2)) => Ok(n1 > n2),
+                (Number(n), Equal, NumberArray(nvec)) => Ok(nvec.iter().any(|v| v == n)),
+                (Number(n), NotEqual, NumberArray(nvec)) => Ok(nvec.iter().all(|v| v != n)),
+                (Number(n), Equal, NumberComparisonArray(ncvec)) => {
+                    Self::eval_number_comparison_array(*n, ncvec)
+                }
                 (MetadataVariant(m1), Equal, MetadataVariant(m2)) => Ok(m1 == m2),
                 (MetadataVariant(m1), NotEqual, MetadataVariant(m2)) => Ok(m1 != m2),
                 (StrValue(s1), Equal, StrValue(s2)) => Ok(s1 == s2),
@@ -210,6 +240,7 @@ pub fn perform_volume_split_priority(
 
 pub fn evaluate_output(output: &Output) -> RoutingResult<(Vec<ConnectorInfo>, Vec<ConnectorInfo>)> {
     match output {
+        Output::Single(connector) => Ok((vec![connector.clone()], vec![connector.clone()])),
         Output::Priority(connectors) => {
             let first_connector = connectors.first().cloned();
             Ok((
