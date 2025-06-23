@@ -500,7 +500,7 @@ diesel::table! {
         name -> Text,
         description -> Text,
         algorithm_data -> Text,
-        algorithm_for -> Text,
+        algorithm_for -> Varchar,
         metadata -> Nullable<Text>,
         created_at -> Timestamp,
         modified_at -> Timestamp,
