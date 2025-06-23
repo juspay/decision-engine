@@ -406,6 +406,7 @@ CREATE TABLE routing_algorithm (
     name VARCHAR(255) NOT NULL,
     description TEXT NOT NULL,
     algorithm_data TEXT NOT NULL,
+    algorithm_for VARCHAR(64) NOT NULL,
     metadata JSONB,
     created_at TIMESTAMP NOT NULL,
     modified_at TIMESTAMP NOT NULL
@@ -433,10 +434,14 @@ CREATE TABLE co_badged_cards_info_test (
     modified_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, 
     last_updated_provider VARCHAR(128)
 );
+
 DROP TABLE IF EXISTS routing_algorithm_mapper;
 CREATE TABLE routing_algorithm_mapper (
-    created_by VARCHAR(255) PRIMARY KEY,
-    routing_algorithm_id VARCHAR(255) NOT NULL
+    id SERIAL PRIMARY KEY,
+    created_by VARCHAR(255) NOT NULL,
+    routing_algorithm_id VARCHAR(255) NOT NULL,
+    algorithm_for VARCHAR(64) NOT NULL,
+    UNIQUE (created_by, algorithm_for)
 );
 
 
