@@ -179,7 +179,7 @@ Success
 curl -X POST http://localhost:8080/rule/create \
   -H "Content-Type: application/json" \
   -d '{
-    "merchant_id": "test_merchant_123",
+    "merchant_id": "test_merchant_123423",
     "config": {
       "type": "successRate",
       "data": {
@@ -212,7 +212,7 @@ curl -X POST http://localhost:8080/rule/create \
 curl -X POST http://localhost:8080/rule/get \
      -H "Content-Type: application/json" \
      -d '{
-           "merchant_id": "test_merchant_123",
+           "merchant_id": "test_merchant_123423",
            "algorithm": "successRate"
          }'
 ```
@@ -220,7 +220,7 @@ curl -X POST http://localhost:8080/rule/get \
 #### Response:
 ```json
 {
-   "merchant_id": "test_merchant_123",
+   "merchant_id": "test_merchant_123423",
     "config": {
       "type": "successRate",
       "data": {
@@ -246,7 +246,7 @@ curl -X POST http://localhost:8080/rule/get \
 curl -X POST http://localhost:8080/rule/update \
   -H "Content-Type: application/json" \
   -d '{
-    "merchant_id": "test_merchant_123",
+    "merchant_id": "test_merchant_123423",
     "config": {
       "type": "successRate",
       "data": {
@@ -279,7 +279,7 @@ curl -X POST http://localhost:8080/rule/update \
 curl -X POST http://localhost:8080/rule/delete \
      -H "Content-Type: application/json" \
      -d '{
-           "merchant_id": "test_merchant_123",
+           "merchant_id": "test_merchant_123423",
            "algorithm": "successRate"
          }'
 ```
@@ -296,7 +296,7 @@ curl -X POST http://localhost:8080/rule/delete \
 curl -X POST http://localhost:8080/rule/create \
   -H "Content-Type: application/json" \
   -d '{
-    "merchant_id": "test_merchant_123",
+    "merchant_id": "test_merchant_123423",
     "config": {
       "type": "elimination",
       "data": {
@@ -318,7 +318,7 @@ curl -X POST http://localhost:8080/rule/create \
 curl -X POST http://localhost:8080/rule/get \
      -H "Content-Type: application/json" \
      -d '{
-           "merchant_id": "test_merchant_123",
+           "merchant_id": "test_merchant_123423",
            "algorithm": "elimination"
          }'
 ```
@@ -326,7 +326,7 @@ curl -X POST http://localhost:8080/rule/get \
 #### Response:
 ```json
 {
-    "merchant_id": "test_merchant_123",
+    "merchant_id": "test_merchant_123423",
     "config": {
       "type": "elimination",
       "data": {
@@ -341,7 +341,7 @@ curl -X POST http://localhost:8080/rule/get \
 curl -X POST http://localhost:8080/rule/update \
   -H "Content-Type: application/json" \
   -d '{
-    "merchant_id": "test_merchant_123",
+    "merchant_id": "test_merchant_123423",
     "config": {
       "type": "elimination",
       "data": {
@@ -363,7 +363,7 @@ curl -X POST http://localhost:8080/rule/update \
 curl -X POST http://localhost:8080/rule/delete \
      -H "Content-Type: application/json" \
      -d '{
-           "merchant_id": "test_merchant_123",
+           "merchant_id": "test_merchant_123423",
            "algorithm": "elimination"
          }'
 ```
@@ -380,7 +380,7 @@ curl -X POST http://localhost:8080/rule/delete \
 curl --location --request POST 'http://localhost:8080/merchant-account/create' \
 --header 'Content-Type: application/json' \
 --data-raw '{
-  "merchant_id": "test_merchant_123"  
+  "merchant_id": "test_merchant_123423"  
 }'
 ```
 
@@ -393,20 +393,20 @@ curl --location --request POST 'http://localhost:8080/merchant-account/create' \
 
 #### Request: Merchant account retrieve
 ```bash
-curl -X GET http://localhost:8080/merchant-account/test_merchant_123            
+curl -X GET http://localhost:8080/merchant-account/test_merchant_123423            
 ```
 
 #### Response:
 ```json
 {
-    "merchant_id": "test_merchant_123",
+    "merchant_id": "test_merchant_123423",
     "gateway_success_rate_based_decider_input": null
 }
 ```
 
 #### Request: Merchant account delete
 ```bash
-curl -X DELETE http://localhost:8080/merchant-account/test_merchant_123  
+curl -X DELETE http://localhost:8080/merchant-account/test_merchant_123423  
 ```     
 
 #### Response:
@@ -423,63 +423,129 @@ It enables merchants and platforms to define their own routing algorithms—such
 ## Create Routing Algorithm:
 ### Request:
 ```
-curl --location 'http://localhost:8080/routing/create' \
+curl --location 'http://127.0.0.1:8082/routing/create' \
 --header 'Content-Type: application/json' \
---data '{
-   "name": "Priority Based Config",
-   "created_by": "merchant_1",
-   "algorithm": {
-       "globals": {},
-       "defaultSelection": {
-           "priority": ["stripe", "adyen", "checkout"]
-       },
-       "rules": [
-           {
-               "name": "Card Rule",
-               "routingType": "priority",
-               "output": {
-                   "priority": ["stripe", "adyen"]
-               },
-               "statements": [
-                   {
-                       "condition": [
-                           {
-                               "lhs": "payment_method",
-                               "comparison": "equal",
-                               "value": {
-                                   "type": "enum_variant",
-                                   "value": "card"
-                               },
-                               "metadata": {}
-                           },
-                           {
-                               "lhs": "amount",
-                               "comparison": "greater_than",
-                               "value": {
-                                   "type": "number",
-                                   "value": 1000
-                               },
-                               "metadata": {}
-                           }
-                       ]
-                   }
-               ]
-           }
-       ],
-       "metadata": {}
-   }
-}'
+--data '
+{
+    "name": "Priority rule",
+    "created_by": "merchant_1234",
+    "description": "this is my priority rule",
+    "algorithm": {
+        "type": "advanced",
+        "data": {
+            "globals": {},
+            "default_selection": {
+                "priority": [
+                    {
+                        "gateway_name": "stripe",
+                        "gateway_id": "mca_111"
+                    },
+                    {
+                        "gateway_name": "adyen",
+                        "gateway_id": "mca_112"
+                    },
+                    {
+                        "gateway_name": "checkout",
+                        "gateway_id": "mca_113"
+                    }
+                ]
+            },
+            "rules": [
+                {
+                    "name": "Card Rule",
+                    "routingType": "priority",
+                    "output": {
+                        "priority": [
+                            {
+                                "gateway_name": "Paytm",
+                                "gateway_id": "mca_114"
+                            },
+                            {
+                                "gateway_name": "adyen",
+                                "gateway_id": "mca_112"
+                            }
+                        ]
+                    },
+                    "statements": [
+                        {
+                            "condition": [
+                                {
+                                    "lhs": "payment_method",
+                                    "comparison": "equal",
+                                    "value": {
+                                        "type": "enum_variant",
+                                        "value": "card"
+                                    },
+                                    "metadata": {}
+                                }
+                            ]
+                        },
+                        {
+                            "condition": [
+                                {
+                                    "lhs": "amount",
+                                    "comparison": "greater_than",
+                                    "value": {
+                                        "type": "number",
+                                        "value": 100
+                                    },
+                                    "metadata": {}
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+    },
+    "metadata": {}
+}
+'
 ```
 
 ### Response:
 ```
 {
    "rule_id": "routing_e641380c-6f24-4405-8454-5ae6cbceb7a0",
-   "name": "Priority Based Config",
+   "name": "Priority rule",
    "created_at": "2025-04-22 11:45:03.411134513",
    "modified_at": "2025-04-22 11:45:03.411134513"
 }
 ```
+
+### What Happens on Evaluation(Rule explaination)?
+
+```
+curl --location '{base_url}/routing/evaluate' \
+--header 'Content-Type: application/json' \
+--data '{
+    "created_by": "merchant_1234",
+    "parameters": {
+        "payment_method": {
+            "type": "enum_variant",
+            "value": "card"
+        }
+        "amount": {
+            "type": "number",
+            "value": 1
+        },
+        "billing_country": {
+            "type": "enum_variant",
+            "value": "Netherlands"
+        }
+    }
+}'
+```
+If the input has:
+
+- **Either Of**:
+  - `amount > 100` **OR**
+  - `payment_method == card`
+
+💡 So this makes the rule as **OR** rule.
+🔄 **Then** the rule `"Card rule"` matches → returns `Paytm`.
+📆 **Otherwise** → returns fallback `defaultSelection` → `[Stripe, Adyen, checkout]`.
+
 
 ## Activate Routing rule for a creator_id.
 ### Request
@@ -487,8 +553,8 @@ curl --location 'http://localhost:8080/routing/create' \
 curl --location 'http://localhost:8080/routing/activate' \
 --header 'Content-Type: application/json' \
 --data '{
-    "created_by": "merchant_1",
-    "routing_algorithm_id": "routing_49ffa266-28ca-40be-9b90-f978190aa571"
+    "created_by": "merchant_1234",
+    "routing_algorithm_id": "routing_8711ce52-33e2-473f-9c8f-91a406acb850"
 }'
 ```
 
@@ -503,15 +569,15 @@ status_code: 200
 curl --location 'http://localhost:8080/routing/evaluate' \
 --header 'Content-Type: application/json' \
 --data '{
- "created_by": "merchant_1",
+ "created_by": "merchant_1234",
  "parameters": {
    "payment_method": {
      "type": "enum_variant",
-     "value": "card"
+     "value": "upi"
    },
    "amount": {
      "type": "number",
-     "value": 100
+     "value": 10
    }
  }
 }
@@ -520,6 +586,7 @@ curl --location 'http://localhost:8080/routing/evaluate' \
 
 
 ### Response:
+This will go to default_selection as the amount is less than 1000 and the payment_method is upi.
 ```
 {
    "status": "default_selection",
@@ -549,116 +616,261 @@ curl --location --request POST 'http://localhost:8080/routing/list/merchant_1234
 ```
 [
     {
-        "id": "routing_7db79cc9-c49a-4f94-8e1c-5ed19c2388df",
+        "id": "routing_bff2f300-6acb-4dd1-80e4-c99233f45d0b",
         "created_by": "merchant_1234",
-        "name": "My Algo",
-        "description": "Test algo",
+        "name": "Priority rule",
+        "description": "this is my priority rule",
         "algorithm_data": {
-            "rules": [
-                {
-                    "name": "Card Rule",
-                    "output": {
-                        "priority": [
-                            "stripe",
-                            "adyen"
-                        ]
-                    },
-                    "statements": [
+            "type": "advanced",
+            "data": {
+                "globals": {},
+                "default_selection": {
+                    "priority": [
                         {
-                            "nested": null,
-                            "condition": [
+                            "gateway_name": "stripe",
+                            "gateway_id": "mca_111"
+                        },
+                        {
+                            "gateway_name": "adyen",
+                            "gateway_id": "mca_112"
+                        },
+                        {
+                            "gateway_name": "checkout",
+                            "gateway_id": "mca_113"
+                        }
+                    ]
+                },
+                "rules": [
+                    {
+                        "name": "Card Rule",
+                        "routing_type": "priority",
+                        "output": {
+                            "priority": [
                                 {
-                                    "lhs": "payment_method",
-                                    "value": {
-                                        "type": "enum_variant",
-                                        "value": "card"
-                                    },
-                                    "metadata": {},
-                                    "comparison": "equal"
+                                    "gateway_name": "Paytm",
+                                    "gateway_id": "mca_114"
                                 },
                                 {
-                                    "lhs": "amount",
-                                    "value": {
-                                        "type": "number",
-                                        "value": 1000
-                                    },
-                                    "metadata": {},
-                                    "comparison": "greater_than"
+                                    "gateway_name": "adyen",
+                                    "gateway_id": "mca_112"
                                 }
                             ]
-                        }
-                    ],
-                    "routingType": "priority"
-                }
-            ],
-            "globals": {},
-            "metadata": {},
-            "defaultSelection": {
-                "priority": [
-                    "stripe",
-                    "adyen",
-                    "checkout"
-                ]
+                        },
+                        "statements": [
+                            {
+                                "condition": [
+                                    {
+                                        "lhs": "payment_method",
+                                        "comparison": "equal",
+                                        "value": {
+                                            "type": "enum_variant",
+                                            "value": "card"
+                                        },
+                                        "metadata": {}
+                                    }
+                                ],
+                                "nested": null
+                            },
+                            {
+                                "condition": [
+                                    {
+                                        "lhs": "amount",
+                                        "comparison": "greater_than",
+                                        "value": {
+                                            "type": "number",
+                                            "value": 100
+                                        },
+                                        "metadata": {}
+                                    }
+                                ],
+                                "nested": null
+                            }
+                        ]
+                    }
+                ],
+                "metadata": null
             }
         },
-        "created_at": "2025-04-24 09:30:44.0",
-        "modified_at": "2025-04-24 09:30:44.0"
+        "created_at": "2025-06-17 13:00:41.506841",
+        "modified_at": "2025-06-17 13:00:41.506841"
     },
     {
-        "id": "routing_b15157b3-5c3d-4ea7-b2af-6dc773ff1bf6",
+        "id": "routing_8ba5c1a6-d01b-4a5e-b894-b55afa224896",
         "created_by": "merchant_1234",
-        "name": "My Algo",
-        "description": "Test algo",
+        "name": "Volume split based config",
+        "description": "test volume based rule",
         "algorithm_data": {
-            "rules": [
-                {
-                    "name": "Card Rule",
-                    "output": {
-                        "priority": [
-                            "stripe",
-                            "adyen"
-                        ]
-                    },
-                    "statements": [
+            "type": "advanced",
+            "data": {
+                "globals": {},
+                "default_selection": {
+                    "priority": [
                         {
-                            "nested": null,
-                            "condition": [
+                            "gateway_name": "Bambora",
+                            "gateway_id": "mca_111"
+                        },
+                        {
+                            "gateway_name": "Paytm",
+                            "gateway_id": "mca_112"
+                        },
+                        {
+                            "gateway_name": "checkout",
+                            "gateway_id": "mca_113"
+                        }
+                    ]
+                },
+                "rules": [
+                    {
+                        "name": "HDFC Rule",
+                        "routing_type": "volume_split",
+                        "output": {
+                            "volume_split": [
                                 {
-                                    "lhs": "payment_method",
-                                    "value": {
-                                        "type": "enum_variant",
-                                        "value": "card"
-                                    },
-                                    "metadata": {},
-                                    "comparison": "equal"
+                                    "split": 60,
+                                    "output": {
+                                        "gateway_name": "hdfc",
+                                        "gateway_id": "mca_114"
+                                    }
                                 },
                                 {
-                                    "lhs": "amount",
-                                    "value": {
-                                        "type": "number",
-                                        "value": 1000
-                                    },
-                                    "metadata": {},
-                                    "comparison": "greater_than"
+                                    "split": 40,
+                                    "output": {
+                                        "gateway_name": "instamojo",
+                                        "gateway_id": "mca_115"
+                                    }
                                 }
                             ]
-                        }
-                    ],
-                    "routingType": "priority"
+                        },
+                        "statements": [
+                            {
+                                "condition": [
+                                    {
+                                        "lhs": "amount",
+                                        "comparison": "greater_than",
+                                        "value": {
+                                            "type": "number",
+                                            "value": 100
+                                        },
+                                        "metadata": {}
+                                    },
+                                    {
+                                        "lhs": "billing_country",
+                                        "comparison": "equal",
+                                        "value": {
+                                            "type": "enum_variant",
+                                            "value": "Netherlands"
+                                        },
+                                        "metadata": {}
+                                    }
+                                ],
+                                "nested": null
+                            }
+                        ]
+                    }
+                ],
+                "metadata": {
+                    "transaction": "data"
                 }
-            ],
-            "globals": {},
-            "metadata": {},
-            "defaultSelection": {
-                "priority": [
-                    "stripe",
-                    "adyen",
-                    "checkout"
-                ]
             }
         },
-        "created_at": "2025-04-24 08:50:26.0",
-        "modified_at": "2025-04-24 08:50:26.0"
+        "created_at": "2025-06-17 13:01:25.223118",
+        "modified_at": "2025-06-17 13:01:25.223118"
+    },
+    {
+        "id": "routing_8711ce52-33e2-473f-9c8f-91a406acb850",
+        "created_by": "merchant_1234",
+        "name": "AND OR rule example",
+        "description": "priority rule which demonstrates AND and OR rule",
+        "algorithm_data": {
+            "type": "advanced",
+            "data": {
+                "globals": {},
+                "default_selection": {
+                    "priority": [
+                        {
+                            "gateway_name": "Bambora",
+                            "gateway_id": "mca_111"
+                        },
+                        {
+                            "gateway_name": "Paytm",
+                            "gateway_id": "mca_112"
+                        },
+                        {
+                            "gateway_name": "checkout",
+                            "gateway_id": "mca_113"
+                        }
+                    ]
+                },
+                "rules": [
+                    {
+                        "name": "Card Rule",
+                        "routing_type": "priority",
+                        "output": {
+                            "priority": [
+                                {
+                                    "gateway_name": "rbl",
+                                    "gateway_id": "mca_114"
+                                },
+                                {
+                                    "gateway_name": "instamojo",
+                                    "gateway_id": "mca_115"
+                                }
+                            ]
+                        },
+                        "statements": [
+                            {
+                                "condition": [
+                                    {
+                                        "lhs": "amount",
+                                        "comparison": "greater_than",
+                                        "value": {
+                                            "type": "number",
+                                            "value": 10
+                                        },
+                                        "metadata": {}
+                                    }
+                                ],
+                                "nested": [
+                                    {
+                                        "condition": [
+                                            {
+                                                "lhs": "card_network",
+                                                "comparison": "equal",
+                                                "value": {
+                                                    "type": "enum_variant",
+                                                    "value": "Visa"
+                                                },
+                                                "metadata": {}
+                                            }
+                                        ],
+                                        "nested": null
+                                    },
+                                    {
+                                        "condition": [
+                                            {
+                                                "lhs": "billing_country",
+                                                "comparison": "equal",
+                                                "value": {
+                                                    "type": "enum_variant",
+                                                    "value": "Netherlands"
+                                                },
+                                                "metadata": {}
+                                            }
+                                        ],
+                                        "nested": null
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ],
+                "metadata": {
+                    "transaction": "data"
+                }
+            }
+        },
+        "created_at": "2025-06-17 13:02:07.795246",
+        "modified_at": "2025-06-17 13:02:07.795246"
     }
 ]
 ```
@@ -666,247 +878,360 @@ curl --location --request POST 'http://localhost:8080/routing/list/merchant_1234
 ## List active Routing rule for a creator_id.
 ### Request
 ```
-curl --location --request POST 'http://localhost:8080/routing/list/active/merchant_1' \
+curl --location --request POST 'http://localhost:8080/routing/list/active/merchant_1234' \
 --header 'Content-Type: application/json'
 ```
 
 ### Response
 ```
 {
-    "id": "routing_49ffa266-28ca-40be-9b90-f978190aa571",
-    "created_by": "merchant_1",
-    "name": "My Algo",
-    "description": "Test algo",
+    "id": "routing_8711ce52-33e2-473f-9c8f-91a406acb850",
+    "created_by": "merchant_1234",
+    "name": "AND OR rule example",
+    "description": "priority rule which demonstrates AND and OR rule",
     "algorithm_data": {
-        "rules": [
-            {
-                "name": "Card Rule",
-                "output": {
-                    "priority": [
-                        "stripe",
-                        "adyen"
-                    ]
-                },
-                "statements": [
+        "type": "advanced",
+        "data": {
+            "globals": {},
+            "default_selection": {
+                "priority": [
                     {
-                        "nested": null,
-                        "condition": [
+                        "gateway_name": "Bambora",
+                        "gateway_id": "mca_111"
+                    },
+                    {
+                        "gateway_name": "Paytm",
+                        "gateway_id": "mca_112"
+                    },
+                    {
+                        "gateway_name": "checkout",
+                        "gateway_id": "mca_113"
+                    }
+                ]
+            },
+            "rules": [
+                {
+                    "name": "Card Rule",
+                    "routing_type": "priority",
+                    "output": {
+                        "priority": [
                             {
-                                "lhs": "payment_method",
-                                "value": {
-                                    "type": "enum_variant",
-                                    "value": "card"
-                                },
-                                "metadata": {},
-                                "comparison": "equal"
+                                "gateway_name": "rbl",
+                                "gateway_id": "mca_114"
                             },
                             {
-                                "lhs": "amount",
-                                "value": {
-                                    "type": "number",
-                                    "value": 10000
-                                },
-                                "metadata": {},
-                                "comparison": "greater_than"
+                                "gateway_name": "instamojo",
+                                "gateway_id": "mca_115"
                             }
                         ]
-                    }
-                ],
-                "routingType": "priority"
+                    },
+                    "statements": [
+                        {
+                            "condition": [
+                                {
+                                    "lhs": "amount",
+                                    "comparison": "greater_than",
+                                    "value": {
+                                        "type": "number",
+                                        "value": 10
+                                    },
+                                    "metadata": {}
+                                }
+                            ],
+                            "nested": [
+                                {
+                                    "condition": [
+                                        {
+                                            "lhs": "card_network",
+                                            "comparison": "equal",
+                                            "value": {
+                                                "type": "enum_variant",
+                                                "value": "Visa"
+                                            },
+                                            "metadata": {}
+                                        }
+                                    ],
+                                    "nested": null
+                                },
+                                {
+                                    "condition": [
+                                        {
+                                            "lhs": "billing_country",
+                                            "comparison": "equal",
+                                            "value": {
+                                                "type": "enum_variant",
+                                                "value": "Netherlands"
+                                            },
+                                            "metadata": {}
+                                        }
+                                    ],
+                                    "nested": null
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ],
+            "metadata": {
+                "transaction": "data"
             }
-        ],
-        "globals": {},
-        "metadata": {},
-        "defaultSelection": {
-            "priority": [
-                "stripe",
-                "adyen",
-                "checkout"
-            ]
         }
     },
-    "created_at": "2025-04-24 10:26:58.0",
-    "modified_at": "2025-04-24 10:26:58.0"
+    "created_at": "2025-06-17 13:02:07.795246",
+    "modified_at": "2025-06-17 13:02:07.795246"
 }
 ```
 
-## Advanced Rule Creation Examples
-### 1. Volume Split Rule (with fallback)
+### 1. Volume split rule with fallback
 ```
-curl --location 'http://127.0.0.1:8080/routing' \
+curl --location 'http://127.0.0.1:8082/routing/create' \
 --header 'Content-Type: application/json' \
---header 'api-key: *****' \
 --data '
 {
-   "name": "advanced config",
-   "description": "It is my ADVANCED config",
-   "profile_id": "pro_rfW0Fv5J0Cct1Bnw2EuS",
-   "algorithm": {
-       "type": "advanced",
-       "data": {
-           "defaultSelection": {
-               "type": "priority",
-               "data": [
-                   {
-                       "connector": "stripe",
-                       "merchant_connector_id": "mca_aHTJXYcakT5Nlx48kuSh"
-                   }
-               ]
-           },
-           "rules": [
-               {
-                   "name": "cybersource first",
-                   "connectorSelection": {
-                       "type": "volume_split",
-                       "data": [
-                           {
-                               "split": 60,
-                               "connector": "cybersource",
-                               "merchant_connector_id": "mca_rJu5LzTmK2SjYgoRMWZ4"
-                           },
-                           {
-                               "split": 40,
-                               "connector": "stripe",
-                               "merchant_connector_id": "mca_aHTJXYcakT5Nlx48kuSh"
-                           }
-                       ]
-                   },
-                   "statements": [
-                       {
-                           "condition": [
-                               {
-                                   "lhs": "billing_country",
-                                   "comparison": "equal",
-                                   "value": {
-                                       "type": "enum_variant",
-                                       "value": "Netherlands"
-                                   },
-                                   "metadata": {}
-                               },
-                               {
-                                   "lhs": "amount",
-                                   "comparison": "greater_than",
-                                   "value": {
-                                       "type": "number",
-                                       "value": 1000
-                                   },
-                                   "metadata": {}
-                               }
-                           ],
-                           "nested": null
-                       }
-                   ]
-               }
-           ],
-           "metadata": {}
-       }
-   }
-}'
-```
-
-### 2. Nested Rule with Fallback
-```
-curl --location 'http://127.0.0.1:8080/routing' \
---header 'Content-Type: application/json' \
---header 'api-key: *****' \
---data '
-{
-   "name": "advanced config",
-   "description": "It is my ADVANCED config",
-   "profile_id": "pro_rfW0Fv5J0Cct1Bnw2EuS",
-   "algorithm": {
-       "type": "advanced",
-       "data": {
-           "defaultSelection": {
-               "type": "priority",
-               "data": [
-                   {
-                       "connector": "stripe",
-                       "merchant_connector_id": "mca_aHTJXYcakT5Nlx48kuSh"
-                   }
-               ]
-           },
-           "rules": [
-               {
-                   "name": "cybersource first",
-                   "connectorSelection": {
-                       "type": "priority",
-                       "data": [
-                           {
-                               "connector": "cybersource",
-                               "merchant_connector_id": "mca_rJu5LzTmK2SjYgoRMWZ4"
-                           }
-                       ]
-                   },
-                   "statements": [
-                       {
-                           "condition": [
-                               {
-                                   "lhs": "upi",
-                                   "comparison": "equal",
-                                   "value": {
-                                       "type": "enum_variant",
-                                       "value": "upi_collect"
-                                   },
-                                   "metadata": {}
-                               }
-                           ],
-                           "nested": [
-                               {
-                                   "condition": [
-                                       {
-                                           "lhs": "amount",
-                                           "comparison": "greater_than",
-                                           "value": {
-                                               "type": "number",
-                                               "value": 5000
-                                           },
-                                           "metadata": {}
-                                       },
-                                       {
-                                           "lhs": "currency",
-                                           "comparison": "equal",
-                                           "value": {
-                                               "type": "enum_variant",
-                                               "value": "USD"
-                                           },
-                                           "metadata": {}
-                                       }
-                                   ]
-                               },
-                               {
-                                   "condition": [
-                                       {
-                                           "lhs": "amount",
-                                           "comparison": "greater_than",
-                                           "value": {
-                                               "type": "number",
-                                               "value": 10000
-                                           },
-                                           "metadata": {}
-                                       }
-                                   ]
-                               }
-                           ]
-                       }
-                   ]
-               }
-           ],
-           "metadata": {}
-       }
-   }
-}'
+    "name": "Volume split based config",
+    "created_by": "merchant_1234",
+    "description": "test volume based rule",
+    "algorithm": {
+        "type": "advanced",
+        "data": {
+            "globals": {},
+            "default_selection": {
+                "priority": [
+                    {
+                        "gateway_name": "Bambora",
+                        "gateway_id": "mca_111"
+                    },
+                    {
+                        "gateway_name": "Paytm",
+                        "gateway_id": "mca_112"
+                    },
+                    {
+                        "gateway_name": "checkout",
+                        "gateway_id": "mca_113"
+                    }
+                ]
+            },
+            "rules": [
+                {
+                    "name": "HDFC Rule",
+                    "routing_type": "volume_split",
+                    "output": {
+                        "volume_split": [
+                            {
+                                "split": 60,
+                                "output": {
+                                    "gateway_name": "hdfc",
+                                    "gateway_id": "mca_114"
+                                }
+                            },
+                            {
+                                "split": 40,
+                                "output": {
+                                    "gateway_name": "instamojo",
+                                    "gateway_id": "mca_115"
+                                }
+                            }
+                        ]
+                    },
+                    "statements": [
+                        {
+                            "condition": [
+                                {
+                                    "lhs": "amount",
+                                    "comparison": "greater_than",
+                                    "value": {
+                                        "type": "number",
+                                        "value": 100
+                                    },
+                                    "metadata": {}
+                                },
+                                {
+                                    "lhs": "billing_country",
+                                    "comparison": "equal",
+                                    "value": {
+                                        "type": "enum_variant",
+                                        "value": "Netherlands"
+                                    },
+                                    "metadata": {}
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ],
+            "metadata": {
+                "transaction": "data"
+            }
+        },
+        "metadata": {
+            "transaction_type": "payment"
+        }
+    }
+}
+'
 ```
 
 ### What Happens on Evaluation?
 
+```
+curl --location '{base_url}/routing/evaluate' \
+--header 'Content-Type: application/json' \
+--data '{
+    "created_by": "merchant_1234",
+    "parameters": {
+        "payment_method": {
+            "type": "enum_variant",
+            "value": "card"
+        },
+        "amount": {
+            "type": "number",
+            "value": 10000
+        },
+        "billing_country": {
+            "type": "enum_variant",
+            "value": "Netherlands"
+        }
+    }
+}'
+```
 If the input has:
 
-- `upi = upi_collect` **AND**
+- **Both Of**:
+  - `amount > 100` **AND**
+  - `billing_country == Netherlands`
+
+💡 So this makes the rule as **AND** rule.
+🔄 **Then** the rule `"Hdfc rule"` matches → returns volume split between `hdfc` and `instamojo`.
+📆 **Otherwise** → returns fallback `defaultSelection` → `[bambora, Paytm, checkout]`.
+
+
+### 2. Nested Rule with Fallback
+```
+curl --location 'http://127.0.0.1:8082/routing/create' \
+--header 'Content-Type: application/json' \
+--data '
+{
+    "name": "AND OR rule example",
+    "created_by": "merchant_1234",
+    "description": "priority rule which demonstrates AND and OR rule",
+    "algorithm": {
+        "type": "advanced",
+        "data": {
+            "globals": {},
+            "default_selection": {
+                "priority": [
+                    {
+                        "gateway_name": "Bambora",
+                        "gateway_id": "mca_111"
+                    },
+                    {
+                        "gateway_name": "Paytm",
+                        "gateway_id": "mca_112"
+                    },
+                    {
+                        "gateway_name": "checkout",
+                        "gateway_id": "mca_113"
+                    }
+                ]
+            },
+            "rules": [
+                {
+                    "name": "Card Rule",
+                    "routing_type": "priority",
+                    "output": {
+                        "priority": [
+                            {
+                                "gateway_name": "rbl",
+                                "gateway_id": "mca_114"
+                            },
+                            {
+                                "gateway_name": "instamojo",
+                                "gateway_id": "mca_115"
+                            }
+                        ]
+                    },
+                    "statements": [
+                        {
+                            "condition": [
+                                {
+                                    "lhs": "amount",
+                                    "comparison": "greater_than",
+                                    "value": {
+                                        "type": "number",
+                                        "value": 10
+                                    },
+                                    "metadata": {}
+                                }
+                            ],
+                            "nested": [
+                                {
+                                    "condition": [
+                                        {
+                                            "lhs": "card_network",
+                                            "comparison": "equal",
+                                            "value": {
+                                                "type": "enum_variant",
+                                                "value": "Visa"
+                                            },
+                                            "metadata": {}
+                                        }
+                                    ]
+                                },
+                                {
+                                    "condition": [
+                                        {
+                                            "lhs": "billing_country",
+                                            "comparison": "equal",
+                                            "value": {
+                                                "type": "enum_variant",
+                                                "value": "Netherlands"
+                                            },
+                                            "metadata": {}
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ],
+            "metadata": {
+                "transaction": "data"
+            }
+        },
+        "metadata": {
+            "transaction_type": "payout"
+        }
+    }
+}'
+```
+
+### What Happens on Evaluation?
+```
+curl --location '{base_url}/routing/evaluate' \
+--header 'Content-Type: application/json' \
+--data '{
+    "created_by": "merchant_1234",
+    "parameters": {
+        "card_network": {
+            "type": "enum_variant",
+            "value": "Visa"
+        },
+        "amount": {
+            "type": "number",
+            "value": 10000
+        }
+    }
+}'
+```
+
+If the input has:
+
+- `amount > 100` **AND**
 - **EITHER**:
-  - `amount > 5000` **AND** `currency == USD`
-  - **OR** `amount > 10000`
+  - `card_network == Visa` **OR**
+  - `billing_country == Netherlands`
 
-🔄 **Then** the rule `"cybersource first"` matches → returns `cybersource`.
+🔄 **Then** the rule `"RBL rule"` matches → returns `rbl`.
 
-📆 **Otherwise** → returns fallback `defaultSelection` → `stripe`.
+📆 **Otherwise** → returns fallback `defaultSelection` → `[bambora, Paytm, checkout]`.
