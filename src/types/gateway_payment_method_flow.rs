@@ -1,8 +1,6 @@
 use crate::app::get_tenant_app_state;
 use crate::types::country::country_iso::CountryISO;
-use crate::types::payment::payment_method::{
-    text_to_payment_method_type, to_payment_method_id, PaymentMethodId, PaymentMethodType,
-};
+use crate::types::payment::payment_method::{to_payment_method_id, PaymentMethodId};
 use crate::types::payment_flow::*;
 use serde::{Deserialize, Serialize};
 use std::option::Option;
@@ -83,7 +81,7 @@ pub struct GatewayPaymentMethodFlowF {
     #[serde(rename = "disabled")]
     pub disabled: bool,
     #[serde(rename = "paymentMethodType")]
-    pub paymentMethodType: Option<PaymentMethodType>,
+    pub paymentMethodType: Option<String>,
 }
 
 impl TryFrom<DBGatewayPaymentMethodFlow> for GatewayPaymentMethodFlowF {
@@ -115,7 +113,7 @@ impl TryFrom<DBGatewayPaymentMethodFlow> for GatewayPaymentMethodFlowF {
 
         // Convert optional payment method type
         let payment_method_type = if let Some(pmt) = db.payment_method_type {
-            Some(text_to_payment_method_type(pmt)?)
+            Some(pmt)
         } else {
             None
         };
@@ -228,7 +226,7 @@ pub async fn find_all_gpmf_by_country_code_gw_pf_id_pmt_jbcid_db(
     country_code: CountryISO,
     gw_ls: Vec<String>,
     pf_id: PaymentFlow,
-    pmt: PaymentMethodType,
+    pmt: String,
     jbc_id: BankCodeId,
 ) -> Result<Vec<DBGatewayPaymentMethodFlow>, crate::generics::MeshError> {
     let app_state = get_tenant_app_state().await;
@@ -237,7 +235,7 @@ pub async fn find_all_gpmf_by_country_code_gw_pf_id_pmt_jbcid_db(
     let jbc_id_text = jbc_id.0;
     let pf_id_text = payment_flows_to_text(&pf_id);
     let country_code_text = country_iso_to_text(country_code);
-    let pmt_text = pmt.to_text();
+    let pmt_text = pmt;
 
     // Use Diesel's query builder with multiple conditions
     crate::generics::generic_find_all::<
@@ -261,7 +259,7 @@ pub async fn find_all_gpmf_by_country_code_gw_pf_id_pmt_jbcid(
     country_code: CountryISO,
     gw: Vec<String>,
     pf_id: PaymentFlow,
-    pmt: PaymentMethodType,
+    pmt: String,
     jbc_id: BankCodeId,
 ) -> Vec<GatewayPaymentMethodFlowF> {
     // Call the DB function and handle the results

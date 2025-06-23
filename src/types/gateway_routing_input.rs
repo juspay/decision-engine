@@ -1,5 +1,4 @@
 use crate::types::merchant::id::MerchantId;
-use crate::types::payment::payment_method::PaymentMethodType;
 use serde::{Deserialize, Serialize};
 use std::option::Option;
 use std::string::String;
@@ -98,7 +97,7 @@ pub struct GatewaySuccessRateBasedRoutingInput {
     #[serde(rename = "defaultSelectionLevel")]
     pub defaultSelectionLevel: Option<SelectionLevel>,
     #[serde(rename = "enabledPaymentMethodTypes")]
-    pub enabledPaymentMethodTypes: Vec<PaymentMethodType>,
+    pub enabledPaymentMethodTypes: Vec<String>,
     #[serde(rename = "eliminationV2SuccessRateInputs")]
     pub eliminationV2SuccessRateInputs: Option<Vec<EliminationSuccessRateInput>>,
     #[serde(rename = "globalGatewayWiseInputs")]

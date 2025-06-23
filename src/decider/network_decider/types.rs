@@ -245,14 +245,19 @@ crate::impl_to_sql_from_sql_text_pg!(PanOrToken);
 #[cfg(feature = "postgres")]
 crate::impl_to_sql_from_sql_text_pg!(CountryAlpha2);
 
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+pub struct NetworkSavingInfo {
+    pub network: gatewaydecider::types::NETWORK,
+    pub saving_percentage: f64,
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct DebitRoutingOutput {
-    pub co_badged_card_networks: Vec<gatewaydecider::types::NETWORK>,
+    pub co_badged_card_networks_info: Vec<NetworkSavingInfo>,
     pub issuer_country: CountryAlpha2,
     pub is_regulated: bool,
     pub regulated_name: Option<RegulatedName>,
     pub card_type: CardType,
-    pub saving_percentage: f64,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]

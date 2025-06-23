@@ -263,10 +263,7 @@ pub fn parseFromApiTxnCardInfo(apiType: T::ApiTxnCardInfo) -> Option<ETCa::TxnCa
         // cardReferenceId: apiType.cardReferenceId,
         // txnDetailId: apiType.txnDetailId.and_then(|id_str| id_str.parse::<i64>().ok()).map(ETTD::to_txn_detail_id)?,
         dateCreated: apiType.dateCreated?,
-        paymentMethodType: apiType
-            .paymentMethodType
-            .map(ETP::text_to_payment_method_type)?
-            .ok()?,
+        paymentMethodType: apiType.paymentMethodType?,
         paymentMethod: apiType.paymentMethod?,
         // cardGlobalFingerprint: apiType.cardGlobalFingerprint,
         paymentSource: apiType.paymentSource,
