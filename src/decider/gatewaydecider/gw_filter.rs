@@ -1669,6 +1669,7 @@ pub async fn filterGatewaysForValidationType(
     
                 (ETGCI::ValidationType::Tpv, e_mgas)
             };
+            
             if matches!(validation_type,ETGCI::ValidationType::TpvEmandate | ETGCI::ValidationType::Emandate) && is_otm_flow {
                 return Ok(returnGwListWithLog(
                     this,
@@ -1692,50 +1693,31 @@ pub async fn filterGatewaysForValidationType(
 
             let amount = Utils::effective_amount_with_txn_amount(txn_detail.clone()).await;
 
-            // New Work
-
             let m_pf = Utils::get_pf_from_validation_type(&validation_type);
 
             let (empty_csi_mgas , gpmf_source_mgas): (Vec<_>, Vec<_>,) = enabled_gateway_accounts.clone().into_iter().partition(|mga| mga.config_source_info.is_none());
 
             // --- Second Partition on gpmfSourceMgas ---
-            // (gpmfBasedMgas, nonGpmfInferredMgas) = DL.partition (...) gpmfSourceMgas
             let (gpmf_based_mgas, non_gpmf_inferred_mgas): (Vec<_>, Vec<_>) =
                 gpmf_source_mgas
                     .into_iter()
                     .partition(|mga| {
-                        let config_info_opt = &mga.config_source_info; // This will be Some(ConfigSourceInfo) at this point
-                        
-                        // Access gpmf_inferred_flows within the Some(config_info)
-                        // Equivalent to `(.gpmfInferredFlows) =<< mga.configSourceInfo`
+                        let config_info_opt = &mga.config_source_info;
+
                         let gpmf_flows_opt: Option<&Vec<PaymentFlow>> = config_info_opt
-                            .as_ref() // Get a reference to the inner ConfigSourceInfo
-                            .and_then(|info| info.gpmf_inferred_flows.as_ref()); // Get a reference to the inner Vec<Option<Flow>>
+                            .as_ref() 
+                            .and_then(|info| info.gpmf_inferred_flows.as_ref());
 
-                        // isNothing ((.gpmfInferredFlows) =<< mga.configSourceInfo)
-                        let is_gpmf_flows_none = gpmf_flows_opt.is_none();
-
-                        // (null $ fromMaybe [] ((.gpmfInferredFlows) =<< mga.configSourceInfo))
                         let is_gpmf_flows_empty = gpmf_flows_opt.map_or(true, |flows| flows.is_empty());
-                        // `map_or(true, ...)` means: if `gpmf_flows_opt` is `None`, return `true` (it's "empty" in this context).
-                        // If it's `Some(flows)`, check if `flows.is_empty()`.
 
-                        // (isJust mPf && elem mPf (maybe [] ((<$>) Just) ((.gpmfInferredFlows) =<< mga.configSourceInfo)))
-                        let m_pf_is_present_in_gpmf_flows = m_pf.as_ref().map_or(false, |pf_val| {
+                        let m_pf_is_present_in_gpmf_flows = m_pf
+                            .as_ref()
+                            .map_or(false, |pf_val| {
                             gpmf_flows_opt.map_or(false, |flows_vec_opt| { flows_vec_opt.contains(pf_val)})
                         });
-                        // Detailed breakdown of the above line:
-                        // m_pf.as_ref().map_or(false, |pf_val| { ... }): Only proceeds if m_pf is Some(Flow), otherwise false.
-                        // gpmf_flows_opt.map_or(false, |flows_vec_opt| { ... }): Only proceeds if gpmf_inferred_flows is Some(Vec<...>), otherwise false.
-                        // flows_vec_opt.iter().any(|opt_flow| { ... }): Iterates through each Option<Flow> in the inner Vec.
-                        // opt_flow.as_ref().map_or(false, |flow_val| flow_val == pf_val): Checks if the Option<Flow> is Some(Flow) and if that inner Flow matches our m_pf value.
-
-                        is_gpmf_flows_none || is_gpmf_flows_empty || m_pf_is_present_in_gpmf_flows
+                        is_gpmf_flows_empty || m_pf_is_present_in_gpmf_flows
                     });
 
-            // --- Concatenation ---
-            // gciBasedMgas = emptyCSIMgas <> nonGpmfInferredMgas
-            // Using `chain` for efficient concatenation of iterators without collecting intermediate vecs
             let gci_based_mgas: Vec<MerchantGatewayAccount> = empty_csi_mgas
                 .into_iter()
                 .chain(non_gpmf_inferred_mgas.into_iter())
@@ -1783,9 +1765,6 @@ pub async fn filterGatewaysForValidationType(
 
             let new_st = catMaybes(&nst);
 
-
-            // NEW LOGIC 
-            
             let mgci_matched_final_mgas: Vec<MerchantGatewayAccount>  = gci_based_mgas
                     .into_iter()
                     .filter(|mga| {
@@ -1808,15 +1787,6 @@ pub async fn filterGatewaysForValidationType(
                                 .iter()
                                 .map(|mga| mga.gateway.clone())
                                 .collect();
-            
-                            // let all_gpmf_entries = GPMF::find_all_by_country_code_gw_pf_id_pmt_jbcid(
-                            //     CountryCode::IND,
-                            //     &gw_list,
-                            //     pf.clone(),
-                            //     txn_card_info.payment_method_type.clone(),
-                            //     jbc.id.clone(),
-                            // )
-                            // .await?;
 
                             let all_gpmf_entries = GPMF::find_all_gpmf_by_country_code_gw_pf_id_pmt_jbcid_db(
                                 crate::types::country::country_iso::CountryISO::IND,
@@ -1827,7 +1797,7 @@ pub async fn filterGatewaysForValidationType(
                                 )
                                 .await
                                 .unwrap_or_default();
-                            // Extract MGA IDs and GPMF IDs for further filtering
+
                             let mga_ids = gpmf_based_mgas
                                 .iter()
                                 .map(|mga| mga.id.merchantGwAccId)
@@ -1838,20 +1808,8 @@ pub async fn filterGatewaysForValidationType(
                                 .map(|entry| to_gateway_payment_method_flow_id(entry.id.clone()))
                                 .collect();
 
-                            // Get merchant gateway payment method flows that match both MGA and GPMF
                             let mgpmf_entries =
                                 MGPMF::get_all_mgpmf_by_mga_id_and_gpmf_ids(mga_ids, gpmf_ids).await;
-
-            
-                            // let mga_ids: Vec<String> = gpmf_based_mgas
-                            //     .iter()
-                            //     .map(|mga| mga.id.merchant_gw_acc_id.clone())
-                            //     .collect();
-            
-                            // let gpmf_ids: Vec<String> =
-                            //     all_gpmf_entries.iter().map(|e| e.id.clone()).collect();
-            
-                            // let mgpmf_entries = MGPMF::get_all_by_mga_and_gpmf_ids(&mga_ids, &gpmf_ids).await?;
             
                             let max_amount_filtered_entries = Utils::filter_mgpmf_for_max_register_amount(
                                 pf.clone(),
@@ -1860,13 +1818,11 @@ pub async fn filterGatewaysForValidationType(
                                 amount,
                             );
 
-                            // Extract merchant gateway account IDs that have matching payment method flows
                             let mgpmf_mga_id_entries = max_amount_filtered_entries
                                 .await.iter()
                                 .map(|entry| entry.merchantGatewayAccountId)
                                 .collect::<Vec<_>>();
 
-                            // Final filtering of MGAs to only those with matching payment flows
                             gpmf_based_mgas
                                 .into_iter()
                                 .filter(|mga| mgpmf_mga_id_entries.contains(&mga.id.merchantGwAccId))
@@ -1875,10 +1831,7 @@ pub async fn filterGatewaysForValidationType(
                     }
                 }
                 _ => vec![],
-            };                    
-            
-            // Update gateway list and MGAs
-            
+            };
             let new_gws = [mgci_matched_final_mgas, mgpmf_matched_final_mgas].concat();
             setGwsAndMgas(this, new_gws);
         }

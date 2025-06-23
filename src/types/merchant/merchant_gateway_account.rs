@@ -94,7 +94,7 @@ enum FlowConfigSource { GPMF}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConfigSourceInfo {
     #[serde(rename = "flowConfigSource")]
-    pub flow_config_source: Vec<FlowConfigSource>,
+    pub flow_config_source: FlowConfigSource,
     #[serde(rename = "gpmfInferredFlows")]
     pub gpmf_inferred_flows: Option<Vec<PaymentFlow>>,
 }

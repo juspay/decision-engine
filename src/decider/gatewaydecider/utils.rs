@@ -2742,7 +2742,6 @@ pub fn get_pf_from_validation_type(vt: &ValidationType) -> Option<PaymentFlow> {
   }
 }
 
-
 pub async fn filter_mgpmf_for_max_register_amount(
     pf: PaymentFlow,
     payment_method_type: &PaymentMethodType,
@@ -2772,7 +2771,6 @@ pub async fn filter_mgpmf_for_max_register_amount(
 
         merchant_gateway_payment_method_flows
             .into_iter()
-            // .filter(|mgpmf| filtered_ids.contains(&mgpmf.id))
             .filter_map(|mgpmf| {
                match mgpmf.id.map(|id| to_flow_level_id(id.to_string())) {
                 Some(value) => if filtered_ids.contains(&value) {
@@ -2791,7 +2789,6 @@ pub async fn filter_mgpmf_for_max_register_amount(
     }
 }
 
-
 fn extract_mgpmf_ids_as_flow_level_ids(
     flows: &[MerchantGatewayPaymentMethodFlow],
 ) -> Vec<FlowLevelId> {
@@ -2800,7 +2797,6 @@ fn extract_mgpmf_ids_as_flow_level_ids(
         .filter_map(|flow| flow.id.map(|id| to_flow_level_id(id.to_string())))
         .collect()
 }
-
 
 // fn push_to_stream(decided_gateway: OptionETG::Gateway, final_decider_approach: types::GatewayDeciderApproach, m_priority_logic_tag: Option, current_gateway_score_map: GatewayScoreMap) -> DeciderFlow<()> {
 //     if let Some(decided_gateway) = decided_gateway {

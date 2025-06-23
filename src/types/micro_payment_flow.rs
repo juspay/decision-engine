@@ -14,6 +14,7 @@ use crate::storage::schema::micro_payment_flow::dsl;
 use crate::storage::schema_pg::micro_payment_flow::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
+use crate::logger;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MicroPaymentFlowId {
@@ -118,7 +119,10 @@ pub async fn find_mpf_by_flow_level_flow_level_ids_mpf_name(
                 MicroPaymentFlowF::try_from(db_record).ok()
             })
             .collect(),
-        Err(_) => Vec::new(), // Silently handle any errors by returning empty vec
+        Err(err) => {
+            logger::info!("Error in find_mpf_by_flow_level_flow_level_ids_mpf_name: {:?}", err);
+            Vec::new() // Silently handle any errors by returning empty vec
+        }
     }
 }
 
