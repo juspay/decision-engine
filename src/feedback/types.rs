@@ -8,7 +8,6 @@ use time::PrimitiveDateTime;
 // use database::beam as B;
 // use chrono::{Local, Utc};
 use crate::types::gateway as ETG;
-use crate::types::payment::payment_method::PaymentMethodType;
 use crate::types::txn_details::types::{Offset, TxnStatus};
 use std::string::String;
 use time::OffsetDateTime;
@@ -99,7 +98,7 @@ pub struct GatewayScoringKeyType {
     pub cardIssuerBankName: Option<String>,
 
     #[serde(rename = "paymentMethodType")]
-    pub paymentMethodType: Option<PaymentMethodType>,
+    pub paymentMethodType: Option<String>,
 
     #[serde(rename = "paymentMethod")]
     pub paymentMethod: Option<String>,

@@ -1,4 +1,4 @@
-use crate::decider::gatewaydecider::{self, types as gateway_decider_types};
+use crate::decider::gatewaydecider::types as gateway_decider_types;
 use crate::decider::network_decider::{co_badged_card_info, types};
 use crate::utils::CustomResult;
 use crate::{app, error, logger};
@@ -79,24 +79,21 @@ impl types::CoBadgedCardRequest {
             .fetch_co_badged_card_info(app_state, card_isin_optional)
             .await?;
 
-        let networks = self
+        let mut network_costs = self
             .calculate_network_fees(app_state, &co_badged_card_info, amount)
             .await?;
 
-        logger::debug!("Total fees per debit network: {:?}", networks);
+        logger::debug!("Total fees per debit network: {:?}", network_costs);
+        network_costs.sort_by(|(_, fee1), (_, fee2)| fee1.total_cmp(fee2));
 
-        let sorted_networks = sort_networks(networks.clone());
-
-        let saving_percentage =
-            calculate_and_round_saving_percentage(&sorted_networks, &networks, amount);
+        let network_saving_infos = Self::calculate_network_saving_infos(network_costs, amount)?;
 
         Some(types::DebitRoutingOutput {
-            co_badged_card_networks: sorted_networks.clone(),
+            co_badged_card_networks_info: network_saving_infos,
             issuer_country: co_badged_card_info.issuer_country,
             is_regulated: co_badged_card_info.is_regulated,
             regulated_name: co_badged_card_info.regulated_name,
-            card_type: co_badged_card_info.card_type.clone(),
-            saving_percentage,
+            card_type: co_badged_card_info.card_type,
         })
     }
 
@@ -138,69 +135,65 @@ impl types::CoBadgedCardRequest {
         .ok()
         .flatten()
     }
-}
 
-pub fn sort_networks(
-    network_fees: Vec<(gatewaydecider::types::NETWORK, f64)>,
-) -> Vec<gatewaydecider::types::NETWORK> {
-    logger::debug!("Sorting networks by fee");
-    let mut sorted_fees = network_fees;
-    sorted_fees.sort_by(|(_network1, fee1), (_network2, fee2)| fee1.total_cmp(fee2));
-
-    sorted_fees
-        .into_iter()
-        .map(|(network, _fee)| network)
-        .collect()
-}
-
-// Helper function to calculate and round the saving percentage
-fn calculate_and_round_saving_percentage(
-    sorted_network_types: &[gateway_decider_types::NETWORK],
-    network_costs: &[(gateway_decider_types::NETWORK, f64)],
-    transaction_amount: f64,
-) -> f64 {
-    let mut saving_percentage_value: f64 = 0.0;
-
-    if !sorted_network_types.is_empty() {
-        let first_chosen_network = sorted_network_types[0].clone();
-
-        if first_chosen_network.is_global_network() {
-            // If the first network is already global, savings are 0.
-            // saving_percentage_value is already 0.0
-        } else {
-            // The first network is not global, try to find a global one for comparison.
-            let cost_first_opt = network_costs
-                .iter()
-                .find(|(n, _)| *n == first_chosen_network)
-                .map(|(_, cost)| *cost);
-
-            let global_network_for_comparison_opt = sorted_network_types
-                .iter()
-                .find(|n_type| n_type.is_global_network());
-
-            if let (Some(cost_first), Some(global_network_type)) =
-                (cost_first_opt, global_network_for_comparison_opt)
-            {
-                let cost_global_for_comparison_opt = network_costs
-                    .iter()
-                    .find(|(n, _)| *n == *global_network_type)
-                    .map(|(_, cost)| *cost);
-
-                if let Some(cost_global) = cost_global_for_comparison_opt {
-                    let difference = cost_global - cost_first;
-                    if transaction_amount > 0.0 {
-                        let raw_percentage = (difference / transaction_amount) * 100.0;
-
-                        // Round to 2 decimal places
-                        saving_percentage_value = (raw_percentage * 100.0).round() / 100.0;
-                    }
-                }
-            }
-        }
+    fn calculate_savings<F>(
+        costs: Vec<(gateway_decider_types::NETWORK, f64)>,
+        calc_savings_percentage: F,
+    ) -> Vec<types::NetworkSavingInfo>
+    where
+        F: Fn(f64) -> f64,
+    {
+        costs
+            .into_iter()
+            .map(|(network, fee)| types::NetworkSavingInfo {
+                network,
+                saving_percentage: calc_savings_percentage(fee),
+            })
+            .collect()
     }
 
-    // sorted_network_types is empty, percentage remains 0.0
-    saving_percentage_value
+    fn calculate_network_saving_infos(
+        sorted_network_costs: Vec<(gateway_decider_types::NETWORK, f64)>,
+        transaction_amount: f64,
+    ) -> Option<Vec<types::NetworkSavingInfo>> {
+        let zero_savings_fn = |_fee: f64| 0.0;
+        let Some((first_network, _)) = sorted_network_costs.first() else {
+            logger::debug!("No network costs found, returning empty vector.");
+            return None;
+        };
+
+        if first_network.is_global_network() {
+            return Some(Self::calculate_savings(
+                sorted_network_costs,
+                zero_savings_fn,
+            ));
+        };
+
+        let baseline_fee_optional = sorted_network_costs
+            .iter()
+            .find(|(network, _)| network.is_global_network())
+            .map(|(_, fee)| *fee);
+
+        if let Some(baseline_fee) = baseline_fee_optional {
+            let calc_savings_fn = |fee: f64| {
+                let saving = baseline_fee - fee;
+                if saving > 0.0 && transaction_amount > 0.0 {
+                    ((saving / transaction_amount) * 10000.0).round() / 100.0
+                } else {
+                    0.0
+                }
+            };
+            Some(Self::calculate_savings(
+                sorted_network_costs,
+                calc_savings_fn,
+            ))
+        } else {
+            Some(Self::calculate_savings(
+                sorted_network_costs,
+                zero_savings_fn,
+            ))
+        }
+    }
 }
 
 impl gateway_decider_types::NETWORK {

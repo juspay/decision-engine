@@ -33,6 +33,7 @@ use crate::decider::gatewaydecider::utils as GU;
 use crate::logger;
 use crate::merchant_config_util as MC;
 use crate::redis::cache::findByNameFromRedis;
+use crate::types::payment::payment_method_type_const::*;
 use crate::{
     app,
     decider::gatewaydecider::types::GatewayScoringData,
@@ -56,7 +57,6 @@ use crate::{
         merchant::{
             merchant_account::MerchantAccount, merchant_gateway_account::MerchantGatewayAccount,
         },
-        payment::payment_method::PaymentMethodType as PMT,
         payment_flow::PaymentFlow as PF,
         txn_details::types::TxnDetail,
     },
@@ -106,7 +106,7 @@ pub async fn updateSrV3Score(
                 txn_card_info.clone(),
             )
             .await;
-            if [PMT::Card, PMT::UPI].contains(&payment_method_type) {
+            if [CARD, UPI].contains(&payment_method_type.as_str()) {
                 let key3d_for_gateway_selection =
                     unified_sr_v3_key.clone().unwrap_or_else(|| "".to_string());
                 if key3d_for_gateway_selection != key_for_gateway_selection {
@@ -319,7 +319,7 @@ pub async fn getSrV3MerchantBucketSize(txn_detail: TxnDetail, txn_card_info: Txn
         C::SR_V3_INPUT_CONFIG(MID::merchant_id_to_text(txn_detail.merchantId)).get_key(),
     )
     .await;
-    let pmt = txn_card_info.paymentMethodType.to_text();
+    let pmt = txn_card_info.paymentMethodType;
     let pm = GU::get_payment_method(
         (&pmt).to_string(),
         txn_card_info.paymentMethod,

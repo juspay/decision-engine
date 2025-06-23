@@ -24,109 +24,6 @@ use std::string::String;
 use time::PrimitiveDateTime;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PaymentMethodType {
-    #[serde(rename = "WALLET")]
-    Wallet,
-    #[serde(rename = "UPI")]
-    UPI,
-    #[serde(rename = "NB")]
-    NB,
-    #[serde(rename = "CARD")]
-    Card,
-    #[serde(rename = "PAYLATER")]
-    Paylater,
-    #[serde(rename = "CONSUMER_FINANCE")]
-    ConsumerFinance,
-    #[serde(rename = "REWARD")]
-    Reward,
-    #[serde(rename = "CASH")]
-    Cash,
-    #[serde(rename = "ATM_CARD")]
-    AtmCard,
-    #[serde(rename = "AADHAAR")]
-    Aadhaar,
-    #[serde(rename = "MERCHANT_CONTAINER")]
-    MerchantContainer,
-    #[serde(rename = "WALLET_CONTAINER")]
-    WalletContainer,
-    #[serde(rename = "PAPERNACH")]
-    Papernach,
-    #[serde(rename = "VIRTUAL_ACCOUNT")]
-    VirtualAccount,
-    #[serde(rename = "OTC")]
-    Otc,
-    #[serde(rename = "RTP")]
-    Rtp,
-    #[serde(rename = "CRYPTO")]
-    Crypto,
-    #[serde(rename = "CARD_QR")]
-    CardQr,
-    #[serde(rename = "PAN")]
-    PAN,
-    #[serde(rename = "UNKNOWN")]
-    Unknown,
-}
-
-impl PaymentMethodType {
-    pub fn to_text(&self) -> &'static str {
-        match self {
-            Self::Wallet => "WALLET",
-            Self::UPI => "UPI",
-            Self::NB => "NB",
-            Self::Card => "CARD",
-            Self::Paylater => "PAYLATER",
-            Self::ConsumerFinance => "CONSUMER_FINANCE",
-            Self::Reward => "REWARD",
-            Self::Cash => "CASH",
-            Self::AtmCard => "ATM_CARD",
-            Self::Aadhaar => "AADHAAR",
-            Self::MerchantContainer => "MERCHANT_CONTAINER",
-            Self::WalletContainer => "WALLET_CONTAINER",
-            Self::Papernach => "PAPERNACH",
-            Self::VirtualAccount => "VIRTUAL_ACCOUNT",
-            Self::Otc => "OTC",
-            Self::Rtp => "RTP",
-            Self::Crypto => "CRYPTO",
-            Self::CardQr => "CARD_QR",
-            Self::PAN => "PAN",
-            Self::Unknown => "UNKNOWN",
-        }
-    }
-
-    pub fn from_text(ctx: &str) -> Result<Self, ApiError> {
-        match ctx {
-            "WALLET" => Ok(Self::Wallet),
-            "UPI" => Ok(Self::UPI),
-            "NB" => Ok(Self::NB),
-            "CARD" => Ok(Self::Card),
-            "PAYLATER" => Ok(Self::Paylater),
-            "CONSUMER_FINANCE" => Ok(Self::ConsumerFinance),
-            "REWARD" => Ok(Self::Reward),
-            "CASH" => Ok(Self::Cash),
-            "ATM_CARD" => Ok(Self::AtmCard),
-            "AADHAAR" => Ok(Self::Aadhaar),
-            "MERCHANT_CONTAINER" => Ok(Self::MerchantContainer),
-            "WALLET_CONTAINER" => Ok(Self::WalletContainer),
-            "PAPERNACH" => Ok(Self::Papernach),
-            "VIRTUAL_ACCOUNT" => Ok(Self::VirtualAccount),
-            "OTC" => Ok(Self::Otc),
-            "RTP" => Ok(Self::Rtp),
-            "CRYPTO" => Ok(Self::Crypto),
-            "CARD_QR" => Ok(Self::CardQr),
-            "PAN" => Ok(Self::PAN),
-            "UNKNOWN" => Ok(Self::Unknown),
-            _ => Err(ApiError::ParsingError("Invalid Payment Method Type")),
-        }
-    }
-}
-
-pub fn text_to_payment_method_type(
-    payment_method_type: String,
-) -> Result<PaymentMethodType, ApiError> {
-    PaymentMethodType::from_text(payment_method_type.as_str())
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaymentMethodId(pub i64);
 
 pub fn to_payment_method_id(id: i64) -> PaymentMethodId {
@@ -139,7 +36,7 @@ pub struct PaymentMethod {
     pub dateCreated: PrimitiveDateTime,
     pub lastUpdated: PrimitiveDateTime,
     pub name: String,
-    pub pmType: PaymentMethodType,
+    pub pmType: String,
     pub description: Option<String>,
     pub juspayBankCodeId: Option<BankCodeId>,
     pub displayName: Option<String>,
@@ -229,7 +126,7 @@ impl TryFrom<DBPaymentMethod> for PaymentMethod {
             dateCreated: value.date_created,
             lastUpdated: value.last_updated,
             name: value.name,
-            pmType: PaymentMethodType::from_text(&value.pm_type)?,
+            pmType: value.pm_type,
             description: value.description,
             juspayBankCodeId: value.juspay_bank_code_id.map(to_bank_code_id),
             displayName: value.display_name,
