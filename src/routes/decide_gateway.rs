@@ -3,7 +3,7 @@ use crate::{
         flow_new::deciderFullPayloadHSFunction,
         types::{DecidedGateway, DomainDeciderRequestForApiCallV2, ErrorResponse, UnifiedError},
     },
-    logger,
+    logger, metrics,
 };
 use axum::body::to_bytes;
 use axum::http::StatusCode;
@@ -35,6 +35,9 @@ impl IntoResponse for DecidedGateway {
 pub async fn decide_gateway(
     req: axum::http::Request<axum::body::Body>,
 ) -> Result<DecidedGateway, ErrorResponse> {
+    let start_time = std::time::Instant::now();
+    metrics::DECIDE_GATEWAY_METRICS_REQUEST.inc();
+
     let headers = req.headers();
     for (name, value) in headers.iter() {
         logger::debug!(tag = "DecideGateway", "Header: {}: {:?}", name, value);
@@ -46,6 +49,9 @@ pub async fn decide_gateway(
         }
         Err(e) => {
             logger::debug!(tag = "DecideGateway", "Error: {:?}", e);
+            metrics::DECIDE_GATEWAY_UNSUCCESSFUL_RESPONSE_COUNT.inc();
+            metrics::DECIDE_GATEWAY_METRICS_DECISION_REQUEST_TIME
+                .observe(start_time.elapsed().as_secs_f64());
             return Err(ErrorResponse {
                 status: "400".to_string(),
                 error_code: "400".to_string(),
@@ -65,16 +71,21 @@ pub async fn decide_gateway(
     };
     let api_decider_request: Result<DomainDeciderRequestForApiCallV2, _> =
         serde_json::from_slice(&body);
-    match api_decider_request {
+    let result = match api_decider_request {
         Ok(payload) => match deciderFullPayloadHSFunction(payload).await {
-            Ok(decided_gateway) => Ok(decided_gateway),
+            Ok(decided_gateway) => {
+                metrics::DECIDE_GATEWAY_SUCCESSFUL_RESPONSE_COUNT.inc();
+                Ok(decided_gateway)
+            }
             Err(e) => {
                 logger::debug!(tag = "DecideGateway", "Error: {:?}", e);
+                metrics::DECIDE_GATEWAY_UNSUCCESSFUL_RESPONSE_COUNT.inc();
                 Err(e)
             }
         },
         Err(e) => {
             logger::debug!(tag = "DecideGateway", "Error: {:?}", e);
+            metrics::DECIDE_GATEWAY_UNSUCCESSFUL_RESPONSE_COUNT.inc();
             Err(ErrorResponse {
                 status: "400".to_string(),
                 error_code: "400".to_string(),
@@ -91,7 +102,9 @@ pub async fn decide_gateway(
                 is_dynamic_mga_enabled: false,
             })
         }
-    }
+    };
+    metrics::DECIDE_GATEWAY_METRICS_DECISION_REQUEST_TIME
+        .observe(start_time.elapsed().as_secs_f64());
 
     // let connection = state.db.get_conn().await.unwrap();
     // println!("Starting Decision Gateway");
@@ -103,6 +116,8 @@ pub async fn decide_gateway(
 
     // let res = crate::redis::feature::isFeatureEnabled("ENABLE_RESET_ON_SR_V3".to_string(), "zeptomarketplace".to_string(), "".to_string()).await;
     // println!("Decision Gateway expect false: {:?}", res);
+
+    result
 }
 
 // SELECT `merchant_iframe_preferences`.`id`, `merchant_iframe_preferences`.`merchant_id`, `merchant_iframe_preferences`.`dynamic_switching_enabled`, `merchant_iframe_preferences`.`isin_routing_enabled`, `merchant_iframe_preferences`.`issuer_routing_enabled`, `merchant_iframe_preferences`.`txn_failure_gateway_penality`, `merchant_iframe_preferences`.`card_brand_routing_enabled` FROM `merchant_iframe_preferences` WHERE (`merchant_iframe_preferences`.`merchant_id` = ?)

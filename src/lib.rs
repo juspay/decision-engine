@@ -1,3 +1,5 @@
+#![recursion_limit = "2048"]
+
 pub mod api_client;
 pub mod app;
 pub mod config;
@@ -10,6 +12,7 @@ pub mod feedback;
 pub mod generics;
 pub mod logger;
 pub mod merchant_config_util;
+pub mod metrics;
 #[cfg(feature = "middleware")]
 pub mod middleware;
 pub mod redis;

@@ -21,11 +21,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .expect("Failed to fetch raw application secrets");
 
-    let global_app_state = GlobalAppState::new(global_config).await;
+    let global_app_state = GlobalAppState::new(global_config.clone()).await;
 
-    open_router::app::server_builder(global_app_state)
-        .await
-        .expect("Failed while building the server");
+    // Run both servers concurrently using tokio::spawn
+    let main_server_handle = tokio::spawn(async move {
+        open_router::app::server_builder(global_app_state)
+            .await
+            .expect("Failed while building the main server")
+    });
+
+    let metrics_server_handle = tokio::spawn(async move {
+        open_router::metrics::metrics_server_builder(global_config.clone())
+            .await
+            .expect("Failed while building the metrics server")
+    });
+
+    // Wait for both servers to complete (they should run indefinitely)
+    tokio::try_join!(main_server_handle, metrics_server_handle)?;
 
     Ok(())
 }

@@ -721,14 +721,16 @@ pub async fn metric_tracker_log(stage: &str, flowtype: &str, log_data: MessageFo
         Err(e) => {
             crate::logger::error!(
                 action = "metric_tracking_log_error",
-                "Failed to serialize log_data: {}", e
+                "Failed to serialize log_data: {}",
+                e
             );
             return;
         }
     };
     crate::logger::info!(
         action = "metric_tracking_log",
-        "{}",normalized_log_data.to_string(),
+        "{}",
+        normalized_log_data.to_string(),
     );
 }
 

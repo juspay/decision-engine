@@ -34,6 +34,8 @@ chrono = "0.4"
 cpu-time = "1.0.0"
 jemallocator = "0.5"
 jemalloc-ctl = "0.5"
+prometheus = "0.13"
+lazy_static = "1.4"
 
 async-bb8-diesel = { git = "https://github.com/jarnura/async-bb8-diesel", rev = "53b4ab901aab7635c8215fd1c2d542c8db443094" }
 redis_interface = { git = "https://github.com/juspay/hyperswitch.git", tag = "2024.09.30.0" }

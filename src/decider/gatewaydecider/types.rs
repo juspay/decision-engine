@@ -1713,7 +1713,7 @@ pub struct GlobalSREvaluationScoreLog {
     #[serde(rename = "elimination_threshold")]
     pub eliminationThreshold: f64,
     #[serde(rename = "elimination_max_count_threshold")]
-    pub eliminationMaxCountThreshold: i64,   
+    pub eliminationMaxCountThreshold: i64,
     pub gateway: String,
 }
 

@@ -7,6 +7,10 @@ log_format = "default"
 host = "127.0.0.1"
 port = 8080
 
+[metrics]
+host = "127.0.0.1"
+port = 9090
+
 [limit]
 request_count = 1
 duration = 60

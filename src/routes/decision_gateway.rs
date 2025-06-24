@@ -2,7 +2,7 @@ use crate::decider::gatewaydecider::{
     flows::deciderFullPayloadHSFunction,
     types::{DecidedGateway, DomainDeciderRequest, ErrorResponse, UnifiedError},
 };
-use crate::logger;
+use crate::{logger, metrics};
 use axum::body::to_bytes;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
@@ -46,6 +46,8 @@ where
     ErrorResponse: IntoResponse,
 {
     let cpu_start = ProcessTime::now();
+    metrics::DECISION_GATEWAY_METRICS_REQUEST.inc();
+
     // Clone the headers and URI before consuming `req`
     let headers = req.headers().clone();
     let original_url = req.uri().to_string();
@@ -126,7 +128,7 @@ where
             let allocated_after = jemalloc_ctl::stats::allocated::read().unwrap_or(0);
             let bytes_allocated = allocated_after.saturating_sub(allocated_before);
 
-            match result {
+            let final_result = match result {
                 Ok((decided_gateway, filter_list)) => {
                     let response = DecidedGatewayResponse {
                         decided_gateway,
@@ -162,6 +164,7 @@ where
                         "Successfully processed request"
                     );
 
+                    metrics::DECISION_GATEWAY_SUCCESSFUL_RESPONSE_COUNT.inc();
                     Ok(response)
                 }
                 Err(e) => {
@@ -190,9 +193,14 @@ where
                         "Error occurred while processing decider function"
                     );
 
+                    metrics::DECISION_GATEWAY_UNSUCCESSFUL_RESPONSE_COUNT.inc();
                     Err(e)
                 }
-            }
+            };
+
+            metrics::DECISION_GATEWAY_METRICS_DECISION_REQUEST_TIME
+                .observe(start_time.elapsed().as_secs_f64());
+            final_result
         }
         Err(e) => {
             let error_response = ErrorResponse {
@@ -237,6 +245,9 @@ where
                 "Error occurred while parsing request payload"
             );
 
+            metrics::DECISION_GATEWAY_UNSUCCESSFUL_RESPONSE_COUNT.inc();
+            metrics::DECISION_GATEWAY_METRICS_DECISION_REQUEST_TIME
+                .observe(start_time.elapsed().as_secs_f64());
             Err(error_response)
         }
     }

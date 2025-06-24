@@ -21,7 +21,7 @@ use crate::euclid::{
     errors::EuclidErrors,
     types::{RoutingAlgorithmMapper, RoutingAlgorithmMapperUpdate},
 };
-use crate::{euclid::types::RoutingAlgorithm, logger};
+use crate::{euclid::types::RoutingAlgorithm, logger, metrics};
 use axum::{extract::Path, Json};
 use diesel::{associations::HasTable, BoolExpressionMethods, ExpressionMethods};
 use error_stack::ResultExt;
@@ -34,6 +34,9 @@ use serde_json::{json, Value};
 pub async fn routing_create(
     Json(payload): Json<Value>,
 ) -> Result<Json<RoutingDictionaryRecord>, ContainerError<EuclidErrors>> {
+    let start_time = std::time::Instant::now();
+    metrics::ROUTING_CREATE_METRICS_REQUEST.inc();
+
     let state = get_tenant_app_state().await;
 
     let config: RoutingRule = serde_json::from_value(payload.clone())
@@ -49,6 +52,9 @@ pub async fn routing_create(
                 let detailed_error = validation_messages.join("; ");
                 logger::error!("Routing rule validation failed with errors: {detailed_error}");
 
+                metrics::ROUTING_CREATE_UNSUCCESSFUL_RESPONSE_COUNT.inc();
+                metrics::ROUTING_CREATE_METRICS_DECISION_REQUEST_TIME
+                    .observe(start_time.elapsed().as_secs_f64());
                 return Err(ContainerError::new_with_status_code_and_payload(
                     EuclidErrors::FailedToValidateRoutingRule,
                     axum::http::StatusCode::BAD_REQUEST,
@@ -60,6 +66,9 @@ pub async fn routing_create(
                 ));
             }
         }
+        metrics::ROUTING_CREATE_UNSUCCESSFUL_RESPONSE_COUNT.inc();
+        metrics::ROUTING_CREATE_METRICS_DECISION_REQUEST_TIME
+            .observe(start_time.elapsed().as_secs_f64());
         return Err(err.into());
     }
 
@@ -105,6 +114,9 @@ pub async fn routing_create(
     );
     logger::info!("Response: {response:?}");
 
+    metrics::ROUTING_CREATE_SUCCESSFUL_RESPONSE_COUNT.inc();
+    metrics::ROUTING_CREATE_METRICS_DECISION_REQUEST_TIME
+        .observe(start_time.elapsed().as_secs_f64());
     Ok(Json(response))
 }
 
