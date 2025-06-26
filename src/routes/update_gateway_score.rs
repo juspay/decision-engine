@@ -21,6 +21,9 @@
 use crate::decider::gatewaydecider::types::{ErrorResponse, UnifiedError};
 use crate::feedback::gateway_scoring_service::check_and_update_gateway_score_;
 use crate::feedback::types::{UpdateScorePayload, UpdateScoreResponse};
+use crate::metrics::API_LATENCY_HISTOGRAM;
+use crate::metrics::API_REQUEST_COUNTER;
+use crate::metrics::API_REQUEST_TOTAL_COUNTER;
 use axum::body::to_bytes;
 use axum::extract::Json;
 
@@ -28,6 +31,13 @@ use axum::extract::Json;
 pub async fn update_gateway_score(
     req: axum::http::Request<axum::body::Body>,
 ) -> Result<Json<UpdateScoreResponse>, ErrorResponse> {
+    let timer = API_LATENCY_HISTOGRAM
+        .with_label_values(&["update_gateway_score"])
+        .start_timer();
+    API_REQUEST_TOTAL_COUNTER
+        .with_label_values(&["update_gateway_score"])
+        .inc();
+
     let headers = req.headers();
     for (name, value) in headers.iter() {
         crate::logger::debug!(tag = "UpdateGatewayScore", "Header: {}: {:?}", name, value);
@@ -40,6 +50,10 @@ pub async fn update_gateway_score(
         }
         Err(e) => {
             crate::logger::debug!(tag = "UpdateGatewayScore", "Error: {:?}", e);
+            API_REQUEST_COUNTER
+                .with_label_values(&["update_gateway_score", "failure"])
+                .inc();
+            timer.observe_duration();
             return Err(ErrorResponse {
                 status: "400".to_string(),
                 error_code: "400".to_string(),
@@ -63,10 +77,20 @@ pub async fn update_gateway_score(
         Ok(payload) => {
             let result = check_and_update_gateway_score_(payload).await;
             match result {
-                Ok(success) => Ok(Json(UpdateScoreResponse {
-                    message: "Success".to_string(),
-                })),
+                Ok(success) => {
+                    API_REQUEST_COUNTER
+                        .with_label_values(&["update_gateway_score", "success"])
+                        .inc();
+                    timer.observe_duration();
+                    Ok(Json(UpdateScoreResponse {
+                        message: "Success".to_string(),
+                    }))
+                }
                 Err(e) => {
+                    API_REQUEST_COUNTER
+                        .with_label_values(&["update_gateway_score", "failure"])
+                        .inc();
+                    timer.observe_duration();
                     println!("Error: {:?}", e);
                     Err(e)
                 }
@@ -74,6 +98,10 @@ pub async fn update_gateway_score(
         }
         Err(e) => {
             crate::logger::debug!(tag = "UpdateScoreRequest", "Error: {:?}", e);
+            API_REQUEST_COUNTER
+                .with_label_values(&["update_gateway_score", "failure"])
+                .inc();
+            timer.observe_duration();
             return Err(ErrorResponse {
                 status: "400".to_string(),
                 error_code: "400".to_string(),

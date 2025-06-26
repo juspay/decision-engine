@@ -29,13 +29,18 @@ use error_stack::ResultExt;
 use crate::app::get_tenant_app_state;
 
 use crate::error::{self, ContainerError};
+use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
 use serde_json::{json, Value};
 
 pub async fn routing_create(
     Json(payload): Json<Value>,
 ) -> Result<Json<RoutingDictionaryRecord>, ContainerError<EuclidErrors>> {
-    let start_time = std::time::Instant::now();
-    metrics::ROUTING_CREATE_METRICS_REQUEST.inc();
+    let timer = metrics::API_LATENCY_HISTOGRAM
+        .with_label_values(&["routing_create"])
+        .start_timer();
+    metrics::API_REQUEST_TOTAL_COUNTER
+        .with_label_values(&["routing_create"])
+        .inc();
 
     let state = get_tenant_app_state().await;
 
@@ -52,9 +57,10 @@ pub async fn routing_create(
                 let detailed_error = validation_messages.join("; ");
                 logger::error!("Routing rule validation failed with errors: {detailed_error}");
 
-                metrics::ROUTING_CREATE_UNSUCCESSFUL_RESPONSE_COUNT.inc();
-                metrics::ROUTING_CREATE_METRICS_DECISION_REQUEST_TIME
-                    .observe(start_time.elapsed().as_secs_f64());
+                metrics::API_REQUEST_COUNTER
+                    .with_label_values(&["routing_create", "failure"])
+                    .inc();
+                timer.observe_duration();
                 return Err(ContainerError::new_with_status_code_and_payload(
                     EuclidErrors::FailedToValidateRoutingRule,
                     axum::http::StatusCode::BAD_REQUEST,
@@ -66,9 +72,10 @@ pub async fn routing_create(
                 ));
             }
         }
-        metrics::ROUTING_CREATE_UNSUCCESSFUL_RESPONSE_COUNT.inc();
-        metrics::ROUTING_CREATE_METRICS_DECISION_REQUEST_TIME
-            .observe(start_time.elapsed().as_secs_f64());
+        metrics::API_REQUEST_COUNTER
+            .with_label_values(&["routing_create", "failure"])
+            .inc();
+        timer.observe_duration();
         return Err(err.into());
     }
 
@@ -114,9 +121,10 @@ pub async fn routing_create(
     );
     logger::info!("Response: {response:?}");
 
-    metrics::ROUTING_CREATE_SUCCESSFUL_RESPONSE_COUNT.inc();
-    metrics::ROUTING_CREATE_METRICS_DECISION_REQUEST_TIME
-        .observe(start_time.elapsed().as_secs_f64());
+    metrics::API_REQUEST_COUNTER
+        .with_label_values(&["routing_create", "success"])
+        .inc();
+    timer.observe_duration();
     Ok(Json(response))
 }
 
@@ -128,15 +136,32 @@ use crate::storage::schema_pg::routing_algorithm_mapper::dsl as mapper_dsl;
 pub async fn activate_routing_rule(
     Json(payload): Json<ActivateRoutingConfigRequest>,
 ) -> Result<(), ContainerError<EuclidErrors>> {
+    let timer = API_LATENCY_HISTOGRAM
+        .with_label_values(&["activate_routing_rule"])
+        .start_timer();
+    API_REQUEST_TOTAL_COUNTER
+        .with_label_values(&["activate_routing_rule"])
+        .inc();
+
     let state = get_tenant_app_state().await;
-    let conn = &state
+    let conn = match state
         .db
         .get_conn()
         .await
-        .map_err(|_| EuclidErrors::StorageError)?;
+        .map_err(|_| EuclidErrors::StorageError)
+    {
+        Ok(connection) => connection,
+        Err(e) => {
+            API_REQUEST_COUNTER
+                .with_label_values(&["activate_routing_rule", "failure"])
+                .inc();
+            timer.observe_duration();
+            return Err(e.into());
+        }
+    };
 
     // === Step 1: Find algorithm_for from RoutingAlgorithm table ===
-    let algorithm_for = crate::generics::generic_find_one::<
+    let algorithm_for = match crate::generics::generic_find_one::<
         <RoutingAlgorithm as HasTable>::Table,
         _,
         RoutingAlgorithm,
@@ -144,8 +169,16 @@ pub async fn activate_routing_rule(
     .await
     .change_context(EuclidErrors::RoutingAlgorithmNotFound(
         payload.routing_algorithm_id.clone(),
-    ))?
-    .algorithm_for;
+    )) {
+        Ok(algorithm) => algorithm.algorithm_for,
+        Err(e) => {
+            API_REQUEST_COUNTER
+                .with_label_values(&["activate_routing_rule", "failure"])
+                .inc();
+            timer.observe_duration();
+            return Err(e.into());
+        }
+    };
 
     // === Step 2: Try to find existing entry for (created_by, algorithm_for) ===
     let maybe_existing = crate::generics::generic_find_one::<
@@ -173,14 +206,34 @@ pub async fn activate_routing_rule(
                 algorithm_for: algorithm_for.clone(),
             };
 
-            crate::generics::generic_update_if_present::<
+            match crate::generics::generic_update_if_present::<
                 <RoutingAlgorithmMapper as HasTable>::Table,
                 RoutingAlgorithmMapperUpdate,
                 _,
-            >(conn, predicate, values)
+            >(&conn, predicate, values)
             .await
-            .change_context(EuclidErrors::StorageError)?;
+            .change_context(EuclidErrors::StorageError)
+            {
+                Ok(_) => {
+                    API_REQUEST_COUNTER
+                        .with_label_values(&["activate_routing_rule", "success"])
+                        .inc();
+                    timer.observe_duration();
+                    return Ok(());
+                }
+                Err(e) => {
+                    API_REQUEST_COUNTER
+                        .with_label_values(&["activate_routing_rule", "failure"])
+                        .inc();
+                    timer.observe_duration();
+                    return Err(e.into());
+                }
+            }
         }
+        API_REQUEST_COUNTER
+            .with_label_values(&["activate_routing_rule", "success"])
+            .inc();
+        timer.observe_duration();
         return Ok(());
     }
 
@@ -191,38 +244,77 @@ pub async fn activate_routing_rule(
         algorithm_for,
     );
 
-    crate::generics::generic_insert(&state.db, mapper_entry)
+    match crate::generics::generic_insert(&state.db, mapper_entry)
         .await
-        .change_context(EuclidErrors::StorageError)?;
-
-    Ok(())
+        .change_context(EuclidErrors::StorageError)
+    {
+        Ok(_) => {
+            API_REQUEST_COUNTER
+                .with_label_values(&["activate_routing_rule", "success"])
+                .inc();
+            timer.observe_duration();
+            Ok(())
+        }
+        Err(e) => {
+            API_REQUEST_COUNTER
+                .with_label_values(&["activate_routing_rule", "failure"])
+                .inc();
+            timer.observe_duration();
+            Err(e.into())
+        }
+    }
 }
 
 pub async fn list_all_routing_algorithm_id(
     Path(created_by): Path<String>,
 ) -> Result<Json<Vec<JsonifiedRoutingAlgorithm>>, ContainerError<EuclidErrors>> {
+    let timer = API_LATENCY_HISTOGRAM
+        .with_label_values(&["list_all_routing_algorithm_id"])
+        .start_timer();
+    API_REQUEST_TOTAL_COUNTER
+        .with_label_values(&["list_all_routing_algorithm_id"])
+        .inc();
+
     let state = get_tenant_app_state().await;
-    Ok(Json(
-        crate::generics::generic_find_all::<
-            <RoutingAlgorithm as HasTable>::Table,
-            _,
-            RoutingAlgorithm,
-        >(&state.db, dsl::created_by.eq(created_by))
-        .await
-        .change_context(EuclidErrors::StorageError)?
-        .into_iter()
-        .map(Into::into)
-        .collect(),
-    ))
+
+    match crate::generics::generic_find_all::<
+        <RoutingAlgorithm as HasTable>::Table,
+        _,
+        RoutingAlgorithm,
+    >(&state.db, dsl::created_by.eq(created_by))
+    .await
+    .change_context(EuclidErrors::StorageError)
+    {
+        Ok(algorithms) => {
+            API_REQUEST_COUNTER
+                .with_label_values(&["list_all_routing_algorithm_id", "success"])
+                .inc();
+            timer.observe_duration();
+            Ok(Json(algorithms.into_iter().map(Into::into).collect()))
+        }
+        Err(e) => {
+            API_REQUEST_COUNTER
+                .with_label_values(&["list_all_routing_algorithm_id", "failure"])
+                .inc();
+            timer.observe_duration();
+            Err(e.into())
+        }
+    }
 }
 
 #[axum::debug_handler]
 pub async fn list_active_routing_algorithm(
     Path(created_by): Path<String>,
 ) -> Result<Json<Vec<JsonifiedRoutingAlgorithm>>, ContainerError<EuclidErrors>> {
+    let timer = metrics::API_LATENCY_HISTOGRAM
+        .with_label_values(&["list_active_routing_algorithm"])
+        .start_timer();
+    metrics::API_REQUEST_TOTAL_COUNTER
+        .with_label_values(&["list_active_routing_algorithm"])
+        .inc();
     let state = get_tenant_app_state().await;
 
-    let active_mappings = crate::generics::generic_find_all::<
+    let active_mappings = match crate::generics::generic_find_all::<
         <RoutingAlgorithmMapper as HasTable>::Table,
         _,
         RoutingAlgorithmMapper,
@@ -230,25 +322,48 @@ pub async fn list_active_routing_algorithm(
     .await
     .change_context(EuclidErrors::ActiveRoutingAlgorithmNotFound(
         created_by.clone(),
-    ))?;
+    )) {
+        Ok(mappings) => mappings,
+        Err(e) => {
+            metrics::API_REQUEST_COUNTER
+                .with_label_values(&["list_active_routing_algorithm", "failure"])
+                .inc();
+            timer.observe_duration();
+            return Err(e.into());
+        }
+    };
 
     let ids: Vec<String> = active_mappings
         .into_iter()
         .map(|m| m.routing_algorithm_id)
         .collect();
 
-    let routing_algorithms = crate::generics::generic_find_all::<
+    let routing_algorithms = match crate::generics::generic_find_all::<
         <RoutingAlgorithm as HasTable>::Table,
         _,
         RoutingAlgorithm,
     >(&state.db, dsl::id.eq_any(ids))
     .await
-    .change_context(EuclidErrors::StorageError)?;
-
+    .change_context(EuclidErrors::StorageError)
+    {
+        Ok(algos) => algos,
+        Err(e) => {
+            metrics::API_REQUEST_COUNTER
+                .with_label_values(&["list_active_routing_algorithm", "failure"])
+                .inc();
+            timer.observe_duration();
+            return Err(e.into());
+        }
+    };
     let result = routing_algorithms
         .into_iter()
         .map(JsonifiedRoutingAlgorithm::from)
         .collect();
+
+    API_REQUEST_COUNTER
+        .with_label_values(&["list_active_routing_algorithm", "success"])
+        .inc();
+    timer.observe_duration();
 
     Ok(Json(result))
 }
@@ -256,6 +371,12 @@ pub async fn list_active_routing_algorithm(
 pub async fn routing_evaluate(
     Json(payload): Json<RoutingRequest>,
 ) -> Result<Json<RoutingEvaluateResponse>, ContainerError<EuclidErrors>> {
+    let timer = metrics::API_LATENCY_HISTOGRAM
+        .with_label_values(&["routing_evaluate"])
+        .start_timer();
+    API_REQUEST_TOTAL_COUNTER
+        .with_label_values(&["routing_evaluate"])
+        .inc();
     let state = get_tenant_app_state().await;
     logger::debug!(
         "Received routing evaluation request for ID: {}",
@@ -263,7 +384,7 @@ pub async fn routing_evaluate(
     );
 
     // fetch the active routing_algorithm of the merchant
-    let active_routing_algorithm_id = crate::generics::generic_find_one::<
+    let active_routing_algorithm_id = match crate::generics::generic_find_one::<
         <RoutingAlgorithmMapper as HasTable>::Table,
         _,
         RoutingAlgorithmMapper,
@@ -273,20 +394,42 @@ pub async fn routing_evaluate(
     )
     .await
     .change_context(EuclidErrors::ActiveRoutingAlgorithmNotFound(
-        payload.created_by,
-    ))?
-    .routing_algorithm_id;
+        payload.created_by.clone(),
+    )) {
+        Ok(mapper) => mapper.routing_algorithm_id,
+        Err(e) => {
+            API_REQUEST_COUNTER
+                .with_label_values(&["routing_evaluate", "failure"])
+                .inc();
+            timer.observe_duration();
+            return Err(e.into());
+        }
+    };
 
     let parameters = payload.parameters.clone();
 
-    let routing_config = state
+    let routing_config = match state
         .config
         .routing_config
         .as_ref()
-        .ok_or(EuclidErrors::GlobalRoutingConfigsUnavailable)?;
+        .ok_or(EuclidErrors::GlobalRoutingConfigsUnavailable)
+    {
+        Ok(config) => config,
+        Err(e) => {
+            API_REQUEST_COUNTER
+                .with_label_values(&["routing_evaluate", "failure"])
+                .inc();
+            timer.observe_duration();
+            return Err(e.into());
+        }
+    };
 
     for (key, _) in &parameters {
         if !routing_config.keys.keys.contains_key(key) {
+            API_REQUEST_COUNTER
+                .with_label_values(&["routing_evaluate", "failure"])
+                .inc();
+            timer.observe_duration();
             return Err(EuclidErrors::InvalidRequestParameter(key.clone()).into());
         }
 
@@ -294,6 +437,10 @@ pub async fn routing_evaluate(
             if key_config.data_type == "enum" {
                 if let Some(Some(ValueType::EnumVariant(value))) = parameters.get(key) {
                     if !is_valid_enum_value(routing_config, key, value) {
+                        API_REQUEST_COUNTER
+                            .with_label_values(&["routing_evaluate", "failure"])
+                            .inc();
+                        timer.observe_duration();
                         return Err(EuclidErrors::InvalidRequest(format!(
                             "Invalid enum value '{}' for key '{}'",
                             value, key
@@ -301,6 +448,10 @@ pub async fn routing_evaluate(
                         .into());
                     }
                 } else {
+                    API_REQUEST_COUNTER
+                        .with_label_values(&["routing_evaluate", "failure"])
+                        .inc();
+                    timer.observe_duration();
                     return Err(EuclidErrors::InvalidRequest(format!(
                         "Expected enum value for key '{}'",
                         key
@@ -311,7 +462,7 @@ pub async fn routing_evaluate(
         }
     }
 
-    let algorithm = crate::generics::generic_find_one::<
+    let algorithm = match crate::generics::generic_find_one::<
         <RoutingAlgorithm as HasTable>::Table,
         _,
         RoutingAlgorithm,
@@ -325,63 +476,113 @@ pub async fn routing_evaluate(
         );
         e
     })
-    .change_context(EuclidErrors::StorageError)?;
+    .change_context(EuclidErrors::StorageError)
+    {
+        Ok(algo) => algo,
+        Err(e) => {
+            API_REQUEST_COUNTER
+                .with_label_values(&["routing_evaluate", "failure"])
+                .inc();
+            timer.observe_duration();
+            return Err(e.into());
+        }
+    };
 
     logger::debug!("Fetched routing algorithm: {:?}", algorithm);
-    let algorithm_data: StaticRoutingAlgorithm = serde_json::from_str(&algorithm.algorithm_data)
-        .map_err(|e| {
+    let algorithm_data: StaticRoutingAlgorithm =
+        match serde_json::from_str(&algorithm.algorithm_data).map_err(|e| {
             logger::error!(
                 error = ?e,
                 raw_data = %algorithm.algorithm_data,
                 "Failed to parse algorithm_data into StaticRoutingAlgorithm"
             );
             EuclidErrors::InvalidRequest(format!("Invalid algorithm data format: {}", e))
-        })?;
+        }) {
+            Ok(data) => data,
+            Err(e) => {
+                API_REQUEST_COUNTER
+                    .with_label_values(&["routing_evaluate", "failure"])
+                    .inc();
+                timer.observe_duration();
+                return Err(e.into());
+            }
+        };
 
     let (output, evaluated_output, rule_name): (Output, Vec<ConnectorInfo>, Option<String>) =
         match algorithm_data {
             StaticRoutingAlgorithm::Single(conn) => {
                 let out_enum = Output::Single(*conn.clone());
-                let (_, eval) = evaluate_output(&out_enum).map_err(|_| {
+                match evaluate_output(&out_enum).map_err(|_| {
                     EuclidErrors::FailedToEvaluateOutput(format!(
                         "{}",
                         StaticRoutingAlgorithm::Single(conn.clone()).to_string()
                     ))
-                })?;
-                (out_enum, eval, Some("straight_through_rule".into()))
+                }) {
+                    Ok((_, eval)) => (out_enum, eval, Some("straight_through_rule".into())),
+                    Err(e) => {
+                        API_REQUEST_COUNTER
+                            .with_label_values(&["routing_evaluate", "failure"])
+                            .inc();
+                        timer.observe_duration();
+                        return Err(e.into());
+                    }
+                }
             }
 
             StaticRoutingAlgorithm::Priority(connectors) => {
                 let out_enum = Output::Priority(connectors.clone());
-                let (_, eval) = evaluate_output(&out_enum).map_err(|_| {
+                match evaluate_output(&out_enum).map_err(|_| {
                     EuclidErrors::FailedToEvaluateOutput(format!(
                         "{}",
                         StaticRoutingAlgorithm::Priority(connectors.clone()).to_string()
                     ))
-                })?;
-                (out_enum, eval, Some("priority_rule".into()))
+                }) {
+                    Ok((_, eval)) => (out_enum, eval, Some("priority_rule".into())),
+                    Err(e) => {
+                        API_REQUEST_COUNTER
+                            .with_label_values(&["routing_evaluate", "failure"])
+                            .inc();
+                        timer.observe_duration();
+                        return Err(e.into());
+                    }
+                }
             }
 
             StaticRoutingAlgorithm::VolumeSplit(splits) => {
                 let out_enum = Output::VolumeSplit(splits.clone());
-                let (_, eval) = evaluate_output(&out_enum).map_err(|_| {
+                match evaluate_output(&out_enum).map_err(|_| {
                     EuclidErrors::FailedToEvaluateOutput(format!(
                         "{}",
                         StaticRoutingAlgorithm::VolumeSplit(splits.clone()).to_string()
                     ))
-                })?;
-                (out_enum, eval, Some("volume_split_rule".into()))
+                }) {
+                    Ok((_, eval)) => (out_enum, eval, Some("volume_split_rule".into())),
+                    Err(e) => {
+                        API_REQUEST_COUNTER
+                            .with_label_values(&["routing_evaluate", "failure"])
+                            .inc();
+                        timer.observe_duration();
+                        return Err(e.into());
+                    }
+                }
             }
 
             StaticRoutingAlgorithm::Advanced(program) => {
                 let ctx = Context::new(payload.parameters.clone());
                 logger::debug!("routing_evaluation: context keys = {:?}", parameters.keys());
 
-                let ir = InterpreterBackend::eval_program(&program, &ctx).map_err(|e| {
+                match InterpreterBackend::eval_program(&program, &ctx).map_err(|e| {
                     EuclidErrors::InvalidRequest(format!("Interpreter error: {:?}", e.error_type))
-                })?;
-
-                (ir.output, ir.evaluated_output, ir.rule_name)
+                }) {
+                    Ok(ir) => (ir.output, ir.evaluated_output, ir.rule_name),
+                    Err(e) => {
+                        API_REQUEST_COUNTER
+                            .with_label_values(&["routing_evaluate", "failure"])
+                            .inc();
+                        timer.observe_duration();
+                        return Err(e.into());
+                    }
+                }
             }
         };
 
@@ -404,6 +605,10 @@ pub async fn routing_evaluate(
     };
     logger::info!("Response: {response:?}");
 
+    API_REQUEST_COUNTER
+        .with_label_values(&["routing_evaluate", "success"])
+        .inc();
+    timer.observe_duration();
     Ok(Json(response))
 }
 

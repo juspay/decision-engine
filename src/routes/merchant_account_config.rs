@@ -1,8 +1,8 @@
+use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
 use crate::types::merchant as ETM;
 use crate::{error, logger, metrics, types};
 use axum::{extract::Path, Json};
 use error_stack::ResultExt;
-
 #[axum::debug_handler]
 pub async fn get_merchant_config(
     Path(merchant_id): Path<String>,
@@ -10,8 +10,13 @@ pub async fn get_merchant_config(
     Json<ETM::merchant_account::MerchantAccountResponse>,
     error::ContainerError<error::MerchantAccountConfigurationError>,
 > {
-    let start_time = std::time::Instant::now();
-    metrics::MERCHANT_CONFIG_GET_METRICS_REQUEST.inc();
+    // Record total request count and start timer
+    API_REQUEST_TOTAL_COUNTER
+        .with_label_values(&["merchant_account_get"])
+        .inc();
+    let timer = API_LATENCY_HISTOGRAM
+        .with_label_values(&["merchant_account_get"])
+        .start_timer();
 
     logger::debug!(
         "Received request to get merchant account configuration for ID: {}",
@@ -24,17 +29,20 @@ pub async fn get_merchant_config(
 
     let response = match result {
         Ok(merchant_account) => {
-            metrics::MERCHANT_CONFIG_GET_SUCCESSFUL_RESPONSE_COUNT.inc();
+            API_REQUEST_COUNTER
+                .with_label_values(&["merchant_account_get", "success"])
+                .inc();
             Ok(Json(merchant_account.into()))
         }
         Err(e) => {
-            metrics::MERCHANT_CONFIG_GET_UNSUCCESSFUL_RESPONSE_COUNT.inc();
+            API_REQUEST_COUNTER
+                .with_label_values(&["merchant_account_get", "failure"])
+                .inc();
             Err(e.into())
         }
     };
 
-    metrics::MERCHANT_CONFIG_GET_METRICS_DECISION_REQUEST_TIME
-        .observe(start_time.elapsed().as_secs_f64());
+    timer.observe_duration();
     response
 }
 
@@ -42,8 +50,13 @@ pub async fn get_merchant_config(
 pub async fn create_merchant_config(
     Json(payload): Json<ETM::merchant_account::MerchantAccountCreateRequest>,
 ) -> Result<Json<String>, error::ContainerError<error::MerchantAccountConfigurationError>> {
-    let start_time = std::time::Instant::now();
-    metrics::MERCHANT_CONFIG_CREATE_METRICS_REQUEST.inc();
+    // Record total request count and start timer
+    API_REQUEST_TOTAL_COUNTER
+        .with_label_values(&["merchant_account_create"])
+        .inc();
+    let timer = API_LATENCY_HISTOGRAM
+        .with_label_values(&["merchant_account_create"])
+        .start_timer();
 
     logger::debug!(
         "Received request to create merchant account configuration: {:?}",
@@ -54,9 +67,10 @@ pub async fn create_merchant_config(
         ETM::merchant_account::load_merchant_by_merchant_id(payload.merchant_id.clone()).await;
 
     if merchant_account.is_some() {
-        metrics::MERCHANT_CONFIG_CREATE_UNSUCCESSFUL_RESPONSE_COUNT.inc();
-        metrics::MERCHANT_CONFIG_CREATE_METRICS_DECISION_REQUEST_TIME
-            .observe(start_time.elapsed().as_secs_f64());
+        API_REQUEST_COUNTER
+            .with_label_values(&["merchant_account_create", "failure"])
+            .inc();
+        timer.observe_duration();
         return Err(error::MerchantAccountConfigurationError::MerchantAlreadyExists.into());
     }
 
@@ -67,17 +81,20 @@ pub async fn create_merchant_config(
     let response = match result {
         Ok(_) => {
             logger::debug!("Merchant account configuration created successfully");
-            metrics::MERCHANT_CONFIG_CREATE_SUCCESSFUL_RESPONSE_COUNT.inc();
+            API_REQUEST_COUNTER
+                .with_label_values(&["merchant_account_create", "success"])
+                .inc();
             Ok(Json("Merchant account created successfully".to_string()))
         }
         Err(e) => {
-            metrics::MERCHANT_CONFIG_CREATE_UNSUCCESSFUL_RESPONSE_COUNT.inc();
+            API_REQUEST_COUNTER
+                .with_label_values(&["merchant_account_create", "failure"])
+                .inc();
             Err(e.into())
         }
     };
 
-    metrics::MERCHANT_CONFIG_CREATE_METRICS_DECISION_REQUEST_TIME
-        .observe(start_time.elapsed().as_secs_f64());
+    timer.observe_duration();
     response
 }
 
@@ -85,8 +102,13 @@ pub async fn create_merchant_config(
 pub async fn delete_merchant_config(
     Path(merchant_id): Path<String>,
 ) -> Result<Json<String>, error::ContainerError<error::MerchantAccountConfigurationError>> {
-    let start_time = std::time::Instant::now();
-    metrics::MERCHANT_CONFIG_DELETE_METRICS_REQUEST.inc();
+    // Record total request count and start timer
+    API_REQUEST_TOTAL_COUNTER
+        .with_label_values(&["merchant_account_delete"])
+        .inc();
+    let timer = API_LATENCY_HISTOGRAM
+        .with_label_values(&["merchant_account_delete"])
+        .start_timer();
 
     logger::debug!(
         "Received request to delete merchant account configuration for ID: {}",
@@ -99,16 +121,19 @@ pub async fn delete_merchant_config(
 
     let response = match result {
         Ok(_) => {
-            metrics::MERCHANT_CONFIG_DELETE_SUCCESSFUL_RESPONSE_COUNT.inc();
+            API_REQUEST_COUNTER
+                .with_label_values(&["merchant_account_delete", "success"])
+                .inc();
             Ok(Json("Merchant account deleted successfully".to_string()))
         }
         Err(e) => {
-            metrics::MERCHANT_CONFIG_DELETE_UNSUCCESSFUL_RESPONSE_COUNT.inc();
+            API_REQUEST_COUNTER
+                .with_label_values(&["merchant_account_delete", "failure"])
+                .inc();
             Err(e.into())
         }
     };
 
-    metrics::MERCHANT_CONFIG_DELETE_METRICS_DECISION_REQUEST_TIME
-        .observe(start_time.elapsed().as_secs_f64());
+    timer.observe_duration();
     response
 }

@@ -35,8 +35,12 @@ impl IntoResponse for DecidedGateway {
 pub async fn decide_gateway(
     req: axum::http::Request<axum::body::Body>,
 ) -> Result<DecidedGateway, ErrorResponse> {
-    let start_time = std::time::Instant::now();
-    metrics::DECIDE_GATEWAY_METRICS_REQUEST.inc();
+    let timer = metrics::API_LATENCY_HISTOGRAM
+        .with_label_values(&["decide_gateway"])
+        .start_timer();
+    metrics::API_REQUEST_TOTAL_COUNTER
+        .with_label_values(&["decide_gateway"])
+        .inc();
 
     let headers = req.headers();
     for (name, value) in headers.iter() {
@@ -49,9 +53,10 @@ pub async fn decide_gateway(
         }
         Err(e) => {
             logger::debug!(tag = "DecideGateway", "Error: {:?}", e);
-            metrics::DECIDE_GATEWAY_UNSUCCESSFUL_RESPONSE_COUNT.inc();
-            metrics::DECIDE_GATEWAY_METRICS_DECISION_REQUEST_TIME
-                .observe(start_time.elapsed().as_secs_f64());
+            metrics::API_REQUEST_COUNTER
+                .with_label_values(&["decide_gateway", "failure"])
+                .inc();
+            timer.observe_duration();
             return Err(ErrorResponse {
                 status: "400".to_string(),
                 error_code: "400".to_string(),
@@ -74,18 +79,24 @@ pub async fn decide_gateway(
     let result = match api_decider_request {
         Ok(payload) => match deciderFullPayloadHSFunction(payload).await {
             Ok(decided_gateway) => {
-                metrics::DECIDE_GATEWAY_SUCCESSFUL_RESPONSE_COUNT.inc();
+                metrics::API_REQUEST_COUNTER
+                    .with_label_values(&["decide_gateway", "success"])
+                    .inc();
                 Ok(decided_gateway)
             }
             Err(e) => {
                 logger::debug!(tag = "DecideGateway", "Error: {:?}", e);
-                metrics::DECIDE_GATEWAY_UNSUCCESSFUL_RESPONSE_COUNT.inc();
+                metrics::API_REQUEST_COUNTER
+                    .with_label_values(&["decide_gateway", "failure"])
+                    .inc();
                 Err(e)
             }
         },
         Err(e) => {
             logger::debug!(tag = "DecideGateway", "Error: {:?}", e);
-            metrics::DECIDE_GATEWAY_UNSUCCESSFUL_RESPONSE_COUNT.inc();
+            metrics::API_REQUEST_COUNTER
+                .with_label_values(&["decide_gateway", "failure"])
+                .inc();
             Err(ErrorResponse {
                 status: "400".to_string(),
                 error_code: "400".to_string(),
@@ -103,8 +114,7 @@ pub async fn decide_gateway(
             })
         }
     };
-    metrics::DECIDE_GATEWAY_METRICS_DECISION_REQUEST_TIME
-        .observe(start_time.elapsed().as_secs_f64());
+    timer.observe_duration();
 
     // let connection = state.db.get_conn().await.unwrap();
     // println!("Starting Decision Gateway");

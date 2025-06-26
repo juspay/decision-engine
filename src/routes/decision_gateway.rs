@@ -2,6 +2,7 @@ use crate::decider::gatewaydecider::{
     flows::deciderFullPayloadHSFunction,
     types::{DecidedGateway, DomainDeciderRequest, ErrorResponse, UnifiedError},
 };
+use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
 use crate::{logger, metrics};
 use axum::body::to_bytes;
 use axum::http::StatusCode;
@@ -46,7 +47,12 @@ where
     ErrorResponse: IntoResponse,
 {
     let cpu_start = ProcessTime::now();
-    metrics::DECISION_GATEWAY_METRICS_REQUEST.inc();
+    let timer = API_LATENCY_HISTOGRAM
+        .with_label_values(&["decision_gateway"])
+        .start_timer();
+    API_REQUEST_TOTAL_COUNTER
+        .with_label_values(&["decision_gateway"])
+        .inc();
 
     // Clone the headers and URI before consuming `req`
     let headers = req.headers().clone();
@@ -109,6 +115,11 @@ where
                 "Error occurred while parsing request body"
             );
 
+            API_REQUEST_COUNTER
+                .with_label_values(&["decision_gateway", "failure"])
+                .inc();
+            timer.observe_duration();
+
             return Err(error_response);
         }
     };
@@ -164,7 +175,9 @@ where
                         "Successfully processed request"
                     );
 
-                    metrics::DECISION_GATEWAY_SUCCESSFUL_RESPONSE_COUNT.inc();
+                    API_REQUEST_COUNTER
+                        .with_label_values(&["decision_gateway", "success"])
+                        .inc();
                     Ok(response)
                 }
                 Err(e) => {
@@ -193,13 +206,14 @@ where
                         "Error occurred while processing decider function"
                     );
 
-                    metrics::DECISION_GATEWAY_UNSUCCESSFUL_RESPONSE_COUNT.inc();
+                    API_REQUEST_COUNTER
+                        .with_label_values(&["decision_gateway", "failure"])
+                        .inc();
                     Err(e)
                 }
             };
 
-            metrics::DECISION_GATEWAY_METRICS_DECISION_REQUEST_TIME
-                .observe(start_time.elapsed().as_secs_f64());
+            timer.observe_duration();
             final_result
         }
         Err(e) => {
@@ -245,9 +259,10 @@ where
                 "Error occurred while parsing request payload"
             );
 
-            metrics::DECISION_GATEWAY_UNSUCCESSFUL_RESPONSE_COUNT.inc();
-            metrics::DECISION_GATEWAY_METRICS_DECISION_REQUEST_TIME
-                .observe(start_time.elapsed().as_secs_f64());
+            API_REQUEST_COUNTER
+                .with_label_values(&["decision_gateway", "failure"])
+                .inc();
+            timer.observe_duration();
             Err(error_response)
         }
     }
