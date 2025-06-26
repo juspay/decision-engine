@@ -1,88 +1,195 @@
-# Running the Decision Engine with PostgreSQL
+# PostgreSQL Setup Guide for Decision Engine
 
-This guide provides instructions on how to set up and run the Decision Engine application using PostgreSQL as the database.
+This guide provides instructions on how to set up the Decision Engine with PostgreSQL as the database. There are several ways to achieve this, depending on your preference for using Docker or a local PostgreSQL installation.
 
 ## Prerequisites
 
-*   Docker and Docker Compose must be installed on your system (OrbStack can be used as an alternative to Docker Desktop).
-*   You should have the project code cloned to your local machine.
-*   Rust and Cargo should be installed if you intend to build the application with specific features.
+Before you begin, ensure you have the necessary tools installed based on your chosen setup method.
+
+**Common Tools (potentially needed for all methods):**
+
+*   A text editor or IDE for viewing/editing configuration files.
+*   Git for cloning the project repository.
+*   Rust and Cargo: Essential to build and run the Decision Engine application from source directly on your host machine.
+
+**For All Docker-Based Setups:**
+
+*   **Docker and Docker Compose**: Essential for running the application and database in containers.
+
+
+**For Full Local Development Setup:**
+
+*   **PostgreSQL**: Needed if you are managing a local PostgreSQL instance directly (e.g., for creating databases, running `just resurrect`).
+*   **Just**: A command runner used for some of the local setup scripts (e.g., `just resurrect`, `just migrate-pg`). You can install it by following the instructions [here](https://github.com/casey/just#installation).
+*   **Diesel CLI (with PostgreSQL feature)**: Required for managing database migrations when running against a local PostgreSQL database. Install using:
+
+    ```bash
+    cargo install diesel_cli --no-default-features --features postgres
+    ```
+
+## Setup Options
+
+Choose one of the following methods to set up the Decision Engine with PostgreSQL:
+
+### 1. Using Pre-built Docker Image (Recommended for quick setup)
+
+This method uses pre-built Docker images for both the application and the PostgreSQL database. It's the simplest way to get started.
+
+**Steps:**
+
+1.  Navigate to the root directory of the `decision-engine` project.
+2.  Run the following command:
+
+    ```bash
+    make init-pg
+    ```
+
+    This command will:
+    *   Pull the necessary Docker images.
+    *   Start a PostgreSQL container.
+    *   Run database migrations using a `db-migrator-postgres` service defined in `docker-compose.yaml`.
+    *   Start the Decision Engine application container (`open-router-pg`), configured to connect to the PostgreSQL database.
+
+The application should now be running and accessible.
+
+### 2. Using Local Changes with PostgreSQL in Docker
+
+This method is useful if you are making changes to the Decision Engine codebase and want to test them with a PostgreSQL database running in Docker.
+
+**Steps:**
+
+1.  Navigate to the root directory of the `decision-engine` project.
+2.  Run the following command:
+
+    ```bash
+    make init-local-pg
+    ```
+
+    This command will:
+    *   Start a PostgreSQL container.
+    *   Run database migrations using the `db-migrator-postgres` service.
+    *   Build the Decision Engine application from your local source code within a Docker container (`open-router-local-pg`).
+    *   Start the newly built application container, connected to the PostgreSQL database.
+
+This allows you to test your local code changes in an environment where PostgreSQL is managed by Docker.
+
+### 3. Using Local Changes with a Local PostgreSQL Installation
+
+This method is for developers who have PostgreSQL installed and running directly on their local machine (not in Docker).
+
+**Steps:**
+
+1.  **Ensure PostgreSQL is Running:**
+    Make sure your local PostgreSQL server is running and accessible.
+
+2.  **Set up Environment Variables (Optional but Recommended):**
+    The application and `diesel` CLI use environment variables to connect to the database.
+
+    The `Justfile` provides defaults if these are not set:
+    *   `DB_USER` (default: `db_user`)
+    *   `DB_PASSWORD` (default: `db_pass`)
+    *   `DB_HOST` (default: `localhost`)
+    *   `DB_PORT` (default: `5432`)
+    *   `DB_NAME` (default: `decision_engine_db`)
+    *   `DATABASE_URL` (derived default: `postgresql://db_user:db_pass@localhost:5432/decision_engine_db`)
+
+    **Example of exporting variables in your shell (using default values):**
+    ```bash
+    export DB_USER="db_user"
+    export DB_PASSWORD="db_pass"
+    export DB_HOST="localhost"
+    export DB_PORT="5432"
+    export DB_NAME="decision_engine_db"
+    # DATABASE_URL will be constructed by the application or Justfile if not set,
+    ```
+3.  **Drop Database if Exist:**
+    
+    ```bash
+    just resurrect
+    ```
+    This command will drop the Database and create a new one.
+4.  **Run Database Migrations:**
+    Apply the database schema migrations to your local PostgreSQL database:
+
+    ```bash
+    just migrate-pg
+    ```
+    This command uses `diesel migration run` with the PostgreSQL specific migration directory (`migrations_pg`) and configuration file (`diesel_pg.toml`).
+
+5.  **Run the Application:**
+    Compile and run the Decision Engine application, ensuring it's built with PostgreSQL features:
+    ```bash
+    RUSTFLAGS="-Awarnings" cargo run --no-default-features --features postgres
+    ```
+    *   `RUSTFLAGS="-Awarnings"`: Suppresses warnings during compilation (optional).
+    *   `--no-default-features --features postgres`: Ensures the application is compiled specifically for PostgreSQL, excluding default features (like MySQL support if it's a default) and including the `postgres` feature.
+
+The application will start and connect to your local PostgreSQL database.
 
 ## Configuration
 
-To use PostgreSQL, the application needs to be compiled with the `postgres` Rust feature flag enabled.
+The database connection URL is typically configured in:
 
-The PostgreSQL connection details are configured in `config/docker-configuration.toml` under the `[pg_database]` section. The `docker-compose.yaml` file defines a `postgresql` service (`open-router-postgres`) with the following default environment variables:
-*   `POSTGRES_USER=db_user`
-*   `POSTGRES_PASSWORD=db_pass`
-*   `POSTGRES_DB=decision_engine_db`
+*   `config/development.toml` (for local cargo runs)
+*   `config/docker-configuration.toml` (often mapped into Docker containers)
 
-The service is exposed on port `5432`. The application, when running inside Docker, connects to PostgreSQL using the hostname `postgresql` (as specified in `config/docker-configuration.toml`), which is the service name within the Docker network.
+Ensure the `[database.url]` points to your PostgreSQL instance. For example:
+`url = "postgresql://db_user:db_pass@localhost:5432/decision_engine_db"`
 
-## Setup and Running
+For Docker setups (`make init-pg`, `make init-local-pg`), the `docker-compose.yaml` file handles the service linking and environment variables to ensure the application container can connect to the PostgreSQL container (usually aliased as `postgres` or a similar hostname within the Docker network).
 
-Follow these steps to get the application running with PostgreSQL:
+## Troubleshooting
 
-### 1. Enable the `postgres` Feature Flag
+*   **Connection Issues:**
+    *   Verify `DATABASE_URL` is correct and the PostgreSQL server is accessible from where the application is running (your local machine or Docker container).
+    *   Check PostgreSQL logs for any connection errors.
+    *   Ensure firewalls are not blocking the connection.
+*   **Migration Failures:**
+    *   Check `diesel_pg.toml` for correct configuration.
+    *   Ensure the migration files in `migrations_pg/` are correctly formatted.
+    *   If you encounter issues with a "dirty" database state after a failed migration, you might need to manually resolve it in the database or use `diesel migration redo` (with caution).
+*   **`just` command not found:**
+    *   Install `just` by following its official installation guide.
+*   **`diesel` command not found:**
+    *   Install `diesel_cli` with PostgreSQL support: `cargo install diesel_cli --no-default-features --features postgres`.
 
-To use PostgreSQL, the `postgres` feature flag must be enabled. This is typically done by modifying the `Cargo.toml` file.
+This guide should help you get the Decision Engine up and running with PostgreSQL.
 
-Open `Cargo.toml` and locate the `[features]` section. Add `postgres` to the `default` features list (if not already present):
 
-```toml
-[features]
-default = ["middleware", "postgres"] # Ensure "postgres" is here
-# ... other features
-```
+# Metrics
 
-**Important:** After modifying `Cargo.toml`, the application needs to be rebuilt for the changes to take effect. The `make init-local-pg` command (described below) handles the build process. Note that as per the `Cargo.toml` provided, `postgres` is already part of the `default` features, so you might not need to change this unless your `Cargo.toml` differs.
+This document provides an overview of the metrics implementation in the routing layer.
 
-### 2. Start Services and Run Migrations for PostgreSQL
+## Overview
 
-To build the application locally with the `postgres` feature (implicitly, as the build process will pick up the modified `Cargo.toml` if `postgres` is in `default`) and run PostgreSQL migrations:
-```bash
-make init-local-pg
-```
+The metrics server is responsible for exposing key performance indicators of the application. It uses the `prometheus` crate to register and expose metrics in a format that can be scraped by a Prometheus server.
 
-**Explanation:**
-*   This command first executes the `db-migrator-postgres` service defined in `docker-compose.yaml`.
-*   The `db-migrator-postgres` service connects to the `postgresql` service (container name `open-router-postgres`).
-*   It then applies the database schema by executing the SQL script located at `migrations_pg/00000000000000_diesel_postgresql_initial_setup/up.sql`.
-*   After the migrations are successfully applied, the command starts the `open-router-local` application service.
-*   Because `postgres` is (presumably) in the default features in `Cargo.toml`, the `docker-compose up --build open-router-local` part of the `make` target will rebuild the application with PostgreSQL support.
+## How it works
 
-### 3. Accessing the Application
+The metrics server is built using `axum` and runs on a separate port from the main application server. It exposes a `/metrics` endpoint that returns the current state of all registered metrics.
 
-Once the services are up and running, the Decision Engine API will be available at:
-`http://localhost:8080`
+The server is initialized in the `metrics_server_builder` function in `src/metrics.rs`. This function creates a new `axum` router and binds it to the address specified in the configuration.
 
-## Stopping the Application
+## Available Metrics
 
-To stop all running services and remove the containers:
-```bash
-make stop
-```
+The following metrics are exposed by the server:
 
-## How It Works (Summary)
+### Counters
 
-*   The `postgres` feature flag in `Cargo.toml` controls whether the application is compiled with PostgreSQL support. It is included in the `default` features, meaning it's enabled by default unless you customize the build.
-*   The `Makefile` target `init-local-pg` orchestrates the setup process for PostgreSQL.
-*   `docker-compose.yaml` defines the `postgresql` service for the database and a `db-migrator-postgres` service to apply schema migrations specific to PostgreSQL.
-*   The application's Rust code in `src/storage.rs` conditionally compiles to use PostgreSQL connection logic when the `postgres` feature flag is active.
-*   The `config/docker-configuration.toml` file provides the necessary runtime connection parameters for the application to connect to the PostgreSQL database.
+-   `api_requests_total`: A counter that tracks the total number of API requests received by the application. It has a single label, `endpoint`, which is the path of the API endpoint that was called.
 
-## Other Available Feature Flags
+-   `api_requests_by_status`: A counter that tracks the number of API requests grouped by endpoint and result status. It has two labels: `endpoint` and `status`.
 
-Besides `postgres`, the application supports several other feature flags that can be enabled in `Cargo.toml` to include additional functionalities. Here are some notable ones:
+### Histograms
 
-*   `mysql`: Enables support for MySQL as an alternative database.
-*   `kms-aws`: Integrates with AWS Key Management Service for managing encryption keys.
-*   `kms-hashicorp-vault`: Integrates with HashiCorp Vault for secrets management.
-*   `external_key_manager`: Enables a generic external key manager interface.
-*   `external_key_manager_mtls`: Adds mTLS support for the external key manager.
-*   `console`: Enables a Tokio console for debugging and tracing application behavior.
-*   `limit`: Potentially related to request limiting or resource constraints (its exact use may require code inspection).
-*   `middleware`: Enables common middleware components (included in `default`).
-*   `release`: A meta-feature often used to group features for release builds, currently includes `middleware` and `kms-aws`.
+-   `api_latency_seconds`: A histogram that measures the latency of API calls. It has a single label, `endpoint`, and uses exponential buckets to provide a detailed view of the latency distribution.
 
-To enable a specific feature, you can add it to the `default` list in `Cargo.toml` or specify it during the build process (e.g., `cargo build --features your_feature`). Refer to the `Cargo.toml` file for the complete list and their dependencies.
+## How to check metrics
+
+To check the metrics, you can hit the following endpoint:
+
+```sh
+curl http://127.0.0.1:9090/metrics
+````
+
+This will return a text-based representation of the current metrics, which can be ingested by a Prometheus server.
