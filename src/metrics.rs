@@ -10,7 +10,7 @@ lazy_static! {
     pub static ref API_REQUEST_TOTAL_COUNTER: IntCounterVec = register_int_counter_vec!(
         "api_requests_total",
         "Total Count of API requests by endpoint",
-        &["endpoint"] // example: ("decide_gateway")
+        &["endpoint"]
     )
     .unwrap();
 
@@ -18,7 +18,7 @@ lazy_static! {
     pub static ref API_REQUEST_COUNTER: IntCounterVec = register_int_counter_vec!(
         "api_requests_by_status",
         "Count of API requests grouped by endpoint and result",
-        &["endpoint", "status"] // example: ("decide_gateway", "success")
+        &["endpoint", "status"]
     ).unwrap();
 
     /// Latency of API calls grouped by endpoint
@@ -97,26 +97,3 @@ impl crate::config::Server {
     }
 }
 
-// API endpoint constants for consistent labeling
-pub mod endpoints {
-    pub const DECIDE_GATEWAY: &str = "decide_gateway";
-    pub const UPDATE_GATEWAY_SCORE: &str = "update_gateway_score";
-    pub const RULE_CREATE: &str = "rule_create";
-    pub const RULE_GET: &str = "rule_get";
-    pub const RULE_UPDATE: &str = "rule_update";
-    pub const RULE_DELETE: &str = "rule_delete";
-    pub const MERCHANT_ACCOUNT_CREATE: &str = "merchant_account_create";
-    pub const MERCHANT_ACCOUNT_GET: &str = "merchant_account_get";
-    pub const MERCHANT_ACCOUNT_DELETE: &str = "merchant_account_delete";
-    pub const ROUTING_CREATE: &str = "routing_create";
-    pub const ROUTING_ACTIVATE: &str = "routing_activate";
-    pub const ROUTING_EVALUATE: &str = "routing_evaluate";
-    pub const ROUTING_LIST: &str = "routing_list";
-    pub const ROUTING_LIST_ACTIVE: &str = "routing_list_active";
-}
-
-// Status constants for consistent labeling
-pub mod status {
-    pub const SUCCESS: &str = "success";
-    pub const FAILURE: &str = "failure";
-}

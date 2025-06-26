@@ -1,5 +1,3 @@
-#![recursion_limit = "2048"]
-
 pub mod api_client;
 pub mod app;
 pub mod config;
