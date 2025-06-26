@@ -22,6 +22,7 @@ Before you begin, ensure you have the necessary tools installed based on your ch
 *   **PostgreSQL**: Needed if you are managing a local PostgreSQL instance directly (e.g., for creating databases, running `just resurrect`).
 *   **Just**: A command runner used for some of the local setup scripts (e.g., `just resurrect`, `just migrate-pg`). You can install it by following the instructions [here](https://github.com/casey/just#installation).
 *   **Diesel CLI (with PostgreSQL feature)**: Required for managing database migrations when running against a local PostgreSQL database. Install using:
+
     ```bash
     cargo install diesel_cli --no-default-features --features postgres
     ```
@@ -153,3 +154,42 @@ For Docker setups (`make init-pg`, `make init-local-pg`), the `docker-compose.ya
     *   Install `diesel_cli` with PostgreSQL support: `cargo install diesel_cli --no-default-features --features postgres`.
 
 This guide should help you get the Decision Engine up and running with PostgreSQL.
+
+
+# Metrics
+
+This document provides an overview of the metrics implementation in the routing layer.
+
+## Overview
+
+The metrics server is responsible for exposing key performance indicators of the application. It uses the `prometheus` crate to register and expose metrics in a format that can be scraped by a Prometheus server.
+
+## How it works
+
+The metrics server is built using `axum` and runs on a separate port from the main application server. It exposes a `/metrics` endpoint that returns the current state of all registered metrics.
+
+The server is initialized in the `metrics_server_builder` function in `src/metrics.rs`. This function creates a new `axum` router and binds it to the address specified in the configuration.
+
+## Available Metrics
+
+The following metrics are exposed by the server:
+
+### Counters
+
+-   `api_requests_total`: A counter that tracks the total number of API requests received by the application. It has a single label, `endpoint`, which is the path of the API endpoint that was called.
+
+-   `api_requests_by_status`: A counter that tracks the number of API requests grouped by endpoint and result status. It has two labels: `endpoint` and `status`.
+
+### Histograms
+
+-   `api_latency_seconds`: A histogram that measures the latency of API calls. It has a single label, `endpoint`, and uses exponential buckets to provide a detailed view of the latency distribution.
+
+## How to check metrics
+
+To check the metrics, you can hit the following endpoint:
+
+```sh
+curl http://127.0.0.1:9090/metrics
+````
+
+This will return a text-based representation of the current metrics, which can be ingested by a Prometheus server.
