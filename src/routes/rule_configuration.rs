@@ -84,7 +84,7 @@ pub async fn create_rule_config(
             match result {
                 Ok(_) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["Elimination_create_rule_config", "success"])
+                        .with_label_values(&["elimination_create_rule_config", "success"])
                         .inc();
                     Ok(Json(
                         "Elimination Configuration created successfully".to_string(),
@@ -92,7 +92,7 @@ pub async fn create_rule_config(
                 }
                 Err(e) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["Elimination_create_rule_config", "failure"])
+                        .with_label_values(&["elimination_create_rule_config", "failure"])
                         .inc();
                     Err(e.into())
                 }
@@ -214,7 +214,7 @@ pub async fn get_rule_config(
             match result {
                 Ok(elimination_config) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["Elimination_get_rule_config", "success"])
+                        .with_label_values(&["elimination_get_rule_config", "success"])
                         .inc();
                     Ok(Json(types::routing_configuration::RoutingRule {
                         merchant_id: mid,
@@ -225,7 +225,7 @@ pub async fn get_rule_config(
                 }
                 Err(e) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["Elimination_get_rule_config", "failure"])
+                        .with_label_values(&["elimination_get_rule_config", "failure"])
                         .inc();
                     Err(e.into())
                 }
@@ -329,7 +329,7 @@ pub async fn update_rule_config(
             match result {
                 Ok(_) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["Elimination_update_rule_config", "success"])
+                        .with_label_values(&["elimination_update_rule_config", "success"])
                         .inc();
                     Ok(Json(
                         "Elimination Configuration created successfully".to_string(),
@@ -337,7 +337,7 @@ pub async fn update_rule_config(
                 }
                 Err(e) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["Elimination_update_rule_config", "failure"])
+                        .with_label_values(&["elimination_update_rule_config", "failure"])
                         .inc();
                     Err(e.into())
                 }
@@ -427,7 +427,7 @@ pub async fn delete_rule_config(
             match result {
                 Ok(_) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["Elimination_delete_rule_config", "success"])
+                        .with_label_values(&["elimination_delete_rule_config", "success"])
                         .inc();
                     Ok(Json(
                         "Elimination Configuration deleted successfully".to_string(),
@@ -435,7 +435,7 @@ pub async fn delete_rule_config(
                 }
                 Err(e) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["Elimination_delete_rule_config", "failure"])
+                        .with_label_values(&["elimination_delete_rule_config", "failure"])
                         .inc();
                     Err(e.into())
                 }
