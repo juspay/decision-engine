@@ -26,7 +26,6 @@ use crate::types::merchant::merchant_account::MerchantAccount;
 use crate::types::merchant::merchant_gateway_account::merchant_gw_acc_id_to_id;
 use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
 use crate::types::merchant_gateway_card_info::MerchantGatewayCardInfo;
-use crate::types::payment::payment_method::PaymentMethodType;
 use diesel::associations::HasTable;
 use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
@@ -73,19 +72,22 @@ pub async fn filter_gateways_for_payment_method_and_validation_type(
 
     // Step 2: Fetch Gateway Card Info
     let gci_records: Vec<DBGatewayCardInfo> = match crate::generics::generic_find_all::<
-            <DBGatewayCardInfo as HasTable>::Table,
-            _,
-            DBGatewayCardInfo
-        >(
-            &app_state.db,
-                     g_dsl::juspay_bank_code_id.eq_any(valid_jpbc_ids)
-                .and(g_dsl::disabled.eq(Some(BitBool(false))))
-                .and(g_dsl::validation_type.eq(Some(validation_type_to_text(given_validation_type))))
-                .and(g_dsl::payment_method_type.eq(PaymentMethodType::to_text(&given_payment_method_type))),
-        ).await {
-            Ok(records) => records,
-            Err(_) => return vec![],
-        };
+        <DBGatewayCardInfo as HasTable>::Table,
+        _,
+        DBGatewayCardInfo,
+    >(
+        &app_state.db,
+        g_dsl::juspay_bank_code_id
+            .eq_any(valid_jpbc_ids)
+            .and(g_dsl::disabled.eq(Some(BitBool(false))))
+            .and(g_dsl::validation_type.eq(Some(validation_type_to_text(given_validation_type))))
+            .and(g_dsl::payment_method_type.eq(given_payment_method_type)),
+    )
+    .await
+    {
+        Ok(records) => records,
+        Err(_) => return vec![],
+    };
 
     let gci_ids: Vec<i64> = gci_records.iter().map(|rec| rec.id).collect();
     if gci_ids.is_empty() {
@@ -99,7 +101,8 @@ pub async fn filter_gateways_for_payment_method_and_validation_type(
         DBMerchantGatewayCardInfo,
     >(
         &app_state.db,
-        m_dsl::gateway_card_info_id.eq_any(gci_ids)
+        m_dsl::gateway_card_info_id
+            .eq_any(gci_ids)
             .and(m_dsl::merchant_account_id.eq(merchant_pid_to_text(merchant_account.id.clone())))
             .and(m_dsl::disabled.eq(BitBool(false)))
             .and(m_dsl::merchant_gateway_account_id.eq_any(enabled_gateway_accounts_ids)),

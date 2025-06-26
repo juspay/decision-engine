@@ -1,3 +1,4 @@
+use crate::decider::gatewaydecider::constants::CASH_ONLY_GATEWAYS;
 use crate::decider::gatewaydecider::types::*;
 use crate::decider::gatewaydecider::utils as Utils;
 use crate::decider::storage::utils::gateway_card_info as ETGCIS;
@@ -35,7 +36,7 @@ use crate::types::gateway_payment_method_flow::{
 use crate::types::merchant_gateway_account_sub_info::{self as ETMGASI, SubIdType, SubInfoType};
 use crate::types::merchant_gateway_payment_method_flow as MGPMF;
 use crate::types::order::Order;
-use crate::types::payment::payment_method::{self as ETP, PaymentMethodType};
+use crate::types::payment::payment_method::{self as ETP};
 use crate::types::payment_flow::PaymentFlow;
 use std::collections::{HashMap, HashSet};
 // use crate::types::metadata::Meta;
@@ -48,12 +49,12 @@ use crate::types::card::txn_card_info::TxnCardInfo;
 use crate::types::currency::Currency;
 use crate::types::feature as ETF;
 use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
+use crate::types::payment::payment_method_type_const::*;
 use crate::types::transaction::id::transaction_id_to_text;
 use crate::types::txn_details::types::TxnObjectType;
-use serde_json::Value as AValue;
-
 use masking::PeekInterface;
 use serde_json;
+use serde_json::Value as AValue;
 
 pub fn ord_nub<T>(v: Vec<T>) -> Vec<T>
 where
@@ -386,7 +387,7 @@ pub async fn getFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList {
                         &txn_card_info,
                         txn_detail.txnObjectType.clone(),
                         &mga_eligible_seamless_gateways,
-                        &txn_detail
+                        &txn_detail,
                     )
                 })
                 .collect()
@@ -574,11 +575,17 @@ pub fn isMgaEligible(
     txnCI: &TxnCardInfo,
     mTxnObjType: TxnObjectType,
     mgaEligibleSeamlessGateways: &[String],
-    txn_detail: &TxnDetail
+    txn_detail: &TxnDetail,
 ) -> bool {
     let payment_flow_list = Utils::get_payment_flow_list_from_txn_detail(&txn_detail);
     let is_otm_flow = payment_flow_list.contains(&"ONE_TIME_MANDATE".to_string());
-    validateMga(mga, txnCI, mTxnObjType, mgaEligibleSeamlessGateways, is_otm_flow)
+    validateMga(
+        mga,
+        txnCI,
+        mTxnObjType,
+        mgaEligibleSeamlessGateways,
+        is_otm_flow,
+    )
 }
 
 fn validateMga(
@@ -586,13 +593,13 @@ fn validateMga(
     txnCI: &TxnCardInfo,
     mTxnObjType: TxnObjectType,
     mgaEligibleSeamlessGateways: &[String],
-    is_otm_flow: bool
+    is_otm_flow: bool,
 ) -> bool {
     if mgaEligibleSeamlessGateways.contains(&mga.gateway) && isCardOrNbTxn(txnCI) {
         Utils::is_seamless(mga)
     } else if isMandateRegister(mTxnObjType.clone()) {
         Utils::is_subscription(mga)
-    } else if (isEmandateRegister(mTxnObjType) && !is_otm_flow){
+    } else if (isEmandateRegister(mTxnObjType) && !is_otm_flow) {
         Utils::is_emandate_enabled(mga)
     } else {
         !Utils::is_only_subscription(mga)
@@ -891,16 +898,15 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
         findByNameFromRedis(C::MERCHANT_CONTAINER_SUPPORTED_GATEWAYS.get_key())
             .await
             .unwrap_or_default();
-    let filtered_gateways: Vec<String> =
-        if txnCardInfo.paymentMethodType == PaymentMethodType::MerchantContainer {
-            st.into_iter()
-                .filter(|gw| merchantContainerSupportedGateways.contains(gw))
-                .collect()
-        } else {
-            st.into_iter()
-                .filter(|gw| !merchantContainerSupportedGateways.contains(gw))
-                .collect()
-        };
+    let filtered_gateways: Vec<String> = if txnCardInfo.paymentMethodType == MERCHANT_CONTAINER {
+        st.into_iter()
+            .filter(|gw| merchantContainerSupportedGateways.contains(gw))
+            .collect()
+    } else {
+        st.into_iter()
+            .filter(|gw| !merchantContainerSupportedGateways.contains(gw))
+            .collect()
+    };
     setGws(this, filtered_gateways);
     returnGwListWithLog(this, DeciderFilterName::FilterFunctionalGateways, true)
 }
@@ -1475,22 +1481,20 @@ pub async fn filterGatewaysForValidationType(
         // Get excluded gateways from Redis
         let uniqueGwLs: Vec<String> = st.clone().into_iter().collect();
         let brand = txn_card_info
-                    .cardSwitchProvider
-                    .as_ref()
-                    .map(|provider| provider.peek().to_string())
-                    .unwrap_or_else(|| "DEFAULT".to_string());
+            .cardSwitchProvider
+            .as_ref()
+            .map(|provider| provider.peek().to_string())
+            .unwrap_or_else(|| "DEFAULT".to_string());
         let mPmEntryDB = ETP::get_by_name(brand).await;
-        
-        
+
         let updatedSt = if let Some(cardPaymentMethod) = mPmEntryDB {
             let uniqueGwLs: Vec<String> = st.into_iter().collect();
-            let allGPMfEntries =
-                GPMF::find_all_gpmf_by_gateway_payment_flow_payment_method(
-                    uniqueGwLs.clone(),
-                    cardPaymentMethod.id,
-                    PaymentFlow::CVVLESS,
-                )
-                .await;
+            let allGPMfEntries = GPMF::find_all_gpmf_by_gateway_payment_flow_payment_method(
+                uniqueGwLs.clone(),
+                cardPaymentMethod.id,
+                PaymentFlow::CVVLESS,
+            )
+            .await;
             let mgaList = Utils::get_mgas(this).unwrap_or_default();
             let gmpfGws: Vec<String> = allGPMfEntries
                 .iter()
@@ -1506,9 +1510,7 @@ pub async fn filterGatewaysForValidationType(
                 .collect();
             let gpmfIds: Vec<GatewayPaymentMethodFlowId> =
                 allGPMfEntries.iter().map(|gpmf| gpmf.id.clone()).collect();
-            let mgpmfEntries =
-                MGPMF::get_all_mgpmf_by_mga_id_and_gpmf_ids(mgaIds, gpmfIds)
-                    .await;
+            let mgpmfEntries = MGPMF::get_all_mgpmf_by_mga_id_and_gpmf_ids(mgaIds, gpmfIds).await;
             let filteredMgaList: Vec<i64> = mgpmfEntries
                 .iter()
                 .map(|mgpmf| mgpmf.merchantGatewayAccountId)
@@ -1626,22 +1628,21 @@ pub async fn filterGatewaysForValidationType(
     // Handle TPV or E-Mandate transactions
     else if Utils::is_tpv_transaction(&txn_detail)
         || (Utils::is_emandate_transaction(&txn_detail)
-            && Utils::is_emandate_supported_payment_method(&txn_card_info)) {
-    
-
+            && Utils::is_emandate_supported_payment_method(&txn_card_info))
+    {
         // Check if we should skip processing for one-time mandate flow
         let payment_flow_list = Utils::get_payment_flow_list_from_txn_detail(&txn_detail);
         let is_otm_flow = payment_flow_list.contains(&"ONE_TIME_MANDATE".to_string());
 
-        if is_otm_flow
-        {
+        if is_otm_flow {
             logger::info!(
                 "Skipping processing for OTM flow for txn_id {:?}",
                 txn_detail.txnId.clone()
             );
-        } else // Filter enabled gateway accounts
-            {
-                // Determine validation type and get enabled MGAs
+        } else
+        // Filter enabled gateway accounts
+        {
+            // Determine validation type and get enabled MGAs
             let (validation_type, e_mgas) = if Utils::is_emandate_transaction(&txn_detail) {
                 let e_mgas = SETMA::get_emandate_enabled_mga(
                     this,
@@ -1649,13 +1650,13 @@ pub async fn filterGatewaysForValidationType(
                     possible_ref_ids_of_merchant,
                 )
                 .await;
-    
+
                 let v_type = if Utils::is_tpv_mandate_transaction(&txn_detail) {
                     ETGCI::ValidationType::TpvEmandate
                 } else {
                     ETGCI::ValidationType::Emandate
                 };
-    
+
                 (v_type, e_mgas)
             } else {
                 let e_mgas = ETMA::getEnabledMgasByMerchantIdAndRefId(
@@ -1666,16 +1667,20 @@ pub async fn filterGatewaysForValidationType(
                         .collect(),
                 )
                 .await;
-    
+
                 (ETGCI::ValidationType::Tpv, e_mgas)
             };
-            if matches!(validation_type,ETGCI::ValidationType::TpvEmandate | ETGCI::ValidationType::Emandate) && is_otm_flow {
+            if matches!(
+                validation_type,
+                ETGCI::ValidationType::TpvEmandate | ETGCI::ValidationType::Emandate
+            ) && is_otm_flow
+            {
                 return Ok(returnGwListWithLog(
                     this,
                     DeciderFilterName::FilterFunctionalGatewaysForValidationType,
                     true,
-                ))
-            }            
+                ));
+            }
             let enabled_gateway_accounts = e_mgas
                 .into_iter()
                 .filter(|mga| {
@@ -1888,7 +1893,13 @@ pub async fn filterGatewaysCardInfo(
                         ci.gateway.is_some()
                             && merchant_wise_mandate_supported_gateway_prime.contains(&ci.gateway)
                             && ci.validationType == Some(ETGCI::ValidationType::CardMandate)
-                            && ci.authType.clone().unwrap_or_else(|| "THREE_DS".to_string()) == auth_type_to_text(&m_auth_type.clone().unwrap_or(AuthType::THREE_DS))
+                            && ci
+                                .authType
+                                .clone()
+                                .unwrap_or_else(|| "THREE_DS".to_string())
+                                == auth_type_to_text(
+                                    &m_auth_type.clone().unwrap_or(AuthType::THREE_DS),
+                                )
                     })
                     .collect::<Vec<_>>()
             } else {
@@ -1905,7 +1916,16 @@ pub async fn filterGatewaysCardInfo(
                 ETGCI::get_enabled_gateway_card_info_for_gateways(card_bins, filtered_gateways)
                     .await
                     .into_iter()
-                    .filter(|ci| (ci.validationType == Some(ETGCI::ValidationType::CardMandate) && ci.authType.clone().unwrap_or_else(|| "THREE_DS".to_string()) == auth_type_to_text(&m_auth_type.clone().unwrap_or(AuthType::THREE_DS))))
+                    .filter(|ci| {
+                        (ci.validationType == Some(ETGCI::ValidationType::CardMandate)
+                            && ci
+                                .authType
+                                .clone()
+                                .unwrap_or_else(|| "THREE_DS".to_string())
+                                == auth_type_to_text(
+                                    &m_auth_type.clone().unwrap_or(AuthType::THREE_DS),
+                                ))
+                    })
                     .collect::<Vec<GatewayCardInfo>>();
 
             Ok(eligible_gateway_card_info_prime
@@ -1985,13 +2005,15 @@ pub async fn filterGatewaysCardInfo(
                 .collect::<Vec<_>>();
 
             let eligible_gateway_card_info_prime = match m_validation_type {
-                Some(ref v_type) => eligible_gateway_card_infos.clone()
+                Some(ref v_type) => eligible_gateway_card_infos
+                    .clone()
                     .into_iter()
                     .filter(|ci| {
                         ci.validationType.clone().map(|v| v.to_string()) == Some(v_type.to_string())
                     })
                     .collect::<Vec<_>>(),
-                None => eligible_gateway_card_infos.clone()
+                None => eligible_gateway_card_infos
+                    .clone()
                     .into_iter()
                     .filter(|ci| ci.authType == m_auth_type.as_ref().map(|auth| auth.to_string()))
                     .collect::<Vec<_>>(),
@@ -2567,11 +2589,8 @@ async fn getGatewaysAcceptingPaymentMethod(
 
 fn getPaymentMethodForNonCardTransaction(txn_card_info: &TxnCardInfo) -> String {
     if matches!(
-        txn_card_info.paymentMethodType,
-        ETP::PaymentMethodType::ConsumerFinance
-            | ETP::PaymentMethodType::UPI
-            | ETP::PaymentMethodType::Reward
-            | ETP::PaymentMethodType::Cash
+        txn_card_info.paymentMethodType.as_str(),
+        CONSUMER_FINANCE | UPI | REWARD | CASH
     ) {
         txn_card_info.paymentMethod.clone()
     } else {
@@ -2919,7 +2938,7 @@ pub async fn filterGatewaysForConsumerFinance(this: &mut DeciderFlow<'_>) -> Vec
         .into_iter()
         .collect::<HashSet<_>>();
 
-    if txn_card_info.paymentMethodType == ETP::PaymentMethodType::ConsumerFinance {
+    if txn_card_info.paymentMethodType == CONSUMER_FINANCE {
         let consumer_finance_also_gateways: Vec<String> =
             findByNameFromRedis::<Vec<String>>(C::CONSUMER_FINANCE_ALSO_GATEWAYS.get_key())
                 .await
@@ -2969,7 +2988,7 @@ pub async fn filterGatewaysForUpi(this: &mut DeciderFlow<'_>) -> Vec<String> {
     //Convert upi_only_gateways to <HashSet<_>>
     let upi_only_gateways_hashset = upi_only_gateways.into_iter().collect::<HashSet<_>>();
 
-    if txn_card_info.paymentMethodType == ETP::PaymentMethodType::UPI {
+    if txn_card_info.paymentMethodType == UPI {
         let upi_also_gateway: Vec<String> =
             findByNameFromRedis::<Vec<String>>(C::UPI_ALSO_GATEWAYS.get_key())
                 .await
@@ -3016,31 +3035,30 @@ pub async fn filterGatewaysForTxnType(this: &mut DeciderFlow<'_>) -> Vec<String>
         None => (),
         Some(txn_type) => {
             let mgas = Utils::get_mgas(this).unwrap_or_default();
-            let (st, curr_mgas) = if txn_card_info.paymentMethodType == ETP::PaymentMethodType::UPI
-                && txn_card_info.paymentMethod == "UPI"
-            {
-                let functional_mgas: Vec<_> = mgas
-                    .iter()
-                    .filter(|mga| {
-                        st.contains(&mga.gateway)
-                            && Utils::is_txn_type_enabled(
-                                mga.supportedTxnType.as_deref(),
-                                "UPI",
-                                &txn_type,
-                            )
-                    })
-                    .cloned()
-                    .collect();
-                (
-                    functional_mgas
+            let (st, curr_mgas) =
+                if txn_card_info.paymentMethodType == UPI && txn_card_info.paymentMethod == UPI {
+                    let functional_mgas: Vec<_> = mgas
                         .iter()
-                        .map(|mga| mga.gateway.clone())
-                        .collect(),
-                    functional_mgas,
-                )
-            } else {
-                (st.clone(), mgas)
-            };
+                        .filter(|mga| {
+                            st.contains(&mga.gateway)
+                                && Utils::is_txn_type_enabled(
+                                    mga.supportedTxnType.as_deref(),
+                                    UPI,
+                                    &txn_type,
+                                )
+                        })
+                        .cloned()
+                        .collect();
+                    (
+                        functional_mgas
+                            .iter()
+                            .map(|mga| mga.gateway.clone())
+                            .collect(),
+                        functional_mgas,
+                    )
+                } else {
+                    (st.clone(), mgas)
+                };
 
             let v2_integration_not_supported_gateways: Vec<String> =
                 findByNameFromRedis(C::V2_INTEGRATION_NOT_SUPPORTED_GATEWAYS.get_key())
@@ -3213,8 +3231,7 @@ pub async fn filterGatewaysForReward(this: &mut DeciderFlow<'_>) -> Vec<String> 
             .unwrap_or_else(Vec::new)
             .into_iter()
             .collect();
-    let filtered_gws = if card_type == Some(ETCA::CardType::Reward)
-        || payment_method_type == ETP::PaymentMethodType::Reward
+    let filtered_gws = if card_type == Some(ETCA::CardType::Reward) || payment_method_type == REWARD
     {
         st.into_iter()
             .filter(|gw| reward_also_gateways.contains(gw) || reward_only_gateways.contains(gw))
@@ -3235,7 +3252,7 @@ pub async fn filterGatewaysForReward(this: &mut DeciderFlow<'_>) -> Vec<String> 
 pub async fn filterGatewaysForCash(this: &mut DeciderFlow<'_>) -> Vec<String> {
     let st = getGws(this);
     let payment_method_type = this.get().dpTxnCardInfo.paymentMethodType.clone();
-    if payment_method_type != ETP::PaymentMethodType::Cash {
+    if payment_method_type != CASH {
         let cash_only_gateways: Vec<String> = findByNameFromRedis(C::CASH_ONLY_GATEWAYS.get_key())
             .await
             .unwrap_or_else(Vec::new)

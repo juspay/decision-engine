@@ -29,43 +29,39 @@
 // use serde_json as A;
 // use std::vec::Vec as BSL;
 // use feedback::types::{TxnCardInfo, PaymentMethodType, MerchantGatewayAccount};
-use crate::logger;
 use crate::decider::gatewaydecider::utils as GU;
+use crate::logger;
+use crate::merchant_config_util as MC;
+use crate::redis::cache::findByNameFromRedis;
+use crate::types::payment::payment_method_type_const::*;
 use crate::{
     app,
     decider::gatewaydecider::types::GatewayScoringData,
+    decider::{
+        gatewaydecider::constants as DC, gatewaydecider::types::RoutingFlowType as RF,
+        gatewaydecider::types::ScoreKeyType as SK, gatewaydecider::types::SrV3InputConfig,
+    },
     feedback::{
         constants as C,
         types::SrV3DebugBlock,
         utils::{
-            dateInIST, getCurrentIstDateWithFormat,
-            getProducerKey, getTrueString, isKeyExistsRedis, logGatewayScoreType,
-            GatewayScoringType,updateMovingWindow, updateScore,
+            dateInIST, getCurrentIstDateWithFormat, getProducerKey, getTrueString,
+            isKeyExistsRedis, logGatewayScoreType, updateMovingWindow, updateScore,
+            GatewayScoringType,
         },
-       
     },
     redis::{feature::isFeatureEnabled, types::ServiceConfigKey},
     types::{
         card::txn_card_info::TxnCardInfo,
-        payment_flow::PaymentFlow as PF,
+        merchant::id as MID,
         merchant::{
             merchant_account::MerchantAccount, merchant_gateway_account::MerchantGatewayAccount,
         },
-        payment::payment_method::PaymentMethodType as PMT,
+        payment_flow::PaymentFlow as PF,
         txn_details::types::TxnDetail,
-        merchant::id as MID
-    },
-    decider::{
-        gatewaydecider::constants as DC,
-        gatewaydecider::types::{SrV3InputConfig},
-        gatewaydecider::types::ScoreKeyType as SK,
-        gatewaydecider::types::RoutingFlowType as RF,
     },
     utils as U,
 };
-use crate::redis::cache::findByNameFromRedis;
-use crate::merchant_config_util as MC;
-
 
 // Converted functions
 // Original Haskell function: updateSrV3Score
@@ -78,58 +74,65 @@ pub async fn updateSrV3Score(
     gateway_reference_id: Option<String>,
 ) {
     // let is_merchant_enabled_globally = MC::isMerchantEnabledForPaymentFlows(merchant_acc.id, [PF::SR_BASED_ROUTING].to_vec()).await;
-        match (txn_detail.gateway.clone()) {
-            (None) => {
-                logger::info!(
-                    action = "gateway not found",
-                    tag = "gateway not found",
-                    "gateway not found for this transaction having id"
-                );
-            }
-            (Some(gateway)) => {
-                let unified_sr_v3_key =
-                    getProducerKey(txn_detail.clone(), mb_gateway_scoring_data, SK::SR_V3_KEY, false, gateway_reference_id.clone())
-                        .await;
-                let key_for_gateway_selection = unified_sr_v3_key.clone().unwrap_or_else(|| "".to_string());
-                let payment_method_type = txn_card_info.paymentMethodType.clone();
-                let key_for_gateway_selection_queue =
-                    format!("{}_{}queue", key_for_gateway_selection, "}");
-                let key_for_gateway_selection_score =
-                    format!("{}_{}score", key_for_gateway_selection, "}");
-                updateScoreAndQueue(
-                    key_for_gateway_selection_queue,
-                    key_for_gateway_selection_score,
-                    gateway_scoring_type.clone(),
-                    txn_detail.clone(),
-                    txn_card_info.clone(),
-                ).await;
-                if [PMT::Card, PMT::UPI].contains(&payment_method_type) {
-                    let key3d_for_gateway_selection =
-                        unified_sr_v3_key.clone().unwrap_or_else(|| "".to_string());
-                    if key3d_for_gateway_selection != key_for_gateway_selection {
-                        logger::info!(
-                            tag = "SR V3 Based threeD Producer Key",
-                            action = "SR V3 Based threeD Producer Key",
-                            "{:?}",
-                            key3d_for_gateway_selection
-                        );
-                        let key3d_for_gateway_selection_queue =
-                            format!("{}_{}queue", key3d_for_gateway_selection, "}");
-                        let key3d_for_gateway_selection_score =
-                            format!("{}_{}score", key3d_for_gateway_selection, "}");
-                        updateScoreAndQueue(
-                            key3d_for_gateway_selection_queue,
-                            key3d_for_gateway_selection_score,
-                            gateway_scoring_type.clone(),
-                            txn_detail.clone(),
-                            txn_card_info.clone(),
-                        ).await;
-                    }
-                }
-                logGatewayScoreType(gateway_scoring_type, RF::SRV3_FLOW, txn_detail);
-            }
+    match (txn_detail.gateway.clone()) {
+        (None) => {
+            logger::info!(
+                action = "gateway not found",
+                tag = "gateway not found",
+                "gateway not found for this transaction having id"
+            );
         }
-
+        (Some(gateway)) => {
+            let unified_sr_v3_key = getProducerKey(
+                txn_detail.clone(),
+                mb_gateway_scoring_data,
+                SK::SR_V3_KEY,
+                false,
+                gateway_reference_id.clone(),
+            )
+            .await;
+            let key_for_gateway_selection =
+                unified_sr_v3_key.clone().unwrap_or_else(|| "".to_string());
+            let payment_method_type = txn_card_info.paymentMethodType.clone();
+            let key_for_gateway_selection_queue =
+                format!("{}_{}queue", key_for_gateway_selection, "}");
+            let key_for_gateway_selection_score =
+                format!("{}_{}score", key_for_gateway_selection, "}");
+            updateScoreAndQueue(
+                key_for_gateway_selection_queue,
+                key_for_gateway_selection_score,
+                gateway_scoring_type.clone(),
+                txn_detail.clone(),
+                txn_card_info.clone(),
+            )
+            .await;
+            if [CARD, UPI].contains(&payment_method_type.as_str()) {
+                let key3d_for_gateway_selection =
+                    unified_sr_v3_key.clone().unwrap_or_else(|| "".to_string());
+                if key3d_for_gateway_selection != key_for_gateway_selection {
+                    logger::info!(
+                        tag = "SR V3 Based threeD Producer Key",
+                        action = "SR V3 Based threeD Producer Key",
+                        "{:?}",
+                        key3d_for_gateway_selection
+                    );
+                    let key3d_for_gateway_selection_queue =
+                        format!("{}_{}queue", key3d_for_gateway_selection, "}");
+                    let key3d_for_gateway_selection_score =
+                        format!("{}_{}score", key3d_for_gateway_selection, "}");
+                    updateScoreAndQueue(
+                        key3d_for_gateway_selection_queue,
+                        key3d_for_gateway_selection_score,
+                        gateway_scoring_type.clone(),
+                        txn_detail.clone(),
+                        txn_card_info.clone(),
+                    )
+                    .await;
+                }
+            }
+            logGatewayScoreType(gateway_scoring_type, RF::SRV3_FLOW, txn_detail);
+        }
+    }
 }
 
 // Original Haskell function: createKeysIfNotExist
@@ -165,8 +168,9 @@ pub async fn createKeysIfNotExist(
             key_for_gateway_selection_queue,
             key_for_gateway_selection_score,
             merchant_bucket_size,
-            score_list
-        ).await;
+            score_list,
+        )
+        .await;
     }
 }
 
@@ -188,8 +192,9 @@ pub async fn updateScoreAndQueue(
         key_for_gateway_selection_score.clone(),
         txn_detail.clone(),
         txn_card_info,
-    ).await;
-    let (value, should_score_increase) : (String, bool) = match gateway_scoring_type {
+    )
+    .await;
+    let (value, should_score_increase): (String, bool) = match gateway_scoring_type {
         GatewayScoringType::PENALISE_SRV3 => ("0".into(), false),
         GatewayScoringType::REWARD => ("1".into(), true),
         _ => ("0".into(), false),
@@ -231,8 +236,8 @@ pub async fn updateScoreAndQueue(
     //             // ).await;
     //             ()
     //         }
-//     }
-// }
+    //     }
+    // }
     let current_ist_time = getCurrentIstDateWithFormat("YYYY-MM-DD HH:mm:SS.sss".to_string());
     let date_created = dateInIST(
         txn_detail.clone().dateCreated.to_string(),
@@ -255,18 +260,18 @@ pub async fn updateScoreAndQueue(
         key_for_gateway_selection_queue.clone(),
         key_for_gateway_selection_score.clone(),
         value.clone(),
-    ).await;
+    )
+    .await;
     logger::info!(
         action = "updateScoreAndQueue",
         tag = "updateScoreAndQueue",
         "Popped Redis Value {}",
         popped_status
     );
-    let returned_value = match serde_json::from_slice::<Option<SrV3DebugBlock>>(popped_status.as_bytes()){
-            Ok(maybe_popped_status_block) => {
-                get_status(maybe_popped_status_block, popped_status)
-            },
-            Err(_) => popped_status
+    let returned_value =
+        match serde_json::from_slice::<Option<SrV3DebugBlock>>(popped_status.as_bytes()) {
+            Ok(maybe_popped_status_block) => get_status(maybe_popped_status_block, popped_status),
+            Err(_) => popped_status,
         };
     logger::info!(
         action = "updateScoreAndQueue",
@@ -281,7 +286,8 @@ pub async fn updateScoreAndQueue(
             C::kvRedis(),
             key_for_gateway_selection_score.clone(),
             should_score_increase,
-        ).await;
+        )
+        .await;
     }
 }
 
@@ -309,9 +315,11 @@ fn getStatus(maybe_popped_status_block: Option<SrV3DebugBlock>, popped_status: S
 
 //Original Haskell function: getSrV3MerchantBucketSize
 pub async fn getSrV3MerchantBucketSize(txn_detail: TxnDetail, txn_card_info: TxnCardInfo) -> i32 {
-    let merchant_sr_v3_input_config:Option<SrV3InputConfig>  =
-        findByNameFromRedis(C::SR_V3_INPUT_CONFIG(MID::merchant_id_to_text(txn_detail.merchantId)).get_key()).await;
-    let pmt = txn_card_info.paymentMethodType.to_text();
+    let merchant_sr_v3_input_config: Option<SrV3InputConfig> = findByNameFromRedis(
+        C::SR_V3_INPUT_CONFIG(MID::merchant_id_to_text(txn_detail.merchantId)).get_key(),
+    )
+    .await;
+    let pmt = txn_card_info.paymentMethodType;
     let pm = GU::get_payment_method(
         (&pmt).to_string(),
         txn_card_info.paymentMethod,
@@ -320,7 +328,7 @@ pub async fn getSrV3MerchantBucketSize(txn_detail: TxnDetail, txn_card_info: Txn
     let maybe_bucket_size = GU::get_sr_v3_bucket_size(merchant_sr_v3_input_config, &pmt, &pm);
     let merchant_bucket_size = match maybe_bucket_size {
         None => {
-            let default_sr_v3_input_config:Option<SrV3InputConfig> =
+            let default_sr_v3_input_config: Option<SrV3InputConfig> =
                 findByNameFromRedis(DC::srV3DefaultInputConfig.get_key()).await;
             GU::get_sr_v3_bucket_size(default_sr_v3_input_config, &pmt, &pm)
                 .unwrap_or(C::defaultSrV3BasedBucketSize)

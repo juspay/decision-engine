@@ -153,11 +153,8 @@ diesel::table! {
         juspay_bank_code_id -> Nullable<Int8>,
         gateway_bank_code -> Nullable<Text>,
         currency_configs -> Nullable<Text>,
-        #[sql_name = "dsl"]
         gateway_dsl -> Nullable<Text>,
-        #[sql_name = "non_combinable_flows"]
         non_combination_flows -> Nullable<Text>,
-        #[sql_name = "country_code_alpha_3"]
         country_code_alpha3 -> Nullable<Text>,
         disabled -> Bool,
         payment_method_type -> Nullable<Text>,
@@ -333,7 +330,6 @@ diesel::table! {
         display_name -> Nullable<Text>,
         nick_name -> Nullable<Text>,
         sub_type -> Nullable<Text>,
-        #[sql_name = "dsl"]
         payment_dsl -> Nullable<Text>,
     }
 }
@@ -348,6 +344,8 @@ diesel::table! {
         name -> Varchar,
         description -> Text,
         algorithm_data -> Text,
+        #[max_length = 64]
+        algorithm_for -> Varchar,
         metadata -> Nullable<Jsonb>,
         created_at -> Timestamp,
         modified_at -> Timestamp,
@@ -355,11 +353,14 @@ diesel::table! {
 }
 
 diesel::table! {
-    routing_algorithm_mapper (created_by) {
+    routing_algorithm_mapper (id) {
+        id -> Int4,
         #[max_length = 255]
         created_by -> Varchar,
         #[max_length = 255]
         routing_algorithm_id -> Varchar,
+        #[max_length = 64]
+        algorithm_for -> Varchar,
     }
 }
 
@@ -378,7 +379,6 @@ diesel::table! {
     tenant_config (id) {
         #[max_length = 255]
         id -> Varchar,
-        #[sql_name = "type"]
         #[max_length = 255]
         tenant_type -> Varchar,
         #[max_length = 255]

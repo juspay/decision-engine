@@ -12,12 +12,12 @@ use std::{
 use chrono::{Datelike, Timelike, Utc};
 use once_cell::sync::Lazy;
 use serde::ser::{SerializeMap, Serializer};
-use serde_json::Value;
+use serde_json::{Value, Map};
 
 use crate::logger;
 
-use super::storage::Storage;
 use super::env::get_env_var;
+use super::storage::Storage;
 use time::format_description::well_known::Iso8601;
 use tracing::{Event, Metadata, Subscriber};
 use tracing_subscriber::{
@@ -151,6 +151,31 @@ where
         }
     }
 
+    pub fn normalize_json(value: Value) -> Value {
+        match value {
+            Value::Object(map) => {
+                let new_map = map
+                    .into_iter()
+                    .map(|(k, v)| (k, Self::normalize_json(v)))
+                    .collect::<Map<_, _>>();
+                Value::Object(new_map)
+            }
+            Value::Array(arr) => {
+                let new_arr = arr.into_iter().map(Self::normalize_json).collect();
+                Value::Array(new_arr)
+            }
+            Value::String(s) => {
+                // Try parsing string as JSON
+                match serde_json::from_str::<Value>(&s) {
+                    Ok(inner_json) => FormattingLayer::<W>::normalize_json(inner_json),
+                    Err(_) => Value::String(s),
+                }
+            }
+            other => other,
+        }
+    }
+
+
     /// Serialize common for both span and event entries.
     fn common_serialize<S>(
         &self,
@@ -165,20 +190,66 @@ where
     {
         // Define specific keys for "Incoming_api" and "DOMAIN" categories.
         let incoming_api_keys = [
-            "udf_order_id", "udf_customer_id", "udf_txn_uuid", "x-request-id", "x-global-request-id",
-            "merchant_id", "sdk_session_span", "timestamp", "hostname", "action",
-            "partitionKey", "category", "entity", "latency", "io_latency_metric", "request_cputime",
-            "gc_time", "bytes_allocated", "schema_version", "tenant_name", "tenant_id", "resp_code",
-            "url", "cell_selector", "gateway", "cell_id", "is_audit_trail_log", "is_art_enabled",
-            "error_category", "error_code"
+            "udf_order_id",
+            "udf_customer_id",
+            "udf_txn_uuid",
+            "x-request-id",
+            "x-global-request-id",
+            "merchant_id",
+            "sdk_session_span",
+            "timestamp",
+            "hostname",
+            "action",
+            "partitionKey",
+            "category",
+            "entity",
+            "latency",
+            "io_latency_metric",
+            "request_cputime",
+            "gc_time",
+            "bytes_allocated",
+            "schema_version",
+            "tenant_name",
+            "tenant_id",
+            "resp_code",
+            "url",
+            "cell_selector",
+            "gateway",
+            "cell_id",
+            "is_audit_trail_log",
+            "is_art_enabled",
+            "error_category",
+            "error_code",
         ];
 
         let domain_keys = [
-            "message_number", "error_category", "x-request-id", "env", "@timestamp", "udf_txn_uuid",
-            "flow_guid", "action", "is_audit_trail_log", "euler-request-id", "tenant_name", "hostname",
-            "cluster", "level", "merchant_id", "udf_order_id", "is_art_enabled", "schema_version",
-            "message", "gateway", "error_reason", "config_version", "category", "tenant_id",
-            "timestamp", "sdk_session_span", "tag",
+            "message_number",
+            "error_category",
+            "x-request-id",
+            "env",
+            "@timestamp",
+            "udf_txn_uuid",
+            "flow_guid",
+            "action",
+            "is_audit_trail_log",
+            "euler-request-id",
+            "tenant_name",
+            "hostname",
+            "cluster",
+            "level",
+            "merchant_id",
+            "udf_order_id",
+            "is_art_enabled",
+            "schema_version",
+            "message",
+            "gateway",
+            "error_reason",
+            "config_version",
+            "category",
+            "tenant_id",
+            "timestamp",
+            "sdk_session_span",
+            "tag",
         ];
 
         // Read the category from storage (default is "DOMAIN").
@@ -214,8 +285,8 @@ where
                         explicit_entries_set.insert(*key);
                     }
                 }
-            }  
-            
+            }
+
             // Construct the custom "message" object for Incoming_api logs.
             let mut message = serde_json::json!({
                 "url": storage.values.get("url").unwrap_or(&Value::String("null".to_string())),
@@ -240,30 +311,44 @@ where
                     "jp_error_message": storage.values.get("jp_error_message").unwrap_or(&Value::String("null".to_string())),
                     "source": storage.values.get("source").unwrap_or(&Value::String("null".to_string())),
                 });
-                message.as_object_mut().unwrap().insert("error_info".to_string(), error_info);
+                message
+                    .as_object_mut()
+                    .unwrap()
+                    .insert("error_info".to_string(), error_info);
             }
 
-            if !explicit_entries_set.contains("message"){ 
+            if !explicit_entries_set.contains("message") {
                 map_serializer.serialize_entry("message", &message)?;
                 explicit_entries_set.insert("message");
-            }   
-            if !explicit_entries_set.contains("latency"){ 
-                map_serializer.serialize_entry("latency", &storage.values.get("latency").unwrap_or(&Value::String("null".to_string())))?;
+            }
+            if !explicit_entries_set.contains("latency") {
+                map_serializer.serialize_entry(
+                    "latency",
+                    &storage
+                        .values
+                        .get("latency")
+                        .unwrap_or(&Value::String("null".to_string())),
+                )?;
                 explicit_entries_set.insert("latency");
             }
-            if !explicit_entries_set.contains("resp_code"){ 
-                map_serializer.serialize_entry("resp_code", &storage.values.get("res_code").unwrap_or(&Value::String("null".to_string())))?;
+            if !explicit_entries_set.contains("resp_code") {
+                map_serializer.serialize_entry(
+                    "resp_code",
+                    &storage
+                        .values
+                        .get("res_code")
+                        .unwrap_or(&Value::String("null".to_string())),
+                )?;
                 explicit_entries_set.insert("resp_code");
             }
-            if !explicit_entries_set.contains("level"){ 
+            if !explicit_entries_set.contains("level") {
                 map_serializer.serialize_entry("level", &Value::String("Info".to_string()))?;
                 explicit_entries_set.insert("level");
             }
-            if !explicit_entries_set.contains("cell_id"){ 
+            if !explicit_entries_set.contains("cell_id") {
                 map_serializer.serialize_entry("cell_id", &get_env_var("CELL_ID", "null"))?;
                 explicit_entries_set.insert("cell_id");
             }
-
         } else {
             // DOMAIN category logic.
             // Serialize keys from the span that match the domain keys array.
@@ -283,29 +368,45 @@ where
             for key in &domain_keys {
                 if !explicit_entries_set.contains(*key) {
                     if let Some(value) = storage.values.get(*key) {
-                        map_serializer.serialize_entry(*key, value)?;
-                        explicit_entries_set.insert(*key);
+                        if key == &"message" {
+                            let normalized_value = get_normalized_message::<W>(&storage);
+                            
+                            map_serializer.serialize_entry("message", &normalized_value)?;
+                            explicit_entries_set.insert("message");
+                        }    
+                        else{
+                            map_serializer.serialize_entry(*key, value)?;
+                            explicit_entries_set.insert(*key);
+
+                        }
+                        
+                        
                     }
                 }
-            }           
+            }
 
             // Set additional fields for DOMAIN logs.
             if metadata.level() == &tracing::Level::ERROR {
-                if !explicit_entries_set.contains("category"){ 
-                    map_serializer.serialize_entry("category", &Value::String("ERROR".to_string()))?;
+                if !explicit_entries_set.contains("category") {
+                    map_serializer
+                        .serialize_entry("category", &Value::String("ERROR".to_string()))?;
                     explicit_entries_set.insert("category");
                 }
-                if !explicit_entries_set.contains("error_category"){ 
-                    map_serializer.serialize_entry("error_category", &Value::String("DOMAIN_ERROR".to_string()))?;
+                if !explicit_entries_set.contains("error_category") {
+                    map_serializer.serialize_entry(
+                        "error_category",
+                        &Value::String("DOMAIN_ERROR".to_string()),
+                    )?;
                     explicit_entries_set.insert("error_category");
                 }
-                if !explicit_entries_set.contains("level"){ 
+                if !explicit_entries_set.contains("level") {
                     map_serializer.serialize_entry("level", &Value::String("Error".to_string()))?;
                     explicit_entries_set.insert("level");
                 }
             } else {
-                if !explicit_entries_set.contains("category"){ 
-                    map_serializer.serialize_entry("category", &Value::String("DOMAIN".to_string()))?;
+                if !explicit_entries_set.contains("category") {
+                    map_serializer
+                        .serialize_entry("category", &Value::String("DOMAIN".to_string()))?;
                     explicit_entries_set.insert("category");
                 }
                 if !explicit_entries_set.contains("level") {
@@ -322,18 +423,19 @@ where
                 }
             }
 
-            if !explicit_entries_set.contains("message"){
-                map_serializer.serialize_entry("message", &storage.values.get("message").unwrap_or(&Value::String("null".to_string())))?;
+            if !explicit_entries_set.contains("message") {
+                let normalized_value = get_normalized_message::<W>(&storage);
+                
+                map_serializer.serialize_entry("message", &normalized_value)?;
                 explicit_entries_set.insert("message");
             }
 
-            if !explicit_entries_set.contains("@timestamp"){
+            if !explicit_entries_set.contains("@timestamp") {
                 map_serializer.serialize_entry("@timestamp", &format_time_custom())?;
                 explicit_entries_set.insert("@timestamp");
             }
-
         }
-        if !explicit_entries_set.contains("is_art_enabled"){
+        if !explicit_entries_set.contains("is_art_enabled") {
             map_serializer.serialize_entry("is_art_enabled", "false")?;
             explicit_entries_set.insert("is_art_enabled");
         }
@@ -356,9 +458,13 @@ where
         map_serializer.serialize_entry(FILE, &metadata.file())?;
         if name != "?" {
             map_serializer.serialize_entry(FN, name)?;
-            map_serializer.serialize_entry(FULL_NAME, &format!("{}::{}", metadata.target(), name))?;
+            map_serializer
+                .serialize_entry(FULL_NAME, &format!("{}::{}", metadata.target(), name))?;
         }
-        map_serializer.serialize_entry("message_number", &MESSAGE_NUMBER.fetch_add(1, Ordering::SeqCst))?;
+        map_serializer.serialize_entry(
+            "message_number",
+            &MESSAGE_NUMBER.fetch_add(1, Ordering::SeqCst),
+        )?;
         explicit_entries_set.insert("message_number");
         explicit_entries_set.insert("timestamp");
         explicit_entries_set.insert("app_framework");
@@ -371,15 +477,15 @@ where
         explicit_entries_set.insert(FILE);
         explicit_entries_set.insert(FN);
         explicit_entries_set.insert(FULL_NAME);
-        
+
         if category == "INCOMING_API" {
             for key in &incoming_api_keys {
                 if !explicit_entries_set.contains(*key) {
                     map_serializer.serialize_entry(*key, &Value::Null)?;
                     explicit_entries_set.insert(*key); // optional, not needed beyond this
                 }
-        }}
-        else{
+            }
+        } else {
             for key in &domain_keys {
                 if !explicit_entries_set.contains(*key) {
                     map_serializer.serialize_entry(*key, &Value::Null)?;
@@ -387,7 +493,7 @@ where
                 }
             }
         }
-        
+
         if let Ok(time) = &time::OffsetDateTime::now_utc().format(&Iso8601::DEFAULT) {
             map_serializer.serialize_entry(TIME, time)?;
         }
@@ -456,8 +562,23 @@ where
         map_serializer.end()?;
         Ok(buffer)
     }
-
 }
+
+fn get_normalized_message<W>(storage: &Storage<'_>) -> serde_json::Value
+where
+    W: for<'a> MakeWriter<'a> + 'static,
+{
+    let value = storage.values.get("message").cloned().unwrap_or(Value::String("null".to_string()));
+
+    match &value {
+        serde_json::Value::String(s) => match serde_json::from_str::<serde_json::Value>(s.as_str()) {
+            Ok(parsed) => FormattingLayer::<W>::normalize_json(parsed),
+            Err(_) => value.clone(),
+        },
+        _ => value.clone(),
+    }
+}
+
 
 /// Format the current time in a custom format: "YYYY-MM-DD HH:MM:SS.mmm"
 fn format_time_custom() -> String {

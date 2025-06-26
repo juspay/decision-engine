@@ -25,7 +25,6 @@ use crate::{
             udfs::get_udf,
             Order,
         },
-        payment::payment_method::PaymentMethodType,
         tenant::{
             tenant_config::{ConfigType, FilterDimension, ModuleName},
             tenant_config_filter::get_tenant_config_filter_by_group_id_and_dimension_value,
@@ -43,7 +42,7 @@ use serde_json::{from_str, Value};
 use crate::decider::gatewaydecider::types as DeciderTypes;
 
 use super::utils;
-
+use crate::types::payment::payment_method_type_const::*;
 // use serde_json::Value as AValue;
 // use eulerhs::prelude::*;
 // use data::aeson::{Object, either_decode, (.:)};
@@ -237,7 +236,7 @@ pub fn make_payment_info(
                 .card_type
                 .as_ref()
                 .map(|ct| card_type_to_text(&ct))
-                .or_else(|| Some(txnCardInfo.paymentMethodType.to_text().to_string())),
+                .or_else(|| Some(txnCardInfo.paymentMethodType)),
             paymentMethod: txnCardInfo
                 .cardIssuerBankName
                 .clone()
@@ -314,7 +313,7 @@ fn go_card_isin(
     let cloned_txn_card_info = txnCardInfo.clone();
 
     FilteredPaymentInfo {
-        paymentMethodType: Some("CARD".to_string()),
+        paymentMethodType: Some(CARD.to_string()),
         paymentMethod: txnCardInfo
             .cardSwitchProvider
             .clone()

@@ -7,16 +7,18 @@ use crate::decider::gatewaydecider::types::{
     SRMetricLogData,
 };
 use crate::logger;
-use crate::merchant_config_util::{isMerchantEnabledForPaymentFlows, isPaymentFlowEnabledWithHierarchyCheck};
+use crate::merchant_config_util::{
+    isMerchantEnabledForPaymentFlows, isPaymentFlowEnabledWithHierarchyCheck,
+};
 use crate::redis::types::ServiceConfigKey;
 #[cfg(feature = "mysql")]
 use crate::storage::schema::txn_detail;
 #[cfg(feature = "postgres")]
 use crate::storage::schema_pg::txn_detail;
 use crate::types::gateway_routing_input::{
-    EliminationLevel, EliminationSuccessRateInput, GatewaySuccessRateBasedRoutingInput,
-    GatewayWiseSuccessRateBasedRoutingInput, GlobalGatewayScore, GlobalScore, GlobalScoreLog,
-    SelectionLevel, GatewayScore,
+    EliminationLevel, EliminationSuccessRateInput, GatewayScore,
+    GatewaySuccessRateBasedRoutingInput, GatewayWiseSuccessRateBasedRoutingInput,
+    GlobalGatewayScore, GlobalScore, GlobalScoreLog, SelectionLevel,
 };
 use crate::types::payment_flow::PaymentFlow;
 use crate::types::tenant::tenant_config::ModuleName;
@@ -61,14 +63,6 @@ use crate::types::gateway_outage::{self as ETGO, GatewayOutage};
 // use data_random::distribution::beta::beta;
 // use system_random::stateful::{init_std_gen, new_io_gen_m, IOGenM};
 // use system_random::internal::StdGen;
-use std::collections::HashMap as MP;
-use std::iter::Iterator;
-use std::option::Option;
-use std::primitive;
-use std::string::String as T;
-use std::time::{SystemTime, UNIX_EPOCH};
-use std::vec::Vec;
-use crate::feedback::gateway_elimination_scoring::flow::{getTTLForKey};
 use super::types::{
     transform_gateway_wise_success_rate_based_routing, ConfigSource, DebugScoringEntry,
     DeciderGatewayWiseSuccessRateBasedRoutingInput, Dimension, DownTime, FilterLevel, Gateway,
@@ -76,7 +70,15 @@ use super::types::{
     RankingAlgorithm, RedisKey, ResetApproach, ResetGatewayInput, ScoreKeyType, SrV3InputConfig,
     SuccessRate1AndNConfig,
 };
-
+use crate::feedback::gateway_elimination_scoring::flow::getTTLForKey;
+use crate::types::payment::payment_method_type_const::*;
+use std::collections::HashMap as MP;
+use std::iter::Iterator;
+use std::option::Option;
+use std::primitive;
+use std::string::String as T;
+use std::time::{SystemTime, UNIX_EPOCH};
+use std::vec::Vec;
 // #[derive(Debug, ArtRecordable)]
 // pub struct IOGenMStdGen;
 
@@ -150,7 +152,7 @@ pub fn return_sm_with_log(
     let sr = decider_flow.writer.gwScoreMap.clone();
     let txn_id = decider_flow.get().dpTxnDetail.txnId.clone();
     logger::debug!(
-        tag="GW_Scoring",
+        tag = "GW_Scoring",
         action = "GW_Scoring",
         "Gateway scores after {} for {:?} : {:?}",
         s_name,
@@ -192,7 +194,14 @@ pub async fn scoring_flow(
             functional_gateways.first().cloned(),
         );
         let current_gateway_score_map = get_gwsm(decider_flow);
-        update_gateway_score_based_on_success_rate(decider_flow, false, current_gateway_score_map, gateway_scoring_data, elimination_enabled).await;
+        update_gateway_score_based_on_success_rate(
+            decider_flow,
+            false,
+            current_gateway_score_map,
+            gateway_scoring_data,
+            elimination_enabled,
+        )
+        .await;
         logger::debug!(
             tag="scoringFlow",
             action = "scoringFlow",
@@ -205,7 +214,7 @@ pub async fn scoring_flow(
         let pm = decider_flow.get().dpTxnCardInfo.paymentMethod.clone();
         let maybe_source_object = decider_flow.get().dpTxnDetail.sourceObject.clone();
 
-        let pmt_str = pmt.to_text().to_string();
+        let pmt_str = pmt.clone();
         let pm_str = Utils::get_payment_method(
             pmt_str.clone(),
             pm.clone(),
@@ -230,7 +239,7 @@ pub async fn scoring_flow(
 
             if is_sr_v3_metric_enabled {
                 logger::info!(
-                    tag="scoringFlow",
+                    tag = "scoringFlow",
                     action = "scoringFlow",
                     "Deciding Gateway based on SR V3 Routing for merchant {:?} and for txn Id {:?}",
                     Utils::get_m_id(merchant.merchantId.clone()),
@@ -244,16 +253,15 @@ pub async fn scoring_flow(
                 let default_sr_v3_input_config =
                     findByNameFromRedis(C::srV3DefaultInputConfig.get_key()).await;
 
-
                 logger::info!(
-                    tag="scoringFlow_Sr_V3_Input_Config",
+                    tag = "scoringFlow_Sr_V3_Input_Config",
                     action = "scoringFlow_Sr_V3_Input_Config",
                     "Sr V3 Input Config {:?}",
                     merchant_sr_v3_input_config
                 );
 
                 logger::info!(
-                    tag="scoringFlow_Sr_V3_Default_Input_Config",
+                    tag = "scoringFlow_Sr_V3_Default_Input_Config",
                     action = "scoringFlow_Sr_V3_Default_Input_Config",
                     "Sr V3 Default Input Config {:?}",
                     default_sr_v3_input_config
@@ -307,9 +315,8 @@ pub async fn scoring_flow(
 
                 let initial_sr_gw_scores_list = toListOfGatewayScore(initial_sr_gw_scores.clone());
 
-
                 logger::info!(
-                    tag="scoringFlow",
+                    tag = "scoringFlow",
                     action = "scoringFlow",
                     "Gateway Scores based on SR V3 Routing for txn id : {:?} is {:?}",
                     txn_detail.txnId.clone(),
@@ -320,7 +327,7 @@ pub async fn scoring_flow(
                     Utils::set_sr_gateway_scores(decider_flow, initial_sr_gw_scores_list);
 
                     logger::info!(
-                        tag="scoringFlow",
+                        tag = "scoringFlow",
                         action = "scoringFlow",
                         "Considering Gateway Scores based on SR V3 for txn id : {:?}",
                         txn_detail.txnId.clone()
@@ -417,7 +424,7 @@ pub async fn scoring_flow(
             set_gwsm(decider_flow, gateway_score.clone());
             return_sm_with_log(decider_flow, DeciderScoringName::GetScoreWithPriority, true);
             logger::info!(
-                tag="scoringFlow",
+                tag = "scoringFlow",
                 action = "scoringFlow",
                 "Gateway scores after considering priority for {:?} : {:?}",
                 txn_detail.txnId.clone(),
@@ -428,7 +435,7 @@ pub async fn scoring_flow(
             // update_score_for_card_brand(decider_flow);
         } else {
             logger::info!(
-                tag="scoringFlow",
+                tag = "scoringFlow",
                 action = "scoringFlow",
                 "skipped priority for merchant {:?} and for txn Id {:?}",
                 Utils::get_m_id(merchant.merchantId.clone()),
@@ -466,11 +473,11 @@ pub async fn get_cached_scores_based_on_srv3(
     let merchant = decider_flow.get().dpMerchantAccount.clone();
     let pmt = decider_flow.get().dpTxnCardInfo.paymentMethodType.clone();
     let order_ref = decider_flow.get().dpOrder.clone();
-    let pmt_str = pmt.to_text();
+    let pmt_str = pmt;
     let functional_gateways = getGws(decider_flow);
 
     logger::debug!(
-        tag="get_cached_scores_based_on_srv3",
+        tag = "get_cached_scores_based_on_srv3",
         action = "get_cached_scores_based_on_srv3",
         "Functional Gateways for merchant {:?} and for txn Id {:?} is {:?}",
         Utils::get_m_id(merchant.merchantId.clone()),
@@ -488,14 +495,14 @@ pub async fn get_cached_scores_based_on_srv3(
     .await;
 
     let merchant_bucket_size =
-        Utils::get_sr_v3_bucket_size(merchant_srv3_input_config.clone(), pmt_str, &pm)
+        Utils::get_sr_v3_bucket_size(merchant_srv3_input_config.clone(), &pmt_str, &pm)
             .or_else(|| {
-                Utils::get_sr_v3_bucket_size(default_srv3_input_config.clone(), pmt_str, &pm)
+                Utils::get_sr_v3_bucket_size(default_srv3_input_config.clone(), &pmt_str, &pm)
             })
             .unwrap_or(C::DEFAULT_SR_V3_BASED_BUCKET_SIZE);
 
     logger::debug!(
-        tag="Sr_V3_Bucket_Size",
+        tag = "Sr_V3_Bucket_Size",
         action = "Sr_V3_Bucket_Size",
         "{:?}",
         merchant_bucket_size
@@ -516,7 +523,7 @@ pub async fn get_cached_scores_based_on_srv3(
         }
     }
     logger::debug!(
-        tag="get_cached_scores_based_on_srv3",
+        tag = "get_cached_scores_based_on_srv3",
         action = "get_cached_scores_based_on_srv3",
         "Gateway Score Map After Sr V3 Evaluation for merchant {:?} and for txn Id {:?} is {:?}",
         Utils::get_m_id(merchant.merchantId.clone()),
@@ -536,65 +543,66 @@ pub async fn get_cached_scores_based_on_srv3(
         "kv_redis".to_string(),
     )
     .await;
-    let updated_score_map_after_reset =
-        if is_srv3_reset_enabled {
-            let upper_reset_factor = Utils::get_sr_v3_upper_reset_factor(
-                merchant_srv3_input_config.clone(),
-                pmt_str,
-                &pm,
-            )
-            .or_else(|| {
-                Utils::get_sr_v3_upper_reset_factor(default_srv3_input_config.clone(), pmt_str, &pm)
-            })
-            .unwrap_or(C::defaultSrV3BasedUpperResetFactor);
-            let lower_reset_factor = Utils::get_sr_v3_lower_reset_factor(
-                merchant_srv3_input_config.clone(),
-                pmt_str,
-                &pm,
-            )
-            .or_else(|| {
-                Utils::get_sr_v3_lower_reset_factor(default_srv3_input_config.clone(), pmt_str, &pm)
-            })
-            .unwrap_or(C::defaultSrV3BasedLowerResetFactor);
+    let updated_score_map_after_reset = if is_srv3_reset_enabled {
+        let upper_reset_factor =
+            Utils::get_sr_v3_upper_reset_factor(merchant_srv3_input_config.clone(), &pmt_str, &pm)
+                .or_else(|| {
+                    Utils::get_sr_v3_upper_reset_factor(
+                        default_srv3_input_config.clone(),
+                        &pmt_str,
+                        &pm,
+                    )
+                })
+                .unwrap_or(C::defaultSrV3BasedUpperResetFactor);
+        let lower_reset_factor =
+            Utils::get_sr_v3_lower_reset_factor(merchant_srv3_input_config.clone(), &pmt_str, &pm)
+                .or_else(|| {
+                    Utils::get_sr_v3_lower_reset_factor(
+                        default_srv3_input_config.clone(),
+                        &pmt_str,
+                        &pm,
+                    )
+                })
+                .unwrap_or(C::defaultSrV3BasedLowerResetFactor);
+        logger::debug!(
+            tag = "Sr_V3_Upper_Reset_Factor",
+            action = "Sr_V3_Upper_Reset_Factor",
+            "Upper Reset Factor: {:?}",
+            upper_reset_factor
+        );
+        logger::debug!(
+            tag = "Sr_V3_Lower_Reset_Factor",
+            action = "Sr_V3_Lower_Reset_Factor",
+            "Lower Reset Factor: {:?}",
+            lower_reset_factor
+        );
+        let (updated_score_map_after_reset, is_reset_done) = reset_sr_v3_score(
+            score_map.clone(),
+            merchant_bucket_size,
+            sr_gateway_redis_key_map.clone(),
+            upper_reset_factor,
+            lower_reset_factor,
+        )
+        .await;
+        if is_reset_done {
             logger::debug!(
-                tag="Sr_V3_Upper_Reset_Factor",
-                action = "Sr_V3_Upper_Reset_Factor",
-                "Upper Reset Factor: {:?}",
-                upper_reset_factor
+                tag = "get_cached_scores_based_on_srv3",
+                action = "get_cached_scores_based_on_srv3",
+                "Gateway Score Map After Sr V3 Evaluation And Reset: {:?}",
+                updated_score_map_after_reset
             );
-            logger::debug!(
-                tag="Sr_V3_Lower_Reset_Factor",
-                action = "Sr_V3_Lower_Reset_Factor",
-                "Lower Reset Factor: {:?}",
-                lower_reset_factor
-            );
-            let (updated_score_map_after_reset, is_reset_done) = reset_sr_v3_score(
-                score_map.clone(),
-                merchant_bucket_size,
-                sr_gateway_redis_key_map.clone(),
-                upper_reset_factor,
-                lower_reset_factor,
+            reset_and_log_metrics(
+                decider_flow,
+                updated_score_map_after_reset.clone(),
+                "SR_SELECTION_V3_EVALUATION_AFTER_RESET".to_string(),
             )
             .await;
-            if is_reset_done {
-                logger::debug!(
-                    tag="get_cached_scores_based_on_srv3",
-                    action = "get_cached_scores_based_on_srv3",
-                    "Gateway Score Map After Sr V3 Evaluation And Reset: {:?}",
-                    updated_score_map_after_reset
-                );
-                reset_and_log_metrics(
-                    decider_flow,
-                    updated_score_map_after_reset.clone(),
-                    "SR_SELECTION_V3_EVALUATION_AFTER_RESET".to_string(),
-                )
-                .await;
-                Utils::set_reset_approach(decider_flow, ResetApproach::SRV3_RESET);
-            }
-            updated_score_map_after_reset
-        } else {
-            score_map
-        };
+            Utils::set_reset_approach(decider_flow, ResetApproach::SRV3_RESET);
+        }
+        updated_score_map_after_reset
+    } else {
+        score_map
+    };
 
     let is_srv3_extra_score_enabled = M::isFeatureEnabled(
         C::enable_extra_score_on_sr_v3.get_key(),
@@ -617,7 +625,7 @@ pub async fn get_cached_scores_based_on_srv3(
             final_score_map.insert(gw, extra_score);
         }
         logger::debug!(
-            tag="get_cached_scores_based_on_srv3",
+            tag = "get_cached_scores_based_on_srv3",
             action = "get_cached_scores_based_on_srv3",
             "Gateway Score Map After Sr V3 Evaluation And Extra Score: {:?}",
             final_score_map
@@ -660,7 +668,7 @@ pub async fn get_cached_scores_based_on_srv3(
                 final_score_map_after_distribution.insert(gw, final_score_after_distribution);
             }
             logger::debug!(
-                tag="get_cached_scores_based_on_srv3",
+                tag = "get_cached_scores_based_on_srv3",
                 action = "get_cached_scores_based_on_srv3",
                 "Gateway Score Map After Sr V3 Evaluation And Binomial Distribution: {:?}",
                 final_score_map_after_distribution
@@ -684,7 +692,7 @@ pub async fn get_cached_scores_based_on_srv3(
                 final_score_map_after_distribution.insert(gw, final_score_map_distribution);
             }
             logger::debug!(
-                tag="get_cached_scores_based_on_srv3",
+                tag = "get_cached_scores_based_on_srv3",
                 action = "get_cached_scores_based_on_srv3",
                 "Gateway Score Map After Sr V3 Evaluation And Beta Distribution: {:?}",
                 final_score_map_after_distribution
@@ -749,7 +757,7 @@ pub fn add_extra_score(
             })
             .unwrap_or(C::DEFAULT_SR_V3_BASED_GATEWAY_SIGMA_FACTOR);
     logger::debug!(
-        tag="add_extra_score",
+        tag = "add_extra_score",
         action = "add_extra_score",
         "Gateway: {:?}, Sigma Factor: {:?}",
         gw,
@@ -940,10 +948,7 @@ pub async fn update_score_for_outage(decider_flow: &mut DeciderFlow<'_>) -> Gate
             .unwrap_or(86400);
 
     let potential_outages = get_scheduled_outage(scheduled_outage_validation_duration).await;
-    logger::debug!(
-        "updated score for outage {:?}",
-        potential_outages
-    );
+    logger::debug!("updated score for outage {:?}", potential_outages);
     let juspay_bank_code = Utils::fetch_juspay_bank_code(&txn_card_info);
     let bank_code = match juspay_bank_code {
         None => None,
@@ -961,17 +966,13 @@ pub async fn update_score_for_outage(decider_flow: &mut DeciderFlow<'_>) -> Gate
             )
         })
         .collect();
-    logger::debug!(
-        "updated score for outage filtered {:?}",
-        out_gws
-    );
+    logger::debug!("updated score for outage filtered {:?}", out_gws);
     logger::debug!(
         "updated score for outage info: {:?}, {:?}, {:?}",
         txn_detail.txnObjectType,
         txn_detail.sourceObject,
         Utils::fetch_juspay_bank_code(&txn_card_info)
     );
-
 
     let new_sm = out_gws.iter().fold(old_sm, |mut acc, gw| {
         if let Some(gw) = gw.gateway.clone() {
@@ -991,7 +992,7 @@ pub async fn update_score_for_outage(decider_flow: &mut DeciderFlow<'_>) -> Gate
 // checkScheduledOutage :: ETTD.TxnDetail -> TxnCardInfo -> ETM.MerchantId -> Maybe ETJ.JuspayBankCode -> ETGO.GatewayOutage -> Bool
 // checkScheduledOutage txnDetail txnCardInfo merchantId juspayBankCode scheduledOutage =
 //   (scheduleEqualTo (==) (Just merchantId) scheduledOutage.merchantId)
-//   && (if (txnCardInfo.paymentMethod == "UPI")
+//   && (if (txnCardInfo.paymentMethod == UPI)
 //         then (scheduleEqualTo (==) txnDetail.sourceObject scheduledOutage.paymentMethod)
 //         else scheduleEqualTo (==)  (Just txnCardInfo.paymentMethod) scheduledOutage.paymentMethod)
 //   && (scheduleEqualTo (==) (Just txnCardInfo.paymentMethodType) scheduledOutage.paymentMethodType)
@@ -1027,7 +1028,7 @@ fn check_scheduled_outtage(
         |x: ETM::id::MerchantId, y: ETM::id::MerchantId| x == y,
         Some(merchant_id.clone()),
         scheduled_outage.merchantId.clone(),
-    ) && if txn_card_info.paymentMethodType == ETP::payment_method::PaymentMethodType::UPI {
+    ) && if txn_card_info.paymentMethodType == UPI {
         schedule_equal_to(
             |x, y| x == y,
             txn_detail.sourceObject.clone(),
@@ -1077,14 +1078,14 @@ fn check_scheduled_outtage(
 //           currentTime <- getCurrentTimeUTC
 //           scheduledOutages <- ETGO.getPotentialGwOutages currentTime
 //           let validatedOutages = filter (validateScheduledOutage scheduledOutageValidationDuration) scheduledOutages
-            // if validated_outages.len() != scheduled_outages.len() {
-            //     logger::debug!(
-            //         tag = "scheduled Outages filtered",
-            //         "Validated outages: {}, Scheduled outages: {}",
-            //         validated_outages.len(),
-            //         scheduled_outages.len()
-            //     );
-            // }
+// if validated_outages.len() != scheduled_outages.len() {
+//     logger::debug!(
+//         tag = "scheduled Outages filtered",
+//         "Validated outages: {}, Scheduled outages: {}",
+//         validated_outages.len(),
+//         scheduled_outages.len()
+//     );
+// }
 //           pure validatedOutages
 // convert the above haskell code to rust code
 
@@ -1108,13 +1109,13 @@ fn check_scheduled_outage_metadata(
                 |x: _, y| x == Some(y),
                 Some(None),
                 scheduled_outage_metadata.flowType.clone(),
-            ) && match txn_card_info.paymentMethodType {
-                ETP::payment_method::PaymentMethodType::Card => schedule_equal_to(
+            ) && match txn_card_info.paymentMethodType.as_str() {
+                CARD => schedule_equal_to(
                     |x, y| x == y,
                     txn_card_info.card_type.clone(),
                     scheduled_outage_metadata.cardType.clone(),
                 ),
-                ETP::payment_method::PaymentMethodType::UPI => txn_card_info
+                UPI => txn_card_info
                     .paymentSource
                     .as_ref()
                     .map_or(false, |payment_source| {
@@ -1145,12 +1146,11 @@ async fn get_scheduled_outage(scheduled_outage_validation_duration: i64) -> Vec<
     let validated_outages: Vec<GatewayOutage> = scheduled_outages
         .iter()
         .cloned()
-        .filter(|outage| validate_scheduled_outage(scheduled_outage_validation_duration, outage.clone()))
+        .filter(|outage| {
+            validate_scheduled_outage(scheduled_outage_validation_duration, outage.clone())
+        })
         .collect();
-    logger::debug!(
-        "scheduled Outages length: {:?}",
-        scheduled_outages.len()
-    );
+    logger::debug!("scheduled Outages length: {:?}", scheduled_outages.len());
     // if validated_outages.len() != scheduled_outages.len() {
 
     logger::debug!(
@@ -1180,9 +1180,9 @@ fn check_duration(
 }
 
 fn check_pmt_outage(scheduled_outage: ETGO::GatewayOutage) -> bool {
-    match scheduled_outage.paymentMethodType {
+    match scheduled_outage.paymentMethodType.as_deref() {
         None => true,
-        Some(ETP::payment_method::PaymentMethodType::UPI) => true,
+        Some(UPI) => true,
         _ => {
             scheduled_outage.gateway.is_some()
                 || scheduled_outage.bank.is_some()
@@ -1343,168 +1343,211 @@ pub async fn update_gateway_score_based_on_global_success_rate(
     merchant_wise_global_routing_input: Option<ETGRI::GatewaySuccessRateBasedRoutingInput>,
     global_success_rate_based_routing_input: Option<ETGRI::GatewaySuccessRateBasedRoutingInput>,
     gateway_scoring_data: GatewayScoringData,
-) -> (GatewayScoreMap, Option<Vec<GatewayWiseSuccessRateBasedRoutingInput>>, bool) {
+) -> (
+    GatewayScoreMap,
+    Option<Vec<GatewayWiseSuccessRateBasedRoutingInput>>,
+    bool,
+) {
     let gateway_score = get_gwsm(decider_flow);
     let txn_detail = decider_flow.get().dpTxnDetail.clone();
     let merchant_id = txn_detail.merchantId.clone();
 
-    let (global_elimination_occurred, global_elimination_gateway_score_map) = match check_sr_global_routing_defaults(
-        global_success_rate_based_routing_input.clone(),
-        merchant_wise_global_routing_input.clone(),
-    ) {
-        Ok(global_routing_defaults) => {
-            let gateway_success_rate_inputs = gateway_score.clone()
-                .iter()
-                .map(|(k, _)| {
-                    get_gateway_wise_routing_inputs_for_global_sr(
-                        k.clone(),
-                        merchant_wise_global_routing_input.clone(),
-                        global_success_rate_based_routing_input.clone(),
-                        global_routing_defaults.clone(),
-                    )
-                })
-                .collect::<Vec<_>>();
-
-            let gateway_list = Utils::get_gateway_list(gateway_score.clone());
-            let gateway_redis_key_map = Utils::get_consumer_key(
-                decider_flow,
-                gateway_scoring_data,
-                ScoreKeyType::ELIMINATION_GLOBAL_KEY,
-                false,
-                gateway_list,
-            ).await;
-
-            let mut upd_gateway_success_rate_inputs = Vec::new();
-            let mut global_gateway_scores = Vec::new();
-            for gsri in gateway_success_rate_inputs {
-                let global_elimination_gateway_score = get_global_elimination_gateway_score(gateway_redis_key_map.clone(), gsri.clone()).await;
-                match global_elimination_gateway_score{
-                    Some((global_gateway_score, s)) => {
-                        let new_gsri = GatewayWiseSuccessRateBasedRoutingInput {
-                            currentScore: Some(s),
-                            ..gsri.clone()
-                        };
-                        upd_gateway_success_rate_inputs.push(new_gsri);
-                        global_gateway_scores.push(update_global_score_log(gsri.gateway.clone(), global_gateway_score));
-                    }
-                    None => {}
-                }
-            }
-
-            let filtered_gateway_success_rate_inputs: Vec<GatewayWiseSuccessRateBasedRoutingInput> = upd_gateway_success_rate_inputs
-                .into_iter()
-                .filter(|x| {
-                    if let (Some(cs), Some(et)) = (x.currentScore, x.eliminationThreshold) {
-                        cs < et
-                    } else {
-                        false
-                    }
-                })
-                .collect();
-
-            reset_metric_log_data(decider_flow);
-            let init_metric_log_data = decider_flow.writer.srMetricLogData.clone();
-            let before_gwsm = get_gwsm(decider_flow);
-            set_metric_log_data(decider_flow, SRMetricLogData {
-                gatewayBeforeEvaluation: Utils::get_max_score_gateway(&before_gwsm).map(|x| x.0),
-                downtimeStatus: filtered_gateway_success_rate_inputs
+    let (global_elimination_occurred, global_elimination_gateway_score_map) =
+        match check_sr_global_routing_defaults(
+            global_success_rate_based_routing_input.clone(),
+            merchant_wise_global_routing_input.clone(),
+        ) {
+            Ok(global_routing_defaults) => {
+                let gateway_success_rate_inputs = gateway_score
+                    .clone()
                     .iter()
-                    .map(|x| x.gateway.clone())
-                    .collect(),
-                ..init_metric_log_data.clone()
-            });
+                    .map(|(k, _)| {
+                        get_gateway_wise_routing_inputs_for_global_sr(
+                            k.clone(),
+                            merchant_wise_global_routing_input.clone(),
+                            global_success_rate_based_routing_input.clone(),
+                            global_routing_defaults.clone(),
+                        )
+                    })
+                    .collect::<Vec<_>>();
 
-            if !filtered_gateway_success_rate_inputs.is_empty() {
-                let new_gateway_score = filtered_gateway_success_rate_inputs.iter().fold(
-                    gateway_score.clone(),
-                    |acc, x| penalize_gsr(txn_detail.txnId.clone(), acc, x.clone()),
+                let gateway_list = Utils::get_gateway_list(gateway_score.clone());
+                let gateway_redis_key_map = Utils::get_consumer_key(
+                    decider_flow,
+                    gateway_scoring_data,
+                    ScoreKeyType::ELIMINATION_GLOBAL_KEY,
+                    false,
+                    gateway_list,
+                )
+                .await;
+
+                let mut upd_gateway_success_rate_inputs = Vec::new();
+                let mut global_gateway_scores = Vec::new();
+                for gsri in gateway_success_rate_inputs {
+                    let global_elimination_gateway_score = get_global_elimination_gateway_score(
+                        gateway_redis_key_map.clone(),
+                        gsri.clone(),
+                    )
+                    .await;
+                    match global_elimination_gateway_score {
+                        Some((global_gateway_score, s)) => {
+                            let new_gsri = GatewayWiseSuccessRateBasedRoutingInput {
+                                currentScore: Some(s),
+                                ..gsri.clone()
+                            };
+                            upd_gateway_success_rate_inputs.push(new_gsri);
+                            global_gateway_scores.extend(update_global_score_log(
+                                gsri.gateway.clone(),
+                                global_gateway_score,
+                            ));
+                        }
+                        None => {}
+                    }
+                }
+
+                let filtered_gateway_success_rate_inputs: Vec<
+                    GatewayWiseSuccessRateBasedRoutingInput,
+                > = upd_gateway_success_rate_inputs
+                    .into_iter()
+                    .filter(|x| {
+                        if let (Some(cs), Some(et)) = (x.currentScore, x.eliminationThreshold) {
+                            cs < et
+                        } else {
+                            false
+                        }
+                    })
+                    .collect();
+
+                reset_metric_log_data(decider_flow);
+                let init_metric_log_data = decider_flow.writer.srMetricLogData.clone();
+                let before_gwsm = get_gwsm(decider_flow);
+                set_metric_log_data(
+                    decider_flow,
+                    SRMetricLogData {
+                        gatewayBeforeEvaluation: Utils::get_max_score_gateway(&before_gwsm)
+                            .map(|x| x.0),
+                        downtimeStatus: filtered_gateway_success_rate_inputs
+                            .iter()
+                            .map(|x| x.gateway.clone())
+                            .collect(),
+                        ..init_metric_log_data.clone()
+                    },
                 );
-                set_gwsm(decider_flow, new_gateway_score.clone());
-                let old_sr_metric_log_data = decider_flow.writer.srMetricLogData.clone();
-                set_metric_log_data(decider_flow, SRMetricLogData {
-                    gatewayAfterEvaluation: Utils::get_max_score_gateway(&new_gateway_score)
-                        .map(|x| x.0),
-                    ..old_sr_metric_log_data.clone()
-                });
-            } else {
-                logger::info!(
+
+                if !filtered_gateway_success_rate_inputs.is_empty() {
+                    let new_gateway_score = filtered_gateway_success_rate_inputs
+                        .iter()
+                        .fold(gateway_score.clone(), |acc, x| {
+                            penalize_gsr(txn_detail.txnId.clone(), acc, x.clone())
+                        });
+                    set_gwsm(decider_flow, new_gateway_score.clone());
+                    let old_sr_metric_log_data = decider_flow.writer.srMetricLogData.clone();
+                    set_metric_log_data(
+                        decider_flow,
+                        SRMetricLogData {
+                            gatewayAfterEvaluation: Utils::get_max_score_gateway(
+                                &new_gateway_score,
+                            )
+                            .map(|x| x.0),
+                            ..old_sr_metric_log_data.clone()
+                        },
+                    );
+                } else {
+                    logger::info!(
                     tag="scoringFlow",
                     action = "scoringFlow",
                     "No gateways are eligible for penalties & fallback {:?} based on global score",
                     txn_detail.txnId
                 );
+                    let old_sr_metric_log_data = decider_flow.writer.srMetricLogData.clone();
+                    set_metric_log_data(
+                        decider_flow,
+                        SRMetricLogData {
+                            gatewayAfterEvaluation: Utils::get_max_score_gateway(&gateway_score)
+                                .map(|x| x.0),
+                            ..old_sr_metric_log_data.clone()
+                        },
+                    );
+                }
+
                 let old_sr_metric_log_data = decider_flow.writer.srMetricLogData.clone();
-                set_metric_log_data(decider_flow, SRMetricLogData {
-                    gatewayAfterEvaluation: Utils::get_max_score_gateway(&gateway_score)
-                        .map(|x| x.0),
-                    ..old_sr_metric_log_data.clone()
-                });
-            }
+                logger::debug!(
+                    tag = "MetricData-GLOBAL-ELIMINATION",
+                    action = "MetricData-GLOBAL-ELIMINATION",
+                    "{:?}",
+                    old_sr_metric_log_data
+                );
 
-            let old_sr_metric_log_data = decider_flow.writer.srMetricLogData.clone();
-            logger::debug!(
-                tag="MetricData-GLOBAL-ELIMINATION",
-                action = "MetricData-GLOBAL-ELIMINATION",
-                "{:?}",
-                old_sr_metric_log_data
-            );
+                let global_elimination_occurred =
+                    old_sr_metric_log_data.gatewayBeforeEvaluation.is_some()
+                        && old_sr_metric_log_data.gatewayBeforeEvaluation
+                            != old_sr_metric_log_data.gatewayAfterEvaluation;
 
-            let global_elimination_occurred = old_sr_metric_log_data
-                .gatewayBeforeEvaluation
-                .is_some()
-                && old_sr_metric_log_data.gatewayBeforeEvaluation
-                    != old_sr_metric_log_data.gatewayAfterEvaluation;
+                if !global_gateway_scores.is_empty() {
+                    set_metric_log_data(
+                        decider_flow,
+                        SRMetricLogData {
+                            merchantGatewayScore: Some(serde_json::json!(global_gateway_scores)),
+                            ..old_sr_metric_log_data.clone()
+                        },
+                    );
+                    Utils::metric_tracker_log(
+                        "GLOBAL_SR_EVALUATION",
+                        "GW_SCORING",
+                        Utils::get_metric_log_format(decider_flow, "GLOBAL_SR_EVALUATION"),
+                    )
+                    .await;
+                } else {
+                    logger::info!(
+                        tag = "scoringFlow",
+                        action = "scoringFlow",
+                        "Global scores not available for {:?} {:?}",
+                        merchant_id,
+                        txn_detail.txnId
+                    );
+                }
 
-            if !global_gateway_scores.is_empty() {
-                set_metric_log_data(decider_flow, SRMetricLogData {
-                    merchantGatewayScore: Some(serde_json::json!(global_gateway_scores)),
-                    ..old_sr_metric_log_data.clone()
-                });
-                Utils::metric_tracker_log(
-                    "GLOBAL_SR_EVALUATION",
-                    "GW_SCORING",
-                    Utils::get_metric_log_format(decider_flow, "GLOBAL_SR_EVALUATION"),
-                ).await;
-            } else {
                 logger::info!(
-                    tag="scoringFlow",
+                    tag = "scoringFlow",
                     action = "scoringFlow",
-                    "Global scores not available for {:?} {:?}",
+                    "Gateway scores after considering global SR based elimination for {:?} : {:?}",
+                    txn_detail.txnId,
+                    global_gateway_scores
+                );
+
+                (
+                    global_elimination_occurred,
+                    Some(filtered_gateway_success_rate_inputs),
+                )
+            }
+            Err(reason) => {
+                logger::debug!(
+                    tag = "Global SR routing",
+                    action = "Global SR routing",
+                    "{:?}",
+                    reason
+                );
+                logger::info!(
+                    tag = "scoringFlow",
+                    action = "scoringFlow",
+                    "Global SR routing not enabled for merchant {:?} txn {:?}",
                     merchant_id,
                     txn_detail.txnId
                 );
+                (false, None)
             }
+        };
 
-            logger::info!(
-                tag="scoringFlow",
-                action = "scoringFlow",
-                "Gateway scores after considering global SR based elimination for {:?} : {:?}",
-                txn_detail.txnId,
-                global_gateway_scores
-            );
-
-            (global_elimination_occurred, Some(filtered_gateway_success_rate_inputs))
-        }
-        Err(reason) => {
-            logger::debug!(
-                tag="Global SR routing",
-                action = "Global SR routing",
-                "{:?}",
-                reason
-            );
-            logger::info!(
-                tag="scoringFlow",
-                action = "scoringFlow",
-                "Global SR routing not enabled for merchant {:?} txn {:?}",
-                merchant_id,
-                txn_detail.txnId
-            );
-            (false, None)
-        }
-    };
-
-    let sm = return_sm_with_log(decider_flow, DeciderScoringName::ScoringByGatewayScoreBasedOnGlobalSuccessRate, false);
-    (sm, global_elimination_gateway_score_map, global_elimination_occurred)
+    let sm = return_sm_with_log(
+        decider_flow,
+        DeciderScoringName::ScoringByGatewayScoreBasedOnGlobalSuccessRate,
+        false,
+    );
+    (
+        sm,
+        global_elimination_gateway_score_map,
+        global_elimination_occurred,
+    )
 }
 
 pub fn update_global_score_log(
@@ -1539,7 +1582,7 @@ pub fn penalize_gsr(
     new_gs.entry(sri.gateway.clone()).and_modify(|v| *v /= 5.0);
 
     logger::info!(
-        tag="scoringFlow",
+        tag = "scoringFlow",
         action = "scoringFlow",
         "Penalizing gateway {:?} for {:?} based on global score",
         sri.gateway,
@@ -1770,7 +1813,7 @@ async fn get_elimination_v2_threshold(
         );
 
         logger::info!(
-            tag="scoringFlow",
+            tag = "scoringFlow",
             action = "scoringFlow",
             "Threshold value: {:?}",
             ((sr1_th_weight * sr1) + (sr2_th_weight * sr2)) / 100.0
@@ -1780,7 +1823,6 @@ async fn get_elimination_v2_threshold(
 
         Some(((sr1_th_weight * sr1) + (sr2_th_weight * sr2)) / 100.0)
     } else {
-
         logger::info!(
             tag="scoringFlow",
             action = "scoringFlow",
@@ -1812,18 +1854,17 @@ pub async fn get_sr1_and_sr2_and_n(
 )> {
     if let Some(gateway_success_rate_merchant_input) = m_gateway_success_rate_merchant_input {
         if let Some(inputs) = gateway_success_rate_merchant_input.eliminationV2SuccessRateInputs {
-            let pmt = txn_card_info.paymentMethodType.to_text();
-            let source_obj = if txn_card_info.paymentMethod == "UPI" {
+            let pmt = &txn_card_info.paymentMethodType;
+            let source_obj = if txn_card_info.paymentMethod == UPI {
                 txn_detail.sourceObject.clone()
             } else {
                 Some(txn_card_info.paymentMethod.clone())
             };
-            let pm =
-                if txn_card_info.paymentMethodType == ETP::payment_method::PaymentMethodType::UPI {
-                    source_obj.clone()
-                } else {
-                    Some(txn_card_info.paymentMethod.clone())
-                };
+            let pm = if txn_card_info.paymentMethodType == UPI {
+                source_obj.clone()
+            } else {
+                Some(txn_card_info.paymentMethod.clone())
+            };
             let txn_obj_type = txn_detail.txnObjectType.to_string();
 
             filter_using_service_config(merchant_id, pmt.to_string(), pm, txn_obj_type, inputs)
@@ -2191,7 +2232,7 @@ pub async fn update_gateway_score_based_on_success_rate(
         || elimination_enabled == Some(true);
 
     logger::debug!(
-        tag="updateGatewayScoreBasedOnSuccessRate",
+        tag = "updateGatewayScoreBasedOnSuccessRate",
         action = "updateGatewayScoreBasedOnSuccessRate",
         "enableSuccessRateBasedGatewayElimination = {:?} for merchant {:?}",
         enable_success_rate_based_gateway_elimination,
@@ -2210,9 +2251,9 @@ pub async fn update_gateway_score_based_on_success_rate(
         .await;
 
         let payment_method_type = if Utils::is_card_transaction(&txn_card_info) {
-            ETP::payment_method::PaymentMethodType::Card
+            CARD
         } else {
-            txn_card_info.paymentMethodType.clone()
+            txn_card_info.paymentMethodType.as_str()
         };
 
         let enabled_payment_method_types = gateway_success_rate_merchant_input
@@ -2221,7 +2262,7 @@ pub async fn update_gateway_score_based_on_success_rate(
             .unwrap_or_default();
 
         if !enabled_payment_method_types.is_empty()
-            && !enabled_payment_method_types.contains(&payment_method_type)
+            && !enabled_payment_method_types.contains(&payment_method_type.to_string())
         {
             logger::info!(
                 tag="scoringFlow",
@@ -2245,7 +2286,7 @@ pub async fn update_gateway_score_based_on_success_rate(
             .await;
 
             logger::info!(
-                tag="scoringFlow",
+                tag = "scoringFlow",
                 action = "scoringFlow",
                 "Gateway scores input for merchant wise SR based evaluation for {:?} : {:?}",
                 txn_detail.txnId,
@@ -2344,8 +2385,11 @@ pub async fn update_gateway_score_based_on_success_rate(
                     );
 
                     if is_reset_score_enabled_for_merchant {
-                        let reset_enabled_gateway_list =
-                            evaluate_reset_gateway_score(filtered_gateway_success_rate_inputs.clone(), txn_detail.clone()).await;
+                        let reset_enabled_gateway_list = evaluate_reset_gateway_score(
+                            filtered_gateway_success_rate_inputs.clone(),
+                            txn_detail.clone(),
+                        )
+                        .await;
 
                         if !reset_enabled_gateway_list.is_empty() {
                             decider_flow.writer.resetGatewayList =
@@ -2364,7 +2408,7 @@ pub async fn update_gateway_score_based_on_success_rate(
                     );
 
                     logger::info!(
-                        tag="scoringFlow",
+                        tag = "scoringFlow",
                         action = "scoringFlow",
                         "No gateways are eligible for penalties & fallback : {:?}",
                         txn_detail.txnId
@@ -2408,10 +2452,7 @@ pub async fn update_gateway_score_based_on_success_rate(
                 )
                 .await;
 
-                logger::debug!(
-                    "MetricData-MERCHANT_PMT_PM: {:?}",
-                    old_sr_metric_log_data
-                );
+                logger::debug!("MetricData-MERCHANT_PMT_PM: {:?}", old_sr_metric_log_data);
 
                 let new_gateway_score = get_gwsm(decider_flow);
                 // let merchant_enabled_for_unification = Redis::is_feature_enabled(
@@ -2423,13 +2464,13 @@ pub async fn update_gateway_score_based_on_success_rate(
                 // let (new_gateway_score, reset_gateway_level_list, gateway_level_sr_elimination) =
                 //     if merchant_enabled_for_unification {
                 //         (new_gateway_score.clone(), vec![], false);
-                    // } else {
-                    //     update_gateway_score_based_on_gateway_level_scores(
-                    //         &gateway_success_rate_inputs,
-                    //         new_gateway_score.clone(),
-                    //         is_reset_score_enabled_for_merchant,
-                    //     )
-                    // };
+                // } else {
+                //     update_gateway_score_based_on_gateway_level_scores(
+                //         &gateway_success_rate_inputs,
+                //         new_gateway_score.clone(),
+                //         is_reset_score_enabled_for_merchant,
+                //     )
+                // };
 
                 // if !reset_gateway_level_list.is_empty() {
                 //     modify(|ctx| {
@@ -2453,7 +2494,7 @@ pub async fn update_gateway_score_based_on_success_rate(
                 // };
 
                 let reset_gw_list = decider_flow.writer.resetGatewayList.clone();
-                if (!reset_gw_list.is_empty()){     
+                if (!reset_gw_list.is_empty()) {
                     trigger_reset_gateway_score(
                         decider_flow,
                         gateway_success_rate_inputs,
@@ -2461,7 +2502,8 @@ pub async fn update_gateway_score_based_on_success_rate(
                         reset_gw_list,
                         is_reset_score_enabled_for_merchant,
                         gateway_redis_key_map.clone(),
-                    ).await;
+                    )
+                    .await;
                 }
 
                 let gateway_decider_approach = get_decider_approach(decider_flow);
@@ -2533,14 +2575,19 @@ pub async fn update_gateway_score_based_on_success_rate(
                             sr_based_elimination_approach_info,
                         )
                     };
-                
-                let gateway_decider_approach =
-                                    Utils::modify_gateway_decider_approach(gateway_decider_approach.clone(), downtime);
+
+                let gateway_decider_approach = Utils::modify_gateway_decider_approach(
+                    gateway_decider_approach.clone(),
+                    downtime,
+                );
 
                 set_gwsm(decider_flow, gw_score.clone());
                 Utils::set_elimination_scores(decider_flow, toListOfGatewayScore(gw_score));
                 set_decider_approach(decider_flow, gateway_decider_approach.clone());
-                set_sr_elimination_approach_info(decider_flow, sr_based_elimination_approach_info_res);
+                set_sr_elimination_approach_info(
+                    decider_flow,
+                    sr_based_elimination_approach_info_res,
+                );
 
                 logger::info!("routing_approach: {:?}", gateway_decider_approach);
             }
@@ -2550,7 +2597,7 @@ pub async fn update_gateway_score_based_on_success_rate(
     let gateway_score_sr_based = get_gwsm(decider_flow);
 
     logger::info!(
-        tag="GW_Scoring",
+        tag = "GW_Scoring",
         action = "GW_Scoring",
         "Gateway scores after considering SR based elimination for {:?} : {:?}",
         txn_detail.txnId,
@@ -2575,10 +2622,11 @@ pub fn update_score_with_log(
             if *gw == v.gateway {
                 let new_score = *score / 5_f64;
                 logger::info!(
-                    tag="scoringFlow",
+                    tag = "scoringFlow",
                     action = "scoringFlow",
                     "Penalizing gateway {:?} for {:?}",
-                    v.gateway, txn_id
+                    v.gateway,
+                    txn_id
                 );
                 Some((gw.clone(), new_score))
             } else {
@@ -2611,7 +2659,7 @@ pub async fn update_current_score(
     let m_score = get_merchant_elimination_gateway_score(redis_key).await;
 
     logger::info!(
-        tag="scoringFlow",
+        tag = "scoringFlow",
         action = "scoringFlow",
         "Current score for {:?} {:?} : {:?} with elimination level {:?} threshold {:?}",
         txn_detail.txnId,
@@ -2666,7 +2714,7 @@ pub async fn evaluate_reset_gateway_score(
     txnDetail: ETTD::TxnDetail,
 ) -> Vec<String> {
     logger::debug!(
-        tag="evaluateResetGatewayScore",
+        tag = "evaluateResetGatewayScore",
         action = "evaluateResetGatewayScore",
         "Evaluating Reset Logic for Gateways for {:?}",
         txnDetail.txnId
@@ -2685,10 +2733,12 @@ pub async fn evaluate_reset_gateway_score(
         if let Some(last_reset_time) = it.lastResetTimeStamp {
             if (current_time * 1000 - last_reset_time as i64) > key_ttl.round() as i64 {
                 logger::debug!(
-                    tag="evaluateResetGatewayScore",
+                    tag = "evaluateResetGatewayScore",
                     action = "evaluateResetGatewayScore",
                     "Adding gateway {} to reset Request for {:?} for level {:?}",
-                    it.gateway, txnDetail.txnId, it.eliminationLevel
+                    it.gateway,
+                    txnDetail.txnId,
+                    it.eliminationLevel
                 );
                 acc.push(it.gateway.clone());
             }
@@ -2707,14 +2757,14 @@ pub async fn trigger_reset_gateway_score(
     gateway_redis_key_map: GatewayRedisKeyMap,
 ) {
     logger::info!(
-        tag="scoringFlow",
+        tag = "scoringFlow",
         action = "scoringFlow",
         "Triggering Reset for Gateways for {:?}",
         reset_gateway_list
     );
     if is_reset_score_enabled_for_merchant {
         logger::info!(
-            tag="scoringFlow",
+            tag = "scoringFlow",
             action = "scoringFlow",
             "Reset Gateway Scores is enabled for {:?} and merchantId {:?}",
             txn_detail.txnId,
@@ -2723,12 +2773,13 @@ pub async fn trigger_reset_gateway_score(
         let mut reset_gateway_sr_list = Vec::new();
         for it in &reset_gateway_list {
             logger::info!(
-                tag="scoringFlow",
+                tag = "scoringFlow",
                 action = "scoringFlow",
                 "Adding gateway {:?} to resetAPI Request for {:?}",
-                it, txn_detail.txnId
+                it,
+                txn_detail.txnId
             );
-            
+
             let m_sr_input = get_gateway_success_rate_input(it, &gateway_success_rate_inputs);
             let oref = decider_flow.get().dpOrder.clone();
             let macc = decider_flow.get().dpMerchantAccount.clone();
@@ -2737,13 +2788,13 @@ pub async fn trigger_reset_gateway_score(
                 macc.enableGatewayReferenceIdBasedRouting,
                 &oref,
             );
-            
+
             if let Some(sr_input) = m_sr_input {
                 let gw_ref_id = Utils::get_gateway_reference_id(meta, it, oref, pl_ref_id_map);
                 let hard_ttl = getTTLForKey(ScoreKeyType::ELIMINATION_MERCHANT_KEY).await;
-                let soft_ttl = getKeyTTLFromMerchantDimension(
-                    merchantGatewayScoreDimension(sr_input.clone()),
-                ).await;
+                let soft_ttl =
+                    getKeyTTLFromMerchantDimension(merchantGatewayScoreDimension(sr_input.clone()))
+                        .await;
                 let reset_gateway_input = ResetGatewayInput {
                     gateway: it.clone(),
                     eliminationThreshold: sr_input.eliminationThreshold,
@@ -2754,16 +2805,22 @@ pub async fn trigger_reset_gateway_score(
                     hardTtl: hard_ttl,
                     softTtl: soft_ttl,
                 };
-                
+
                 // Now these await calls are in an async context
-                reset_gateway_score(decider_flow,txn_detail.clone(), reset_gateway_input.clone()).await;
+                reset_gateway_score(
+                    decider_flow,
+                    txn_detail.clone(),
+                    reset_gateway_input.clone(),
+                )
+                .await;
                 reset_gateway_sr_list.push(reset_gateway_input.clone());
             } else {
                 logger::info!(
-                    tag="scoringFlow",
+                    tag = "scoringFlow",
                     action = "scoringFlow",
                     "No SR Input for {:?} and {:?}",
-                    it, txn_detail.txnId
+                    it,
+                    txn_detail.txnId
                 );
             }
         }
@@ -2779,13 +2836,13 @@ pub async fn trigger_reset_gateway_score(
             _ => Utils::set_reset_approach(decider_flow, ResetApproach::ELIMINATION_RESET),
         }
         logger::info!(
-            tag="RESET_APPROACH",
+            tag = "RESET_APPROACH",
             action = "RESET_APPROACH",
             "{:?}",
             reset_approach
         );
         logger::info!(
-            tag="scoringFlow",
+            tag = "scoringFlow",
             action = "scoringFlow",
             "Reset Gateway List for {:?} is {:?}",
             txn_detail.txnId,
@@ -2793,7 +2850,7 @@ pub async fn trigger_reset_gateway_score(
         );
     } else {
         logger::info!(
-            tag="scoringFlow",
+            tag = "scoringFlow",
             action = "scoringFlow",
             "Reset Gateway Scores is not enabled for {:?} and merchantId {:?}",
             txn_detail.txnId,
@@ -2816,14 +2873,17 @@ pub async fn reset_gateway_score(
     decider_flow: &mut DeciderFlow<'_>,
     txn_detail: ETTD::TxnDetail,
     reset_gateway_input: ResetGatewayInput,
-){
+) {
     let current_timestamp = get_current_date_in_millis();
-    match (reset_gateway_input.clone().key,reset_gateway_input.clone().eliminationThreshold, reset_gateway_input.clone().eliminationMaxCount){
+    match (
+        reset_gateway_input.clone().key,
+        reset_gateway_input.clone().eliminationThreshold,
+        reset_gateway_input.clone().eliminationMaxCount,
+    ) {
         (Some(key), Some(threshold), Some(max_count)) => {
-           
-           let penality_factor = Utils::get_penality_factor_(decider_flow).await;
-           let score = get_merchant_elimination_gateway_score (key.clone()).await;
-           let (is_eligible_for_reset, reset_cached_gateway_score) = match score {
+            let penality_factor = Utils::get_penality_factor_(decider_flow).await;
+            let score = get_merchant_elimination_gateway_score(key.clone()).await;
+            let (is_eligible_for_reset, reset_cached_gateway_score) = match score {
                 Some(score) => {
                     let current_score = score.score;
                     let transaction_count = score.transactionCount;
@@ -2834,8 +2894,9 @@ pub async fn reset_gateway_score(
                         threshold.clone(),
                         score.clone(),
                     );
-                    if is_eligible_for_reset_{
-                        let reset_score = Utils::get_reset_score(threshold, penality_factor, max_count as i32);
+                    if is_eligible_for_reset_ {
+                        let reset_score =
+                            Utils::get_reset_score(threshold, penality_factor, max_count as i32);
                         let reset_cached_gateway_score_ = GatewayScore {
                             score: reset_score,
                             transactionCount: transaction_count,
@@ -2843,12 +2904,11 @@ pub async fn reset_gateway_score(
                             timestamp: score.clone().timestamp,
                         };
                         (true, reset_cached_gateway_score_)
-                    }
-                    else{
+                    } else {
                         logger::info!(
-                            tag="scoringFresetKeyScorelow",
+                            tag = "scoringFresetKeyScorelow",
                             action = "resetKeyScore",
-                           "Key {:?} is not eligible for reset",
+                            "Key {:?} is not eligible for reset",
                             key.clone()
                         );
                         (false, score)
@@ -2869,18 +2929,27 @@ pub async fn reset_gateway_score(
                     );
                     (false, default_gw_score)
                 }
-               
             };
-            let elapsed_time = current_timestamp.saturating_sub(reset_cached_gateway_score.timestamp as u128);
+            let elapsed_time =
+                current_timestamp.saturating_sub(reset_cached_gateway_score.timestamp as u128);
             let remaining_ttl = (reset_gateway_input.hardTtl as u128).saturating_sub(elapsed_time);
             #[allow(clippy::absurd_extreme_comparisons)]
-            let safe_remaining_ttl = if remaining_ttl < 0 { reset_gateway_input.hardTtl as i64} else { remaining_ttl as i64 };
-            let result = Utils::writeToCacheWithTTL(key.clone(), reset_cached_gateway_score.clone(), safe_remaining_ttl).await;
+            let safe_remaining_ttl = if remaining_ttl < 0 {
+                reset_gateway_input.hardTtl as i64
+            } else {
+                remaining_ttl as i64
+            };
+            let result = Utils::writeToCacheWithTTL(
+                key.clone(),
+                reset_cached_gateway_score.clone(),
+                safe_remaining_ttl,
+            )
+            .await;
             match result {
                 Ok(_) => {
                     if is_eligible_for_reset {
                         logger::info!(
-                            tag="scoringFlow",
+                            tag = "scoringFlow",
                             action = "scoringFlow",
                             "Resetting Gateway Score for {:?} with new score {:?}",
                             txn_detail.txnId,
@@ -2888,7 +2957,7 @@ pub async fn reset_gateway_score(
                         );
                     } else {
                         logger::info!(
-                            tag="scoringFlow",
+                            tag = "scoringFlow",
                             action = "scoringFlow",
                             "Gateway Score is not eligible for reset for {:?}",
                             txn_detail.txnId
@@ -2897,7 +2966,7 @@ pub async fn reset_gateway_score(
                 }
                 Err(e) => {
                     logger::error!(
-                        tag="scoringFlow",
+                        tag = "scoringFlow",
                         action = "scoringFlow",
                         "Failed to reset Gateway Score for {:?} with error: {:?}",
                         txn_detail.txnId,
@@ -2905,24 +2974,18 @@ pub async fn reset_gateway_score(
                     );
                 }
             }
-            
-          
         }
         _ => {
             logger::info!(
-                tag="scoringFlow",
+                tag = "scoringFlow",
                 action = "scoringFlow",
                 "Reset Gateway Score is not enabled for {:?} and merchantId {:?}",
                 txn_detail.txnId,
                 Utils::get_m_id(txn_detail.clone().merchantId)
             );
-
         }
     }
 }
-    
-
-
 
 // fn reset_gw_score_call(param1: Option<Text>, param2: Option<Text>, params: ResetCallParams) -> T::EulerClient<A::Value> {
 //     T::client::<ResetGWScoreAPI>(param1, param2, params)
@@ -2940,7 +3003,7 @@ pub fn route_random_traffic(
         (0.0, 100.0),
     );
     logger::debug!(
-        tag="RandomNumber",
+        tag = "RandomNumber",
         action = "RandomNumber",
         "Random Number for Route Random Traffic: {:?}",
         num
@@ -2959,7 +3022,10 @@ pub fn route_random_traffic(
             .collect();
         logger::debug!(
             "Gateway Scores After Route Random Traffic Feature: {:?}",
-            remaining_gateways.iter().chain(head_gateways.iter()).collect::<Vec<_>>()
+            remaining_gateways
+                .iter()
+                .chain(head_gateways.iter())
+                .collect::<Vec<_>>()
         );
         if is_sr_v3_metric_enabled {
             set_decider_approach(decider_flow, GatewayDeciderApproach::SR_V3_HEDGING);
@@ -2976,10 +3042,7 @@ pub fn route_random_traffic(
             )
             .collect()
     } else {
-        logger::debug!(
-            "Selection Based Routing Gateways SR: {:?}",
-            sorted_gw_list
-        );
+        logger::debug!("Selection Based Routing Gateways SR: {:?}", sorted_gw_list);
         sorted_gw_list
             .into_iter()
             .map(|(gw, score)| (gw.clone(), *score))

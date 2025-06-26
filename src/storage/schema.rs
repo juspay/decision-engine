@@ -500,6 +500,8 @@ diesel::table! {
         name -> Text,
         description -> Text,
         algorithm_data -> Text,
+        #[max_length = 64]
+        algorithm_for -> Varchar,
         metadata -> Nullable<Text>,
         created_at -> Timestamp,
         modified_at -> Timestamp,
@@ -507,11 +509,14 @@ diesel::table! {
 }
 
 diesel::table! {
-    routing_algorithm_mapper (created_by) {
+    routing_algorithm_mapper (id) {
+        id -> Int4,
         #[max_length = 255]
         created_by -> Varchar,
         #[max_length = 255]
         routing_algorithm_id -> Varchar,
+        #[max_length = 64]
+        algorithm_for -> Varchar,
     }
 }
 
