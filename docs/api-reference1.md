@@ -417,9 +417,9 @@ curl -X DELETE http://localhost:8080/merchant-account/test_merchant_123423
 ```
 
 # Priority Logic V2
-
-It enables merchants and platforms to define their own routing algorithms—such as **priority-based**, **volume-split**, or **hybrid logic**—and evaluate transaction parameters against them **in real time**.
 ---
+
+**A rule engine to enable merchants to create complex logical expressions based on various payment related [parameters](https://github.com/juspay/decision-engine/blob/main/config/development.toml). These rules are executed on the payment payload to evaluate the gateway to be used.**
 
 ## Table of Contents
 1. [API Components](#components)
