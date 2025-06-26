@@ -629,7 +629,7 @@ curl --location 'http://127.0.0.1:8082/routing/activate' \
   "routing_algorithm_id": "routing_8711ce52-33e2-473f-9c8f-91a406acb850"
 }'
 ```
-At a given time one algorithm for each transaction_type (`payment`, `payout`, `three_ds_authentication`) can be active for one creator_id.
+At a given time one algorithm for each transaction_type (`payment`, `payout`, `three_ds_authentication`) can be active for one created_by id.
 HTTP 200 ⇒ algorithm is now active.
 
 ### <a id="list"></a>2.3.3 List Activated algorithm
@@ -656,7 +656,7 @@ Returns algorithms currently active for the merchant.
 ---
 Note: for advanced algorithm kinds we always require statements to be evaluated upoun, unlike the below priority, single and volume_split, which donot requires any statements and directly provide output.
 <details>
-<summary id="and-rule">AND Rule – (volume_split)</summary>
+<summary id="and-rule">AND Rule</summary>
 
 ```json
 {
@@ -699,7 +699,7 @@ All conditions must match → volume split applies
 ---
 
 <details>
-<summary id="or-rule">OR Rule – (priority)</summary>
+<summary id="or-rule">OR Rule</summary>
 
 ```json
 {
@@ -740,7 +740,7 @@ Any one condition match triggers the rule
 ---
 
 <details>
-<summary id="and-or-rule" >AND + OR (nested priority)</summary>
+<summary id="and-or-rule" >AND + OR (Nested)</summary>
 
 ```json
 {
