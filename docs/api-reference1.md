@@ -418,8 +418,7 @@ curl -X DELETE http://localhost:8080/merchant-account/test_merchant_123423
 
 # Priority Logic V2
 
-Define and manage **routing algorithms**—priority-based, volume-split, single-connector, or complex hybrid rules.
-
+It enables merchants and platforms to define their own routing algorithms—such as **priority-based**, **volume-split**, or **hybrid logic**—and evaluate transaction parameters against them **in real time**.
 ---
 
 ## Table of Contents
