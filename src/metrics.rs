@@ -96,4 +96,3 @@ impl crate::config::Server {
         Ok(tokio::net::TcpListener::bind(loc).await?)
     }
 }
-
