@@ -1,8 +1,9 @@
 use crate::decider::gatewaydecider::types::{ErrorResponse, UnifiedError};
 use crate::feedback::gateway_scoring_service::check_and_update_gateway_score;
-use crate::logger;
+use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
 use crate::types::card::txn_card_info::TxnCardInfo;
 use crate::types::txn_details::types::TxnDetail;
+use crate::{logger, metrics};
 use axum::body::to_bytes;
 use cpu_time::ProcessTime;
 use serde::{Deserialize, Serialize};
@@ -22,6 +23,13 @@ pub async fn update_score(
 ) -> Result<&'static str, ErrorResponse> {
     // Extract headers and URI
     let cpu_start = ProcessTime::now();
+    let timer = API_LATENCY_HISTOGRAM
+        .with_label_values(&["update_score"])
+        .start_timer();
+    API_REQUEST_TOTAL_COUNTER
+        .with_label_values(&["update_score"])
+        .inc();
+
     let headers = req.headers().clone();
     // let req_headers = serde_json::to_string(&headers).unwrap_or("{}".to_string());
     let original_url = req.uri().to_string();
@@ -39,6 +47,10 @@ pub async fn update_score(
     let body_bytes = match to_bytes(req.into_body(), usize::MAX).await {
         Ok(bytes) => bytes,
         Err(e) => {
+            API_REQUEST_COUNTER
+                .with_label_values(&["update_score", "failure"])
+                .inc();
+            timer.observe_duration();
             let error_response = ErrorResponse {
                 status: "400".to_string(),
                 error_code: "400".to_string(),
@@ -135,6 +147,10 @@ pub async fn update_score(
                     "Gateway field is empty"
                 );
 
+                API_REQUEST_COUNTER
+                    .with_label_values(&["update_score", "failure"])
+                    .inc();
+                timer.observe_duration();
                 return Err(error_response);
             }
 
@@ -182,6 +198,10 @@ pub async fn update_score(
                 "Successfully updated score"
             );
 
+            API_REQUEST_COUNTER
+                .with_label_values(&["update_score", "success"])
+                .inc();
+            timer.observe_duration();
             return Ok("Success");
         }
         Err(e) => {
@@ -225,6 +245,10 @@ pub async fn update_score(
                 "Error occurred while parsing request payload"
             );
 
+            API_REQUEST_COUNTER
+                .with_label_values(&["update_score", "failure"])
+                .inc();
+            timer.observe_duration();
             return Err(error_response);
         }
     }

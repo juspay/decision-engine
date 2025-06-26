@@ -10,6 +10,7 @@ pub mod feedback;
 pub mod generics;
 pub mod logger;
 pub mod merchant_config_util;
+pub mod metrics;
 #[cfg(feature = "middleware")]
 pub mod middleware;
 pub mod redis;

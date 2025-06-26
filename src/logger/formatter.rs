@@ -12,7 +12,7 @@ use std::{
 use chrono::{Datelike, Timelike, Utc};
 use once_cell::sync::Lazy;
 use serde::ser::{SerializeMap, Serializer};
-use serde_json::{Value, Map};
+use serde_json::{Map, Value};
 
 use crate::logger;
 
@@ -174,7 +174,6 @@ where
             other => other,
         }
     }
-
 
     /// Serialize common for both span and event entries.
     fn common_serialize<S>(
@@ -370,17 +369,13 @@ where
                     if let Some(value) = storage.values.get(*key) {
                         if key == &"message" {
                             let normalized_value = get_normalized_message::<W>(&storage);
-                            
+
                             map_serializer.serialize_entry("message", &normalized_value)?;
                             explicit_entries_set.insert("message");
-                        }    
-                        else{
+                        } else {
                             map_serializer.serialize_entry(*key, value)?;
                             explicit_entries_set.insert(*key);
-
                         }
-                        
-                        
                     }
                 }
             }
@@ -425,7 +420,7 @@ where
 
             if !explicit_entries_set.contains("message") {
                 let normalized_value = get_normalized_message::<W>(&storage);
-                
+
                 map_serializer.serialize_entry("message", &normalized_value)?;
                 explicit_entries_set.insert("message");
             }
@@ -568,17 +563,21 @@ fn get_normalized_message<W>(storage: &Storage<'_>) -> serde_json::Value
 where
     W: for<'a> MakeWriter<'a> + 'static,
 {
-    let value = storage.values.get("message").cloned().unwrap_or(Value::String("null".to_string()));
+    let value = storage
+        .values
+        .get("message")
+        .cloned()
+        .unwrap_or(Value::String("null".to_string()));
 
     match &value {
-        serde_json::Value::String(s) => match serde_json::from_str::<serde_json::Value>(s.as_str()) {
+        serde_json::Value::String(s) => match serde_json::from_str::<serde_json::Value>(s.as_str())
+        {
             Ok(parsed) => FormattingLayer::<W>::normalize_json(parsed),
             Err(_) => value.clone(),
         },
         _ => value.clone(),
     }
 }
-
 
 /// Format the current time in a custom format: "YYYY-MM-DD HH:MM:SS.mmm"
 fn format_time_custom() -> String {
