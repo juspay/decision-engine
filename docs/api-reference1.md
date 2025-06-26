@@ -416,9 +416,15 @@ curl -X DELETE http://localhost:8080/merchant-account/test_merchant_123423
 }
 ```
 
-# Priority Logic V2 
+# Priority Logic V2
 
 It enables merchants and platforms to define their own routing algorithms—such as **priority-based**, **volume-split**, or **hybrid logic**—and evaluate transaction parameters against them **in real time**.
+
+## Types and their associated values
+- algorithm_for(optional): transaction type (payment, payout, three_ds_authentication) default payment.
+- algorithm : {"type": "can be one of advanced, single, priority, volume_split"} examples are provided at last.
+- routing_type: priority, volume_split.
+- other values like lhs and values can be accessed through the development.toml.
 
 ## Create Routing Algorithm:
 ### Request:
@@ -453,7 +459,7 @@ curl --location 'http://127.0.0.1:8082/routing/create' \
             "rules": [
                 {
                     "name": "Card Rule",
-                    "routingType": "priority",
+                    "routing_type": "priority",
                     "output": {
                         "priority": [
                             {
@@ -589,19 +595,31 @@ curl --location 'http://localhost:8080/routing/evaluate' \
 This will go to default_selection as the amount is less than 1000 and the payment_method is upi.
 ```
 {
-   "status": "default_selection",
-   "output": {
-       "type": "priority",
-       "connectors": [
-           "stripe",
-           "adyen",
-           "checkout"
-       ]
-   },
-   "evaluated_output": [
-       "stripe"
-   ],
-   "eligible_connectors": []
+  "status": "default_selection",
+  "output": {
+    "type": "priority",
+    "connectors": [
+      {
+        "gateway_name": "stripe",
+        "gateway_id": "mca_001"
+      },
+      {
+        "gateway_name": "adyen",
+        "gateway_id": "mca_002"
+      },
+      {
+        "gateway_name": "checkout",
+        "gateway_id": "mca_003"
+      }
+    ]
+  },
+  "evaluated_output": [
+    {
+      "gateway_name": "stripe",
+      "gateway_id": "mca_001"
+    }
+  ],
+  "eligible_connectors": []
 }
 ```
 
@@ -1235,3 +1253,79 @@ If the input has:
 🔄 **Then** the rule `"RBL rule"` matches → returns `rbl`.
 
 📆 **Otherwise** → returns fallback `defaultSelection` → `[bambora, Paytm, checkout]`.
+
+### 3. Straight through routing
+This ensures that no-matter the payment params, transactions will always be routed through the provided gateway.
+```
+curl --location 'http://127.0.0.1:8082/routing/create' \
+--header 'Content-Type: application/json' \
+--data '{
+  "name": "single connector rule",
+  "description": "Only one connector to use",
+  "created_by": "merchant_123",
+  "algorithm": {
+    "type": "single",
+    "data": {
+      "gateway_name": "stripe",
+      "gateway_id": "mca_00123"
+    }
+  }
+}'
+```
+
+### 4. Priority Routing
+Same as straight through, this rule will ensure a prioty list output, in the same order as mentioned.
+```
+curl --location 'http://127.0.0.1:8082/routing/create' \
+--header 'Content-Type: application/json' \
+--data '{
+  "name": "priority rule test",
+  "description": "Prioritize connectors by order",
+  "created_by": "merchant_123",
+  "algorithm": {
+    "type": "priority",
+    "data": [
+      {
+        "gateway_name": "stripe",
+        "gateway_id": "mca_001"
+      },
+      {
+        "gateway_name": "razorpay",
+        "gateway_id": "mca_002"
+      }
+    ]
+  }
+}'
+```
+
+### 5. Volume based Rule
+Same as above two rules, this will 
+```
+curl --location 'http://127.0.0.1:8082/routing/create' \
+--header 'Content-Type: application/json' \
+--data '{
+  "name": "volume split test rule",
+  "description": "A rule to split volume between connectors",
+  "created_by": "merchant_31",
+  "algorithm_for": "payout",
+  "algorithm": {
+    "type": "volume_split",
+    "data": [
+      {
+        "split": 70,
+        "output": {
+          "gateway_name": "stripe",
+          "gateway_id": "mca_001"
+        }
+      },
+      {
+        "split": 30,
+        "output": {
+          "gateway_name": "razorpay",
+          "gateway_id": "mca_002"
+        }
+      }
+    ]
+  }
+}'
+```
