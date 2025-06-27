@@ -57,6 +57,9 @@ spec:
             - name: http
               containerPort: {{ .Values.decisionEngine.server.port }}
               protocol: TCP
+            - name: metrics
+              containerPort: {{ .Values.decisionEngine.metrics.port }}
+              protocol: TCP
           env:
             - name: GROOVY_RUNNER_HOST
               value: "{{ include "decision-engine.groovyRunnerName" . }}:{{ .Values.groovyRunner.service.port }}"

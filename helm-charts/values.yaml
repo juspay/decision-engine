@@ -5,7 +5,7 @@ image:
   # Updated to include the registry URL
   repository: ghcr.io/juspay/decision-engine/postgres
   pullPolicy: Always
-  version: "v1.0.0"
+  version: "v1.2.0"
 
 # Configure these if your images are in a private registry
 imagePullSecrets: 
@@ -85,6 +85,10 @@ decisionEngine:
   server:
     host: "0.0.0.0"
     port: 8080
+  # Metrics server configurations
+  metrics:
+    host: "0.0.0.0"
+    port: 9090
   # Rate limiting
   rateLimit:
     requestCount: 1

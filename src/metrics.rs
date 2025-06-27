@@ -88,7 +88,10 @@ pub async fn metrics_server_builder(
 }
 
 impl crate::config::GlobalConfig {
-    pub async fn tcp_listener(&self,server: &str) -> Result<tokio::net::TcpListener, ConfigurationError> {
+    pub async fn tcp_listener(
+        &self,
+        server: &str,
+    ) -> Result<tokio::net::TcpListener, ConfigurationError> {
         let loc = format!("{}:{}", self.metrics.host, self.metrics.port);
 
         tracing::info!(
