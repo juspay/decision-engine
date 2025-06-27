@@ -73,6 +73,7 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
+      - "9090:9090"
     depends_on:
       postgresql:
         condition: service_healthy
@@ -88,13 +89,14 @@ services:
       - GROOVY_RUNNER_HOST=host.docker.internal:8085
 
   open-router-pg:
-    image: ghcr.io/juspay/decision-engine/postgres:v1.0.0
+    image: ghcr.io/juspay/decision-engine/postgres:7892cc0
     pull_policy: always
     platform: linux/amd64
     container_name: open-router-pg 
     restart: unless-stopped
     ports:
-      - "8080:8080" 
+      - "8080:8080"
+      - "9090:9090"
     depends_on:
       db-migrator-postgres: 
         condition: service_completed_successfully

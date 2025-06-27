@@ -57,7 +57,7 @@ pub enum ConfigurationError {
 pub async fn metrics_server_builder(
     config: crate::config::GlobalConfig,
 ) -> Result<(), ConfigurationError> {
-    let listener = config.metrics.tcp_listener().await?;
+    let listener = config.tcp_listener("Metrics").await?;
 
     let router = axum::Router::new().route(
         "/metrics",
@@ -87,11 +87,17 @@ pub async fn metrics_server_builder(
     Ok(())
 }
 
-impl crate::config::Server {
-    pub async fn tcp_listener(&self) -> Result<tokio::net::TcpListener, ConfigurationError> {
-        let loc = format!("{}:{}", self.host, self.port);
+impl crate::config::GlobalConfig {
+    pub async fn tcp_listener(&self,server: &str) -> Result<tokio::net::TcpListener, ConfigurationError> {
+        let loc = format!("{}:{}", self.metrics.host, self.metrics.port);
 
-        tracing::info!(tag = "SERVER", "binding the metrics server at {}", loc);
+        tracing::info!(
+            category = "SERVER",
+            "{} started [{:?}] [{:?}]",
+            server,
+            self.metrics,
+            self.log
+        );
 
         Ok(tokio::net::TcpListener::bind(loc).await?)
     }
