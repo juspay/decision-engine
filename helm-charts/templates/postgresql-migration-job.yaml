@@ -48,15 +48,17 @@ spec:
             - name: PGPASSWORD
               value: {{ .Values.postgresql.auth.password | quote }}
             - name: DATABASE_URL
-              value: postgresql://{{ .Values.postgresql.auth.username }}:{{ .Values.postgresql.auth.password }}@{{ include "decision-engine.postgresqlHost" . }}:5432/{{ .Values.postgresql.database }}
+              value: postgresql://{{ .Values.postgresql.auth.username }}:{{ .Values.postgresql.auth.password }}@{{ include "decision-engine.postgresqlHost" . }}:5432/{{ .Values.postgresql.auth.database }}
           command:
             - /bin/sh
             - -c
             - |-
              version={{ .Values.image.version }}
+             database_url = "postgresql://{{ .Values.postgresql.auth.username }}:{{ .Values.postgresql.auth.password }}@{{ include "decision-engine.postgresqlHost" . }}:5432/{{ .Values.postgresql.auth.database}}"
              echo "INFO: Starting migration process for version: $version"
+             echo "INFO: Using database URL: $database_url"
 
-             DOWNLOAD_URL="https://github.com/juspay/decision-engine/refs/tags/$version.tar.gz"
+             DOWNLOAD_URL="https://github.com/juspay/decision-engine/archive/refs/tags/$version.tar.gz"
 
              echo "INFO: Downloading source code from $DOWNLOAD_URL"
              # -L: follow redirects

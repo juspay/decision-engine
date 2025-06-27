@@ -124,6 +124,10 @@ log_format = {{ .Values.decisionEngine.logging.format | quote }}
 host = {{ .Values.decisionEngine.server.host | quote }}
 port = {{ .Values.decisionEngine.server.port }}
 
+[metrics]
+host = {{ .Values.decisionEngine.metrics.host | quote }}
+port = {{ .Values.decisionEngine.metrics.port }}
+
 [limit]
 request_count = {{ .Values.decisionEngine.rateLimit.requestCount }}
 duration = {{ .Values.decisionEngine.rateLimit.duration }}
@@ -194,4 +198,3 @@ Define the MySQL hostname
 {{- .Values.mysql.hostname | default (printf "%s-mysql" .Release.Name) }}
 {{- end }}
 {{- end }}
-
