@@ -38,6 +38,11 @@ We welcome feature suggestions! Feature requests should include:
 
 #### Development Environment Setup
 
+For setting up the database, please refer to the following guides:
+- **MySQL Setup**: [docs/setup-guide-mysql.md](docs/setup-guide-mysql.md)
+- **PostgreSQL Setup**: [docs/setup-guide-postgres.md](docs/setup-guide-postgres.md)
+
+
 ```bash
 # Clone your fork
 git clone https://github.com/your-username/decision-engine.git
