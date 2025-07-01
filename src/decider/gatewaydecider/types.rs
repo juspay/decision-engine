@@ -611,6 +611,7 @@ pub enum GatewayDeciderApproach {
     SR_V3_ALL_DOWNTIME_HEDGING,
     SR_V3_DOWNTIME_HEDGING,
     SR_V3_GLOBAL_DOWNTIME_HEDGING,
+    NTW_BASED_ROUTING,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -1397,6 +1398,9 @@ impl fmt::Display for GatewayDeciderApproach {
             Self::SR_V3_DOWNTIME_HEDGING => write!(f, "SR_V3_DOWNTIME_HEDGING"),
             Self::SR_V3_GLOBAL_DOWNTIME_HEDGING => {
                 write!(f, "SR_V3_GLOBAL_DOWNTIME_HEDGING")
+            }
+            Self::NTW_BASED_ROUTING => {
+                write!(f, "NTW_BASED_ROUTING")
             }
         }
     }
