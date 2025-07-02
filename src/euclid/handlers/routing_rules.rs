@@ -518,7 +518,7 @@ pub async fn routing_evaluate(
                         StaticRoutingAlgorithm::Single(conn.clone()).to_string()
                     ))
                 }) {
-                    Ok((_, eval)) => (out_enum, eval, Some("straight_through_rule".into())),
+                    Ok((_, eval)) => (out_enum, eval, Some("straight_through".into())),
                     Err(e) => {
                         API_REQUEST_COUNTER
                             .with_label_values(&["routing_evaluate", "failure"])
@@ -537,7 +537,7 @@ pub async fn routing_evaluate(
                         StaticRoutingAlgorithm::Priority(connectors.clone()).to_string()
                     ))
                 }) {
-                    Ok((_, eval)) => (out_enum, eval, Some("priority_rule".into())),
+                    Ok((_, eval)) => (out_enum, eval, Some("priority".into())),
                     Err(e) => {
                         API_REQUEST_COUNTER
                             .with_label_values(&["routing_evaluate", "failure"])
@@ -556,7 +556,7 @@ pub async fn routing_evaluate(
                         StaticRoutingAlgorithm::VolumeSplit(splits.clone()).to_string()
                     ))
                 }) {
-                    Ok((_, eval)) => (out_enum, eval, Some("volume_split_rule".into())),
+                    Ok((_, eval)) => (out_enum, eval, Some("volume_split".into())),
                     Err(e) => {
                         API_REQUEST_COUNTER
                             .with_label_values(&["routing_evaluate", "failure"])
@@ -575,6 +575,25 @@ pub async fn routing_evaluate(
                     EuclidErrors::InvalidRequest(format!("Interpreter error: {:?}", e.error_type))
                 }) {
                     Ok(ir) => (ir.output, ir.evaluated_output, ir.rule_name),
+                    Err(e) => {
+                        API_REQUEST_COUNTER
+                            .with_label_values(&["routing_evaluate", "failure"])
+                            .inc();
+                        timer.observe_duration();
+                        return Err(e.into());
+                    }
+                }
+            }
+
+            StaticRoutingAlgorithm::DefaultFallback(connectors) => {
+                let out_enum = Output::DefaultFallback(connectors.clone());
+                match evaluate_output(&out_enum).map_err(|_| {
+                    EuclidErrors::FailedToEvaluateOutput(format!(
+                        "{}",
+                        StaticRoutingAlgorithm::DefaultFallback(connectors.clone()).to_string()
+                    ))
+                }) {
+                    Ok((_, eval)) => (out_enum, eval, Some("default_fallback".into())),
                     Err(e) => {
                         API_REQUEST_COUNTER
                             .with_label_values(&["routing_evaluate", "failure"])
@@ -623,6 +642,12 @@ fn format_output(output: &Output) -> Value {
         Output::Priority(connectors) => {
             json!({
                 "type": "priority",
+                "connectors": connectors
+            })
+        }
+        Output::DefaultFallback(connectors) => {
+            json!({
+                "type": "default_fallback",
                 "connectors": connectors
             })
         }
