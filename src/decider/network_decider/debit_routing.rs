@@ -37,7 +37,8 @@ pub async fn perform_debit_routing(
                         gateway_priority_map: None,
                         filter_wise_gateways: None,
                         priority_logic_tag: None,
-                        routing_approach: gateway_decider_types::GatewayDeciderApproach::NONE,
+                        routing_approach:
+                            gateway_decider_types::GatewayDeciderApproach::NTW_BASED_ROUTING,
                         gateway_before_evaluation: None,
                         priority_logic_output: None,
                         debit_routing_output: Some(debit_routing_output),
