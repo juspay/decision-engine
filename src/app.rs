@@ -109,8 +109,6 @@ where
         logger::error!("SIGTERM signal received, shutting down...");
         let app_state = APP_STATE.get().expect("GlobalAppState not set");
         app_state.set_not_ready(); // Set readiness flag to false
-                                   // Wait for 60 seconds before shutting down
-        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
         handle_clone.shutdown(); // Trigger axum_server shutdown
     });
 
