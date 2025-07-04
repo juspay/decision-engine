@@ -148,6 +148,7 @@ pub enum RoutingType {
     Priority,
     VolumeSplit,
     VolumeSplitPriority,
+    DefaultFallback,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -164,6 +165,7 @@ pub enum Output {
     Priority(Vec<ConnectorInfo>),
     VolumeSplit(Vec<VolumeSplit<ConnectorInfo>>),
     VolumeSplitPriority(Vec<VolumeSplit<Vec<ConnectorInfo>>>),
+    DefaultFallback(Vec<ConnectorInfo>),
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
