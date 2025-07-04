@@ -5,11 +5,8 @@ use crate::{
     error::{self, ResultContainerExt},
 };
 use masking::Maskable;
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::StatusCode;
-use reqwest::{
-    header::{HeaderMap, HeaderName, HeaderValue},
-    Response,
-};
 
 pub type Headers = std::collections::HashSet<(String, Maskable<String>)>;
 
@@ -82,15 +79,16 @@ impl ApiClient {
         Ok(Self { inner: client })
     }
 
-    pub async fn send_request<T>(
+    pub async fn send_request<Req, Res>(
         &self,
         url: String,
         headers: Headers,
         method: Method,
-        request_body: T,
-    ) -> Result<ApiResponse, error::ContainerError<error::ApiClientError>>
+        request_body: Req,
+    ) -> Result<Res, error::ContainerError<error::ApiClientError>>
     where
-        T: serde::Serialize + Send + Sync + 'static,
+        Req: serde::Serialize + Send + Sync + 'static,
+        Res: serde::de::DeserializeOwned + Send + 'static + std::fmt::Debug,
     {
         let url =
             reqwest::Url::parse(&url).change_error(error::ApiClientError::UrlEncodingFailed)?;
@@ -109,7 +107,10 @@ impl ApiClient {
             .change_error(error::ApiClientError::RequestNotSent)?;
 
         match response.status() {
-            StatusCode::OK => Ok(ApiResponse(response)),
+            StatusCode::OK => response
+                .json::<Res>()
+                .await
+                .change_error(error::ApiClientError::ResponseDecodingFailed),
             StatusCode::INTERNAL_SERVER_ERROR => Err(error::ApiClientError::InternalServerError(
                 response
                     .bytes()
@@ -140,21 +141,5 @@ impl ApiClient {
             }
             .into()),
         }
-    }
-}
-
-pub struct ApiResponse(Response);
-
-impl ApiResponse {
-    pub async fn deserialize_json<R, E>(self) -> Result<R, error::ContainerError<E>>
-    where
-        R: serde::de::DeserializeOwned,
-        error::ContainerError<E>: From<error::ContainerError<error::ApiClientError>> + Send + Sync,
-    {
-        Ok(self
-            .0
-            .json::<R>()
-            .await
-            .change_error(error::ApiClientError::ResponseDecodingFailed)?)
     }
 }
