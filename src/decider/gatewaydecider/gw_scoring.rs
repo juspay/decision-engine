@@ -11,6 +11,7 @@ use crate::merchant_config_util::{
     isMerchantEnabledForPaymentFlows, isPaymentFlowEnabledWithHierarchyCheck,
 };
 use crate::redis::types::ServiceConfigKey;
+use masking::PeekInterface;
 #[cfg(feature = "mysql")]
 use crate::storage::schema::txn_detail;
 #[cfg(feature = "postgres")]
@@ -267,16 +268,30 @@ pub async fn scoring_flow(
                     default_sr_v3_input_config
                 );
 
+                // Extract the new parameters from txn_card_info
+                let card_network = txn_card_info.cardSwitchProvider.as_ref().map(|s| s.peek().to_string());
+                let card_isin = txn_card_info.card_isin;
+                let currency = Some(decider_flow.get().dpOrder.currency.to_string());
+                let auth_type = txn_card_info.authType.as_ref().map(|a| a.to_string());
+
                 let hedging_percent = Utils::get_sr_v3_hedging_percent(
                     merchant_sr_v3_input_config.clone(),
                     &pmt_str,
                     pm.clone().as_str(),
+                    card_network.clone(),
+                    card_isin.clone(),
+                    currency.clone(),
+                    auth_type.clone(),
                 )
                 .or_else(|| {
                     Utils::get_sr_v3_hedging_percent(
                         default_sr_v3_input_config.clone(),
                         &pmt_str,
                         pm.clone().as_str(),
+                        card_network.clone(),
+                        card_isin.clone(),
+                        currency.clone(),
+                        auth_type.clone(),
                     )
                 })
                 .unwrap_or(C::defaultSrV3BasedHedgingPercent);
@@ -494,10 +509,17 @@ pub async fn get_cached_scores_based_on_srv3(
     )
     .await;
 
+    // Extract the new parameters from txn_card_info
+    let txn_card_info = decider_flow.get().dpTxnCardInfo.clone();
+    let card_network = txn_card_info.cardSwitchProvider.as_ref().map(|s| s.peek().to_string());
+    let card_isin = txn_card_info.card_isin;
+    let currency = Some(decider_flow.get().dpOrder.currency.to_string());
+    let auth_type = txn_card_info.authType.as_ref().map(|a| a.to_string());
+
     let merchant_bucket_size =
-        Utils::get_sr_v3_bucket_size(merchant_srv3_input_config.clone(), &pmt_str, &pm)
+        Utils::get_sr_v3_bucket_size(merchant_srv3_input_config.clone(), &pmt_str, &pm, card_network.clone(), card_isin.clone(),currency.clone(), auth_type.clone())
             .or_else(|| {
-                Utils::get_sr_v3_bucket_size(default_srv3_input_config.clone(), &pmt_str, &pm)
+                Utils::get_sr_v3_bucket_size(default_srv3_input_config.clone(), &pmt_str, &pm, card_network.clone(), card_isin.clone(), currency.clone(), auth_type.clone())
             })
             .unwrap_or(C::DEFAULT_SR_V3_BASED_BUCKET_SIZE);
 
@@ -545,22 +567,30 @@ pub async fn get_cached_scores_based_on_srv3(
     .await;
     let updated_score_map_after_reset = if is_srv3_reset_enabled {
         let upper_reset_factor =
-            Utils::get_sr_v3_upper_reset_factor(merchant_srv3_input_config.clone(), &pmt_str, &pm)
+            Utils::get_sr_v3_upper_reset_factor(merchant_srv3_input_config.clone(), &pmt_str, &pm, card_network.clone(), card_isin.clone(), currency.clone(), auth_type.clone())
                 .or_else(|| {
                     Utils::get_sr_v3_upper_reset_factor(
                         default_srv3_input_config.clone(),
                         &pmt_str,
                         &pm,
+                        card_network.clone(),
+                        card_isin.clone(),
+                        currency.clone(),
+                        auth_type.clone(),
                     )
                 })
                 .unwrap_or(C::defaultSrV3BasedUpperResetFactor);
         let lower_reset_factor =
-            Utils::get_sr_v3_lower_reset_factor(merchant_srv3_input_config.clone(), &pmt_str, &pm)
+            Utils::get_sr_v3_lower_reset_factor(merchant_srv3_input_config.clone(), &pmt_str, &pm, card_network.clone(), card_isin.clone(), currency.clone(), auth_type.clone())
                 .or_else(|| {
                     Utils::get_sr_v3_lower_reset_factor(
                         default_srv3_input_config.clone(),
                         &pmt_str,
                         &pm,
+                        card_network.clone(),
+                        card_isin.clone(),
+                        currency.clone(),
+                        auth_type.clone(),
                     )
                 })
                 .unwrap_or(C::defaultSrV3BasedLowerResetFactor);
@@ -621,6 +651,10 @@ pub async fn get_cached_scores_based_on_srv3(
                 pmt_str.to_string(),
                 pm.clone(),
                 gw.clone(),
+                card_network.clone(),
+                card_isin.clone(),
+                currency.clone(),
+                auth_type.clone(),
             );
             final_score_map.insert(gw, extra_score);
         }
@@ -749,11 +783,15 @@ pub fn add_extra_score(
     pmt: String,
     pm: String,
     gw: String,
+    card_network: Option<String>,
+    card_isin: Option<String>,
+    currency: Option<String>,
+    auth_type: Option<String>,
 ) -> f64 {
     let gateway_sigma_factor =
-        Utils::get_sr_v3_gateway_sigma_factor(merchant_sr_v3_input_config, &pmt, &pm, &gw)
+                Utils::get_sr_v3_gateway_sigma_factor(merchant_sr_v3_input_config, &pmt, &pm, &gw, card_network.clone(), card_isin.clone(), currency.clone(), auth_type.clone())
             .or_else(|| {
-                Utils::get_sr_v3_gateway_sigma_factor(default_sr_v3_input_config, &pmt, &pm, &gw)
+                Utils::get_sr_v3_gateway_sigma_factor(default_sr_v3_input_config, &pmt, &pm, &gw, card_network.clone(), card_isin.clone(), currency.clone(), auth_type.clone())
             })
             .unwrap_or(C::DEFAULT_SR_V3_BASED_GATEWAY_SIGMA_FACTOR);
     logger::debug!(

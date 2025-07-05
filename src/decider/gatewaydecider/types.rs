@@ -529,6 +529,9 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
             routingApproach: None,
             dateCreated: OffsetDateTime::now_utc(),
             eliminationEnabled: false,
+            cardIsIn: None,
+            cardSwitchProvider: None,
+            currency: None,
         },
     }
 }
@@ -551,6 +554,9 @@ pub struct GatewayScoringData {
     pub routingApproach: Option<String>,
     pub dateCreated: OffsetDateTime,
     pub eliminationEnabled: bool,
+    pub cardIsIn: Option<String>,
+    pub cardSwitchProvider: Option<Secret<String>>,
+    pub currency: Option<Currency>,
 }
 
 #[derive(Debug)]
@@ -1113,6 +1119,10 @@ pub struct SrV3InputConfig {
 pub struct SrV3SubLevelInputConfig {
     pub paymentMethodType: Option<String>,
     pub paymentMethod: Option<String>,
+    pub cardNetwork: Option<String>,
+    pub cardIsIn: Option<String>,
+    pub currency: Option<String>,
+    pub authType: Option<String>,
     pub latencyThreshold: Option<f64>,
     pub bucketSize: Option<i32>,
     pub hedgingPercent: Option<f64>,
