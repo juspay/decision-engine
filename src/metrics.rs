@@ -4,7 +4,7 @@ use prometheus::{
     self, exponential_buckets, register_histogram_vec, register_int_counter_vec, Encoder,
     HistogramVec, IntCounterVec, TextEncoder,
 };
-
+use tokio::signal::unix::{signal, SignalKind};
 lazy_static! {
     /// Total count of API requests by endpoint
     pub static ref API_REQUEST_TOTAL_COUNTER: IntCounterVec = register_int_counter_vec!(
@@ -77,10 +77,13 @@ pub async fn metrics_server_builder(
         }),
     );
 
+    // Create a signal stream for SIGTERM
+    let mut sigterm = signal(SignalKind::terminate()).expect("Failed to create SIGTERM handler");
+
     axum::serve(listener, router.into_make_service())
-        .with_graceful_shutdown(async {
-            let output = tokio::signal::ctrl_c().await;
-            tracing::error!("shutting down: {:?}", output);
+        .with_graceful_shutdown(async move {
+            let _ = sigterm.recv().await;
+            tracing::info!("Metrics server shutting down gracefully");
         })
         .await?;
 
