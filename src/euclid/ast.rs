@@ -166,7 +166,7 @@ pub enum Output {
     VolumeSplitPriority(Vec<VolumeSplit<Vec<ConnectorInfo>>>),
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ConnectorInfo {
     pub gateway_name: String,

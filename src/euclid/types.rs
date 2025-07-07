@@ -62,6 +62,7 @@ pub enum AlgorithmType {
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct RoutingRequest {
     pub created_by: String,
+    pub fallback_output: Option<Vec<ConnectorInfo>>,
     pub parameters: HashMap<String, Option<ValueType>>,
 }
 
