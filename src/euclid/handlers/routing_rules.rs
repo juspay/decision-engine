@@ -174,6 +174,7 @@ pub async fn routing_evaluate(
     if check_default_fallback_present
         && payload
             .fallback_output
+            .clone()
             .is_none_or(|fallback| fallback.is_empty())
     {
         return Err(EuclidErrors::DefaultFallbackNotFound(payload.created_by.clone()).into());
@@ -370,7 +371,24 @@ pub async fn routing_evaluate(
                 match InterpreterBackend::eval_program(&program, &ctx).map_err(|e| {
                     EuclidErrors::InvalidRequest(format!("Interpreter error: {:?}", e.error_type))
                 }) {
-                    Ok(ir) => (ir.output, ir.evaluated_output, ir.rule_name),
+                    Ok(mut ir) => {
+                        // Check if fallback is enabled
+                        if check_default_fallback_present && ir.output == program.default_selection
+                        {
+                            logger::info!(
+                                "Default fallback triggered: Overriding with fallback connector"
+                            );
+
+                            // Replace output with fallback connector from request
+                            if let Some(fallback_connector) = payload.fallback_output.clone() {
+                                ir.rule_name = Some("default_fallback".to_string());
+                                ir.output = Output::Priority(fallback_connector.clone());
+                                ir.evaluated_output =
+                                    vec![fallback_connector.first().cloned().unwrap_or_default()];
+                            }
+                        }
+                        (ir.output, ir.evaluated_output, ir.rule_name)
+                    }
                     Err(e) => {
                         API_REQUEST_COUNTER
                             .with_label_values(&["routing_evaluate", "failure"])
@@ -390,15 +408,16 @@ pub async fn routing_evaluate(
     };
 
     let response = RoutingEvaluateResponse {
-        status: if rule_name.is_some() {
-            "success".into()
-        } else {
-            "default_selection".into()
+        status: match rule_name.as_deref() {
+            Some("default_selection") | Some("default_fallback") => "default_selection".into(),
+            Some(_) => "success".into(),
+            None => "default_selection".into(),
         },
         output: format_output(&output),
         evaluated_output,
         eligible_connectors,
     };
+
     logger::info!("Response: {response:?}");
 
     API_REQUEST_COUNTER

@@ -150,14 +150,14 @@ pub enum RoutingType {
     VolumeSplitPriority,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct VolumeSplit<T> {
     pub split: u8,
     pub output: T,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Output {
     Single(ConnectorInfo),
