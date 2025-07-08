@@ -248,6 +248,7 @@ pub fn evaluate_output(output: &Output) -> RoutingResult<(Vec<ConnectorInfo>, Ve
                 vec![first_connector.unwrap_or_default()],
             ))
         }
+        Output::DefaultFallback(connectors) => Ok((connectors.clone(), connectors.to_vec())),
         Output::VolumeSplit(splits) => {
             let selected_connector = perform_volume_split(splits.clone())?;
             Ok((vec![selected_connector.clone()], vec![selected_connector]))

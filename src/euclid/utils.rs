@@ -74,6 +74,7 @@ pub fn validate_routing_rule(
     match &rule.algorithm {
         StaticRoutingAlgorithm::Single(_)
         | StaticRoutingAlgorithm::Priority(_)
+        | StaticRoutingAlgorithm::DefaultFallback(_)
         | StaticRoutingAlgorithm::VolumeSplit(_) => return Ok(()),
         StaticRoutingAlgorithm::Advanced(program) => {
             let mut errors = Vec::new();

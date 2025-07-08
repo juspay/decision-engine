@@ -47,6 +47,7 @@ pub enum StaticRoutingAlgorithm {
     Priority(Vec<ConnectorInfo>),
     VolumeSplit(Vec<super::ast::VolumeSplit<ConnectorInfo>>),
     Advanced(Program),
+    DefaultFallback(Vec<ConnectorInfo>),
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, strum::Display)]
