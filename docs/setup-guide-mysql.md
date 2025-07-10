@@ -99,6 +99,8 @@ make run-local
 
 ## Using the Decision Engine APIs
 
+<img width="512" height="424" alt="image" src="https://github.com/user-attachments/assets/58601dd2-5a89-494c-92bf-6f726c9a63bb" />
+
 ### 1. Get the Gateway Decision
 
 Use the following cURL with payment info to get the gateway-decision:
@@ -184,78 +186,6 @@ curl --location 'http://localhost:8080/update-gateway-score' \
     "status": "PENDING_VBV",
     "paymentId": "123"
 }'
-```
-
-## Configuration Options
-
-### 1. Priority Logic (PL) to be updated in this file - [https://github.com/juspay/decision-engine/blob/main/routing-config/priority_logic.txt]
-
-```groovy
-def priorities = ['A','B','C','D','E'] // Default priorities if no rule matches
-def systemtimemills = System.currentTimeMillis() % 100
-def enforceFlag = false
-
-if ((payment.paymentMethodType)=='UPI' && (txn.sourceObject)=='UPI_COLLECT') {
-    priorities = ['A','B']
-    enforceFlag = true
-}
-else {
-    if (['UPI'].contains(payment.paymentMethodType)) {
-        if (order.udf1=="LOB1") {
-            if (payment.paymentSource?.indexOf("ABC") >= 0 || 
-                payment.paymentSource?.indexOf("DEF") >= 0) {
-                priorities = ['B','C']
-            }
-            else if (systemtimemills < 50) {
-                priorities = ['D','E']
-            }
-            else {
-                priorities = ['E','D']
-            }
-        }
-    }
-}
-```
-
-### 2. SR and ER routing configs to be update in this file - [https://github.com/juspay/decision-engine/blob/main/routing-config/config.yaml]
-```yaml
-merchant_id: test_merchant1
-priority_logic:
-  script: priority_logic.txt
-  tag: PL_TEST
-elimination_config:
-  threshold: 0.35
-sr_routing_config:
-  defaultBucketSize: 50
-  defaultHedgingPercent: 5
-  subLevelInputConfig:
-    - paymentMethodType: UPI
-      paymentMethod: UPI_COLLECT
-      bucketSize: 100
-      hedgingPercent: 1
-    - paymentMethodType: UPI
-      paymentMethod: UPI_PAY
-      bucketSize: 500
-      hedgingPercent: 1
-    - paymentMethodType: UPI
-      paymentMethod: UPI_QR
-      bucketSize: 1000
-      hedgingPercent: 1
-    - paymentMethodType: NB
-      bucketSize: 50
-      hedgingPercent: 1
-    - paymentMethodType: CARD
-      bucketSize: 200
-      hedgingPercent: 1
-    - paymentMethodType: WALLET
-      bucketSize: 50
-      hedgingPercent: 1
-```
-
-After modifying the configurations, use the following command to push them to the DB:
-
-```bash
-make update-config
 ```
 
 ## Glossary
