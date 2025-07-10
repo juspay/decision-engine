@@ -31,7 +31,7 @@ To learn more, refer to this blog: [https://juspay.io/blog/juspay-orchestrator-a
 
 ## Try it out
  
- Check the [SETUP.md](/docs/setup-guide1.md) for detailed steps to try out the application.
+ Check the [SETUP.md](/docs/setup-guide-mysql.md) for detailed steps to try out the application.
 
 
 
