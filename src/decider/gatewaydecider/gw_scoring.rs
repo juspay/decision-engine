@@ -282,22 +282,22 @@ pub async fn scoring_flow(
                     merchant_sr_v3_input_config.clone(),
                     &pmt_str,
                     pm.clone().as_str(),
-                    card_network.clone(),
-                    card_isin.clone(),
-                    currency.clone(),
-                    country.clone(),
-                    auth_type.clone(),
+                    &card_network,
+                    &card_isin,
+                    &currency,
+                    &country,
+                    &auth_type,
                 )
                 .or_else(|| {
                     Utils::get_sr_v3_hedging_percent(
                         default_sr_v3_input_config.clone(),
                         &pmt_str,
                         pm.clone().as_str(),
-                        card_network.clone(),
-                        card_isin.clone(),
-                        currency.clone(),
-                        country.clone(),
-                        auth_type.clone(),
+                        &card_network,
+                        &card_isin,
+                        &currency,
+                        &country,
+                        &auth_type,
                     )
                 })
                 .unwrap_or(C::defaultSrV3BasedHedgingPercent);
@@ -535,22 +535,22 @@ pub async fn get_cached_scores_based_on_srv3(
         merchant_srv3_input_config.clone(),
         &pmt_str,
         &pm,
-        card_network.clone(),
-        card_isin.clone(),
-        currency.clone(),
-        country.clone(),
-        auth_type.clone(),
+        &card_network,
+        &card_isin,
+        &currency,
+        &country,
+        &auth_type,
     )
     .or_else(|| {
         Utils::get_sr_v3_bucket_size(
             default_srv3_input_config.clone(),
             &pmt_str,
             &pm,
-            card_network.clone(),
-            card_isin.clone(),
-            currency.clone(),
-            country.clone(),
-            auth_type.clone(),
+            &card_network,
+            &card_isin,
+            &currency,
+            &country,
+            &auth_type,
         )
     })
     .unwrap_or(C::DEFAULT_SR_V3_BASED_BUCKET_SIZE);
@@ -602,22 +602,22 @@ pub async fn get_cached_scores_based_on_srv3(
             merchant_srv3_input_config.clone(),
             &pmt_str,
             &pm,
-            card_network.clone(),
-            card_isin.clone(),
-            currency.clone(),
-            country.clone(),
-            auth_type.clone(),
+            &card_network,
+            &card_isin,
+            &currency,
+            &country,
+            &auth_type,
         )
         .or_else(|| {
             Utils::get_sr_v3_upper_reset_factor(
                 default_srv3_input_config.clone(),
                 &pmt_str,
                 &pm,
-                card_network.clone(),
-                card_isin.clone(),
-                currency.clone(),
-                country.clone(),
-                auth_type.clone(),
+                &card_network,
+                &card_isin,
+                &currency,
+                &country,
+                &auth_type,
             )
         })
         .unwrap_or(C::defaultSrV3BasedUpperResetFactor);
@@ -625,22 +625,22 @@ pub async fn get_cached_scores_based_on_srv3(
             merchant_srv3_input_config.clone(),
             &pmt_str,
             &pm,
-            card_network.clone(),
-            card_isin.clone(),
-            currency.clone(),
-            country.clone(),
-            auth_type.clone(),
+            &card_network,
+            &card_isin,
+            &currency,
+            &country,
+            &auth_type,
         )
         .or_else(|| {
             Utils::get_sr_v3_lower_reset_factor(
                 default_srv3_input_config.clone(),
                 &pmt_str,
                 &pm,
-                card_network.clone(),
-                card_isin.clone(),
-                currency.clone(),
-                country.clone(),
-                auth_type.clone(),
+                &card_network.clone(),
+                &card_isin.clone(),
+                &currency.clone(),
+                &country.clone(),
+                &auth_type.clone(),
             )
         })
         .unwrap_or(C::defaultSrV3BasedLowerResetFactor);
@@ -845,11 +845,11 @@ pub fn add_extra_score(
         &pmt,
         &pm,
         &gw,
-        card_network.clone(),
-        card_isin.clone(),
-        currency.clone(),
-        country.clone(),
-        auth_type.clone(),
+        &card_network,
+        &card_isin,
+        &currency,
+        &country,
+        &auth_type,
     )
     .or_else(|| {
         Utils::get_sr_v3_gateway_sigma_factor(
@@ -857,11 +857,11 @@ pub fn add_extra_score(
             &pmt,
             &pm,
             &gw,
-            card_network.clone(),
-            card_isin.clone(),
-            currency.clone(),
-            country.clone(),
-            auth_type.clone(),
+            &card_network,
+            &card_isin,
+            &currency,
+            &country,
+            &auth_type,
         )
     })
     .unwrap_or(C::DEFAULT_SR_V3_BASED_GATEWAY_SIGMA_FACTOR);

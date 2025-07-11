@@ -1563,11 +1563,11 @@ pub fn get_sr_v3_latency_threshold(
     sr_v3_input_config: Option<SrV3InputConfig>,
     pmt: &str,
     pm: &str,
-    card_network: Option<String>,
-    card_isin: Option<String>,
-    currency: Option<String>,
-    country: Option<String>,
-    auth_type: Option<String>,
+    card_network: &Option<String>,
+    card_isin: &Option<String>,
+    currency: &Option<String>,
+    country: &Option<String>,
+    auth_type: &Option<String>,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
         get_sr_v3_sub_level_input_config(
@@ -1590,11 +1590,11 @@ pub fn get_sr_v3_bucket_size(
     sr_v3_input_config: Option<SrV3InputConfig>,
     pmt: &str,
     pm: &str,
-    card_network: Option<String>,
-    card_isin: Option<String>,
-    currency: Option<String>,
-    country: Option<String>,
-    auth_type: Option<String>,
+    card_network: &Option<String>,
+    card_isin: &Option<String>,
+    currency: &Option<String>,
+    country: &Option<String>,
+    auth_type: &Option<String>,
 ) -> Option<i32> {
     sr_v3_input_config.and_then(|config| {
         get_sr_v3_sub_level_input_config(
@@ -1618,11 +1618,11 @@ pub fn get_sr_v3_hedging_percent(
     sr_v3_input_config: Option<SrV3InputConfig>,
     pmt: &str,
     pm: &str,
-    card_network: Option<String>,
-    card_isin: Option<String>,
-    currency: Option<String>,
-    country: Option<String>,
-    auth_type: Option<String>,
+    card_network: &Option<String>,
+    card_isin: &Option<String>,
+    currency: &Option<String>,
+    country: &Option<String>,
+    auth_type: &Option<String>,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
         get_sr_v3_sub_level_input_config(
@@ -1646,11 +1646,11 @@ pub fn get_sr_v3_lower_reset_factor(
     sr_v3_input_config: Option<SrV3InputConfig>,
     pmt: &str,
     pm: &str,
-    card_network: Option<String>,
-    card_isin: Option<String>,
-    currency: Option<String>,
-    country: Option<String>,
-    auth_type: Option<String>,
+    card_network: &Option<String>,
+    card_isin: &Option<String>,
+    currency: &Option<String>,
+    country: &Option<String>,
+    auth_type: &Option<String>,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
         get_sr_v3_sub_level_input_config(
@@ -1674,11 +1674,11 @@ pub fn get_sr_v3_upper_reset_factor(
     sr_v3_input_config: Option<SrV3InputConfig>,
     pmt: &str,
     pm: &str,
-    card_network: Option<String>,
-    card_isin: Option<String>,
-    currency: Option<String>,
-    country: Option<String>,
-    auth_type: Option<String>,
+    card_network: &Option<String>,
+    card_isin: &Option<String>,
+    currency: &Option<String>,
+    country: &Option<String>,
+    auth_type: &Option<String>,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
         get_sr_v3_sub_level_input_config(
@@ -1703,11 +1703,11 @@ pub fn get_sr_v3_gateway_sigma_factor(
     pmt: &str,
     pm: &str,
     gw: &String,
-    card_network: Option<String>,
-    card_isin: Option<String>,
-    currency: Option<String>,
-    country: Option<String>,
-    auth_type: Option<String>,
+    card_network: &Option<String>,
+    card_isin: &Option<String>,
+    currency: &Option<String>,
+    country: &Option<String>,
+    auth_type: &Option<String>,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
         get_sr_v3_sub_level_input_config(
@@ -1746,11 +1746,11 @@ fn get_sr_v3_sub_level_input_config(
     sub_level_input_config: &Option<Vec<SrV3SubLevelInputConfig>>,
     pmt: &str,
     pm: &str,
-    card_network: Option<String>,
-    card_isin: Option<String>,
-    currency: Option<String>,
-    country: Option<String>,
-    auth_type: Option<String>,
+    card_network: &Option<String>,
+    card_isin: &Option<String>,
+    currency: &Option<String>,
+    country: &Option<String>,
+    auth_type: &Option<String>,
     is_input_non_null: impl Fn(&SrV3SubLevelInputConfig) -> bool,
 ) -> Option<SrV3SubLevelInputConfig> {
     sub_level_input_config

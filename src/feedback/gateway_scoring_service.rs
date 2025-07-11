@@ -304,11 +304,11 @@ pub async fn getGatewayScoringType(
         merchant_sr_v3_input_config,
         &pmt,
         &pm,
-        card_network.clone(),
-        card_isin.clone(),
-        currency.clone(),
-        country.clone(),
-        auth_type.clone(),
+        &card_network,
+        &card_isin,
+        &currency,
+        &country,
+        &auth_type,
     );
 
     let time_difference_threshold = match maybe_latency_threshold {
@@ -319,11 +319,11 @@ pub async fn getGatewayScoringType(
                 default_sr_v3_input_config,
                 &pmt,
                 &pm,
-                card_network,
-                card_isin,
-                currency,
-                country.clone(),
-                auth_type,
+                &card_network,
+                &card_isin,
+                &currency,
+                &country,
+                &auth_type,
             );
             maybe_default_latency_threshold.unwrap_or(defaultSrV3LatencyThresholdInSecs())
         }

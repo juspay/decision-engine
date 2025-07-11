@@ -340,11 +340,11 @@ pub async fn getSrV3MerchantBucketSize(txn_detail: TxnDetail, txn_card_info: Txn
         merchant_sr_v3_input_config,
         &pmt,
         &pm,
-        card_network.clone(),
-        card_isin.clone(),
-        currency.clone(),
-        country.clone(),
-        auth_type.clone(),
+        &card_network,
+        &card_isin,
+        &currency,
+        &country,
+        &auth_type,
     );
     let merchant_bucket_size = match maybe_bucket_size {
         None => {
@@ -354,11 +354,11 @@ pub async fn getSrV3MerchantBucketSize(txn_detail: TxnDetail, txn_card_info: Txn
                 default_sr_v3_input_config,
                 &pmt,
                 &pm,
-                card_network,
-                card_isin,
-                currency,
-                country.clone(),
-                auth_type,
+                &card_network,
+                &card_isin,
+                &currency,
+                &country,
+                &auth_type,
             )
             .unwrap_or(C::defaultSrV3BasedBucketSize)
         }
