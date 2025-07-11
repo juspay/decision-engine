@@ -291,20 +291,40 @@ pub async fn getGatewayScoringType(
         txn_detail.sourceObject.unwrap_or_default(),
     );
     // Extract the new parameters from txn_card_info
-    let card_network = txn_card_info.cardSwitchProvider.as_ref().map(|s| s.peek().to_string());
+    let card_network = txn_card_info
+        .cardSwitchProvider
+        .as_ref()
+        .map(|s| s.peek().to_string());
     let card_isin = txn_card_info.card_isin.clone();
     let currency = Some(txn_detail.currency.to_string());
+    let country = txn_detail.country.as_ref().map(|c| c.to_string());
     let auth_type = txn_card_info.authType.as_ref().map(|a| a.to_string());
 
-    let maybe_latency_threshold =
-        get_sr_v3_latency_threshold(merchant_sr_v3_input_config, &pmt, &pm, card_network.clone(), card_isin.clone(), currency.clone(), auth_type.clone());
+    let maybe_latency_threshold = get_sr_v3_latency_threshold(
+        merchant_sr_v3_input_config,
+        &pmt,
+        &pm,
+        card_network.clone(),
+        card_isin.clone(),
+        currency.clone(),
+        country.clone(),
+        auth_type.clone(),
+    );
 
     let time_difference_threshold = match maybe_latency_threshold {
         None => {
             let default_sr_v3_input_config =
                 findByNameFromRedis(srV3DefaultInputConfig.get_key()).await;
-            let maybe_default_latency_threshold =
-                get_sr_v3_latency_threshold(default_sr_v3_input_config, &pmt, &pm, card_network, card_isin, currency, auth_type);
+            let maybe_default_latency_threshold = get_sr_v3_latency_threshold(
+                default_sr_v3_input_config,
+                &pmt,
+                &pm,
+                card_network,
+                card_isin,
+                currency,
+                country.clone(),
+                auth_type,
+            );
             maybe_default_latency_threshold.unwrap_or(defaultSrV3LatencyThresholdInSecs())
         }
         Some(latency_threshold) => latency_threshold,

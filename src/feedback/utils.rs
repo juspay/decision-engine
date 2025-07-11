@@ -185,7 +185,11 @@ pub fn getTxnDetailFromApiPayload(
             .unwrap_or_else(|| ETTD::TxnObjectType::OrderPayment),
         sourceObject: Some(gateway_scoring_data.paymentMethod.clone()),
         sourceObjectId: None,
-        currency: Currency::INR,
+        currency: gateway_scoring_data
+            .currency
+            .clone()
+            .expect("currency is mandatory"),
+        country: gateway_scoring_data.country.clone(),
         surchargeAmount: None,
         taxAmount: None,
         internalMetadata: Some(

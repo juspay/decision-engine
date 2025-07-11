@@ -6,6 +6,8 @@ use crate::feedback::gateway_elimination_scoring::flow::{
 use crate::redis::feature::isFeatureEnabled;
 use crate::redis::types::ServiceConfigKey;
 use crate::types::card::card_type::card_type_to_text;
+use crate::types::country::country_iso::CountryISO2;
+use crate::types::currency::Currency;
 use crate::types::merchant::id::{merchant_id_to_text, MerchantId};
 use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
 use crate::types::money::internal::Money;
@@ -19,10 +21,9 @@ use crate::{decider, feedback, logger};
 use diesel::Identifiable;
 use fred::prelude::{KeysInterface, ListInterface};
 use masking::PeekInterface;
+use masking::Secret;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use masking::Secret;
-use crate::types::currency::Currency;
 use serde_json::from_value;
 use serde_json::{from_slice, from_str, Value};
 use std::cmp::Ordering;
@@ -1565,6 +1566,7 @@ pub fn get_sr_v3_latency_threshold(
     card_network: Option<String>,
     card_isin: Option<String>,
     currency: Option<String>,
+    country: Option<String>,
     auth_type: Option<String>,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
@@ -1575,6 +1577,7 @@ pub fn get_sr_v3_latency_threshold(
             card_network,
             card_isin,
             currency,
+            country,
             auth_type,
             |x| x.latencyThreshold.is_some(),
         )
@@ -1590,6 +1593,7 @@ pub fn get_sr_v3_bucket_size(
     card_network: Option<String>,
     card_isin: Option<String>,
     currency: Option<String>,
+    country: Option<String>,
     auth_type: Option<String>,
 ) -> Option<i32> {
     sr_v3_input_config.and_then(|config| {
@@ -1600,6 +1604,7 @@ pub fn get_sr_v3_bucket_size(
             card_network,
             card_isin,
             currency,
+            country,
             auth_type,
             |x| x.bucketSize.is_some(),
         )
@@ -1616,6 +1621,7 @@ pub fn get_sr_v3_hedging_percent(
     card_network: Option<String>,
     card_isin: Option<String>,
     currency: Option<String>,
+    country: Option<String>,
     auth_type: Option<String>,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
@@ -1626,6 +1632,7 @@ pub fn get_sr_v3_hedging_percent(
             card_network,
             card_isin,
             currency,
+            country,
             auth_type,
             |x| x.hedgingPercent.is_some(),
         )
@@ -1642,6 +1649,7 @@ pub fn get_sr_v3_lower_reset_factor(
     card_network: Option<String>,
     card_isin: Option<String>,
     currency: Option<String>,
+    country: Option<String>,
     auth_type: Option<String>,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
@@ -1652,6 +1660,7 @@ pub fn get_sr_v3_lower_reset_factor(
             card_network,
             card_isin,
             currency,
+            country,
             auth_type,
             |x| x.lowerResetFactor.is_some(),
         )
@@ -1668,6 +1677,7 @@ pub fn get_sr_v3_upper_reset_factor(
     card_network: Option<String>,
     card_isin: Option<String>,
     currency: Option<String>,
+    country: Option<String>,
     auth_type: Option<String>,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
@@ -1678,6 +1688,7 @@ pub fn get_sr_v3_upper_reset_factor(
             card_network,
             card_isin,
             currency,
+            country,
             auth_type,
             |x| x.upperResetFactor.is_some(),
         )
@@ -1695,6 +1706,7 @@ pub fn get_sr_v3_gateway_sigma_factor(
     card_network: Option<String>,
     card_isin: Option<String>,
     currency: Option<String>,
+    country: Option<String>,
     auth_type: Option<String>,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
@@ -1705,6 +1717,7 @@ pub fn get_sr_v3_gateway_sigma_factor(
             card_network,
             card_isin,
             currency,
+            country,
             auth_type,
             |x| {
                 x.gatewayExtraScore
@@ -1736,6 +1749,7 @@ fn get_sr_v3_sub_level_input_config(
     card_network: Option<String>,
     card_isin: Option<String>,
     currency: Option<String>,
+    country: Option<String>,
     auth_type: Option<String>,
     is_input_non_null: impl Fn(&SrV3SubLevelInputConfig) -> bool,
 ) -> Option<SrV3SubLevelInputConfig> {
@@ -1752,6 +1766,7 @@ fn get_sr_v3_sub_level_input_config(
                         card_network.clone(),
                         card_isin.clone(),
                         currency.clone(),
+                        country.clone(),
                         auth_type.clone(),
                     ) && is_input_non_null(config)
                 })
@@ -1764,6 +1779,7 @@ fn get_sr_v3_sub_level_input_config(
                             card_network.clone(),
                             card_isin.clone(),
                             currency.clone(),
+                            country.clone(),
                             auth_type.clone(),
                         ) && is_input_non_null(config)
                     })
@@ -1779,14 +1795,15 @@ fn is_sr_v3_config_match(
     card_network: Option<String>,
     card_isin: Option<String>,
     currency: Option<String>,
+    country: Option<String>,
     auth_type: Option<String>,
 ) -> bool {
     let pmt_matches = config.paymentMethodType == pmt;
     let pm_matches = config.paymentMethod.is_none() || config.paymentMethod == pm;
-    let card_network_matches =
-        config.cardNetwork.is_none() || config.cardNetwork == card_network;
+    let card_network_matches = config.cardNetwork.is_none() || config.cardNetwork == card_network;
     let card_isin_matches = config.cardIsIn.is_none() || config.cardIsIn == card_isin;
     let currency_matches = config.currency.is_none() || config.currency == currency;
+    let country_matches = config.country.is_none() || config.country == country;
     let auth_type_matches = config.authType.is_none() || config.authType == auth_type;
 
     pmt_matches
@@ -1795,6 +1812,7 @@ fn is_sr_v3_config_match(
         && card_isin_matches
         && currency_matches
         && auth_type_matches
+        && country_matches
 }
 
 pub fn filter_upto_pmt(
@@ -1979,7 +1997,8 @@ pub fn get_default_gateway_scoring_data(
     card_isin: Option<String>,
     card_switch_provider: Option<Secret<String>>,
     currency: Option<Currency>,
-    auth_type: Option<String>
+    country: Option<CountryISO2>,
+    auth_type: Option<String>,
 ) -> GatewayScoringData {
     GatewayScoringData {
         merchantId: merchant_id,
@@ -2001,6 +2020,7 @@ pub fn get_default_gateway_scoring_data(
         cardIsIn: card_isin,
         cardSwitchProvider: card_switch_provider,
         currency: currency,
+        country: country,
     }
 }
 
@@ -2053,7 +2073,13 @@ pub async fn get_gateway_scoring_data(
         decider_flow.get().dpTxnCardInfo.card_isin.clone(),
         decider_flow.get().dpTxnCardInfo.cardSwitchProvider.clone(),
         Some(decider_flow.get().dpOrder.currency.clone()),
-        decider_flow.get().dpTxnCardInfo.authType.as_ref().map(|a| a.to_string()),
+        decider_flow.get().dpTxnDetail.country.clone(),
+        decider_flow
+            .get()
+            .dpTxnCardInfo
+            .authType
+            .as_ref()
+            .map(|a| a.to_string()),
     );
     let updated_gateway_scoring_data = match txn_card_info.paymentMethodType.as_str() {
         UPI => {
@@ -2426,14 +2452,18 @@ pub async fn get_unified_sr_key(
     let payment_method = gateway_scoring_data.paymentMethod.clone();
     let card_network = gateway_scoring_data.cardSwitchProvider.clone();
     let card_isin = gateway_scoring_data.cardIsIn.clone();
-    let currency = gateway_scoring_data.currency.as_ref().map(|c| c.to_string());
+    let currency = gateway_scoring_data
+        .currency
+        .as_ref()
+        .map(|c| c.to_string());
+    let country = gateway_scoring_data.country.as_ref().map(|c| c.to_string());
     let auth_type = gateway_scoring_data.authType.clone();
     let key_prefix = if is_sr_v3_metric_enabled {
         C::gateway_selection_v3_order_type_key_prefix.to_string()
     } else {
         C::gateway_selection_order_type_key_prefix.to_string()
     };
-    
+
     // Base key components that are always present
     let mut key_components = vec![
         key_prefix,
@@ -2453,19 +2483,27 @@ pub async fn get_unified_sr_key(
     if let Some(cu) = currency.clone() {
         key_components.push(cu);
     }
+    if let Some(co) = country.clone() {
+        key_components.push(co);
+    }
     if let Some(at) = auth_type.clone() {
         key_components.push(at);
     }
 
     // Handle legacy behavior for backward compatibility
-    if card_network.is_none() && card_isin.is_none() && currency.is_none() && auth_type.is_none() {
+    if card_network.is_none()
+        && card_isin.is_none()
+        && currency.is_none()
+        && country.is_none()
+        && auth_type.is_none()
+    {
         // Use legacy key construction for backward compatibility
-        return get_legacy_unified_sr_key(gateway_scoring_data, is_sr_v3_metric_enabled, enforce1d).await;
+        return get_legacy_unified_sr_key(gateway_scoring_data, is_sr_v3_metric_enabled, enforce1d)
+            .await;
     }
 
     intercalate_without_empty_string("_", &key_components)
 }
-
 
 async fn get_legacy_unified_sr_key(
     gateway_scoring_data: &GatewayScoringData,

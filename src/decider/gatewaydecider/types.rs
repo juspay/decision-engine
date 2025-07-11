@@ -1,5 +1,6 @@
 use crate::app::{get_tenant_app_state, TenantAppState};
 use crate::decider::network_decider;
+use crate::types::country::country_iso::CountryISO2;
 use crate::types::currency::Currency;
 use crate::types::money::internal as ETMo;
 use crate::types::order::udfs::UDFs;
@@ -532,6 +533,7 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
             cardIsIn: None,
             cardSwitchProvider: None,
             currency: None,
+            country: None,
         },
     }
 }
@@ -557,6 +559,7 @@ pub struct GatewayScoringData {
     pub cardIsIn: Option<String>,
     pub cardSwitchProvider: Option<Secret<String>>,
     pub currency: Option<Currency>,
+    pub country: Option<CountryISO2>,
 }
 
 #[derive(Debug)]
@@ -760,6 +763,7 @@ pub struct ApiTxnDetail {
     pub sourceObject: Option<String>,
     pub sourceObjectId: Option<String>,
     pub currency: Option<String>,
+    pub country: Option<String>,
     pub netAmount: Option<f64>,
     pub surchargeAmount: Option<f64>,
     pub taxAmount: Option<f64>,
@@ -908,6 +912,7 @@ pub struct PaymentInfo {
     paymentId: String,
     pub amount: f64,
     currency: Currency,
+    country: Option<CountryISO2>,
     customerId: Option<ETCu::CustomerId>,
     udfs: Option<UDFs>,
     preferredGateway: Option<String>,
@@ -986,6 +991,7 @@ impl DomainDeciderRequestForApiCallV2 {
                 sourceObject: Some(self.paymentInfo.paymentMethod.clone()),
                 sourceObjectId: None,
                 currency: self.paymentInfo.currency.clone(),
+                country: self.paymentInfo.country.clone(),
                 netAmount: ETMo::Money::from_double(self.paymentInfo.amount),
                 surchargeAmount: None,
                 taxAmount: None,
@@ -1122,6 +1128,7 @@ pub struct SrV3SubLevelInputConfig {
     pub cardNetwork: Option<String>,
     pub cardIsIn: Option<String>,
     pub currency: Option<String>,
+    pub country: Option<String>,
     pub authType: Option<String>,
     pub latencyThreshold: Option<f64>,
     pub bucketSize: Option<i32>,
