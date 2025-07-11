@@ -15,6 +15,7 @@ use crate::{
         },
         utils::{generate_random_id, is_valid_enum_value, validate_routing_rule},
     },
+    types::service_configuration::find_config_by_name,
 };
 
 use crate::euclid::{
@@ -31,6 +32,8 @@ use crate::app::get_tenant_app_state;
 use crate::error::{self, ContainerError};
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
 use serde_json::{json, Value};
+
+const DEFAULT_FALLBACK_IDENTIFIER: &str = "default_fallback_enabled";
 
 pub async fn routing_create(
     Json(payload): Json<Value>,
@@ -123,6 +126,302 @@ pub async fn routing_create(
 
     metrics::API_REQUEST_COUNTER
         .with_label_values(&["routing_create", "success"])
+        .inc();
+    timer.observe_duration();
+    Ok(Json(response))
+}
+
+pub async fn routing_evaluate(
+    Json(payload): Json<RoutingRequest>,
+) -> Result<Json<RoutingEvaluateResponse>, ContainerError<EuclidErrors>> {
+    let timer = metrics::API_LATENCY_HISTOGRAM
+        .with_label_values(&["routing_evaluate"])
+        .start_timer();
+
+    API_REQUEST_TOTAL_COUNTER
+        .with_label_values(&["routing_evaluate"])
+        .inc();
+
+    let state = get_tenant_app_state().await;
+    logger::debug!(
+        "Received routing evaluation request for ID: {}",
+        payload.created_by
+    );
+
+    let config_identifier = format!(
+        "{}_{}",
+        DEFAULT_FALLBACK_IDENTIFIER,
+        payload.created_by.clone()
+    );
+
+    // Check for the default_fallback config:
+    let configs = find_config_by_name(config_identifier)
+        .await
+        .change_context(EuclidErrors::StorageError)?;
+
+    // In default state it should be false, and should only be made true, if the value is present
+    let mut check_default_fallback_present = false;
+
+    // Not adding parsing error, as this value can only be written by application
+    configs.map(|config| {
+        config.value.map(|value| {
+            if let Ok(parsed_value) = value.parse::<bool>() {
+                check_default_fallback_present = parsed_value;
+            }
+        })
+    });
+
+    if check_default_fallback_present
+        && payload
+            .fallback_output
+            .clone()
+            .is_none_or(|fallback| fallback.is_empty())
+    {
+        return Err(EuclidErrors::DefaultFallbackNotFound(payload.created_by.clone()).into());
+    }
+
+    // fetch the active routing_algorithm of the merchant
+    let active_routing_algorithm_id = match crate::generics::generic_find_one::<
+        <RoutingAlgorithmMapper as HasTable>::Table,
+        _,
+        RoutingAlgorithmMapper,
+    >(
+        &state.db,
+        mapper_dsl::created_by.eq(payload.created_by.clone()),
+    )
+    .await
+    .change_context(EuclidErrors::ActiveRoutingAlgorithmNotFound(
+        payload.created_by.clone(),
+    )) {
+        Ok(mapper) => mapper.routing_algorithm_id,
+        Err(e) => {
+            API_REQUEST_COUNTER
+                .with_label_values(&["routing_evaluate", "failure"])
+                .inc();
+            timer.observe_duration();
+            return Err(e.into());
+        }
+    };
+
+    let parameters = payload.parameters.clone();
+
+    let routing_config = match state
+        .config
+        .routing_config
+        .as_ref()
+        .ok_or(EuclidErrors::GlobalRoutingConfigsUnavailable)
+    {
+        Ok(config) => config,
+        Err(e) => {
+            API_REQUEST_COUNTER
+                .with_label_values(&["routing_evaluate", "failure"])
+                .inc();
+            timer.observe_duration();
+            return Err(e.into());
+        }
+    };
+
+    for (key, _) in &parameters {
+        if !routing_config.keys.keys.contains_key(key) {
+            API_REQUEST_COUNTER
+                .with_label_values(&["routing_evaluate", "failure"])
+                .inc();
+            timer.observe_duration();
+            return Err(EuclidErrors::InvalidRequestParameter(key.clone()).into());
+        }
+
+        if let Some(key_config) = routing_config.keys.keys.get(key) {
+            if key_config.data_type == "enum" {
+                if let Some(Some(ValueType::EnumVariant(value))) = parameters.get(key) {
+                    if !is_valid_enum_value(routing_config, key, value) {
+                        API_REQUEST_COUNTER
+                            .with_label_values(&["routing_evaluate", "failure"])
+                            .inc();
+                        timer.observe_duration();
+                        return Err(EuclidErrors::InvalidRequest(format!(
+                            "Invalid enum value '{}' for key '{}'",
+                            value, key
+                        ))
+                        .into());
+                    }
+                } else {
+                    API_REQUEST_COUNTER
+                        .with_label_values(&["routing_evaluate", "failure"])
+                        .inc();
+                    timer.observe_duration();
+                    return Err(EuclidErrors::InvalidRequest(format!(
+                        "Expected enum value for key '{}'",
+                        key
+                    ))
+                    .into());
+                }
+            }
+        }
+    }
+
+    let algorithm = match crate::generics::generic_find_one::<
+        <RoutingAlgorithm as HasTable>::Table,
+        _,
+        RoutingAlgorithm,
+    >(&state.db, dsl::id.eq(active_routing_algorithm_id.clone()))
+    .await
+    .map_err(|e| {
+        logger::error!(
+            ?e,
+            "Failed to fetch RoutingAlgorithm for ID {:?}",
+            active_routing_algorithm_id
+        );
+        e
+    })
+    .change_context(EuclidErrors::StorageError)
+    {
+        Ok(algo) => algo,
+        Err(e) => {
+            API_REQUEST_COUNTER
+                .with_label_values(&["routing_evaluate", "failure"])
+                .inc();
+            timer.observe_duration();
+            return Err(e.into());
+        }
+    };
+
+    logger::debug!("Fetched routing algorithm: {:?}", algorithm);
+    let algorithm_data: StaticRoutingAlgorithm =
+        match serde_json::from_str(&algorithm.algorithm_data).map_err(|e| {
+            logger::error!(
+                error = ?e,
+                raw_data = %algorithm.algorithm_data,
+                "Failed to parse algorithm_data into StaticRoutingAlgorithm"
+            );
+            EuclidErrors::InvalidRequest(format!("Invalid algorithm data format: {}", e))
+        }) {
+            Ok(data) => data,
+            Err(e) => {
+                API_REQUEST_COUNTER
+                    .with_label_values(&["routing_evaluate", "failure"])
+                    .inc();
+                timer.observe_duration();
+                return Err(e.into());
+            }
+        };
+
+    let (output, evaluated_output, rule_name): (Output, Vec<ConnectorInfo>, Option<String>) =
+        match algorithm_data {
+            StaticRoutingAlgorithm::Single(conn) => {
+                let out_enum = Output::Single(*conn.clone());
+                match evaluate_output(&out_enum).map_err(|_| {
+                    EuclidErrors::FailedToEvaluateOutput(format!(
+                        "{}",
+                        StaticRoutingAlgorithm::Single(conn.clone()).to_string()
+                    ))
+                }) {
+                    Ok((_, eval)) => (out_enum, eval, Some("straight_through_rule".into())),
+                    Err(e) => {
+                        API_REQUEST_COUNTER
+                            .with_label_values(&["routing_evaluate", "failure"])
+                            .inc();
+                        timer.observe_duration();
+                        return Err(e.into());
+                    }
+                }
+            }
+
+            StaticRoutingAlgorithm::Priority(connectors) => {
+                let out_enum = Output::Priority(connectors.clone());
+                match evaluate_output(&out_enum).map_err(|_| {
+                    EuclidErrors::FailedToEvaluateOutput(format!(
+                        "{}",
+                        StaticRoutingAlgorithm::Priority(connectors.clone()).to_string()
+                    ))
+                }) {
+                    Ok((_, eval)) => (out_enum, eval, Some("priority_rule".into())),
+                    Err(e) => {
+                        API_REQUEST_COUNTER
+                            .with_label_values(&["routing_evaluate", "failure"])
+                            .inc();
+                        timer.observe_duration();
+                        return Err(e.into());
+                    }
+                }
+            }
+
+            StaticRoutingAlgorithm::VolumeSplit(splits) => {
+                let out_enum = Output::VolumeSplit(splits.clone());
+                match evaluate_output(&out_enum).map_err(|_| {
+                    EuclidErrors::FailedToEvaluateOutput(format!(
+                        "{}",
+                        StaticRoutingAlgorithm::VolumeSplit(splits.clone()).to_string()
+                    ))
+                }) {
+                    Ok((_, eval)) => (out_enum, eval, Some("volume_split_rule".into())),
+                    Err(e) => {
+                        API_REQUEST_COUNTER
+                            .with_label_values(&["routing_evaluate", "failure"])
+                            .inc();
+                        timer.observe_duration();
+                        return Err(e.into());
+                    }
+                }
+            }
+
+            StaticRoutingAlgorithm::Advanced(program) => {
+                let ctx = Context::new(payload.parameters.clone());
+                logger::debug!("routing_evaluation: context keys = {:?}", parameters.keys());
+
+                match InterpreterBackend::eval_program(&program, &ctx).map_err(|e| {
+                    EuclidErrors::InvalidRequest(format!("Interpreter error: {:?}", e.error_type))
+                }) {
+                    Ok(mut ir) => {
+                        // Check if fallback is enabled
+                        if check_default_fallback_present && ir.output == program.default_selection
+                        {
+                            logger::info!(
+                                "Default fallback triggered: Overriding with fallback connector"
+                            );
+
+                            // Replace output with fallback connector from request
+                            if let Some(fallback_connector) = payload.fallback_output.clone() {
+                                ir.rule_name = Some("default_fallback".to_string());
+                                ir.output = Output::Priority(fallback_connector.clone());
+                                ir.evaluated_output =
+                                    vec![fallback_connector.first().cloned().unwrap_or_default()];
+                            }
+                        }
+                        (ir.output, ir.evaluated_output, ir.rule_name)
+                    }
+                    Err(e) => {
+                        API_REQUEST_COUNTER
+                            .with_label_values(&["routing_evaluate", "failure"])
+                            .inc();
+                        timer.observe_duration();
+                        return Err(e.into());
+                    }
+                }
+            }
+        };
+
+    let eligible_connectors = if let Some(ref cfg) = state.config.routing_config {
+        let ctx = cgraph::CheckCtx::from(payload.parameters.clone());
+        perform_eligibility_analysis(&cfg.constraint_graph, ctx, &evaluated_output)
+    } else {
+        evaluated_output.clone()
+    };
+
+    let response = RoutingEvaluateResponse {
+        status: match rule_name.as_deref() {
+            Some("default_selection") | Some("default_fallback") => "default_selection".into(),
+            Some(_) => "success".into(),
+            None => "default_selection".into(),
+        },
+        output: format_output(&output),
+        evaluated_output,
+        eligible_connectors,
+    };
+
+    logger::info!("Response: {response:?}");
+
+    API_REQUEST_COUNTER
+        .with_label_values(&["routing_evaluate", "success"])
         .inc();
     timer.observe_duration();
     Ok(Json(response))
@@ -366,250 +665,6 @@ pub async fn list_active_routing_algorithm(
     timer.observe_duration();
 
     Ok(Json(result))
-}
-
-pub async fn routing_evaluate(
-    Json(payload): Json<RoutingRequest>,
-) -> Result<Json<RoutingEvaluateResponse>, ContainerError<EuclidErrors>> {
-    let timer = metrics::API_LATENCY_HISTOGRAM
-        .with_label_values(&["routing_evaluate"])
-        .start_timer();
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["routing_evaluate"])
-        .inc();
-    let state = get_tenant_app_state().await;
-    logger::debug!(
-        "Received routing evaluation request for ID: {}",
-        payload.created_by
-    );
-
-    // fetch the active routing_algorithm of the merchant
-    let active_routing_algorithm_id = match crate::generics::generic_find_one::<
-        <RoutingAlgorithmMapper as HasTable>::Table,
-        _,
-        RoutingAlgorithmMapper,
-    >(
-        &state.db,
-        mapper_dsl::created_by.eq(payload.created_by.clone()),
-    )
-    .await
-    .change_context(EuclidErrors::ActiveRoutingAlgorithmNotFound(
-        payload.created_by.clone(),
-    )) {
-        Ok(mapper) => mapper.routing_algorithm_id,
-        Err(e) => {
-            API_REQUEST_COUNTER
-                .with_label_values(&["routing_evaluate", "failure"])
-                .inc();
-            timer.observe_duration();
-            return Err(e.into());
-        }
-    };
-
-    let parameters = payload.parameters.clone();
-
-    let routing_config = match state
-        .config
-        .routing_config
-        .as_ref()
-        .ok_or(EuclidErrors::GlobalRoutingConfigsUnavailable)
-    {
-        Ok(config) => config,
-        Err(e) => {
-            API_REQUEST_COUNTER
-                .with_label_values(&["routing_evaluate", "failure"])
-                .inc();
-            timer.observe_duration();
-            return Err(e.into());
-        }
-    };
-
-    for (key, _) in &parameters {
-        if !routing_config.keys.keys.contains_key(key) {
-            API_REQUEST_COUNTER
-                .with_label_values(&["routing_evaluate", "failure"])
-                .inc();
-            timer.observe_duration();
-            return Err(EuclidErrors::InvalidRequestParameter(key.clone()).into());
-        }
-
-        if let Some(key_config) = routing_config.keys.keys.get(key) {
-            if key_config.data_type == "enum" {
-                if let Some(Some(ValueType::EnumVariant(value))) = parameters.get(key) {
-                    if !is_valid_enum_value(routing_config, key, value) {
-                        API_REQUEST_COUNTER
-                            .with_label_values(&["routing_evaluate", "failure"])
-                            .inc();
-                        timer.observe_duration();
-                        return Err(EuclidErrors::InvalidRequest(format!(
-                            "Invalid enum value '{}' for key '{}'",
-                            value, key
-                        ))
-                        .into());
-                    }
-                } else {
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["routing_evaluate", "failure"])
-                        .inc();
-                    timer.observe_duration();
-                    return Err(EuclidErrors::InvalidRequest(format!(
-                        "Expected enum value for key '{}'",
-                        key
-                    ))
-                    .into());
-                }
-            }
-        }
-    }
-
-    let algorithm = match crate::generics::generic_find_one::<
-        <RoutingAlgorithm as HasTable>::Table,
-        _,
-        RoutingAlgorithm,
-    >(&state.db, dsl::id.eq(active_routing_algorithm_id.clone()))
-    .await
-    .map_err(|e| {
-        logger::error!(
-            ?e,
-            "Failed to fetch RoutingAlgorithm for ID {:?}",
-            active_routing_algorithm_id
-        );
-        e
-    })
-    .change_context(EuclidErrors::StorageError)
-    {
-        Ok(algo) => algo,
-        Err(e) => {
-            API_REQUEST_COUNTER
-                .with_label_values(&["routing_evaluate", "failure"])
-                .inc();
-            timer.observe_duration();
-            return Err(e.into());
-        }
-    };
-
-    logger::debug!("Fetched routing algorithm: {:?}", algorithm);
-    let algorithm_data: StaticRoutingAlgorithm =
-        match serde_json::from_str(&algorithm.algorithm_data).map_err(|e| {
-            logger::error!(
-                error = ?e,
-                raw_data = %algorithm.algorithm_data,
-                "Failed to parse algorithm_data into StaticRoutingAlgorithm"
-            );
-            EuclidErrors::InvalidRequest(format!("Invalid algorithm data format: {}", e))
-        }) {
-            Ok(data) => data,
-            Err(e) => {
-                API_REQUEST_COUNTER
-                    .with_label_values(&["routing_evaluate", "failure"])
-                    .inc();
-                timer.observe_duration();
-                return Err(e.into());
-            }
-        };
-
-    let (output, evaluated_output, rule_name): (Output, Vec<ConnectorInfo>, Option<String>) =
-        match algorithm_data {
-            StaticRoutingAlgorithm::Single(conn) => {
-                let out_enum = Output::Single(*conn.clone());
-                match evaluate_output(&out_enum).map_err(|_| {
-                    EuclidErrors::FailedToEvaluateOutput(format!(
-                        "{}",
-                        StaticRoutingAlgorithm::Single(conn.clone()).to_string()
-                    ))
-                }) {
-                    Ok((_, eval)) => (out_enum, eval, Some("straight_through_rule".into())),
-                    Err(e) => {
-                        API_REQUEST_COUNTER
-                            .with_label_values(&["routing_evaluate", "failure"])
-                            .inc();
-                        timer.observe_duration();
-                        return Err(e.into());
-                    }
-                }
-            }
-
-            StaticRoutingAlgorithm::Priority(connectors) => {
-                let out_enum = Output::Priority(connectors.clone());
-                match evaluate_output(&out_enum).map_err(|_| {
-                    EuclidErrors::FailedToEvaluateOutput(format!(
-                        "{}",
-                        StaticRoutingAlgorithm::Priority(connectors.clone()).to_string()
-                    ))
-                }) {
-                    Ok((_, eval)) => (out_enum, eval, Some("priority_rule".into())),
-                    Err(e) => {
-                        API_REQUEST_COUNTER
-                            .with_label_values(&["routing_evaluate", "failure"])
-                            .inc();
-                        timer.observe_duration();
-                        return Err(e.into());
-                    }
-                }
-            }
-
-            StaticRoutingAlgorithm::VolumeSplit(splits) => {
-                let out_enum = Output::VolumeSplit(splits.clone());
-                match evaluate_output(&out_enum).map_err(|_| {
-                    EuclidErrors::FailedToEvaluateOutput(format!(
-                        "{}",
-                        StaticRoutingAlgorithm::VolumeSplit(splits.clone()).to_string()
-                    ))
-                }) {
-                    Ok((_, eval)) => (out_enum, eval, Some("volume_split_rule".into())),
-                    Err(e) => {
-                        API_REQUEST_COUNTER
-                            .with_label_values(&["routing_evaluate", "failure"])
-                            .inc();
-                        timer.observe_duration();
-                        return Err(e.into());
-                    }
-                }
-            }
-
-            StaticRoutingAlgorithm::Advanced(program) => {
-                let ctx = Context::new(payload.parameters.clone());
-                logger::debug!("routing_evaluation: context keys = {:?}", parameters.keys());
-
-                match InterpreterBackend::eval_program(&program, &ctx).map_err(|e| {
-                    EuclidErrors::InvalidRequest(format!("Interpreter error: {:?}", e.error_type))
-                }) {
-                    Ok(ir) => (ir.output, ir.evaluated_output, ir.rule_name),
-                    Err(e) => {
-                        API_REQUEST_COUNTER
-                            .with_label_values(&["routing_evaluate", "failure"])
-                            .inc();
-                        timer.observe_duration();
-                        return Err(e.into());
-                    }
-                }
-            }
-        };
-
-    let eligible_connectors = if let Some(ref cfg) = state.config.routing_config {
-        let ctx = cgraph::CheckCtx::from(payload.parameters.clone());
-        perform_eligibility_analysis(&cfg.constraint_graph, ctx, &evaluated_output)
-    } else {
-        evaluated_output.clone()
-    };
-
-    let response = RoutingEvaluateResponse {
-        status: if rule_name.is_some() {
-            "success".into()
-        } else {
-            "default_selection".into()
-        },
-        output: format_output(&output),
-        evaluated_output,
-        eligible_connectors,
-    };
-    logger::info!("Response: {response:?}");
-
-    API_REQUEST_COUNTER
-        .with_label_values(&["routing_evaluate", "success"])
-        .inc();
-    timer.observe_duration();
-    Ok(Json(response))
 }
 
 fn format_output(output: &Output) -> Value {

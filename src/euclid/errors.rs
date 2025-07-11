@@ -35,6 +35,9 @@ pub enum EuclidErrors {
     #[error("routing_algorithm not found for: {0}")]
     RoutingAlgorithmNotFound(String),
 
+    #[error("default fallback not found in evaluate request for: {0}")]
+    DefaultFallbackNotFound(String),
+
     #[error("Storage error")]
     StorageError,
 }
@@ -148,6 +151,19 @@ impl axum::response::IntoResponse for EuclidErrors {
                     format!(
                     "Routing algorithm not found for the provided id : {}",
                     msg
+                ),
+                    None,
+                )),
+            )
+                .into_response(),
+
+            EuclidErrors::DefaultFallbackNotFound(creator_by) => (
+                hyper::StatusCode::BAD_REQUEST,
+                axum::Json(ApiErrorResponse::new(
+                    error_codes::TE_04,
+                    format!(
+                    "Default fallback not found for the provided created_by id: {}",
+                    creator_by
                 ),
                     None,
                 )),
