@@ -195,7 +195,12 @@ impl GlobalConfig {
 
         let config = Self::builder(&env)?
             .add_source(config::File::from(config_path).required(false))
-            .add_source(config::Environment::with_prefix("LOCKER").separator("__"))
+            .add_source(
+                config::Environment::with_prefix("DECISION_ENGINE")
+                    .separator("__")
+                    .list_separator(",")
+                    .with_list_parse_key("redis.cluster_urls"),
+            )
             .build()?;
 
         serde_path_to_error::deserialize(config).map_err(|error| {
