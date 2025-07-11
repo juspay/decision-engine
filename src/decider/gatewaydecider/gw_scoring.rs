@@ -636,11 +636,11 @@ pub async fn get_cached_scores_based_on_srv3(
                 default_srv3_input_config.clone(),
                 &pmt_str,
                 &pm,
-                &card_network.clone(),
-                &card_isin.clone(),
-                &currency.clone(),
-                &country.clone(),
-                &auth_type.clone(),
+                &card_network,
+                &card_isin,
+                &currency,
+                &country,
+                &auth_type,
             )
         })
         .unwrap_or(C::defaultSrV3BasedLowerResetFactor);
