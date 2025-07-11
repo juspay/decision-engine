@@ -28,6 +28,7 @@ use super::types as T;
 use crate::error;
 use crate::types::card::card_type as Ca;
 use crate::types::card::txn_card_info as ETCa;
+use crate::types::country::country_iso::CountryISO2;
 use crate::types::currency::Currency;
 use crate::types::customer as ETC;
 use crate::types::gateway as ETG;
@@ -233,6 +234,11 @@ pub fn parseFromApiTxnDetail(apiType: T::ApiTxnDetail) -> Option<ETTD::TxnDetail
             .as_deref()
             .map(Currency::text_to_curr)?
             .ok()?,
+        country: apiType
+            .country
+            .as_deref()
+            .map(CountryISO2::text_to_country)?
+            .ok(),
         surchargeAmount: apiType.surchargeAmount.map(Money::from_double),
         taxAmount: apiType.taxAmount.map(Money::from_double),
         internalMetadata: apiType.internalMetadata,
