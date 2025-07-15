@@ -23,9 +23,6 @@ host = "localhost" # the host where the database is hosted on
 port = 5432        # the port of the database
 dbname = "open_router"  # the name of the database where the cards are stored
 
-[secrets]
-open_router_private_key = "" # the open_router private key to used used and the private key present with the tenant
-
 [tenant_secrets]
 # schema - database schema to be used for the tenant
 hyperswitch = { schema = "public" }
