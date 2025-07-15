@@ -656,7 +656,7 @@ pub async fn runDeciderFlow(
                                 .clone(),
                             is_scheduled_outage: decider_flow.writer.isScheduledOutage,
                             is_dynamic_mga_enabled: decider_flow.writer.is_dynamic_mga_enabled,
-                            gateway_mga_id_map: None,
+                            gateway_mga_id_map: Some(gatewayMgaIdMap),
                             is_rust_based_decider: deciderParams.dpShouldConsumeResult.unwrap_or(false),
                         }),
                         None => Err((
