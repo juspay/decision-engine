@@ -223,6 +223,7 @@ pub async fn runDeciderFlow(
                     is_dynamic_mga_enabled: decider_flow.writer.is_dynamic_mga_enabled,
                     gateway_mga_id_map: None,
                     debit_routing_output: None,
+                    is_rust_based_decider: true,
                 })
             } else {
                 decider_flow
@@ -493,6 +494,7 @@ pub async fn runDeciderFlow(
                             is_dynamic_mga_enabled: decider_flow.writer.is_dynamic_mga_enabled,
                             gateway_mga_id_map: None,
                             debit_routing_output: None,
+                            is_rust_based_decider: true,
                         }),
                         None => Err((
                             decider_flow.writer.debugFilterList.clone(),
@@ -684,6 +686,7 @@ fn defaultDecidedGateway(
         is_scheduled_outage: isScheduledOutage,
         is_dynamic_mga_enabled: isDynamicMGAEnabled,
         gateway_mga_id_map: None,
+        is_rust_based_decider: true,
     }
 }
 

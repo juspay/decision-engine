@@ -48,6 +48,7 @@ pub async fn perform_debit_routing(
                         is_scheduled_outage: false,
                         is_dynamic_mga_enabled: false,
                         gateway_mga_id_map: None,
+                        is_rust_based_decider: true,
                     });
                 }
             }

@@ -1194,6 +1194,7 @@ pub struct DecidedGateway {
     pub is_scheduled_outage: bool,
     pub is_dynamic_mga_enabled: bool,
     pub gateway_mga_id_map: Option<AValue>,
+    pub is_rust_based_decider: bool,
 }
 
 #[derive(Debug, Serialize, Clone, Deserialize)]
