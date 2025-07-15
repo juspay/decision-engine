@@ -1410,7 +1410,8 @@ pub fn decider_filter_order(filter_name: &str) -> i32 {
         "filterGatewaysForEMITenureSpecficGatewayCreds" => 24,
         "filterGatewaysForMGASelectionIntegrity" => 25,
         "FilterFunctionalGatewaysForOTM" => 26,
-        _ => 27,
+        "FilterFunctionalGatewaysForAvailableFlows" => 27,
+        _ => 28,
     }
 }
 

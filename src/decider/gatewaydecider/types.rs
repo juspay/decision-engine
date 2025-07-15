@@ -159,6 +159,9 @@ impl fmt::Display for DeciderFilterName {
             Self::FilterFunctionalGatewaysForOTM => {
                 write!(f, "FilterFunctionalGatewaysForOTM")
             }
+            Self::FilterFunctionalGatewaysForAvailableFlows => {
+                write!(f, "FilterFunctionalGatewaysForAvailableFlows")
+            }
         }
     }
 }
