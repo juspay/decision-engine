@@ -948,7 +948,7 @@ pub async fn filterGatewaysForTxnOfferDetails(this: &mut DeciderFlow<'_>) -> Vec
 }
 
 
-pub async fn filter_functional_gateways_for_available_payment_flows(this: &mut DeciderFlow<'_>) -> GatewayList {
+pub async fn filterFunctionalGatewaysForAvailablePaymentFlows(this: &mut DeciderFlow<'_>) -> GatewayList {
     let st = getGws(this);
     let txn_detail = this.get().dpTxnDetail.clone();
     let macc = this.get().dpMerchantAccount.clone();
