@@ -1,6 +1,6 @@
 services:
   open-router:
-    image: ghcr.io/juspay/decision-engine:main
+    image: ghcr.io/juspay/decision-engine:v1.2.0
     pull_policy: always
     platform: linux/amd64
     container_name: open-router
@@ -212,9 +212,9 @@ services:
       mysql:
         condition: service_healthy
     volumes:
-      - ./migrations/00000000000000_diesel_initial_setup/up.sql:/app/migrations/up.sql
+      - ./migrations:/app/migrations
     working_dir: /app
-    entrypoint: ["/bin/sh", "-c", "mysql -h mysql -uroot -proot jdb < /app/migrations/up.sql"]
+    entrypoint: ["/bin/sh", "-c", "for sql_file in $$(find /app/migrations -name 'up.sql' -type f | sort); do echo \"Running migration: $$sql_file\"; mysql -h mysql -uroot -proot jdb < \"$$sql_file\"; done"]
     networks:
       - open-router-network
   
