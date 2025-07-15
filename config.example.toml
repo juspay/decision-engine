@@ -27,10 +27,8 @@ dbname = "open_router"  # the name of the database where the cards are stored
 open_router_private_key = "" # the open_router private key to used used and the private key present with the tenant
 
 [tenant_secrets]
-# configure master_key and public_key for each tenant
-# master_key - used for database encryption this could be aes encrypted by key custodian
-# public_key - used for signature verification and encryption of response payload which is sent back to tenant
-hyperswitch = { master_key = "", public_key = "", schema = "public" }
+# schema - database schema to be used for the tenant
+hyperswitch = { schema = "public" }
 
 # To protect secret/sensitive values like:
 # - database.passwod
