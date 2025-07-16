@@ -1479,61 +1479,13 @@ pub async fn filterGatewaysForValidationType(
     // Handle Card Mandate transactions
     if Utils::is_mandate_transaction(&txn_detail) && Utils::is_card_transaction(&txn_card_info) {
         // Get excluded gateways from Redis
-        let uniqueGwLs: Vec<String> = st.clone().into_iter().collect();
-        let brand = txn_card_info
-            .cardSwitchProvider
-            .as_ref()
-            .map(|provider| provider.peek().to_string())
-            .unwrap_or_else(|| "DEFAULT".to_string());
-        let mPmEntryDB = ETP::get_by_name(brand).await;
-
-        let updatedSt = if let Some(cardPaymentMethod) = mPmEntryDB {
-            let uniqueGwLs: Vec<String> = st.into_iter().collect();
-            let allGPMfEntries = GPMF::find_all_gpmf_by_gateway_payment_flow_payment_method(
-                uniqueGwLs.clone(),
-                cardPaymentMethod.id,
-                PaymentFlow::CVVLESS,
-            )
-            .await;
-            let mgaList = Utils::get_mgas(this).unwrap_or_default();
-            let gmpfGws: Vec<String> = allGPMfEntries
-                .iter()
-                .map(|gpmf| gpmf.gateway.clone())
-                .collect();
-            let filteredMga: Vec<MerchantGatewayAccount> = mgaList
-                .into_iter()
-                .filter(|mga| gmpfGws.contains(&mga.gateway))
-                .collect();
-            let mgaIds: Vec<i64> = filteredMga
-                .iter()
-                .map(|mga| mga.id.merchantGwAccId)
-                .collect();
-            let gpmfIds: Vec<GatewayPaymentMethodFlowId> =
-                allGPMfEntries.iter().map(|gpmf| gpmf.id.clone()).collect();
-            let mgpmfEntries = MGPMF::get_all_mgpmf_by_mga_id_and_gpmf_ids(mgaIds, gpmfIds).await;
-            let filteredMgaList: Vec<i64> = mgpmfEntries
-                .iter()
-                .map(|mgpmf| mgpmf.merchantGatewayAccountId)
-                .collect();
-            let finalFilteredMga: Vec<MerchantGatewayAccount> = filteredMga
-                .into_iter()
-                .filter(|mga| filteredMgaList.contains(&mga.id.merchantGwAccId))
-                .collect();
-            Utils::set_mgas(this, finalFilteredMga.clone());
-            finalFilteredMga
-                .into_iter()
-                .map(|mga| mga.gateway)
-                .collect()
-        } else {
-            Vec::new()
-        };
 
         let card_mandate_bin_filter_excluded_gateways =
             findByNameFromRedis(C::CARD_MANDATE_BIN_FILTER_EXCLUDED_GATEWAYS.get_key())
                 .await
                 .unwrap_or_else(Vec::new);
         let bin_wise_filter_excluded_gateways =
-            intersect(&card_mandate_bin_filter_excluded_gateways, &updatedSt);
+            intersect(&card_mandate_bin_filter_excluded_gateways, &st);
         let bin_list = Utils::get_bin_list(txn_card_info.card_isin.clone());
 
         // Filter gateways based on card info
@@ -1541,8 +1493,8 @@ pub async fn filterGatewaysForValidationType(
             this,
             macc.clone(),
             bin_list,
-            updatedSt,
-            txn_card_info.authType.clone(),
+            st,
+            None,
             Some(ETGCI::ValidationType::CardMandate),
         )
         .await?;
