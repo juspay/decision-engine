@@ -26,7 +26,6 @@ pub struct GlobalConfig {
     pub database: Database,
     #[cfg(feature = "postgres")]
     pub pg_database: PgDatabase,
-    pub secrets: Secrets,
     #[serde(default)]
     pub secrets_management: SecretsManagementConfig,
     pub log: Log,
@@ -46,7 +45,6 @@ pub struct GlobalConfig {
 #[derive(Clone, Debug)]
 pub struct TenantConfig {
     pub tenant_id: String,
-    pub open_router_secrets: Secrets,
     pub tenant_secrets: TenantSecrets,
     pub routing_config: Option<TomlConfig>,
     pub debit_routing_config: network_decider::types::DebitRoutingConfig,
@@ -61,7 +59,6 @@ impl TenantConfig {
     pub fn from_global_config(global_config: &GlobalConfig, tenant_id: String) -> Self {
         Self {
             tenant_id: tenant_id.clone(),
-            open_router_secrets: global_config.secrets.clone(),
             routing_config: global_config.routing_config.clone(),
             #[allow(clippy::unwrap_used)]
             tenant_secrets: global_config
@@ -108,20 +105,8 @@ pub struct PgDatabase {
     pub pg_pool_size: Option<usize>,
 }
 
-#[derive(Clone, serde::Deserialize, Debug)]
-pub struct Secrets {
-    // KMS encrypted
-    #[cfg(feature = "middleware")]
-    pub open_router_private_key: masking::Secret<String>,
-}
-
 #[derive(serde::Deserialize, Debug, Clone)]
 pub struct TenantSecrets {
-    #[serde(deserialize_with = "deserialize_hex")]
-    pub master_key: Vec<u8>,
-    #[cfg(feature = "middleware")]
-    pub public_key: masking::Secret<String>,
-
     /// schema name for the tenant (defaults to tenant_id)
     pub schema: String,
 }
@@ -195,7 +180,12 @@ impl GlobalConfig {
 
         let config = Self::builder(&env)?
             .add_source(config::File::from(config_path).required(false))
-            .add_source(config::Environment::with_prefix("LOCKER").separator("__"))
+            .add_source(
+                config::Environment::with_prefix("DECISION_ENGINE")
+                    .separator("__")
+                    .list_separator(",")
+                    .with_list_parse_key("redis.cluster_urls"),
+            )
             .build()?;
 
         serde_path_to_error::deserialize(config).map_err(|error| {
@@ -267,57 +257,6 @@ impl GlobalConfig {
                 .change_context(error::ConfigurationError::KmsDecryptError(
                     "pg_database_password",
                 ))?;
-        }
-
-        for tenant_secrets in self.tenant_secrets.values_mut() {
-            if tenant_secrets.master_key.is_empty() {
-                logger::debug!("Skipping decryption of master key for tenant as it is empty");
-                // Skip decryption if master_key is empty
-                continue;
-            }
-            tenant_secrets.master_key = hex::decode(
-                secret_management_client
-                    .get_secret(
-                        String::from_utf8(tenant_secrets.master_key.clone())
-                            .expect("Failed while converting master key to `String`")
-                            .into(),
-                    )
-                    .await
-                    .change_context(error::ConfigurationError::KmsDecryptError("master_key"))?
-                    .expose(),
-            )
-            .expect("Failed to hex decode master key")
-        }
-
-        #[cfg(feature = "middleware")]
-        {
-            for tenant_secrets in self.tenant_secrets.values_mut() {
-                if tenant_secrets.public_key.clone().expose().is_empty() {
-                    logger::debug!("Skipping decryption of public key for tenant as it is empty");
-                    continue; // Skip decryption if public_key is empty
-                }
-                tenant_secrets.public_key = secret_management_client
-                    .get_secret(tenant_secrets.public_key.clone())
-                    .await
-                    .change_context(error::ConfigurationError::KmsDecryptError("public_key"))?;
-            }
-
-            if self
-                .secrets
-                .open_router_private_key
-                .clone()
-                .expose()
-                .is_empty()
-            {
-                logger::debug!("Skipping decryption of open_router_private_key as it is empty");
-            } else {
-                self.secrets.open_router_private_key = secret_management_client
-                    .get_secret(self.secrets.open_router_private_key.clone())
-                    .await
-                    .change_context(error::ConfigurationError::KmsDecryptError(
-                        "open_router_private_key",
-                    ))?;
-            }
         }
 
         Ok(())

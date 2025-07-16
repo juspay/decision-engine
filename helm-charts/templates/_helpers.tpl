@@ -169,11 +169,8 @@ max_feed_count = 200
 tti = {{ .Values.decisionEngine.cache.tti }}
 max_capacity = {{ .Values.decisionEngine.cache.maxCapacity }}
 
-[secrets]
-open_router_private_key = {{ .Values.decisionEngine.secrets.openRouterPrivateKey | quote }}
-
 [tenant_secrets]
-public = { master_key = "", public_key = "", schema = "public" }
+public = { schema = "public" }
 
 [secrets_management]
 secrets_manager = {{ .Values.decisionEngine.secrets.secretsManager | quote }}
