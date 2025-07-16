@@ -46,7 +46,7 @@ unresponsive_timeout = 10
 max_feed_count = 200
 
 [cache]
-tti = 7200 # i.e. 2 hours
+tti = 7200          # i.e. 2 hours
 max_capacity = 5000
 
 [analytics]
@@ -68,7 +68,7 @@ database = "decision_engine_analytics"
 open_router_private_key = ""
 
 [tenant_secrets]
-public = { master_key = "", public_key = "", schema = "public" }
+public = { schema = "public" }
 
 [secrets_management]
 secrets_manager = "no_encryption"
