@@ -1164,6 +1164,9 @@ pub async fn getFailureReasonWithFilter(
         "filterFunctionalGatewaysForOTMFlow" => {
             "No functional gateways after filtering for OTM flow.".to_string()
         }
+        "filterFunctionalGatewaysForAvailablePaymentFlows" => {
+            "No functional gateways after filtering for available payment flows.".to_string()
+        }
         "filterFunctionalGateways" => {
             if Utils::is_card_transaction(txn_card_info) {
                 if m_internal_meta
