@@ -14,6 +14,7 @@ pub struct KafkaConfig {
     pub topic_prefix: String,
     pub batch_size: usize,
     pub batch_timeout_ms: u64,
+    pub max_consecutive_failures: u32,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -54,6 +55,7 @@ impl Default for AnalyticsConfig {
                 topic_prefix: "decision-engine".to_string(),
                 batch_size: 100,
                 batch_timeout_ms: 1000,
+                max_consecutive_failures: 5,
             },
             clickhouse: ClickhouseConfig {
                 host: "http://localhost:8123".to_string(),

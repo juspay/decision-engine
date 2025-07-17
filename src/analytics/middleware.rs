@@ -19,7 +19,7 @@ pub async fn analytics_middleware(
 ) -> Response {
     // Only track analytics for routing endpoints
     let path = request.uri().path();
-    if !should_track_endpoint(path) {
+    if !global_app_state.global_config.analytics.enabled || !should_track_endpoint(path) {
         return next.run(request).await;
     }
 
@@ -30,7 +30,7 @@ pub async fn analytics_middleware(
     let endpoint = path.to_string();
     
     // Extract merchant ID from request headers or body (simplified for now)
-    let merchant_id = extract_merchant_id(&request).unwrap_or_else(|| "public".to_string());
+    let merchant_id = extract_merchant_id(&request).unwrap_or("public".to_string());
     
     // Get the tenant app state to access analytics client
     let tenant_app_state = match global_app_state.get_app_state_of_tenant(&merchant_id).await {
@@ -46,11 +46,6 @@ pub async fn analytics_middleware(
             }
         }
     };
-
-    // Check if analytics is enabled
-    if !global_app_state.global_config.analytics.enabled {
-        return next.run(request).await;
-    }
     
     // Create routing event
     let mut routing_event = RoutingEvent::from_request(&request, merchant_id.clone());
@@ -77,7 +72,7 @@ pub async fn analytics_middleware(
     // Extract response information
     let status_code = response.status().as_u16();
     
-    // Extract response body for logging (this is more complex in practice)
+    // Extract response body for logging. Note: This operation can lead to high memory usage 
     let (response_parts, body) = response.into_parts();
     let body_bytes = match body.collect().await {
         Ok(collected) => collected.to_bytes(),

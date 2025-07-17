@@ -110,15 +110,14 @@ impl KafkaProducer {
         let producer = self.clone();
         let batch_size = self.config.batch_size;
         let batch_timeout = Duration::from_millis(self.config.batch_timeout_ms);
+        let max_consecutive_failures = self.config.max_consecutive_failures;
 
         tokio::spawn(async move {
             let mut batch = Vec::with_capacity(batch_size);
             let mut last_flush = tokio::time::Instant::now();
             let mut consecutive_failures = 0;
-            const MAX_CONSECUTIVE_FAILURES: u32 = 5;
-
-            info!("Starting Kafka batch processor with batch_size: {}, timeout: {}ms", 
-                  batch_size, batch_timeout.as_millis());
+            info!("Starting Kafka batch processor with batch_size: {}, timeout: {}ms, max_consecutive_failures: {}", 
+                  batch_size, batch_timeout.as_millis(), max_consecutive_failures);
 
             loop {
                 tokio::select! {
@@ -135,7 +134,7 @@ impl KafkaProducer {
                                         consecutive_failures = 0;
                                     } else {
                                         consecutive_failures += 1;
-                                        if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
+                                        if consecutive_failures >= max_consecutive_failures {
                                             warn!("Too many consecutive Kafka failures ({}), continuing to collect events but not sending", 
                                                   consecutive_failures);
                                         }
@@ -164,7 +163,7 @@ impl KafkaProducer {
                                 consecutive_failures = 0;
                             } else {
                                 consecutive_failures += 1;
-                                if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
+                                if consecutive_failures >= max_consecutive_failures {
                                     warn!("Too many consecutive Kafka failures ({}), continuing to collect events but not sending", 
                                           consecutive_failures);
                                 }
@@ -191,6 +190,7 @@ mod tests {
             topic_prefix: "test".to_string(),
             batch_size: 10,
             batch_timeout_ms: 1000,
+            max_consecutive_failures: 5,
         };
 
         let producer = KafkaProducer::new(config);

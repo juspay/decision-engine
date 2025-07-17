@@ -199,7 +199,7 @@ fn extract_ip_address(request: &Request) -> Option<String> {
         .and_then(|v| v.to_str().ok())
         .map(|s| {
             // Take the first IP if there are multiple (comma-separated)
-            s.split(',').next().unwrap_or(s).trim().to_string()
+            s.split(',').next().map(|ip| ip.trim().to_string()).unwrap_or_else(|| String::new())
         })
 }
 
