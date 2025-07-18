@@ -166,7 +166,6 @@ pub async fn get_co_badged_cards_info(
                     )
                     .await
                 } else {
-                    logger::error!("Error while fetching co-badged card info record:");
                     Ok(records)
                 }
             }
@@ -183,7 +182,7 @@ pub async fn get_co_badged_cards_info(
         .attach_printable("Error while fetching co-badged card info record")?;
 
     logger::debug!(
-        "Co-badged card info records retrieved successfully  records: {:?}",
+        "Co-badged card info records retrieved successfully records: {:?}",
         co_badged_card_infos
     );
 
