@@ -132,70 +132,95 @@ pub async fn get_co_badged_cards_info(
     card_isin: String,
 ) -> CustomResult<Option<types::CoBadgedCardInfoResponse>, error::ApiError> {
     // Pad the card number to 19 digits to match the co-badged card bin length
-    let card_number_str = CoBadgedCardInfoList::pad_card_number_to_19_digit(card_isin);
+    let card_bin_string = CoBadgedCardInfoList::pad_card_number_to_19_digit(card_isin.clone());
 
-    let parsed_number: i64 = card_number_str
+    let parsed_number: i64 = card_bin_string
         .parse::<i64>()
         .change_context(error::ApiError::UnknownError)
         .attach_printable(
             "Failed to convert card number to integer in co-badged cards info flow",
         )?;
 
-    let co_badged_card_infos_record =
-        co_badged_card_info::find_co_badged_cards_info_by_card_bin(app_state, parsed_number).await;
+    let co_badged_card_infos =
+        match co_badged_card_info::find_co_badged_cards_info_by_card_bin(app_state, parsed_number)
+            .await
+        {
+            Ok(records) => {
+                if records.is_empty() && card_isin.len() == 8 {
+                    logger::info!(
+                        "No co-badged card info found with 8-digit BIN. Retrying with 6-digit BIN."
+                    );
 
-    let filtered_co_badged_card_info_list_optional = match co_badged_card_infos_record {
-        Err(error) => {
-            logger::error!(
-                "Error while fetching co-badged card info record: {:?}",
-                error
-            );
-            Err(error::ApiError::UnknownError)
-                .attach_printable("Error while fetching co-badged card info record")
+                    let card_bin_string = CoBadgedCardInfoList::pad_card_number_to_19_digit(
+                        card_isin[..6].to_string(),
+                    );
+                    let parsed_number = card_bin_string
+                        .parse::<i64>()
+                        .change_context(error::ApiError::UnknownError)
+                        .attach_printable(
+                            "Failed to convert card number to integer in co-badged cards info flow",
+                        )?;
+                    co_badged_card_info::find_co_badged_cards_info_by_card_bin(
+                        app_state,
+                        parsed_number,
+                    )
+                    .await
+                } else {
+                    logger::error!("Error while fetching co-badged card info record:");
+                    Ok(records)
+                }
+            }
+            Err(error) => {
+                logger::error!(
+                    "Error while fetching co-badged card info record: {:?}",
+                    error
+                );
+                Err(error::ApiError::UnknownError)
+                    .attach_printable("Error while fetching co-badged card info record")?
+            }
         }
-        Ok(co_badged_card_infos) => {
-            logger::debug!("Co-badged card info record retrieved successfully");
+        .change_context(error::ApiError::UnknownError)
+        .attach_printable("Error while fetching co-badged card info record")?;
 
-            // Parse the co-badged card info records into domain data
-            let parsed_cards: Vec<types::CoBadgedCardInfoDomainData> = co_badged_card_infos
-                .into_iter()
-                .filter_map(|raw_co_badged_card_info| {
-                    match raw_co_badged_card_info.clone().try_into() {
-                        Ok(parsed) => Some(parsed),
-                        Err(error) => {
-                            logger::warn!(
-                                "Skipping co-badged card with card_network = {:?} due to error: {}",
-                                raw_co_badged_card_info.card_network,
-                                error
-                            );
-                            None
-                        }
-                    }
-                })
-                .collect();
+    logger::debug!(
+        "Co-badged card info records retrieved successfully  records: {:?}",
+        co_badged_card_infos
+    );
 
-            let co_badged_card_infos_list = CoBadgedCardInfoList(parsed_cards);
+    // Parse the co-badged card info records into domain data
+    let parsed_cards: Vec<types::CoBadgedCardInfoDomainData> = co_badged_card_infos
+        .into_iter()
+        .filter_map(
+            |raw_co_badged_card_info| match raw_co_badged_card_info.clone().try_into() {
+                Ok(parsed) => Some(parsed),
+                Err(error) => {
+                    logger::warn!(
+                        "Skipping co-badged card with card_network = {:?} due to error: {}",
+                        raw_co_badged_card_info.card_network,
+                        error
+                    );
+                    None
+                }
+            },
+        )
+        .collect();
 
-            let filtered_list_optional = co_badged_card_infos_list
-                .is_valid_length()
-                .then(|| {
-                    co_badged_card_infos_list
-                        .is_only_one_global_network_present()
-                        .then_some(co_badged_card_infos_list.filter_cards())
-                })
-                .flatten()
-                .and_then(|filtered_list| filtered_list.is_valid_length().then_some(filtered_list));
+    let co_badged_card_infos_list = CoBadgedCardInfoList(parsed_cards);
 
-            Ok(filtered_list_optional)
-        }
-    }?;
+    let filtered_list_optional = co_badged_card_infos_list
+        .is_valid_length()
+        .then(|| {
+            co_badged_card_infos_list
+                .is_only_one_global_network_present()
+                .then_some(co_badged_card_infos_list.filter_cards())
+        })
+        .flatten()
+        .and_then(|filtered_list| filtered_list.is_valid_length().then_some(filtered_list));
 
-    let co_badged_cards_info_response = filtered_co_badged_card_info_list_optional
+    filtered_list_optional
         .map(|filtered_list| filtered_list.get_co_badged_cards_info_response())
         .transpose()
-        .attach_printable("Failed to construct co-badged card info response")?;
-
-    Ok(co_badged_cards_info_response)
+        .attach_printable("Failed to construct co-badged card info response")
 }
 
 pub fn calculate_interchange_fee(
