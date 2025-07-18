@@ -2,6 +2,7 @@ use crate::app;
 use crate::{
     decider::{gatewaydecider, network_decider::types, storage::utils::co_badged_card_info},
     error, logger,
+    storage::types as storage_types,
     utils::CustomResult,
 };
 use error_stack::ResultExt;
@@ -127,13 +128,11 @@ impl CoBadgedCardInfoList {
     }
 }
 
-pub async fn get_co_badged_cards_info(
+async fn co_badged_cards_info_lookup(
     app_state: &app::TenantAppState,
     card_isin: String,
-) -> CustomResult<Option<types::CoBadgedCardInfoResponse>, error::ApiError> {
-    // Pad the card number to 19 digits to match the co-badged card bin length
-    let card_bin_string = CoBadgedCardInfoList::pad_card_number_to_19_digit(card_isin.clone());
-
+) -> CustomResult<Vec<storage_types::CoBadgedCardInfo>, error::ApiError> {
+    let card_bin_string = CoBadgedCardInfoList::pad_card_number_to_19_digit(card_isin);
     let parsed_number: i64 = card_bin_string
         .parse::<i64>()
         .change_context(error::ApiError::UnknownError)
@@ -141,30 +140,25 @@ pub async fn get_co_badged_cards_info(
             "Failed to convert card number to integer in co-badged cards info flow",
         )?;
 
+    co_badged_card_info::find_co_badged_cards_info_by_card_bin(app_state, parsed_number)
+        .await
+        .change_context(error::ApiError::UnknownError)
+        .attach_printable("Error while fetching co-badged card info record")
+}
+
+pub async fn get_co_badged_cards_info(
+    app_state: &app::TenantAppState,
+    card_isin: String,
+) -> CustomResult<Option<types::CoBadgedCardInfoResponse>, error::ApiError> {
     let co_badged_card_infos =
-        match co_badged_card_info::find_co_badged_cards_info_by_card_bin(app_state, parsed_number)
-            .await
-        {
+        match co_badged_cards_info_lookup(app_state, card_isin.clone()).await {
             Ok(records) => {
                 if records.is_empty() && card_isin.len() == 8 {
-                    logger::info!(
+                    logger::debug!(
                         "No co-badged card info found with 8-digit BIN. Retrying with 6-digit BIN."
                     );
 
-                    let card_bin_string = CoBadgedCardInfoList::pad_card_number_to_19_digit(
-                        card_isin[..6].to_string(),
-                    );
-                    let parsed_number = card_bin_string
-                        .parse::<i64>()
-                        .change_context(error::ApiError::UnknownError)
-                        .attach_printable(
-                            "Failed to convert card number to integer in co-badged cards info flow",
-                        )?;
-                    co_badged_card_info::find_co_badged_cards_info_by_card_bin(
-                        app_state,
-                        parsed_number,
-                    )
-                    .await
+                    co_badged_cards_info_lookup(app_state, card_isin[..6].to_string()).await
                 } else {
                     Ok(records)
                 }
