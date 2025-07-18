@@ -40,6 +40,16 @@ pub struct GlobalConfig {
     pub routing_config: Option<TomlConfig>,
     #[serde(default)]
     pub debit_routing_config: network_decider::types::DebitRoutingConfig,
+    #[serde(default)]
+    pub pagos_api: Option<PagosApiConfig>,
+}
+
+#[derive(Clone, serde::Deserialize, Debug, Default)]
+pub struct PagosApiConfig {
+    pub base_url: String,
+    pub api_key: masking::Secret<String>,
+    #[serde(default)]
+    pub use_api_for_co_badged_lookup: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -48,6 +58,7 @@ pub struct TenantConfig {
     pub tenant_secrets: TenantSecrets,
     pub routing_config: Option<TomlConfig>,
     pub debit_routing_config: network_decider::types::DebitRoutingConfig,
+    pub pagos_api: Option<PagosApiConfig>,
 }
 
 impl TenantConfig {
@@ -67,6 +78,7 @@ impl TenantConfig {
                 .cloned()
                 .unwrap(),
             debit_routing_config: global_config.debit_routing_config.clone(),
+            pagos_api: global_config.pagos_api.clone(),
         }
     }
 }

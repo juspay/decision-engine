@@ -210,3 +210,8 @@ merchant_category_code_0001.accel = { percentage = 1.55, fixed_amount = 0.04 }
 merchant_category_code_0001.nyce = { percentage = 1.30, fixed_amount = 0.213125 }
 merchant_category_code_0001.pulse = { percentage = 1.60, fixed_amount = 0.15 }
 merchant_category_code_0001.star = { percentage = 1.63, fixed_amount = 0.15 }
+
+[pagos_api]
+base_url = "https://parrot.prod.pagosapi.com" # Pagos API base URL
+api_key = "your_pagos_api_key_here"           # Your Pagos API Key (sensitive, manage securely)
+use_api_for_co_badged_lookup = false           # Set to true to use Pagos API for co-badged card info, false for DB lookup

@@ -26,6 +26,8 @@ pub enum ConfigurationError {
     VaultClientError,
     #[error("Invalid configuration value provided: {0}")]
     InvalidConfigurationValueError(String),
+    #[error("Failed to setup Pagos client")]
+    PagosClientSetupError,
 }
 
 #[derive(Debug, thiserror::Error)]
