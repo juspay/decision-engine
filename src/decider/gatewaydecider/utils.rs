@@ -1,5 +1,8 @@
 use crate::app::get_tenant_app_state;
 use crate::decider::gatewaydecider::types::{self, DeciderFlow};
+use crate::error;
+use crate::euclid::errors::EuclidErrors;
+use crate::euclid::types::SrDimensionConfig;
 use crate::feedback::gateway_elimination_scoring::flow::{
     eliminationV2RewardFactor, getPenaltyFactor,
 };
@@ -13,12 +16,14 @@ use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
 use crate::types::money::internal::Money;
 use crate::types::payment::payment_method_type_const::*;
 use crate::types::payment_flow::{payment_flows_to_text, PaymentFlow};
+use crate::types::service_configuration::find_config_by_name;
 use crate::types::user_eligibility_info::{
     get_eligibility_info, identifier_name_to_text, IdentifierName,
 };
 use crate::utils::{generate_random_number, get_current_date_in_millis};
 use crate::{decider, feedback, logger};
 use diesel::Identifiable;
+use error_stack::ResultExt;
 use fred::prelude::{KeysInterface, ListInterface};
 use masking::PeekInterface;
 use masking::Secret;
@@ -2467,27 +2472,69 @@ pub async fn get_unified_sr_key(
     // Base key components that are always present
     let mut key_components = vec![
         key_prefix,
-        merchant_id,
+        merchant_id.clone(),
         order_type,
         payment_method_type,
         payment_method,
     ];
 
-    // Add optional parameters if they have values
-    if let Some(cn) = card_network.clone() {
-        key_components.push(cn.peek().to_string());
-    }
-    if let Some(ci) = card_isin.clone() {
-        key_components.push(ci);
-    }
-    if let Some(cu) = currency.clone() {
-        key_components.push(cu);
-    }
-    if let Some(co) = country.clone() {
-        key_components.push(co);
-    }
-    if let Some(at) = auth_type.clone() {
-        key_components.push(at);
+    let name = format!("SR_DIMENSION_CONFIG_{}", merchant_id);
+
+    let service_config = find_config_by_name(name.clone())
+        .await
+        .change_context(EuclidErrors::StorageError)
+        .and_then(|opt_config| {
+            opt_config.and_then(|config| config.value).ok_or_else(|| {
+                error_stack::report!(EuclidErrors::InvalidSrDimensionConfig(
+                    "SR dimension config not found".to_string()
+                ))
+            })
+        })
+        .and_then(|config| {
+            serde_json::from_str::<SrDimensionConfig>(&config).change_context(
+                EuclidErrors::InvalidSrDimensionConfig(
+                    "Failed to parse SR dimension config".to_string(),
+                ),
+            )
+        });
+
+    let fields = service_config
+        .map(|config| config.fields)
+        .unwrap_or_default();
+
+    for field in fields {
+        if let Some(suffix) = field.strip_prefix("paymentInfo.") {
+            match suffix {
+                "card_network" => {
+                    if let Some(cn) = card_network.clone() {
+                        key_components.push(cn.peek().to_string());
+                    }
+                }
+                "card_is_in" => {
+                    if let Some(ci) = card_isin.clone() {
+                        key_components.push(ci);
+                    }
+                }
+                "currency" => {
+                    if let Some(cu) = currency.clone() {
+                        key_components.push(cu);
+                    }
+                }
+                "country" => {
+                    if let Some(co) = country.clone() {
+                        key_components.push(co);
+                    }
+                }
+                "auth_type" => {
+                    if let Some(at) = auth_type.clone() {
+                        key_components.push(at);
+                    }
+                }
+                _ => {
+                    // Unknown field under payment_info
+                }
+            }
+        }
     }
 
     // Handle legacy behavior for backward compatibility

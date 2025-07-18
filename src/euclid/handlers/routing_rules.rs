@@ -11,11 +11,12 @@ use crate::{
         types::{
             ActivateRoutingConfigRequest, Context, JsonifiedRoutingAlgorithm,
             RoutingAlgorithmMapperNew, RoutingDictionaryRecord, RoutingEvaluateResponse,
-            RoutingRequest, RoutingRule, StaticRoutingAlgorithm,
+            RoutingRequest, RoutingRule, SrDimensionConfig, StaticRoutingAlgorithm,
+            ELIGIBLE_DIMENSIONS,
         },
         utils::{generate_random_id, is_valid_enum_value, validate_routing_rule},
     },
-    types::service_configuration::find_config_by_name,
+    types::service_configuration::{find_config_by_name, insert_config, update_config},
 };
 
 use crate::euclid::{
@@ -34,7 +35,99 @@ use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOT
 use serde_json::{json, Value};
 
 const DEFAULT_FALLBACK_IDENTIFIER: &str = "default_fallback_enabled";
+pub async fn config_sr_dimentions(
+    Json(payload): Json<SrDimensionConfig>,
+) -> Result<Json<String>, ContainerError<EuclidErrors>> {
+    let timer = metrics::API_LATENCY_HISTOGRAM
+        .with_label_values(&["config_sr_dimentions"])
+        .start_timer();
+    metrics::API_REQUEST_TOTAL_COUNTER
+        .with_label_values(&["config_sr_dimentions"])
+        .inc();
+    logger::debug!("Received SR Dimension config: {:?}", payload);
 
+    // Validate dimensions against ELIGIBLE_DIMENSIONS
+    let invalid_dimensions: Vec<&String> = payload
+        .fields
+        .iter()
+        .filter(|field| !ELIGIBLE_DIMENSIONS.contains(&field.as_str()))
+        .collect();
+
+    if !invalid_dimensions.is_empty() {
+        metrics::API_REQUEST_COUNTER
+            .with_label_values(&["config_sr_dimentions", "failure"])
+            .inc();
+        timer.observe_duration();
+
+        let invalid_dims_str = invalid_dimensions
+            .iter()
+            .map(|d| format!("'{}'", d))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        logger::error!(
+            "Invalid dimensions found for merchant {}: {}",
+            payload.merchant_id,
+            invalid_dims_str
+        );
+
+        return Err(EuclidErrors::InvalidSrDimensionConfig(format!(
+            "Invalid dimensions: {}. Valid dimensions are: {}",
+            invalid_dims_str,
+            ELIGIBLE_DIMENSIONS.join(", ")
+        ))
+        .into());
+    }
+
+    let mid = payload.merchant_id.clone();
+    let config = serde_json::to_string(&payload)
+        .change_context(EuclidErrors::FailedToSerializeJsonToString)?;
+    let name = format!("SR_DIMENSION_CONFIG_{}", mid);
+
+    let service_config = find_config_by_name(name.clone())
+        .await
+        .change_context(EuclidErrors::StorageError)?;
+    let result = match service_config {
+        Some(_) => {
+            logger::debug!(
+                "Updating existing SR Dimension config for merchant: {}",
+                mid
+            );
+            update_config(name, Some(config))
+                .await
+                .change_context(EuclidErrors::StorageError)
+        }
+        None => {
+            logger::debug!("Inserting new SR Dimension config for merchant: {}", mid);
+            insert_config(name, Some(config))
+                .await
+                .change_context(EuclidErrors::StorageError)
+        }
+    };
+
+    if let Err(_) = result {
+        metrics::API_REQUEST_COUNTER
+            .with_label_values(&["config_sr_dimentions", "failure"])
+            .inc();
+        timer.observe_duration();
+        logger::error!(
+            "Failed to insert or update SR Dimension config for merchant: {}",
+            mid
+        );
+        return Err(ContainerError::from(EuclidErrors::StorageError));
+    }
+    metrics::API_REQUEST_COUNTER
+        .with_label_values(&["config_sr_dimentions", "success"])
+        .inc();
+    timer.observe_duration();
+    logger::info!(
+        "SR Dimension configuration updated successfully for merchant: {}",
+        mid
+    );
+    Ok(Json(
+        "SR Dimension configuration updated successfully".to_string(),
+    ))
+}
 pub async fn routing_create(
     Json(payload): Json<Value>,
 ) -> Result<Json<RoutingDictionaryRecord>, ContainerError<EuclidErrors>> {
