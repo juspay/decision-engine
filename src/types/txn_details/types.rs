@@ -13,6 +13,7 @@ use time::Time;
 // use db::mesh::internal;
 // use crate::storage::internal::primd_id_to_int;
 // use types::utils::dbconfig::get_euler_db_conf;
+use crate::types::country::country_iso::CountryISO2;
 use crate::types::currency::Currency;
 use crate::types::merchant::id::MerchantId;
 use crate::types::merchant::merchant_gateway_account::MerchantGwAccId;
@@ -530,6 +531,8 @@ pub struct TxnDetail {
     pub sourceObjectId: Option<SourceObjectId>,
     #[serde(rename = "currency")]
     pub currency: Currency,
+    #[serde(rename = "country")]
+    pub country: Option<CountryISO2>,
     #[serde(rename = "surchargeAmount")]
     pub surchargeAmount: Option<Money>,
     #[serde(rename = "taxAmount")]

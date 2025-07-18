@@ -40,6 +40,9 @@ pub enum EuclidErrors {
 
     #[error("Storage error")]
     StorageError,
+
+    #[error("Invalid Sr Dimension Configuration")]
+    InvalidSrDimensionConfig(String),
 }
 
 impl axum::response::IntoResponse for EuclidErrors {
@@ -191,6 +194,16 @@ impl axum::response::IntoResponse for EuclidErrors {
                 )),
             )
                 .into_response(),
+
+                EuclidErrors::InvalidSrDimensionConfig(msg) => (
+                    hyper::StatusCode::BAD_REQUEST,
+                    axum::Json(ApiErrorResponse::new(
+                        error_codes::TE_04,
+                        msg,
+                        None,
+                    )),
+                )
+                    .into_response(),
         }
     }
 }
