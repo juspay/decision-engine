@@ -154,31 +154,11 @@ pub async fn routing_evaluate(
         payload.created_by.clone()
     );
 
-    // Check for the default_fallback config:
-    let configs = find_config_by_name(config_identifier)
-        .await
-        .change_context(EuclidErrors::StorageError)?;
-
-    // In default state it should be false, and should only be made true, if the value is present
-    let mut check_default_fallback_present = false;
-
-    // Not adding parsing error, as this value can only be written by application
-    configs.map(|config| {
-        config.value.map(|value| {
-            if let Ok(parsed_value) = value.parse::<bool>() {
-                check_default_fallback_present = parsed_value;
-            }
-        })
-    });
-
-    if check_default_fallback_present
-        && payload
-            .fallback_output
-            .clone()
-            .is_none_or(|fallback| fallback.is_empty())
-    {
-        return Err(EuclidErrors::DefaultFallbackNotFound(payload.created_by.clone()).into());
-    }
+    // Check for the fallback_output in evaluate request:
+    let default_output_present = payload
+        .fallback_output
+        .as_ref()
+        .map_or(false, |output| !output.is_empty());
 
     // fetch the active routing_algorithm of the merchant
     let active_routing_algorithm_id = match crate::generics::generic_find_one::<
@@ -373,8 +353,7 @@ pub async fn routing_evaluate(
                 }) {
                     Ok(mut ir) => {
                         // Check if fallback is enabled
-                        if check_default_fallback_present && ir.output == program.default_selection
-                        {
+                        if default_output_present && ir.output == program.default_selection {
                             logger::info!(
                                 "Default fallback triggered: Overriding with fallback connector"
                             );
