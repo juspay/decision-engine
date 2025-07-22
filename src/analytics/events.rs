@@ -25,12 +25,7 @@ pub struct RoutingEvent {
 }
 
 impl RoutingEvent {
-    pub fn new(
-        merchant_id: String,
-        request_id: String,
-        endpoint: String,
-        method: String,
-    ) -> Self {
+    pub fn new(merchant_id: String, request_id: String, endpoint: String, method: String) -> Self {
         Self {
             event_id: Uuid::new_v4().to_string(),
             merchant_id,
@@ -137,17 +132,21 @@ impl RoutingEvent {
         if !self.response_payload.is_empty() {
             if let Ok(response_json) = serde_json::from_str::<Value>(&self.response_payload) {
                 // Try to extract gateway from various possible response structures
-                if let Some(gateway) = response_json.get("gateway")
+                if let Some(gateway) = response_json
+                    .get("gateway")
                     .or_else(|| response_json.get("selected_gateway"))
                     .or_else(|| response_json.get("connector"))
-                    .and_then(|v| v.as_str()) {
+                    .and_then(|v| v.as_str())
+                {
                     self.gateway_selected = Some(gateway.to_string());
                 }
 
                 // Try to extract routing algorithm ID
-                if let Some(algo_id) = response_json.get("routing_algorithm_id")
+                if let Some(algo_id) = response_json
+                    .get("routing_algorithm_id")
                     .or_else(|| response_json.get("algorithm_id"))
-                    .and_then(|v| v.as_str()) {
+                    .and_then(|v| v.as_str())
+                {
                     self.routing_algorithm_id = Some(algo_id.to_string());
                 }
             }
@@ -159,10 +158,12 @@ impl RoutingEvent {
     pub fn extract_error_from_response(&mut self) -> AnalyticsResult<()> {
         if self.status_code >= 400 && !self.response_payload.is_empty() {
             if let Ok(response_json) = serde_json::from_str::<Value>(&self.response_payload) {
-                if let Some(error) = response_json.get("error")
+                if let Some(error) = response_json
+                    .get("error")
                     .or_else(|| response_json.get("message"))
                     .or_else(|| response_json.get("error_message"))
-                    .and_then(|v| v.as_str()) {
+                    .and_then(|v| v.as_str())
+                {
                     self.error_message = Some(error.to_string());
                 }
             }
@@ -199,7 +200,10 @@ fn extract_ip_address(request: &Request) -> Option<String> {
         .and_then(|v| v.to_str().ok())
         .map(|s| {
             // Take the first IP if there are multiple (comma-separated)
-            s.split(',').next().map(|ip| ip.trim().to_string()).unwrap_or_else(|| String::new())
+            s.split(',')
+                .next()
+                .map(|ip| ip.trim().to_string())
+                .unwrap_or_else(|| String::new())
         })
 }
 
@@ -274,6 +278,9 @@ mod tests {
 
         event.extract_error_from_response().unwrap();
 
-        assert_eq!(event.error_message, Some("Gateway not available".to_string()));
+        assert_eq!(
+            event.error_message,
+            Some("Gateway not available".to_string())
+        );
     }
 }

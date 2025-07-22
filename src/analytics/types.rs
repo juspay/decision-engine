@@ -84,8 +84,8 @@ pub type AnalyticsResult<T> = Result<T, AnalyticsError>;
 // Custom datetime serialization for ClickHouse compatibility
 mod clickhouse_datetime {
     use serde::{self, Deserialize, Deserializer, Serializer};
-    use time::OffsetDateTime;
     use time::format_description::well_known::Rfc3339;
+    use time::OffsetDateTime;
 
     pub fn serialize<S>(date: &OffsetDateTime, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -101,15 +101,14 @@ mod clickhouse_datetime {
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        
+
         // Try parsing as Unix timestamp first
         if let Ok(timestamp) = s.parse::<i64>() {
             return OffsetDateTime::from_unix_timestamp(timestamp)
                 .map_err(serde::de::Error::custom);
         }
-        
+
         // Fallback to RFC3339 parsing
-        OffsetDateTime::parse(&s, &Rfc3339)
-            .map_err(serde::de::Error::custom)
+        OffsetDateTime::parse(&s, &Rfc3339).map_err(serde::de::Error::custom)
     }
 }

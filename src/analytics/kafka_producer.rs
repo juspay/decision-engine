@@ -2,7 +2,7 @@ use crate::analytics::{AnalyticsError, AnalyticsResult, KafkaConfig, RoutingEven
 use kafka::producer::{Producer, Record, RequiredAcks};
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tracing::{error, info, warn, debug};
+use tracing::{debug, error, info, warn};
 
 #[derive(Clone)]
 pub struct KafkaProducer {
@@ -13,39 +13,48 @@ pub struct KafkaProducer {
 impl KafkaProducer {
     pub fn new(config: KafkaConfig) -> AnalyticsResult<Self> {
         let topic = format!("{}-routing-events", config.topic_prefix);
-        
+
         // Validate broker configuration
         if config.brokers.is_empty() {
             return Err(AnalyticsError::Configuration(
-                "No Kafka brokers configured".to_string()
+                "No Kafka brokers configured".to_string(),
             ));
         }
-        
-        debug!("Initializing Kafka producer with brokers: {:?}", config.brokers);
-        
+
+        debug!(
+            "Initializing Kafka producer with brokers: {:?}",
+            config.brokers
+        );
+
         Ok(Self { config, topic })
     }
 
     /// Test Kafka connectivity
     pub async fn test_connection(&self) -> AnalyticsResult<()> {
-        debug!("Testing Kafka connection to brokers: {:?}", self.config.brokers);
-        
+        debug!(
+            "Testing Kafka connection to brokers: {:?}",
+            self.config.brokers
+        );
+
         let producer = Producer::from_hosts(self.config.brokers.clone())
             .with_ack_timeout(Duration::from_secs(5))
             .with_required_acks(RequiredAcks::One)
             .create()
             .map_err(|e| {
-                error!("Failed to create Kafka producer for connection test: {:?}", e);
+                error!(
+                    "Failed to create Kafka producer for connection test: {:?}",
+                    e
+                );
                 AnalyticsError::Kafka(e)
             })?;
-        
+
         info!("Kafka connection test successful");
         Ok(())
     }
 
     pub async fn send_event(&self, event: &RoutingEventData) -> AnalyticsResult<()> {
         let json_data = serde_json::to_string(event)?;
-        
+
         // Create producer with configuration
         let mut producer = Producer::from_hosts(self.config.brokers.clone())
             .with_ack_timeout(Duration::from_secs(1))
@@ -54,11 +63,10 @@ impl KafkaProducer {
             .map_err(AnalyticsError::Kafka)?;
 
         // Send the record
-        let record = Record::from_key_value(&self.topic, event.event_id.as_bytes(), json_data.as_bytes());
-        
-        producer
-            .send(&record)
-            .map_err(AnalyticsError::Kafka)?;
+        let record =
+            Record::from_key_value(&self.topic, event.event_id.as_bytes(), json_data.as_bytes());
+
+        producer.send(&record).map_err(AnalyticsError::Kafka)?;
 
         Ok(())
     }
@@ -80,15 +88,28 @@ impl KafkaProducer {
 
         for (index, event) in events.iter().enumerate() {
             let json_data = serde_json::to_string(event)?;
-            let record = Record::from_key_value(&self.topic, event.event_id.as_bytes(), json_data.as_bytes());
-            
+            let record = Record::from_key_value(
+                &self.topic,
+                event.event_id.as_bytes(),
+                json_data.as_bytes(),
+            );
+
             if let Err(e) = producer.send(&record) {
-                error!("Failed to send event {} of {} to Kafka: {:?}", index + 1, events.len(), e);
+                error!(
+                    "Failed to send event {} of {} to Kafka: {:?}",
+                    index + 1,
+                    events.len(),
+                    e
+                );
                 return Err(AnalyticsError::Kafka(e));
             }
         }
 
-        info!("Successfully sent {} events to Kafka topic: {}", events.len(), self.topic);
+        info!(
+            "Successfully sent {} events to Kafka topic: {}",
+            events.len(),
+            self.topic
+        );
         Ok(())
     }
 
@@ -97,7 +118,10 @@ impl KafkaProducer {
         match self.send_events_batch(events).await {
             Ok(()) => true,
             Err(e) => {
-                warn!("Failed to send events batch to Kafka, continuing without analytics: {:?}", e);
+                warn!(
+                    "Failed to send events batch to Kafka, continuing without analytics: {:?}",
+                    e
+                );
                 false
             }
         }
@@ -126,7 +150,7 @@ impl KafkaProducer {
                         match event {
                             Some(event) => {
                                 batch.push(event);
-                                
+
                                 // Flush if batch is full
                                 if batch.len() >= batch_size {
                                     let success = producer.send_events_batch_graceful(&batch).await;
@@ -135,7 +159,7 @@ impl KafkaProducer {
                                     } else {
                                         consecutive_failures += 1;
                                         if consecutive_failures >= max_consecutive_failures {
-                                            warn!("Too many consecutive Kafka failures ({}), continuing to collect events but not sending", 
+                                            warn!("Too many consecutive Kafka failures ({}), continuing to collect events but not sending",
                                                   consecutive_failures);
                                         }
                                     }
@@ -154,7 +178,7 @@ impl KafkaProducer {
                             }
                         }
                     }
-                    
+
                     // Timeout-based flush
                     _ = tokio::time::sleep_until(last_flush + batch_timeout) => {
                         if !batch.is_empty() {
@@ -164,7 +188,7 @@ impl KafkaProducer {
                             } else {
                                 consecutive_failures += 1;
                                 if consecutive_failures >= max_consecutive_failures {
-                                    warn!("Too many consecutive Kafka failures ({}), continuing to collect events but not sending", 
+                                    warn!("Too many consecutive Kafka failures ({}), continuing to collect events but not sending",
                                           consecutive_failures);
                                 }
                             }
