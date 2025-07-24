@@ -9,7 +9,7 @@ use crate::{
         cgraph,
         interpreter::{evaluate_output, InterpreterBackend},
         types::{
-            ActivateRoutingConfigRequest, Context, JsonifiedRoutingAlgorithm,
+            ActivateRoutingConfigRequest, Context, DataType, JsonifiedRoutingAlgorithm,
             RoutingAlgorithmMapperNew, RoutingDictionaryRecord, RoutingEvaluateResponse,
             RoutingRequest, RoutingRule, StaticRoutingAlgorithm,
         },
@@ -201,8 +201,10 @@ pub async fn routing_evaluate(
         }
     };
 
-    for (key, _) in &parameters {
-        if !routing_config.keys.keys.contains_key(key) {
+    for (key, value) in &parameters {
+        if !routing_config.keys.keys.contains_key(key)
+            && value.as_ref().is_some_and(|val| !val.is_metadata())
+        {
             API_REQUEST_COUNTER
                 .with_label_values(&["routing_evaluate", "failure"])
                 .inc();

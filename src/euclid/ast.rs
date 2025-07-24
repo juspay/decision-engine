@@ -40,6 +40,10 @@ pub enum ValueType {
 }
 
 impl ValueType {
+    pub fn is_metadata(&self) -> bool {
+        matches!(self, Self::MetadataVariant(_))
+    }
+
     pub fn get_type(&self) -> DataType {
         match self {
             Self::Number(_) => DataType::Number,
