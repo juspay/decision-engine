@@ -16,7 +16,7 @@ use time::PrimitiveDateTime;
 
 pub type Metadata = HashMap<String, serde_json::Value>;
 
-#[derive(Debug, Clone, Serialize, strum::Display)]
+#[derive(Debug, Clone, Serialize, strum::Display, PartialEq)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum DataType {
@@ -238,6 +238,7 @@ impl fmt::Display for InterpreterError {
     }
 }
 
+#[derive(Debug)]
 pub struct Context(HashMap<String, Option<ValueType>>);
 impl Context {
     pub fn new(parameters: HashMap<String, Option<ValueType>>) -> Self {
