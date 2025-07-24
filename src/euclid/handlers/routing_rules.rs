@@ -203,7 +203,7 @@ pub async fn routing_evaluate(
 
     for (key, value) in &parameters {
         if !routing_config.keys.keys.contains_key(key)
-            && value.clone().is_some_and(|val| !val.is_metadata())
+            && value.as_ref().is_some_and(|val| !val.is_metadata())
         {
             API_REQUEST_COUNTER
                 .with_label_values(&["routing_evaluate", "failure"])

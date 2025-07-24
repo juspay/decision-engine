@@ -41,10 +41,7 @@ pub enum ValueType {
 
 impl ValueType {
     pub fn is_metadata(&self) -> bool {
-        match self {
-            Self::MetadataVariant(_) => true,
-            _ => false,
-        }
+        matches!(self, Self::MetadataVariant(_))
     }
 
     pub fn get_type(&self) -> DataType {
