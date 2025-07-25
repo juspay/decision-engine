@@ -64,7 +64,8 @@ use crate::types::feature as ETF;
 use super::types::{
     ConfigurableBlock, GatewayList, GatewayRedisKeyMap, GatewayScoreMap, GatewayScoringData,
     GatewayWiseExtraScore, InternalMetadata, MessageFormat, OptimizationRedisBlockData,
-    ScoreKeyType, SplitSettlementDetails, SrV3InputConfig, SrV3SubLevelInputConfig,
+    ScoreKeyType, SplitSettlementDetails, SrRoutingDimensions, SrV3InputConfig,
+    SrV3SubLevelInputConfig,
 };
 use crate::types::merchant as ETM;
 use crate::types::merchant_gateway_card_info as ETMGCI;
@@ -1568,22 +1569,14 @@ pub fn get_sr_v3_latency_threshold(
     sr_v3_input_config: Option<SrV3InputConfig>,
     pmt: &str,
     pm: &str,
-    card_network: &Option<String>,
-    card_isin: &Option<String>,
-    currency: &Option<String>,
-    country: &Option<String>,
-    auth_type: &Option<String>,
+    sr_routing_dimesions: &SrRoutingDimensions,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
         get_sr_v3_sub_level_input_config(
             &config.subLevelInputConfig,
             pmt,
             pm,
-            card_network,
-            card_isin,
-            currency,
-            country,
-            auth_type,
+            sr_routing_dimesions,
             |x| x.latencyThreshold.is_some(),
         )
         .and_then(|sub_config| sub_config.latencyThreshold)
@@ -1595,22 +1588,14 @@ pub fn get_sr_v3_bucket_size(
     sr_v3_input_config: Option<SrV3InputConfig>,
     pmt: &str,
     pm: &str,
-    card_network: &Option<String>,
-    card_isin: &Option<String>,
-    currency: &Option<String>,
-    country: &Option<String>,
-    auth_type: &Option<String>,
+    sr_routing_dimesions: &SrRoutingDimensions,
 ) -> Option<i32> {
     sr_v3_input_config.and_then(|config| {
         get_sr_v3_sub_level_input_config(
             &config.subLevelInputConfig,
             pmt,
             pm,
-            card_network,
-            card_isin,
-            currency,
-            country,
-            auth_type,
+            sr_routing_dimesions,
             |x| x.bucketSize.is_some(),
         )
         .and_then(|sub_config| sub_config.bucketSize)
@@ -1623,22 +1608,14 @@ pub fn get_sr_v3_hedging_percent(
     sr_v3_input_config: Option<SrV3InputConfig>,
     pmt: &str,
     pm: &str,
-    card_network: &Option<String>,
-    card_isin: &Option<String>,
-    currency: &Option<String>,
-    country: &Option<String>,
-    auth_type: &Option<String>,
+    sr_routing_dimesions: &SrRoutingDimensions,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
         get_sr_v3_sub_level_input_config(
             &config.subLevelInputConfig,
             pmt,
             pm,
-            card_network,
-            card_isin,
-            currency,
-            country,
-            auth_type,
+            sr_routing_dimesions,
             |x| x.hedgingPercent.is_some(),
         )
         .and_then(|sub_config| sub_config.hedgingPercent)
@@ -1651,22 +1628,14 @@ pub fn get_sr_v3_lower_reset_factor(
     sr_v3_input_config: Option<SrV3InputConfig>,
     pmt: &str,
     pm: &str,
-    card_network: &Option<String>,
-    card_isin: &Option<String>,
-    currency: &Option<String>,
-    country: &Option<String>,
-    auth_type: &Option<String>,
+    sr_routing_dimesions: &SrRoutingDimensions,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
         get_sr_v3_sub_level_input_config(
             &config.subLevelInputConfig,
             pmt,
             pm,
-            card_network,
-            card_isin,
-            currency,
-            country,
-            auth_type,
+            sr_routing_dimesions,
             |x| x.lowerResetFactor.is_some(),
         )
         .and_then(|sub_config| sub_config.lowerResetFactor)
@@ -1679,22 +1648,14 @@ pub fn get_sr_v3_upper_reset_factor(
     sr_v3_input_config: Option<SrV3InputConfig>,
     pmt: &str,
     pm: &str,
-    card_network: &Option<String>,
-    card_isin: &Option<String>,
-    currency: &Option<String>,
-    country: &Option<String>,
-    auth_type: &Option<String>,
+    sr_routing_dimesions: &SrRoutingDimensions,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
         get_sr_v3_sub_level_input_config(
             &config.subLevelInputConfig,
             pmt,
             pm,
-            card_network,
-            card_isin,
-            currency,
-            country,
-            auth_type,
+            sr_routing_dimesions,
             |x| x.upperResetFactor.is_some(),
         )
         .and_then(|sub_config| sub_config.upperResetFactor)
@@ -1708,22 +1669,14 @@ pub fn get_sr_v3_gateway_sigma_factor(
     pmt: &str,
     pm: &str,
     gw: &String,
-    card_network: &Option<String>,
-    card_isin: &Option<String>,
-    currency: &Option<String>,
-    country: &Option<String>,
-    auth_type: &Option<String>,
+    sr_routing_dimesions: &SrRoutingDimensions,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
         get_sr_v3_sub_level_input_config(
             &config.subLevelInputConfig,
             pmt,
             pm,
-            card_network,
-            card_isin,
-            currency,
-            country,
-            auth_type,
+            sr_routing_dimesions,
             |x| {
                 x.gatewayExtraScore
                     .as_ref()
@@ -1751,11 +1704,7 @@ fn get_sr_v3_sub_level_input_config(
     sub_level_input_config: &Option<Vec<SrV3SubLevelInputConfig>>,
     pmt: &str,
     pm: &str,
-    card_network: &Option<String>,
-    card_isin: &Option<String>,
-    currency: &Option<String>,
-    country: &Option<String>,
-    auth_type: &Option<String>,
+    sr_routing_dimesions: &SrRoutingDimensions,
     is_input_non_null: impl Fn(&SrV3SubLevelInputConfig) -> bool,
 ) -> Option<SrV3SubLevelInputConfig> {
     sub_level_input_config
@@ -1768,11 +1717,7 @@ fn get_sr_v3_sub_level_input_config(
                         config,
                         Some(pmt.to_string()),
                         Some(pm.to_string()),
-                        card_network.clone(),
-                        card_isin.clone(),
-                        currency.clone(),
-                        country.clone(),
-                        auth_type.clone(),
+                        &sr_routing_dimesions,
                     ) && is_input_non_null(config)
                 })
                 .or_else(|| {
@@ -1781,11 +1726,7 @@ fn get_sr_v3_sub_level_input_config(
                             config,
                             Some(pmt.to_string()),
                             None,
-                            card_network.clone(),
-                            card_isin.clone(),
-                            currency.clone(),
-                            country.clone(),
-                            auth_type.clone(),
+                            &sr_routing_dimesions,
                         ) && is_input_non_null(config)
                     })
                 })
@@ -1797,19 +1738,20 @@ fn is_sr_v3_config_match(
     config: &SrV3SubLevelInputConfig,
     pmt: Option<String>,
     pm: Option<String>,
-    card_network: Option<String>,
-    card_isin: Option<String>,
-    currency: Option<String>,
-    country: Option<String>,
-    auth_type: Option<String>,
+    sr_routing_dimesions: &SrRoutingDimensions,
 ) -> bool {
     let pmt_matches = config.paymentMethodType == pmt;
     let pm_matches = config.paymentMethod.is_none() || config.paymentMethod == pm;
-    let card_network_matches = config.cardNetwork.is_none() || config.cardNetwork == card_network;
-    let card_isin_matches = config.cardIsIn.is_none() || config.cardIsIn == card_isin;
-    let currency_matches = config.currency.is_none() || config.currency == currency;
-    let country_matches = config.country.is_none() || config.country == country;
-    let auth_type_matches = config.authType.is_none() || config.authType == auth_type;
+    let card_network_matches =
+        config.cardNetwork.is_none() || config.cardNetwork == sr_routing_dimesions.card_network;
+    let card_isin_matches =
+        config.cardIsIn.is_none() || config.cardIsIn == sr_routing_dimesions.card_isin;
+    let currency_matches =
+        config.currency.is_none() || config.currency == sr_routing_dimesions.currency;
+    let country_matches =
+        config.country.is_none() || config.country == sr_routing_dimesions.country;
+    let auth_type_matches =
+        config.authType.is_none() || config.authType == sr_routing_dimesions.auth_type;
 
     pmt_matches
         && pm_matches

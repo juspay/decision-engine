@@ -1855,3 +1855,12 @@ struct Reader<T> {
     reader: T,
     tenant_state: TenantAppState,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SrRoutingDimensions {
+    pub card_network: Option<String>,
+    pub card_isin: Option<String>,
+    pub currency: Option<String>,
+    pub country: Option<String>,
+    pub auth_type: Option<String>,
+}

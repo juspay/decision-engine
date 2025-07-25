@@ -36,7 +36,7 @@ use crate::redis::cache::findByNameFromRedis;
 use crate::types::payment::payment_method_type_const::*;
 use crate::{
     app,
-    decider::gatewaydecider::types::GatewayScoringData,
+    decider::gatewaydecider::types::{GatewayScoringData, SrRoutingDimensions},
     decider::{
         gatewaydecider::constants as DC, gatewaydecider::types::RoutingFlowType as RF,
         gatewaydecider::types::ScoreKeyType as SK, gatewaydecider::types::SrV3InputConfig,
@@ -327,40 +327,30 @@ pub async fn getSrV3MerchantBucketSize(txn_detail: TxnDetail, txn_card_info: Txn
         txn_detail.sourceObject.unwrap_or_default(),
     );
     // Extract the new parameters from txn_card_info
-    let card_network = txn_card_info
-        .cardSwitchProvider
-        .as_ref()
-        .map(|s| s.peek().to_string());
-    let card_isin = txn_card_info.card_isin;
-    let currency = Some(txn_detail.currency.to_string());
-    let country = txn_detail.country.as_ref().map(|c| c.to_string());
-    let auth_type = txn_card_info.authType.as_ref().map(|a| a.to_string());
+
+    let sr_routing_dimesions = SrRoutingDimensions {
+        card_network: txn_card_info
+            .cardSwitchProvider
+            .as_ref()
+            .map(|s| s.peek().to_string()),
+        card_isin: txn_card_info.card_isin,
+        currency: Some(txn_detail.currency.to_string()),
+        country: txn_detail.country.as_ref().map(|c| c.to_string()),
+        auth_type: txn_card_info.authType.as_ref().map(|a| a.to_string()),
+    };
 
     let maybe_bucket_size = GU::get_sr_v3_bucket_size(
         merchant_sr_v3_input_config,
         &pmt,
         &pm,
-        &card_network,
-        &card_isin,
-        &currency,
-        &country,
-        &auth_type,
+        &sr_routing_dimesions,
     );
     let merchant_bucket_size = match maybe_bucket_size {
         None => {
             let default_sr_v3_input_config: Option<SrV3InputConfig> =
                 findByNameFromRedis(DC::srV3DefaultInputConfig.get_key()).await;
-            GU::get_sr_v3_bucket_size(
-                default_sr_v3_input_config,
-                &pmt,
-                &pm,
-                &card_network,
-                &card_isin,
-                &currency,
-                &country,
-                &auth_type,
-            )
-            .unwrap_or(C::defaultSrV3BasedBucketSize)
+            GU::get_sr_v3_bucket_size(default_sr_v3_input_config, &pmt, &pm, &sr_routing_dimesions)
+                .unwrap_or(C::defaultSrV3BasedBucketSize)
         }
         Some(bucket_size) => bucket_size,
     };

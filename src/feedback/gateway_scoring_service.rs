@@ -28,7 +28,7 @@ use crate::app::{get_tenant_app_state, APP_STATE};
 use crate::decider::gatewaydecider::constants::{self as DC, srV3DefaultInputConfig};
 use crate::decider::gatewaydecider::types as T;
 use crate::decider::gatewaydecider::types::GatewayScoringData;
-use crate::decider::gatewaydecider::types::RoutingFlowType as RF;
+use crate::decider::gatewaydecider::types::{RoutingFlowType as RF, SrRoutingDimensions};
 use crate::decider::gatewaydecider::utils::{
     self as GU, get_m_id, get_payment_method, get_sr_v3_latency_threshold,
 };
@@ -291,24 +291,23 @@ pub async fn getGatewayScoringType(
         txn_detail.sourceObject.unwrap_or_default(),
     );
     // Extract the new parameters from txn_card_info
-    let card_network = txn_card_info
-        .cardSwitchProvider
-        .as_ref()
-        .map(|s| s.peek().to_string());
-    let card_isin = txn_card_info.card_isin.clone();
-    let currency = Some(txn_detail.currency.to_string());
-    let country = txn_detail.country.as_ref().map(|c| c.to_string());
-    let auth_type = txn_card_info.authType.as_ref().map(|a| a.to_string());
+
+    let sr_routing_dimesions = SrRoutingDimensions {
+        card_network: txn_card_info
+            .cardSwitchProvider
+            .as_ref()
+            .map(|s| s.peek().to_string()),
+        card_isin: txn_card_info.card_isin.clone(),
+        currency: Some(txn_detail.currency.to_string()),
+        country: txn_detail.country.as_ref().map(|c| c.to_string()),
+        auth_type: txn_card_info.authType.as_ref().map(|a| a.to_string()),
+    };
 
     let maybe_latency_threshold = get_sr_v3_latency_threshold(
         merchant_sr_v3_input_config,
         &pmt,
         &pm,
-        &card_network,
-        &card_isin,
-        &currency,
-        &country,
-        &auth_type,
+        &sr_routing_dimesions,
     );
 
     let time_difference_threshold = match maybe_latency_threshold {
@@ -319,11 +318,7 @@ pub async fn getGatewayScoringType(
                 default_sr_v3_input_config,
                 &pmt,
                 &pm,
-                &card_network,
-                &card_isin,
-                &currency,
-                &country,
-                &auth_type,
+                &sr_routing_dimesions,
             );
             maybe_default_latency_threshold.unwrap_or(defaultSrV3LatencyThresholdInSecs())
         }
