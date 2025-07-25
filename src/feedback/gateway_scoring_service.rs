@@ -3,6 +3,7 @@
 
 use crate::redis::cache::findByNameFromRedis;
 use crate::redis::feature::isFeatureEnabled;
+use masking::PeekInterface;
 // Converted imports
 // use gateway_decider::constants as c::{enable_elimination_v2, gateway_scoring_data, ENABLE_EXPLORE_AND_EXPLOIT_ON_SRV3, SR_V3_INPUT_CONFIG, GATEWAY_SCORE_FIRST_DIMENSION_SOFT_TTL};
 // use feedback::constants as c;
@@ -27,7 +28,7 @@ use crate::app::{get_tenant_app_state, APP_STATE};
 use crate::decider::gatewaydecider::constants::{self as DC, srV3DefaultInputConfig};
 use crate::decider::gatewaydecider::types as T;
 use crate::decider::gatewaydecider::types::GatewayScoringData;
-use crate::decider::gatewaydecider::types::RoutingFlowType as RF;
+use crate::decider::gatewaydecider::types::{RoutingFlowType as RF, SrRoutingDimensions};
 use crate::decider::gatewaydecider::utils::{
     self as GU, get_m_id, get_payment_method, get_sr_v3_latency_threshold,
 };
@@ -289,15 +290,36 @@ pub async fn getGatewayScoringType(
         txn_card_info.paymentMethod,
         txn_detail.sourceObject.unwrap_or_default(),
     );
-    let maybe_latency_threshold =
-        get_sr_v3_latency_threshold(merchant_sr_v3_input_config, &pmt, &pm);
+    // Extract the new parameters from txn_card_info
+
+    let sr_routing_dimesions = SrRoutingDimensions {
+        card_network: txn_card_info
+            .cardSwitchProvider
+            .as_ref()
+            .map(|s| s.peek().to_string()),
+        card_isin: txn_card_info.card_isin.clone(),
+        currency: Some(txn_detail.currency.to_string()),
+        country: txn_detail.country.as_ref().map(|c| c.to_string()),
+        auth_type: txn_card_info.authType.as_ref().map(|a| a.to_string()),
+    };
+
+    let maybe_latency_threshold = get_sr_v3_latency_threshold(
+        merchant_sr_v3_input_config,
+        &pmt,
+        &pm,
+        &sr_routing_dimesions,
+    );
 
     let time_difference_threshold = match maybe_latency_threshold {
         None => {
             let default_sr_v3_input_config =
                 findByNameFromRedis(srV3DefaultInputConfig.get_key()).await;
-            let maybe_default_latency_threshold =
-                get_sr_v3_latency_threshold(default_sr_v3_input_config, &pmt, &pm);
+            let maybe_default_latency_threshold = get_sr_v3_latency_threshold(
+                default_sr_v3_input_config,
+                &pmt,
+                &pm,
+                &sr_routing_dimesions,
+            );
             maybe_default_latency_threshold.unwrap_or(defaultSrV3LatencyThresholdInSecs())
         }
         Some(latency_threshold) => latency_threshold,
