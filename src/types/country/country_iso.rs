@@ -406,7 +406,6 @@ pub fn text_db_to_country_iso(text: &str) -> Result<CountryISO, ApiError> {
     }
 }
 
-
 #[derive(Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Clone, strum::Display, Copy)]
 pub enum CountryISO2 {
     AD,
