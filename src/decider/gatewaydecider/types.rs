@@ -1,5 +1,6 @@
 use crate::app::{get_tenant_app_state, TenantAppState};
 use crate::decider::network_decider;
+use crate::types::country::country_iso::CountryISO2;
 use crate::types::currency::Currency;
 use crate::types::money::internal as ETMo;
 use crate::types::order::udfs::UDFs;
@@ -529,6 +530,11 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
             routingApproach: None,
             dateCreated: OffsetDateTime::now_utc(),
             eliminationEnabled: false,
+            cardIsIn: None,
+            cardSwitchProvider: None,
+            currency: None,
+            country: None,
+            is_legacy_decider_flow: false,
         },
     }
 }
@@ -551,6 +557,11 @@ pub struct GatewayScoringData {
     pub routingApproach: Option<String>,
     pub dateCreated: OffsetDateTime,
     pub eliminationEnabled: bool,
+    pub cardIsIn: Option<String>,
+    pub cardSwitchProvider: Option<Secret<String>>,
+    pub currency: Option<Currency>,
+    pub country: Option<CountryISO2>,
+    pub is_legacy_decider_flow: bool,
 }
 
 #[derive(Debug)]
@@ -754,6 +765,7 @@ pub struct ApiTxnDetail {
     pub sourceObject: Option<String>,
     pub sourceObjectId: Option<String>,
     pub currency: Option<String>,
+    pub country: Option<String>,
     pub netAmount: Option<f64>,
     pub surchargeAmount: Option<f64>,
     pub taxAmount: Option<f64>,
@@ -902,6 +914,7 @@ pub struct PaymentInfo {
     paymentId: String,
     pub amount: f64,
     currency: Currency,
+    country: Option<CountryISO2>,
     customerId: Option<ETCu::CustomerId>,
     udfs: Option<UDFs>,
     preferredGateway: Option<String>,
@@ -980,6 +993,7 @@ impl DomainDeciderRequestForApiCallV2 {
                 sourceObject: Some(self.paymentInfo.paymentMethod.clone()),
                 sourceObjectId: None,
                 currency: self.paymentInfo.currency.clone(),
+                country: self.paymentInfo.country.clone(),
                 netAmount: ETMo::Money::from_double(self.paymentInfo.amount),
                 surchargeAmount: None,
                 taxAmount: None,
@@ -1113,6 +1127,11 @@ pub struct SrV3InputConfig {
 pub struct SrV3SubLevelInputConfig {
     pub paymentMethodType: Option<String>,
     pub paymentMethod: Option<String>,
+    pub cardNetwork: Option<String>,
+    pub cardIsIn: Option<String>,
+    pub currency: Option<String>,
+    pub country: Option<String>,
+    pub authType: Option<String>,
     pub latencyThreshold: Option<f64>,
     pub bucketSize: Option<i32>,
     pub hedgingPercent: Option<f64>,
@@ -1837,4 +1856,13 @@ pub async fn initial_decider_flow<'a>(
 struct Reader<T> {
     reader: T,
     tenant_state: TenantAppState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SrRoutingDimensions {
+    pub card_network: Option<String>,
+    pub card_isin: Option<String>,
+    pub currency: Option<String>,
+    pub country: Option<String>,
+    pub auth_type: Option<String>,
 }

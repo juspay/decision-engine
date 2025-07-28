@@ -202,7 +202,7 @@ pub async fn deciderFullPayloadHSFunction(
         dpEDCCApplied: dreq.isEdccApplied,
         dpShouldConsumeResult: dreq.shouldConsumeResult,
     };
-    runDeciderFlow(decider_params).await
+    runDeciderFlow(decider_params, true).await
 }
 
 fn handleEnforcedGateway(gateway_list: Option<Vec<String>>) -> Option<Vec<String>> {
@@ -314,6 +314,7 @@ fn handleEnforcedGateway(gateway_list: Option<Vec<String>>) -> Option<Vec<String
 
 pub async fn runDeciderFlow(
     deciderParams: T::DeciderParams,
+    is_legacy_decider_flow: bool,
 ) -> Result<(T::DecidedGateway, Vec<(String, Vec<String>)>), T::ErrorResponse> {
     let txnCreationTime = deciderParams
         .dpTxnDetail
@@ -682,6 +683,7 @@ pub async fn runDeciderFlow(
     .concat();
     let updated_gateway_scoring_data = T::GatewayScoringData {
         routingApproach: Some(decider_flow.writer.gwDeciderApproach.clone().to_string()),
+        is_legacy_decider_flow,
         ..decider_flow.writer.gateway_scoring_data.clone()
     };
     let app_state = get_tenant_app_state().await;

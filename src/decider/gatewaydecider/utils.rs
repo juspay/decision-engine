@@ -1,24 +1,32 @@
 use crate::app::get_tenant_app_state;
 use crate::decider::gatewaydecider::types::{self, DeciderFlow};
+use crate::error;
+use crate::euclid::errors::EuclidErrors;
+use crate::euclid::types::SrDimensionConfig;
 use crate::feedback::gateway_elimination_scoring::flow::{
     eliminationV2RewardFactor, getPenaltyFactor,
 };
 use crate::redis::feature::isFeatureEnabled;
 use crate::redis::types::ServiceConfigKey;
 use crate::types::card::card_type::card_type_to_text;
+use crate::types::country::country_iso::CountryISO2;
+use crate::types::currency::Currency;
 use crate::types::merchant::id::{merchant_id_to_text, MerchantId};
 use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
 use crate::types::money::internal::Money;
 use crate::types::payment::payment_method_type_const::*;
 use crate::types::payment_flow::{payment_flows_to_text, PaymentFlow};
+use crate::types::service_configuration::find_config_by_name;
 use crate::types::user_eligibility_info::{
     get_eligibility_info, identifier_name_to_text, IdentifierName,
 };
 use crate::utils::{generate_random_number, get_current_date_in_millis};
 use crate::{decider, feedback, logger};
 use diesel::Identifiable;
+use error_stack::ResultExt;
 use fred::prelude::{KeysInterface, ListInterface};
 use masking::PeekInterface;
+use masking::Secret;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::from_value;
@@ -56,14 +64,15 @@ use crate::types::feature as ETF;
 use super::types::{
     ConfigurableBlock, GatewayList, GatewayRedisKeyMap, GatewayScoreMap, GatewayScoringData,
     GatewayWiseExtraScore, InternalMetadata, MessageFormat, OptimizationRedisBlockData,
-    ScoreKeyType, SplitSettlementDetails, SrV3InputConfig, SrV3SubLevelInputConfig,
+    ScoreKeyType, SplitSettlementDetails, SrRoutingDimensions, SrV3InputConfig,
+    SrV3SubLevelInputConfig,
 };
 use crate::types::merchant as ETM;
 use crate::types::merchant_gateway_card_info as ETMGCI;
 // // use types::merchant_gateway_card_info as ETMGCI;
 // // use types::merchant_gateway_payment_method as ETMGPM;
 // // use types::money as Money;
-use crate::types::card::txn_card_info::{self as ETTCa, auth_type_to_text};
+use crate::types::card::txn_card_info::{self as ETTCa, auth_type_to_text, AuthType};
 use crate::types::order as ETO;
 use crate::types::txn_details::types as ETTD;
 use crate::types::txn_offer as ETTO;
@@ -1560,11 +1569,16 @@ pub fn get_sr_v3_latency_threshold(
     sr_v3_input_config: Option<SrV3InputConfig>,
     pmt: &str,
     pm: &str,
+    sr_routing_dimesions: &SrRoutingDimensions,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
-        get_sr_v3_sub_level_input_config(&config.subLevelInputConfig, pmt, pm, |x| {
-            x.latencyThreshold.is_some()
-        })
+        get_sr_v3_sub_level_input_config(
+            &config.subLevelInputConfig,
+            pmt,
+            pm,
+            sr_routing_dimesions,
+            |x| x.latencyThreshold.is_some(),
+        )
         .and_then(|sub_config| sub_config.latencyThreshold)
         .or(config.defaultLatencyThreshold)
     })
@@ -1574,11 +1588,16 @@ pub fn get_sr_v3_bucket_size(
     sr_v3_input_config: Option<SrV3InputConfig>,
     pmt: &str,
     pm: &str,
+    sr_routing_dimesions: &SrRoutingDimensions,
 ) -> Option<i32> {
     sr_v3_input_config.and_then(|config| {
-        get_sr_v3_sub_level_input_config(&config.subLevelInputConfig, pmt, pm, |x| {
-            x.bucketSize.is_some()
-        })
+        get_sr_v3_sub_level_input_config(
+            &config.subLevelInputConfig,
+            pmt,
+            pm,
+            sr_routing_dimesions,
+            |x| x.bucketSize.is_some(),
+        )
         .and_then(|sub_config| sub_config.bucketSize)
         .or(config.defaultBucketSize)
         .filter(|&size| size > 0)
@@ -1589,11 +1608,16 @@ pub fn get_sr_v3_hedging_percent(
     sr_v3_input_config: Option<SrV3InputConfig>,
     pmt: &str,
     pm: &str,
+    sr_routing_dimesions: &SrRoutingDimensions,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
-        get_sr_v3_sub_level_input_config(&config.subLevelInputConfig, pmt, pm, |x| {
-            x.hedgingPercent.is_some()
-        })
+        get_sr_v3_sub_level_input_config(
+            &config.subLevelInputConfig,
+            pmt,
+            pm,
+            sr_routing_dimesions,
+            |x| x.hedgingPercent.is_some(),
+        )
         .and_then(|sub_config| sub_config.hedgingPercent)
         .or(config.defaultHedgingPercent)
         .filter(|&percent| percent >= 0.0)
@@ -1604,11 +1628,16 @@ pub fn get_sr_v3_lower_reset_factor(
     sr_v3_input_config: Option<SrV3InputConfig>,
     pmt: &str,
     pm: &str,
+    sr_routing_dimesions: &SrRoutingDimensions,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
-        get_sr_v3_sub_level_input_config(&config.subLevelInputConfig, pmt, pm, |x| {
-            x.lowerResetFactor.is_some()
-        })
+        get_sr_v3_sub_level_input_config(
+            &config.subLevelInputConfig,
+            pmt,
+            pm,
+            sr_routing_dimesions,
+            |x| x.lowerResetFactor.is_some(),
+        )
         .and_then(|sub_config| sub_config.lowerResetFactor)
         .or(config.defaultLowerResetFactor)
         .filter(|&factor| factor >= 0.0)
@@ -1619,11 +1648,16 @@ pub fn get_sr_v3_upper_reset_factor(
     sr_v3_input_config: Option<SrV3InputConfig>,
     pmt: &str,
     pm: &str,
+    sr_routing_dimesions: &SrRoutingDimensions,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
-        get_sr_v3_sub_level_input_config(&config.subLevelInputConfig, pmt, pm, |x| {
-            x.upperResetFactor.is_some()
-        })
+        get_sr_v3_sub_level_input_config(
+            &config.subLevelInputConfig,
+            pmt,
+            pm,
+            sr_routing_dimesions,
+            |x| x.upperResetFactor.is_some(),
+        )
         .and_then(|sub_config| sub_config.upperResetFactor)
         .or(config.defaultUpperResetFactor)
         .filter(|&factor| factor >= 0.0)
@@ -1635,13 +1669,20 @@ pub fn get_sr_v3_gateway_sigma_factor(
     pmt: &str,
     pm: &str,
     gw: &String,
+    sr_routing_dimesions: &SrRoutingDimensions,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
-        get_sr_v3_sub_level_input_config(&config.subLevelInputConfig, pmt, pm, |x| {
-            x.gatewayExtraScore
-                .as_ref()
-                .is_some_and(|scores| scores.iter().any(|score| score.gatewayName == *gw))
-        })
+        get_sr_v3_sub_level_input_config(
+            &config.subLevelInputConfig,
+            pmt,
+            pm,
+            sr_routing_dimesions,
+            |x| {
+                x.gatewayExtraScore
+                    .as_ref()
+                    .is_some_and(|scores| scores.iter().any(|score| score.gatewayName == *gw))
+            },
+        )
         .and_then(|sub_config| find_gateway_sigma_factor(&sub_config.gatewayExtraScore, gw))
         .or_else(|| find_gateway_sigma_factor(&config.defaultGatewayExtraScore, gw))
     })
@@ -1663,6 +1704,7 @@ fn get_sr_v3_sub_level_input_config(
     sub_level_input_config: &Option<Vec<SrV3SubLevelInputConfig>>,
     pmt: &str,
     pm: &str,
+    sr_routing_dimesions: &SrRoutingDimensions,
     is_input_non_null: impl Fn(&SrV3SubLevelInputConfig) -> bool,
 ) -> Option<SrV3SubLevelInputConfig> {
     sub_level_input_config
@@ -1671,18 +1713,53 @@ fn get_sr_v3_sub_level_input_config(
             configs
                 .iter()
                 .find(|config| {
-                    config.paymentMethodType == Some(pmt.to_string())
-                        && config.paymentMethod == Some(pm.to_string())
-                        && is_input_non_null(config)
+                    is_sr_v3_config_match(
+                        config,
+                        Some(pmt.to_string()),
+                        Some(pm.to_string()),
+                        &sr_routing_dimesions,
+                    ) && is_input_non_null(config)
                 })
                 .or_else(|| {
                     configs.iter().find(|config| {
-                        config.paymentMethodType == Some(pmt.to_string())
-                            && is_input_non_null(config)
+                        is_sr_v3_config_match(
+                            config,
+                            Some(pmt.to_string()),
+                            None,
+                            &sr_routing_dimesions,
+                        ) && is_input_non_null(config)
                     })
                 })
         })
         .cloned()
+}
+
+fn is_sr_v3_config_match(
+    config: &SrV3SubLevelInputConfig,
+    pmt: Option<String>,
+    pm: Option<String>,
+    sr_routing_dimesions: &SrRoutingDimensions,
+) -> bool {
+    let pmt_matches = config.paymentMethodType == pmt;
+    let pm_matches = config.paymentMethod.is_none() || config.paymentMethod == pm;
+    let card_network_matches =
+        config.cardNetwork.is_none() || config.cardNetwork == sr_routing_dimesions.card_network;
+    let card_isin_matches =
+        config.cardIsIn.is_none() || config.cardIsIn == sr_routing_dimesions.card_isin;
+    let currency_matches =
+        config.currency.is_none() || config.currency == sr_routing_dimesions.currency;
+    let country_matches =
+        config.country.is_none() || config.country == sr_routing_dimesions.country;
+    let auth_type_matches =
+        config.authType.is_none() || config.authType == sr_routing_dimesions.auth_type;
+
+    pmt_matches
+        && pm_matches
+        && card_network_matches
+        && card_isin_matches
+        && currency_matches
+        && auth_type_matches
+        && country_matches
 }
 
 pub fn filter_upto_pmt(
@@ -1864,6 +1941,11 @@ pub fn get_default_gateway_scoring_data(
     is_gri_enabled_for_elimination: bool,
     is_gri_enabled_for_sr_routing: bool,
     date_created: OffsetDateTime,
+    card_isin: Option<String>,
+    card_switch_provider: Option<Secret<String>>,
+    currency: Option<Currency>,
+    country: Option<CountryISO2>,
+    auth_type: Option<String>,
 ) -> GatewayScoringData {
     GatewayScoringData {
         merchantId: merchant_id,
@@ -1872,7 +1954,7 @@ pub fn get_default_gateway_scoring_data(
         orderType: order_type,
         cardType: None,
         bankCode: None,
-        authType: None,
+        authType: auth_type,
         paymentSource: None,
         isPaymentSourceEnabledForSrRouting: false,
         isAuthLevelEnabledForSrRouting: false,
@@ -1882,6 +1964,11 @@ pub fn get_default_gateway_scoring_data(
         routingApproach: None,
         dateCreated: date_created,
         eliminationEnabled: false,
+        cardIsIn: card_isin,
+        cardSwitchProvider: card_switch_provider,
+        currency: currency,
+        country: country,
+        is_legacy_decider_flow: false,
     }
 }
 
@@ -1931,6 +2018,16 @@ pub async fn get_gateway_scoring_data(
         is_gri_enabled_for_elimination,
         is_gri_enabled_for_sr_routing,
         decider_flow.get().dpTxnDetail.dateCreated.clone(),
+        decider_flow.get().dpTxnCardInfo.card_isin.clone(),
+        decider_flow.get().dpTxnCardInfo.cardSwitchProvider.clone(),
+        Some(decider_flow.get().dpOrder.currency.clone()),
+        decider_flow.get().dpTxnDetail.country.clone(),
+        decider_flow
+            .get()
+            .dpTxnCardInfo
+            .authType
+            .as_ref()
+            .map(|a| a.to_string()),
     );
     let updated_gateway_scoring_data = match txn_card_info.paymentMethodType.as_str() {
         UPI => {
@@ -2293,6 +2390,105 @@ pub async fn get_unified_key(
 }
 
 pub async fn get_unified_sr_key(
+    gateway_scoring_data: &GatewayScoringData,
+    is_sr_v3_metric_enabled: bool,
+    enforce1d: bool,
+) -> String {
+    let is_legacy_decider_flow = gateway_scoring_data.is_legacy_decider_flow;
+    if is_legacy_decider_flow {
+        return get_legacy_unified_sr_key(gateway_scoring_data, is_sr_v3_metric_enabled, enforce1d)
+            .await;
+    }
+    let merchant_id = gateway_scoring_data.merchantId.clone();
+    let order_type = gateway_scoring_data.orderType.clone();
+    let payment_method_type = gateway_scoring_data.paymentMethodType.clone();
+    let payment_method = gateway_scoring_data.paymentMethod.clone();
+    let card_network = gateway_scoring_data.cardSwitchProvider.clone();
+    let card_isin = gateway_scoring_data.cardIsIn.clone();
+    let currency = gateway_scoring_data
+        .currency
+        .as_ref()
+        .map(|c| c.to_string());
+    let country = gateway_scoring_data.country.as_ref().map(|c| c.to_string());
+    let auth_type = gateway_scoring_data.authType.clone();
+    let key_prefix = if is_sr_v3_metric_enabled {
+        C::gateway_selection_v3_order_type_key_prefix.to_string()
+    } else {
+        C::gateway_selection_order_type_key_prefix.to_string()
+    };
+
+    // Base key components that are always present
+    let mut key_components = vec![
+        key_prefix,
+        merchant_id.clone(),
+        order_type,
+        payment_method_type,
+        payment_method,
+    ];
+
+    let name = format!("SR_DIMENSION_CONFIG_{}", merchant_id);
+
+    let service_config = find_config_by_name(name.clone())
+        .await
+        .change_context(EuclidErrors::StorageError)
+        .and_then(|opt_config| {
+            opt_config.and_then(|config| config.value).ok_or_else(|| {
+                error_stack::report!(EuclidErrors::InvalidSrDimensionConfig(
+                    "SR dimension config not found".to_string()
+                ))
+            })
+        })
+        .and_then(|config| {
+            serde_json::from_str::<SrDimensionConfig>(&config).change_context(
+                EuclidErrors::InvalidSrDimensionConfig(
+                    "Failed to parse SR dimension config".to_string(),
+                ),
+            )
+        });
+
+    let fields = service_config
+        .map(|config| config.fields)
+        .unwrap_or_default();
+
+    for field in fields {
+        if let Some(suffix) = field.strip_prefix("paymentInfo.") {
+            match suffix {
+                "card_network" => {
+                    if let Some(cn) = card_network.clone() {
+                        key_components.push(cn.peek().to_string());
+                    }
+                }
+                "card_is_in" => {
+                    if let Some(ci) = card_isin.clone() {
+                        key_components.push(ci);
+                    }
+                }
+                "currency" => {
+                    if let Some(cu) = currency.clone() {
+                        key_components.push(cu);
+                    }
+                }
+                "country" => {
+                    if let Some(co) = country.clone() {
+                        key_components.push(co);
+                    }
+                }
+                "auth_type" => {
+                    if let Some(at) = auth_type.clone() {
+                        key_components.push(at);
+                    }
+                }
+                _ => {
+                    // Unknown field under payment_info
+                }
+            }
+        }
+    }
+
+    intercalate_without_empty_string("_", &key_components)
+}
+
+async fn get_legacy_unified_sr_key(
     gateway_scoring_data: &GatewayScoringData,
     is_sr_v3_metric_enabled: bool,
     enforce1d: bool,

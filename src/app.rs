@@ -172,6 +172,10 @@ where
         .route(
             "/merchant-account/:merchant-id",
             delete(routes::merchant_account_config::delete_merchant_config),
+        )
+        .route(
+            "/config-sr-dimension",
+            axum::routing::post(crate::euclid::handlers::routing_rules::config_sr_dimentions),
         );
     let router = router.route("/update-score", post(routes::update_score::update_score));
     let router = router.route(
