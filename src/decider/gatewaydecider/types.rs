@@ -534,7 +534,7 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
             cardSwitchProvider: None,
             currency: None,
             country: None,
-            is_legacy_enabled: false,
+            is_legacy_decider_flow: false,
         },
     }
 }
@@ -561,7 +561,7 @@ pub struct GatewayScoringData {
     pub cardSwitchProvider: Option<Secret<String>>,
     pub currency: Option<Currency>,
     pub country: Option<CountryISO2>,
-    pub is_legacy_enabled: bool,
+    pub is_legacy_decider_flow: bool,
 }
 
 #[derive(Debug)]

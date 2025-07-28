@@ -1968,7 +1968,7 @@ pub fn get_default_gateway_scoring_data(
         cardSwitchProvider: card_switch_provider,
         currency: currency,
         country: country,
-        is_legacy_enabled: false,
+        is_legacy_decider_flow: false,
     }
 }
 
@@ -2394,8 +2394,8 @@ pub async fn get_unified_sr_key(
     is_sr_v3_metric_enabled: bool,
     enforce1d: bool,
 ) -> String {
-    let is_legacy_enabled = gateway_scoring_data.is_legacy_enabled;
-    if is_legacy_enabled {
+    let is_legacy_decider_flow = gateway_scoring_data.is_legacy_decider_flow;
+    if is_legacy_decider_flow {
         return get_legacy_unified_sr_key(gateway_scoring_data, is_sr_v3_metric_enabled, enforce1d)
             .await;
     }
