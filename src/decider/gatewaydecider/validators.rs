@@ -249,6 +249,7 @@ pub fn parseFromApiTxnDetail(apiType: T::ApiTxnDetail) -> Option<ETTD::TxnDetail
         txnAmountBreakup: apiType.txnAmountBreakup.as_deref().and_then(|breakup_str| {
             serde_json::from_str::<Vec<ETTD::TransactionCharge>>(breakup_str).ok()
         }),
+        txnLatency: None,
     })
 }
 

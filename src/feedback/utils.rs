@@ -206,6 +206,7 @@ pub fn getTxnDetailFromApiPayload(
         internalTrackingInfo: None,
         partitionKey: None,
         txnAmountBreakup: None,
+        txnLatency: apiPayload.txnLatency
     };
     txn_detail
 }

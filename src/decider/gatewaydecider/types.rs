@@ -1003,6 +1003,7 @@ impl DomainDeciderRequestForApiCallV2 {
                 internalTrackingInfo: None,
                 partitionKey: None,
                 txnAmountBreakup: None,
+                txnLatency: None,
             },
             txnOfferDetails: None,
             txnCardInfo: ETCa::txn_card_info::TxnCardInfo {
@@ -1121,6 +1122,8 @@ pub struct SrV3InputConfig {
     pub defaultUpperResetFactor: Option<f64>,
     pub defaultGatewayExtraScore: Option<Vec<GatewayWiseExtraScore>>,
     pub subLevelInputConfig: Option<Vec<SrV3SubLevelInputConfig>>,
+    /// Endpoint-wise latency threshold for SR V3 routing.
+    pub orchestrationLatencyThreshold: Option<OrchestrationLatencyThreshold>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -1144,6 +1147,12 @@ pub struct SrV3SubLevelInputConfig {
 pub struct GatewayWiseExtraScore {
     pub gatewayName: String,
     pub gatewaySigmaFactor: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct OrchestrationLatencyThreshold {
+    /// To have a hard threshold for latency, which is used to filter out gateways that exceed this threshold.
+    pub gateway: Option<f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

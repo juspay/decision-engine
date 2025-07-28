@@ -14,6 +14,7 @@ use time::Time;
 // use crate::storage::internal::primd_id_to_int;
 // use types::utils::dbconfig::get_euler_db_conf;
 use crate::types::country::country_iso::CountryISO2;
+use crate::feedback::types::Milliseconds;
 use crate::types::currency::Currency;
 use crate::types::merchant::id::MerchantId;
 use crate::types::merchant::merchant_gateway_account::MerchantGwAccId;
@@ -550,6 +551,8 @@ pub struct TxnDetail {
     pub partitionKey: Option<PrimitiveDateTime>,
     #[serde(rename = "txnAmountBreakup")]
     pub txnAmountBreakup: Option<Vec<TransactionCharge>>,
+    #[serde(rename = "txnLatency")]
+    pub txnLatency: Option<Milliseconds>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

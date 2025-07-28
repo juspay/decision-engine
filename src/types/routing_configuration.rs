@@ -39,6 +39,7 @@ pub struct SuccessRateData {
     pub default_upper_reset_factor: Option<f64>,
     pub default_gateway_extra_score: Option<Vec<GatewayWiseExtraScore>>,
     pub sub_level_input_config: Option<Vec<SRSubLevelInputConfig>>,
+    pub orchestration_latency_threshold: Option<OrchestrationLatencyThreshold>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -72,4 +73,11 @@ pub struct EliminationData {
 pub struct DebitRoutingData {
     pub merchant_category_code: String,
     pub acquirer_country: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrchestrationLatencyThreshold {
+    /// To have a hard threshold for latency, which is used to filter out gateways that exceed this threshold.
+    pub gateway: Option<f64>,
 }

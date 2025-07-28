@@ -268,6 +268,24 @@ pub fn isTransactionFailure(txn_status: TxnStatus) -> bool {
     txnFailureStates().contains(&txn_status)
 }
 
+pub fn isLatencyAboveConfiguredThreshold(
+    txn_latency: Option<f64>,
+    merchant_latency_threshold: Option<f64>,
+) -> bool {
+    if let Some((latency, threshold)) = txn_latency.zip(merchant_latency_threshold) {
+        logger::info!(
+            action = "txn_latency_above_threshold",
+            tag = "txn_latency_above_threshold",
+            "Latency & Threshold: {} {}",
+            latency,
+            threshold
+        );
+        latency > threshold
+    } else {
+        false
+    }
+}
+
 pub async fn getGatewayScoringType(
     txn_detail: TxnDetail,
     txn_card_info: TxnCardInfo,
@@ -302,12 +320,22 @@ pub async fn getGatewayScoringType(
         country: txn_detail.country.as_ref().map(|c| c.to_string()),
         auth_type: txn_card_info.authType.as_ref().map(|a| a.to_string()),
     };
-
+    /// overall latency between the /decide-gateway call and /update-gateway-score call
     let maybe_latency_threshold = get_sr_v3_latency_threshold(
-        merchant_sr_v3_input_config,
+        merchant_sr_v3_input_config.clone(),
         &pmt,
         &pm,
         &sr_routing_dimesions,
+    );
+
+    /// check if the transaction latency calculated by orchestration is above the configured threshold
+    let is_txn_latency_above_threshold = isLatencyAboveConfiguredThreshold(
+        txn_detail.txnLatency.map(|m| m.milliseconds),
+        merchant_sr_v3_input_config.and_then(|config| {
+            config
+                .orchestrationLatencyThreshold
+                .and_then(|ot| ot.gateway)
+        }),
     );
 
     let time_difference_threshold = match maybe_latency_threshold {
@@ -332,7 +360,9 @@ pub async fn getGatewayScoringType(
         time_difference_threshold
     );
 
-    if is_success {
+    if is_txn_latency_above_threshold {
+        GatewayScoringType::PENALISE_SRV3
+    } else if is_success {
         GatewayScoringType::REWARD
     } else if is_failure {
         GatewayScoringType::PENALISE_SRV3

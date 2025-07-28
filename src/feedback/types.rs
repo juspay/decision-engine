@@ -241,6 +241,7 @@ pub struct UpdateScorePayload {
     pub status: TxnStatus,
     pub paymentId: String,
     pub enforceDynamicRoutingFailure: Option<bool>,
+    pub txnLatency: Option<Milliseconds>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -509,7 +510,7 @@ pub struct SrV3DebugBlock {
 
 // Converted newtypes
 // Original Haskell newtype: Milliseconds
-#[derive(Debug, Serialize, Deserialize, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
 pub struct Milliseconds {
     #[serde(rename = "milliseconds")]
     pub milliseconds: f64,
