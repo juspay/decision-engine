@@ -1968,6 +1968,7 @@ pub fn get_default_gateway_scoring_data(
         cardSwitchProvider: card_switch_provider,
         currency: currency,
         country: country,
+        is_legacy_enabled: false,
     }
 }
 
@@ -2393,6 +2394,11 @@ pub async fn get_unified_sr_key(
     is_sr_v3_metric_enabled: bool,
     enforce1d: bool,
 ) -> String {
+    let is_legacy_enabled = gateway_scoring_data.is_legacy_enabled;
+    if is_legacy_enabled {
+        return get_legacy_unified_sr_key(gateway_scoring_data, is_sr_v3_metric_enabled, enforce1d)
+            .await;
+    }
     let merchant_id = gateway_scoring_data.merchantId.clone();
     let order_type = gateway_scoring_data.orderType.clone();
     let payment_method_type = gateway_scoring_data.paymentMethodType.clone();
@@ -2477,18 +2483,6 @@ pub async fn get_unified_sr_key(
                 }
             }
         }
-    }
-
-    // Handle legacy behavior for backward compatibility
-    if card_network.is_none()
-        && card_isin.is_none()
-        && currency.is_none()
-        && country.is_none()
-        && auth_type.is_none()
-    {
-        // Use legacy key construction for backward compatibility
-        return get_legacy_unified_sr_key(gateway_scoring_data, is_sr_v3_metric_enabled, enforce1d)
-            .await;
     }
 
     intercalate_without_empty_string("_", &key_components)

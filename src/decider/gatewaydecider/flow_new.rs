@@ -129,6 +129,7 @@ pub async fn deciderFullPayloadHSFunction(
             decider_params,
             dreq_.clone().rankingAlgorithm,
             dreq_.clone().eliminationEnabled,
+            false,
         )
         .await
     }
@@ -146,6 +147,7 @@ pub async fn runDeciderFlow(
     deciderParams: T::DeciderParams,
     rankingAlgorithm: Option<RankingAlgorithm>,
     eliminationEnabled: Option<bool>,
+    is_legacy_enabled: bool,
 ) -> Result<(T::DecidedGateway), T::ErrorResponse> {
     let txnCreationTime = deciderParams
         .dpTxnDetail
@@ -517,6 +519,7 @@ pub async fn runDeciderFlow(
     let updated_gateway_scoring_data = T::GatewayScoringData {
         routingApproach: Some(decider_flow.writer.gwDeciderApproach.clone().to_string()),
         eliminationEnabled: eliminationEnabled.unwrap_or_default(),
+        is_legacy_enabled,
         ..decider_flow.writer.gateway_scoring_data.clone()
     };
     let app_state = get_tenant_app_state().await;
