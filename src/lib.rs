@@ -1,3 +1,4 @@
+pub mod analytics;
 pub mod api_client;
 pub mod app;
 pub mod config;

@@ -49,6 +49,25 @@ max_feed_count = 200
 tti = 7200          # i.e. 2 hours
 max_capacity = 5000
 
+[analytics]
+enabled = false
+
+[analytics.kafka]
+brokers = ["localhost:9092"]
+topic_prefix = "decision-engine"
+batch_size = 100
+batch_timeout_ms = 1000
+max_consecutive_failures = 5
+
+[analytics.clickhouse]
+host = "http://clickhouse:8123"
+username = "analytics_user"
+password = "analytics_pass"
+database = "decision_engine_analytics"
+
+[secrets]
+open_router_private_key = ""
+
 [tenant_secrets]
 public = { schema = "public" }
 
