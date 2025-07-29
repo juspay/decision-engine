@@ -3,7 +3,7 @@ name: Docker Build and Push Check
 on:
   push:
     branches:
-      - main
+      - refactor_workflow
   workflow_dispatch:
     inputs:
       ref:
@@ -259,3 +259,38 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  delete-platform-images:
+    needs: [create-manifest, create-manifest-postgres]
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
+
+      - name: Extract short SHA
+        id: vars
+        run: |
+          if [[ -n "${{ github.event.inputs.ref }}" ]]; then
+            echo "SHORT_SHA=${{ github.event.inputs.ref }}" >> $GITHUB_ENV
+          else
+            echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
+          fi
+
+      - name: Delete platform-specific image tags from GHCR
+        run: |
+          for image in "postgres" ""; do
+            for arch in "linux-amd64" "linux-arm64"; do
+              IMAGE_NAME="ghcr.io/${{ github.repository }}${image:+/$image}:${{ env.SHORT_SHA }}-$arch"
+              echo "Deleting image: $IMAGE_NAME"
+              curl -X DELETE \
+                -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                -H "Accept: application/vnd.github.v3+json" \
+                https://ghcr.io/v2/${{ github.repository }}${image:+/$image}/manifests/$(docker buildx imagetools inspect $IMAGE_NAME --raw | jq -r .config.digest)
+            done
+          done
+
