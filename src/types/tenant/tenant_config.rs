@@ -112,6 +112,22 @@ pub fn text_to_filter_dimension(filter_dimension: String) -> Result<FilterDimens
     }
 }
 
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum TenantConfigStatus {
+    #[serde(rename = "ENABLED")]
+    ENABLED,
+    #[serde(rename = "DISABLED")]
+    DISABLED,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TenantConfigValueType<T> {
+    pub status: TenantConfigStatus,
+    #[serde(rename = "configValue")]
+    pub config_value: Option<T>,
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum ConfigStatus {
     #[serde(rename = "ACTIVE")]
