@@ -2,13 +2,13 @@ COMMIT_HASH := $(shell git rev-parse --short HEAD)
 TAG := ghcr.io/juspay/decision-engine:sha_$(COMMIT_HASH)
 
 docker-build:
-    docker build --platform=linux/amd64 -t $(TAG) .
+	docker build --platform=linux/amd64 -t $(TAG) .
 
 docker-run:
-    docker run --platform=linux/amd64 -v `pwd`/config/docker-configuration.toml:/local/config/development.toml -p 8080:8080 -d $(TAG)
+	docker run --platform=linux/amd64 -v `pwd`/config/docker-configuration.toml:/local/config/development.toml -p 8080:8080 -d $(TAG)
 
 docker-it-run:
-    docker run --platform=linux/amd64 -v `pwd`/config/docker-configuration.toml:/local/config/development.toml -it $(TAG) /bin/bash
+	docker run --platform=linux/amd64 -v `pwd`/config/docker-configuration.toml:/local/config/development.toml -it $(TAG) /bin/bash
 
 init:
 	docker-compose run --rm db-migrator && docker-compose up open-router
