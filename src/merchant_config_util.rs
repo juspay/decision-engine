@@ -45,7 +45,9 @@ use crate::{
             },
         },
         payment_flow::{payment_flows_to_text, PaymentFlow},
-        tenant::tenant_config::{ConfigType, ModuleName, TenantConfigValueType, TenantConfigStatus},
+        tenant::tenant_config::{
+            ConfigType, ModuleName, TenantConfigStatus, TenantConfigValueType,
+        },
         tenant_config::{
             get_arr_active_tenant_config_by_tenant_id_module_name_module_key_and_arr_type,
             get_arr_active_tenant_config_by_tenant_id_module_name_module_key_and_arr_type_and_country,
@@ -546,9 +548,7 @@ pub async fn isPaymentFlowEnabledWithHierarchyCheck(
 fn checkIfEnabledByTenant(config_value: &str, error_tag: &str) -> bool {
     let result: Result<TenantConfigValueType<Value>, _> = serde_json::from_str(config_value);
     match result {
-        Ok(config) => {
-            config.status == TenantConfigStatus::ENABLED
-        },
+        Ok(config) => config.status == TenantConfigStatus::ENABLED,
         Err(e) => {
             logger::error!(action = error_tag, tag = error_tag, "Error: {}", e);
             false
