@@ -241,7 +241,7 @@ pub struct UpdateScorePayload {
     pub status: TxnStatus,
     pub paymentId: String,
     pub enforceDynamicRoutingFailure: Option<bool>,
-    pub txnLatency: Option<Milliseconds>,
+    pub txnLatency: Option<TransactionLatencyThreshold>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -259,6 +259,12 @@ pub struct InternalMetadata {
 pub struct InternalTrackingInfo {
     #[serde(rename = "routing_approach")]
     pub routing_approach: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TransactionLatencyThreshold {
+    #[serde(rename = "gatewayLatency")]
+    pub gatewayLatency: Option<f64>,
 }
 
 // Original Haskell data type: Error

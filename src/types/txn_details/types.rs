@@ -552,7 +552,7 @@ pub struct TxnDetail {
     #[serde(rename = "txnAmountBreakup")]
     pub txnAmountBreakup: Option<Vec<TransactionCharge>>,
     #[serde(rename = "txnLatency")]
-    pub txnLatency: Option<Milliseconds>,
+    pub txnLatency: Option<TransactionLatency>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -613,4 +613,10 @@ pub enum ChargeName {
     OFFER,
     ADD_ON,
     GATEWAY_ADJUSTMENT,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TransactionLatency {
+    #[serde(rename = "gatewayLatency")]
+    pub gatewayLatency: Option<f64>,
 }

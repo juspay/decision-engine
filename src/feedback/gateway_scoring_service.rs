@@ -330,12 +330,9 @@ pub async fn getGatewayScoringType(
 
     /// check if the transaction latency calculated by orchestration is above the configured threshold
     let is_txn_latency_above_threshold = isLatencyAboveConfiguredThreshold(
-        txn_detail.txnLatency.map(|m| m.milliseconds),
-        merchant_sr_v3_input_config.and_then(|config| {
-            config
-                .orchestrationLatencyThreshold
-                .and_then(|ot| ot.gateway)
-        }),
+        txn_detail.txnLatency.map(|m| m.gatewayLatency).flatten(),
+        merchant_sr_v3_input_config
+            .and_then(|config| config.txnLatency.and_then(|ot| ot.gatewayLatency)),
     );
 
     let time_difference_threshold = match maybe_latency_threshold {
