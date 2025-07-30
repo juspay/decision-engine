@@ -89,7 +89,7 @@ services:
       - GROOVY_RUNNER_HOST=host.docker.internal:8085
 
   open-router-pg:
-    image: ghcr.io/juspay/decision-engine/postgres:v1.2.0
+    image: ghcr.io/juspay/decision-engine/postgres:v1.2.1
     pull_policy: always
     platform: linux/amd64
     container_name: open-router-pg 
