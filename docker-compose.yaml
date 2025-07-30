@@ -73,7 +73,7 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
-      - "9090:9090"
+      - "9094:9094"
     depends_on:
       postgresql:
         condition: service_healthy
@@ -96,7 +96,7 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
-      - "9090:9090"
+      - "9094:9094"
     depends_on:
       db-migrator-postgres: 
         condition: service_completed_successfully
@@ -108,6 +108,31 @@ services:
       - open-router-network
     environment:
       - GROOVY_RUNNER_HOST=host.docker.internal:8085
+
+  prometheus:
+    image: prom/prometheus:latest
+    networks:
+      - open-router-network
+    volumes:
+      - ./config/prometheus.yaml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    networks:
+      - open-router-network
+    restart: unless-stopped
+    environment:
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_BASIC_ENABLED=false
+    volumes:
+      # - ./config/grafana.ini:/etc/grafana/grafana.ini
+      - ./config/grafana-datasource.yaml:/etc/grafana/provisioning/datasources/datasource.yml
 
   groovy-runner:
     image: ghcr.io/juspay/open-router/groovy-runner:main
