@@ -45,9 +45,9 @@ use crate::{
         constants as C,
         types::SrV3DebugBlock,
         utils::{
-            dateInIST, getCurrentIstDateWithFormat, getProducerKey, getTrueString,
-            isKeyExistsRedis, logGatewayScoreType, updateMovingWindow, updateScore,
-            GatewayScoringType,
+            dateInIST, findKeysByPattern, getCurrentIstDateWithFormat, getProducerKey, getScore,
+            getScoreList, getTrueString, isKeyExistsRedis, logGatewayScoreType, updateMovingWindow,
+            updateScore, GatewayScoringType,
         },
     },
     redis::{feature::isFeatureEnabled, types::ServiceConfigKey},
@@ -155,6 +155,10 @@ pub async fn createKeysIfNotExist(
     if is_queue_key_exists && is_score_key_exists {
         return;
     } else {
+        println!(
+            ">>>>Creating keys as they do not exist in Redis: key_for_gateway_selection_queue:{} and key_for_gateway_selection_score: {}",
+            key_for_gateway_selection_queue, key_for_gateway_selection_score
+        );
         let merchant_bucket_size = getSrV3MerchantBucketSize(txn_detail, txn_card_info).await;
         logger::info!(
             tag = "createKeysIfNotExist",
@@ -162,16 +166,179 @@ pub async fn createKeysIfNotExist(
             "Creating keys with bucket size as {}",
             merchant_bucket_size
         );
-        let score_list = vec!["1".to_string(); merchant_bucket_size.clone().try_into().unwrap()];
-        let redis = C::kvRedis();
-        GU::create_moving_window_and_score(
-            redis,
-            key_for_gateway_selection_queue,
-            key_for_gateway_selection_score,
-            merchant_bucket_size,
-            score_list,
-        )
-        .await;
+        //here check if longest possible subset is present in the redis
+        const PREFIX: &str = "{gw_sr_v3_score__";
+        const SUFFIX: &str = "_}queue";
+
+        let mut processed_string = key_for_gateway_selection_queue.clone();
+        processed_string = processed_string[PREFIX.len()..].to_string();
+        processed_string = processed_string[..(processed_string.len() - SUFFIX.len())].to_string();
+
+        let first_delimiter_idx = processed_string.find("__");
+        let last_delimiter_idx = processed_string.rfind("__");
+
+        let mut sr_dimensions_key =
+            processed_string[first_delimiter_idx.unwrap_or(0)..].to_string();
+
+        let gateway = processed_string[last_delimiter_idx.unwrap_or(0)..].to_string();
+
+        // Loop through sr_dimensions_key from back, removing chars till we find "__"
+        let mut current_key = sr_dimensions_key.clone();
+        let gateway_name = gateway.clone();
+
+        loop {
+            if let Some(last_delimiter_pos) = current_key.rfind("__") {
+                // Remove everything after the last "__"
+                current_key = current_key[..last_delimiter_pos].to_string();
+
+                let key_to_check = format!("{}{}", current_key, gateway_name);
+
+                let queue_key_pattern = format!("{}*{}{}", PREFIX, key_to_check, SUFFIX);
+                let score_key_pattern = format!("{}*{}{}score", PREFIX, key_to_check, "_}");
+
+                logger::info!(
+                    tag = "createKeysIfNotExist",
+                    action = "checking_parent_key_pattern",
+                    "Checking if parent key exists with pattern: {}",
+                    queue_key_pattern
+                );
+
+                // Use pattern matching to find keys
+                let found_queue_keys = findKeysByPattern(&queue_key_pattern).await;
+                let found_score_keys = findKeysByPattern(&score_key_pattern).await;
+
+                if !found_queue_keys.is_empty() && !found_score_keys.is_empty() {
+                    // Key exists in Redis, use the first matching key
+                    let first_queue_key = &found_queue_keys[0];
+                    let first_score_key = &found_score_keys[0];
+
+                    logger::info!(
+                        tag = "createKeysIfNotExist",
+                        action = "parent_key_found",
+                        "Found existing subset keys in Redis - Queue: {}, Score: {}",
+                        first_queue_key,
+                        first_score_key
+                    );
+
+                    println!(
+                        ">>>>found subset keys in Redis - Queue: {}, Score: {}",
+                        first_queue_key, first_score_key
+                    );
+
+                    // Implement logic to copy/inherit from subset key
+
+                    let mut subset_score_list = getScoreList(first_queue_key.clone()).await;
+                    let mut new_score = getScore(first_score_key.clone()).await;
+
+                    subset_score_list.reverse();
+                    let subset_bucket_size = subset_score_list.len() as i32;
+
+                    println!(
+                        ">>>>subset bucket size: {}, subset score list: {:?}",
+                        subset_bucket_size, subset_score_list
+                    );
+
+                    logger::info!(
+                        tag = "createKeysIfNotExist",
+                        action = "parent_bucket_info",
+                        "subset bucket size: {}, Our bucket size: {}, score of the subset: {}",
+                        subset_bucket_size,
+                        merchant_bucket_size,
+                        new_score
+                    );
+
+                    let final_score_list = if merchant_bucket_size == subset_bucket_size {
+                        subset_score_list
+                    } else if merchant_bucket_size < subset_bucket_size {
+                        let start_idx = subset_score_list
+                            .len()
+                            .saturating_sub(merchant_bucket_size as usize);
+                        subset_score_list[start_idx..].to_vec()
+                    } else {
+                        let mut extended_list = subset_score_list;
+                        let additional_ones = merchant_bucket_size - subset_bucket_size;
+                        for _ in 0..additional_ones {
+                            extended_list.push("1".to_string());
+                        }
+                        extended_list
+                    };
+
+                    logger::info!(
+                        tag = "createKeysIfNotExist",
+                        action = "creating_keys_with_parent_data",
+                        "Creating keys with inherited score list of length: {}",
+                        final_score_list.len()
+                    );
+                    new_score = final_score_list
+                        .iter()
+                        .filter_map(|s| s.parse::<i32>().ok())
+                        .sum();
+                    let redis = C::kvRedis();
+                    GU::create_moving_window_and_score(
+                        redis,
+                        key_for_gateway_selection_queue,
+                        key_for_gateway_selection_score,
+                        new_score,
+                        final_score_list,
+                    )
+                    .await;
+
+                    return;
+                } else {
+                    // Key doesn't exist, continue to next iteration
+                    logger::info!(
+                        tag = "createKeysIfNotExist",
+                        action = "parent_key_not_found",
+                        "Parent key not found in Redis with pattern: {}, continuing search",
+                        queue_key_pattern
+                    );
+                    println!(
+                        ">>>>Not found Parent key in Redis with pattern: {}",
+                        queue_key_pattern
+                    );
+                }
+
+                // If we've removed everything except the first "__", break
+                if current_key.matches("__").count() <= 1 {
+                    logger::info!(
+                        tag = "createKeysIfNotExist",
+                        action = "no_parent_key_found",
+                        "No parent key found in Redis hierarchy"
+                    );
+                    let score_list =
+                        vec!["1".to_string(); merchant_bucket_size.clone().try_into().unwrap()];
+                    let redis = C::kvRedis();
+                    GU::create_moving_window_and_score(
+                        redis,
+                        key_for_gateway_selection_queue,
+                        key_for_gateway_selection_score,
+                        merchant_bucket_size,
+                        score_list,
+                    )
+                    .await;
+                    break;
+                }
+            } else {
+                // No more "__" found, break the loop
+                logger::info!(
+                    tag = "createKeysIfNotExist",
+                    action = "no_more_delimiters",
+                    "No more delimiters found in key"
+                );
+                let score_list =
+                    vec!["1".to_string(); merchant_bucket_size.clone().try_into().unwrap()];
+                let redis = C::kvRedis();
+                GU::create_moving_window_and_score(
+                    redis,
+                    key_for_gateway_selection_queue,
+                    key_for_gateway_selection_score,
+                    merchant_bucket_size,
+                    score_list,
+                )
+                .await;
+                break;
+            }
+        }
     }
 }
 

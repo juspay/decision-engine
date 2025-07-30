@@ -415,6 +415,105 @@ pub async fn isKeyExistsRedis(key: String) -> bool {
     }
 }
 
+pub async fn findKeysByPattern(pattern: &str) -> Vec<String> {
+    let app_state = get_tenant_app_state().await;
+    let scan_result: Result<Vec<String>, error_stack::Report<redis_interface::errors::RedisError>> =
+        app_state.redis_conn.scan_match(pattern).await;
+
+    match scan_result {
+        Ok(keys) => {
+            logger::info!(
+                tag = "findKeysByPattern",
+                action = "pattern_search",
+                "Found {} keys with pattern: {}",
+                keys.len(),
+                pattern
+            );
+            keys
+        }
+        Err(err) => {
+            logger::error!(
+                tag = "findKeysByPattern",
+                action = "pattern_search_error",
+                "Error while searching for keys with pattern {}: {:?}",
+                pattern,
+                err
+            );
+            Vec::new()
+        }
+    }
+}
+// Function to get the size of a Redis queue (bucket size)
+pub async fn getScore(queue_key: String) -> i32 {
+    let app_state = get_tenant_app_state().await;
+
+    match app_state.redis_conn.get_key_string(&queue_key).await {
+        Ok(score_str) => {
+            match score_str.parse::<i32>() {
+                Ok(score) => {
+                    logger::info!(
+                        tag = "getScore",
+                        action = "score_fetched",
+                        "Successfully fetched score {} for key {}",
+                        score,
+                        queue_key
+                    );
+                    score
+                }
+                Err(err) => {
+                    logger::error!(
+                        tag = "getScore",
+                        action = "parse_error",
+                        "Error parsing score from Redis for key {}: {:?}",
+                        queue_key,
+                        err
+                    );
+                    0 // Return default value
+                }
+            }
+        }
+        Err(err) => {
+            logger::error!(
+                tag = "getScore",
+                action = "redis_error",
+                "Error fetching score from Redis for key {}: {:?}",
+                queue_key,
+                err
+            );
+            0 // Return default value
+        }
+    }
+}
+
+// Function to fetch the score list from a Redis queue
+pub async fn getScoreList(queue_key: String) -> Vec<String> {
+    let app_state = get_tenant_app_state().await;
+
+    // Fetch all elements from the queue using LRANGE
+    match app_state.redis_conn.lrange(&queue_key, 0, -1).await {
+        Ok(scores) => {
+            logger::info!(
+                tag = "getScoreList",
+                action = "score_list_fetched",
+                "Fetched {} scores from queue {}",
+                scores.len(),
+                queue_key
+            );
+            scores
+        }
+        Err(err) => {
+            logger::error!(
+                tag = "getScoreList",
+                action = "score_list_error",
+                "Error fetching score list from {}: {:?}",
+                queue_key,
+                err
+            );
+            vec![]
+        }
+    }
+}
+
 // Original Haskell function: updateQueue
 pub async fn updateQueue(
     redis_name: String,

@@ -2159,7 +2159,8 @@ pub async fn get_unified_key(
                     .iter()
                     .fold(GatewayRedisKeyMap::new(), |mut acc, (gw, _)| {
                         let final_key = intercalate_without_empty_string(
-                            "_",
+                            "_
+                            _",
                             &[
                                 prefix_key
                                     .iter()
@@ -2235,7 +2236,7 @@ pub async fn get_unified_key(
                     };
                     acc.insert(
                         gw.clone(),
-                        intercalate_without_empty_string("_", &final_key),
+                        intercalate_without_empty_string("__", &final_key),
                     );
                     acc
                 },
@@ -2253,7 +2254,7 @@ pub async fn get_unified_key(
                         acc.insert(
                             gateway.clone(),
                             intercalate_without_empty_string(
-                                "_",
+                                "__",
                                 &vec![key.clone(), ref_id.as_deref().unwrap_or("").to_string()],
                             ),
                         );
@@ -2275,7 +2276,7 @@ pub async fn get_unified_key(
                     GatewayRedisKeyMap::new(),
                     |mut acc, (gateway, ref_id)| {
                         let key = intercalate_without_empty_string(
-                            "_",
+                            "__",
                             &vec![
                                 base_key.clone(),
                                 ref_id.as_deref().unwrap_or("").to_string(),
@@ -2293,7 +2294,7 @@ pub async fn get_unified_key(
                         acc.insert(
                             gateway.clone(),
                             intercalate_without_empty_string(
-                                "_",
+                                "__",
                                 &vec![base_key.clone(), gateway.to_string()],
                             ),
                         );
@@ -2327,7 +2328,7 @@ pub async fn get_unified_key(
             map.insert(
                 "".to_string(),
                 intercalate_without_empty_string(
-                    "_",
+                    "__",
                     &base_key
                         .iter()
                         .map(|s| s.to_string())
@@ -2368,7 +2369,7 @@ pub async fn get_unified_key(
             map.insert(
                 "".to_string(),
                 intercalate_without_empty_string(
-                    "_",
+                    "__",
                     &base_key
                         .iter()
                         .map(|s| s.to_string())
@@ -2485,7 +2486,7 @@ pub async fn get_unified_sr_key(
         }
     }
 
-    intercalate_without_empty_string("_", &key_components)
+    intercalate_without_empty_string("__", &key_components)
 }
 
 async fn get_legacy_unified_sr_key(
@@ -2516,9 +2517,9 @@ async fn get_legacy_unified_sr_key(
             vec![gateway_scoring_data.cardType.clone().unwrap_or_default()],
         ]
         .concat();
-        intercalate_without_empty_string("_", res)
+        intercalate_without_empty_string("__", res)
     } else if enforce1d {
-        intercalate_without_empty_string("_", &base_key)
+        intercalate_without_empty_string("__", &base_key)
     } else if payment_method_type == UPI {
         if gateway_scoring_data.isPaymentSourceEnabledForSrRouting {
             match payment_method.as_str() {
@@ -2531,7 +2532,7 @@ async fn get_legacy_unified_sr_key(
                         ""
                     };
                     intercalate_without_empty_string(
-                        "_",
+                        "__",
                         &[base_key.clone(), vec![append_handle.to_string()]].concat(),
                     )
                 }
@@ -2544,14 +2545,14 @@ async fn get_legacy_unified_sr_key(
                         ""
                     };
                     intercalate_without_empty_string(
-                        "_",
+                        "__",
                         &[base_key.clone(), vec![append_package.to_string()]].concat(),
                     )
                 }
-                _ => intercalate_without_empty_string("_", &base_key),
+                _ => intercalate_without_empty_string("__", &base_key),
             }
         } else {
-            intercalate_without_empty_string("_", &base_key)
+            intercalate_without_empty_string("__", &base_key)
         }
     } else if payment_method_type == CARD {
         let v = &[
@@ -2563,7 +2564,7 @@ async fn get_legacy_unified_sr_key(
         ]
         .concat();
         if gateway_scoring_data.isAuthLevelEnabledForSrRouting {
-            intercalate_without_empty_string("_", v)
+            intercalate_without_empty_string("__", v)
         } else if gateway_scoring_data.isBankLevelEnabledForSrRouting {
             let top_bank_list = get_routing_top_bank_list().await;
             let bank_code = gateway_scoring_data
@@ -2583,17 +2584,17 @@ async fn get_legacy_unified_sr_key(
                 ],
             ]
             .concat();
-            intercalate_without_empty_string("_", v)
+            intercalate_without_empty_string("__", v)
         } else {
             let v = &[
                 base_key.clone(),
                 vec![gateway_scoring_data.cardType.clone().unwrap_or_default()],
             ]
             .concat();
-            intercalate_without_empty_string("_", v)
+            intercalate_without_empty_string("__", v)
         }
     } else {
-        intercalate_without_empty_string("_", &base_key)
+        intercalate_without_empty_string("__", &base_key)
     }
 }
 

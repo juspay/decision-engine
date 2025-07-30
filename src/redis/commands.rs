@@ -174,4 +174,20 @@ impl RedisConnectionWrapper {
             .await
             .change_context(errors::RedisError::UnknownResult)
     }
+    pub async fn scan_match(&self, pattern: &str) -> Result<Vec<String>, errors::RedisError> {
+        self.conn.scan(pattern, None, None).await
+    }
+
+    pub async fn lrange(
+        &self,
+        key: &str,
+        start: i64,
+        stop: i64,
+    ) -> Result<Vec<String>, errors::RedisError> {
+        self.conn
+            .pool
+            .lrange(key, start, stop)
+            .await
+            .change_context(errors::RedisError::GetListElementsFailed)
+    }
 }
