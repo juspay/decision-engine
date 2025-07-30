@@ -40,7 +40,7 @@ use crate::{
                 load_merchant_config_by_mpid_category_name_and_status, MerchantConfig,
             },
             types::{
-                config_category_to_text, config_status_to_text, to_config_status, ConfigCategory,
+                config_category_to_text, config_status_to_text, ConfigCategory,
                 ConfigStatus, PfMcConfig,
             },
         },
