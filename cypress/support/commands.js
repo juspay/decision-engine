@@ -137,6 +137,53 @@ Cypress.Commands.add('decideGateway', (decisionRequest) => {
 })
 
 /**
+ * Legacy Decide gateway for a payment
+ * @param {object} decisionRequest - Gateway decision request object
+ */
+Cypress.Commands.add('decideGatewayLegacy', (decisionRequest) => {
+  const request = {
+    merchantId: decisionRequest.merchantId || generateUniqueId(Cypress.env('DEFAULT_MERCHANT_ID_PREFIX')),
+    eligibleGatewayList: decisionRequest.eligibleGatewayList || Cypress.env('DEFAULT_GATEWAYS'),
+    rankingAlgorithm: decisionRequest.rankingAlgorithm || Cypress.env('ROUTING_ALGORITHMS').SUCCESS_RATE,
+    eliminationEnabled: decisionRequest.eliminationEnabled || true,
+    paymentInfo: {
+      paymentId: decisionRequest.paymentInfo.paymentId || generateUniqueId(Cypress.env('DEFAULT_PAYMENT_ID_PREFIX')),
+      amount: decisionRequest.paymentInfo.amount || 100.50,
+      currency: decisionRequest.paymentInfo.currency || 'USD',
+      customerId: decisionRequest.paymentInfo.customerId || generateUniqueId(Cypress.env('DEFAULT_CUSTOMER_ID_PREFIX') || 'CUST'),
+      udfs: decisionRequest.paymentInfo.udfs || null,
+      preferredGateway: decisionRequest.paymentInfo.preferredGateway || null,
+      paymentType: decisionRequest.paymentInfo.paymentType || "ORDER_PAYMENT",
+      metadata: decisionRequest.paymentInfo.metadata || null,
+      internalMetadata: decisionRequest.paymentInfo.internalMetadata || null,
+      isEmi: decisionRequest.paymentInfo.isEmi || false,
+      emiBank: decisionRequest.paymentInfo.emiBank || null,
+      emiTenure: decisionRequest.paymentInfo.emiTenure || null,
+      paymentMethodType: decisionRequest.paymentInfo.paymentMethodType || Cypress.env('PAYMENT_METHODS').UPI.type,
+      paymentMethod: decisionRequest.paymentInfo.paymentMethod || Cypress.env('PAYMENT_METHODS').UPI.method,
+      paymentSource: decisionRequest.paymentInfo.paymentSource || null,
+      authType: decisionRequest.paymentInfo.authType || null,
+      cardIssuerBankName: decisionRequest.paymentInfo.cardIssuerBankName || null,
+      cardIsin: decisionRequest.paymentInfo.cardIsin || null,
+      cardType: decisionRequest.paymentInfo.cardType || null,
+      cardSwitchProvider: decisionRequest.paymentInfo.cardSwitchProvider || null
+    }
+  }
+
+  return cy.request({
+    method: 'POST',
+    url: `${getApiBaseUrl()}/decision_gateway`,
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: request
+  }).then((response) => {
+    expect(response.status).to.eq(200)
+    return cy.wrap({ request, response: response.body })
+  })
+})
+
+/**
  * Update gateway score
  * @param {object} scoreUpdate - Score update object
  */
@@ -192,6 +239,25 @@ Cypress.Commands.add('createSuccessRateRule', (merchantId, options = {}) => {
           hedgingPercent: 1
         }
       ]
+    }
+  }
+
+  return cy.createRoutingRule(merchantId, ruleConfig)
+})
+
+/**
+ * Create a elimination routing rule
+ * @param {string} merchantId - Merchant ID
+ * @param {object} options - Configuration options
+ */
+Cypress.Commands.add('createEliminationRule', (merchantId, options = {}) => {
+  const ruleConfig = {
+    type: "elimination",
+    data: {
+      threshold: 0.35,
+      txnLatency: {
+        gatewayLatency: options.gatewayLatency || 5000
+      }
     }
   }
 

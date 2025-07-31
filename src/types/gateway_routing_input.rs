@@ -1,4 +1,6 @@
-use crate::types::merchant::id::MerchantId;
+use crate::types::{merchant::id::MerchantId, routing_configuration};
+use crate::{error, logger};
+use error_stack::ResultExt;
 use serde::{Deserialize, Serialize};
 use std::option::Option;
 use std::string::String;
@@ -118,13 +120,15 @@ pub struct GatewaySuccessRateBasedRoutingInput {
     pub defaultGatewayLevelEliminationThreshold: Option<f64>,
     #[serde(rename = "defaultEliminationV2SuccessRate")]
     pub defaultEliminationV2SuccessRate: Option<f64>,
+    #[serde(rename = "txnLatency")]
+    pub txnLatency: Option<routing_configuration::TransactionLatencyThreshold>,
 }
 
 impl GatewaySuccessRateBasedRoutingInput {
-    pub fn from_elimination_threshold(elimination_threshold: f64) -> Self {
+    pub fn from_elimination_threshold(config: routing_configuration::EliminationData) -> Self {
         Self {
             gatewayWiseInputs: None,
-            defaultEliminationThreshold: elimination_threshold,
+            defaultEliminationThreshold: config.threshold,
             defaultEliminationLevel: EliminationLevel::PAYMENT_METHOD,
             defaultSelectionLevel: None,
             enabledPaymentMethodTypes: vec![],
@@ -138,7 +142,13 @@ impl GatewaySuccessRateBasedRoutingInput {
             defaultGlobalSoftTxnResetCount: None,
             defaultGatewayLevelEliminationThreshold: None,
             defaultEliminationV2SuccessRate: None,
+            txnLatency: config.txnLatency,
         }
+    }
+    pub fn from_str(input: &str) -> error_stack::Result<Self, error::RuleConfigurationError> {
+        serde_json::from_str(input)
+            .change_context(error::RuleConfigurationError::DeserializationError)
+            .attach_printable_lazy(|| format!("Unable to parse Input from string: {:?}", input))
     }
 }
 
@@ -160,6 +170,7 @@ impl Default for GatewaySuccessRateBasedRoutingInput {
             defaultGlobalSoftTxnResetCount: None,
             defaultGatewayLevelEliminationThreshold: None,
             defaultEliminationV2SuccessRate: None,
+            txnLatency: None,
         }
     }
 }

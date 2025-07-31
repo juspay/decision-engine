@@ -98,7 +98,7 @@ describe('Gateway Latency Scoring Flow', () => {
     let initialGateway, updatedGateway, initialGatewayScore, initialGatewayCurrentScore
 
     cy.createMerchantAccount(testData.merchantId).then(() => {
-      return cy.createSuccessRateRule(testData.merchantId, {
+      return cy.createEliminationRule(testData.merchantId, {
         gatewayLatency: 3000 // Lower threshold to make latency impact more visible
       })
     }).then(() => {
@@ -127,6 +127,7 @@ describe('Gateway Latency Scoring Flow', () => {
       // Second gateway decision to see if scoring changed
       return cy.decideGateway({
         merchantId: testData.merchantId,
+        eliminationEnabled: true,
         paymentInfo: {
           paymentId: `PAY_${Date.now()}_2` // Different payment ID
         }
@@ -171,28 +172,53 @@ describe('Gateway Latency Scoring Flow', () => {
     })
   })
 
-  it('should handle different routing algorithms', { tags: ['@routing-algorithms'] }, () => {
-    const algorithms = [
-      "SR_BASED_ROUTING",
-      "PL_BASED_ROUTING"
-    ]
+  it('legacy api: should show different gateway selection after score update', { tags: ['@score-impact'] }, () => {
+    let initialGateway, updatedGateway, initialGatewayScore, initialGatewayCurrentScore
 
     cy.createMerchantAccount(testData.merchantId).then(() => {
-      return cy.createSuccessRateRule(testData.merchantId)
-    }).then(() => {
-      // Test each routing algorithm
-      algorithms.forEach((algorithm, index) => {
-        cy.decideGateway({
-          merchantId: testData.merchantId,
-          rankingAlgorithm: algorithm,
-          paymentInfo: {
-            paymentId: `${testData.paymentId}_${algorithm}_${index}`
-          }
-        }).then((result) => {
-          expect(result.response).to.haveValidGatewayResponse()
-          cy.log(`Algorithm ${algorithm}: Gateway ${result.response.decided_gateway}`)
-        })
+      return cy.createSuccessRateRule(testData.merchantId, {
+        gatewayLatency: 3000 // Lower threshold to make latency impact more visible
       })
+    }).then(() => {
+      // First gateway decision
+      return cy.decideGatewayLegacy({
+        merchantId: testData.merchantId,
+        paymentInfo: {
+          paymentId: testData.paymentId
+        }
+      })
+    }).then((result) => {
+      initialGateway = result.response.decided_gateway
+      initialGatewayScore = result.response.gateway_priority_map[initialGateway]
+      
+      // Update score with high latency
+      return cy.updateGatewayScore({
+        merchantId: testData.merchantId,
+        gateway: initialGateway,
+        paymentId: testData.paymentId,
+        status: "AUTHORIZED",
+        txnLatency: {
+          gatewayLatency: 8000 // High latency to impact scoring
+        }
+      })
+    }).then(() => {
+      // Second gateway decision to see if scoring changed
+      return cy.decideGateway({
+        merchantId: testData.merchantId,
+        paymentInfo: {
+          paymentId: `PAY_${Date.now()}_2` // Different payment ID
+        }
+      })
+    }).then((result) => {
+      initialGatewayCurrentScore = result.response.gateway_priority_map[initialGateway]
+      updatedGateway = result.response.decided_gateway
+      
+      // Log both gateways for comparison
+      cy.log(`Initial Gateway: ${initialGateway}`)
+      cy.log(`Updated Gateway: ${updatedGateway}`)
+      
+      expect(updatedGateway).to.not.equal(initialGateway);
+      expect(initialGatewayCurrentScore).to.be.lessThan(initialGatewayScore);
     })
   })
 })

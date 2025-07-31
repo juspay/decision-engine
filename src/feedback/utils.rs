@@ -206,11 +206,6 @@ pub fn getTxnDetailFromApiPayload(
         internalTrackingInfo: None,
         partitionKey: None,
         txnAmountBreakup: None,
-        txnLatency: apiPayload.txnLatency.and_then(|t| {
-            Some(TransactionLatency {
-                gatewayLatency: t.gatewayLatency,
-            })
-        }),
     };
     txn_detail
 }

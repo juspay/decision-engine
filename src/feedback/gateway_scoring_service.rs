@@ -39,6 +39,7 @@ use crate::feedback::utils::GatewayScoringType as GST;
 use crate::merchant_config_util as MerchantConfig;
 use crate::redis::{feature as Cutover, types::ServiceConfigKey};
 use crate::types::card::txn_card_info::TxnCardInfo;
+use crate::types::gateway_routing_input::GatewaySuccessRateBasedRoutingInput;
 use crate::types::merchant::id as MID;
 use crate::types::merchant::merchant_account as MA;
 use crate::types::merchant::merchant_account::MerchantAccount;
@@ -75,9 +76,7 @@ use crate::{
         gateway_elimination_scoring::flow as GEF,
         utils::{isPennyMandateRegTxn, isRecurringTxn, GatewayScoringType},
     },
-    types::txn_details::types::TxnDetail,
-    types::txn_details::types::TxnStatus,
-    types::txn_details::types::TxnStatus as TS,
+    types::txn_details::types::{TransactionLatency, TxnDetail, TxnStatus, TxnStatus as TS},
 };
 
 use super::constants::{
@@ -268,21 +267,21 @@ pub fn isTransactionFailure(txn_status: TxnStatus) -> bool {
     txnFailureStates().contains(&txn_status)
 }
 
-pub fn isLatencyAboveConfiguredThreshold(
+pub fn isGwLatencyWithinConfiguredThreshold(
     txn_latency: Option<f64>,
     merchant_latency_threshold: Option<f64>,
 ) -> bool {
+    logger::info!(
+        action = "txn_latency_within_threshold",
+        tag = "txn_latency_within_threshold",
+        "Latency & Threshold: {:?} {:?}",
+        txn_latency,
+        merchant_latency_threshold
+    );
     if let Some((latency, threshold)) = txn_latency.zip(merchant_latency_threshold) {
-        logger::info!(
-            action = "txn_latency_above_threshold",
-            tag = "txn_latency_above_threshold",
-            "Latency & Threshold: {} {}",
-            latency,
-            threshold
-        );
-        latency > threshold
+        latency <= threshold
     } else {
-        false
+        true
     }
 }
 
@@ -320,19 +319,12 @@ pub async fn getGatewayScoringType(
         country: txn_detail.country.as_ref().map(|c| c.to_string()),
         auth_type: txn_card_info.authType.as_ref().map(|a| a.to_string()),
     };
-    /// overall latency between the /decide-gateway call and /update-gateway-score call
+
     let maybe_latency_threshold = get_sr_v3_latency_threshold(
         merchant_sr_v3_input_config.clone(),
         &pmt,
         &pm,
         &sr_routing_dimesions,
-    );
-
-    /// check if the transaction latency calculated by orchestration is above the configured threshold
-    let is_txn_latency_above_threshold = isLatencyAboveConfiguredThreshold(
-        txn_detail.txnLatency.map(|m| m.gatewayLatency).flatten(),
-        merchant_sr_v3_input_config
-            .and_then(|config| config.txnLatency.and_then(|ot| ot.gatewayLatency)),
     );
 
     let time_difference_threshold = match maybe_latency_threshold {
@@ -353,13 +345,12 @@ pub async fn getGatewayScoringType(
     logger::info!(
         action = "sr_v3_latency_threshold",
         tag = "sr_v3_latency_threshold",
-        "Latency Threshold: {}",
-        time_difference_threshold
+        "Latency Threshold: {} Time Difference: {}",
+        time_difference_threshold,
+        time_difference
     );
 
-    if is_txn_latency_above_threshold {
-        GatewayScoringType::PENALISE_SRV3
-    } else if is_success {
+    if is_success {
         GatewayScoringType::REWARD
     } else if is_failure {
         GatewayScoringType::PENALISE_SRV3
@@ -422,6 +413,7 @@ pub async fn check_and_update_gateway_score_(
                 log_message,
                 enforce_failure,
                 apiPayload.gatewayReferenceId.clone(),
+                apiPayload.txnLatency.clone(),
             )
             .await;
 
@@ -457,10 +449,15 @@ pub async fn check_and_update_gateway_score(
     log_message: &str,
     enforce_failure: bool,
     gateway_reference_id: Option<String>,
+    txn_latency: Option<TransactionLatency>,
 ) -> () {
     // Get gateway scoring type
-    let gateway_scoring_type =
-        getGatewayScoringType(txn_detail.clone(), txn_card_info.clone(), enforce_failure).await;
+    let gateway_scoring_type = getGatewayScoringType(
+        txn_detail.clone(),
+        txn_card_info.clone(),
+        enforce_failure,
+    )
+    .await;
 
     let gateway_in_string = txn_detail.gateway.clone().unwrap_or_default();
 
@@ -502,6 +499,7 @@ pub async fn check_and_update_gateway_score(
                 txn_detail.clone(),
                 txn_card_info.clone(),
                 gateway_reference_id.clone(),
+                txn_latency.clone(),
             )
             .await;
         }
@@ -519,6 +517,7 @@ pub async fn check_and_update_gateway_score(
             txn_detail,
             txn_card_info.clone(),
             gateway_reference_id.clone(),
+            txn_latency.clone(),
         )
         .await;
     }
@@ -532,6 +531,7 @@ pub async fn updateGatewayScore(
     txn_detail: TxnDetail,
     txn_card_info: TxnCardInfo,
     gateway_reference_id: Option<String>,
+    txn_latency: Option<TransactionLatency>,
 ) -> () {
     let mer_acc: MerchantAccount =
         MA::load_merchant_by_merchant_id(MID::merchant_id_to_text(txn_detail.clone().merchantId))
@@ -567,6 +567,7 @@ pub async fn updateGatewayScore(
         txn_card_info.clone(),
         gateway_scoring_type.clone(),
         mer_acc.clone(),
+        txn_latency.clone(),
     )
     .await;
 
@@ -771,7 +772,9 @@ pub async fn isUpdateWithinLatencyWindow(
     txn_card_info: TxnCardInfo,
     gateway_scoring_type: GatewayScoringType,
     mer_acc: MerchantAccount,
+    txn_latency: Option<TransactionLatency>,
 ) -> bool {
+    println!("Checking update within latency window {:?}", gateway_scoring_type);
     match gateway_scoring_type {
         GatewayScoringType::PENALISE => true,
         _ => {
@@ -789,6 +792,15 @@ pub async fn isUpdateWithinLatencyWindow(
                     findByNameFromRedis(C::GATEWAY_SCORE_LATENCY_CHECK_IN_MINS.get_key())
                         .await
                         .unwrap_or(C::defaultGatewayScoreLatencyCheckInMins());
+                /// check if the transaction latency calculated by orchestration is within the configured threshold
+                let is_gw_latency_within_threshold = isGwLatencyWithinConfiguredThreshold(
+                    txn_latency.and_then(|m| m.gatewayLatency),
+                    GatewaySuccessRateBasedRoutingInput::from_str(
+                        &mer_acc.gatewaySuccessRateBasedDeciderInput,
+                    )
+                    .ok()
+                    .and_then(|m| m.txnLatency.and_then(|l| l.gatewayLatency) ),
+                );
                 // Cutover::findByNameFromRedis(C.gatewayScoreLatencyCheckInMins)
                 //     .await
                 //     .unwrap_or(C.defaultGatewayScoreLatencyCheckInMins);
@@ -807,7 +819,9 @@ pub async fn isUpdateWithinLatencyWindow(
                     "gwLatencyCheckThreshold: {}",
                     gw_latency_check_threshold
                 );
-                if gw_score_update_latency < gw_latency_check_threshold * 60000u128 {
+                if (gw_score_update_latency < gw_latency_check_threshold * 60000u128)
+                    && is_gw_latency_within_threshold
+                {
                     true
                 } else {
                     false

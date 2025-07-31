@@ -8,7 +8,7 @@ use time::PrimitiveDateTime;
 // use database::beam as B;
 // use chrono::{Local, Utc};
 use crate::types::gateway as ETG;
-use crate::types::txn_details::types::{Offset, TxnStatus};
+use crate::types::txn_details::types::{Offset, TxnStatus, TransactionLatency};
 use std::string::String;
 use time::OffsetDateTime;
 // use eulerhs::types::MeshError;
@@ -241,7 +241,7 @@ pub struct UpdateScorePayload {
     pub status: TxnStatus,
     pub paymentId: String,
     pub enforceDynamicRoutingFailure: Option<bool>,
-    pub txnLatency: Option<TransactionLatencyThreshold>,
+    pub txnLatency: Option<TransactionLatency>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

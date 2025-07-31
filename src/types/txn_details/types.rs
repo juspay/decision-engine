@@ -551,8 +551,6 @@ pub struct TxnDetail {
     pub partitionKey: Option<PrimitiveDateTime>,
     #[serde(rename = "txnAmountBreakup")]
     pub txnAmountBreakup: Option<Vec<TransactionCharge>>,
-    #[serde(rename = "txnLatency")]
-    pub txnLatency: Option<TransactionLatency>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

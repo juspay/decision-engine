@@ -1003,7 +1003,6 @@ impl DomainDeciderRequestForApiCallV2 {
                 internalTrackingInfo: None,
                 partitionKey: None,
                 txnAmountBreakup: None,
-                txnLatency: None,
             },
             txnOfferDetails: None,
             txnCardInfo: ETCa::txn_card_info::TxnCardInfo {
