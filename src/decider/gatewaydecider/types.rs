@@ -1121,8 +1121,6 @@ pub struct SrV3InputConfig {
     pub defaultUpperResetFactor: Option<f64>,
     pub defaultGatewayExtraScore: Option<Vec<GatewayWiseExtraScore>>,
     pub subLevelInputConfig: Option<Vec<SrV3SubLevelInputConfig>>,
-    /// Transaction latency threshold for SR V3 routing.
-    pub txnLatency: Option<TransactionLatencyThreshold>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

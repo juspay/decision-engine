@@ -774,7 +774,6 @@ pub async fn isUpdateWithinLatencyWindow(
     mer_acc: MerchantAccount,
     txn_latency: Option<TransactionLatency>,
 ) -> bool {
-    println!("Checking update within latency window {:?}", gateway_scoring_type);
     match gateway_scoring_type {
         GatewayScoringType::PENALISE => true,
         _ => {
