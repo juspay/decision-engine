@@ -40,12 +40,14 @@ use crate::{
                 load_merchant_config_by_mpid_category_name_and_status, MerchantConfig,
             },
             types::{
-                config_category_to_text, config_status_to_text, to_config_status, ConfigCategory,
+                config_category_to_text, config_status_to_text, ConfigCategory,
                 ConfigStatus, PfMcConfig,
             },
         },
         payment_flow::{payment_flows_to_text, PaymentFlow},
-        tenant::tenant_config::{ConfigType, ModuleName},
+        tenant::tenant_config::{
+            ConfigType, ModuleName, TenantConfigStatus, TenantConfigValueType,
+        },
         tenant_config::{
             get_arr_active_tenant_config_by_tenant_id_module_name_module_key_and_arr_type,
             get_arr_active_tenant_config_by_tenant_id_module_name_module_key_and_arr_type_and_country,
@@ -544,10 +546,9 @@ pub async fn isPaymentFlowEnabledWithHierarchyCheck(
 }
 
 fn checkIfEnabledByTenant(config_value: &str, error_tag: &str) -> bool {
-    let config_status = to_config_status(config_value);
-    match config_status {
-        Ok(ConfigStatus::ENABLED) => true,
-        Ok(ConfigStatus::DISABLED) => false,
+    let result: Result<TenantConfigValueType<Value>, _> = serde_json::from_str(config_value);
+    match result {
+        Ok(config) => config.status == TenantConfigStatus::ENABLED,
         Err(e) => {
             logger::error!(action = error_tag, tag = error_tag, "Error: {}", e);
             false
