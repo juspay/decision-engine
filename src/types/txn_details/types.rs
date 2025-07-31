@@ -13,6 +13,7 @@ use time::Time;
 // use db::mesh::internal;
 // use crate::storage::internal::primd_id_to_int;
 // use types::utils::dbconfig::get_euler_db_conf;
+use crate::feedback::types::Milliseconds;
 use crate::types::country::country_iso::CountryISO2;
 use crate::types::currency::Currency;
 use crate::types::merchant::id::MerchantId;
@@ -610,4 +611,10 @@ pub enum ChargeName {
     OFFER,
     ADD_ON,
     GATEWAY_ADJUSTMENT,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TransactionLatency {
+    #[serde(rename = "gatewayLatency")]
+    pub gatewayLatency: Option<f64>,
 }

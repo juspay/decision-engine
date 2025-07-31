@@ -72,7 +72,7 @@ pub async fn create_rule_config(
             }
         }
         types::routing_configuration::ConfigVariant::Elimination(config) => {
-            let db_config = types::gateway_routing_input::GatewaySuccessRateBasedRoutingInput::from_elimination_threshold(config.threshold);
+            let db_config = types::gateway_routing_input::GatewaySuccessRateBasedRoutingInput::from_elimination_threshold(config);
             let config = serde_json::to_string(&db_config)
                 .map_err(|_| error::RuleConfigurationError::StorageError)?;
 
@@ -208,6 +208,7 @@ pub async fn get_rule_config(
                 .map_err(|_| error::RuleConfigurationError::DeserializationError)
                 .map(|config| types::routing_configuration::EliminationData {
                     threshold: config.defaultEliminationThreshold,
+                    txnLatency: config.txnLatency,
                 })
             });
 
@@ -317,7 +318,7 @@ pub async fn update_rule_config(
             }
         }
         types::routing_configuration::ConfigVariant::Elimination(config) => {
-            let db_config = types::gateway_routing_input::GatewaySuccessRateBasedRoutingInput::from_elimination_threshold(config.threshold);
+            let db_config = types::gateway_routing_input::GatewaySuccessRateBasedRoutingInput::from_elimination_threshold(config);
             let config = serde_json::to_string(&db_config)
                 .map_err(|_| error::RuleConfigurationError::StorageError)?;
 

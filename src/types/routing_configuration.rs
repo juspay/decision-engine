@@ -65,6 +65,7 @@ pub struct GatewayWiseExtraScore {
 #[serde(rename_all = "camelCase")]
 pub struct EliminationData {
     pub threshold: f64,
+    pub txnLatency: Option<TransactionLatencyThreshold>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -72,4 +73,11 @@ pub struct EliminationData {
 pub struct DebitRoutingData {
     pub merchant_category_code: String,
     pub acquirer_country: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransactionLatencyThreshold {
+    /// To have a hard threshold for latency in millis, which is used to filter out gateways that exceed this threshold.
+    pub gatewayLatency: Option<f64>,
 }

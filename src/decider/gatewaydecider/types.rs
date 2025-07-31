@@ -1146,6 +1146,12 @@ pub struct GatewayWiseExtraScore {
     pub gatewaySigmaFactor: f64,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TransactionLatencyThreshold {
+    /// To have a hard threshold for latency, which is used to filter out gateways that exceed this threshold.
+    pub gatewayLatency: Option<f64>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UnifiedError {
     pub code: String,

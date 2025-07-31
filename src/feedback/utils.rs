@@ -18,10 +18,10 @@ use crate::feedback::types::{
     UpdateScorePayload,
 };
 use crate::storage::types::TxnCardInfo;
-use crate::types::currency::Currency;
 use crate::types::money::internal::Money;
 use crate::types::order as ETO;
 use crate::types::transaction::id as ETId;
+use crate::types::{currency::Currency, txn_details::types::TransactionLatency};
 use fred::prelude::{KeysInterface, ListInterface};
 // use sequelize::{ModelMeta, OrderBy, Set, Where};
 use crate::types::card as ETCa;

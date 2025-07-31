@@ -8,7 +8,7 @@ use time::PrimitiveDateTime;
 // use database::beam as B;
 // use chrono::{Local, Utc};
 use crate::types::gateway as ETG;
-use crate::types::txn_details::types::{Offset, TxnStatus};
+use crate::types::txn_details::types::{Offset, TxnStatus, TransactionLatency};
 use std::string::String;
 use time::OffsetDateTime;
 // use eulerhs::types::MeshError;
@@ -241,6 +241,7 @@ pub struct UpdateScorePayload {
     pub status: TxnStatus,
     pub paymentId: String,
     pub enforceDynamicRoutingFailure: Option<bool>,
+    pub txnLatency: Option<TransactionLatency>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -258,6 +259,12 @@ pub struct InternalMetadata {
 pub struct InternalTrackingInfo {
     #[serde(rename = "routing_approach")]
     pub routing_approach: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TransactionLatencyThreshold {
+    #[serde(rename = "gatewayLatency")]
+    pub gatewayLatency: Option<f64>,
 }
 
 // Original Haskell data type: Error
@@ -509,7 +516,7 @@ pub struct SrV3DebugBlock {
 
 // Converted newtypes
 // Original Haskell newtype: Milliseconds
-#[derive(Debug, Serialize, Deserialize, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
 pub struct Milliseconds {
     #[serde(rename = "milliseconds")]
     pub milliseconds: f64,

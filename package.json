@@ -1,0 +1,20 @@
+{
+  "name": "decision-engine-cypress-tests",
+  "version": "1.0.0",
+  "description": "Cypress tests for Decision Engine routing flows",
+  "scripts": {
+    "cypress:open": "cypress open",
+    "cypress:run": "cypress run",
+    "cypress:run:headless": "cypress run --headless",
+    "test:gateway-latency": "cypress run --spec 'cypress/e2e/routing-flows/gateway-latency-scoring.cy.js'",
+    "test:success-rate": "cypress run --spec 'cypress/e2e/routing-flows/success-rate-routing.cy.js'",
+    "test": "cypress run --spec 'cypress/e2e/routing-flows/*.cy.js'"
+  },
+  "devDependencies": {
+    "cypress": "^13.6.0",
+    "@cypress/grep": "^4.0.1"
+  },
+  "dependencies": {
+    "uuid": "^9.0.1"
+  }
+}

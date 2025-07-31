@@ -4,3 +4,7 @@ routing-config/venv
 routing-config/output.sql
 dump.rdb
 .vscode
+**/node_modules
+cypress/screenshots
+cypress/videos
+cypress/fixtures
