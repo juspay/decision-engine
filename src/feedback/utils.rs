@@ -170,25 +170,27 @@ pub fn getTxnDetailFromApiPayload(
         orderId: ETO::id::to_order_id(apiPayload.paymentId.clone()),
         status: apiPayload.status.clone(),
         txnId: ETId::to_transaction_id(apiPayload.paymentId.clone()),
-        txnType: "NOT_DEFINED".to_string(),
-        addToLocker: false,
+        txnType: Some("NOT_DEFINED".to_string()),
+        addToLocker: Some(false),
         merchantId: ETM::id::to_merchant_id(apiPayload.merchantId.clone()),
         gateway: Some(apiPayload.gateway),
-        expressCheckout: false,
-        isEmi: false,
+        expressCheckout: Some(false),
+        isEmi: Some(false),
         emiBank: None,
         emiTenure: None,
         txnUuid: apiPayload.paymentId.clone(),
         merchantGatewayAccountId: None,
-        txnAmount: ETMo::Money::from_double(0.0),
-        txnObjectType: ETTD::TxnObjectType::from_text(gateway_scoring_data.orderType.clone())
-            .unwrap_or_else(|| ETTD::TxnObjectType::OrderPayment),
+        txnAmount: Some(ETMo::Money::from_double(0.0)),
+        txnObjectType: Some(
+            ETTD::TxnObjectType::from_text(gateway_scoring_data.orderType.clone())
+                .unwrap_or_else(|| ETTD::TxnObjectType::OrderPayment),
+        ),
         sourceObject: Some(gateway_scoring_data.paymentMethod.clone()),
         sourceObjectId: None,
         currency: gateway_scoring_data
             .currency
             .clone()
-            .expect("currency is mandatory"),
+            .expect("Currency is mandatory for TxnDetail"),
         country: gateway_scoring_data.country.clone(),
         surchargeAmount: None,
         taxAmount: None,
@@ -200,7 +202,7 @@ pub fn getTxnDetailFromApiPayload(
             })
             .unwrap(),
         ),
-        netAmount: ETMo::Money::from_double(0.0),
+        netAmount: Some(ETMo::Money::from_double(0.0)),
         metadata: None,
         offerDeductionAmount: None,
         internalTrackingInfo: None,
@@ -855,8 +857,12 @@ pub fn mandateRegisterTxnObjectTypes() -> Vec<TxnObjectType> {
 }
 
 pub fn isPennyMandateRegTxn(txn_detail: TxnDetail) -> bool {
-    if isMandateRegTxn(txn_detail.clone().txnObjectType) {
-        isPennyTxnType(txn_detail.clone())
+    if let Some(txn_object_type) = txn_detail.clone().txnObjectType {
+        if isMandateRegTxn(txn_object_type) {
+            isPennyTxnType(txn_detail.clone())
+        } else {
+            false
+        }
     } else {
         false
     }

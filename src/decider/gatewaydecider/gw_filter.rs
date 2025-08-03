@@ -287,7 +287,7 @@ pub async fn getFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList {
     Utils::set_payment_flow_list(this, payment_flow_list);
 
     let mgas_ = match (
-        txn_detail.isEmi || Utils::is_reccuring_payment_transaction(&txn_detail),
+        txn_detail.isEmi.unwrap_or(false) || Utils::is_reccuring_payment_transaction(&txn_detail),
         &enforce_gateway_list,
     ) {
         (false, _) => enabled_gateway_accounts.clone(),
@@ -385,7 +385,7 @@ pub async fn getFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList {
                     isMgaEligible(
                         mga,
                         &txn_card_info,
-                        txn_detail.txnObjectType.clone(),
+                        txn_detail.txnObjectType.clone().unwrap_or(TxnObjectType::Unknown),
                         &mga_eligible_seamless_gateways,
                         &txn_detail,
                     )
@@ -1549,7 +1549,7 @@ pub async fn filterGatewaysForValidationType(
         }
 
         // Handle non-express checkout, non-token repeat transactions
-        if !txn_detail.expressCheckout && !Utils::is_token_repeat_txn(m_internal_meta) {
+        if !txn_detail.expressCheckout.unwrap_or(false) && !Utils::is_token_repeat_txn(m_internal_meta) {
             let m_mandate_guest_checkout_supported_gateways: Option<Vec<String>> =
                 findByNameFromRedis(
                     C::getmandateGuestCheckoutKey(txn_card_info.cardSwitchProvider).get_key(),
@@ -2121,7 +2121,7 @@ pub async fn filterGatewaysForEmi(this: &mut DeciderFlow<'_>) -> GatewayList {
         txn_detail.isEmi
     );
 
-    if txn_detail.isEmi {
+    if txn_detail.isEmi.unwrap_or(false) {
         let is_mandate_txn = Utils::is_mandate_transaction(&txn_detail);
         let si_on_emi_card_supported_gateways: HashSet<String> =
             findByNameFromRedis::<HashSet<String>>(C::SI_ON_EMI_CARD_SUPPORTED_GATEWAYS.get_key())
@@ -2809,7 +2809,7 @@ pub fn filterForEMITenureSpecificMGAs(this: &mut DeciderFlow) -> Vec<String> {
     let txn_detail = this.get().dpTxnDetail.clone();
 
     // Only filter if transaction is EMI
-    if txn_detail.isEmi {
+    if txn_detail.isEmi.unwrap_or(false) {
         // Get current functional gateways
         let st = getGws(this);
 
@@ -2832,7 +2832,7 @@ pub fn filterForEMITenureSpecificMGAs(this: &mut DeciderFlow) -> Vec<String> {
                         match serde_json::from_str::<EMIAccountDetails>(acc_details) {
                             Ok(emi_details) => {
                                 // Check if EMI details match transaction EMI requirements
-                                get_emi(emi_details.isEmi) == txn_detail.isEmi
+                                get_emi(emi_details.isEmi) == txn_detail.isEmi.unwrap_or(false)
                                     && get_tenure(emi_details.emiTenure)
                                         == txn_detail.emiTenure.unwrap_or(0)
                             }
@@ -3133,7 +3133,7 @@ pub fn filterGatewaysForUpiPayBasedOnSupportedFlow(
 pub async fn filterGatewaysForTxnDetailType(this: &mut DeciderFlow<'_>) -> Vec<String> {
     let st = getGws(this);
     let m_txn_type = this.get().dpTxnDetail.txnType.clone();
-    let txn_type: &str = m_txn_type.as_str();
+    let txn_type: &str = m_txn_type.as_deref().unwrap_or("");
     let txn_detail_type_restricted_gateways =
         findByNameFromRedis(C::TXN_DETAIL_TYPE_RESTRICTED_GATEWAYS.get_key())
             .await

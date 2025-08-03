@@ -156,14 +156,14 @@ pub struct FilteredTxnInfo {
 
 pub fn filter_txn(detail: TxnDetail) -> FilteredTxnInfo {
     FilteredTxnInfo {
-        isEmi: detail.isEmi,
+        isEmi: detail.isEmi.unwrap_or(false),
         emiBank: detail.emiBank,
         emiTenure: detail.emiTenure,
         txnId: detail.txnId,
-        addToLocker: detail.addToLocker,
-        expressCheckout: detail.expressCheckout,
+        addToLocker: detail.addToLocker.unwrap_or(false),
+        expressCheckout: detail.expressCheckout.unwrap_or(false),
         sourceObject: detail.sourceObject,
-        txnObjectType: detail.txnObjectType,
+        txnObjectType: detail.txnObjectType.unwrap_or(TxnObjectType::Unknown),
     }
 }
 

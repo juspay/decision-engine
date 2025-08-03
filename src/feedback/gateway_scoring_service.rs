@@ -831,7 +831,7 @@ pub async fn isUpdateWithinLatencyWindow(
 }
 
 async fn checkExemptIfMandateTxn(txn_detail: &TxnDetail, txn_card_info: &TxnCardInfo) -> bool {
-    let is_recurring = isRecurringTxn(Some(txn_detail.txnObjectType.clone()));
+    let is_recurring = isRecurringTxn(txn_detail.txnObjectType.clone());
     let is_nb_pmt = txn_card_info.paymentMethodType == (NB);
     let is_penny_reg_txn = isPennyMandateRegTxn(txn_detail.clone());
     is_recurring || (is_nb_pmt && is_penny_reg_txn)
