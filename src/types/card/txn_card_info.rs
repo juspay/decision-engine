@@ -204,8 +204,11 @@ pub struct SafeTxnCardInfo {
 }
 
 pub fn convert_safe_to_txn_card_info(safe_info: SafeTxnCardInfo) -> TxnCardInfo {
-    let id_i64 = safe_info.id.parse::<i64>()
-        .map_err(|e| format!("Failed to parse id: {}", e)).unwrap();
+    let id_i64 = safe_info
+        .id
+        .parse::<i64>()
+        .map_err(|e| format!("Failed to parse id: {}", e))
+        .unwrap();
 
     TxnCardInfo {
         id: TxnCardInfoPId(id_i64),
@@ -218,7 +221,8 @@ pub fn convert_safe_to_txn_card_info(safe_info: SafeTxnCardInfo) -> TxnCardInfo 
         paymentMethodType: safe_info.paymentMethodType,
         paymentMethod: safe_info.paymentMethod,
         paymentSource: safe_info.paymentSource,
-        authType: safe_info.authType
+        authType: safe_info
+            .authType
             .and_then(|auth| text_to_auth_type(&auth).ok()),
         partitionKey: safe_info.partitionKey,
     }

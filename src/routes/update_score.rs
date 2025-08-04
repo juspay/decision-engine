@@ -1,8 +1,12 @@
 use crate::decider::gatewaydecider::types::{ErrorResponse, UnifiedError};
 use crate::feedback::gateway_scoring_service::check_and_update_gateway_score;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
-use crate::types::card::txn_card_info::{SafeTxnCardInfo, TxnCardInfo, convert_safe_to_txn_card_info};
-use crate::types::txn_details::types::{convert_safe_txn_detail_to_txn_detail, SafeTxnDetail, TransactionLatency};
+use crate::types::card::txn_card_info::{
+    convert_safe_to_txn_card_info, SafeTxnCardInfo, TxnCardInfo,
+};
+use crate::types::txn_details::types::{
+    convert_safe_txn_detail_to_txn_detail, SafeTxnDetail, TransactionLatency,
+};
 use crate::{logger, metrics};
 use axum::body::to_bytes;
 use cpu_time::ProcessTime;
@@ -101,12 +105,9 @@ pub async fn update_score(
     let req_body = String::from_utf8_lossy(&body_bytes).to_string();
 
     // Deserialize the body into the expected type
-    println!("req_body payload: {:?}", req_body);
     let update_score_request: Result<UpdateScoreRequest, _> = serde_json::from_slice(&body_bytes);
     match update_score_request {
         Ok(payload) => {
-
-            println!("Received payload: {:?}", payload);
             let merchant_id = payload.txn_detail.merchantId.clone();
             let merchant_id_txt = crate::types::merchant::id::merchant_id_to_text(merchant_id);
             tracing::Span::current().record("merchant_id", merchant_id_txt.clone());
@@ -175,7 +176,7 @@ pub async fn update_score(
                 log_message.as_str(),
                 enforce_failure,
                 gateway_reference_id,
-                txn_latency
+                txn_latency,
             )
             .await;
 

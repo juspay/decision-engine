@@ -229,7 +229,10 @@ pub fn is_reccuring_payment_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
 }
 
 pub fn is_tpv_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
-    matches!(txn_detail.txnObjectType, Some(ETTD::TxnObjectType::TpvPayment))
+    matches!(
+        txn_detail.txnObjectType,
+        Some(ETTD::TxnObjectType::TpvPayment)
+    )
 }
 
 pub fn is_tpv_mandate_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
@@ -568,7 +571,7 @@ pub fn get_gateway_reference_id(
 
 pub async fn effective_amount_with_txn_amount(txn_detail: ETTD::TxnDetail) -> Money {
     let def_amount = Money::from_double(0.0);
-    let amount_txn = txn_detail.txnAmount.clone().unwrap_or(def_amount.clone());
+    let amount_txn = txn_detail.txnAmount.as_ref().unwrap_or(&def_amount);
     let offers = ETTO::getOffers(&txn_detail.id).await;
     let discount_sum: Money = Money::from_double(
         offers

@@ -452,12 +452,8 @@ pub async fn check_and_update_gateway_score(
     txn_latency: Option<TransactionLatency>,
 ) -> () {
     // Get gateway scoring type
-    let gateway_scoring_type = getGatewayScoringType(
-        txn_detail.clone(),
-        txn_card_info.clone(),
-        enforce_failure,
-    )
-    .await;
+    let gateway_scoring_type =
+        getGatewayScoringType(txn_detail.clone(), txn_card_info.clone(), enforce_failure).await;
 
     let gateway_in_string = txn_detail.gateway.clone().unwrap_or_default();
 
@@ -798,7 +794,7 @@ pub async fn isUpdateWithinLatencyWindow(
                         &mer_acc.gatewaySuccessRateBasedDeciderInput,
                     )
                     .ok()
-                    .and_then(|m| m.txnLatency.and_then(|l| l.gatewayLatency) ),
+                    .and_then(|m| m.txnLatency.and_then(|l| l.gatewayLatency)),
                 );
                 // Cutover::findByNameFromRedis(C.gatewayScoreLatencyCheckInMins)
                 //     .await

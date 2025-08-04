@@ -21,7 +21,7 @@ use crate::types::merchant::merchant_gateway_account::MerchantGwAccId;
 use crate::types::money::internal::Money;
 use crate::types::order::id::OrderId;
 // use juspay::extra::parsing::{Parsed, ParsingErrorType, Step, around, defaulting, lift_either, lift_pure, mandated, non_empty_text, non_negative, parse_field, project, to_utc};
-use crate::types::source_object_id::{SourceObjectId, to_source_object_id};
+use crate::types::source_object_id::{to_source_object_id, SourceObjectId};
 // use juspay::extra::nonemptytext::NonEmptyText;
 use crate::types::transaction::id::TransactionId;
 // use eulerhs::extra::combinators::to_domain_all;
@@ -80,7 +80,7 @@ pub enum TxnObjectType {
     #[serde(rename = "MOTO_PAYMENT")]
     MotoPayment,
     #[serde(rename = "UNKNOWN")]
-    Unknown
+    Unknown,
 }
 
 impl fmt::Display for TxnObjectType {
@@ -103,7 +103,7 @@ impl fmt::Display for TxnObjectType {
                 Self::PartialVoid => "PARTIAL_VOID",
                 Self::VanPayment => "VAN_PAYMENT",
                 Self::MotoPayment => "MOTO_PAYMENT",
-                Self::Unknown => "UNKNOWN"
+                Self::Unknown => "UNKNOWN",
             }
         )
     }
@@ -147,7 +147,7 @@ impl TxnObjectType {
             Self::PartialVoid => "PARTIAL_VOID",
             Self::VanPayment => "VAN_PAYMENT",
             Self::MotoPayment => "MOTO_PAYMENT",
-            Self::Unknown => "UNKNOWN"
+            Self::Unknown => "UNKNOWN",
         }
     }
 }
@@ -544,18 +544,26 @@ pub struct SafeTxnDetail {
     pub internalMetadata: Option<String>,
     #[serde(rename = "internalTrackingInfo")]
     pub internalTrackingInfo: Option<String>,
-    #[serde(deserialize_with = "deserialize_optional_primitive_datetime", rename = "partitionKey")]
+    #[serde(
+        deserialize_with = "deserialize_optional_primitive_datetime",
+        rename = "partitionKey"
+    )]
     pub partitionKey: Option<PrimitiveDateTime>,
     pub txnAmountBreakup: Option<Vec<TransactionCharge>>,
 }
 
 pub fn convert_safe_txn_detail_to_txn_detail(safe_detail: SafeTxnDetail) -> TxnDetail {
     TxnDetail {
-        id: safe_detail.id.and_then(|s| s.parse::<i64>().ok()).map(to_txn_detail_id).unwrap(),
-        dateCreated: safe_detail.dateCreated.unwrap_or_else(|| OffsetDateTime::now_utc()),
+        id: safe_detail
+            .id
+            .and_then(|s| s.parse::<i64>().ok())
+            .map(to_txn_detail_id)
+            .unwrap(),
+        dateCreated: safe_detail
+            .dateCreated
+            .unwrap_or_else(|| OffsetDateTime::now_utc()),
         orderId: safe_detail.orderId,
-        status: TxnStatus::from_text(safe_detail.status)
-            .unwrap_or(TxnStatus::Failure),
+        status: TxnStatus::from_text(safe_detail.status).unwrap_or(TxnStatus::Failure),
         txnId: safe_detail.txnId,
         txnType: Some(safe_detail.txnType),
         addToLocker: safe_detail.addToLocker,
@@ -568,7 +576,9 @@ pub fn convert_safe_txn_detail_to_txn_detail(safe_detail: SafeTxnDetail) -> TxnD
         txnUuid: safe_detail.txnUuid,
         merchantGatewayAccountId: safe_detail
             .merchantGatewayAccountId
-            .map(|id| MerchantGwAccId { merchantGwAccId: id }),
+            .map(|id| MerchantGwAccId {
+                merchantGwAccId: id,
+            }),
         netAmount: safe_detail.netAmount,
         txnAmount: safe_detail.txnAmount,
         txnObjectType: safe_detail

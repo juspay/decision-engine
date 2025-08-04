@@ -385,7 +385,10 @@ pub async fn getFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList {
                     isMgaEligible(
                         mga,
                         &txn_card_info,
-                        txn_detail.txnObjectType.clone().unwrap_or(TxnObjectType::Unknown),
+                        txn_detail
+                            .txnObjectType
+                            .clone()
+                            .unwrap_or(TxnObjectType::Unknown),
                         &mga_eligible_seamless_gateways,
                         &txn_detail,
                     )
@@ -1549,7 +1552,9 @@ pub async fn filterGatewaysForValidationType(
         }
 
         // Handle non-express checkout, non-token repeat transactions
-        if !txn_detail.expressCheckout.unwrap_or(false) && !Utils::is_token_repeat_txn(m_internal_meta) {
+        if !txn_detail.expressCheckout.unwrap_or(false)
+            && !Utils::is_token_repeat_txn(m_internal_meta)
+        {
             let m_mandate_guest_checkout_supported_gateways: Option<Vec<String>> =
                 findByNameFromRedis(
                     C::getmandateGuestCheckoutKey(txn_card_info.cardSwitchProvider).get_key(),
