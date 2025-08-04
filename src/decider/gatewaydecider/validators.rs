@@ -210,23 +210,23 @@ pub fn parseFromApiTxnDetail(apiType: T::ApiTxnDetail) -> Option<ETTD::TxnDetail
         orderId: ETOID::to_order_id(apiType.orderId),
         status: ETTD::TxnStatus::from_text(apiType.status)?,
         txnId: ETTID::to_transaction_id(apiType.txnId),
-        txnType: apiType.txnType,
-        addToLocker: apiType.addToLocker.unwrap_or(false),
+        txnType: Some(apiType.txnType),
+        addToLocker: Some(apiType.addToLocker.unwrap_or(false)),
         merchantId: apiType.merchantId.map(to_merchant_id)?,
         gateway: apiType.gateway,
-        expressCheckout: apiType.expressCheckout.unwrap_or(false),
-        isEmi: apiType.isEmi.unwrap_or(false),
+        expressCheckout: Some(apiType.expressCheckout.unwrap_or(false)),
+        isEmi: Some(apiType.isEmi.unwrap_or(false)),
         emiBank: apiType.emiBank,
         emiTenure: apiType.emiTenure,
-        txnUuid: apiType.txnUuid?,
+        txnUuid: apiType.txnUuid.unwrap_or_default(),
         merchantGatewayAccountId: apiType
             .merchantGatewayAccountId
             .map(ETMGA::to_merchant_gw_acc_id),
-        netAmount: apiType.netAmount.map(Money::from_double)?,
-        txnAmount: apiType.txnAmount.map(Money::from_double)?,
+        netAmount: apiType.netAmount.map(Money::from_double),
+        txnAmount: apiType.txnAmount.map(Money::from_double),
         txnObjectType: apiType
             .txnObjectType
-            .and_then(ETTD::TxnObjectType::from_text)?,
+            .and_then(ETTD::TxnObjectType::from_text),
         sourceObject: apiType.sourceObject,
         sourceObjectId: apiType.sourceObjectId.map(SO::to_source_object_id),
         currency: apiType

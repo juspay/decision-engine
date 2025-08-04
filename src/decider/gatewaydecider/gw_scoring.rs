@@ -1164,7 +1164,7 @@ fn check_scheduled_outage_metadata(
         Some(scheduled_outage_metadata) => {
             schedule_equal_to(
                 |x, y| x == y,
-                Some(txn_detail.txnObjectType.clone()),
+                txn_detail.txnObjectType.clone(),
                 scheduled_outage_metadata.txnObjectType.clone(),
             ) && schedule_equal_to(
                 |x, y| x == y,
@@ -1930,7 +1930,7 @@ pub async fn get_sr1_and_sr2_and_n(
             } else {
                 Some(txn_card_info.paymentMethod.clone())
             };
-            let txn_obj_type = txn_detail.txnObjectType.to_string();
+            let txn_obj_type = format!("{:?}", txn_detail.txnObjectType);
 
             filter_using_service_config(merchant_id, pmt.to_string(), pm, txn_obj_type, inputs)
                 .await

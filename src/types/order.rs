@@ -139,6 +139,8 @@ pub enum OrderType {
     VanPayment,
     #[serde(rename = "MOTO_PAYMENT")]
     MotoPayment,
+    #[serde(rename = "UNKNOWN")]
+    Unknown,
 }
 
 impl OrderType {
@@ -153,6 +155,7 @@ impl OrderType {
             Self::TpvMandatePayment => "TPV_MANDATE_PAYMENT".to_string(),
             Self::VanPayment => "VAN_PAYMENT".to_string(),
             Self::MotoPayment => "MOTO_PAYMENT".to_string(),
+            Self::Unknown => "UNKNOWN".to_string(),
         }
     }
 
@@ -186,6 +189,7 @@ impl OrderType {
             TxnObjectType::PartialVoid => Self::OrderPayment,
             TxnObjectType::VanPayment => Self::VanPayment,
             TxnObjectType::MotoPayment => Self::MotoPayment,
+            _ => Self::Unknown,
         }
     }
 }

@@ -452,12 +452,8 @@ pub async fn check_and_update_gateway_score(
     txn_latency: Option<TransactionLatency>,
 ) -> () {
     // Get gateway scoring type
-    let gateway_scoring_type = getGatewayScoringType(
-        txn_detail.clone(),
-        txn_card_info.clone(),
-        enforce_failure,
-    )
-    .await;
+    let gateway_scoring_type =
+        getGatewayScoringType(txn_detail.clone(), txn_card_info.clone(), enforce_failure).await;
 
     let gateway_in_string = txn_detail.gateway.clone().unwrap_or_default();
 
@@ -798,7 +794,7 @@ pub async fn isUpdateWithinLatencyWindow(
                         &mer_acc.gatewaySuccessRateBasedDeciderInput,
                     )
                     .ok()
-                    .and_then(|m| m.txnLatency.and_then(|l| l.gatewayLatency) ),
+                    .and_then(|m| m.txnLatency.and_then(|l| l.gatewayLatency)),
                 );
                 // Cutover::findByNameFromRedis(C.gatewayScoreLatencyCheckInMins)
                 //     .await
@@ -831,7 +827,7 @@ pub async fn isUpdateWithinLatencyWindow(
 }
 
 async fn checkExemptIfMandateTxn(txn_detail: &TxnDetail, txn_card_info: &TxnCardInfo) -> bool {
-    let is_recurring = isRecurringTxn(Some(txn_detail.txnObjectType.clone()));
+    let is_recurring = isRecurringTxn(txn_detail.txnObjectType.clone());
     let is_nb_pmt = txn_card_info.paymentMethodType == (NB);
     let is_penny_reg_txn = isPennyMandateRegTxn(txn_detail.clone());
     is_recurring || (is_nb_pmt && is_penny_reg_txn)
