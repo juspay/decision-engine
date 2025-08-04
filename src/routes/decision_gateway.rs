@@ -130,6 +130,10 @@ where
             let merchant_id = payload.orderReference.merchantId.clone();
             let merchant_id_txt = crate::types::merchant::id::merchant_id_to_text(merchant_id);
             tracing::Span::current().record("merchant_id", merchant_id_txt.clone());
+            tracing::Span::current().record("udf_txn_uuid", payload.txnDetail.txnUuid.clone());
+            tracing::Span::current().record("txn_uuid", payload.txnDetail.txnUuid.clone());
+            tracing::Span::current()
+                .record("udf_order_id", payload.orderReference.orderId.0.as_str());
             jemalloc_ctl::epoch::advance().unwrap();
             let allocated_before = jemalloc_ctl::stats::allocated::read().unwrap_or(0);
 

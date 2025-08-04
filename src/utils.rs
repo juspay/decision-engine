@@ -35,6 +35,7 @@ pub fn record_fields_from_header(request: &Request<Body>) -> tracing::Span {
         udf_order_id = tracing::field::Empty,
         udf_customer_id = tracing::field::Empty,
         udf_txn_uuid = tracing::field::Empty,
+        txn_uuid = tracing::field::Empty,
         "x-request-id" = tracing::field::Empty,
         "x-global-request-id" = tracing::field::Empty,
         merchant_id = tracing::field::Empty,
