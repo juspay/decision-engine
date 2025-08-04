@@ -229,6 +229,7 @@ pub async fn newGwFilters(
         let _ = filterFunctionalGatewaysForSplitSettlement(this).await;
         let _ = filterFunctionalGatewaysForMerchantRequiredFlow(this).await;
         let _ = filterFunctionalGatewaysForOTMFlow(this).await;
+        let _ = FilterFunctionalGatewaysForAvailableFlows(this.await) ;
         let _ = filterGatewaysForMGASelectionIntegrity(this).await;
         let funcGateways =
             returnGwListWithLog(this, DeciderFilterName::FinalFunctionalGateways, false);
@@ -1451,6 +1452,86 @@ pub async fn filterFunctionalGatewaysForOTMFlow(this: &mut DeciderFlow<'_>) -> V
         DeciderFilterName::FilterFunctionalGatewaysForOTM,
         true,
     )
+}
+
+pub async fn filterFunctionalGatewaysForAvailablePaymentFlows(this: &mut DeciderFlow<'_>) -> GatewayList {
+    let st = getGws(this);
+    let txn_detail = this.get().dpTxnDetail.clone();
+    let macc = this.get().dpMerchantAccount.clone();
+    let order_reference = this.get().dpOrder.clone();
+    let txn_card_info = this.get().dpTxnCardInfo.clone();
+    let all_flows = Utils::get_payment_flow_list_from_txn_detail(&txn_detail);
+    let relevant_flows = Utils::filter_relevant_payment_flows(all_flows);
+
+    if relevant_flows.is_empty() {
+        setGws(this, st);
+    } else {
+        if let Ok(Some(jbc)) = find_bank_code(txn_card_info.paymentMethod.clone()).await {
+            let (metadata, pl_ref_id_map) = Utils::get_order_metadata_and_pl_ref_id_map(
+                this,
+                macc.enableGatewayReferenceIdBasedRouting,
+                &order_reference,
+            );
+            let possible_ref_ids_of_merchant =
+                Utils::get_all_possible_ref_ids(metadata, order_reference, pl_ref_id_map);
+            let enabled_mgas =
+                SETMA::get_enabled_mgas_by_merchant_id_and_ref_id(this, macc.merchantId, possible_ref_ids_of_merchant).await;
+
+            let filtered_mgas_by_enablement: Vec<_> = enabled_mgas
+                .into_iter()
+                .filter(|mga| {
+                    relevant_flows.iter().all(|flow| {
+                        Utils::is_payment_flow_enabled_in_mga(mga, flow).unwrap_or(false)
+                    })
+                })
+                .collect();
+
+            let eligible_mga_post_filtering: Vec<_> = filtered_mgas_by_enablement
+                .into_iter()
+                .filter(|mga| st.contains(&mga.gateway))
+                .collect();
+
+            let all_mga_ids: Vec<_> = eligible_mga_post_filtering
+                .iter()
+                .map(|mga| mga.id.merchantGwAccId)
+                .collect();
+
+            let mut final_eligible_mga = eligible_mga_post_filtering.clone();
+
+            for flow in relevant_flows {
+                let current_gws: Vec<_> = final_eligible_mga.iter().map(|mga| mga.gateway.clone()).collect();
+                let gpmf_entries = GPMF::find_all_gpmf_by_country_code_gw_pf_id_pmt_jbcid_db(
+                    crate::types::country::country_iso::CountryISO::IND,
+                    current_gws,
+                    Utils::text_to_payment_flow_or_error(&flow),
+                    txn_card_info.paymentMethodType.clone(),
+                    jbc.id,
+                )
+                .await
+                .unwrap_or_default();
+
+                let gpmf_ids: Vec<_> = gpmf_entries.iter().map(|entry| entry.id.clone()).collect();
+                let mgpmf_entries =
+                    MGPMF::get_all_mgpmf_by_mga_id_and_gpmf_ids(all_mga_ids.clone(), gpmf_ids).await;
+                let mgpmf_mga_ids: Vec<_> = mgpmf_entries
+                    .iter()
+                    .map(|entry| entry.merchantGatewayAccountId)
+                    .collect();
+
+                final_eligible_mga = final_eligible_mga
+                    .into_iter()
+                    .filter(|mga| mgpmf_mga_ids.contains(&mga.id.merchantGwAccId))
+                    .collect();
+            }
+
+            let final_gws = final_eligible_mga.iter().map(|mga| mga.gateway.clone()).collect();
+            Utils::set_mgas(this, final_eligible_mga);
+            setGws(this, final_gws);
+        } else {
+            setGws(this, st);
+        }
+    }
+    returnGwListWithLog(this, DeciderFilterName::FilterFunctionalGatewaysForAvailableFlows, true)
 }
 
 /// Filters gateways based on transaction validation type (Card Mandate, TPV, E-Mandate)

@@ -1227,6 +1227,21 @@ pub fn set_payment_flow_list(decider_flow: &mut DeciderFlow<'_>, payment_flow_li
     decider_flow.writer.paymentFlowList = payment_flow_list;
 }
 
+pub fn filter_relevant_payment_flows(flowslist: Vec<String>) -> Vec<String> {
+    let required_flows: HashSet<String> = [
+        "ONE_TIME_MANDATE".to_string(),
+        "PARTIAL_TPV".to_string(),
+    ]
+    .iter()
+    .cloned()
+    .collect();
+
+    flowslist
+        .into_iter()
+        .filter(|flow| required_flows.contains(flow))
+        .collect()
+}
+
 pub fn check_if_enabled_in_mga(
     mga: &ETM::merchant_gateway_account::MerchantGatewayAccount,
     payment_flow: &str,
@@ -1404,7 +1419,8 @@ pub fn decider_filter_order(filter_name: &str) -> i32 {
         "filterGatewaysForEMITenureSpecficGatewayCreds" => 24,
         "filterGatewaysForMGASelectionIntegrity" => 25,
         "FilterFunctionalGatewaysForOTM" => 26,
-        _ => 27,
+        "FilterFunctionalGatewaysForAvailableFlows" => 27,
+        _ => 28,
     }
 }
 
