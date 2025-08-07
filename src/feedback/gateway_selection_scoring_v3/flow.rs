@@ -30,10 +30,12 @@
 // use std::vec::Vec as BSL;
 // use feedback::types::{TxnCardInfo, PaymentMethodType, MerchantGatewayAccount};
 use crate::decider::gatewaydecider::utils as GU;
+use crate::euclid::errors::EuclidErrors;
 use crate::logger;
 use crate::merchant_config_util as MC;
 use crate::redis::cache::findByNameFromRedis;
 use crate::types::payment::payment_method_type_const::*;
+use crate::types::service_configuration::find_config_by_name;
 use crate::{
     app,
     decider::gatewaydecider::types::{GatewayScoringData, SrRoutingDimensions},
@@ -62,6 +64,7 @@ use crate::{
     },
     utils as U,
 };
+use error_stack::ResultExt;
 use masking::PeekInterface;
 
 // Converted functions
@@ -159,7 +162,8 @@ pub async fn createKeysIfNotExist(
             ">>>>Creating keys as they do not exist in Redis: key_for_gateway_selection_queue:{} and key_for_gateway_selection_score: {}",
             key_for_gateway_selection_queue, key_for_gateway_selection_score
         );
-        let merchant_bucket_size = getSrV3MerchantBucketSize(txn_detail, txn_card_info).await;
+        let merchant_bucket_size =
+            getSrV3MerchantBucketSize(txn_detail.clone(), txn_card_info).await;
         logger::info!(
             tag = "createKeysIfNotExist",
             action = "createKeysIfNotExist",
@@ -177,8 +181,61 @@ pub async fn createKeysIfNotExist(
         let first_delimiter_idx = processed_string.find("__");
         let last_delimiter_idx = processed_string.rfind("__");
 
-        let mut sr_dimensions_key =
-            processed_string[first_delimiter_idx.unwrap_or(0)..].to_string();
+        let mid = MID::merchant_id_to_text(txn_detail.merchantId);
+        let name = format!("SR_DIMENSION_CONFIG_{}", mid);
+
+        let service_config = find_config_by_name(name.clone())
+            .await
+            .change_context(EuclidErrors::StorageError);
+
+        let enable_global_info = match service_config {
+            Ok(Some(config)) => match config.value {
+                Some(json_value) => match serde_json::from_str::<serde_json::Value>(&json_value) {
+                    Ok(parsed_json) => parsed_json
+                        .get("enable_global_info")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false),
+                    Err(e) => {
+                        logger::error!(
+                            tag = "createKeysIfNotExist",
+                            action = "parse_service_config_json",
+                            "Failed to parse service config JSON: {}",
+                            e
+                        );
+                        false
+                    }
+                },
+                None => {
+                    logger::warn!(
+                        tag = "createKeysIfNotExist",
+                        action = "service_config_value_missing",
+                        "Service config value is None for name: {}",
+                        name
+                    );
+                    false
+                }
+            },
+            Ok(None) => {
+                logger::warn!(
+                    tag = "createKeysIfNotExist",
+                    action = "service_config_not_found",
+                    "Service config not found for name: {}",
+                    name
+                );
+                false
+            }
+            Err(e) => {
+                logger::error!(
+                    tag = "createKeysIfNotExist",
+                    action = "service_config_fetch_error",
+                    "Error fetching service config: {:?}",
+                    e
+                );
+                false
+            }
+        };
+
+        let sr_dimensions_key = processed_string[first_delimiter_idx.unwrap_or(0)..].to_string();
 
         let gateway = processed_string[last_delimiter_idx.unwrap_or(0)..].to_string();
 
@@ -193,8 +250,14 @@ pub async fn createKeysIfNotExist(
 
                 let key_to_check = format!("{}{}", current_key, gateway_name);
 
-                let queue_key_pattern = format!("{}*{}{}", PREFIX, key_to_check, SUFFIX);
-                let score_key_pattern = format!("{}*{}{}score", PREFIX, key_to_check, "_}");
+                let mut queue_key_pattern = format!("{}{}{}{}", PREFIX, mid, key_to_check, SUFFIX);
+                let mut score_key_pattern =
+                    format!("{}{}{}{}score", PREFIX, mid, key_to_check, "_}");
+
+                if enable_global_info == true {
+                    queue_key_pattern = format!("{}*{}{}", PREFIX, key_to_check, SUFFIX);
+                    score_key_pattern = format!("{}*{}{}score", PREFIX, key_to_check, "_}");
+                }
 
                 logger::info!(
                     tag = "createKeysIfNotExist",

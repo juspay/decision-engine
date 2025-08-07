@@ -104,6 +104,7 @@ impl RoutingDictionaryRecord {
 pub struct SrDimensionConfig {
     pub merchant_id: String,
     pub fields: Vec<String>,
+    pub enable_global_info: bool,
 }
 pub const ELIGIBLE_DIMENSIONS: [&str; 5] = [
     "paymentInfo.currency",
