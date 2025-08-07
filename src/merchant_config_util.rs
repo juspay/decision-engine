@@ -40,8 +40,8 @@ use crate::{
                 load_merchant_config_by_mpid_category_name_and_status, MerchantConfig,
             },
             types::{
-                config_category_to_text, config_status_to_text, ConfigCategory,
-                ConfigStatus, PfMcConfig,
+                config_category_to_text, config_status_to_text, ConfigCategory, ConfigStatus,
+                PfMcConfig,
             },
         },
         payment_flow::{payment_flows_to_text, PaymentFlow},

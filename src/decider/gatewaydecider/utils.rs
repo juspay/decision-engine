@@ -95,6 +95,7 @@ use crate::types::isin_routes as ETIsinR;
 // // use configs::env_vars as ENV;
 use crate::error::StorageError;
 use crate::types::gateway_card_info::ValidationType;
+use crate::types::order::udfs::get_udf;
 
 pub fn either_decode_t<T: for<'de> Deserialize<'de>>(text: &str) -> Result<T, String> {
     from_slice(text.as_bytes()).map_err(|e| e.to_string())
@@ -1969,6 +1970,7 @@ pub fn get_default_gateway_scoring_data(
         currency: currency,
         country: country,
         is_legacy_decider_flow: false,
+        udfs: None,
     }
 }
 
@@ -2447,42 +2449,62 @@ pub async fn get_unified_sr_key(
         });
 
     let fields = service_config
-        .map(|config| config.fields)
+        .as_ref()
+        .map(|config| config.paymentInfo.fields.clone())
+        .unwrap_or_default();
+
+    let udfs = service_config
+        .as_ref()
+        .map(|config| config.paymentInfo.udfs.clone())
         .unwrap_or_default();
 
     for field in fields {
-        if let Some(suffix) = field.strip_prefix("paymentInfo.") {
-            match suffix {
-                "card_network" => {
-                    if let Some(cn) = card_network.clone() {
-                        key_components.push(cn.peek().to_string());
-                    }
-                }
-                "card_is_in" => {
-                    if let Some(ci) = card_isin.clone() {
-                        key_components.push(ci);
-                    }
-                }
-                "currency" => {
-                    if let Some(cu) = currency.clone() {
-                        key_components.push(cu);
-                    }
-                }
-                "country" => {
-                    if let Some(co) = country.clone() {
-                        key_components.push(co);
-                    }
-                }
-                "auth_type" => {
-                    if let Some(at) = auth_type.clone() {
-                        key_components.push(at);
-                    }
-                }
-                _ => {
-                    // Unknown field under payment_info
+        match field.as_str() {
+            "card_network" => {
+                if let Some(cn) = card_network.clone() {
+                    key_components.push(cn.peek().to_string());
                 }
             }
+            "card_is_in" => {
+                if let Some(ci) = card_isin.clone() {
+                    key_components.push(ci);
+                }
+            }
+            "currency" => {
+                if let Some(cu) = currency.clone() {
+                    key_components.push(cu);
+                }
+            }
+            "country" => {
+                if let Some(co) = country.clone() {
+                    key_components.push(co);
+                }
+            }
+            "auth_type" => {
+                if let Some(at) = auth_type.clone() {
+                    key_components.push(at);
+                }
+            }
+            _ => {
+                // Unknown field
+            }
         }
+    }
+
+    if let Some(udf_values) =
+        gateway_scoring_data
+            .udfs
+            .as_ref()
+            .zip(udfs.as_ref())
+            .map(|(udf_map, udf_keys)| {
+                udf_keys
+                    .iter()
+                    .filter_map(|&udf| get_udf(udf_map, udf))
+                    .map(|value| value.to_string())
+                    .collect::<Vec<String>>()
+            })
+    {
+        key_components.extend(udf_values);
     }
 
     intercalate_without_empty_string("_", &key_components)
