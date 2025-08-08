@@ -18,7 +18,7 @@ lazy_static! {
     pub static ref API_REQUEST_COUNTER: IntCounterVec = register_int_counter_vec!(
         "api_requests_by_status",
         "Count of API requests grouped by endpoint and result",
-        &["endpoint", "status"]
+        &["endpoint", "status", "status_code"]
     ).unwrap();
 
     /// Latency of API calls grouped by endpoint

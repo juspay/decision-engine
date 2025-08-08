@@ -30,13 +30,13 @@ pub async fn get_merchant_config(
     let response = match result {
         Ok(merchant_account) => {
             API_REQUEST_COUNTER
-                .with_label_values(&["merchant_account_get", "success"])
+                .with_label_values(&["merchant_account_get", "success", "200"])
                 .inc();
             Ok(Json(merchant_account.into()))
         }
         Err(e) => {
             API_REQUEST_COUNTER
-                .with_label_values(&["merchant_account_get", "failure"])
+                .with_label_values(&["merchant_account_get", "failure", "404"])
                 .inc();
             Err(e.into())
         }
@@ -68,7 +68,7 @@ pub async fn create_merchant_config(
 
     if merchant_account.is_some() {
         API_REQUEST_COUNTER
-            .with_label_values(&["merchant_account_create", "failure"])
+            .with_label_values(&["merchant_account_create", "failure", "409"])
             .inc();
         timer.observe_duration();
         return Err(error::MerchantAccountConfigurationError::MerchantAlreadyExists.into());
@@ -82,13 +82,13 @@ pub async fn create_merchant_config(
         Ok(_) => {
             logger::debug!("Merchant account configuration created successfully");
             API_REQUEST_COUNTER
-                .with_label_values(&["merchant_account_create", "success"])
+                .with_label_values(&["merchant_account_create", "success", "200"])
                 .inc();
             Ok(Json("Merchant account created successfully".to_string()))
         }
         Err(e) => {
             API_REQUEST_COUNTER
-                .with_label_values(&["merchant_account_create", "failure"])
+                .with_label_values(&["merchant_account_create", "failure", "500"])
                 .inc();
             Err(e.into())
         }
@@ -122,13 +122,13 @@ pub async fn delete_merchant_config(
     let response = match result {
         Ok(_) => {
             API_REQUEST_COUNTER
-                .with_label_values(&["merchant_account_delete", "success"])
+                .with_label_values(&["merchant_account_delete", "success", "200"])
                 .inc();
             Ok(Json("Merchant account deleted successfully".to_string()))
         }
         Err(e) => {
             API_REQUEST_COUNTER
-                .with_label_values(&["merchant_account_delete", "failure"])
+                .with_label_values(&["merchant_account_delete", "failure", "500"])
                 .inc();
             Err(e.into())
         }
