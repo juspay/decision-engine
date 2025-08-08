@@ -51,7 +51,7 @@ pub async fn update_gateway_score(
         Err(e) => {
             crate::logger::debug!(tag = "UpdateGatewayScore", "Error: {:?}", e);
             API_REQUEST_COUNTER
-                .with_label_values(&["update_gateway_score", "failure"])
+                .with_label_values(&["update_gateway_score", "failure", "400"])
                 .inc();
             timer.observe_duration();
             return Err(ErrorResponse {
@@ -79,7 +79,7 @@ pub async fn update_gateway_score(
             match result {
                 Ok(success) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["update_gateway_score", "success"])
+                        .with_label_values(&["update_gateway_score", "success", "200"])
                         .inc();
                     timer.observe_duration();
                     Ok(Json(UpdateScoreResponse {
@@ -88,7 +88,7 @@ pub async fn update_gateway_score(
                 }
                 Err(e) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["update_gateway_score", "failure"])
+                        .with_label_values(&["update_gateway_score", "failure", "400"])
                         .inc();
                     timer.observe_duration();
                     println!("Error: {:?}", e);
@@ -99,7 +99,7 @@ pub async fn update_gateway_score(
         Err(e) => {
             crate::logger::debug!(tag = "UpdateScoreRequest", "Error: {:?}", e);
             API_REQUEST_COUNTER
-                .with_label_values(&["update_gateway_score", "failure"])
+                .with_label_values(&["update_gateway_score", "failure", "400"])
                 .inc();
             timer.observe_duration();
             return Err(ErrorResponse {
