@@ -8,7 +8,7 @@ use crate::types::transaction::id as ETId;
 use crate::types::txn_details::types::TxnObjectType;
 use masking::Secret;
 use serde::ser::SerializeStruct;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value as AValue;
 use std::collections::HashMap as HMap;
 use std::collections::HashMap;
@@ -535,6 +535,7 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
             currency: None,
             country: None,
             is_legacy_decider_flow: false,
+            udfs: None,
         },
     }
 }
@@ -562,6 +563,7 @@ pub struct GatewayScoringData {
     pub currency: Option<Currency>,
     pub country: Option<CountryISO2>,
     pub is_legacy_decider_flow: bool,
+    pub udfs: Option<UDFs>,
 }
 
 #[derive(Debug)]
@@ -909,6 +911,30 @@ pub struct DomainDeciderRequestForApiCallV2 {
     pub eliminationEnabled: Option<bool>,
 }
 
+pub fn deserialize_optional_udfs_to_hashmap<'de, D>(
+    deserializer: D,
+) -> Result<Option<UDFs>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    // First try to deserialize as Option<Vec<Option<String>>>
+    let opt_raw_vec: Option<Vec<Option<String>>> = Option::deserialize(deserializer)?;
+
+    match opt_raw_vec {
+        None => Ok(None),
+        Some(raw_vec) => {
+            // Convert the Vec<Option<String>> to a HashMap<i32, String>
+            let hashmap: HashMap<i32, String> = raw_vec
+                .into_iter()
+                .enumerate()
+                .filter_map(|(index, value)| value.map(|v| (index as i32, v)))
+                .collect();
+
+            Ok(Some(UDFs(hashmap)))
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaymentInfo {
     paymentId: String,
@@ -916,6 +942,7 @@ pub struct PaymentInfo {
     currency: Currency,
     country: Option<CountryISO2>,
     customerId: Option<ETCu::CustomerId>,
+    #[serde(deserialize_with = "deserialize_optional_udfs_to_hashmap")]
     udfs: Option<UDFs>,
     preferredGateway: Option<String>,
     paymentType: TxnObjectType,
