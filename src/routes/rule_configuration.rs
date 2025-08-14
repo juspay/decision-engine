@@ -72,7 +72,7 @@ pub async fn create_rule_config(
                                 message: "Success Rate Configuration created successfully"
                                     .to_string(),
                                 merchant_id,
-                                config: config.clone(),
+                                config,
                             }))
                         }
                         Err(e) => {
@@ -105,7 +105,7 @@ pub async fn create_rule_config(
                     Ok(Json(RuleConfigResponse {
                         message: "Elimination Configuration created successfully".to_string(),
                         merchant_id,
-                        config: config.clone(),
+                        config,
                     }))
                 }
                 Err(e) => {
@@ -332,7 +332,7 @@ pub async fn update_rule_config(
                     Ok(Json(RuleConfigResponse {
                         message: "Success Rate Configuration updated successfully".to_string(),
                         merchant_id,
-                        config: config.clone(),
+                        config,
                     }))
                 }
                 Err(e) => {
@@ -363,7 +363,7 @@ pub async fn update_rule_config(
                     Ok(Json(RuleConfigResponse {
                         message: "Elimination Configuration updated successfully".to_string(),
                         merchant_id,
-                        config: config.clone(),
+                        config,
                     }))
                 }
                 Err(e) => {

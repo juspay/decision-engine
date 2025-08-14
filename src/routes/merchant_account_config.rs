@@ -57,7 +57,10 @@ pub async fn get_merchant_config(
 #[axum::debug_handler]
 pub async fn create_merchant_config(
     Json(payload): Json<ETM::merchant_account::MerchantAccountCreateRequest>,
-) -> Result<Json<MerchantAccountCreateResponse>, error::ContainerError<error::MerchantAccountConfigurationError>> {
+) -> Result<
+    Json<MerchantAccountCreateResponse>,
+    error::ContainerError<error::MerchantAccountConfigurationError>,
+> {
     // Record total request count and start timer
     API_REQUEST_TOTAL_COUNTER
         .with_label_values(&["merchant_account_create"])
@@ -72,7 +75,8 @@ pub async fn create_merchant_config(
     );
 
     let merchant_id = payload.merchant_id.clone();
-    let gateway_success_rate_based_decider_input = payload.gateway_success_rate_based_decider_input.clone();
+    let gateway_success_rate_based_decider_input =
+        payload.gateway_success_rate_based_decider_input.clone();
 
     let merchant_account =
         ETM::merchant_account::load_merchant_by_merchant_id(payload.merchant_id.clone()).await;
@@ -139,8 +143,10 @@ pub async fn delete_merchant_config(
             API_REQUEST_COUNTER
                 .with_label_values(&["merchant_account_delete", "success"])
                 .inc();
-            Ok(Json(format!("Merchant account deleted successfully for merchant_id: {}", merchant_id)))
-
+            Ok(Json(format!(
+                "Merchant account deleted successfully for merchant_id: {}",
+                merchant_id
+            )))
         }
         Err(e) => {
             API_REQUEST_COUNTER
