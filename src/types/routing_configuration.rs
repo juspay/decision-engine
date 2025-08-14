@@ -20,7 +20,7 @@ pub enum AlgorithmType {
     DebitRouting,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 #[serde(rename_all = "camelCase")]
 pub enum ConfigVariant {
@@ -29,7 +29,7 @@ pub enum ConfigVariant {
     DebitRouting(DebitRoutingData),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SuccessRateData {
     pub default_latency_threshold: Option<f64>,
@@ -41,7 +41,7 @@ pub struct SuccessRateData {
     pub sub_level_input_config: Option<Vec<SRSubLevelInputConfig>>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SRSubLevelInputConfig {
     pub payment_method_type: Option<String>,
@@ -54,28 +54,28 @@ pub struct SRSubLevelInputConfig {
     pub gateway_extra_score: Option<Vec<GatewayWiseExtraScore>>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GatewayWiseExtraScore {
     pub gateway_name: String,
     pub gateway_sigma_factor: f64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EliminationData {
     pub threshold: f64,
     pub txnLatency: Option<TransactionLatencyThreshold>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DebitRoutingData {
     pub merchant_category_code: String,
     pub acquirer_country: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionLatencyThreshold {
     /// To have a hard threshold for latency in millis, which is used to filter out gateways that exceed this threshold.
