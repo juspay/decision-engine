@@ -2,7 +2,7 @@ use crate::decider::gatewaydecider::types::{ErrorResponse, UnifiedError};
 use crate::feedback::gateway_scoring_service::check_and_update_gateway_score;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
 use crate::types::card::txn_card_info::TxnCardInfo;
-use crate::types::txn_details::types::{TxnDetail, TransactionLatency};
+use crate::types::txn_details::types::{TransactionLatency, TxnDetail};
 use crate::{logger, metrics};
 use axum::body::to_bytes;
 use cpu_time::ProcessTime;
@@ -172,7 +172,7 @@ pub async fn update_score(
                 log_message.as_str(),
                 enforce_failure,
                 gateway_reference_id,
-                txn_latency
+                txn_latency,
             )
             .await;
 

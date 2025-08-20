@@ -3,6 +3,21 @@ use crate::types::merchant as ETM;
 use crate::{error, logger, metrics, types};
 use axum::{extract::Path, Json};
 use error_stack::ResultExt;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MerchantAccountCreateResponse {
+    pub message: String,
+    pub merchant_id: String,
+    pub gateway_success_rate_based_decider_input: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MerchantAccountDeleteResponse {
+    pub message: String,
+    pub merchant_id: String,
+}
+
 #[axum::debug_handler]
 pub async fn get_merchant_config(
     Path(merchant_id): Path<String>,
@@ -49,7 +64,10 @@ pub async fn get_merchant_config(
 #[axum::debug_handler]
 pub async fn create_merchant_config(
     Json(payload): Json<ETM::merchant_account::MerchantAccountCreateRequest>,
-) -> Result<Json<String>, error::ContainerError<error::MerchantAccountConfigurationError>> {
+) -> Result<
+    Json<MerchantAccountCreateResponse>,
+    error::ContainerError<error::MerchantAccountConfigurationError>,
+> {
     // Record total request count and start timer
     API_REQUEST_TOTAL_COUNTER
         .with_label_values(&["merchant_account_create"])
@@ -62,6 +80,10 @@ pub async fn create_merchant_config(
         "Received request to create merchant account configuration: {:?}",
         payload
     );
+
+    let merchant_id = payload.merchant_id.clone();
+    let gateway_success_rate_based_decider_input =
+        payload.gateway_success_rate_based_decider_input.clone();
 
     let merchant_account =
         ETM::merchant_account::load_merchant_by_merchant_id(payload.merchant_id.clone()).await;
@@ -84,7 +106,11 @@ pub async fn create_merchant_config(
             API_REQUEST_COUNTER
                 .with_label_values(&["merchant_account_create", "success"])
                 .inc();
-            Ok(Json("Merchant account created successfully".to_string()))
+            Ok(Json(MerchantAccountCreateResponse {
+                message: "Merchant account created successfully".to_string(),
+                merchant_id,
+                gateway_success_rate_based_decider_input,
+            }))
         }
         Err(e) => {
             API_REQUEST_COUNTER
@@ -101,7 +127,10 @@ pub async fn create_merchant_config(
 #[axum::debug_handler]
 pub async fn delete_merchant_config(
     Path(merchant_id): Path<String>,
-) -> Result<Json<String>, error::ContainerError<error::MerchantAccountConfigurationError>> {
+) -> Result<
+    Json<MerchantAccountDeleteResponse>,
+    error::ContainerError<error::MerchantAccountConfigurationError>,
+> {
     // Record total request count and start timer
     API_REQUEST_TOTAL_COUNTER
         .with_label_values(&["merchant_account_delete"])
@@ -115,7 +144,7 @@ pub async fn delete_merchant_config(
         merchant_id
     );
 
-    let result = ETM::merchant_account::delete_merchant_account(merchant_id)
+    let result = ETM::merchant_account::delete_merchant_account(merchant_id.clone())
         .await
         .change_context(error::MerchantAccountConfigurationError::MerchantDeletionFailed);
 
@@ -124,7 +153,10 @@ pub async fn delete_merchant_config(
             API_REQUEST_COUNTER
                 .with_label_values(&["merchant_account_delete", "success"])
                 .inc();
-            Ok(Json("Merchant account deleted successfully".to_string()))
+            Ok(Json(MerchantAccountDeleteResponse {
+                message: "Merchant account deleted successfully".to_string(),
+                merchant_id,
+            }))
         }
         Err(e) => {
             API_REQUEST_COUNTER
