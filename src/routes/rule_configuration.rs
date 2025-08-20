@@ -12,6 +12,12 @@ pub struct RuleConfigResponse {
     pub config: types::routing_configuration::ConfigVariant,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RuleConfigDeleteResponse {
+    pub message: String,
+    pub merchant_id: String,
+}
+
 #[axum::debug_handler]
 pub async fn create_rule_config(
     Json(payload): Json<types::routing_configuration::RoutingRule>,
@@ -410,7 +416,7 @@ pub async fn update_rule_config(
 #[axum::debug_handler]
 pub async fn delete_rule_config(
     Json(payload): Json<types::routing_configuration::FetchRoutingRule>,
-) -> Result<Json<String>, error::ContainerError<error::RuleConfigurationError>> {
+) -> Result<Json<RuleConfigDeleteResponse>, error::ContainerError<error::RuleConfigurationError>> {
     let timer = API_LATENCY_HISTOGRAM
         .with_label_values(&["delete_rule_config"])
         .start_timer();
@@ -428,10 +434,6 @@ pub async fn delete_rule_config(
     let result = match payload.algorithm {
         types::routing_configuration::AlgorithmType::SuccessRate => {
             let config_name = format!("SR_V3_INPUT_CONFIG_{}", mid);
-            let success_msg = format!(
-                "Success Rate Configuration deleted for merchant_id: {}",
-                mid
-            );
             let result = types::service_configuration::delete_config(config_name)
                 .await
                 .change_context(error::RuleConfigurationError::StorageError);
@@ -441,7 +443,10 @@ pub async fn delete_rule_config(
                     API_REQUEST_COUNTER
                         .with_label_values(&["sr_delete_rule_config", "success"])
                         .inc();
-                    Ok(Json(success_msg))
+                    Ok(Json(RuleConfigDeleteResponse {
+                        message: "Success Rate Configuration deleted successfully".to_string(),
+                        merchant_id: mid,
+                    }))
                 }
                 Err(e) => {
                     API_REQUEST_COUNTER
@@ -452,10 +457,8 @@ pub async fn delete_rule_config(
             }
         }
         types::routing_configuration::AlgorithmType::Elimination => {
-            let elimination_msg =
-                format!("Elimination Configuration deleted for merchant_id: {}", mid);
             let result = types::merchant::merchant_account::update_merchant_account(
-                mid,
+                mid.clone(),
                 Some("".to_string()),
             ) // update to empty string
             .await
@@ -466,7 +469,10 @@ pub async fn delete_rule_config(
                     API_REQUEST_COUNTER
                         .with_label_values(&["elimination_delete_rule_config", "success"])
                         .inc();
-                    Ok(Json(elimination_msg))
+                    Ok(Json(RuleConfigDeleteResponse {
+                        message: "Elimination Configuration deleted successfully".to_string(),
+                        merchant_id: mid,
+                    }))
                 }
                 Err(e) => {
                     API_REQUEST_COUNTER
@@ -478,10 +484,6 @@ pub async fn delete_rule_config(
         }
         types::routing_configuration::AlgorithmType::DebitRouting => {
             let config_name = format!("DEBIT_ROUTING_CONFIG_{}", mid);
-            let debit_msg = format!(
-                "Debit Routing Configuration deleted for merchant_id: {}",
-                mid
-            );
             let result = types::service_configuration::delete_config(config_name)
                 .await
                 .change_context(error::RuleConfigurationError::StorageError);
@@ -491,7 +493,10 @@ pub async fn delete_rule_config(
                     API_REQUEST_COUNTER
                         .with_label_values(&["debit_routing_delete_rule_config", "success"])
                         .inc();
-                    Ok(Json(debit_msg))
+                    Ok(Json(RuleConfigDeleteResponse {
+                        message: "Debit Routing Configuration deleted successfully".to_string(),
+                        merchant_id: mid,
+                    }))
                 }
                 Err(e) => {
                     API_REQUEST_COUNTER

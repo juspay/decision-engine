@@ -11,6 +11,13 @@ pub struct MerchantAccountCreateResponse {
     pub merchant_id: String,
     pub gateway_success_rate_based_decider_input: Option<String>,
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MerchantAccountDeleteResponse {
+    pub message: String,
+    pub merchant_id: String,
+}
+
 #[axum::debug_handler]
 pub async fn get_merchant_config(
     Path(merchant_id): Path<String>,
@@ -120,7 +127,10 @@ pub async fn create_merchant_config(
 #[axum::debug_handler]
 pub async fn delete_merchant_config(
     Path(merchant_id): Path<String>,
-) -> Result<Json<String>, error::ContainerError<error::MerchantAccountConfigurationError>> {
+) -> Result<
+    Json<MerchantAccountDeleteResponse>,
+    error::ContainerError<error::MerchantAccountConfigurationError>,
+> {
     // Record total request count and start timer
     API_REQUEST_TOTAL_COUNTER
         .with_label_values(&["merchant_account_delete"])
@@ -143,10 +153,10 @@ pub async fn delete_merchant_config(
             API_REQUEST_COUNTER
                 .with_label_values(&["merchant_account_delete", "success"])
                 .inc();
-            Ok(Json(format!(
-                "Merchant account deleted successfully for merchant_id: {}",
-                merchant_id
-            )))
+            Ok(Json(MerchantAccountDeleteResponse {
+                message: "Merchant account deleted successfully".to_string(),
+                merchant_id,
+            }))
         }
         Err(e) => {
             API_REQUEST_COUNTER
