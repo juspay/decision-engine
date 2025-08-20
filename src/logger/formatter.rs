@@ -228,6 +228,7 @@ where
             "env",
             "@timestamp",
             "udf_txn_uuid",
+            "txn_uuid",
             "flow_guid",
             "action",
             "is_audit_trail_log",
