@@ -54,7 +54,7 @@ pub async fn decide_gateway(
         Err(e) => {
             logger::debug!(tag = "DecideGateway", "Error: {:?}", e);
             metrics::API_REQUEST_COUNTER
-                .with_label_values(&["decide_gateway", "failure"])
+                .with_label_values(&["decide_gateway", "failure", "400"])
                 .inc();
             timer.observe_duration();
             return Err(ErrorResponse {
@@ -80,14 +80,14 @@ pub async fn decide_gateway(
         Ok(payload) => match deciderFullPayloadHSFunction(payload).await {
             Ok(decided_gateway) => {
                 metrics::API_REQUEST_COUNTER
-                    .with_label_values(&["decide_gateway", "success"])
+                    .with_label_values(&["decide_gateway", "success", "200"])
                     .inc();
                 Ok(decided_gateway)
             }
             Err(e) => {
                 logger::debug!(tag = "DecideGateway", "Error: {:?}", e);
                 metrics::API_REQUEST_COUNTER
-                    .with_label_values(&["decide_gateway", "failure"])
+                    .with_label_values(&["decide_gateway", "failure", "400"])
                     .inc();
                 Err(e)
             }
@@ -95,7 +95,7 @@ pub async fn decide_gateway(
         Err(e) => {
             logger::debug!(tag = "DecideGateway", "Error: {:?}", e);
             metrics::API_REQUEST_COUNTER
-                .with_label_values(&["decide_gateway", "failure"])
+                .with_label_values(&["decide_gateway", "failure", "400"])
                 .inc();
             Err(ErrorResponse {
                 status: "400".to_string(),
