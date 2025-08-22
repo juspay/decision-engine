@@ -1,5 +1,6 @@
 use crate::decider::network_decider;
 use crate::{
+    analytics::AnalyticsConfig,
     api_client::ApiClientConfig,
     crypto::secrets_manager::{
         secrets_interface::SecretManager, secrets_management::SecretsManagementConfig,
@@ -40,6 +41,8 @@ pub struct GlobalConfig {
     pub routing_config: Option<TomlConfig>,
     #[serde(default)]
     pub debit_routing_config: network_decider::types::DebitRoutingConfig,
+    #[serde(default)]
+    pub analytics: AnalyticsConfig,
 }
 
 #[derive(Clone, Debug)]
