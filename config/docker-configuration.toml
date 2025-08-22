@@ -57,6 +57,7 @@ brokers = ["kafka:29092"]
 topic_prefix = "decision-engine"
 batch_size = 100
 batch_timeout_ms = 1000
+max_consecutive_failures = 5
 
 [analytics.clickhouse]
 host = "http://clickhouse:8123"
