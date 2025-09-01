@@ -398,8 +398,26 @@ pub async fn check_and_update_gateway_score_(
     match m_gateway_scoring_data {
         Ok(gateway_scoring_data) => {
             // Extract transaction details and card info from the API payload
-            let txn_detail: TxnDetail =
-                Fbu::getTxnDetailFromApiPayload(apiPayload.clone(), gateway_scoring_data.clone());
+            let txn_detail: TxnDetail = match Fbu::getTxnDetailFromApiPayload(apiPayload.clone(), gateway_scoring_data.clone()) {
+                Ok(detail) => detail,
+                Err(e) => {
+                    return Err(T::ErrorResponse {
+                        status: "400".to_string(),
+                        error_code: "INVALID_REQUEST".to_string(),
+                        error_message: format!("Failed to extract transaction details: {}", e),
+                        priority_logic_tag: None,
+                        routing_approach: None,
+                        filter_wise_gateways: None,
+                        error_info: T::UnifiedError {
+                            code: "INVALID_REQUEST".to_string(),
+                            user_message: "Invalid request data provided".to_string(),
+                            developer_message: format!("Error extracting transaction details: {}", e),
+                        },
+                        priority_logic_output: None,
+                        is_dynamic_mga_enabled: false,
+                    });
+                }
+            };
             let txn_card_info: TxnCardInfo =
                 Fbu::getTxnCardInfoFromApiPayload(apiPayload.clone(), gateway_scoring_data.clone());
 

@@ -160,8 +160,47 @@ pub async fn update_score(
             }
 
             // Process the request
-            let txn_detail = convert_safe_txn_detail_to_txn_detail(payload.txn_detail);
-            let txn_card_info = convert_safe_to_txn_card_info(payload.txn_card_info);
+            let txn_detail = match convert_safe_txn_detail_to_txn_detail(payload.txn_detail) {
+                Ok(detail) => detail,
+                Err(e) => {
+                    return Err(ErrorResponse {
+                        status: "400".to_string(),
+                        error_code: "INVALID_REQUEST".to_string(),
+                        error_message: format!("Failed to extract transaction details: {}", e),
+                        priority_logic_tag: None,
+                        routing_approach: None,
+                        filter_wise_gateways: None,
+                        error_info: UnifiedError {
+                            code: "INVALID_REQUEST".to_string(),
+                            user_message: "Invalid request data provided".to_string(),
+                            developer_message: format!("Error extracting transaction details: {}", e),
+                        },
+                        priority_logic_output: None,
+                        is_dynamic_mga_enabled: false,
+                    });
+                }
+            };
+            let txn_card_info = match convert_safe_to_txn_card_info(payload.txn_card_info) {
+                Ok(card_info) => card_info,
+                Err(e) => {
+                    return Err(ErrorResponse {
+                        status: "400".to_string(),
+                        error_code: "INVALID_REQUEST".to_string(),
+                        error_message: format!("Failed to extract txn_card_info: {}", e),
+                        priority_logic_tag: None,
+                        routing_approach: None,
+                        filter_wise_gateways: None,
+                        error_info: UnifiedError {
+                            code: "INVALID_REQUEST".to_string(),
+                            user_message: "Invalid request data provided".to_string(),
+                            developer_message: format!("Error extracting txn_card_info: {}", e),
+                        },
+                        priority_logic_output: None,
+                        is_dynamic_mga_enabled: false,
+                    });
+                }
+            };
+            
             let log_message = payload.log_message;
             let enforce_failure = payload.enforce_dynaic_routing_failure.unwrap_or(false);
             let gateway_reference_id = payload.gateway_reference_id;

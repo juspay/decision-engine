@@ -552,8 +552,8 @@ pub struct SafeTxnDetail {
     pub txnAmountBreakup: Option<Vec<TransactionCharge>>,
 }
 
-pub fn convert_safe_txn_detail_to_txn_detail(safe_detail: SafeTxnDetail) -> TxnDetail {
-    TxnDetail {
+pub fn convert_safe_txn_detail_to_txn_detail(safe_detail: SafeTxnDetail) -> Result<TxnDetail, crate::error::ApiError> {
+    Ok(TxnDetail {
         id: safe_detail
             .id
             .and_then(|s| s.parse::<i64>().ok())
@@ -589,7 +589,7 @@ pub fn convert_safe_txn_detail_to_txn_detail(safe_detail: SafeTxnDetail) -> TxnD
         currency: safe_detail
             .currency
             .and_then(|s| Currency::text_to_curr(&s).ok())
-            .expect("Invalid currency format"),
+            .ok_or(crate::error::ApiError::MissingRequiredField("currency"))?,
         country: None,
         surchargeAmount: safe_detail.surchargeAmount,
         taxAmount: safe_detail.taxAmount,
@@ -599,7 +599,7 @@ pub fn convert_safe_txn_detail_to_txn_detail(safe_detail: SafeTxnDetail) -> TxnD
         internalTrackingInfo: safe_detail.internalTrackingInfo,
         partitionKey: safe_detail.partitionKey,
         txnAmountBreakup: safe_detail.txnAmountBreakup,
-    }
+    })
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TxnDetail {

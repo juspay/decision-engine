@@ -203,14 +203,13 @@ pub struct SafeTxnCardInfo {
     pub partitionKey: Option<PrimitiveDateTime>,
 }
 
-pub fn convert_safe_to_txn_card_info(safe_info: SafeTxnCardInfo) -> TxnCardInfo {
+pub fn convert_safe_to_txn_card_info(safe_info: SafeTxnCardInfo) -> Result<TxnCardInfo, crate::error::ApiError> {
     let id_i64 = safe_info
         .id
         .parse::<i64>()
-        .map_err(|e| format!("Failed to parse id: {}", e))
-        .unwrap();
+        .map_err(|_| crate::error::ApiError::ParsingError("id"))?;
 
-    TxnCardInfo {
+    Ok(TxnCardInfo {
         id: TxnCardInfoPId(id_i64),
         card_isin: safe_info.card_isin,
         cardIssuerBankName: safe_info.cardIssuerBankName,
@@ -225,5 +224,5 @@ pub fn convert_safe_to_txn_card_info(safe_info: SafeTxnCardInfo) -> TxnCardInfo 
             .authType
             .and_then(|auth| text_to_auth_type(&auth).ok()),
         partitionKey: safe_info.partitionKey,
-    }
+    })
 }

@@ -163,7 +163,7 @@ pub fn convertSuccessResponseIdFlip(x: i32) -> ETTD::SuccessResponseId {
 pub fn getTxnDetailFromApiPayload(
     apiPayload: UpdateScorePayload,
     gateway_scoring_data: GatewayScoringData,
-) -> ETTD::TxnDetail {
+) -> Result<ETTD::TxnDetail, crate::error::ApiError> {
     let txn_detail = ETTD::TxnDetail {
         id: ETTD::to_txn_detail_id(1),
         dateCreated: gateway_scoring_data.dateCreated,
@@ -190,7 +190,7 @@ pub fn getTxnDetailFromApiPayload(
         currency: gateway_scoring_data
             .currency
             .clone()
-            .expect("Currency is mandatory for TxnDetail"),
+            .ok_or(crate::error::ApiError::MissingRequiredField("currency"))?,
         country: gateway_scoring_data.country.clone(),
         surchargeAmount: None,
         taxAmount: None,
@@ -209,7 +209,7 @@ pub fn getTxnDetailFromApiPayload(
         partitionKey: None,
         txnAmountBreakup: None,
     };
-    txn_detail
+    Ok(txn_detail)
 }
 
 pub fn getTxnCardInfoFromApiPayload(
