@@ -247,6 +247,12 @@ pub async fn routing_evaluate(
         payload.created_by.clone()
     );
 
+    let update_failure_metrics = || {
+        API_REQUEST_COUNTER
+            .with_label_values(&["routing_evaluate", "failure"])
+            .inc();
+    };
+
     // Check for the fallback_output in evaluate request:
     let default_output_present = payload
         .fallback_output
@@ -268,9 +274,7 @@ pub async fn routing_evaluate(
     )) {
         Ok(mapper) => mapper.routing_algorithm_id,
         Err(e) => {
-            API_REQUEST_COUNTER
-                .with_label_values(&["routing_evaluate", "failure"])
-                .inc();
+            update_failure_metrics();
             timer.observe_duration();
             return Err(e.into());
         }
@@ -286,9 +290,7 @@ pub async fn routing_evaluate(
     {
         Ok(config) => config,
         Err(e) => {
-            API_REQUEST_COUNTER
-                .with_label_values(&["routing_evaluate", "failure"])
-                .inc();
+            update_failure_metrics();
             timer.observe_duration();
             return Err(e.into());
         }
@@ -298,9 +300,7 @@ pub async fn routing_evaluate(
         if !routing_config.keys.keys.contains_key(key)
             && value.as_ref().is_some_and(|val| !val.is_metadata())
         {
-            API_REQUEST_COUNTER
-                .with_label_values(&["routing_evaluate", "failure"])
-                .inc();
+            update_failure_metrics();
             timer.observe_duration();
             return Err(EuclidErrors::InvalidRequestParameter(key.clone()).into());
         }
@@ -309,9 +309,7 @@ pub async fn routing_evaluate(
             if key_config.data_type == "enum" {
                 if let Some(Some(ValueType::EnumVariant(value))) = parameters.get(key) {
                     if !is_valid_enum_value(routing_config, key, value) {
-                        API_REQUEST_COUNTER
-                            .with_label_values(&["routing_evaluate", "failure"])
-                            .inc();
+                        update_failure_metrics();
                         timer.observe_duration();
                         return Err(EuclidErrors::InvalidRequest(format!(
                             "Invalid enum value '{}' for key '{}'",
@@ -320,9 +318,7 @@ pub async fn routing_evaluate(
                         .into());
                     }
                 } else {
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["routing_evaluate", "failure"])
-                        .inc();
+                    update_failure_metrics();
                     timer.observe_duration();
                     return Err(EuclidErrors::InvalidRequest(format!(
                         "Expected enum value for key '{}'",
@@ -352,9 +348,7 @@ pub async fn routing_evaluate(
     {
         Ok(algo) => algo,
         Err(e) => {
-            API_REQUEST_COUNTER
-                .with_label_values(&["routing_evaluate", "failure"])
-                .inc();
+            update_failure_metrics();
             timer.observe_duration();
             return Err(e.into());
         }
@@ -372,9 +366,7 @@ pub async fn routing_evaluate(
         }) {
             Ok(data) => data,
             Err(e) => {
-                API_REQUEST_COUNTER
-                    .with_label_values(&["routing_evaluate", "failure"])
-                    .inc();
+                update_failure_metrics();
                 timer.observe_duration();
                 return Err(e.into());
             }
@@ -392,9 +384,7 @@ pub async fn routing_evaluate(
                 }) {
                     Ok((_, eval)) => (out_enum, eval, Some("straight_through_rule".into())),
                     Err(e) => {
-                        API_REQUEST_COUNTER
-                            .with_label_values(&["routing_evaluate", "failure"])
-                            .inc();
+                        update_failure_metrics();
                         timer.observe_duration();
                         return Err(e.into());
                     }
@@ -411,9 +401,7 @@ pub async fn routing_evaluate(
                 }) {
                     Ok((_, eval)) => (out_enum, eval, Some("priority_rule".into())),
                     Err(e) => {
-                        API_REQUEST_COUNTER
-                            .with_label_values(&["routing_evaluate", "failure"])
-                            .inc();
+                        update_failure_metrics();
                         timer.observe_duration();
                         return Err(e.into());
                     }
@@ -430,9 +418,7 @@ pub async fn routing_evaluate(
                 }) {
                     Ok((_, eval)) => (out_enum, eval, Some("volume_split_rule".into())),
                     Err(e) => {
-                        API_REQUEST_COUNTER
-                            .with_label_values(&["routing_evaluate", "failure"])
-                            .inc();
+                        update_failure_metrics();
                         timer.observe_duration();
                         return Err(e.into());
                     }
@@ -464,9 +450,7 @@ pub async fn routing_evaluate(
                         (ir.output, ir.evaluated_output, ir.rule_name)
                     }
                     Err(e) => {
-                        API_REQUEST_COUNTER
-                            .with_label_values(&["routing_evaluate", "failure"])
-                            .inc();
+                        update_failure_metrics();
                         timer.observe_duration();
                         return Err(e.into());
                     }
@@ -516,6 +500,12 @@ pub async fn activate_routing_rule(
         .with_label_values(&["activate_routing_rule"])
         .inc();
 
+    let update_failure_metrics = || {
+        API_REQUEST_COUNTER
+            .with_label_values(&["activate_routing_rule", "failure"])
+            .inc();
+    };
+
     let state = get_tenant_app_state().await;
     let conn = match state
         .db
@@ -525,9 +515,7 @@ pub async fn activate_routing_rule(
     {
         Ok(connection) => connection,
         Err(e) => {
-            API_REQUEST_COUNTER
-                .with_label_values(&["activate_routing_rule", "failure"])
-                .inc();
+            update_failure_metrics();
             timer.observe_duration();
             return Err(e.into());
         }
@@ -545,9 +533,7 @@ pub async fn activate_routing_rule(
     )) {
         Ok(algorithm) => algorithm.algorithm_for,
         Err(e) => {
-            API_REQUEST_COUNTER
-                .with_label_values(&["activate_routing_rule", "failure"])
-                .inc();
+            update_failure_metrics();
             timer.observe_duration();
             return Err(e.into());
         }
@@ -595,9 +581,7 @@ pub async fn activate_routing_rule(
                     return Ok(());
                 }
                 Err(e) => {
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["activate_routing_rule", "failure"])
-                        .inc();
+                    update_failure_metrics();
                     timer.observe_duration();
                     return Err(e.into());
                 }
@@ -629,9 +613,7 @@ pub async fn activate_routing_rule(
             Ok(())
         }
         Err(e) => {
-            API_REQUEST_COUNTER
-                .with_label_values(&["activate_routing_rule", "failure"])
-                .inc();
+            update_failure_metrics();
             timer.observe_duration();
             Err(e.into())
         }
@@ -685,6 +667,13 @@ pub async fn list_active_routing_algorithm(
     metrics::API_REQUEST_TOTAL_COUNTER
         .with_label_values(&["list_active_routing_algorithm"])
         .inc();
+
+    let update_failure_metrics = || {
+        API_REQUEST_COUNTER
+            .with_label_values(&["list_active_routing_algorithm", "failure"])
+            .inc();
+    };
+
     let state = get_tenant_app_state().await;
 
     let active_mappings = match crate::generics::generic_find_all::<
@@ -698,9 +687,7 @@ pub async fn list_active_routing_algorithm(
     )) {
         Ok(mappings) => mappings,
         Err(e) => {
-            metrics::API_REQUEST_COUNTER
-                .with_label_values(&["list_active_routing_algorithm", "failure"])
-                .inc();
+            update_failure_metrics();
             timer.observe_duration();
             return Err(e.into());
         }
@@ -721,9 +708,7 @@ pub async fn list_active_routing_algorithm(
     {
         Ok(algos) => algos,
         Err(e) => {
-            metrics::API_REQUEST_COUNTER
-                .with_label_values(&["list_active_routing_algorithm", "failure"])
-                .inc();
+            update_failure_metrics();
             timer.observe_duration();
             return Err(e.into());
         }
