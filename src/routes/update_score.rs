@@ -1,5 +1,5 @@
 use crate::decider::gatewaydecider::types::{ErrorResponse, UnifiedError};
-use crate::feedback::gateway_scoring_service::check_and_update_gateway_score;
+use crate::feedback::gateway_scoring_service::{check_and_update_gateway_score,invalid_request_error};
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
 use crate::types::card::txn_card_info::{
     convert_safe_to_txn_card_info, SafeTxnCardInfo, TxnCardInfo,
@@ -163,41 +163,13 @@ pub async fn update_score(
             let txn_detail = match convert_safe_txn_detail_to_txn_detail(payload.txn_detail) {
                 Ok(detail) => detail,
                 Err(e) => {
-                    return Err(ErrorResponse {
-                        status: "400".to_string(),
-                        error_code: "INVALID_REQUEST".to_string(),
-                        error_message: format!("Failed to extract transaction details: {}", e),
-                        priority_logic_tag: None,
-                        routing_approach: None,
-                        filter_wise_gateways: None,
-                        error_info: UnifiedError {
-                            code: "INVALID_REQUEST".to_string(),
-                            user_message: "Invalid request data provided".to_string(),
-                            developer_message: format!("Error extracting transaction details: {}", e),
-                        },
-                        priority_logic_output: None,
-                        is_dynamic_mga_enabled: false,
-                    });
+                    return Err(invalid_request_error("transaction details", &e));
                 }
             };
             let txn_card_info = match convert_safe_to_txn_card_info(payload.txn_card_info) {
                 Ok(card_info) => card_info,
                 Err(e) => {
-                    return Err(ErrorResponse {
-                        status: "400".to_string(),
-                        error_code: "INVALID_REQUEST".to_string(),
-                        error_message: format!("Failed to extract txn_card_info: {}", e),
-                        priority_logic_tag: None,
-                        routing_approach: None,
-                        filter_wise_gateways: None,
-                        error_info: UnifiedError {
-                            code: "INVALID_REQUEST".to_string(),
-                            user_message: "Invalid request data provided".to_string(),
-                            developer_message: format!("Error extracting txn_card_info: {}", e),
-                        },
-                        priority_logic_output: None,
-                        is_dynamic_mga_enabled: false,
-                    });
+                    return Err(invalid_request_error("transaction Card Info", &e));
                 }
             };
             

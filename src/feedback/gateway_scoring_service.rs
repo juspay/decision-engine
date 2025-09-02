@@ -380,6 +380,24 @@ pub fn updateGatewayScoreLock(
     }
 }
 
+pub fn invalid_request_error(detail: &str, e: &impl std::fmt::Display) -> T::ErrorResponse {
+    T::ErrorResponse {
+        status: "400".to_string(),
+        error_code: "INVALID_REQUEST".to_string(),
+        error_message: format!("Failed to extract {}: {}", detail, e),
+        priority_logic_tag: None,
+        routing_approach: None,
+        filter_wise_gateways: None,
+        error_info: T::UnifiedError {
+            code: "INVALID_REQUEST".to_string(),
+            user_message: "Invalid request data provided".to_string(),
+            developer_message: format!("Error extracting {}: {}", detail, e),
+        },
+        priority_logic_output: None,
+        is_dynamic_mga_enabled: false,
+    }
+}
+
 pub async fn check_and_update_gateway_score_(
     apiPayload: FT::UpdateScorePayload,
 ) -> Result<String, T::ErrorResponse> {
@@ -401,21 +419,7 @@ pub async fn check_and_update_gateway_score_(
             let txn_detail: TxnDetail = match Fbu::getTxnDetailFromApiPayload(apiPayload.clone(), gateway_scoring_data.clone()) {
                 Ok(detail) => detail,
                 Err(e) => {
-                    return Err(T::ErrorResponse {
-                        status: "400".to_string(),
-                        error_code: "INVALID_REQUEST".to_string(),
-                        error_message: format!("Failed to extract transaction details: {}", e),
-                        priority_logic_tag: None,
-                        routing_approach: None,
-                        filter_wise_gateways: None,
-                        error_info: T::UnifiedError {
-                            code: "INVALID_REQUEST".to_string(),
-                            user_message: "Invalid request data provided".to_string(),
-                            developer_message: format!("Error extracting transaction details: {}", e),
-                        },
-                        priority_logic_output: None,
-                        is_dynamic_mga_enabled: false,
-                    });
+                    return Err(invalid_request_error("transaction details", &e));
                 }
             };
             let txn_card_info: TxnCardInfo =
