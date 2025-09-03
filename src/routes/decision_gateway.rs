@@ -3,7 +3,7 @@ use crate::decider::gatewaydecider::{
     types::{DecidedGateway, DomainDeciderRequest, ErrorResponse, UnifiedError},
 };
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
-use crate::{logger, metrics};
+use crate::{logger, metrics, utils::estimate_memory_usage};
 use axum::body::to_bytes;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
@@ -130,18 +130,19 @@ where
             let merchant_id = payload.orderReference.merchantId.clone();
             let merchant_id_txt = crate::types::merchant::id::merchant_id_to_text(merchant_id);
             tracing::Span::current().record("merchant_id", merchant_id_txt.clone());
+            
             tracing::Span::current().record("udf_txn_uuid", payload.txnDetail.txnUuid.clone());
             tracing::Span::current().record("txn_uuid", payload.txnDetail.txnUuid.clone());
             tracing::Span::current()
                 .record("udf_order_id", payload.orderReference.orderId.0.as_str());
-            jemalloc_ctl::epoch::advance().unwrap();
-            let allocated_before = jemalloc_ctl::stats::allocated::read().unwrap_or(0);
+            // This is a simplified approach as mimalloc doesn't expose runtime stats like jemalloc
+            let process_start = std::process::id();
+            let memory_before = estimate_memory_usage();
 
             let result = deciderFullPayloadHSFunction(payload.clone()).await;
 
-            jemalloc_ctl::epoch::advance().unwrap();
-            let allocated_after = jemalloc_ctl::stats::allocated::read().unwrap_or(0);
-            let bytes_allocated = allocated_after.saturating_sub(allocated_before);
+            let memory_after = estimate_memory_usage();
+            let bytes_allocated = memory_after.saturating_sub(memory_before);
 
             let final_result = match result {
                 Ok((decided_gateway, filter_list)) => {

@@ -20,7 +20,7 @@ use crate::{
 use once_cell::sync::OnceCell;
 pub static APP_STATE: OnceCell<Arc<GlobalAppState>> = OnceCell::new();
 #[global_allocator]
-static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
+static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 pub async fn get_tenant_app_state() -> Arc<TenantAppState> {
     let app_state = APP_STATE.get().expect("GlobalAppState not set");
     let tenant_app_state = GlobalAppState::get_app_state_of_tenant(app_state, "public")

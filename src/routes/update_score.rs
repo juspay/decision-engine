@@ -3,7 +3,7 @@ use crate::feedback::gateway_scoring_service::check_and_update_gateway_score;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
 use crate::types::card::txn_card_info::TxnCardInfo;
 use crate::types::txn_details::types::{TransactionLatency, TxnDetail};
-use crate::{logger, metrics};
+use crate::{logger, metrics, utils::estimate_memory_usage};
 use axum::body::to_bytes;
 use cpu_time::ProcessTime;
 use serde::{Deserialize, Serialize};
@@ -163,8 +163,8 @@ pub async fn update_score(
             let gateway_reference_id = payload.gateway_reference_id;
             let txn_latency = payload.txn_latency;
 
-            jemalloc_ctl::epoch::advance().unwrap();
-            let allocated_before = jemalloc_ctl::stats::allocated::read().unwrap_or(0);
+            // For mimalloc, we'll track memory differently - using heap size estimation
+            let memory_before = estimate_memory_usage();
 
             check_and_update_gateway_score(
                 txn_detail,
@@ -176,9 +176,8 @@ pub async fn update_score(
             )
             .await;
 
-            jemalloc_ctl::epoch::advance().unwrap();
-            let allocated_after = jemalloc_ctl::stats::allocated::read().unwrap_or(0);
-            let bytes_allocated = allocated_after.saturating_sub(allocated_before);
+            let memory_after = estimate_memory_usage();
+            let bytes_allocated = memory_after.saturating_sub(memory_before);
 
             // Log the successful response
             let latency = start_time.elapsed().as_millis() as u64;
