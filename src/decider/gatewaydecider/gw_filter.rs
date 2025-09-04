@@ -229,6 +229,7 @@ pub async fn newGwFilters(
         let _ = filterFunctionalGatewaysForSplitSettlement(this).await;
         let _ = filterFunctionalGatewaysForMerchantRequiredFlow(this).await;
         let _ = filterFunctionalGatewaysForOTMFlow(this).await;
+        let _ = filterFunctionalGatewaysForNBQC(this).await;
         let _ = filterGatewaysForMGASelectionIntegrity(this).await;
         let funcGateways =
             returnGwListWithLog(this, DeciderFilterName::FinalFunctionalGateways, false);
@@ -1451,6 +1452,62 @@ pub async fn filterFunctionalGatewaysForOTMFlow(this: &mut DeciderFlow<'_>) -> V
         DeciderFilterName::FilterFunctionalGatewaysForOTM,
         true,
     )
+}
+
+pub async fn filterFunctionalGatewaysForNBQC(
+    this: &mut DeciderFlow<'_>,
+) -> GatewayList {
+    let st = getGws(this);
+    let txn_detail = this.get().dpTxnDetail.clone();
+
+    let macc = this.get().dpMerchantAccount.clone();
+    let order_reference = this.get().dpOrder.clone();
+    let (metadata, pl_ref_id_map) = Utils::get_order_metadata_and_pl_ref_id_map(
+        this,
+        macc.enableGatewayReferenceIdBasedRouting,
+        &order_reference,
+    );
+    let possible_ref_ids_of_merchant = Utils::get_all_possible_ref_ids(metadata.clone(), order_reference.clone(), pl_ref_id_map.clone());
+    let enabled_mgas = SETMA::get_enabled_mgas_by_merchant_id_and_ref_id(this, macc.merchantId, possible_ref_ids_of_merchant,).await;
+    let relevant_flows: Vec<&str> = [
+        C::NB_QUICK_CHECKOUT_PAYMENT_FLOW_NAME
+    ].to_vec();
+
+    let filtered_mgas_by_enablement: Vec<_> = enabled_mgas
+                .into_iter()
+                .filter(|mga| {
+                    relevant_flows.iter().all(|flow| {
+                        Utils::is_payment_flow_enabled_in_mga(mga, flow).unwrap_or(false)
+                    })
+                })
+                .collect();
+    let txn_payment_flows = Utils::get_payment_flow_list_from_txn_detail(&txn_detail);
+
+
+    let eligible_mga_post_filtering: Vec<_> = filtered_mgas_by_enablement
+                .into_iter()
+                .filter(|mga| {
+                    st.iter().any(|gw| {
+                        gw == &mga.gateway
+                    })
+                })
+                .collect();
+    let final_gateways = eligible_mga_post_filtering
+                .into_iter()
+                .map(|g| g.gateway)
+                .collect::<Vec<_>>();
+
+    let is_nb_quick_checkout_in_txn_pf = txn_payment_flows.contains(&C::NB_QUICK_CHECKOUT_PAYMENT_FLOW_NAME.to_string());
+
+
+    if final_gateways.is_empty() || !is_nb_quick_checkout_in_txn_pf {
+        setGws(this, st);
+    } 
+    else {
+        setGws(this, final_gateways);
+    }
+
+    returnGwListWithLog(this, DeciderFilterName::FilterFunctionalGatewaysForNBQC, true)
 }
 
 /// Filters gateways based on transaction validation type (Card Mandate, TPV, E-Mandate)
