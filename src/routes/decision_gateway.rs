@@ -116,7 +116,7 @@ where
             );
 
             API_REQUEST_COUNTER
-                .with_label_values(&["decision_gateway", "failure"])
+                .with_label_values(&["decision_gateway", "failure", "400"])
                 .inc();
             timer.observe_duration();
 
@@ -180,7 +180,7 @@ where
                     );
 
                     API_REQUEST_COUNTER
-                        .with_label_values(&["decision_gateway", "success"])
+                        .with_label_values(&["decision_gateway", "success", "200"])
                         .inc();
                     Ok(response)
                 }
@@ -209,9 +209,9 @@ where
                         category = "INCOMING_API",
                         "Error occurred while processing decider function"
                     );
-
+                    let status_code = e.status.clone();
                     API_REQUEST_COUNTER
-                        .with_label_values(&["decision_gateway", "failure"])
+                        .with_label_values(&["decision_gateway", "failure", &status_code])
                         .inc();
                     Err(e)
                 }
@@ -264,7 +264,7 @@ where
             );
 
             API_REQUEST_COUNTER
-                .with_label_values(&["decision_gateway", "failure"])
+                .with_label_values(&["decision_gateway", "failure", "400"])
                 .inc();
             timer.observe_duration();
             Err(error_response)

@@ -41,7 +41,7 @@ pub async fn create_rule_config(
         .is_none()
     {
         API_REQUEST_COUNTER
-            .with_label_values(&["create_rule_config", "failure"])
+            .with_label_values(&["create_rule_config", "failure", "404"])
             .inc();
         timer.observe_duration();
         return Err(error::RuleConfigurationError::MerchantNotFound.into());
@@ -61,7 +61,7 @@ pub async fn create_rule_config(
             match result {
                 Some(_) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["sr_create_rule_config", "failure"])
+                        .with_label_values(&["sr_create_rule_config", "failure", "409"])
                         .inc();
                     Err(error::RuleConfigurationError::ConfigurationAlreadyExists.into())
                 }
@@ -72,7 +72,7 @@ pub async fn create_rule_config(
                     {
                         Ok(_) => {
                             API_REQUEST_COUNTER
-                                .with_label_values(&["sr_create_rule_config", "success"])
+                                .with_label_values(&["sr_create_rule_config", "success", "200"])
                                 .inc();
                             Ok(Json(RuleConfigResponse {
                                 message: "Success Rate Configuration created successfully"
@@ -83,7 +83,7 @@ pub async fn create_rule_config(
                         }
                         Err(e) => {
                             API_REQUEST_COUNTER
-                                .with_label_values(&["sr_create_rule_config", "failure"])
+                                .with_label_values(&["sr_create_rule_config", "failure", "500"])
                                 .inc();
                             Err(e.into())
                         }
@@ -106,7 +106,7 @@ pub async fn create_rule_config(
             match result {
                 Ok(_) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["elimination_create_rule_config", "success"])
+                        .with_label_values(&["elimination_create_rule_config", "success", "200"])
                         .inc();
                     Ok(Json(RuleConfigResponse {
                         message: "Elimination Configuration created successfully".to_string(),
@@ -116,7 +116,7 @@ pub async fn create_rule_config(
                 }
                 Err(e) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["elimination_create_rule_config", "failure"])
+                        .with_label_values(&["elimination_create_rule_config", "failure", "500"])
                         .inc();
                     Err(e.into())
                 }
@@ -135,7 +135,7 @@ pub async fn create_rule_config(
             match result {
                 Some(_) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["debit_routing_create_rule_config", "failure"])
+                        .with_label_values(&["debit_routing_create_rule_config", "failure", "409"])
                         .inc();
                     Err(error::RuleConfigurationError::ConfigurationAlreadyExists.into())
                 }
@@ -146,7 +146,11 @@ pub async fn create_rule_config(
                     {
                         Ok(_) => {
                             API_REQUEST_COUNTER
-                                .with_label_values(&["debit_routing_create_rule_config", "success"])
+                                .with_label_values(&[
+                                    "debit_routing_create_rule_config",
+                                    "success",
+                                    "200",
+                                ])
                                 .inc();
                             Ok(Json(RuleConfigResponse {
                                 message: "Debit Routing Configuration created successfully"
@@ -157,7 +161,11 @@ pub async fn create_rule_config(
                         }
                         Err(e) => {
                             API_REQUEST_COUNTER
-                                .with_label_values(&["debit_routing_create_rule_config", "failure"])
+                                .with_label_values(&[
+                                    "debit_routing_create_rule_config",
+                                    "failure",
+                                    "500",
+                                ])
                                 .inc();
                             Err(e.into())
                         }
@@ -210,7 +218,7 @@ pub async fn get_rule_config(
             match result {
                 Ok(success_rate_config) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["sr_get_rule_config", "success"])
+                        .with_label_values(&["sr_get_rule_config", "success", "200"])
                         .inc();
                     Ok(Json(types::routing_configuration::RoutingRule {
                         merchant_id: mid,
@@ -221,7 +229,7 @@ pub async fn get_rule_config(
                 }
                 Err(e) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["sr_get_rule_config", "failure"])
+                        .with_label_values(&["sr_get_rule_config", "failure", "500"])
                         .inc();
                     Err(e.into())
                 }
@@ -242,7 +250,7 @@ pub async fn get_rule_config(
             match result {
                 Ok(elimination_config) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["elimination_get_rule_config", "success"])
+                        .with_label_values(&["elimination_get_rule_config", "success", "200"])
                         .inc();
                     Ok(Json(types::routing_configuration::RoutingRule {
                         merchant_id: mid,
@@ -253,7 +261,7 @@ pub async fn get_rule_config(
                 }
                 Err(e) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["elimination_get_rule_config", "failure"])
+                        .with_label_values(&["elimination_get_rule_config", "failure", "500"])
                         .inc();
                     Err(e.into())
                 }
@@ -277,7 +285,7 @@ pub async fn get_rule_config(
             match result {
                 Ok(debit_routing_config) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["debit_routing_get_rule_config", "success"])
+                        .with_label_values(&["debit_routing_get_rule_config", "success", "200"])
                         .inc();
                     Ok(Json(types::routing_configuration::RoutingRule {
                         merchant_id: mid,
@@ -288,7 +296,7 @@ pub async fn get_rule_config(
                 }
                 Err(e) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["debit_routing_get_rule_config", "failure"])
+                        .with_label_values(&["debit_routing_get_rule_config", "failure", "500"])
                         .inc();
                     Err(e.into())
                 }
@@ -333,7 +341,7 @@ pub async fn update_rule_config(
             match result {
                 Ok(_) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["sr_update_rule_config", "success"])
+                        .with_label_values(&["sr_update_rule_config", "success", "200"])
                         .inc();
                     Ok(Json(RuleConfigResponse {
                         message: "Success Rate Configuration updated successfully".to_string(),
@@ -343,7 +351,7 @@ pub async fn update_rule_config(
                 }
                 Err(e) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["sr_update_rule_config", "failure"])
+                        .with_label_values(&["sr_update_rule_config", "failure", "500"])
                         .inc();
                     Err(e.into())
                 }
@@ -364,7 +372,7 @@ pub async fn update_rule_config(
             match result {
                 Ok(_) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["elimination_update_rule_config", "success"])
+                        .with_label_values(&["elimination_update_rule_config", "success", "200"])
                         .inc();
                     Ok(Json(RuleConfigResponse {
                         message: "Elimination Configuration updated successfully".to_string(),
@@ -374,7 +382,7 @@ pub async fn update_rule_config(
                 }
                 Err(e) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["elimination_update_rule_config", "failure"])
+                        .with_label_values(&["elimination_update_rule_config", "failure", "500"])
                         .inc();
                     Err(e.into())
                 }
@@ -392,7 +400,7 @@ pub async fn update_rule_config(
             match result {
                 Ok(_) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["debit_routing_update_rule_config", "success"])
+                        .with_label_values(&["debit_routing_update_rule_config", "success", "200"])
                         .inc();
                     Ok(Json(RuleConfigResponse {
                         message: "Debit Routing Configuration updated successfully".to_string(),
@@ -402,7 +410,7 @@ pub async fn update_rule_config(
                 }
                 Err(e) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["debit_routing_update_rule_config", "failure"])
+                        .with_label_values(&["debit_routing_update_rule_config", "failure", "500"])
                         .inc();
                     Err(e.into())
                 }
@@ -441,7 +449,7 @@ pub async fn delete_rule_config(
             match result {
                 Ok(_) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["sr_delete_rule_config", "success"])
+                        .with_label_values(&["sr_delete_rule_config", "success", "200"])
                         .inc();
                     Ok(Json(RuleConfigDeleteResponse {
                         message: "Success Rate Configuration deleted successfully".to_string(),
@@ -450,7 +458,7 @@ pub async fn delete_rule_config(
                 }
                 Err(e) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["sr_delete_rule_config", "failure"])
+                        .with_label_values(&["sr_delete_rule_config", "failure", "500"])
                         .inc();
                     Err(e.into())
                 }
@@ -467,7 +475,7 @@ pub async fn delete_rule_config(
             match result {
                 Ok(_) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["elimination_delete_rule_config", "success"])
+                        .with_label_values(&["elimination_delete_rule_config", "success", "200"])
                         .inc();
                     Ok(Json(RuleConfigDeleteResponse {
                         message: "Elimination Configuration deleted successfully".to_string(),
@@ -476,7 +484,7 @@ pub async fn delete_rule_config(
                 }
                 Err(e) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["elimination_delete_rule_config", "failure"])
+                        .with_label_values(&["elimination_delete_rule_config", "failure", "500"])
                         .inc();
                     Err(e.into())
                 }
@@ -491,7 +499,7 @@ pub async fn delete_rule_config(
             match result {
                 Ok(_) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["debit_routing_delete_rule_config", "success"])
+                        .with_label_values(&["debit_routing_delete_rule_config", "success", "200"])
                         .inc();
                     Ok(Json(RuleConfigDeleteResponse {
                         message: "Debit Routing Configuration deleted successfully".to_string(),
@@ -500,7 +508,7 @@ pub async fn delete_rule_config(
                 }
                 Err(e) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["debit_routing_delete_rule_config", "failure"])
+                        .with_label_values(&["debit_routing_delete_rule_config", "failure", "500"])
                         .inc();
                     Err(e.into())
                 }

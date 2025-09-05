@@ -49,7 +49,7 @@ pub async fn update_score(
         Ok(bytes) => bytes,
         Err(e) => {
             API_REQUEST_COUNTER
-                .with_label_values(&["update_score", "failure"])
+                .with_label_values(&["update_score", "failure", "400"])
                 .inc();
             timer.observe_duration();
             let error_response = ErrorResponse {
@@ -149,7 +149,7 @@ pub async fn update_score(
                 );
 
                 API_REQUEST_COUNTER
-                    .with_label_values(&["update_score", "failure"])
+                    .with_label_values(&["update_score", "failure", "400"])
                     .inc();
                 timer.observe_duration();
                 return Err(error_response);
@@ -202,7 +202,7 @@ pub async fn update_score(
             );
 
             API_REQUEST_COUNTER
-                .with_label_values(&["update_score", "success"])
+                .with_label_values(&["update_score", "success", "200"])
                 .inc();
             timer.observe_duration();
             return Ok("Success");
@@ -249,7 +249,7 @@ pub async fn update_score(
             );
 
             API_REQUEST_COUNTER
-                .with_label_values(&["update_score", "failure"])
+                .with_label_values(&["update_score", "failure", "400"])
                 .inc();
             timer.observe_duration();
             return Err(error_response);

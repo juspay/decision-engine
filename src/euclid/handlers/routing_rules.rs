@@ -55,7 +55,7 @@ pub async fn config_sr_dimentions(
 
     if !invalid_dimensions.is_empty() {
         metrics::API_REQUEST_COUNTER
-            .with_label_values(&["config_sr_dimentions", "failure"])
+            .with_label_values(&["config_sr_dimentions", "failure", "400"])
             .inc();
         timer.observe_duration();
 
@@ -107,7 +107,7 @@ pub async fn config_sr_dimentions(
 
     if let Err(_) = result {
         metrics::API_REQUEST_COUNTER
-            .with_label_values(&["config_sr_dimentions", "failure"])
+            .with_label_values(&["config_sr_dimentions", "failure", "500"])
             .inc();
         timer.observe_duration();
         logger::error!(
@@ -117,7 +117,7 @@ pub async fn config_sr_dimentions(
         return Err(ContainerError::from(EuclidErrors::StorageError));
     }
     metrics::API_REQUEST_COUNTER
-        .with_label_values(&["config_sr_dimentions", "success"])
+        .with_label_values(&["config_sr_dimentions", "success", "200"])
         .inc();
     timer.observe_duration();
     logger::info!(
@@ -154,7 +154,7 @@ pub async fn routing_create(
                 logger::error!("Routing rule validation failed with errors: {detailed_error}");
 
                 metrics::API_REQUEST_COUNTER
-                    .with_label_values(&["routing_create", "failure"])
+                    .with_label_values(&["routing_create", "failure", "400"])
                     .inc();
                 timer.observe_duration();
                 return Err(ContainerError::new_with_status_code_and_payload(
@@ -169,7 +169,7 @@ pub async fn routing_create(
             }
         }
         metrics::API_REQUEST_COUNTER
-            .with_label_values(&["routing_create", "failure"])
+            .with_label_values(&["routing_create", "failure", "400"])
             .inc();
         timer.observe_duration();
         return Err(err.into());
@@ -218,7 +218,7 @@ pub async fn routing_create(
     logger::info!("Response: {response:?}");
 
     metrics::API_REQUEST_COUNTER
-        .with_label_values(&["routing_create", "success"])
+        .with_label_values(&["routing_create", "success", "200"])
         .inc();
     timer.observe_duration();
     Ok(Json(response))
@@ -269,7 +269,7 @@ pub async fn routing_evaluate(
         Ok(mapper) => mapper.routing_algorithm_id,
         Err(e) => {
             API_REQUEST_COUNTER
-                .with_label_values(&["routing_evaluate", "failure"])
+                .with_label_values(&["routing_evaluate", "failure", "404"])
                 .inc();
             timer.observe_duration();
             return Err(e.into());
@@ -287,7 +287,7 @@ pub async fn routing_evaluate(
         Ok(config) => config,
         Err(e) => {
             API_REQUEST_COUNTER
-                .with_label_values(&["routing_evaluate", "failure"])
+                .with_label_values(&["routing_evaluate", "failure", "500"])
                 .inc();
             timer.observe_duration();
             return Err(e.into());
@@ -299,7 +299,7 @@ pub async fn routing_evaluate(
             && value.as_ref().is_some_and(|val| !val.is_metadata())
         {
             API_REQUEST_COUNTER
-                .with_label_values(&["routing_evaluate", "failure"])
+                .with_label_values(&["routing_evaluate", "failure", "400"])
                 .inc();
             timer.observe_duration();
             return Err(EuclidErrors::InvalidRequestParameter(key.clone()).into());
@@ -310,7 +310,7 @@ pub async fn routing_evaluate(
                 if let Some(Some(ValueType::EnumVariant(value))) = parameters.get(key) {
                     if !is_valid_enum_value(routing_config, key, value) {
                         API_REQUEST_COUNTER
-                            .with_label_values(&["routing_evaluate", "failure"])
+                            .with_label_values(&["routing_evaluate", "failure", "400"])
                             .inc();
                         timer.observe_duration();
                         return Err(EuclidErrors::InvalidRequest(format!(
@@ -321,7 +321,7 @@ pub async fn routing_evaluate(
                     }
                 } else {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["routing_evaluate", "failure"])
+                        .with_label_values(&["routing_evaluate", "failure", "400"])
                         .inc();
                     timer.observe_duration();
                     return Err(EuclidErrors::InvalidRequest(format!(
@@ -353,7 +353,7 @@ pub async fn routing_evaluate(
         Ok(algo) => algo,
         Err(e) => {
             API_REQUEST_COUNTER
-                .with_label_values(&["routing_evaluate", "failure"])
+                .with_label_values(&["routing_evaluate", "failure", "500"])
                 .inc();
             timer.observe_duration();
             return Err(e.into());
@@ -373,7 +373,7 @@ pub async fn routing_evaluate(
             Ok(data) => data,
             Err(e) => {
                 API_REQUEST_COUNTER
-                    .with_label_values(&["routing_evaluate", "failure"])
+                    .with_label_values(&["routing_evaluate", "failure", "400"])
                     .inc();
                 timer.observe_duration();
                 return Err(e.into());
@@ -393,7 +393,7 @@ pub async fn routing_evaluate(
                     Ok((_, eval)) => (out_enum, eval, Some("straight_through_rule".into())),
                     Err(e) => {
                         API_REQUEST_COUNTER
-                            .with_label_values(&["routing_evaluate", "failure"])
+                            .with_label_values(&["routing_evaluate", "failure", "500"])
                             .inc();
                         timer.observe_duration();
                         return Err(e.into());
@@ -412,7 +412,7 @@ pub async fn routing_evaluate(
                     Ok((_, eval)) => (out_enum, eval, Some("priority_rule".into())),
                     Err(e) => {
                         API_REQUEST_COUNTER
-                            .with_label_values(&["routing_evaluate", "failure"])
+                            .with_label_values(&["routing_evaluate", "failure", "500"])
                             .inc();
                         timer.observe_duration();
                         return Err(e.into());
@@ -431,7 +431,7 @@ pub async fn routing_evaluate(
                     Ok((_, eval)) => (out_enum, eval, Some("volume_split_rule".into())),
                     Err(e) => {
                         API_REQUEST_COUNTER
-                            .with_label_values(&["routing_evaluate", "failure"])
+                            .with_label_values(&["routing_evaluate", "failure", "500"])
                             .inc();
                         timer.observe_duration();
                         return Err(e.into());
@@ -465,7 +465,7 @@ pub async fn routing_evaluate(
                     }
                     Err(e) => {
                         API_REQUEST_COUNTER
-                            .with_label_values(&["routing_evaluate", "failure"])
+                            .with_label_values(&["routing_evaluate", "failure", "400"])
                             .inc();
                         timer.observe_duration();
                         return Err(e.into());
@@ -495,7 +495,7 @@ pub async fn routing_evaluate(
     logger::info!("Response: {response:?}");
 
     API_REQUEST_COUNTER
-        .with_label_values(&["routing_evaluate", "success"])
+        .with_label_values(&["routing_evaluate", "success", "200"])
         .inc();
     timer.observe_duration();
     Ok(Json(response))
@@ -526,7 +526,7 @@ pub async fn activate_routing_rule(
         Ok(connection) => connection,
         Err(e) => {
             API_REQUEST_COUNTER
-                .with_label_values(&["activate_routing_rule", "failure"])
+                .with_label_values(&["activate_routing_rule", "failure", "500"])
                 .inc();
             timer.observe_duration();
             return Err(e.into());
@@ -546,7 +546,7 @@ pub async fn activate_routing_rule(
         Ok(algorithm) => algorithm.algorithm_for,
         Err(e) => {
             API_REQUEST_COUNTER
-                .with_label_values(&["activate_routing_rule", "failure"])
+                .with_label_values(&["activate_routing_rule", "failure", "404"])
                 .inc();
             timer.observe_duration();
             return Err(e.into());
@@ -589,14 +589,14 @@ pub async fn activate_routing_rule(
             {
                 Ok(_) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["activate_routing_rule", "success"])
+                        .with_label_values(&["activate_routing_rule", "success", "200"])
                         .inc();
                     timer.observe_duration();
                     return Ok(());
                 }
                 Err(e) => {
                     API_REQUEST_COUNTER
-                        .with_label_values(&["activate_routing_rule", "failure"])
+                        .with_label_values(&["activate_routing_rule", "failure", "500"])
                         .inc();
                     timer.observe_duration();
                     return Err(e.into());
@@ -604,7 +604,7 @@ pub async fn activate_routing_rule(
             }
         }
         API_REQUEST_COUNTER
-            .with_label_values(&["activate_routing_rule", "success"])
+            .with_label_values(&["activate_routing_rule", "success", "200"])
             .inc();
         timer.observe_duration();
         return Ok(());
@@ -623,14 +623,14 @@ pub async fn activate_routing_rule(
     {
         Ok(_) => {
             API_REQUEST_COUNTER
-                .with_label_values(&["activate_routing_rule", "success"])
+                .with_label_values(&["activate_routing_rule", "success", "200"])
                 .inc();
             timer.observe_duration();
             Ok(())
         }
         Err(e) => {
             API_REQUEST_COUNTER
-                .with_label_values(&["activate_routing_rule", "failure"])
+                .with_label_values(&["activate_routing_rule", "failure", "500"])
                 .inc();
             timer.observe_duration();
             Err(e.into())
@@ -660,14 +660,14 @@ pub async fn list_all_routing_algorithm_id(
     {
         Ok(algorithms) => {
             API_REQUEST_COUNTER
-                .with_label_values(&["list_all_routing_algorithm_id", "success"])
+                .with_label_values(&["list_all_routing_algorithm_id", "success", "200"])
                 .inc();
             timer.observe_duration();
             Ok(Json(algorithms.into_iter().map(Into::into).collect()))
         }
         Err(e) => {
             API_REQUEST_COUNTER
-                .with_label_values(&["list_all_routing_algorithm_id", "failure"])
+                .with_label_values(&["list_all_routing_algorithm_id", "failure", "500"])
                 .inc();
             timer.observe_duration();
             Err(e.into())
@@ -699,7 +699,7 @@ pub async fn list_active_routing_algorithm(
         Ok(mappings) => mappings,
         Err(e) => {
             metrics::API_REQUEST_COUNTER
-                .with_label_values(&["list_active_routing_algorithm", "failure"])
+                .with_label_values(&["list_active_routing_algorithm", "failure", "404"])
                 .inc();
             timer.observe_duration();
             return Err(e.into());
@@ -722,7 +722,7 @@ pub async fn list_active_routing_algorithm(
         Ok(algos) => algos,
         Err(e) => {
             metrics::API_REQUEST_COUNTER
-                .with_label_values(&["list_active_routing_algorithm", "failure"])
+                .with_label_values(&["list_active_routing_algorithm", "failure", "500"])
                 .inc();
             timer.observe_duration();
             return Err(e.into());
@@ -734,7 +734,7 @@ pub async fn list_active_routing_algorithm(
         .collect();
 
     API_REQUEST_COUNTER
-        .with_label_values(&["list_active_routing_algorithm", "success"])
+        .with_label_values(&["list_active_routing_algorithm", "success", "200"])
         .inc();
     timer.observe_duration();
 
