@@ -742,6 +742,7 @@ pub const paymentFlowsRequiredForGwFiltering: [&str; 12] = [
     "CROSS_BORDER_PAYMENT",
     "SINGLE_BLOCK_MULTIPLE_DEBIT",
     "ONE_TIME_MANDATE",
+    "PARTIAL_TPV"
 ];
 
 pub const getCardBrandCacheExpiry: i32 = 2 * 24 * 60 * 60;
