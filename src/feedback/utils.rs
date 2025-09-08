@@ -414,7 +414,34 @@ pub async fn isKeyExistsRedis(key: String) -> bool {
         }
     }
 }
+pub async fn findKeysByPattern(pattern: &str) -> Vec<String> {
+    let app_state = get_tenant_app_state().await;
+    let scan_result: Result<Vec<String>, error_stack::Report<redis_interface::errors::RedisError>> =
+        app_state.redis_conn.scan_match(pattern).await;
 
+    match scan_result {
+        Ok(keys) => {
+            logger::info!(
+                tag = "findKeysByPattern",
+                action = "pattern_search",
+                "Found {} keys with pattern: {}",
+                keys.len(),
+                pattern
+            );
+            keys
+        }
+        Err(err) => {
+            logger::error!(
+                tag = "findKeysByPattern",
+                action = "pattern_search_error",
+                "Error while searching for keys with pattern {}: {:?}",
+                pattern,
+                err
+            );
+            Vec::new()
+        }
+    }
+}
 // Original Haskell function: updateQueue
 pub async fn updateQueue(
     redis_name: String,
