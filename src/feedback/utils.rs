@@ -214,6 +214,11 @@ pub fn getTxnCardInfoFromApiPayload(
     apiPayload: UpdateScorePayload,
     gateway_scoring_data: GatewayScoringData,
 ) -> ETCa::txn_card_info::TxnCardInfo {
+    // Use paymentMethod from request if provided, otherwise fall back to Redis data
+    let payment_method = apiPayload.paymentMethod
+        .clone()
+        .unwrap_or_else(|| gateway_scoring_data.paymentMethod.clone());
+
     let txnCardInfo = ETCa::txn_card_info::TxnCardInfo {
         id: ETCa::txn_card_info::to_txn_card_info_pid(1),
         card_isin: None,
@@ -223,7 +228,7 @@ pub fn getTxnCardInfoFromApiPayload(
         nameOnCard: None,
         dateCreated: gateway_scoring_data.dateCreated,
         paymentMethodType: gateway_scoring_data.paymentMethodType.clone(),
-        paymentMethod: gateway_scoring_data.paymentMethod.clone(),
+        paymentMethod: payment_method,
         paymentSource: gateway_scoring_data.paymentSource.clone(),
         authType: gateway_scoring_data
             .authType
@@ -617,8 +622,40 @@ pub async fn getProducerKey(
     enforce1d: bool,
     gateway_reference_id: Option<String>,
 ) -> Option<String> {
+    getProducerKeyWithUpdatedPaymentMethod(
+        txn_detail,
+        redis_gateway_score_data,
+        score_key_type,
+        enforce1d,
+        gateway_reference_id,
+        None,
+    )
+    .await
+}
+
+// Enhanced version of getProducerKey that accepts an optional updated paymentMethod
+pub async fn getProducerKeyWithUpdatedPaymentMethod(
+    txn_detail: TxnDetail,
+    redis_gateway_score_data: Option<GatewayScoringData>,
+    score_key_type: ScoreKeyType,
+    enforce1d: bool,
+    gateway_reference_id: Option<String>,
+    updated_payment_method: Option<String>,
+) -> Option<String> {
     match redis_gateway_score_data {
-        Some(gateway_score_data) => {
+        Some(mut gateway_score_data) => {
+            // If an updated payment method is provided, use it to override the original
+            if let Some(new_payment_method) = updated_payment_method {
+                logger::info!(
+                    action = "getProducerKeyWithUpdatedPaymentMethod",
+                    tag = "network_specific_scoring",
+                    "Overriding paymentMethod: {} -> {}",
+                    gateway_score_data.paymentMethod,
+                    new_payment_method
+                );
+                gateway_score_data.paymentMethod = new_payment_method;
+            }
+
             let is_gri_enabled = if [ScoreKeyType::ELIMINATION_MERCHANT_KEY]
                 .contains(&score_key_type)
             {
@@ -653,7 +690,7 @@ pub async fn getProducerKey(
             .await;
 
             let (_, key) = gateway_key.into_iter().next().unwrap();
-            logger::info!(tag = "getProducerKey", "UNIFIED_KEY {}", key);
+            logger::info!(tag = "getProducerKeyWithUpdatedPaymentMethod", "UNIFIED_KEY {}", key);
             Some(key)
         }
         None => {
