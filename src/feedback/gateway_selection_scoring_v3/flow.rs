@@ -45,7 +45,7 @@ use crate::{
         constants as C,
         types::SrV3DebugBlock,
         utils::{
-            dateInIST, getCurrentIstDateWithFormat, getProducerKey, getTrueString,
+            dateInIST, getCurrentIstDateWithFormat, getProducerKey, getProducerKeyWithUpdatedPaymentMethod, getTrueString,
             isKeyExistsRedis, logGatewayScoreType, updateMovingWindow, updateScore,
             GatewayScoringType,
         },
@@ -84,12 +84,13 @@ pub async fn updateSrV3Score(
             );
         }
         (Some(gateway)) => {
-            let unified_sr_v3_key = getProducerKey(
+            let unified_sr_v3_key = getProducerKeyWithUpdatedPaymentMethod(
                 txn_detail.clone(),
                 mb_gateway_scoring_data,
                 SK::SR_V3_KEY,
                 false,
                 gateway_reference_id.clone(),
+                Some(txn_card_info.paymentMethod.clone()),
             )
             .await;
             let key_for_gateway_selection =
