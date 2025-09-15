@@ -731,7 +731,7 @@ impl SC::ServiceConfigKey for GATEWAYDECIDER_SCORINGFLOW {
     }
 }
 
-pub const paymentFlowsRequiredForGwFiltering: [&str; 12] = [
+pub const paymentFlowsRequiredForGwFiltering: [&str; 13] = [
     "DOTP",
     "CARD_MOTO",
     "MANDATE_REGISTER",
@@ -744,6 +744,7 @@ pub const paymentFlowsRequiredForGwFiltering: [&str; 12] = [
     "CROSS_BORDER_PAYMENT",
     "SINGLE_BLOCK_MULTIPLE_DEBIT",
     "ONE_TIME_MANDATE",
+    NB_QUICK_CHECKOUT_PAYMENT_FLOW_NAME,
 ];
 
 pub const getCardBrandCacheExpiry: i32 = 2 * 24 * 60 * 60;
