@@ -247,6 +247,9 @@ pub struct UpdateScorePayload {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct UpdateScoreResponse {
     pub message: String,
+    pub merchant_id: String,
+    pub gateway: String,
+    pub payment_id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
