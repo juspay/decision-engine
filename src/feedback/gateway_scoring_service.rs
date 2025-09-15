@@ -416,7 +416,10 @@ pub async fn check_and_update_gateway_score_(
     match m_gateway_scoring_data {
         Ok(gateway_scoring_data) => {
             // Extract transaction details and card info from the API payload
-            let txn_detail: TxnDetail = match Fbu::getTxnDetailFromApiPayload(apiPayload.clone(), gateway_scoring_data.clone()) {
+            let txn_detail: TxnDetail = match Fbu::getTxnDetailFromApiPayload(
+                apiPayload.clone(),
+                gateway_scoring_data.clone(),
+            ) {
                 Ok(detail) => detail,
                 Err(e) => {
                     return Err(invalid_request_error("transaction details", &e));

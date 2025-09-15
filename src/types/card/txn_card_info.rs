@@ -203,7 +203,9 @@ pub struct SafeTxnCardInfo {
     pub partitionKey: Option<PrimitiveDateTime>,
 }
 
-pub fn convert_safe_to_txn_card_info(safe_info: SafeTxnCardInfo) -> Result<TxnCardInfo, crate::error::ApiError> {
+pub fn convert_safe_to_txn_card_info(
+    safe_info: SafeTxnCardInfo,
+) -> Result<TxnCardInfo, crate::error::ApiError> {
     let id_i64 = safe_info
         .id
         .parse::<i64>()

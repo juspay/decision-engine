@@ -3,7 +3,7 @@
 
 use crate::app::get_tenant_app_state;
 use crate::error::StorageError;
-use masking::{Secret, PeekInterface};
+use masking::{PeekInterface, Secret};
 // Converted imports
 // use eulerhs::prelude::*;
 // use eulerhs::language as L;
@@ -195,14 +195,14 @@ pub fn getTxnDetailFromApiPayload(
         country: gateway_scoring_data.country.clone(),
         surchargeAmount: None,
         taxAmount: None,
-        internalMetadata: Some(
-            Secret::new(serde_json::to_string(&InternalMetadata {
+        internalMetadata: Some(Secret::new(
+            serde_json::to_string(&InternalMetadata {
                 internal_tracking_info: InternalTrackingInfo {
                     routing_approach: gateway_scoring_data.routingApproach.unwrap_or_default(),
                 },
             })
-            .unwrap()),
-        ),
+            .unwrap(),
+        )),
         netAmount: Some(ETMo::Money::from_double(0.0)),
         metadata: None,
         offerDeductionAmount: None,

@@ -552,7 +552,9 @@ pub struct SafeTxnDetail {
     pub txnAmountBreakup: Option<Vec<TransactionCharge>>,
 }
 
-pub fn convert_safe_txn_detail_to_txn_detail(safe_detail: SafeTxnDetail) -> Result<TxnDetail, crate::error::ApiError> {
+pub fn convert_safe_txn_detail_to_txn_detail(
+    safe_detail: SafeTxnDetail,
+) -> Result<TxnDetail, crate::error::ApiError> {
     Ok(TxnDetail {
         id: safe_detail
             .id

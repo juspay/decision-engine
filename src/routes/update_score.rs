@@ -1,5 +1,7 @@
 use crate::decider::gatewaydecider::types::{ErrorResponse, UnifiedError};
-use crate::feedback::gateway_scoring_service::{check_and_update_gateway_score,invalid_request_error};
+use crate::feedback::gateway_scoring_service::{
+    check_and_update_gateway_score, invalid_request_error,
+};
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
 use crate::types::card::txn_card_info::{
     convert_safe_to_txn_card_info, SafeTxnCardInfo, TxnCardInfo,
@@ -172,7 +174,7 @@ pub async fn update_score(
                     return Err(invalid_request_error("transaction Card Info", &e));
                 }
             };
-            
+
             let log_message = payload.log_message;
             let enforce_failure = payload.enforce_dynaic_routing_failure.unwrap_or(false);
             let gateway_reference_id = payload.gateway_reference_id;
