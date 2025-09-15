@@ -3,6 +3,7 @@
 
 use crate::app::get_tenant_app_state;
 use crate::error::StorageError;
+use masking::{Secret, PeekInterface};
 // Converted imports
 // use eulerhs::prelude::*;
 // use eulerhs::language as L;
@@ -195,12 +196,12 @@ pub fn getTxnDetailFromApiPayload(
         surchargeAmount: None,
         taxAmount: None,
         internalMetadata: Some(
-            serde_json::to_string(&InternalMetadata {
+            Secret::new(serde_json::to_string(&InternalMetadata {
                 internal_tracking_info: InternalTrackingInfo {
                     routing_approach: gateway_scoring_data.routingApproach.unwrap_or_default(),
                 },
             })
-            .unwrap(),
+            .unwrap()),
         ),
         netAmount: Some(ETMo::Money::from_double(0.0)),
         metadata: None,
@@ -869,7 +870,7 @@ pub fn isPennyMandateRegTxn(txn_detail: TxnDetail) -> bool {
 }
 
 // Original Haskell function: getTxnTypeFromInternalMetadata
-pub fn getTxnTypeFromInternalMetadata(internal_metadata: Option<String>) -> MandateTxnType {
+pub fn getTxnTypeFromInternalMetadata(internal_metadata: Option<Secret<String>>) -> MandateTxnType {
     match internal_metadata {
         None => {
             logger::debug!(
@@ -880,7 +881,7 @@ pub fn getTxnTypeFromInternalMetadata(internal_metadata: Option<String>) -> Mand
             (MandateTxnType::DEFAULT)
         }
         Some(internal_metadata) => {
-            match serde_json::from_str::<MandateTxnInfo>(&internal_metadata) {
+            match serde_json::from_str::<MandateTxnInfo>(internal_metadata.peek()) {
                 Ok(txn_info) => txn_info.mandateTxnInfo.txnType,
                 Err(_) => MandateTxnType::DEFAULT,
             }

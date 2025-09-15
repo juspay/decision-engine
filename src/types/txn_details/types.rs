@@ -539,9 +539,9 @@ pub struct SafeTxnDetail {
     pub taxAmount: Option<Money>,
     #[serde(rename = "offerDeductionAmount")]
     pub offerDeductionAmount: Option<Money>,
-    pub metadata: Option<String>,
+    pub metadata: Option<masking::Secret<String>>,
     #[serde(rename = "internalMetadata")]
-    pub internalMetadata: Option<String>,
+    pub internalMetadata: Option<masking::Secret<String>>,
     #[serde(rename = "internalTrackingInfo")]
     pub internalTrackingInfo: Option<String>,
     #[serde(
@@ -653,9 +653,9 @@ pub struct TxnDetail {
     #[serde(rename = "taxAmount")]
     pub taxAmount: Option<Money>,
     #[serde(rename = "internalMetadata")]
-    pub internalMetadata: Option<String>,
+    pub internalMetadata: Option<masking::Secret<String>>,
     #[serde(rename = "metadata")]
-    pub metadata: Option<String>,
+    pub metadata: Option<masking::Secret<String>>,
     #[serde(rename = "offerDeductionAmount")]
     pub offerDeductionAmount: Option<Money>,
     #[serde(rename = "internalTrackingInfo")]

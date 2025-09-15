@@ -757,7 +757,7 @@ pub fn getRoutingApproach(txnDetail: TxnDetail) -> Option<String> {
 // Original Haskell function: getValueFromMetaData
 pub fn getValueFromMetaData<T: serde::de::DeserializeOwned>(txn_detail: &TxnDetail) -> Option<T> {
     let metadata = txn_detail.internalMetadata.clone()?;
-    serde_json::from_str(&metadata).ok()
+    serde_json::from_str(metadata.peek()).ok()
 }
 
 // Original Haskell function: isRoutingApproachInSRV2

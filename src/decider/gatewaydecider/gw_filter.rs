@@ -631,7 +631,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
     let mInternalMeta: Option<InternalMetadata> = txnDetail
         .internalMetadata
         .as_ref()
-        .and_then(|meta| serde_json::from_str(meta).ok());
+        .and_then(|meta| serde_json::from_str(meta.peek()).ok());
 
     Utils::set_internal_meta_data(this, mInternalMeta.clone());
 

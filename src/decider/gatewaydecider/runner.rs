@@ -493,7 +493,7 @@ pub async fn execute_priority_logic(
         .txnDetail
         .internalMetadata
         .as_ref()
-        .and_then(|im| serde_json::from_str(im).ok());
+        .and_then(|im| serde_json::from_str(im.peek()).ok());
     let order_metadata = req.orderMetadata.metadata.clone();
     // resolveBin <- case Utils.fetchExtendedCardBin req.txnCardInfo of
     // Just cardBin -> pure (Just cardBin)

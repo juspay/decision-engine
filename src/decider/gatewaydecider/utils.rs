@@ -1363,7 +1363,7 @@ pub fn modify_gateway_decider_approach(
 
 pub fn get_juspay_bank_code_from_internal_metadata(txn_detail: &ETTD::TxnDetail) -> Option<String> {
     txn_detail.internalMetadata.as_ref().and_then(|metadata| {
-        from_str::<Value>(metadata).ok().and_then(|json| {
+        from_str::<Value>(metadata.peek()).ok().and_then(|json| {
             json.get("juspayBankCode")
                 .and_then(|v| v.as_str().map(|s| s.to_string()))
         })
