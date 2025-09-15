@@ -389,13 +389,14 @@ pub async fn runDeciderFlow(
                     routing_approach: T::GatewayDeciderApproach::MERCHANT_PREFERENCE,
                     gateway_before_evaluation: Some(pgw.clone()),
                     priority_logic_output: None,
+                    debit_routing_output: None,
+                    super_router: None,
                     reset_approach: T::ResetApproach::NO_RESET,
                     routing_dimension: None,
                     routing_dimension_level: None,
                     is_scheduled_outage: false,
                     is_dynamic_mga_enabled: decider_flow.writer.is_dynamic_mga_enabled,
                     gateway_mga_id_map: Some(gatewayMgaIdMap),
-                    debit_routing_output: None,
                     is_rust_based_decider: deciderParams.dpShouldConsumeResult.unwrap_or(false),
                 })
             } else {
@@ -649,6 +650,7 @@ pub async fn runDeciderFlow(
                             gateway_before_evaluation: topGatewayBeforeSRDowntimeEvaluation.clone(),
                             priority_logic_output: Some(updatedPriorityLogicOutput),
                             debit_routing_output: None,
+                            super_router: None,
                             reset_approach: decider_flow.writer.reset_approach.clone(),
                             routing_dimension: decider_flow.writer.routing_dimension.clone(),
                             routing_dimension_level: decider_flow
@@ -863,6 +865,7 @@ fn defaultDecidedGateway(
         gateway_before_evaluation: topGatewayBeforeSRDowntimeEvaluation,
         priority_logic_output: priorityLogicOutput,
         debit_routing_output: None,
+        super_router: None,
         reset_approach: resetApproach,
         routing_dimension: routingDimension,
         routing_dimension_level: routingDimensionLevel,
