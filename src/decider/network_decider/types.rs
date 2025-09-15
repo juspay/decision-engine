@@ -251,7 +251,7 @@ pub struct NetworkSavingInfo {
     pub saving_percentage: f64,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct DebitRoutingOutput {
     pub co_badged_card_networks_info: Vec<NetworkSavingInfo>,
     pub issuer_country: CountryAlpha2,

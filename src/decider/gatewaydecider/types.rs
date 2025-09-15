@@ -623,6 +623,7 @@ pub enum GatewayDeciderApproach {
     SR_V3_DOWNTIME_HEDGING,
     SR_V3_GLOBAL_DOWNTIME_HEDGING,
     NTW_BASED_ROUTING,
+    SUPER_ROUTER,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -648,6 +649,21 @@ pub enum RankingAlgorithm {
     SR_BASED_ROUTING,
     PL_BASED_ROUTING,
     NTW_BASED_ROUTING,
+    SUPER_ROUTER,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct SUPERROUTERPRIORITYMAP {
+    pub gateway: String,
+    pub payment_method: String,
+    pub success_rate: Option<f64>,
+    pub saving: Option<f64>,
+    pub combined_score: Option<f64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct SUPERROUTEROUTPUT {
+    pub priority_map: Vec<SUPERROUTERPRIORITYMAP>,
 }
 
 // pub type DeciderFlow<R> = for<'a> fn(&'a mut (dyn MonadFlow + 'a)) -> ReaderT<DeciderParams, StateT<DeciderState, &'a mut (dyn MonadFlow + 'a)>, R>;
@@ -925,7 +941,7 @@ pub struct PaymentInfo {
     emiBank: Option<String>,
     emiTenure: Option<i32>,
     paymentMethodType: String,
-    paymentMethod: String,
+    pub paymentMethod: NETWORK,
     paymentSource: Option<String>,
     authType: Option<ETCa::txn_card_info::AuthType>,
     cardIssuerBankName: Option<String>,
@@ -990,7 +1006,7 @@ impl DomainDeciderRequestForApiCallV2 {
                 merchantGatewayAccountId: None,
                 txnAmount: ETMo::Money::from_double(self.paymentInfo.amount),
                 txnObjectType: self.paymentInfo.paymentType.clone(),
-                sourceObject: Some(self.paymentInfo.paymentMethod.clone()),
+                sourceObject: Some(self.paymentInfo.paymentMethod.to_string()),
                 sourceObjectId: None,
                 currency: self.paymentInfo.currency.clone(),
                 country: self.paymentInfo.country.clone(),
@@ -1014,7 +1030,7 @@ impl DomainDeciderRequestForApiCallV2 {
                 nameOnCard: None,
                 dateCreated: OffsetDateTime::now_utc(),
                 paymentMethodType: self.paymentInfo.paymentMethodType.to_string(),
-                paymentMethod: self.paymentInfo.paymentMethod.clone(),
+                paymentMethod: self.paymentInfo.paymentMethod.to_string(),
                 paymentSource: self.paymentInfo.paymentSource.clone(),
                 authType: self.paymentInfo.authType.clone(),
                 partitionKey: None,
@@ -1203,7 +1219,7 @@ pub fn toListOfGatewayScore(m: GatewayScoreMap) -> Vec<GatewayScore> {
         .collect()
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct DecidedGateway {
     pub decided_gateway: String,
     pub gateway_priority_map: Option<AValue>,
@@ -1213,6 +1229,7 @@ pub struct DecidedGateway {
     pub gateway_before_evaluation: Option<String>,
     pub priority_logic_output: Option<GatewayPriorityLogicOutput>,
     pub debit_routing_output: Option<network_decider::types::DebitRoutingOutput>,
+    pub super_router: Option<SUPERROUTEROUTPUT>,
     pub reset_approach: ResetApproach,
     pub routing_dimension: Option<String>,
     pub routing_dimension_level: Option<String>,
@@ -1427,6 +1444,9 @@ impl fmt::Display for GatewayDeciderApproach {
             }
             Self::NTW_BASED_ROUTING => {
                 write!(f, "NTW_BASED_ROUTING")
+            }
+            Self::SUPER_ROUTER => {
+                write!(f, "SUPER_ROUTER")
             }
         }
     }

@@ -97,6 +97,47 @@ impl types::CoBadgedCardRequest {
         })
     }
 
+    pub async fn sorted_networks_by_absolute_fee(
+        self,
+        app_state: &app::TenantAppState,
+        card_isin_optional: Option<String>,
+        amount: f64,
+    ) -> Option<types::DebitRoutingOutput> {
+        logger::debug!("Fetching sorted card networks based on their respective network fees");
+
+        let co_badged_card_info = self
+            .fetch_co_badged_card_info(app_state, card_isin_optional)
+            .await?;
+
+        let mut network_costs = self
+            .calculate_network_fees(app_state, &co_badged_card_info, amount)
+            .await?;
+
+        logger::debug!("Total fees per debit network: {:?}", network_costs);
+        network_costs.sort_by(|(_, fee1), (_, fee2)| fee1.total_cmp(fee2));
+
+        // let network_saving_infos = Self::calculate_network_saving_infos(network_costs, amount)?;
+
+        let mut network_saving_infos = Vec::new();
+
+        let base = network_costs.last().map(|(_, fee)| *fee).unwrap_or(0.0);
+
+        for (network, fee) in &network_costs {
+            network_saving_infos.push(types::NetworkSavingInfo {
+                network: network.clone(),
+                saving_percentage: base - *fee,
+            });
+        }
+
+        Some(types::DebitRoutingOutput {
+            co_badged_card_networks_info: network_saving_infos,
+            issuer_country: co_badged_card_info.issuer_country,
+            is_regulated: co_badged_card_info.is_regulated,
+            regulated_name: co_badged_card_info.regulated_name,
+            card_type: co_badged_card_info.card_type,
+        })
+    }
+
     async fn fetch_co_badged_card_info(
         &self,
         app_state: &app::TenantAppState,
