@@ -43,7 +43,7 @@ pub async fn update_score(
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_else(|_| "unknown".to_string());
     let query_params = original_url.splitn(2, '?').nth(1).unwrap_or("").to_string();
-
+    tracing::Span::current().record("is_audit_trail_log","true");
     // Buffer the body into memory
     let body_bytes = match to_bytes(req.into_body(), usize::MAX).await {
         Ok(bytes) => bytes,

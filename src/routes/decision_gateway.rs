@@ -134,6 +134,7 @@ where
             tracing::Span::current().record("txn_uuid", payload.txnDetail.txnUuid.clone());
             tracing::Span::current()
                 .record("udf_order_id", payload.orderReference.orderId.0.as_str());
+            tracing::Span::current().record("is_audit_trail_log", payload.shouldConsumeResult.unwrap_or(false));
             jemalloc_ctl::epoch::advance().unwrap();
             let allocated_before = jemalloc_ctl::stats::allocated::read().unwrap_or(0);
 

@@ -69,7 +69,7 @@ pub fn record_fields_from_header(request: &Request<Body>) -> tracing::Span {
     record_field(consts::X_SESSION_ID, "sdk_session_span");
     record_field(consts::X_CELL_SELECTOR, "cell_selector");
     record_field(consts::X_ART_RECORDING, "is_art_enabled");
-    span.record("is_audit_trail_log", "true");
+    span.record("is_audit_trail_log", "false");
     span.record("schema_version", "V2");
     span.record("tenant_name", "JUSPAY");
     span.record("tenant_id", "JUSPAY");
