@@ -172,3 +172,59 @@ pub struct TxnCardInfo {
     #[serde(deserialize_with = "deserialize_optional_primitive_datetime")]
     pub partitionKey: Option<PrimitiveDateTime>,
 }
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct SafeTxnCardInfo {
+    #[serde(rename = "id")]
+    pub id: String,
+    #[serde(rename = "cardIsin")]
+    pub card_isin: Option<String>,
+    #[serde(rename = "cardIssuerBankName")]
+    pub cardIssuerBankName: Option<String>,
+    #[serde(rename = "cardSwitchProvider")]
+    pub cardSwitchProvider: Option<Secret<String>>,
+    #[serde(rename = "cardType")]
+    pub card_type: Option<CardType>,
+    #[serde(rename = "nameOnCard")]
+    pub nameOnCard: Option<Secret<String>>,
+    #[serde(with = "time::serde::iso8601")]
+    #[serde(rename = "dateCreated")]
+    pub dateCreated: OffsetDateTime,
+    #[serde(rename = "paymentMethodType")]
+    pub paymentMethodType: String,
+    #[serde(rename = "paymentMethod")]
+    pub paymentMethod: String,
+    #[serde(rename = "paymentSource")]
+    pub paymentSource: Option<String>,
+    #[serde(rename = "authType")]
+    pub authType: Option<String>,
+    #[serde(rename = "partitionKey")]
+    #[serde(deserialize_with = "deserialize_optional_primitive_datetime")]
+    pub partitionKey: Option<PrimitiveDateTime>,
+}
+
+pub fn convert_safe_to_txn_card_info(
+    safe_info: SafeTxnCardInfo,
+) -> Result<TxnCardInfo, crate::error::ApiError> {
+    let id_i64 = safe_info
+        .id
+        .parse::<i64>()
+        .map_err(|_| crate::error::ApiError::ParsingError("id"))?;
+
+    Ok(TxnCardInfo {
+        id: TxnCardInfoPId(id_i64),
+        card_isin: safe_info.card_isin,
+        cardIssuerBankName: safe_info.cardIssuerBankName,
+        cardSwitchProvider: safe_info.cardSwitchProvider,
+        card_type: safe_info.card_type,
+        nameOnCard: safe_info.nameOnCard,
+        dateCreated: safe_info.dateCreated,
+        paymentMethodType: safe_info.paymentMethodType,
+        paymentMethod: safe_info.paymentMethod,
+        paymentSource: safe_info.paymentSource,
+        authType: safe_info
+            .authType
+            .and_then(|auth| text_to_auth_type(&auth).ok()),
+        partitionKey: safe_info.partitionKey,
+    })
+}

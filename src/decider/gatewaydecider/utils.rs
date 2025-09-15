@@ -204,36 +204,39 @@ pub fn is_emandate_supported_payment_method(
 pub fn is_emandate_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
     matches!(
         txn_detail.txnObjectType,
-        ETTD::TxnObjectType::EmandateRegister
-            | ETTD::TxnObjectType::TpvEmandateRegister
-            | ETTD::TxnObjectType::EmandatePayment
-            | ETTD::TxnObjectType::TpvEmandatePayment
+        Some(ETTD::TxnObjectType::EmandateRegister)
+            | Some(ETTD::TxnObjectType::TpvEmandateRegister)
+            | Some(ETTD::TxnObjectType::EmandatePayment)
+            | Some(ETTD::TxnObjectType::TpvEmandatePayment)
     )
 }
 
 pub fn is_emandate_payment_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
     matches!(
         txn_detail.txnObjectType,
-        ETTD::TxnObjectType::EmandatePayment | ETTD::TxnObjectType::TpvEmandatePayment
+        Some(ETTD::TxnObjectType::EmandatePayment) | Some(ETTD::TxnObjectType::TpvEmandatePayment)
     )
 }
 
 pub fn is_reccuring_payment_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
     matches!(
         txn_detail.txnObjectType,
-        ETTD::TxnObjectType::EmandatePayment
-            | ETTD::TxnObjectType::TpvEmandatePayment
-            | ETTD::TxnObjectType::MandatePayment
-            | ETTD::TxnObjectType::TpvMandatePayment
+        Some(ETTD::TxnObjectType::EmandatePayment)
+            | Some(ETTD::TxnObjectType::TpvEmandatePayment)
+            | Some(ETTD::TxnObjectType::MandatePayment)
+            | Some(ETTD::TxnObjectType::TpvMandatePayment)
     )
 }
 
 pub fn is_tpv_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
-    txn_detail.txnObjectType == ETTD::TxnObjectType::TpvPayment
+    matches!(
+        txn_detail.txnObjectType,
+        Some(ETTD::TxnObjectType::TpvPayment)
+    )
 }
 
 pub fn is_tpv_mandate_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
-    txn_detail.txnObjectType == ETTD::TxnObjectType::TpvEmandateRegister
+    txn_detail.txnObjectType == Some(ETTD::TxnObjectType::TpvEmandateRegister)
 }
 
 pub fn get_merchant_wise_si_bin_key(gw: &String) -> String {
@@ -254,7 +257,7 @@ fn get_merchant_gateway_card_info_feature_name(
 pub fn is_mandate_transaction(txn: &ETTD::TxnDetail) -> bool {
     matches!(
         txn.txnObjectType,
-        ETTD::TxnObjectType::MandateRegister | ETTD::TxnObjectType::MandatePayment
+        Some(ETTD::TxnObjectType::MandateRegister) | Some(ETTD::TxnObjectType::MandatePayment)
     )
 }
 
@@ -568,7 +571,7 @@ pub fn get_gateway_reference_id(
 
 pub async fn effective_amount_with_txn_amount(txn_detail: ETTD::TxnDetail) -> Money {
     let def_amount = Money::from_double(0.0);
-    let amount_txn = &txn_detail.txnAmount;
+    let amount_txn = txn_detail.txnAmount.as_ref().unwrap_or(&def_amount);
     let offers = ETTO::getOffers(&txn_detail.id).await;
     let discount_sum: Money = Money::from_double(
         offers
@@ -616,7 +619,7 @@ pub fn is_emandate_amount_filter_needed(
 }
 
 pub fn is_emandate_register_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
-    txn_detail.txnObjectType == ETTD::TxnObjectType::EmandateRegister
+    txn_detail.txnObjectType == Some(ETTD::TxnObjectType::EmandateRegister)
 }
 
 pub async fn get_card_brand(decider_flow: &mut DeciderFlow<'_>) -> Option<String> {
@@ -756,7 +759,7 @@ pub fn get_metric_log_format(decider_flow: &mut DeciderFlow<'_>, stage: &str) ->
         .and_then(|ps| last(split("@", ps)));
 
     MessageFormat {
-        model: txn_detail.txnObjectType.to_string(),
+        model: format!("{:?}", txn_detail.txnObjectType),
         log_type: "APP_EVENT".to_string(),
         payment_method: txn_card_info.paymentMethod.clone(),
         payment_method_type: txn_card_info.paymentMethodType.clone(),
@@ -817,7 +820,7 @@ pub async fn log_gateway_decider_approach(
         "GATEWAY_DECIDER_APPROACH",
         "DECIDER",
         MessageFormat {
-            model: txn_detail.txnObjectType.to_string(),
+            model: format!("{:?}", txn_detail.txnObjectType),
             log_type: "APP_EVENT".to_string(),
             payment_method: txn_card_info.clone().paymentMethod,
             payment_method_type: txn_card_info.clone().paymentMethodType.to_string(),
@@ -1360,7 +1363,7 @@ pub fn modify_gateway_decider_approach(
 
 pub fn get_juspay_bank_code_from_internal_metadata(txn_detail: &ETTD::TxnDetail) -> Option<String> {
     txn_detail.internalMetadata.as_ref().and_then(|metadata| {
-        from_str::<Value>(metadata).ok().and_then(|json| {
+        from_str::<Value>(metadata.peek()).ok().and_then(|json| {
             json.get("juspayBankCode")
                 .and_then(|v| v.as_str().map(|s| s.to_string()))
         })
@@ -1985,7 +1988,7 @@ pub async fn get_gateway_scoring_data(
     )
     .await;
     let merchant_id = merchant_id_to_text(merchant.merchantId.clone());
-    let order_type = txn_detail.txnObjectType.to_string();
+    let order_type = format!("{:?}", txn_detail.txnObjectType);
     let payment_method_type = txn_card_info.paymentMethodType.to_uppercase();
     let m_source_object = if txn_card_info.paymentMethod == UPI {
         txn_detail.sourceObject.clone().unwrap_or_default()

@@ -156,14 +156,14 @@ pub struct FilteredTxnInfo {
 
 pub fn filter_txn(detail: TxnDetail) -> FilteredTxnInfo {
     FilteredTxnInfo {
-        isEmi: detail.isEmi,
+        isEmi: detail.isEmi.unwrap_or(false),
         emiBank: detail.emiBank,
         emiTenure: detail.emiTenure,
         txnId: detail.txnId,
-        addToLocker: detail.addToLocker,
-        expressCheckout: detail.expressCheckout,
+        addToLocker: detail.addToLocker.unwrap_or(false),
+        expressCheckout: detail.expressCheckout.unwrap_or(false),
         sourceObject: detail.sourceObject,
-        txnObjectType: detail.txnObjectType,
+        txnObjectType: detail.txnObjectType.unwrap_or(TxnObjectType::Unknown),
     }
 }
 
@@ -493,7 +493,7 @@ pub async fn execute_priority_logic(
         .txnDetail
         .internalMetadata
         .as_ref()
-        .and_then(|im| serde_json::from_str(im).ok());
+        .and_then(|im| serde_json::from_str(im.peek()).ok());
     let order_metadata = req.orderMetadata.metadata.clone();
     // resolveBin <- case Utils.fetchExtendedCardBin req.txnCardInfo of
     // Just cardBin -> pure (Just cardBin)

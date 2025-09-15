@@ -3,6 +3,7 @@
 
 use crate::app::get_tenant_app_state;
 use crate::error::StorageError;
+use masking::{PeekInterface, Secret};
 // Converted imports
 // use eulerhs::prelude::*;
 // use eulerhs::language as L;
@@ -163,51 +164,53 @@ pub fn convertSuccessResponseIdFlip(x: i32) -> ETTD::SuccessResponseId {
 pub fn getTxnDetailFromApiPayload(
     apiPayload: UpdateScorePayload,
     gateway_scoring_data: GatewayScoringData,
-) -> ETTD::TxnDetail {
+) -> Result<ETTD::TxnDetail, crate::error::ApiError> {
     let txn_detail = ETTD::TxnDetail {
         id: ETTD::to_txn_detail_id(1),
         dateCreated: gateway_scoring_data.dateCreated,
         orderId: ETO::id::to_order_id(apiPayload.paymentId.clone()),
         status: apiPayload.status.clone(),
         txnId: ETId::to_transaction_id(apiPayload.paymentId.clone()),
-        txnType: "NOT_DEFINED".to_string(),
-        addToLocker: false,
+        txnType: Some("NOT_DEFINED".to_string()),
+        addToLocker: Some(false),
         merchantId: ETM::id::to_merchant_id(apiPayload.merchantId.clone()),
         gateway: Some(apiPayload.gateway),
-        expressCheckout: false,
-        isEmi: false,
+        expressCheckout: Some(false),
+        isEmi: Some(false),
         emiBank: None,
         emiTenure: None,
         txnUuid: apiPayload.paymentId.clone(),
         merchantGatewayAccountId: None,
-        txnAmount: ETMo::Money::from_double(0.0),
-        txnObjectType: ETTD::TxnObjectType::from_text(gateway_scoring_data.orderType.clone())
-            .unwrap_or_else(|| ETTD::TxnObjectType::OrderPayment),
+        txnAmount: Some(ETMo::Money::from_double(0.0)),
+        txnObjectType: Some(
+            ETTD::TxnObjectType::from_text(gateway_scoring_data.orderType.clone())
+                .unwrap_or_else(|| ETTD::TxnObjectType::OrderPayment),
+        ),
         sourceObject: Some(gateway_scoring_data.paymentMethod.clone()),
         sourceObjectId: None,
         currency: gateway_scoring_data
             .currency
             .clone()
-            .expect("currency is mandatory"),
+            .ok_or(crate::error::ApiError::MissingRequiredField("currency"))?,
         country: gateway_scoring_data.country.clone(),
         surchargeAmount: None,
         taxAmount: None,
-        internalMetadata: Some(
+        internalMetadata: Some(Secret::new(
             serde_json::to_string(&InternalMetadata {
                 internal_tracking_info: InternalTrackingInfo {
                     routing_approach: gateway_scoring_data.routingApproach.unwrap_or_default(),
                 },
             })
             .unwrap(),
-        ),
-        netAmount: ETMo::Money::from_double(0.0),
+        )),
+        netAmount: Some(ETMo::Money::from_double(0.0)),
         metadata: None,
         offerDeductionAmount: None,
         internalTrackingInfo: None,
         partitionKey: None,
         txnAmountBreakup: None,
     };
-    txn_detail
+    Ok(txn_detail)
 }
 
 pub fn getTxnCardInfoFromApiPayload(
@@ -855,15 +858,19 @@ pub fn mandateRegisterTxnObjectTypes() -> Vec<TxnObjectType> {
 }
 
 pub fn isPennyMandateRegTxn(txn_detail: TxnDetail) -> bool {
-    if isMandateRegTxn(txn_detail.clone().txnObjectType) {
-        isPennyTxnType(txn_detail.clone())
+    if let Some(txn_object_type) = txn_detail.clone().txnObjectType {
+        if isMandateRegTxn(txn_object_type) {
+            isPennyTxnType(txn_detail.clone())
+        } else {
+            false
+        }
     } else {
         false
     }
 }
 
 // Original Haskell function: getTxnTypeFromInternalMetadata
-pub fn getTxnTypeFromInternalMetadata(internal_metadata: Option<String>) -> MandateTxnType {
+pub fn getTxnTypeFromInternalMetadata(internal_metadata: Option<Secret<String>>) -> MandateTxnType {
     match internal_metadata {
         None => {
             logger::debug!(
@@ -874,7 +881,7 @@ pub fn getTxnTypeFromInternalMetadata(internal_metadata: Option<String>) -> Mand
             (MandateTxnType::DEFAULT)
         }
         Some(internal_metadata) => {
-            match serde_json::from_str::<MandateTxnInfo>(&internal_metadata) {
+            match serde_json::from_str::<MandateTxnInfo>(internal_metadata.peek()) {
                 Ok(txn_info) => txn_info.mandateTxnInfo.txnType,
                 Err(_) => MandateTxnType::DEFAULT,
             }
