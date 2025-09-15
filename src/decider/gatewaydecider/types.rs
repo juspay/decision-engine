@@ -77,6 +77,7 @@ pub enum DeciderFilterName {
     FilterGatewaysForEMITenureSpecficGatewayCreds,
     FilterFunctionalGatewaysForReversePennyDrop,
     FilterFunctionalGatewaysForOTM,
+    FilterFunctionalGatewaysForNBQC
 }
 
 impl fmt::Display for DeciderFilterName {
@@ -158,6 +159,9 @@ impl fmt::Display for DeciderFilterName {
             }
             Self::FilterFunctionalGatewaysForOTM => {
                 write!(f, "FilterFunctionalGatewaysForOTM")
+            }
+            Self::FilterFunctionalGatewaysForNBQC => {
+                write!(f, "FilterFunctionalGatewaysForNBQC")
             }
         }
     }

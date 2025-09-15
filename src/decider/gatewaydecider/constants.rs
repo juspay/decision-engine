@@ -44,6 +44,8 @@ impl SC::ServiceConfigKey for SR_V3_INPUT_CONFIG_DEFAULT {
 
 pub const srV3DefaultInputConfig: SR_V3_INPUT_CONFIG_DEFAULT = SR_V3_INPUT_CONFIG_DEFAULT;
 
+
+pub const NB_QUICK_CHECKOUT_PAYMENT_FLOW_NAME: &str = "NB_QUICK_CHECKOUT";
 pub const DEFAULT_SR_V3_BASED_BUCKET_SIZE: i32 = 125;
 pub const defaultSrV3BasedUpperResetFactor: f64 = 3.0;
 pub const defaultSrV3BasedLowerResetFactor: f64 = 3.0;
@@ -729,7 +731,7 @@ impl SC::ServiceConfigKey for GATEWAYDECIDER_SCORINGFLOW {
     }
 }
 
-pub const paymentFlowsRequiredForGwFiltering: [&str; 12] = [
+pub const paymentFlowsRequiredForGwFiltering: [&str; 13] = [
     "DOTP",
     "CARD_MOTO",
     "MANDATE_REGISTER",
@@ -742,6 +744,7 @@ pub const paymentFlowsRequiredForGwFiltering: [&str; 12] = [
     "CROSS_BORDER_PAYMENT",
     "SINGLE_BLOCK_MULTIPLE_DEBIT",
     "ONE_TIME_MANDATE",
+    NB_QUICK_CHECKOUT_PAYMENT_FLOW_NAME,
 ];
 
 pub const getCardBrandCacheExpiry: i32 = 2 * 24 * 60 * 60;
