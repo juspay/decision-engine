@@ -120,12 +120,21 @@ impl types::CoBadgedCardRequest {
 
         let mut network_saving_infos = Vec::new();
 
-        let base = network_costs.last().map(|(_, fee)| *fee).unwrap_or(0.0);
+        // Find min and max fee values for min-max normalization
+        let min_fee = network_costs.first().map(|(_, fee)| *fee).unwrap_or(0.0);
+        let max_fee = network_costs.last().map(|(_, fee)| *fee).unwrap_or(0.0);
 
         for (network, fee) in &network_costs {
+            // Apply standard min-max normalization
+            let normalized_value = if max_fee > min_fee {
+                (*fee - min_fee) / (max_fee - min_fee)
+            } else {
+                0.0
+            };
+
             network_saving_infos.push(types::NetworkSavingInfo {
                 network: network.clone(),
-                saving_percentage: base - *fee,
+                saving_percentage: normalized_value,
             });
         }
 
