@@ -42,6 +42,7 @@ pub async fn perform_debit_routing(
                         gateway_before_evaluation: None,
                         priority_logic_output: None,
                         debit_routing_output: Some(debit_routing_output),
+                        super_router: None,
                         reset_approach: gateway_decider_types::ResetApproach::NO_RESET,
                         routing_dimension: None,
                         routing_dimension_level: None,

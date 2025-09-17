@@ -39,6 +39,10 @@ use crate::types::gateway_card_info::ValidationType;
 use crate::types::merchant as ETM;
 use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
 use crate::types::txn_details::types as ETTD;
+use crate::decider::network_decider::types as NetworkTypes;
+
+const SUPER_ROUTER_SUCCESS_RATE_DELTA: f64 = 0.01; // 1% delta for success rate windowing
+
 
 pub async fn deciderFullPayloadHSFunction(
     dreq_: T::DomainDeciderRequestForApiCallV2,
@@ -123,6 +127,9 @@ pub async fn deciderFullPayloadHSFunction(
     if dreq_.rankingAlgorithm == Some(RankingAlgorithm::NTW_BASED_ROUTING) {
         logger::debug!("Performing debit routing");
         network_decider::debit_routing::perform_debit_routing(dreq_).await
+    } else if dreq_.rankingAlgorithm == Some(RankingAlgorithm::SUPER_ROUTER) {
+        logger::debug!("Performing SUPER_ROUTER routing");
+        runSuperRouterFlow(decider_params, dreq_.clone()).await
     } else {
         logger::debug!("Performing gateway routing");
         runDeciderFlow(
@@ -218,13 +225,14 @@ pub async fn runDeciderFlow(
                     routing_approach: T::GatewayDeciderApproach::MERCHANT_PREFERENCE,
                     gateway_before_evaluation: Some(pgw.clone()),
                     priority_logic_output: None,
+                    debit_routing_output: None,
+                    super_router: None,
                     reset_approach: T::ResetApproach::NO_RESET,
                     routing_dimension: None,
                     routing_dimension_level: None,
                     is_scheduled_outage: false,
                     is_dynamic_mga_enabled: decider_flow.writer.is_dynamic_mga_enabled,
                     gateway_mga_id_map: None,
-                    debit_routing_output: None,
                     is_rust_based_decider: true,
                 })
             } else {
@@ -486,6 +494,8 @@ pub async fn runDeciderFlow(
                             routing_approach: finalDeciderApproach.clone(),
                             gateway_before_evaluation: topGatewayBeforeSRDowntimeEvaluation.clone(),
                             priority_logic_output: Some(updatedPriorityLogicOutput),
+                            debit_routing_output: None,
+                            super_router: None,
                             reset_approach: decider_flow.writer.reset_approach.clone(),
                             routing_dimension: decider_flow.writer.routing_dimension.clone(),
                             routing_dimension_level: decider_flow
@@ -495,7 +505,6 @@ pub async fn runDeciderFlow(
                             is_scheduled_outage: decider_flow.writer.isScheduledOutage,
                             is_dynamic_mga_enabled: decider_flow.writer.is_dynamic_mga_enabled,
                             gateway_mga_id_map: None,
-                            debit_routing_output: None,
                             is_rust_based_decider: true,
                         }),
                         None => Err((
@@ -683,6 +692,7 @@ fn defaultDecidedGateway(
         gateway_before_evaluation: topGatewayBeforeSRDowntimeEvaluation,
         priority_logic_output: priorityLogicOutput,
         debit_routing_output: None,
+        super_router: None,
         reset_approach: resetApproach,
         routing_dimension: routingDimension,
         routing_dimension_level: routingDimensionLevel,
@@ -691,6 +701,270 @@ fn defaultDecidedGateway(
         gateway_mga_id_map: None,
         is_rust_based_decider: true,
     }
+}
+
+pub async fn runSuperRouterFlow(
+    decider_params: T::DeciderParams,
+    dreq: T::DomainDeciderRequestForApiCallV2,
+) -> Result<T::DecidedGateway, T::ErrorResponse> {
+    logger::debug!("Starting SUPER_ROUTER flow");
+    
+    let app_state = get_tenant_app_state().await;
+    let card_isin = decider_params.dpTxnCardInfo.card_isin.clone();
+    let amount = dreq.paymentInfo.amount;
+    
+    // Get networks to process
+    let networks_to_process = if let Some(card_isin_value) = card_isin {
+        logger::debug!("Card ISIN present, calling sorted_networks_by_absolute_fee");
+        
+        // Create CoBadgedCardRequest from the request metadata
+        if let Some(metadata_value) = dreq.paymentInfo.metadata
+            .map(|metadata_string| Utils::parse_json_from_string(&metadata_string))
+            .flatten()
+        {
+            match TryInto::<NetworkTypes::CoBadgedCardRequest>::try_into(metadata_value) {
+                Ok(co_badged_card_request) => {
+                    if let Some(debit_routing_output) = co_badged_card_request
+                        .sorted_networks_by_absolute_fee(&app_state, Some(card_isin_value), amount)
+                        .await
+                    {
+                        debit_routing_output.co_badged_card_networks_info
+                    } else {
+                        logger::warn!("Failed to get networks from sorted_networks_by_absolute_fee, using paymentMethod");
+                        vec![NetworkTypes::NetworkSavingInfo {
+                            network: dreq.paymentInfo.paymentMethod,
+                            saving_percentage: 0.0, // this is hard coded for now
+                        }]
+                    }
+                }
+                Err(error) => {
+                    logger::error!("Failed to parse metadata for SUPER_ROUTER: {:?}", error);
+                    vec![NetworkTypes::NetworkSavingInfo {
+                        network: dreq.paymentInfo.paymentMethod,
+                        saving_percentage: 0.0,
+                    }]
+                }
+            }
+        } else {
+            logger::warn!("No metadata found, using paymentMethod");
+            vec![NetworkTypes::NetworkSavingInfo {
+                network: dreq.paymentInfo.paymentMethod,
+                saving_percentage: 0.0,
+            }]
+        }
+    } else {
+        logger::debug!("Card ISIN not present, using paymentMethod with 0 savings");
+        vec![NetworkTypes::NetworkSavingInfo {
+            network: dreq.paymentInfo.paymentMethod,
+            saving_percentage: 0.0,
+        }]
+    };
+    
+    logger::debug!("Networks to process for SUPER_ROUTER: {:?}", networks_to_process);
+    
+    let mut super_router_priority_map = Vec::new();
+    let mut first_gateway_result: Option<T::DecidedGateway> = None;
+    
+    // Process each network
+    for network_info in networks_to_process {
+        logger::debug!("Processing network: {:?}", network_info.network);
+        
+        // Create mutable copy of decider_params and update network
+        let mut modified_decider_params = decider_params.clone();
+        
+        // Update the network in sourceObject field of txnDetail
+        modified_decider_params.dpTxnDetail.sourceObject = Some(network_info.network.to_string());
+        
+        // Update the network in paymentMethod field of dpTxnCardInfo
+        modified_decider_params.dpTxnCardInfo.paymentMethod = network_info.network.to_string();
+        
+        // Call runDeciderFlow for this network
+        match runDeciderFlow(
+            modified_decider_params,
+            Some(RankingAlgorithm::SR_BASED_ROUTING), // Use SR_BASED_ROUTING for individual network processing
+            dreq.eliminationEnabled,
+            false,
+        ).await {
+            Ok(decided_gateway) => {
+                // Store the first successful result as the main gateway decision
+                if first_gateway_result.is_none() {
+                    first_gateway_result = Some(decided_gateway.clone());
+                }
+                
+                // Extract gateway_priority_map and construct super_router output
+                if let Some(gateway_priority_map) = decided_gateway.gateway_priority_map {
+                    if let Ok(priority_map) = serde_json::from_value::<HashMap<String, f64>>(gateway_priority_map) {
+                        for (gateway, score) in priority_map {
+                            super_router_priority_map.push(T::SUPERROUTERPRIORITYMAP {
+                                gateway,
+                                payment_method: network_info.network.to_string(),
+                                success_rate: Some(score), // Using the score as success_rate
+                                saving: Some(network_info.saving_percentage),
+                                combined_score: Some(0.0), // Set to 0 as requested
+                            });
+                        }
+                    }
+                }
+            }
+            Err(error) => {
+                logger::warn!("Failed to get gateway decision for network {:?}: {:?}", network_info.network, error);
+                // Continue with other networks even if one fails
+            }
+            
+        }
+    }
+    
+    // Sort the super router priority map using dynamic windows
+    let sorted_priority_map = sort_super_router_priority_map_by_dynamic_windows(
+        super_router_priority_map,
+        SUPER_ROUTER_SUCCESS_RATE_DELTA,
+    );
+    
+    // Return the result
+    match first_gateway_result {
+        Some(mut gateway_result) => {
+            // Add super_router output to the result
+            gateway_result.super_router = Some(T::SUPERROUTEROUTPUT {
+                priority_map: sorted_priority_map,
+            });
+            gateway_result.routing_approach = T::GatewayDeciderApproach::SUPER_ROUTER;
+            
+            logger::debug!("SUPER_ROUTER flow completed successfully");
+            Ok(gateway_result)
+        }
+        None => {
+            logger::error!("No successful gateway decision found for any network in SUPER_ROUTER flow");
+            Err(T::ErrorResponse {
+                status: "Invalid Request".to_string(),
+                error_code: "invalid_request_error".to_string(),
+                error_message: "Can't find a suitable gateway to process the transaction using SUPER_ROUTER".to_string(),
+                priority_logic_tag: None,
+                routing_approach: Some(T::GatewayDeciderApproach::SUPER_ROUTER),
+                filter_wise_gateways: None,
+                error_info: UnifiedError {
+                    code: "SUPER_ROUTER_GATEWAY_NOT_FOUND".to_string(),
+                    user_message: "No gateway found using SUPER_ROUTER algorithm".to_string(),
+                    developer_message: "No gateway found using SUPER_ROUTER algorithm".to_string(),
+                },
+                priority_logic_output: None,
+                is_dynamic_mga_enabled: false,
+            })
+        }
+    }
+}
+
+fn sort_super_router_priority_map_by_dynamic_windows(
+    mut priority_map: Vec<T::SUPERROUTERPRIORITYMAP>,
+    delta: f64,
+) -> Vec<T::SUPERROUTERPRIORITYMAP> {
+    logger::debug!(
+        action = "sort_super_router_priority_map_by_dynamic_windows",
+        tag = "sort_super_router_priority_map_by_dynamic_windows",
+        "Starting sorting with delta: {}, input size: {}",
+        delta,
+        priority_map.len()
+    );
+
+    if priority_map.is_empty() {
+        return priority_map;
+    }
+
+    // Helper function to get success rate with default for None values
+    fn get_success_rate(entry: &T::SUPERROUTERPRIORITYMAP) -> f64 {
+        entry.success_rate.unwrap_or(0.0)
+    }
+
+    // Helper function to get saving with default for None values
+    fn get_saving(entry: &T::SUPERROUTERPRIORITYMAP) -> f64 {
+        entry.saving.unwrap_or(0.0)
+    }
+
+    // Sort by success rate descending first
+    priority_map.sort_by(|a, b| {
+        let rate_a = get_success_rate(a);
+        let rate_b = get_success_rate(b);
+        rate_b.partial_cmp(&rate_a).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let mut result = Vec::new();
+    let mut remaining = priority_map;
+
+    while !remaining.is_empty() {
+        if remaining.len() == 1 {
+            // Only one gateway left, add it to result
+            result.push(remaining.remove(0));
+            break;
+        }
+
+        // Take the first gateway as benchmark
+        let benchmark = get_success_rate(&remaining[0]);
+        let window_threshold = benchmark - delta;
+
+        logger::debug!(
+            action = "sort_super_router_priority_map_by_dynamic_windows",
+            tag = "sort_super_router_priority_map_by_dynamic_windows",
+            "Creating window: benchmark = {}, threshold = {}, remaining gateways = {}",
+            benchmark,
+            window_threshold,
+            remaining.len()
+        );
+
+        // Find all gateways within the current window
+        let mut window_group = Vec::new();
+        let mut outside_window = Vec::new();
+
+        for entry in remaining {
+            let success_rate = get_success_rate(&entry);
+            if success_rate >= window_threshold || (success_rate - benchmark).abs() < f64::EPSILON {
+                window_group.push(entry);
+            } else {
+                outside_window.push(entry);
+            }
+        }
+
+        logger::debug!(
+            action = "sort_super_router_priority_map_by_dynamic_windows",
+            tag = "sort_super_router_priority_map_by_dynamic_windows",
+            "Window group size: {}, outside window size: {}",
+            window_group.len(),
+            outside_window.len()
+        );
+
+        // Sort the window group by savings descending
+        window_group.sort_by(|a, b| {
+            let saving_a = get_saving(a);
+            let saving_b = get_saving(b);
+            saving_b.partial_cmp(&saving_a).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Log the window group for debugging
+        for (i, entry) in window_group.iter().enumerate() {
+            logger::debug!(
+                action = "sort_super_router_priority_map_by_dynamic_windows",
+                tag = "sort_super_router_priority_map_by_dynamic_windows",
+                "Window group[{}]: gateway = {}, success_rate = {:?}, saving = {:?}",
+                i,
+                entry.gateway,
+                entry.success_rate,
+                entry.saving
+            );
+        }
+
+        // Add the sorted window group to result
+        result.extend(window_group);
+
+        // Update remaining gateways
+        remaining = outside_window;
+    }
+
+    logger::debug!(
+        action = "sort_super_router_priority_map_by_dynamic_windows",
+        tag = "sort_super_router_priority_map_by_dynamic_windows",
+        "Sorting completed, result size: {}",
+        result.len()
+    );
+
+    result
 }
 
 // async fn addMetricsToStream(

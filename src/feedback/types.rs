@@ -242,6 +242,10 @@ pub struct UpdateScorePayload {
     pub paymentId: String,
     pub enforceDynamicRoutingFailure: Option<bool>,
     pub txnLatency: Option<TransactionLatency>,
+    /// Optional payment method (network) for network-specific score updates
+    /// When provided, score updates will target this specific network
+    /// If not provided, falls back to network stored in Redis data
+    pub paymentMethod: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
