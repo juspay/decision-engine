@@ -116,9 +116,8 @@ impl types::CoBadgedCardRequest {
         logger::debug!("Total fees per debit network: {:?}", network_costs);
         network_costs.sort_by(|(_, fee1), (_, fee2)| fee1.total_cmp(fee2));
 
-        // let network_saving_infos = Self::calculate_network_saving_infos(network_costs, amount)?;
-
-        let mut network_saving_infos = Vec::new();
+        // Initialize network_saving_infos vector
+        let mut network_saving_infos: Vec<types::NetworkSavingInfo> = Vec::new();
 
         // Find min and max fee values for min-max normalization
         let min_fee = network_costs.first().map(|(_, fee)| *fee).unwrap_or(0.0);

@@ -794,6 +794,7 @@ pub async fn runSuperRouterFlow(
                 if first_gateway_result.is_none() {
                     first_gateway_result = Some(decided_gateway.clone());
                 }
+                logger::debug!("run decider flow: {:?}", decided_gateway);
 
                 // Extract gateway_priority_map and construct super_router output
                 if let Some(gateway_priority_map) = decided_gateway.gateway_priority_map {

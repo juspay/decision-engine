@@ -17,30 +17,14 @@ struct GapAnalysisResult {
     cost_weight: f64,
 }
 
-// Function to normalize scores using min-max normalization
-fn normalize_scores(entries: &[(String, f64, f64)]) -> Vec<(String, f64, f64, f64)> {
-    // Find min and max values for score for normalization
-    let min_score = entries
-        .iter()
-        .map(|(_, score, _)| *score)
-        .fold(f64::MAX, f64::min);
-    let max_score = entries
-        .iter()
-        .map(|(_, score, _)| *score)
-        .fold(f64::MIN, f64::max);
-
-    // Create a vector with normalized scores
+// Function to prepare entries without normalizing scores
+fn prepare_entries(entries: &[(String, f64, f64)]) -> Vec<(String, f64, f64, f64)> {
+    // Create a vector with original scores (no normalization)
     entries
         .iter()
         .map(|(key, score, cost)| {
-            // Normalize score using min-max standardization
-            let normalized_score = if max_score > min_score {
-                (*score - min_score) / (max_score - min_score)
-            } else {
-                1.0 // If all scores are the same, assign 1.0
-            };
-
-            (key.clone(), *score, *cost, normalized_score)
+            // Use the original score without normalization
+            (key.clone(), *score, *cost, *score)
         })
         .collect()
 }
@@ -137,8 +121,8 @@ pub fn sort_by_euclidean_distance_original(
         }
     }
 
-    // Normalize scores using the normalize_scores function
-    let mut normalized_entries = normalize_scores(&entries);
+    // Prepare entries without normalizing scores
+    let mut normalized_entries = prepare_entries(&entries);
 
     // Sort by normalized score in descending order
     normalized_entries.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap_or(Ordering::Equal));
