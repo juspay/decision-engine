@@ -414,6 +414,7 @@ pub async fn check_and_update_gateway_score_(
                 enforce_failure,
                 apiPayload.gatewayReferenceId.clone(),
                 apiPayload.txnLatency.clone(),
+                apiPayload.paymentMethod.clone(),
             )
             .await;
 
@@ -450,6 +451,7 @@ pub async fn check_and_update_gateway_score(
     enforce_failure: bool,
     gateway_reference_id: Option<String>,
     txn_latency: Option<TransactionLatency>,
+    updated_payment_method: Option<String>,
 ) -> () {
     // Get gateway scoring type
     let gateway_scoring_type =
@@ -496,6 +498,7 @@ pub async fn check_and_update_gateway_score(
                 txn_card_info.clone(),
                 gateway_reference_id.clone(),
                 txn_latency.clone(),
+                updated_payment_method.clone(),
             )
             .await;
         }
@@ -514,6 +517,7 @@ pub async fn check_and_update_gateway_score(
             txn_card_info.clone(),
             gateway_reference_id.clone(),
             txn_latency.clone(),
+            updated_payment_method.clone(),
         )
         .await;
     }
@@ -528,6 +532,7 @@ pub async fn updateGatewayScore(
     txn_card_info: TxnCardInfo,
     gateway_reference_id: Option<String>,
     txn_latency: Option<TransactionLatency>,
+    updated_payment_method: Option<String>,
 ) -> () {
     let mer_acc: MerchantAccount =
         MA::load_merchant_by_merchant_id(MID::merchant_id_to_text(txn_detail.clone().merchantId))
@@ -671,6 +676,7 @@ pub async fn updateGatewayScore(
                     mer_acc.clone(),
                     gateway_scoring_data.clone(),
                     gateway_reference_id.clone(),
+                    updated_payment_method.clone(), // Pass the payment method from API request
                 )
                 .await;
                 logger::info!(
