@@ -709,6 +709,7 @@ pub async fn updateGatewayScore(
                         txn_detail.clone(),
                         txn_card_info.clone(),
                         gateway_scoring_type.clone(),
+                        gateway_scoring_data.clone(),
                         mer_acc_p_id,
                         mer_acc.clone(),
                         key,

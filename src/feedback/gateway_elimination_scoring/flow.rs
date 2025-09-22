@@ -93,6 +93,7 @@ pub async fn updateKeyScoreForKeysFromConsumer(
     txn_detail: TxnDetail,
     txn_card_info: TxnCardInfo,
     gateway_scoring_type: GatewayScoreType,
+    gateway_scoring_data: GatewayScoringData,
     mer_acc_p_id: merchant::id::MerchantPId,
     mer_acc: MerchantAccount,
     gateway_scoring_key: (ScoreKeyType, Option<String>),
@@ -145,6 +146,7 @@ pub async fn updateKeyScoreForKeysFromConsumer(
                     gateway_scoring_type.clone(),
                     txn_detail.clone(),
                     txn_card_info.clone(),
+                    gateway_scoring_data.clone(),
                 )
                 .await;
                 let updated_score = match gw_score_to_be_updated.score {
@@ -157,6 +159,7 @@ pub async fn updateKeyScoreForKeysFromConsumer(
                             gateway_scoring_type.clone(),
                             score,
                             score_key_type,
+                            gateway_scoring_data
                         )
                         .await,
                     ),
@@ -245,6 +248,7 @@ pub async fn updateKeyScoreForTxnStatus(
     gateway_scoring_type: GatewayScoreType,
     current_key_score: f64,
     score_key_type: ScoreKeyType,
+    gateway_scoring_data: GatewayScoringData
 ) -> f64 {
     let is_elimination_v2_enabled = isFeatureEnabled(
         ENABLE_ELIMINATION_V2.get_key(),
@@ -277,6 +281,7 @@ pub async fn updateKeyScoreForTxnStatus(
                 &txn_detail,
                 current_key_score,
                 &score_key_type,
+                gateway_scoring_data.clone()
             )
             .await;
         }
@@ -290,6 +295,7 @@ pub async fn updateKeyScoreForTxnStatus(
                 &txn_detail,
                 current_key_score,
                 &score_key_type,
+                gateway_scoring_data.clone()
             )
             .await;
         }
@@ -306,6 +312,7 @@ async fn updateScoreWithPenalty(
     txn_detail: &TxnDetail,
     current_key_score: f64,
     score_key_type: &ScoreKeyType,
+    gateway_scoring_data: GatewayScoringData
 ) -> f64 {
     match (
         is_elimination_v2_enabled,
@@ -314,7 +321,7 @@ async fn updateScoreWithPenalty(
     ) {
         (true, true, true) | (true, _, _) => {
             let m_reward_factor =
-                eliminationV2RewardFactor(merchant_id, txn_card_info, txn_detail).await;
+                eliminationV2RewardFactor(merchant_id, txn_card_info, txn_detail,gateway_scoring_data.isGriEnabledForElimination, gateway_scoring_data.gatewayReferenceId).await;
             match m_reward_factor {
                 None => {
                     getFailureKeyScore(
@@ -347,6 +354,7 @@ async fn updateScoreWithReward(
     txn_detail: &TxnDetail,
     current_key_score: f64,
     score_key_type: &ScoreKeyType,
+    gateway_scoring_data: GatewayScoringData
 ) -> f64 {
     match (
         is_elimination_v2_enabled,
@@ -355,7 +363,7 @@ async fn updateScoreWithReward(
     ) {
         (true, true, true) | (true, _, _) => {
             let m_reward_factor =
-                eliminationV2RewardFactor(merchant_id, txn_card_info, txn_detail).await;
+                eliminationV2RewardFactor(merchant_id, txn_card_info, txn_detail,gateway_scoring_data.isGriEnabledForElimination, gateway_scoring_data.gatewayReferenceId).await;
             match m_reward_factor {
                 None => getSuccessKeyScore(
                     false,
@@ -444,6 +452,7 @@ pub async fn getUpdatedMerchantDetailsForGlobalKey(
     gateway_scoring_type: GatewayScoreType,
     txn_detail: TxnDetail,
     txn_card_info: TxnCardInfo,
+    gateway_scoring_data: GatewayScoringData
 ) -> Option<Vec<MerchantScoringDetails>> {
     let merchant_id = Merchant::merchant_id_to_text(txn_detail.merchantId.clone());
     if isGlobalKey(score_key_type) {
@@ -469,6 +478,7 @@ pub async fn getUpdatedMerchantDetailsForGlobalKey(
                             &txn_card_info,
                             gateway_scoring_type.clone(),
                             score_key_type,
+                            gateway_scoring_data.clone()
                         )
                         .await;
                         results.push(result);
@@ -493,6 +503,7 @@ pub async fn replaceTransactionCount(
     txn_card_info: &TxnCardInfo,
     gateway_scoring_type: GatewayScoreType,
     score_key_type: ScoreKeyType,
+    gateway_scoring_data: GatewayScoringData,
 ) -> MerchantScoringDetails {
     let merchant_id = Merchant::merchant_id_to_text(txn_detail.merchantId.clone());
     if merchant_scoring_details.merchantId == merchant_id {
@@ -503,6 +514,7 @@ pub async fn replaceTransactionCount(
             gateway_scoring_type.clone(),
             merchant_scoring_details.score,
             score_key_type,
+            gateway_scoring_data.clone()
         )
         .await;
         let new_count = if gateway_scoring_type == GatewayScoreType::PENALISE {
@@ -782,6 +794,8 @@ pub async fn eliminationV2RewardFactor(
     merchant_id: &str,
     txn_card_info: &TxnCardInfo,
     txn_detail: &TxnDetail,
+    is_gri_enabled_for_elimination: bool,
+    gateway_reference_id: Option<String>,
 ) -> Option<f64> {
     let merch_acc: MerchantAccount =
         MA::load_merchant_by_merchant_id(MID::merchant_id_to_text(txn_detail.clone().merchantId))
@@ -804,6 +818,8 @@ pub async fn eliminationV2RewardFactor(
         merchant_id.to_string(),
         txn_card_info.clone(),
         txn_detail.clone(),
+        is_gri_enabled_for_elimination,
+        gateway_reference_id.clone()
     )
     .await;
 

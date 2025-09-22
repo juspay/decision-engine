@@ -4,7 +4,7 @@ use crate::app::get_tenant_app_state;
 use crate::decider::gatewaydecider::gw_filter::{getGws, setGws};
 use crate::decider::gatewaydecider::types::{
     toListOfGatewayScore, DeciderFlow, DeciderScoringName, GatewayDeciderApproach, GatewayScoreMap,
-    SRMetricLogData, SrRoutingDimensions,
+    SRMetricLogData, SrRoutingDimensions, MetricEntry, SrMetrics, ConfigSource, FilterLevel,
 };
 use crate::logger;
 use crate::merchant_config_util::{
@@ -65,8 +65,8 @@ use crate::types::gateway_outage::{self as ETGO, GatewayOutage};
 // use system_random::stateful::{init_std_gen, new_io_gen_m, IOGenM};
 // use system_random::internal::StdGen;
 use super::types::{
-    transform_gateway_wise_success_rate_based_routing, ConfigSource, DebugScoringEntry,
-    DeciderGatewayWiseSuccessRateBasedRoutingInput, Dimension, DownTime, FilterLevel, Gateway,
+    transform_gateway_wise_success_rate_based_routing, DebugScoringEntry,
+    DeciderGatewayWiseSuccessRateBasedRoutingInput, Dimension, DownTime, Gateway,
     GatewayRedisKeyMap, GatewayScoringData, GlobalSREvaluationScoreLog, LogCurrScore,
     RankingAlgorithm, RedisKey, ResetApproach, ResetGatewayInput, ScoreKeyType, SrV3InputConfig,
     SuccessRate1AndNConfig,
@@ -1734,6 +1734,7 @@ pub fn global_elim_lvl_not_none(v: &GatewaySuccessRateBasedRoutingInput) -> bool
 }
 
 pub async fn get_gateway_wise_routing_inputs_for_merchant_sr(
+    gatewayScoringData:GatewayScoringData,
     merchant_acc: ETM::merchant_account::MerchantAccount,
     txn_detail: ETTD::TxnDetail,
     txn_card_info: ETCT::txn_card_info::TxnCardInfo,
@@ -1789,7 +1790,7 @@ pub async fn get_gateway_wise_routing_inputs_for_merchant_sr(
         .unwrap_or(default_merchant_elimination_threshold.unwrap_or(default_elimination_threshold));
 
     let elimination_threshold_updated = if is_elimination_v2_enabled {
-        get_elimination_v2_threshold(&merchant_acc, &txn_card_info, &txn_detail)
+        get_elimination_v2_threshold(&merchant_acc, &txn_card_info, &txn_detail, gatewayScoringData)
             .await
             .unwrap_or(elimination_threshold)
     } else {
@@ -1832,6 +1833,7 @@ async fn get_elimination_v2_threshold(
     merchant_acc: &ETM::merchant_account::MerchantAccount,
     txn_card_info: &ETCT::txn_card_info::TxnCardInfo,
     txn_detail: &ETTD::TxnDetail,
+    gateway_Scoring_Data:GatewayScoringData
 ) -> Option<f64> {
     let m_gateway_success_rate_merchant_input = Utils::decode_and_log_error(
         "Gateway Decider Input Decode Error",
@@ -1861,6 +1863,8 @@ async fn get_elimination_v2_threshold(
         merchant_acc.merchantId.0.clone(),
         txn_card_info.clone(),
         txn_detail.clone(),
+        gateway_Scoring_Data.isGriEnabledForElimination,
+        gateway_Scoring_Data.gatewayReferenceId.clone()
     )
     .await
     {
@@ -1908,6 +1912,8 @@ pub async fn get_sr1_and_sr2_and_n(
     merchant_id: String,
     txn_card_info: ETCT::txn_card_info::TxnCardInfo,
     txn_detail: ETTD::TxnDetail,
+    is_gri_enabled_for_elimination: bool,
+    gateway_reference_id: Option<String>,
 ) -> Option<(
     f64,
     f64,
@@ -1917,30 +1923,58 @@ pub async fn get_sr1_and_sr2_and_n(
     Option<String>,
     ConfigSource,
 )> {
+    let pmt = &txn_card_info.paymentMethodType;
+    let source_obj = if txn_card_info.paymentMethod == UPI {
+        txn_detail.sourceObject.clone()
+    } else {
+        Some(txn_card_info.paymentMethod.clone())
+    };
+    let pm = if txn_card_info.paymentMethodType == UPI {
+        source_obj.clone()
+    } else {
+        Some(txn_card_info.paymentMethod.clone())
+    };
+    let txn_obj_type = format!("{:?}", txn_detail.txnObjectType);
+    let card_type = txn_card_info.card_type.clone();
+
+    // Try Redis first
+    if let Some(gateway_success_rate_merchant_input) = m_gateway_success_rate_merchant_input.clone() {
+        if let Some(inputs) = gateway_success_rate_merchant_input.eliminationV2SuccessRateInputs {
+            let redis_result = filter_using_redis(
+                merchant_id.clone(),
+                pmt.to_string(),
+                pm.clone(),
+                txn_obj_type.clone(),
+                inputs.clone(),
+                is_gri_enabled_for_elimination,
+                gateway_reference_id.clone(),
+            )
+            .await;
+            
+            if redis_result.is_some() {
+                return redis_result;
+            }
+        }
+    }
+
+    // Try Service Config
     if let Some(gateway_success_rate_merchant_input) = m_gateway_success_rate_merchant_input {
         if let Some(inputs) = gateway_success_rate_merchant_input.eliminationV2SuccessRateInputs {
-            let pmt = &txn_card_info.paymentMethodType;
-            let source_obj = if txn_card_info.paymentMethod == UPI {
-                txn_detail.sourceObject.clone()
-            } else {
-                Some(txn_card_info.paymentMethod.clone())
-            };
-            let pm = if txn_card_info.paymentMethodType == UPI {
-                source_obj.clone()
-            } else {
-                Some(txn_card_info.paymentMethod.clone())
-            };
-            let txn_obj_type = format!("{:?}", txn_detail.txnObjectType);
-
-            filter_using_service_config(merchant_id, pmt.to_string(), pm, txn_obj_type, inputs)
-                .await
-        } else {
-            None
-            // fetch_default_sr1_and_sr2_and_n(&gateway_success_rate_merchant_input).await
+            let service_config_result = filter_using_service_config(
+                merchant_id,
+                pmt.to_string(),
+                pm,
+                txn_obj_type,
+                inputs,
+            )
+            .await;
+            
+            return service_config_result;
         }
-    } else {
-        None
     }
+
+    // Return None if neither Redis nor Service Config has data
+    None
 }
 
 // async fn fetch_default_sr1_and_sr2_and_n(
@@ -2368,6 +2402,7 @@ pub async fn update_gateway_score_based_on_success_rate(
             for (gw, _) in gateway_score_global_sr.clone() {
                 gateway_success_rate_inputs.push(
                     get_gateway_wise_routing_inputs_for_merchant_sr(
+                        gateway_scoring_data.clone(),
                         merchant_acc.clone(),
                         txn_detail.clone(),
                         txn_card_info.clone(),
@@ -2567,6 +2602,7 @@ pub async fn update_gateway_score_based_on_success_rate(
                         reset_gw_list,
                         is_reset_score_enabled_for_merchant,
                         gateway_redis_key_map.clone(),
+                        gateway_scoring_data.clone()
                     )
                     .await;
                 }
@@ -2820,6 +2856,7 @@ pub async fn trigger_reset_gateway_score(
     reset_gateway_list: Vec<String>,
     is_reset_score_enabled_for_merchant: bool,
     gateway_redis_key_map: GatewayRedisKeyMap,
+    gateway_scoring_data: GatewayScoringData
 ) {
     logger::info!(
         tag = "scoringFlow",
@@ -2869,6 +2906,7 @@ pub async fn trigger_reset_gateway_score(
                     key: gateway_redis_key_map.get(it).cloned(),
                     hardTtl: hard_ttl,
                     softTtl: soft_ttl,
+                    gatewayReferenceIdEnabled: Some(gateway_scoring_data.isGriEnabledForElimination),
                 };
 
                 // Now these await calls are in an async context
@@ -2876,6 +2914,7 @@ pub async fn trigger_reset_gateway_score(
                     decider_flow,
                     txn_detail.clone(),
                     reset_gateway_input.clone(),
+                    gateway_scoring_data.clone()
                 )
                 .await;
                 reset_gateway_sr_list.push(reset_gateway_input.clone());
@@ -2938,6 +2977,7 @@ pub async fn reset_gateway_score(
     decider_flow: &mut DeciderFlow<'_>,
     txn_detail: ETTD::TxnDetail,
     reset_gateway_input: ResetGatewayInput,
+    gateway_scoring_data: GatewayScoringData
 ) {
     let current_timestamp = get_current_date_in_millis();
     match (
@@ -2946,7 +2986,7 @@ pub async fn reset_gateway_score(
         reset_gateway_input.clone().eliminationMaxCount,
     ) {
         (Some(key), Some(threshold), Some(max_count)) => {
-            let penality_factor = Utils::get_penality_factor_(decider_flow).await;
+            let penality_factor = Utils::get_penality_factor_(decider_flow,&gateway_scoring_data).await;
             let score = get_merchant_elimination_gateway_score(key.clone()).await;
             let (is_eligible_for_reset, reset_cached_gateway_score) = match score {
                 Some(score) => {
@@ -3113,4 +3153,158 @@ pub fn route_random_traffic(
             .map(|(gw, score)| (gw.clone(), *score))
             .collect()
     }
+}
+
+pub async fn filter_using_redis(
+    merchant_id: String,
+    pmt: String,
+    pm: Option<String>,
+    txn_obj_type: String,
+    inputs: Vec<ETGRI::EliminationSuccessRateInput>,
+    is_gri_enabled_for_elimination: bool,
+    gateway_reference_id: Option<String>,
+) -> Option<(f64, f64, f64, Option<String>, Option<String>, Option<String>, ConfigSource)> {
+    filter_using_redis_upto(
+        None,
+        FilterLevel::TXN_OBJECT_TYPE,
+        merchant_id.clone(),
+        pmt.clone(),
+        pm.clone(),
+        txn_obj_type.clone(),
+        is_gri_enabled_for_elimination,
+        gateway_reference_id.clone(),
+        inputs.clone(),
+        None,
+    )
+    .await
+    .or(filter_using_redis_upto(
+        None,
+        FilterLevel::PAYMENT_METHOD,
+        merchant_id.clone(),
+        pmt.clone(),
+        pm.clone(),
+        txn_obj_type.clone(),
+        is_gri_enabled_for_elimination,
+        gateway_reference_id.clone(),
+        inputs.clone(),
+        None,
+    )
+    .await)
+    .or(filter_using_redis_upto(
+        None,
+        FilterLevel::PAYMENT_METHOD_TYPE,
+        merchant_id,
+        pmt,
+        pm,
+        txn_obj_type,
+        is_gri_enabled_for_elimination,
+        gateway_reference_id,
+        inputs,
+        None,
+    )
+    .await)
+}
+
+async fn filter_using_redis_upto(
+    m_metric_entry: Option<MetricEntry>,
+    level: FilterLevel,
+    merchant_id: String,
+    pmt: String,
+    pm: Option<String>,
+    txn_obj_type: String,
+    is_gri_enabled_for_elimination: bool,
+    gateway_reference_id: Option<String>,
+    inputs: Vec<ETGRI::EliminationSuccessRateInput>,
+    card_type: Option<String>,
+) -> Option<(f64, f64, f64, Option<String>, Option<String>, Option<String>, ConfigSource)> {
+    let m_input = filter_inputs_upto(
+        level.clone(),
+        pmt.clone(),
+        pm.clone(),
+        txn_obj_type.clone(),
+        inputs,
+    );
+    
+    let m_metric_entry_final = match m_metric_entry {
+        Some(entry) => Some(entry),
+        None => get_metric_entry_data(
+            merchant_id.clone(),
+            pmt.clone(),
+            pm.clone(),
+            txn_obj_type.clone(),
+            card_type,
+        )
+        .await,
+    };
+    
+    match (m_input, m_metric_entry_final) {
+        (Some(input), Some(metric_entry)) => Some((
+            metric_entry.success_rate,
+            input.successRate,
+            metric_entry.sigma_factor,
+            Some(input.paymentMethodType),
+            input.paymentMethod,
+            input.txnObjectType,
+            ConfigSource::REDIS,
+        )),
+        _ => None,
+    }
+}
+
+async fn get_metric_entry_data(
+    merchant_id: String,
+    pmt: String,
+    m_pm: Option<String>,
+    txn_obj_type: String,
+    card_type: Option<String>,
+) -> Option<MetricEntry> {
+    let aggregate_key = construct_aggregate_key(&merchant_id);
+    let dim_key = construct_dimension_key(&pmt, &m_pm, &txn_obj_type, &card_type);
+    
+    fetch_from_redis(&aggregate_key, &dim_key).await
+}
+
+fn construct_dimension_key(
+    pmt: &str,
+    m_pm: &Option<String>,
+    txn_obj_type: &str,
+    card_type: &Option<String>,
+) -> Option<String> {
+    if pmt == CARD {
+        Some(format!(
+            "{}_{}_{}_{}",
+            txn_obj_type,
+            pmt,
+            m_pm.as_ref().unwrap_or(&String::new()),
+            card_type.as_ref().unwrap_or(&String::new())
+        ))
+    } else {
+        Some(format!(
+            "{}_{}_{}",
+            txn_obj_type,
+            pmt,
+            m_pm.as_ref().unwrap_or(&String::new())
+        ))
+    }
+}
+
+async fn fetch_from_redis(
+    key: &str,
+    dim_key: &Option<String>,
+) -> Option<MetricEntry> {
+    match dim_key {
+        None => None,
+        Some(dkey) => {
+            let app_state = get_tenant_app_state().await;
+            app_state
+                .redis_conn
+                .get_key::<MetricEntry>(key, "metric_entry")
+                .await
+                .ok()
+        }
+    }
+}
+
+fn construct_aggregate_key(merchant_id: &str) -> String {
+    format!("{}{}", C::aggregateKeyPrefix, merchant_id)
 }

@@ -138,7 +138,7 @@ pub fn internalDefaultEliminationV2SuccessRate1AndNPrefix(
 pub const defaultFieldNameForSR1AndN: &str = "default";
 pub const sr1KeyPrefix: &str = "sr1_";
 pub const nKeyPrefix: &str = "n_";
-
+pub const aggregateKeyPrefix: &str = "aggregate_data_";
 pub const gwDefaultTxnSoftResetCount: i64 = 10;
 pub const defaultGlobalSelectionVolumeThreshold: i64 = 20;
 
