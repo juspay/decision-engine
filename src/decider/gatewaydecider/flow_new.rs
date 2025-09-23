@@ -725,10 +725,21 @@ pub async fn runSuperRouterFlow(
                         .sorted_networks_by_absolute_fee(&app_state, Some(card_isin_value), amount)
                         .await
                     {
-                        debit_routing_output.co_badged_card_networks_info
+                        let mut network_savings_info_for_super_router = Vec::new();
+                        for network_savings_info in
+                            debit_routing_output.co_badged_card_networks_info
+                        {
+                            network_savings_info_for_super_router.push(
+                                NetworkTypes::NetworkSavingInfoForSuperRouter {
+                                    network: network_savings_info.network.to_string(),
+                                    saving_percentage: network_savings_info.saving_percentage,
+                                },
+                            );
+                        }
+                        network_savings_info_for_super_router
                     } else {
                         logger::warn!("Failed to get networks from sorted_networks_by_absolute_fee, using paymentMethod");
-                        vec![NetworkTypes::NetworkSavingInfo {
+                        vec![NetworkTypes::NetworkSavingInfoForSuperRouter {
                             network: dreq.paymentInfo.paymentMethod,
                             saving_percentage: 0.0,
                         }]
@@ -736,7 +747,7 @@ pub async fn runSuperRouterFlow(
                 }
                 Err(error) => {
                     logger::error!("Failed to parse metadata for SUPER_ROUTER: {:?}", error);
-                    vec![NetworkTypes::NetworkSavingInfo {
+                    vec![NetworkTypes::NetworkSavingInfoForSuperRouter {
                         network: dreq.paymentInfo.paymentMethod,
                         saving_percentage: 0.0,
                     }]
@@ -744,14 +755,14 @@ pub async fn runSuperRouterFlow(
             }
         } else {
             logger::warn!("No metadata found, using paymentMethod");
-            vec![NetworkTypes::NetworkSavingInfo {
+            vec![NetworkTypes::NetworkSavingInfoForSuperRouter {
                 network: dreq.paymentInfo.paymentMethod,
                 saving_percentage: 0.0,
             }]
         }
     } else {
         logger::debug!("Card ISIN not present, using paymentMethod with 0 savings");
-        vec![NetworkTypes::NetworkSavingInfo {
+        vec![NetworkTypes::NetworkSavingInfoForSuperRouter {
             network: dreq.paymentInfo.paymentMethod,
             saving_percentage: 0.0,
         }]

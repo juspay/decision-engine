@@ -941,7 +941,7 @@ pub struct PaymentInfo {
     emiBank: Option<String>,
     emiTenure: Option<i32>,
     paymentMethodType: String,
-    pub paymentMethod: NETWORK,
+    pub paymentMethod: String,
     paymentSource: Option<String>,
     authType: Option<ETCa::txn_card_info::AuthType>,
     cardIssuerBankName: Option<String>,
