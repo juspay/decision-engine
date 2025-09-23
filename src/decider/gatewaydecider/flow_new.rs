@@ -767,6 +767,11 @@ pub async fn runSuperRouterFlow(
             saving_percentage: 0.0,
         }]
     };
+
+    logger::debug!("Networks to process for SUPER_ROUTER before normalization: {:?}", networks_to_process);
+
+    // normalize the cost savings within range [0, 1]
+    let networks_to_process = network_decider::helpers::normalize_cost_savings(networks_to_process);
     
     logger::debug!("Networks to process for SUPER_ROUTER: {:?}", networks_to_process);
     
