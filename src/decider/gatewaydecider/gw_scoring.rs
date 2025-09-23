@@ -1938,8 +1938,9 @@ pub async fn get_sr1_and_sr2_and_n(
     let card_type = txn_card_info.card_type.clone();
 
     // Try Redis first
-    if let Some(gateway_success_rate_merchant_input) = m_gateway_success_rate_merchant_input.clone() {
+    if let Some(gateway_success_rate_merchant_input) = m_gateway_success_rate_merchant_input {
         if let Some(inputs) = gateway_success_rate_merchant_input.eliminationV2SuccessRateInputs {
+            // Try Redis first
             let redis_result = filter_using_redis(
                 merchant_id.clone(),
                 pmt.to_string(),
@@ -1954,12 +1955,8 @@ pub async fn get_sr1_and_sr2_and_n(
             if redis_result.is_some() {
                 return redis_result;
             }
-        }
-    }
-
-    // Try Service Config
-    if let Some(gateway_success_rate_merchant_input) = m_gateway_success_rate_merchant_input {
-        if let Some(inputs) = gateway_success_rate_merchant_input.eliminationV2SuccessRateInputs {
+            
+            // Try Service Config
             let service_config_result = filter_using_service_config(
                 merchant_id,
                 pmt.to_string(),
@@ -1977,33 +1974,46 @@ pub async fn get_sr1_and_sr2_and_n(
     None
 }
 
-// async fn fetch_default_sr1_and_sr2_and_n(
-//     gateway_success_rate_merchant_input: &GatewayWiseSuccessRateBasedRoutingInput,
-// ) -> Option<(f64, f64, f64, Option<String>, Option<String>, Option<String>, ConfigSource)> {
-//     if let Some(sr2) = gateway_success_rate_merchant_input.default_elimination_v2_success_rate {
-//         fetch_default_sr1_and_n_and_mk_result(sr2).await
-//     } else {
-//         None
-//     }
-// }
+async fn fetch_default_sr1_and_sr2_and_n(
+    gateway_success_rate_merchant_input: &GatewaySuccessRateBasedRoutingInput,
+    merchant_id: &str,
+) -> Option<(f64, f64, f64, Option<String>, Option<String>, Option<String>, ConfigSource)> {
+    if let Some(sr2) = gateway_success_rate_merchant_input.defaultEliminationV2SuccessRate {
+        fetch_default_sr1_and_n_and_mk_result(sr2, merchant_id).await
+    } else {
+        None
+    }
+}
 
-// async fn fetch_default_sr1_and_n_and_mk_result(sr2: f64) -> Option<(f64, f64, f64, Option<String>, Option<String>, Option<String>, ConfigSource)> {
-//     let m_default_sr1 = RC::r_hget(Config::EC_REDIS, construct_sr1_key(merchant_id), C::DEFAULT_FIELD_NAME_FOR_SR1_AND_N).await;
-//     let m_default_n = RC::r_hget(Config::EC_REDIS, construct_n_key(merchant_id), C::DEFAULT_FIELD_NAME_FOR_SR1_AND_N).await;
+async fn fetch_default_sr1_and_n_and_mk_result(
+    sr2: f64,
+    merchant_id: &str,
+) -> Option<(f64, f64, f64, Option<String>, Option<String>, Option<String>, ConfigSource)> {
+    let app_state = get_tenant_app_state().await;
+    let redis_conn = &app_state.redis_conn;
+    
+    let sr1_key = format!("{}{}", C::sr1KeyPrefix, merchant_id);
+    let n_key = format!("{}{}", C::nKeyPrefix, merchant_id);
+    
+    let m_default_sr1 = redis_conn.get_key::<f64>(&sr1_key, "f64").await.ok();
+    let m_default_n = redis_conn.get_key::<f64>(&n_key, "f64").await.ok();
 
-//     if let (Some(sr1), Some(n)) = (m_default_sr1, m_default_n) {
-//         Some((sr1, sr2, n, None, None, None, ConfigSource::MERCHANT_DEFAULT))
-//     } else {
-//         let m_s_config_sr1 = RService::find_by_name_from_redis(C::DEFAULT_SR1_S_CONFIG_PREFIX(merchant_id)).await;
-//         let m_s_config_n = RService::find_by_name_from_redis(C::DEFAULT_N_S_CONFIG_PREFIX(merchant_id)).await;
+    if let (Some(sr1), Some(n)) = (m_default_sr1, m_default_n) {
+        Some((sr1, sr2, n, None, None, None, ConfigSource::MERCHANT_DEFAULT))
+    } else {
+        let sr1_config_key = C::defaultSr1SConfigPrefix(merchant_id.to_string()).get_key();
+        let n_config_key = C::defaultNSConfigPrefix(merchant_id.to_string()).get_key();
+        
+        let m_s_config_sr1 = RService::findByNameFromRedis::<f64>(sr1_config_key).await;
+        let m_s_config_n = RService::findByNameFromRedis::<f64>(n_config_key).await;
 
-//         if let (Some(sr1), Some(n)) = (m_s_config_sr1, m_s_config_n) {
-//             Some((sr1, sr2, n, None, None, None, ConfigSource::GLOBAL_DEFAULT))
-//         } else {
-//             None
-//         }
-//     }
-// }
+        if let (Some(sr1), Some(n)) = (m_s_config_sr1, m_s_config_n) {
+            Some((sr1, sr2, n, None, None, None, ConfigSource::GLOBAL_DEFAULT))
+        } else {
+            None
+        }
+    }
+}
 
 async fn filter_using_service_config(
     merchant_id: String,
@@ -2075,77 +2085,6 @@ pub fn filter_inputs_upto(
     }
 }
 
-// pub async fn filter_using_redis_upto(
-//     level: FilterLevel,
-//     merchant_id: T,
-//     pmt: T,
-//     pm: Option<T>,
-//     txn_obj_type: T,
-//     inputs: Vec<ETGRI::EliminationSuccessRateInput>,
-// ) -> Option<(f64, f64, f64, Option<T>, Option<T>, Option<T>, ConfigSource)> {
-//     let m_input = filter_inputs_upto(level, pmt.clone(), pm.clone(), txn_obj_type.clone(), inputs);
-//     let m_sr1_and_n = get_sr1_and_n_from_redis_upto(level, merchant_id.clone(), pmt.clone(), pm.clone(), txn_obj_type.clone()).await;
-//     match (m_input, m_sr1_and_n) {
-//         (Some(input), Some((sr1, n))) => Some((
-//             sr1,
-//             input.success_rate,
-//             n,
-//             Some(input.payment_method_type),
-//             input.payment_method.clone(),
-//             input.txn_object_type.clone(),
-//             ConfigSource::Redis,
-//         )),
-//         _ => None,
-//     }
-// }
-
-// pub async fn get_sr1_and_n_from_redis_upto(
-//     level: FilterLevel,
-//     merchant_id: T,
-//     pmt: T,
-//     m_pm: Option<T>,
-//     txn_obj_type: T,
-// ) -> Option<(f64, f64)> {
-//     let sr1_key = construct_sr1_key(&merchant_id);
-//     let n_key = construct_n_key(&merchant_id);
-//     let dim_key = construct_dimension_key(level, &pmt, m_pm.as_ref(), &txn_obj_type);
-
-//     let redis_sr1 = fetch_from_redis(&sr1_key, &dim_key).await;
-//     let redis_n = fetch_from_redis(&n_key, &dim_key).await;
-
-//     match (redis_sr1, redis_n) {
-//         (Some(sr1), Some(n)) => Some((sr1, n)),
-//         _ => None,
-//     }
-// }
-
-// fn construct_sr1_key(merchant_id: &T) -> T {
-//     format!("{}{}", C::SR1_KEY_PREFIX, merchant_id)
-// }
-
-// fn construct_n_key(merchant_id: &T) -> T {
-//     format!("{}{}", C::N_KEY_PREFIX, merchant_id)
-// }
-
-// fn construct_dimension_key(
-//     level: FilterLevel,
-//     pmt: &T,
-//     pm: Option<&T>,
-//     txn_obj_type: &T,
-// ) -> Option<T> {
-//     match level {
-//         FilterLevel::TxnObjectType => pm.map(|pm| format!("{}|{}|{}", pmt, pm, txn_obj_type)),
-//         FilterLevel::PaymentMethod => pm.map(|pm| format!("{}|{}", pmt, pm)),
-//         FilterLevel::PaymentMethodType => Some(pmt.clone()),
-//     }
-// }
-
-// async fn fetch_from_redis(key: &T, dim_key: &Option<T>) -> Option<f64> {
-//     match dim_key {
-//         None => None,
-//         Some(dkey) => RC::r_hget(Config::EC_REDIS, key, dkey).await,
-//     }
-// }
 
 pub fn fetch_sr1_and_n_from_service_config_upto(
     level: FilterLevel,
