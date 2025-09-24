@@ -41,7 +41,7 @@ fn analyze_gaps_and_weights(entries: &[(String, f64, f64, f64)]) -> GapAnalysisR
     // If we have at least 1 entry, analyze success rates
     if !entries.is_empty() {
         // Fixed threshold for success rate (85%)
-        let sr_threshold = 0.90;
+        let sr_threshold = 0.85;
 
         // Find entries above the threshold
         let above_threshold: Vec<&(String, f64, f64, f64)> = entries
@@ -63,7 +63,7 @@ fn analyze_gaps_and_weights(entries: &[(String, f64, f64, f64)]) -> GapAnalysisR
             };
 
             // Fixed spread value for weight determination (5%)
-            let spread_threshold = 0.01;
+            let spread_threshold = 0.02;
 
             // Calculate weights based on spread
             // If spread is small, cost dominates; if spread is large, SR dominates
@@ -113,7 +113,7 @@ pub fn sort_by_euclidean_distance_original(
 
     // Extract data from combined_map
     for entry in combined_map.iter() {
-        if let (Some(score), Some(cost)) = (entry.success_rate, entry.saving) {
+        if let (Some(score), Some(cost)) = (entry.success_rate, entry.saving_normalized) {
             let key = format!("{}_{}", entry.payment_method, entry.gateway);
             entries.push((key, score, cost));
         }
@@ -210,8 +210,8 @@ pub fn sort_by_euclidean_distance_original(
         let a_normalized_score = normalized_score_map.get(&a_key).cloned().unwrap_or(0.0);
         let b_normalized_score = normalized_score_map.get(&b_key).cloned().unwrap_or(0.0);
 
-        let a_cost = a.saving.unwrap_or(0.0);
-        let b_cost = b.saving.unwrap_or(0.0);
+        let a_cost = a.saving_normalized.unwrap_or(0.0);
+        let b_cost = b.saving_normalized.unwrap_or(0.0);
 
         // Compare distances
         match a_distance
