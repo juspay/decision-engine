@@ -658,6 +658,7 @@ pub struct SUPERROUTERPRIORITYMAP {
     pub payment_method: String,
     pub success_rate: Option<f64>,
     pub saving: Option<f64>,
+    pub saving_normalized: Option<f64>,
     pub combined_score: Option<f64>,
 }
 

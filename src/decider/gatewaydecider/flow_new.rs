@@ -839,6 +839,7 @@ async fn get_sr_for_each_gateway_network_combination(
                                 payment_method: network_info.network.to_string(),
                                 success_rate: Some(score), // Using the score as success_rate
                                 saving: Some(network_info.savings_absolute),
+                                saving_normalized: Some(network_info.savings_normalized),
                                 combined_score: Some(0.0), // Set to 0 as requested
                             });
                         }
@@ -856,21 +857,20 @@ async fn get_sr_for_each_gateway_network_combination(
         }
     }
 
-    (first_gateway_result, super_router_priority_map)
-}
-
-/// Build the final Super Router response with sorted results
-fn build_super_router_response(
-    first_gateway_result: Option<T::DecidedGateway>,
-    mut super_router_priority_map: Vec<T::SUPERROUTERPRIORITYMAP>,
-) -> Result<T::DecidedGateway, T::ErrorResponse> {
-    // Sort the priority_map by success_rate in descending order
     super_router_priority_map.sort_by(|a, b| {
         let success_rate_a = a.success_rate.unwrap_or(0.0);
         let success_rate_b = b.success_rate.unwrap_or(0.0);
         success_rate_b.total_cmp(&success_rate_a)
     });
 
+    (first_gateway_result, super_router_priority_map)
+}
+
+/// Build the final Super Router response with sorted results
+fn build_super_router_response(
+    first_gateway_result: Option<T::DecidedGateway>,
+    super_router_priority_map: Vec<T::SUPERROUTERPRIORITYMAP>,
+) -> Result<T::DecidedGateway, T::ErrorResponse> {
     logger::debug!(
         "Sorted super_router_priority_map by success_rate: {:?}",
         super_router_priority_map
@@ -920,17 +920,17 @@ pub async fn runSuperRouterFlow(
     logger::debug!("Starting SUPER_ROUTER flow");
 
     let app_state = get_tenant_app_state().await;
-    
-    // 1. Get networks with normalization
-    let networks_to_process = get_network_saving_info_for_super_router(
-        &decider_params, &dreq, &app_state
-    ).await;
-    
-    // 2. Process networks for gateway decisions
-    let (first_gateway_result, super_router_priority_map) = 
-        get_sr_for_each_gateway_network_combination(networks_to_process, &decider_params, &dreq).await;
-    
-    // 3. Build final response
+
+    // Get networks with normalization
+    let networks_to_process =
+        get_network_saving_info_for_super_router(&decider_params, &dreq, &app_state).await;
+
+    // Get success rate for each network-gateway combination
+    let (first_gateway_result, super_router_priority_map) =
+        get_sr_for_each_gateway_network_combination(networks_to_process, &decider_params, &dreq)
+            .await;
+
+    // Build super router response
     build_super_router_response(first_gateway_result, super_router_priority_map)
 }
 
