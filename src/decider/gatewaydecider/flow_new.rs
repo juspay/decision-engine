@@ -700,13 +700,12 @@ fn defaultDecidedGateway(
     }
 }
 
-pub async fn runSuperRouterFlow(
-    decider_params: T::DeciderParams,
-    dreq: T::DomainDeciderRequestForApiCallV2,
-) -> Result<T::DecidedGateway, T::ErrorResponse> {
-    logger::debug!("Starting SUPER_ROUTER flow");
-
-    let app_state = get_tenant_app_state().await;
+/// Get networks to process with normalized savings for Super Router
+async fn get_network_saving_info_for_super_router(
+    decider_params: &T::DeciderParams,
+    dreq: &T::DomainDeciderRequestForApiCallV2,
+    app_state: &crate::app::TenantAppState,
+) -> Vec<NetworkTypes::NetworkSavingInfoForSuperRouter> {
     let card_isin = decider_params.dpTxnCardInfo.card_isin.clone();
     let amount = dreq.paymentInfo.amount;
 
@@ -718,13 +717,14 @@ pub async fn runSuperRouterFlow(
         if let Some(metadata_value) = dreq
             .paymentInfo
             .metadata
-            .map(|metadata_string| Utils::parse_json_from_string(&metadata_string))
+            .as_ref()
+            .map(|metadata_string| Utils::parse_json_from_string(metadata_string))
             .flatten()
         {
             match TryInto::<NetworkTypes::CoBadgedCardRequest>::try_into(metadata_value) {
                 Ok(co_badged_card_request) => {
                     if let Some(debit_routing_output) = co_badged_card_request
-                        .sorted_networks_by_absolute_fee(&app_state, Some(card_isin_value), amount)
+                        .sorted_networks_by_absolute_fee(app_state, Some(card_isin_value), amount)
                         .await
                     {
                         let mut network_savings_info_for_super_router = Vec::new();
@@ -743,7 +743,7 @@ pub async fn runSuperRouterFlow(
                     } else {
                         logger::warn!("Failed to get networks from sorted_networks_by_absolute_fee, using paymentMethod");
                         vec![NetworkTypes::NetworkSavingInfoForSuperRouter {
-                            network: dreq.paymentInfo.paymentMethod,
+                            network: dreq.paymentInfo.paymentMethod.clone(),
                             savings_absolute: 0.0,
                             savings_normalized: 0.0,
                         }]
@@ -752,7 +752,7 @@ pub async fn runSuperRouterFlow(
                 Err(error) => {
                     logger::error!("Failed to parse metadata for SUPER_ROUTER: {:?}", error);
                     vec![NetworkTypes::NetworkSavingInfoForSuperRouter {
-                        network: dreq.paymentInfo.paymentMethod,
+                        network: dreq.paymentInfo.paymentMethod.clone(),
                         savings_absolute: 0.0,
                         savings_normalized: 0.0,
                     }]
@@ -761,7 +761,7 @@ pub async fn runSuperRouterFlow(
         } else {
             logger::warn!("No metadata found, using paymentMethod");
             vec![NetworkTypes::NetworkSavingInfoForSuperRouter {
-                network: dreq.paymentInfo.paymentMethod,
+                network: dreq.paymentInfo.paymentMethod.clone(),
                 savings_absolute: 0.0,
                 savings_normalized: 0.0,
             }]
@@ -769,7 +769,7 @@ pub async fn runSuperRouterFlow(
     } else {
         logger::debug!("Card ISIN not present, using paymentMethod with 0 savings");
         vec![NetworkTypes::NetworkSavingInfoForSuperRouter {
-            network: dreq.paymentInfo.paymentMethod,
+            network: dreq.paymentInfo.paymentMethod.clone(),
             savings_absolute: 0.0,
             savings_normalized: 0.0,
         }]
@@ -788,6 +788,15 @@ pub async fn runSuperRouterFlow(
         networks_to_process
     );
 
+    networks_to_process
+}
+
+/// Process each network through gateway decision flow
+async fn get_sr_for_each_gateway_network_combination(
+    networks_to_process: Vec<NetworkTypes::NetworkSavingInfoForSuperRouter>,
+    decider_params: &T::DeciderParams,
+    dreq: &T::DomainDeciderRequestForApiCallV2,
+) -> (Option<T::DecidedGateway>, Vec<T::SUPERROUTERPRIORITYMAP>) {
     let mut super_router_priority_map = Vec::new();
     let mut first_gateway_result: Option<T::DecidedGateway> = None;
 
@@ -847,6 +856,14 @@ pub async fn runSuperRouterFlow(
         }
     }
 
+    (first_gateway_result, super_router_priority_map)
+}
+
+/// Build the final Super Router response with sorted results
+fn build_super_router_response(
+    first_gateway_result: Option<T::DecidedGateway>,
+    mut super_router_priority_map: Vec<T::SUPERROUTERPRIORITYMAP>,
+) -> Result<T::DecidedGateway, T::ErrorResponse> {
     // Sort the priority_map by success_rate in descending order
     super_router_priority_map.sort_by(|a, b| {
         let success_rate_a = a.success_rate.unwrap_or(0.0);
@@ -894,6 +911,27 @@ pub async fn runSuperRouterFlow(
             })
         }
     }
+}
+
+pub async fn runSuperRouterFlow(
+    decider_params: T::DeciderParams,
+    dreq: T::DomainDeciderRequestForApiCallV2,
+) -> Result<T::DecidedGateway, T::ErrorResponse> {
+    logger::debug!("Starting SUPER_ROUTER flow");
+
+    let app_state = get_tenant_app_state().await;
+    
+    // 1. Get networks with normalization
+    let networks_to_process = get_network_saving_info_for_super_router(
+        &decider_params, &dreq, &app_state
+    ).await;
+    
+    // 2. Process networks for gateway decisions
+    let (first_gateway_result, super_router_priority_map) = 
+        get_sr_for_each_gateway_network_combination(networks_to_process, &decider_params, &dreq).await;
+    
+    // 3. Build final response
+    build_super_router_response(first_gateway_result, super_router_priority_map)
 }
 
 // async fn addMetricsToStream(
