@@ -826,6 +826,15 @@ pub async fn runSuperRouterFlow(
         }
     }
     
+    // Sort the priority_map by success_rate in descending order
+    super_router_priority_map.sort_by(|a, b| {
+        let success_rate_a = a.success_rate.unwrap_or(0.0);
+        let success_rate_b = b.success_rate.unwrap_or(0.0);
+        success_rate_b.total_cmp(&success_rate_a)
+    });
+    
+    logger::debug!("Sorted super_router_priority_map by success_rate: {:?}", super_router_priority_map);
+    
     // Return the result
     match first_gateway_result {
         Some(mut gateway_result) => {
