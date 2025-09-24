@@ -260,7 +260,7 @@ pub fn normalize_cost_savings(
     let mut max_saving = f64::NEG_INFINITY;
 
     for network_cost in &network_cost_savings {
-        max_saving = max_saving.max(network_cost.saving_percentage);
+        max_saving = max_saving.max(network_cost.savings_absolute);
     }
 
     // If all the cost savings are 0, return the original array.
@@ -272,10 +272,11 @@ pub fn normalize_cost_savings(
     network_cost_savings
         .iter()
         .map(|network_cost| {
-            let normalized_cost_saving = network_cost.saving_percentage / max_saving;
+            let normalized_cost_saving = network_cost.savings_absolute / max_saving;
             types::NetworkSavingInfoForSuperRouter {
                 network: network_cost.network.clone(),
-                saving_percentage: normalized_cost_saving,
+                savings_absolute: network_cost.savings_absolute.clone(),
+                savings_normalized: normalized_cost_saving,
             }
         })
         .collect()

@@ -254,7 +254,8 @@ pub struct NetworkSavingInfo {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct NetworkSavingInfoForSuperRouter {
     pub network: String,
-    pub saving_percentage: f64,
+    pub savings_absolute: f64,
+    pub savings_normalized: f64,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]

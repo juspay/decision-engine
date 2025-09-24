@@ -700,13 +700,12 @@ fn defaultDecidedGateway(
     }
 }
 
-pub async fn runSuperRouterFlow(
-    decider_params: T::DeciderParams,
-    dreq: T::DomainDeciderRequestForApiCallV2,
-) -> Result<T::DecidedGateway, T::ErrorResponse> {
-    logger::debug!("Starting SUPER_ROUTER flow");
-
-    let app_state = get_tenant_app_state().await;
+/// Get networks to process with normalized savings for Super Router
+async fn get_network_saving_info_for_super_router(
+    decider_params: &T::DeciderParams,
+    dreq: &T::DomainDeciderRequestForApiCallV2,
+    app_state: &crate::app::TenantAppState,
+) -> Vec<NetworkTypes::NetworkSavingInfoForSuperRouter> {
     let card_isin = decider_params.dpTxnCardInfo.card_isin.clone();
     let amount = dreq.paymentInfo.amount;
 
@@ -718,13 +717,14 @@ pub async fn runSuperRouterFlow(
         if let Some(metadata_value) = dreq
             .paymentInfo
             .metadata
-            .map(|metadata_string| Utils::parse_json_from_string(&metadata_string))
+            .as_ref()
+            .map(|metadata_string| Utils::parse_json_from_string(metadata_string))
             .flatten()
         {
             match TryInto::<NetworkTypes::CoBadgedCardRequest>::try_into(metadata_value) {
                 Ok(co_badged_card_request) => {
                     if let Some(debit_routing_output) = co_badged_card_request
-                        .sorted_networks_by_absolute_fee(&app_state, Some(card_isin_value), amount)
+                        .sorted_networks_by_absolute_fee(app_state, Some(card_isin_value), amount)
                         .await
                     {
                         let mut network_savings_info_for_super_router = Vec::new();
@@ -734,7 +734,8 @@ pub async fn runSuperRouterFlow(
                             network_savings_info_for_super_router.push(
                                 NetworkTypes::NetworkSavingInfoForSuperRouter {
                                     network: network_savings_info.network.to_string(),
-                                    saving_percentage: network_savings_info.saving_percentage,
+                                    savings_absolute: network_savings_info.saving_percentage,
+                                    savings_normalized: 0.0,
                                 },
                             );
                         }
@@ -742,31 +743,35 @@ pub async fn runSuperRouterFlow(
                     } else {
                         logger::warn!("Failed to get networks from sorted_networks_by_absolute_fee, using paymentMethod");
                         vec![NetworkTypes::NetworkSavingInfoForSuperRouter {
-                            network: dreq.paymentInfo.paymentMethod,
-                            saving_percentage: 0.0,
+                            network: dreq.paymentInfo.paymentMethod.clone(),
+                            savings_absolute: 0.0,
+                            savings_normalized: 0.0,
                         }]
                     }
                 }
                 Err(error) => {
                     logger::error!("Failed to parse metadata for SUPER_ROUTER: {:?}", error);
                     vec![NetworkTypes::NetworkSavingInfoForSuperRouter {
-                        network: dreq.paymentInfo.paymentMethod,
-                        saving_percentage: 0.0,
+                        network: dreq.paymentInfo.paymentMethod.clone(),
+                        savings_absolute: 0.0,
+                        savings_normalized: 0.0,
                     }]
                 }
             }
         } else {
             logger::warn!("No metadata found, using paymentMethod");
             vec![NetworkTypes::NetworkSavingInfoForSuperRouter {
-                network: dreq.paymentInfo.paymentMethod,
-                saving_percentage: 0.0,
+                network: dreq.paymentInfo.paymentMethod.clone(),
+                savings_absolute: 0.0,
+                savings_normalized: 0.0,
             }]
         }
     } else {
         logger::debug!("Card ISIN not present, using paymentMethod with 0 savings");
         vec![NetworkTypes::NetworkSavingInfoForSuperRouter {
-            network: dreq.paymentInfo.paymentMethod,
-            saving_percentage: 0.0,
+            network: dreq.paymentInfo.paymentMethod.clone(),
+            savings_absolute: 0.0,
+            savings_normalized: 0.0,
         }]
     };
 
@@ -783,6 +788,15 @@ pub async fn runSuperRouterFlow(
         networks_to_process
     );
 
+    networks_to_process
+}
+
+/// Process each network through gateway decision flow
+async fn get_sr_for_each_gateway_network_combination(
+    networks_to_process: Vec<NetworkTypes::NetworkSavingInfoForSuperRouter>,
+    decider_params: &T::DeciderParams,
+    dreq: &T::DomainDeciderRequestForApiCallV2,
+) -> (Option<T::DecidedGateway>, Vec<T::SUPERROUTERPRIORITYMAP>) {
     let mut super_router_priority_map = Vec::new();
     let mut first_gateway_result: Option<T::DecidedGateway> = None;
 
@@ -813,7 +827,6 @@ pub async fn runSuperRouterFlow(
                 if first_gateway_result.is_none() {
                     first_gateway_result = Some(decided_gateway.clone());
                 }
-                logger::debug!("run decider flow: {:?}", decided_gateway);
 
                 // Extract gateway_priority_map and construct super_router output
                 if let Some(gateway_priority_map) = decided_gateway.gateway_priority_map {
@@ -825,7 +838,7 @@ pub async fn runSuperRouterFlow(
                                 gateway,
                                 payment_method: network_info.network.to_string(),
                                 success_rate: Some(score), // Using the score as success_rate
-                                saving: Some(network_info.saving_percentage),
+                                saving: Some(network_info.savings_absolute),
                                 combined_score: Some(0.0), // Set to 0 as requested
                             });
                         }
@@ -843,18 +856,83 @@ pub async fn runSuperRouterFlow(
         }
     }
 
-    // Sort the priority_map by success_rate in descending order
-    // super_router_priority_map.sort_by(|a, b| {
-    //     let success_rate_a = a.success_rate.unwrap_or(0.0);
-    //     let success_rate_b = b.success_rate.unwrap_or(0.0);
-    //     success_rate_b.total_cmp(&success_rate_a)
-    // });
-    // logger::debug!(
-    //     "Completed processing all networks in SUPER_ROUTER flow {:?}",
-    //     super_router_priority_map
-    // );
+    (first_gateway_result, super_router_priority_map)
+}
 
-    // Sort the super_router_priority_map using Euclidean distance
+/// Build the final Super Router response with sorted results
+fn build_super_router_response(
+    first_gateway_result: Option<T::DecidedGateway>,
+    mut super_router_priority_map: Vec<T::SUPERROUTERPRIORITYMAP>,
+) -> Result<T::DecidedGateway, T::ErrorResponse> {
+    // Sort the priority_map by success_rate in descending order
+    super_router_priority_map.sort_by(|a, b| {
+        let success_rate_a = a.success_rate.unwrap_or(0.0);
+        let success_rate_b = b.success_rate.unwrap_or(0.0);
+        success_rate_b.total_cmp(&success_rate_a)
+    });
+
+    logger::debug!(
+        "Sorted super_router_priority_map by success_rate: {:?}",
+        super_router_priority_map
+    );
+
+    // Return the result
+    match first_gateway_result {
+        Some(mut gateway_result) => {
+            // Add super_router output to the result with the sorted priority map
+            gateway_result.super_router = Some(T::SUPERROUTEROUTPUT {
+                priority_map: super_router_priority_map.clone(),
+            });
+            gateway_result.gateway_priority_map = None;
+            // Update the decided gateway to use the best one from our sorted list
+            // gateway_result.decided_gateway = best_gateway;
+            gateway_result.routing_approach = T::GatewayDeciderApproach::SUPER_ROUTER;
+
+            logger::debug!("SUPER_ROUTER flow completed successfully");
+            Ok(gateway_result)
+        }
+        None => {
+            logger::error!(
+                "No successful gateway decision found for any network in SUPER_ROUTER flow"
+            );
+            Err(T::ErrorResponse {
+                status: "Invalid Request".to_string(),
+                error_code: "invalid_request_error".to_string(),
+                error_message:
+                    "Can't find a suitable gateway to process the transaction using SUPER_ROUTER"
+                        .to_string(),
+                priority_logic_tag: None,
+                routing_approach: Some(T::GatewayDeciderApproach::SUPER_ROUTER),
+                filter_wise_gateways: None,
+                error_info: UnifiedError {
+                    code: "SUPER_ROUTER_GATEWAY_NOT_FOUND".to_string(),
+                    user_message: "No gateway found using SUPER_ROUTER algorithm".to_string(),
+                    developer_message: "No gateway found using SUPER_ROUTER algorithm".to_string(),
+                },
+                priority_logic_output: None,
+                is_dynamic_mga_enabled: false,
+            })
+        }
+    }
+}
+
+pub async fn runSuperRouterFlow(
+    decider_params: T::DeciderParams,
+    dreq: T::DomainDeciderRequestForApiCallV2,
+) -> Result<T::DecidedGateway, T::ErrorResponse> {
+    logger::debug!("Starting SUPER_ROUTER flow");
+
+    let app_state = get_tenant_app_state().await;
+
+    // 1. Get networks with normalization
+    let networks_to_process =
+        get_network_saving_info_for_super_router(&decider_params, &dreq, &app_state).await;
+
+    // 2. Process networks for gateway decisions
+    let (first_gateway_result, mut super_router_priority_map) =
+        get_sr_for_each_gateway_network_combination(networks_to_process, &decider_params, &dreq)
+            .await;
+
     let sorted_priority_map =
         super::sr_cost_routing::sort_by_euclidean_distance_original(&mut super_router_priority_map);
 
@@ -897,49 +975,8 @@ pub async fn runSuperRouterFlow(
         best_distance
     );
 
-    logger::debug!(
-        "Sorted super_router_priority_map by success_rate: {:?}",
-        super_router_priority_map
-    );
-
-    // Return the result
-    match first_gateway_result {
-        Some(mut gateway_result) => {
-            // Add super_router output to the result with the sorted priority map
-            gateway_result.super_router = Some(T::SUPERROUTEROUTPUT {
-                priority_map: sorted_priority_map,
-            });
-            gateway_result.gateway_priority_map = None;
-            // Update the decided gateway to use the best one from our sorted list
-            gateway_result.decided_gateway = best_gateway;
-            gateway_result.routing_approach = T::GatewayDeciderApproach::SUPER_ROUTER;
-
-            logger::debug!("SUPER_ROUTER flow completed successfully");
-            Ok(gateway_result)
-        }
-        None => {
-            logger::error!(
-                "No successful gateway decision found for any network in SUPER_ROUTER flow"
-            );
-            Err(T::ErrorResponse {
-                status: "Invalid Request".to_string(),
-                error_code: "invalid_request_error".to_string(),
-                error_message:
-                    "Can't find a suitable gateway to process the transaction using SUPER_ROUTER"
-                        .to_string(),
-                priority_logic_tag: None,
-                routing_approach: Some(T::GatewayDeciderApproach::SUPER_ROUTER),
-                filter_wise_gateways: None,
-                error_info: UnifiedError {
-                    code: "SUPER_ROUTER_GATEWAY_NOT_FOUND".to_string(),
-                    user_message: "No gateway found using SUPER_ROUTER algorithm".to_string(),
-                    developer_message: "No gateway found using SUPER_ROUTER algorithm".to_string(),
-                },
-                priority_logic_output: None,
-                is_dynamic_mga_enabled: false,
-            })
-        }
-    }
+    // 3. Build final response
+    build_super_router_response(first_gateway_result, super_router_priority_map)
 }
 
 // async fn addMetricsToStream(
