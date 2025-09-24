@@ -10,7 +10,6 @@ struct GapAnalysisResult {
     // The index where the gap occurs
     gap_index: usize,
     // The gap value
-    gap_value: f64,
     // Weight for success rate
     sr_weight: f64,
     // Weight for cost
@@ -35,7 +34,6 @@ fn analyze_gaps_and_weights(entries: &[(String, f64, f64, f64)]) -> GapAnalysisR
     let mut result = GapAnalysisResult {
         has_significant_gap: false,
         gap_index: 0,
-        gap_value: 0.0,
         sr_weight: 1.0,
         cost_weight: 1.0,
     };
@@ -43,30 +41,30 @@ fn analyze_gaps_and_weights(entries: &[(String, f64, f64, f64)]) -> GapAnalysisR
     // If we have at least 1 entry, analyze success rates
     if !entries.is_empty() {
         // Fixed threshold for success rate (85%)
-        let sr_threshold = 0.85;
-        
+        let sr_threshold = 0.90;
+
         // Find entries above the threshold
         let above_threshold: Vec<&(String, f64, f64, f64)> = entries
             .iter()
             .filter(|(_, _, _, normalized_score)| *normalized_score >= sr_threshold)
             .collect();
-        
+
         // If we have entries above the threshold, use them for weight determination
         if !above_threshold.is_empty() {
             // Mark that we have a significant gap (entries above threshold)
             result.has_significant_gap = true;
             result.gap_index = above_threshold.len() - 1;
-            
+
             // Calculate spread within entries above threshold
             let sr_spread = if above_threshold.len() > 1 {
                 above_threshold[0].3 - above_threshold[above_threshold.len() - 1].3
             } else {
                 0.0
             };
-            
+
             // Fixed spread value for weight determination (5%)
-            let spread_threshold = 0.05;
-            
+            let spread_threshold = 0.01;
+
             // Calculate weights based on spread
             // If spread is small, cost dominates; if spread is large, SR dominates
             if sr_spread < spread_threshold {
@@ -78,7 +76,7 @@ fn analyze_gaps_and_weights(entries: &[(String, f64, f64, f64)]) -> GapAnalysisR
                 result.sr_weight = 3.0;
                 result.cost_weight = 1.0;
             }
-            
+
             logger::info!(
                 tag = "Weight_Determination",
                 action = "Weight_Determination",

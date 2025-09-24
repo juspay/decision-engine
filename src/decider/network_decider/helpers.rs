@@ -117,23 +117,14 @@ impl types::CoBadgedCardRequest {
         network_costs.sort_by(|(_, fee1), (_, fee2)| fee1.total_cmp(fee2));
 
         // Initialize network_saving_infos vector
-        let mut network_saving_infos: Vec<types::NetworkSavingInfo> = Vec::new();
+        let mut network_saving_infos = Vec::new();
 
-        // Find min and max fee values for min-max normalization
-        let min_fee = network_costs.first().map(|(_, fee)| *fee).unwrap_or(0.0);
-        let max_fee = network_costs.last().map(|(_, fee)| *fee).unwrap_or(0.0);
+        let base = network_costs.last().map(|(_, fee)| *fee).unwrap_or(0.0);
 
         for (network, fee) in &network_costs {
-            // Apply standard min-max normalization
-            let normalized_value = if max_fee > min_fee {
-                (*fee - min_fee) / (max_fee - min_fee)
-            } else {
-                0.0
-            };
-
             network_saving_infos.push(types::NetworkSavingInfo {
                 network: network.clone(),
-                saving_percentage: normalized_value,
+                saving_percentage: base - *fee,
             });
         }
 
@@ -259,4 +250,33 @@ impl gateway_decider_types::NETWORK {
             | gateway_decider_types::NETWORK::NYCE => false,
         }
     }
+}
+
+// Using max normalization strategy
+// min cost saving will always be 0. So, max normalization is equivalent to min-max normalization
+pub fn normalize_cost_savings(
+    network_cost_savings: Vec<types::NetworkSavingInfoForSuperRouter>,
+) -> Vec<types::NetworkSavingInfoForSuperRouter> {
+    let mut max_saving = f64::NEG_INFINITY;
+
+    for network_cost in &network_cost_savings {
+        max_saving = max_saving.max(network_cost.saving_percentage);
+    }
+
+    // If all the cost savings are 0, return the original array.
+    // This avoids division by zero in next code segment while normalizing cost savings.
+    if (max_saving - 0.0).abs() < f64::EPSILON {
+        return network_cost_savings;
+    }
+
+    network_cost_savings
+        .iter()
+        .map(|network_cost| {
+            let normalized_cost_saving = network_cost.saving_percentage / max_saving;
+            types::NetworkSavingInfoForSuperRouter {
+                network: network_cost.network.clone(),
+                saving_percentage: normalized_cost_saving,
+            }
+        })
+        .collect()
 }

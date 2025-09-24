@@ -727,10 +727,21 @@ pub async fn runSuperRouterFlow(
                         .sorted_networks_by_absolute_fee(&app_state, Some(card_isin_value), amount)
                         .await
                     {
-                        debit_routing_output.co_badged_card_networks_info
+                        let mut network_savings_info_for_super_router = Vec::new();
+                        for network_savings_info in
+                            debit_routing_output.co_badged_card_networks_info
+                        {
+                            network_savings_info_for_super_router.push(
+                                NetworkTypes::NetworkSavingInfoForSuperRouter {
+                                    network: network_savings_info.network.to_string(),
+                                    saving_percentage: network_savings_info.saving_percentage,
+                                },
+                            );
+                        }
+                        network_savings_info_for_super_router
                     } else {
                         logger::warn!("Failed to get networks from sorted_networks_by_absolute_fee, using paymentMethod");
-                        vec![NetworkTypes::NetworkSavingInfo {
+                        vec![NetworkTypes::NetworkSavingInfoForSuperRouter {
                             network: dreq.paymentInfo.paymentMethod,
                             saving_percentage: 0.0,
                         }]
@@ -738,7 +749,7 @@ pub async fn runSuperRouterFlow(
                 }
                 Err(error) => {
                     logger::error!("Failed to parse metadata for SUPER_ROUTER: {:?}", error);
-                    vec![NetworkTypes::NetworkSavingInfo {
+                    vec![NetworkTypes::NetworkSavingInfoForSuperRouter {
                         network: dreq.paymentInfo.paymentMethod,
                         saving_percentage: 0.0,
                     }]
@@ -746,18 +757,26 @@ pub async fn runSuperRouterFlow(
             }
         } else {
             logger::warn!("No metadata found, using paymentMethod");
-            vec![NetworkTypes::NetworkSavingInfo {
+            vec![NetworkTypes::NetworkSavingInfoForSuperRouter {
                 network: dreq.paymentInfo.paymentMethod,
                 saving_percentage: 0.0,
             }]
         }
     } else {
         logger::debug!("Card ISIN not present, using paymentMethod with 0 savings");
-        vec![NetworkTypes::NetworkSavingInfo {
+        vec![NetworkTypes::NetworkSavingInfoForSuperRouter {
             network: dreq.paymentInfo.paymentMethod,
             saving_percentage: 0.0,
         }]
     };
+
+    logger::debug!(
+        "Networks to process for SUPER_ROUTER before normalization: {:?}",
+        networks_to_process
+    );
+
+    // normalize the cost savings within range [0, 1]
+    let networks_to_process = network_decider::helpers::normalize_cost_savings(networks_to_process);
 
     logger::debug!(
         "Networks to process for SUPER_ROUTER: {:?}",
@@ -824,10 +843,16 @@ pub async fn runSuperRouterFlow(
         }
     }
 
-    logger::debug!(
-        "Completed processing all networks in SUPER_ROUTER flow {:?}",
-        super_router_priority_map
-    );
+    // Sort the priority_map by success_rate in descending order
+    // super_router_priority_map.sort_by(|a, b| {
+    //     let success_rate_a = a.success_rate.unwrap_or(0.0);
+    //     let success_rate_b = b.success_rate.unwrap_or(0.0);
+    //     success_rate_b.total_cmp(&success_rate_a)
+    // });
+    // logger::debug!(
+    //     "Completed processing all networks in SUPER_ROUTER flow {:?}",
+    //     super_router_priority_map
+    // );
 
     // Sort the super_router_priority_map using Euclidean distance
     let sorted_priority_map =
@@ -870,6 +895,11 @@ pub async fn runSuperRouterFlow(
         best_score,
         best_cost,
         best_distance
+    );
+
+    logger::debug!(
+        "Sorted super_router_priority_map by success_rate: {:?}",
+        super_router_priority_map
     );
 
     // Return the result
