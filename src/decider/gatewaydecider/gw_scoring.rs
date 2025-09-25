@@ -4,8 +4,9 @@ use crate::app::get_tenant_app_state;
 use crate::decider::gatewaydecider::gw_filter::{getGws, setGws};
 use crate::decider::gatewaydecider::types::{
     toListOfGatewayScore, DeciderFlow, DeciderScoringName, GatewayDeciderApproach, GatewayScoreMap,
-    SRMetricLogData, SrRoutingDimensions, MetricEntry, SrMetrics, ConfigSource, FilterLevel,
+    SRMetricLogData, SrRoutingDimensions, SrMetrics, ConfigSource, FilterLevel,
 };
+use crate::feedback::gateway_scoring_service::MetricEntry;
 use crate::logger;
 use crate::merchant_config_util::{
     isMerchantEnabledForPaymentFlows, isPaymentFlowEnabledWithHierarchyCheck,
@@ -3172,15 +3173,17 @@ async fn filter_using_redis_upto(
             pm.clone(),
             txn_obj_type.clone(),
             card_type,
+            is_gri_enabled_for_elimination,
+            gateway_reference_id.clone(),
         )
         .await,
     };
     
     match (m_input, m_metric_entry_final) {
         (Some(input), Some(metric_entry)) => Some((
-            metric_entry.success_rate,
+            metric_entry.success_rate.into(),
             input.successRate,
-            metric_entry.sigma_factor,
+            metric_entry.sigma_factor.into(),
             Some(input.paymentMethodType),
             input.paymentMethod,
             input.txnObjectType,
@@ -3190,18 +3193,26 @@ async fn filter_using_redis_upto(
     }
 }
 
-async fn get_metric_entry_data(
+pub async fn get_metric_entry_data(
     merchant_id: String,
     pmt: String,
     m_pm: Option<String>,
     txn_obj_type: String,
     card_type: Option<String>,
+    isGriEnabledForElimination: bool,
+    gatewayReferenceId: Option<String>,
 ) -> Option<MetricEntry> {
     let aggregate_key = construct_aggregate_key(&merchant_id);
     let dim_key = construct_dimension_key(&pmt, &m_pm, &txn_obj_type, &card_type);
-    
-    fetch_from_redis(&aggregate_key, &dim_key).await
+
+    if isGriEnabledForElimination && gatewayReferenceId.is_some() {
+        let gri_dim_key = format!("{}_{}", dim_key.clone().unwrap_or_default(), gatewayReferenceId.unwrap_or_default());
+        fetch_from_redis(&aggregate_key, &Some(gri_dim_key)).await
+    } else {
+        fetch_from_redis(&aggregate_key, &dim_key).await
+    }
 }
+    
 
 fn construct_dimension_key(
     pmt: &str,
