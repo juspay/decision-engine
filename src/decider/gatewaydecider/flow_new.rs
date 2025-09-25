@@ -2,6 +2,7 @@ use super::runner::get_gateway_priority;
 use super::types::RankingAlgorithm;
 use super::types::UnifiedError;
 use crate::app::get_tenant_app_state;
+use crate::config::{SuperRouterSortingStrategy};
 use crate::decider::network_decider;
 use axum::response::IntoResponse;
 use diesel::expression::is_aggregate::No;
@@ -857,31 +858,53 @@ async fn get_sr_for_each_gateway_network_combination(
         }
     }
 
-    super_router_priority_map.sort_by(|a, b| {
-        let success_rate_a = a.success_rate.unwrap_or(0.0);
-        let success_rate_b = b.success_rate.unwrap_or(0.0);
-        success_rate_b.total_cmp(&success_rate_a)
-    });
-
     (first_gateway_result, super_router_priority_map)
 }
 
-/// Build the final Super Router response with sorted results
-fn build_super_router_response(
-    first_gateway_result: Option<T::DecidedGateway>,
-    super_router_priority_map: Vec<T::SUPERROUTERPRIORITYMAP>,
-) -> Result<T::DecidedGateway, T::ErrorResponse> {
+/// Apply configurable sorting to super router priority map
+fn apply_super_router_sorting(
+    mut super_router_priority_map: Vec<T::SUPERROUTERPRIORITYMAP>,
+    sorting_strategy: &SuperRouterSortingStrategy,
+) -> Vec<T::SUPERROUTERPRIORITYMAP> {
+    match sorting_strategy {
+        SuperRouterSortingStrategy::SuccessRate => {
+            logger::debug!("Applying SUCCESS_RATE sorting strategy");
+            super_router_priority_map.sort_by(|a, b| {
+                let success_rate_a = a.success_rate.unwrap_or(0.0);
+                let success_rate_b = b.success_rate.unwrap_or(0.0);
+                success_rate_b.total_cmp(&success_rate_a) // Descending order
+            });
+        }
+        SuperRouterSortingStrategy::Cost => {
+            logger::debug!("Applying COST sorting strategy");
+            super_router_priority_map.sort_by(|a, b| {
+                let saving_a = a.saving_normalized.unwrap_or(0.0);
+                let saving_b = b.saving_normalized.unwrap_or(0.0);
+                saving_b.total_cmp(&saving_a) // Descending order (higher savings first)
+            });
+        }
+    }
+    
     logger::debug!(
-        "Sorted super_router_priority_map by success_rate: {:?}",
+        "Super router priority map after {:?} sorting: {:?}",
+        sorting_strategy,
         super_router_priority_map
     );
+    
+    super_router_priority_map
+}
 
+/// Build the final Super Router response with pre-sorted results
+fn build_super_router_response(
+    first_gateway_result: Option<T::DecidedGateway>,
+    sorted_priority_map: Vec<T::SUPERROUTERPRIORITYMAP>,
+) -> Result<T::DecidedGateway, T::ErrorResponse> {
     // Return the result
     match first_gateway_result {
         Some(mut gateway_result) => {
             // Add super_router output to the result
             gateway_result.super_router = Some(T::SUPERROUTEROUTPUT {
-                priority_map: super_router_priority_map,
+                priority_map: sorted_priority_map,
             });
             gateway_result.routing_approach = T::GatewayDeciderApproach::SUPER_ROUTER;
 
@@ -930,8 +953,14 @@ pub async fn runSuperRouterFlow(
         get_sr_for_each_gateway_network_combination(networks_to_process, &decider_params, &dreq)
             .await;
 
-    // Build super router response
-    build_super_router_response(first_gateway_result, super_router_priority_map)
+    // Get sorting strategy from configuration
+    let sorting_strategy = &app_state.config.super_router_config.sorting_strategy;
+
+    // Apply configurable sorting
+    let sorted_priority_map = apply_super_router_sorting(super_router_priority_map, sorting_strategy);
+
+    // Build super router response with pre-sorted data
+    build_super_router_response(first_gateway_result, sorted_priority_map)
 }
 
 // async fn addMetricsToStream(
