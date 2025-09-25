@@ -7,7 +7,7 @@ use fred::prelude::RedisKey;
 use fred::types::SetOptions;
 use fred::{
     clients::Transaction,
-    interfaces::{KeysInterface, ListInterface, TransactionInterface},
+    interfaces::{KeysInterface, ListInterface, TransactionInterface, HashesInterface},
     types::{Expiration, FromRedis, MultipleValues, Scanner},
 };
 use redis_interface::{errors, types::DelReply, RedisConnectionPool};
@@ -173,5 +173,32 @@ impl RedisConnectionWrapper {
         trx.exec::<R>(abort_on_error)
             .await
             .change_context(errors::RedisError::UnknownResult)
+    }
+
+    // Redis Hash Operations
+    pub async fn hget<T>(
+        &self,
+        key: &str,
+        field: &str,
+        type_name: &'static str,
+    ) -> Result<Option<T>, errors::RedisError>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        let result: Option<String> = self.conn
+            .pool
+            .hget(key, field)
+            .await
+            .change_context(errors::RedisError::GetFailed)?;
+        
+        match result {
+            Some(value_str) => {
+                let value: T = serde_json::from_str(&value_str)
+                    .map_err(|_| errors::RedisError::UnknownResult)
+                    .change_context(errors::RedisError::GetFailed)?;
+                Ok(Some(value))
+            }
+            None => Ok(None),
+        }
     }
 }

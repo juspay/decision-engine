@@ -3263,13 +3263,13 @@ async fn fetch_from_redis(
             let app_state = get_tenant_app_state().await;
             app_state
                 .redis_conn
-                .get_key::<MetricEntry>(key, "metric_entry")
+                .hget::<MetricEntry>(key, dkey, "metric_entry")
                 .await
                 .ok()
+                .flatten()
         }
     }
 }
-
 fn construct_aggregate_key(merchant_id: &str) -> String {
     format!("{}{}", C::aggregateKeyPrefix, merchant_id)
 }
