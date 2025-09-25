@@ -1859,7 +1859,7 @@ async fn get_elimination_v2_threshold(
     // };
     // let sr2_th_weight = Env::lookup_env(sr2_th_weight_env).await;
 
-    if let Some((sr1, sr2, n, m_pmt, m_pm, m_txn_object_type, source)) = get_sr1_and_sr2_and_n(
+    if let Some((sr1, sr2, n,n_m_, m_pmt, m_pm, m_txn_object_type, source)) = get_sr1_and_sr2_and_n(
         m_gateway_success_rate_merchant_input,
         merchant_acc.merchantId.0.clone(),
         txn_card_info.clone(),
@@ -1872,10 +1872,11 @@ async fn get_elimination_v2_threshold(
         logger::info!(
             tag="scoringFlow",
             action = "scoringFlow",
-            "Calculating Threshold: SR1: {:?} SR2: {:?} N: {:?} PMT: {:?} PM: {:?} TxnObjectType: {:?} SourceObject: {:?}",
+            "Calculating Threshold: SR1: {:?} SR2: {:?} N: {:?} N_M_: {:?} PMT: {:?} PM: {:?} TxnObjectType: {:?} SourceObject: {:?}",
             sr1,
             sr2,
             n,
+            n_m_.unwrap_or(0.0),
             m_pmt.unwrap_or_else(|| "Nothing".to_string()),
             m_pm.unwrap_or_else(|| "Nothing".to_string()),
             m_txn_object_type.unwrap_or_else(|| "Nothing".to_string()),
@@ -1919,6 +1920,7 @@ pub async fn get_sr1_and_sr2_and_n(
     f64,
     f64,
     f64,
+    Option<f64>,
     Option<String>,
     Option<String>,
     Option<String>,
@@ -2026,6 +2028,7 @@ async fn filter_using_service_config(
     f64,
     f64,
     f64,
+    Option<f64>,
     Option<String>,
     Option<String>,
     Option<String>,
@@ -2095,7 +2098,7 @@ pub fn fetch_sr1_and_n_from_service_config_upto(
     txn_object_type: String,
     inputs: Vec<ETGRI::EliminationSuccessRateInput>,
     configs: Vec<SuccessRate1AndNConfig>,
-) -> Option<(f64, f64, f64, Option<T>, Option<T>, Option<T>, ConfigSource)> {
+) -> Option<(f64, f64, f64, Option<f64>, Option<T>, Option<T>, Option<T>, ConfigSource)> {
     let m_input = filter_inputs_upto(
         level.clone(),
         pmt.clone(),
@@ -2118,6 +2121,7 @@ pub fn fetch_sr1_and_n_from_service_config_upto(
             config.successRate,
             input.successRate,
             config.nValue,
+            None,  // Added missing Option<f64> element
             Some(input.paymentMethodType),
             input.paymentMethod.clone(),
             input.txnObjectType.clone(),
@@ -3103,7 +3107,7 @@ pub async fn filter_using_redis(
     inputs: Vec<ETGRI::EliminationSuccessRateInput>,
     is_gri_enabled_for_elimination: bool,
     gateway_reference_id: Option<String>,
-) -> Option<(f64, f64, f64, Option<String>, Option<String>, Option<String>, ConfigSource)> {
+) -> Option<(f64, f64, f64, Option<f64>, Option<String>, Option<String>, Option<String>, ConfigSource)> {
     filter_using_redis_upto(
         None,
         FilterLevel::TXN_OBJECT_TYPE,
@@ -3156,7 +3160,7 @@ async fn filter_using_redis_upto(
     gateway_reference_id: Option<String>,
     inputs: Vec<ETGRI::EliminationSuccessRateInput>,
     card_type: Option<String>,
-) -> Option<(f64, f64, f64, Option<String>, Option<String>, Option<String>, ConfigSource)> {
+) -> Option<(f64, f64, f64, Option<f64>, Option<String>, Option<String>, Option<String>, ConfigSource)> {
     let m_input = filter_inputs_upto(
         level.clone(),
         pmt.clone(),
@@ -3184,9 +3188,20 @@ async fn filter_using_redis_upto(
             metric_entry.success_rate.into(),
             input.successRate,
             metric_entry.sigma_factor.into(),
+            Some(metric_entry.n_value.into()),
             Some(input.paymentMethodType),
             input.paymentMethod,
             input.txnObjectType,
+            ConfigSource::REDIS,
+        )),
+        (None, Some(metric_entry)) => Some((
+            metric_entry.success_rate.into(),
+            metric_entry.default_success_threshold.into(),
+            metric_entry.sigma_factor.into(),
+            Some(metric_entry.n_value.into()),
+            Some(pmt),
+            pm,
+            Some(txn_obj_type),
             ConfigSource::REDIS,
         )),
         _ => None,

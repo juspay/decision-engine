@@ -824,12 +824,13 @@ pub async fn eliminationV2RewardFactor(
     .await;
 
     match sr1_and_sr2_and_n {
-        Some((sr1, sr2, n, m_pmt, m_pm, m_txn_object_type, source)) => {
+        Some((sr1, sr2, n,n_, m_pmt, m_pm, m_txn_object_type, source)) => {
             logger::info!(
-                    "CALCULATING_ALPHA:SR1_SR2_N_PMT_PM_TXNOBJECTTYPE_CONFIGSOURCE {} {} {} {} {} {} {:?}",
+                    "CALCULATING_ALPHA:SR1_SR2_N_PMT_PM_TXNOBJECTTYPE_CONFIGSOURCE {} {} {} {:?} {} {} {} {:?}",
                     sr1,
                     sr2,
                     n,
+                    n_,
                     m_pmt.unwrap_or_else(|| "Nothing".to_string()),
                     m_pm.unwrap_or_else(|| "Nothing".to_string()),
                     m_txn_object_type.unwrap_or_else(|| "Nothing".to_string()),
@@ -838,10 +839,10 @@ pub async fn eliminationV2RewardFactor(
             logger::info!(
                 action = "calculateAlpha",
                 tag = "ALPHA_VALUE",
-                alpha_value = calculate_alpha(sr1, sr2, n),
+                alpha_value = calculate_alpha(sr1, sr2, n, n_),
             );
 
-            Some(calculate_alpha(sr1, sr2, n))
+            Some(calculate_alpha(sr1, sr2, n, n_))
         }
         None => {
             logger::info!("ELIMINATION_V2_VALUES_NOT_FOUND:ALPHA:PMT_PM_TXNOBJECTTYPE_SOURCEOBJECT {:?} {:?} {:?} {:?}",
@@ -855,9 +856,23 @@ pub async fn eliminationV2RewardFactor(
     }
 }
 
-fn calculate_alpha(sr1: f64, sr2: f64, n: f64) -> f64 {
-    ((sr1 - sr2) * (sr1 - sr2)) / ((n * n) * (sr1 * (100.0 - sr1)))
+fn calculate_alpha(sr1: f64, sr2: f64, n: f64, n_prime: Option<f64>) -> f64 {
+    match n_prime {
+        None => {
+            ((sr1 - sr2) * (sr1 - sr2)) / ((n * n) * (sr1 * (100.0 - sr1)))
+        }
+        Some(n_val) => {
+            // These weights should be fetched from Env or config as per your environment
+            let sr1_th_weight = 0.29;
+            let sr2_th_weight = 0.71;
+            let threshold = ((sr1_th_weight * sr1) + (sr2_th_weight * sr2)) / 100.0;
+            let val1 = ((sr1 - sr2) * (sr1 - sr2)) / ((n * n) * (sr1 * (100.0 - sr1)));
+            let val2 = (threshold / (sr1 / 100.0)).powf(1.0 / n_val);
+            val1.min(val2)
+        }
+    }
 }
+
 
 // Original Haskell function: findMerchantFromMerchantArray
 pub fn findMerchantFromMerchantArray(

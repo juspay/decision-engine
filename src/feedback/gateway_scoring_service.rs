@@ -138,8 +138,8 @@ pub struct UpdateGatewayScoreRequest {
 // Original Haskell data type: MetricEntry
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MetricEntry {
-    #[serde(rename = "total_volume")]
-    pub total_volume: f32,
+    #[serde(rename = "n_value")]
+    pub n_value: f32,
 
     #[serde(rename = "success_rate")]
     pub success_rate: f32,
@@ -152,6 +152,9 @@ pub struct MetricEntry {
 
     #[serde(rename = "tp99_latency")]
     pub tp99_latency: f32,
+    
+    #[serde(rename = "default_success_threshold")]
+    pub default_success_threshold: f32,
 }
 
 // Original Haskell data type: SrMetrics

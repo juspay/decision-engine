@@ -1879,11 +1879,12 @@ pub struct SrRoutingDimensions {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetricEntry {
-    pub total_volume: f64,
+    pub n_value: f64,
     pub success_rate: f64,
     pub sigma_factor: f64,
     pub average_latency: f64,
     pub tp99_latency: f64,
+    pub default_success_threshold: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
