@@ -1927,29 +1927,40 @@ pub async fn get_sr1_and_sr2_and_n(
     ConfigSource,
 )> {
     let pmt = &txn_card_info.paymentMethodType;
-    let source_obj = if txn_card_info.paymentMethod == UPI {
+    let pm = if txn_card_info.paymentMethodType == UPI {
         txn_detail.sourceObject.clone()
     } else {
         Some(txn_card_info.paymentMethod.clone())
     };
-    let pm = if txn_card_info.paymentMethodType == UPI {
-        source_obj.clone()
-    } else {
-        Some(txn_card_info.paymentMethod.clone())
+    let txn_obj_type = match txn_detail.txnObjectType {
+        Some(obj_type) => obj_type.to_text().to_string(),
+        None => return None,
     };
-    let txn_obj_type = format!("{:?}", txn_detail.txnObjectType);
     let card_type = txn_card_info.card_type.clone();
 
-    // Try Redis first
-    if let Some(gateway_success_rate_merchant_input) = m_gateway_success_rate_merchant_input {
-        if let Some(inputs) = gateway_success_rate_merchant_input.eliminationV2SuccessRateInputs {
+    match m_gateway_success_rate_merchant_input {
+        None => {
+            filter_using_redis(
+                merchant_id,
+                pmt.to_string(),
+                pm,
+                txn_obj_type,
+                None,
+                is_gri_enabled_for_elimination,
+                gateway_reference_id,
+            )
+            .await
+        }
+        Some(ref gateway_success_rate_merchant_input) => {
+            let inputs = gateway_success_rate_merchant_input.eliminationV2SuccessRateInputs.as_ref();
+            
             // Try Redis first
             let redis_result = filter_using_redis(
                 merchant_id.clone(),
                 pmt.to_string(),
                 pm.clone(),
                 txn_obj_type.clone(),
-                inputs.clone(),
+                inputs.cloned(),
                 is_gri_enabled_for_elimination,
                 gateway_reference_id.clone(),
             )
@@ -1961,26 +1972,30 @@ pub async fn get_sr1_and_sr2_and_n(
             
             // Try Service Config
             let service_config_result = filter_using_service_config(
-                merchant_id,
+                merchant_id.clone(),
                 pmt.to_string(),
-                pm,
-                txn_obj_type,
-                inputs,
+                pm.clone(),
+                txn_obj_type.clone(),
+                inputs.cloned(),
+                is_gri_enabled_for_elimination,
+                gateway_reference_id.clone(),
             )
             .await;
             
-            return service_config_result;
+            if service_config_result.is_some() {
+                return service_config_result;
+            }
+            
+            // Try default SR1 and SR2 and N
+            fetch_default_sr1_and_sr2_and_n(gateway_success_rate_merchant_input, &merchant_id).await
         }
     }
-
-    // Return None if neither Redis nor Service Config has data
-    None
 }
 
 async fn fetch_default_sr1_and_sr2_and_n(
     gateway_success_rate_merchant_input: &GatewaySuccessRateBasedRoutingInput,
     merchant_id: &str,
-) -> Option<(f64, f64, f64, Option<String>, Option<String>, Option<String>, ConfigSource)> {
+) -> Option<(f64, f64, f64, Option<f64>, Option<String>, Option<String>, Option<String>, ConfigSource)> {
     if let Some(sr2) = gateway_success_rate_merchant_input.defaultEliminationV2SuccessRate {
         fetch_default_sr1_and_n_and_mk_result(sr2, merchant_id).await
     } else {
@@ -1991,7 +2006,7 @@ async fn fetch_default_sr1_and_sr2_and_n(
 async fn fetch_default_sr1_and_n_and_mk_result(
     sr2: f64,
     merchant_id: &str,
-) -> Option<(f64, f64, f64, Option<String>, Option<String>, Option<String>, ConfigSource)> {
+) -> Option<(f64, f64, f64, Option<f64>, Option<String>, Option<String>, Option<String>, ConfigSource)> {
     let app_state = get_tenant_app_state().await;
     let redis_conn = &app_state.redis_conn;
     
@@ -2002,7 +2017,7 @@ async fn fetch_default_sr1_and_n_and_mk_result(
     let m_default_n = redis_conn.get_key::<f64>(&n_key, "f64").await.ok();
 
     if let (Some(sr1), Some(n)) = (m_default_sr1, m_default_n) {
-        Some((sr1, sr2, n, None, None, None, ConfigSource::MERCHANT_DEFAULT))
+        Some((sr1, sr2, n, None, None, None, None, ConfigSource::MERCHANT_DEFAULT))
     } else {
         let sr1_config_key = C::defaultSr1SConfigPrefix(merchant_id.to_string()).get_key();
         let n_config_key = C::defaultNSConfigPrefix(merchant_id.to_string()).get_key();
@@ -2011,7 +2026,7 @@ async fn fetch_default_sr1_and_n_and_mk_result(
         let m_s_config_n = RService::findByNameFromRedis::<f64>(n_config_key).await;
 
         if let (Some(sr1), Some(n)) = (m_s_config_sr1, m_s_config_n) {
-            Some((sr1, sr2, n, None, None, None, ConfigSource::GLOBAL_DEFAULT))
+            Some((sr1, sr2, n, None, None, None, None, ConfigSource::GLOBAL_DEFAULT))
         } else {
             None
         }
@@ -2023,7 +2038,9 @@ async fn filter_using_service_config(
     pmt: String,
     pm: Option<String>,
     txn_obj_type: String,
-    inputs: Vec<EliminationSuccessRateInput>,
+    inputs: Option<Vec<EliminationSuccessRateInput>>,
+    is_gri_enabled_for_elimination: bool,
+    gateway_reference_id: Option<String>,
 ) -> Option<(
     f64,
     f64,
@@ -2034,6 +2051,7 @@ async fn filter_using_service_config(
     Option<String>,
     ConfigSource,
 )> {
+    let inputs_vec = inputs.unwrap_or_default();
     let m_configs = RService::findByNameFromRedis(
         C::internalDefaultEliminationV2SuccessRate1AndNPrefix(merchant_id.clone()).get_key(),
     )
@@ -2046,7 +2064,7 @@ async fn filter_using_service_config(
         pmt.clone(),
         pm.clone(),
         txn_obj_type.clone(),
-        inputs.clone(),
+        inputs_vec.clone(),
         configs.clone(),
     )
     .or_else(|| {
@@ -2056,7 +2074,7 @@ async fn filter_using_service_config(
             pmt.clone(),
             pm.clone(),
             txn_obj_type.clone(),
-            inputs.clone(),
+            inputs_vec.clone(),
             configs.clone(),
         )
     })
@@ -2067,7 +2085,7 @@ async fn filter_using_service_config(
             pmt,
             pm,
             txn_obj_type,
-            inputs,
+            inputs_vec,
             configs,
         )
     })
@@ -3104,10 +3122,11 @@ pub async fn filter_using_redis(
     pmt: String,
     pm: Option<String>,
     txn_obj_type: String,
-    inputs: Vec<ETGRI::EliminationSuccessRateInput>,
+    inputs: Option<Vec<ETGRI::EliminationSuccessRateInput>>,
     is_gri_enabled_for_elimination: bool,
     gateway_reference_id: Option<String>,
 ) -> Option<(f64, f64, f64, Option<f64>, Option<String>, Option<String>, Option<String>, ConfigSource)> {
+    let inputs_vec = inputs.unwrap_or_default();
     filter_using_redis_upto(
         None,
         FilterLevel::TXN_OBJECT_TYPE,
@@ -3117,7 +3136,7 @@ pub async fn filter_using_redis(
         txn_obj_type.clone(),
         is_gri_enabled_for_elimination,
         gateway_reference_id.clone(),
-        inputs.clone(),
+        inputs_vec.clone(),
         None,
     )
     .await
@@ -3130,7 +3149,7 @@ pub async fn filter_using_redis(
         txn_obj_type.clone(),
         is_gri_enabled_for_elimination,
         gateway_reference_id.clone(),
-        inputs.clone(),
+        inputs_vec.clone(),
         None,
     )
     .await)
@@ -3143,7 +3162,7 @@ pub async fn filter_using_redis(
         txn_obj_type,
         is_gri_enabled_for_elimination,
         gateway_reference_id,
-        inputs,
+        inputs_vec,
         None,
     )
     .await)
