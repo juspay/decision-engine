@@ -976,7 +976,7 @@ pub async fn runSuperRouterFlow(
     );
 
     // Build super router response
-    build_super_router_response(first_gateway_result, super_router_priority_map)
+    build_super_router_response(first_gateway_result, sorted_priority_map)
 }
 
 // async fn addMetricsToStream(

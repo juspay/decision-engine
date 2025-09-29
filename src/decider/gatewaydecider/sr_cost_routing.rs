@@ -16,20 +16,20 @@ struct GapAnalysisResult {
     cost_weight: f64,
 }
 
-// Function to prepare entries without normalizing scores
-fn prepare_entries(entries: &[(String, f64, f64)]) -> Vec<(String, f64, f64, f64)> {
-    // Create a vector with original scores (no normalization)
+// Function to prepare entries with original scores
+fn prepare_entries(entries: &[(String, f64, f64)]) -> Vec<(String, f64, f64)> {
+    // Create a vector with original scores
     entries
         .iter()
         .map(|(key, score, cost)| {
-            // Use the original score without normalization
-            (key.clone(), *score, *cost, *score)
+            // Use the original score
+            (key.clone(), *score, *cost)
         })
         .collect()
 }
 
 // Function to analyze success rates and determine weights based on a fixed threshold
-fn analyze_gaps_and_weights(entries: &[(String, f64, f64, f64)]) -> GapAnalysisResult {
+fn analyze_gaps_and_weights(entries: &[(String, f64, f64)]) -> GapAnalysisResult {
     // Default result with no significant gap and equal weights
     let mut result = GapAnalysisResult {
         has_significant_gap: false,
@@ -44,9 +44,9 @@ fn analyze_gaps_and_weights(entries: &[(String, f64, f64, f64)]) -> GapAnalysisR
         let sr_threshold = 0.85;
 
         // Find entries above the threshold
-        let above_threshold: Vec<&(String, f64, f64, f64)> = entries
+        let above_threshold: Vec<&(String, f64, f64)> = entries
             .iter()
-            .filter(|(_, _, _, normalized_score)| *normalized_score >= sr_threshold)
+            .filter(|(_, score, _)| *score >= sr_threshold)
             .collect();
 
         // If we have entries above the threshold, use them for weight determination
@@ -57,7 +57,7 @@ fn analyze_gaps_and_weights(entries: &[(String, f64, f64, f64)]) -> GapAnalysisR
 
             // Calculate spread within entries above threshold
             let sr_spread = if above_threshold.len() > 1 {
-                above_threshold[0].3 - above_threshold[above_threshold.len() - 1].3
+                above_threshold[0].1 - above_threshold[above_threshold.len() - 1].1
             } else {
                 0.0
             };
@@ -119,33 +119,28 @@ pub fn sort_by_euclidean_distance_original(
         }
     }
 
-    // Prepare entries without normalizing scores
-    let mut normalized_entries = prepare_entries(&entries);
+    // Prepare entries with original scores
+    let mut sorted_entries = prepare_entries(&entries);
 
-    // Sort by normalized score in descending order
-    normalized_entries.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap_or(Ordering::Equal));
+    // Sort by score in descending order
+    sorted_entries.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
 
-    // Log the sorted normalized entries
+    // Log the sorted entries
     logger::info!(
         tag = "Cluster_Analysis",
         action = "Cluster_Analysis",
-        "Sorted entries by normalized score (descending): {:?}",
-        normalized_entries
+        "Sorted entries by score (descending): {:?}",
+        sorted_entries
     );
 
-    // Analyze gaps and determine weights using normalized scores
-    // let normalized_entries_for_gap_analysis: Vec<(String, f64, f64)> = normalized_entries
-    //     .iter()
-    //     .map(|(key, _, cost, normalized_score)| (key.clone(), *normalized_score, *cost))
-    //     .collect();
-
-    let gap_analysis = analyze_gaps_and_weights(&normalized_entries);
+    // Analyze gaps and determine weights using original scores
+    let gap_analysis = analyze_gaps_and_weights(&sorted_entries);
 
     // Create a map to store calculated distances
     let mut distance_map: HashMap<String, f64> = HashMap::new();
 
-    // Calculate weighted Euclidean distance for each entry using normalized scores
-    for (i, (key, score, cost, normalized_score)) in normalized_entries.iter().enumerate() {
+    // Calculate weighted Euclidean distance for each entry using original scores
+    for (i, (key, score, cost)) in sorted_entries.iter().enumerate() {
         // Determine if this entry is in the top cluster
         let is_in_top_cluster = !gap_analysis.has_significant_gap || i <= gap_analysis.gap_index;
 
@@ -158,8 +153,8 @@ pub fn sort_by_euclidean_distance_original(
             (1.0, 1.0)
         };
 
-        // Calculate weighted Euclidean distance using normalized score
-        let distance = (entry_sr_weight * (1.0 - normalized_score).powi(2)
+        // Calculate weighted Euclidean distance using original score
+        let distance = (entry_sr_weight * (1.0 - score).powi(2)
             + entry_cost_weight * (1.0 - cost).powi(2))
         .sqrt();
 
@@ -170,10 +165,9 @@ pub fn sort_by_euclidean_distance_original(
         logger::info!(
             tag = "Entry_Processing",
             action = "Entry_Processing",
-            "Key: {}, Original Score: {}, Normalized Score: {}, Cost: {}, In Top Cluster: {}, Weights (SR: {}, Cost: {}), Distance: {}",
+            "Key: {}, Score: {}, Cost: {}, In Top Cluster: {}, Weights (SR: {}, Cost: {}), Distance: {}",
             key,
             score,
-            normalized_score,
             cost,
             is_in_top_cluster,
             entry_sr_weight,
@@ -182,10 +176,10 @@ pub fn sort_by_euclidean_distance_original(
         );
     }
 
-    // Create a map of normalized scores for each entry
-    let mut normalized_score_map: HashMap<String, f64> = HashMap::new();
-    for (key, _, _, normalized_score) in &normalized_entries {
-        normalized_score_map.insert(key.clone(), *normalized_score);
+    // Create a map of scores for each entry
+    let mut score_map: HashMap<String, f64> = HashMap::new();
+    for (key, score, _) in &sorted_entries {
+        score_map.insert(key.clone(), *score);
     }
 
     // Update the combined_score in the original combined_map
@@ -204,11 +198,9 @@ pub fn sort_by_euclidean_distance_original(
         let a_distance = a.combined_score.unwrap_or(f64::MAX);
         let b_distance = b.combined_score.unwrap_or(f64::MAX);
 
-        // Get normalized scores from the map
-        let a_key = format!("{}_{}", a.payment_method, a.gateway);
-        let b_key = format!("{}_{}", b.payment_method, b.gateway);
-        let a_normalized_score = normalized_score_map.get(&a_key).cloned().unwrap_or(0.0);
-        let b_normalized_score = normalized_score_map.get(&b_key).cloned().unwrap_or(0.0);
+        // Get scores from the map
+        let a_score = a.success_rate.unwrap_or(0.0);
+        let b_score = b.success_rate.unwrap_or(0.0);
 
         let a_cost = a.saving_normalized.unwrap_or(0.0);
         let b_cost = b.saving_normalized.unwrap_or(0.0);
@@ -220,10 +212,7 @@ pub fn sort_by_euclidean_distance_original(
         {
             Ordering::Equal => {
                 // If distances are equal, compare normalized scores (higher score first)
-                match b_normalized_score
-                    .partial_cmp(&a_normalized_score)
-                    .unwrap_or(Ordering::Equal)
-                {
+                match b_score.partial_cmp(&a_score).unwrap_or(Ordering::Equal) {
                     Ordering::Equal => {
                         // If scores are equal, compare costs (higher cost first)
                         b_cost.partial_cmp(&a_cost).unwrap_or(Ordering::Equal)
