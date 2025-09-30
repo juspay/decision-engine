@@ -898,6 +898,7 @@ fn apply_super_router_sorting(
 fn build_super_router_response(
     first_gateway_result: Option<T::DecidedGateway>,
     sorted_priority_map: Vec<T::SUPERROUTERPRIORITYMAP>,
+    hedging_performed: bool,
 ) -> Result<T::DecidedGateway, T::ErrorResponse> {
     // Return the result
     match first_gateway_result {
@@ -906,7 +907,11 @@ fn build_super_router_response(
             gateway_result.super_router = Some(T::SUPERROUTEROUTPUT {
                 priority_map: sorted_priority_map,
             });
-            gateway_result.routing_approach = T::GatewayDeciderApproach::SUPER_ROUTER;
+            if hedging_performed {
+                gateway_result.routing_approach = T::GatewayDeciderApproach::SUPER_ROUTER_HEDGING;
+            } else {
+                gateway_result.routing_approach = T::GatewayDeciderApproach::SUPER_ROUTER;
+            }
 
             logger::debug!("SUPER_ROUTER flow completed successfully");
             Ok(gateway_result)
@@ -959,8 +964,19 @@ pub async fn runSuperRouterFlow(
     // Apply configurable sorting
     let sorted_priority_map = apply_super_router_sorting(super_router_priority_map, sorting_strategy);
 
+    ///
+    /// Algorithm impl
+    /// 
+
+    // Perform hedging
+    let (final_priority_map, hedging_performed) = Utils::perform_super_router_hedging(
+        &decider_params, 
+        sorted_priority_map,
+    )
+    .await;
+
     // Build super router response with pre-sorted data
-    build_super_router_response(first_gateway_result, sorted_priority_map)
+    build_super_router_response(first_gateway_result, final_priority_map, hedging_performed)
 }
 
 // async fn addMetricsToStream(

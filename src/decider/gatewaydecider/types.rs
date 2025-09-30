@@ -624,6 +624,7 @@ pub enum GatewayDeciderApproach {
     SR_V3_GLOBAL_DOWNTIME_HEDGING,
     NTW_BASED_ROUTING,
     SUPER_ROUTER,
+    SUPER_ROUTER_HEDGING,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -1448,6 +1449,9 @@ impl fmt::Display for GatewayDeciderApproach {
             }
             Self::SUPER_ROUTER => {
                 write!(f, "SUPER_ROUTER")
+            }
+            Self::SUPER_ROUTER_HEDGING => {
+                write!(f, "SUPER_ROUTER_HEDGING")
             }
         }
     }
