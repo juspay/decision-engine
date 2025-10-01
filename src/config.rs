@@ -10,7 +10,6 @@ use crate::{
     logger::config::Log,
 };
 use error_stack::ResultExt;
-use masking::ExposeInterface;
 use redis_interface::RedisSettings;
 use std::{
     collections::HashMap,

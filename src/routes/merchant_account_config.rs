@@ -1,6 +1,6 @@
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
 use crate::types::merchant as ETM;
-use crate::{error, logger, metrics, types};
+use crate::{error, logger};
 use axum::{extract::Path, Json};
 use error_stack::ResultExt;
 use serde::{Deserialize, Serialize};

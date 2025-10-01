@@ -1,7 +1,6 @@
 // use eulerhs::prelude::*;
 // use eulerhs::language::MonadFlow;
 use crate::types::emi_bank_code as EBC;
-use crate::types::gateway as ETG;
 use crate::types::gateway_bank_emi_support as ETGBES;
 use crate::types::gateway_bank_emi_support_v2 as ETGBESV2;
 use std::option::Option;

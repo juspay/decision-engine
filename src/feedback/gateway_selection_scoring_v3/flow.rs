@@ -31,11 +31,9 @@
 // use feedback::types::{TxnCardInfo, PaymentMethodType, MerchantGatewayAccount};
 use crate::decider::gatewaydecider::utils as GU;
 use crate::logger;
-use crate::merchant_config_util as MC;
 use crate::redis::cache::findByNameFromRedis;
 use crate::types::payment::payment_method_type_const::*;
 use crate::{
-    app,
     decider::gatewaydecider::types::{GatewayScoringData, SrRoutingDimensions},
     decider::{
         gatewaydecider::constants as DC, gatewaydecider::types::RoutingFlowType as RF,
@@ -45,22 +43,15 @@ use crate::{
         constants as C,
         types::SrV3DebugBlock,
         utils::{
-            dateInIST, getCurrentIstDateWithFormat, getProducerKey, getTrueString,
-            isKeyExistsRedis, logGatewayScoreType, updateMovingWindow, updateScore,
-            GatewayScoringType,
+            dateInIST, getCurrentIstDateWithFormat, getProducerKey, isKeyExistsRedis,
+            logGatewayScoreType, updateMovingWindow, updateScore, GatewayScoringType,
         },
     },
-    redis::{feature::isFeatureEnabled, types::ServiceConfigKey},
+    redis::types::ServiceConfigKey,
     types::{
-        card::txn_card_info::TxnCardInfo,
-        merchant::id as MID,
-        merchant::{
-            merchant_account::MerchantAccount, merchant_gateway_account::MerchantGatewayAccount,
-        },
-        payment_flow::PaymentFlow as PF,
-        txn_details::types::TxnDetail,
+        card::txn_card_info::TxnCardInfo, merchant::id as MID,
+        merchant::merchant_account::MerchantAccount, txn_details::types::TxnDetail,
     },
-    utils as U,
 };
 use masking::PeekInterface;
 

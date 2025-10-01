@@ -1,6 +1,5 @@
 use crate::app::get_tenant_app_state;
 use crate::decider::gatewaydecider::types::{self, DeciderFlow};
-use crate::error;
 use crate::euclid::errors::EuclidErrors;
 use crate::euclid::types::SrDimensionConfig;
 use crate::feedback::gateway_elimination_scoring::flow::{
@@ -20,16 +19,14 @@ use crate::types::service_configuration::find_config_by_name;
 use crate::types::user_eligibility_info::{
     get_eligibility_info, identifier_name_to_text, IdentifierName,
 };
-use crate::utils::{generate_random_number, get_current_date_in_millis};
-use crate::{decider, feedback, logger};
-use diesel::Identifiable;
+use crate::utils::generate_random_number;
+use crate::{feedback, logger};
 use error_stack::ResultExt;
 use fred::prelude::{KeysInterface, ListInterface};
 use masking::PeekInterface;
 use masking::Secret;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_json::from_value;
 use serde_json::{from_slice, from_str, Value};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -62,22 +59,20 @@ use crate::types::feature as ETF;
 // use crate::types::gateway as Gateway;
 // // use types::gateway_payment_method as ETGPM;
 use super::types::{
-    ConfigurableBlock, GatewayList, GatewayRedisKeyMap, GatewayScoreMap, GatewayScoringData,
-    GatewayWiseExtraScore, InternalMetadata, MessageFormat, OptimizationRedisBlockData,
-    ScoreKeyType, SplitSettlementDetails, SrRoutingDimensions, SrV3InputConfig,
-    SrV3SubLevelInputConfig,
+    GatewayList, GatewayRedisKeyMap, GatewayScoreMap, GatewayScoringData, GatewayWiseExtraScore,
+    InternalMetadata, MessageFormat, ScoreKeyType, SplitSettlementDetails, SrRoutingDimensions,
+    SrV3InputConfig, SrV3SubLevelInputConfig,
 };
 use crate::types::merchant as ETM;
 use crate::types::merchant_gateway_card_info as ETMGCI;
 // // use types::merchant_gateway_card_info as ETMGCI;
 // // use types::merchant_gateway_payment_method as ETMGPM;
 // // use types::money as Money;
-use crate::types::card::txn_card_info::{self as ETTCa, auth_type_to_text, AuthType};
+use crate::types::card::txn_card_info::{self as ETTCa, auth_type_to_text};
 use crate::types::order as ETO;
 use crate::types::txn_details::types as ETTD;
 use crate::types::txn_offer as ETTO;
 // use juspay::extra::parsing as P;
-use crate::types::gateway as ETG;
 use crate::types::gateway_routing_input::{GatewayScore, GatewaySuccessRateBasedRoutingInput};
 use crate::types::token_bin_info as ETTB;
 // // use utils::config::constants as Config;
@@ -85,7 +80,7 @@ use crate::types::token_bin_info as ETTB;
 // // use safe::Safe;
 // // use control::category::Category;
 // // use juspay::extra::non_empty_text as NET;
-use crate::redis::{self, cache as RService};
+use crate::redis::cache as RService;
 use crate::types::isin_routes as ETIsinR;
 // // use utils::redis as EWRedis;
 // // use db::common::types::payment_flows as PF;

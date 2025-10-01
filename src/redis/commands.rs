@@ -8,7 +8,7 @@ use fred::types::SetOptions;
 use fred::{
     clients::Transaction,
     interfaces::{KeysInterface, ListInterface, TransactionInterface},
-    types::{Expiration, FromRedis, MultipleValues, Scanner},
+    types::{Expiration, FromRedis, MultipleValues},
 };
 use redis_interface::{errors, types::DelReply, RedisConnectionPool};
 use std::fmt::Debug;

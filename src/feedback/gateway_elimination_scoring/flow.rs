@@ -4,12 +4,7 @@
 // Local Imports
 use crate::{
     app::get_tenant_app_state,
-    decider::storage::utils::merchant_gateway_account,
-    feedback::constants::{
-        defaultGWScoringPenaltyFactor, defaultGWScoringRewardFactor, defaultMerchantArrMaxLength,
-        defaultMinimumGatewayScore, defaultScoreGlobalKeysTTL, defaultScoreKeysTTL, ecRedis,
-        ecRedis2, kvRedis, kvRedis2, EnforceGwScoreKvRedis, GatewayScoreThirdDimensionTtl,
-    },
+    feedback::constants::{defaultGWScoringPenaltyFactor, defaultGWScoringRewardFactor},
     redis::types::ServiceConfigKey,
     types::{
         card::txn_card_info::TxnCardInfo, merchant, merchant_config::types::PfMcConfig,
@@ -18,6 +13,7 @@ use crate::{
 };
 
 #[cfg(feature = "mysql")]
+#[warn(unused_imports)]
 use crate::storage::schema::gateway_bank_emi_support::gateway;
 #[cfg(feature = "postgres")]
 use crate::storage::schema_pg::gateway_bank_emi_support::gateway;
@@ -26,7 +22,6 @@ use crate::feedback::constants as C;
 
 use crate::decider::gatewaydecider::constants::{EnableEliminationV2, EnableOutageV2};
 
-use crate::types::gateway_routing_input as ETGRI;
 // use crate::feedback::types as F_TYPES;
 
 use crate::decider::gatewaydecider::utils::decode_and_log_error;
@@ -48,11 +43,7 @@ use crate::feedback::types::{
     // TxnCardInfo,
     // TxnDetail,
     CachedGatewayScore,
-    GatewayScoringKeyType,
-    KeyType,
     MerchantScoringDetails,
-    ScoreType,
-    ScoringDimension,
 };
 
 use crate::logger;
@@ -60,10 +51,8 @@ use crate::logger;
 // use eulerhs::language::get_current_date_in_millis;
 // use eulerhs::language as EL;
 
-use crate::redis::commands::RedisConnectionWrapper;
 use crate::redis::feature::isFeatureEnabled;
 
-use crate::types::gateway as Gateway;
 use crate::types::merchant::id as Merchant;
 // use crate::types::txn_details::types::TxnDetail::
 // use types::tenant_config as TenantConfig;
@@ -81,7 +70,6 @@ use crate::utils as CUTILS;
 
 // Haskell's Double corresponds to Rust's f64, which is built into the language.
 
-use bytes::Bytes;
 // use encoding_rs as TE;
 
 // use lens::set;

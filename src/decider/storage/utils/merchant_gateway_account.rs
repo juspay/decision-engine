@@ -5,8 +5,6 @@ use crate::decider::gatewaydecider::types::*;
 // use gatewaydecider::types::*;
 // use juspay::extra::secret::make_secret;
 use crate::decider::gatewaydecider::utils::{get_mgas, is_emandate_enabled, set_mgas};
-use crate::logger;
-use crate::types::gateway as ETG;
 use crate::types::merchant as ETM;
 use crate::types::merchant::id::MerchantId;
 use crate::types::merchant::merchant_gateway_account::MgaReferenceId;

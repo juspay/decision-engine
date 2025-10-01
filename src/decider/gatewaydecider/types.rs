@@ -24,7 +24,6 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 // use data::time::{UTCTime, LocalTime};
 // use unsafe_coerce::unsafeCoerce;
 use crate::types::card as ETCa;
-use crate::types::gateway as ETG;
 use crate::types::merchant as ETM;
 use crate::types::merchant::id::MerchantId;
 use crate::types::order as ETO;
@@ -37,7 +36,6 @@ use crate::types::gateway_routing_input as ETGRI;
 // use eulerhs::language as L;
 // use juspay::extra::parsing as Parsing;
 use crate::types::customer as ETCu;
-use crate::types::payment as ETP;
 use diesel::sql_types;
 use std::fmt;
 

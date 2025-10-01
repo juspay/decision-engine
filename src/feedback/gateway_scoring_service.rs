@@ -52,7 +52,6 @@ use crate::types::merchant::merchant_account::MerchantAccount;
 // use control::monad::extra::maybe_m;
 // use control::category;
 use crate::types::merchant as ETM;
-use crate::types::transaction::id::transaction_id_to_text;
 // use utils::redis as redis;
 // use db::common::types::payment_flows as pf;
 // use utils::config::merchant_config as merchant_config;

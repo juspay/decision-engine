@@ -1,6 +1,5 @@
 use crate::error::ApiError;
 use crate::types::card::card_type::CardType;
-use crate::utils::StringExt;
 use masking::Secret;
 use serde::{Deserialize, Deserializer, Serialize};
 use time::{OffsetDateTime, PrimitiveDateTime};

@@ -2,8 +2,8 @@ use crate::decider::gatewaydecider::{
     flows::deciderFullPayloadHSFunction,
     types::{DecidedGateway, DomainDeciderRequest, ErrorResponse, UnifiedError},
 };
+use crate::logger;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
-use crate::{logger, metrics};
 use axum::body::to_bytes;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;

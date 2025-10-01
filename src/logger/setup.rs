@@ -1,7 +1,7 @@
 //! Setup logging subsystem.
 
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{fmt, prelude::*, util::SubscriberInitExt, EnvFilter, Layer};
+use tracing_subscriber::{prelude::*, util::SubscriberInitExt, EnvFilter, Layer};
 
 use super::{config, formatter::FormattingLayer, storage::StorageSubscription};
 

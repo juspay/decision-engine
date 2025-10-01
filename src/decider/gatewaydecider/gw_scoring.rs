@@ -12,31 +12,28 @@ use crate::merchant_config_util::{
 };
 use crate::redis::types::ServiceConfigKey;
 #[cfg(feature = "mysql")]
+#[warn(unused_imports)]
 use crate::storage::schema::txn_detail;
 #[cfg(feature = "postgres")]
 use crate::storage::schema_pg::txn_detail;
 use crate::types::gateway_routing_input::{
     EliminationLevel, EliminationSuccessRateInput, GatewayScore,
     GatewaySuccessRateBasedRoutingInput, GatewayWiseSuccessRateBasedRoutingInput,
-    GlobalGatewayScore, GlobalScore, GlobalScoreLog, SelectionLevel,
+    GlobalGatewayScore, GlobalScore, GlobalScoreLog,
 };
 use crate::types::payment_flow::PaymentFlow;
 use crate::types::tenant::tenant_config::ModuleName;
 use crate::types::transaction::id::TransactionId;
 use crate::utils::{generate_random_number, get_current_date_in_millis};
-use diesel::dsl::update;
 use masking::PeekInterface;
-use rand::prelude::*;
 use rand_distr::{Beta, Binomial, Distribution};
 use serde::{Deserialize, Serialize};
 use time::{OffsetDateTime, PrimitiveDateTime};
 // use crate::types::card_brand_routes as ETCBR;
 use crate::redis::feature::{self as M, isFeatureEnabled};
-use crate::types::gateway as ETG;
 use crate::types::gateway_routing_input as ETGRI;
 // use crate::types::gateway_health as ETGH;
 use crate::types::card as ETCT;
-use crate::types::payment as ETP;
 // use crate::types::issuer_routes as ETIssuerR;
 use crate::types::merchant as ETM;
 use crate::types::txn_details::types as ETTD;
@@ -66,7 +63,7 @@ use crate::types::gateway_outage::{self as ETGO, GatewayOutage};
 // use system_random::internal::StdGen;
 use super::types::{
     transform_gateway_wise_success_rate_based_routing, ConfigSource, DebugScoringEntry,
-    DeciderGatewayWiseSuccessRateBasedRoutingInput, Dimension, DownTime, FilterLevel, Gateway,
+    DeciderGatewayWiseSuccessRateBasedRoutingInput, Dimension, DownTime, FilterLevel,
     GatewayRedisKeyMap, GatewayScoringData, GlobalSREvaluationScoreLog, LogCurrScore,
     RankingAlgorithm, RedisKey, ResetApproach, ResetGatewayInput, ScoreKeyType, SrV3InputConfig,
     SuccessRate1AndNConfig,
@@ -76,7 +73,6 @@ use crate::types::payment::payment_method_type_const::*;
 use std::collections::HashMap as MP;
 use std::iter::Iterator;
 use std::option::Option;
-use std::primitive;
 use std::string::String as T;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::vec::Vec;

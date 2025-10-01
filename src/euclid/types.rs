@@ -1,6 +1,4 @@
 use super::ast::ConnectorInfo;
-use super::utils::generate_random_id;
-use crate::decider::network_decider;
 use crate::euclid::ast::{Output, Program, ValueType};
 #[cfg(feature = "mysql")]
 use crate::storage::schema;
