@@ -75,15 +75,15 @@ pub async fn updateSrV3Score(
     gateway_reference_id: Option<String>,
 ) {
     // let is_merchant_enabled_globally = MC::isMerchantEnabledForPaymentFlows(merchant_acc.id, [PF::SrBasedRouting].to_vec()).await;
-    match (txn_detail.gateway.clone()) {
-        (None) => {
+    match txn_detail.gateway.clone() {
+        None => {
             logger::info!(
                 action = "gateway not found",
                 tag = "gateway not found",
                 "gateway not found for this transaction having id"
             );
         }
-        (Some(gateway)) => {
+        Some(gateway) => {
             let unified_sr_v3_key = getProducerKey(
                 txn_detail.clone(),
                 mb_gateway_scoring_data,

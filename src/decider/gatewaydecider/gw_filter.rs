@@ -599,7 +599,7 @@ fn validateMga(
         Utils::is_seamless(mga)
     } else if isMandateRegister(mTxnObjType.clone()) {
         Utils::is_subscription(mga)
-    } else if (isEmandateRegister(mTxnObjType) && !is_otm_flow) {
+    } else if isEmandateRegister(mTxnObjType) && !is_otm_flow {
         Utils::is_emandate_enabled(mga)
     } else {
         !Utils::is_only_subscription(mga)
@@ -1871,14 +1871,14 @@ pub async fn filterGatewaysCardInfo(
                     .await
                     .into_iter()
                     .filter(|ci| {
-                        (ci.validationType == Some(ETGCI::ValidationType::CardMandate)
+                        ci.validationType == Some(ETGCI::ValidationType::CardMandate)
                             && ci
                                 .authType
                                 .clone()
                                 .unwrap_or_else(|| "THREE_DS".to_string())
                                 == auth_type_to_text(
                                     &m_auth_type.clone().unwrap_or(AuthType::ThreeDs),
-                                ))
+                                )
                     })
                     .collect::<Vec<GatewayCardInfo>>();
 
