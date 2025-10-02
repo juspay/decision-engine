@@ -22,7 +22,9 @@ macro_rules! impl_to_sql_from_sql_text_mysql {
         impl ::diesel::deserialize::FromSql<::diesel::sql_types::Text, ::diesel::mysql::Mysql>
             for $type
         {
-            fn from_sql(value: ::diesel::mysql::MysqlValue) -> ::diesel::deserialize::Result<Self> {
+            fn from_sql(
+                value: ::diesel::mysql::MysqlValue<'_>,
+            ) -> ::diesel::deserialize::Result<Self> {
                 use ::core::str::FromStr;
                 let s = ::core::str::from_utf8(value.as_bytes())?;
                 <$type>::from_str(s).map_err(|_| "Unrecognized enum variant".into())

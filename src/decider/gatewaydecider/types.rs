@@ -297,7 +297,7 @@ struct GatewayScoringTypeLogVisitor;
 impl<'de> serde::de::Visitor<'de> for GatewayScoringTypeLogVisitor {
     type Value = AValue;
 
-    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str("struct GatewayScoringTypeLog")
     }
 
