@@ -117,10 +117,7 @@ pub fn catMaybes<T: Clone>(options: &[Option<T>]) -> Vec<T> {
     options.iter().filter_map(|opt| opt.clone()).collect()
 }
 
-pub fn intersect<T: Eq + std::hash::Hash>(a: &[T], b: &[T]) -> Vec<T>
-where
-    T: Clone,
-{
+pub fn intersect<T: Eq + std::hash::Hash + Clone>(a: &[T], b: &[T]) -> Vec<T> {
     let set_a: HashSet<_> = a.iter().collect();
     let set_b: HashSet<_> = b.iter().collect();
     set_a.intersection(&set_b).cloned().cloned().collect()
