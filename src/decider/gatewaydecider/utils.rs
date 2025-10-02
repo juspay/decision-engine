@@ -474,24 +474,6 @@ pub fn get_value_from_text(key: &str, t: &Value) -> Option<Value> {
     }
 }
 
-fn get_enabled_gateway_for_brand(brand: &str, enabled_gateways: Option<&Value>) -> Option<Value> {
-    enabled_gateways.and_then(|gateways| match gateways {
-        Value::Object(map) => map.get(brand).cloned(),
-        _ => None,
-    })
-}
-
-fn parse_aeson_string<T: for<'de> Deserialize<'de>>(value: &Value) -> Option<T> {
-    match value {
-        Value::String(s) => from_str(s).ok(),
-        _ => None,
-    }
-}
-
-fn result_to_maybe<T>(result: Result<T, serde_json::Error>) -> Option<T> {
-    result.ok()
-}
-
 fn decode_metadata(text: &str) -> HashMap<String, String> {
     from_str::<HashMap<String, Value>>(text)
         .unwrap_or_default()
@@ -1108,12 +1090,6 @@ async fn get_upi_handle_list() -> Vec<String> {
         .unwrap_or_default()
 }
 
-async fn get_upi_psp_list() -> Vec<String> {
-    RService::findByNameFromRedis(C::V2_ROUTING_PSP_LIST.get_key())
-        .await
-        .unwrap_or_default()
-}
-
 async fn get_routing_top_bank_list() -> Vec<String> {
     RService::findByNameFromRedis(C::V2_ROUTING_TOP_BANK_LIST.get_key())
         .await
@@ -1137,27 +1113,6 @@ pub fn get_bin_list(card_bin: Option<String>) -> Vec<Option<String>> {
             } else {
                 vec![Some(bin)]
             }
-        }
-    }
-}
-
-async fn get_isin_routes_with_extended_bins(
-    card_bin: Option<String>,
-    merchant_id: MerchantId,
-) -> Option<ETIsinR::IsinRoutes> {
-    match get_true_string(card_bin) {
-        None => None,
-        Some(bin) => {
-            let bin_list = if bin.len() > 6 {
-                (6..=9).map(|len| bin[..len].to_string()).collect()
-            } else {
-                vec![bin]
-            };
-            let mut isin_route_list =
-                ETIsinR::find_all_by_isin_and_merchant_id(bin_list, &merchant_id).await;
-            isin_route_list.sort_by(|x, y| y.isin.cmp(&x.isin));
-            let reverse_list: Vec<_> = isin_route_list.into_iter().collect();
-            reverse_list.first().cloned()
         }
     }
 }
@@ -1212,19 +1167,6 @@ pub fn get_payment_flow_list_from_txn_detail(txn_detail: &ETTD::TxnDetail) -> Ve
 }
 
 use crate::decider::gatewaydecider::types::PaymentFlowInfoInInternalTrackingInfo;
-
-fn get_payment_flow_list_from_txn_detail_(txn_detail: &ETTD::TxnDetail) -> Vec<String> {
-    match txn_detail
-        .internalTrackingInfo
-        .as_ref()
-        .and_then(|info| either_decode_t(info).ok())
-    {
-        Some(PaymentFlowInfoInInternalTrackingInfo { paymentFlowInfo }) => {
-            paymentFlowInfo.paymentFlows
-        }
-        None => vec![],
-    }
-}
 
 pub fn set_payment_flow_list(decider_flow: &mut DeciderFlow<'_>, payment_flow_list: Vec<String>) {
     decider_flow.writer.paymentFlowList = payment_flow_list;

@@ -71,9 +71,6 @@ pub type MysqlPool = bb8::Pool<MysqlPooledConn>;
 #[cfg(feature = "postgres")]
 type DeadPoolConnType = Object<AsyncPgConnection>;
 
-#[cfg(feature = "mysql")]
-type DeadPoolConnType = Object<AsyncMysqlConnection>;
-
 #[cfg(feature = "postgres")]
 impl Storage {
     /// Create a new storage interface from configuration

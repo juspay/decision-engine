@@ -565,9 +565,11 @@ pub struct GatewayScoringData {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct MetricsStreamKeyShard(String, i32);
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct MetricsStreamKey(String);
 
 // # TODO - Implement RedisKey for MetricsStreamKeyShard
