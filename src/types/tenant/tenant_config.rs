@@ -22,38 +22,38 @@ pub fn tenant_config_id_to_text(id: TenantConfigId) -> String {
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum ModuleName {
     #[serde(rename = "MERCHANT_ACCOUNT")]
-    MERCHANT_ACCOUNT,
+    MerchantAccount,
     #[serde(rename = "SURCHARGE_LOGIC")]
-    SURCHARGE_LOGIC,
+    SurchargeLogic,
     #[serde(rename = "PRIORITY_LOGIC")]
-    PRIORITY_LOGIC,
+    PriorityLogic,
     #[serde(rename = "MERCHANT_CONFIG")]
-    MERCHANT_CONFIG,
+    MerchantConfig,
     #[serde(rename = "TENANT_FEATURE")]
-    TENANT_FEATURE,
+    TenantFeature,
     #[serde(rename = "TENANT_ACCOUNT")]
-    TENANT_ACCOUNT,
+    TenantAccount,
 }
 
 pub fn module_name_to_text(module_name: &ModuleName) -> String {
     match module_name {
-        ModuleName::MERCHANT_ACCOUNT => "MERCHANT_ACCOUNT".to_string(),
-        ModuleName::SURCHARGE_LOGIC => "SURCHARGE_LOGIC".to_string(),
-        ModuleName::PRIORITY_LOGIC => "PRIORITY_LOGIC".to_string(),
-        ModuleName::MERCHANT_CONFIG => "MERCHANT_CONFIG".to_string(),
-        ModuleName::TENANT_FEATURE => "TENANT_FEATURE".to_string(),
-        ModuleName::TENANT_ACCOUNT => "TENANT_ACCOUNT".to_string(),
+        ModuleName::MerchantAccount => "MERCHANT_ACCOUNT".to_string(),
+        ModuleName::SurchargeLogic => "SURCHARGE_LOGIC".to_string(),
+        ModuleName::PriorityLogic => "PRIORITY_LOGIC".to_string(),
+        ModuleName::MerchantConfig => "MERCHANT_CONFIG".to_string(),
+        ModuleName::TenantFeature => "TENANT_FEATURE".to_string(),
+        ModuleName::TenantAccount => "TENANT_ACCOUNT".to_string(),
     }
 }
 
 pub fn text_to_module_name(module_name: String) -> Result<ModuleName, ApiError> {
     match module_name.as_str() {
-        "MERCHANT_ACCOUNT" => Ok(ModuleName::MERCHANT_ACCOUNT),
-        "SURCHARGE_LOGIC" => Ok(ModuleName::SURCHARGE_LOGIC),
-        "PRIORITY_LOGIC" => Ok(ModuleName::PRIORITY_LOGIC),
-        "MERCHANT_CONFIG" => Ok(ModuleName::MERCHANT_CONFIG),
-        "TENANT_FEATURE" => Ok(ModuleName::TENANT_FEATURE),
-        "TENANT_ACCOUNT" => Ok(ModuleName::TENANT_ACCOUNT),
+        "MERCHANT_ACCOUNT" => Ok(ModuleName::MerchantAccount),
+        "SURCHARGE_LOGIC" => Ok(ModuleName::SurchargeLogic),
+        "PRIORITY_LOGIC" => Ok(ModuleName::PriorityLogic),
+        "MERCHANT_CONFIG" => Ok(ModuleName::MerchantConfig),
+        "TENANT_FEATURE" => Ok(ModuleName::TenantFeature),
+        "TENANT_ACCOUNT" => Ok(ModuleName::TenantAccount),
         _ => Err(ApiError::ParsingError("Invalid Module Name")),
     }
 }

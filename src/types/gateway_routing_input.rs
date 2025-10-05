@@ -11,21 +11,21 @@ pub enum EliminationLevel {
     #[serde(rename = "GATEWAY")]
     GATEWAY,
     #[serde(rename = "PAYMENT_METHOD_TYPE")]
-    PAYMENT_METHOD_TYPE,
+    PaymentMethodType,
     #[serde(rename = "PAYMENT_METHOD")]
-    PAYMENT_METHOD,
+    PaymentMethod,
     #[serde(rename = "NONE")]
     NONE,
     #[serde(rename = "FORCED_PAYMENT_METHOD")]
-    FORCED_PAYMENT_METHOD,
+    ForcedPaymentMethod,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SelectionLevel {
     #[serde(rename = "PAYMENT_MODE")]
-    SL_PAYMENT_MODE,
+    SlPaymentMode,
     #[serde(rename = "PAYMENT_METHOD")]
-    SL_PAYMENT_METHOD,
+    SlPaymentMethod,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -129,7 +129,7 @@ impl GatewaySuccessRateBasedRoutingInput {
         Self {
             gatewayWiseInputs: None,
             defaultEliminationThreshold: config.threshold,
-            defaultEliminationLevel: EliminationLevel::PAYMENT_METHOD,
+            defaultEliminationLevel: EliminationLevel::PaymentMethod,
             defaultSelectionLevel: None,
             enabledPaymentMethodTypes: vec![],
             eliminationV2SuccessRateInputs: None,
@@ -157,7 +157,7 @@ impl Default for GatewaySuccessRateBasedRoutingInput {
         Self {
             gatewayWiseInputs: None,
             defaultEliminationThreshold: 0.0,
-            defaultEliminationLevel: EliminationLevel::PAYMENT_METHOD,
+            defaultEliminationLevel: EliminationLevel::PaymentMethod,
             defaultSelectionLevel: None,
             enabledPaymentMethodTypes: vec![],
             eliminationV2SuccessRateInputs: None,

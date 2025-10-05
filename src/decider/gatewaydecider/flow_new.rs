@@ -120,7 +120,7 @@ pub async fn deciderFullPayloadHSFunction(
         dpShouldConsumeResult: dreq.shouldConsumeResult,
     };
 
-    if dreq_.rankingAlgorithm == Some(RankingAlgorithm::NTW_BASED_ROUTING) {
+    if dreq_.rankingAlgorithm == Some(RankingAlgorithm::NtwBasedRouting) {
         logger::debug!("Performing debit routing");
         network_decider::debit_routing::perform_debit_routing(dreq_).await
     } else {
@@ -204,7 +204,7 @@ pub async fn runDeciderFlow(
                     Some(pgw.clone()),
                     None,
                     Vec::new(),
-                    T::GatewayDeciderApproach::MERCHANT_PREFERENCE,
+                    T::GatewayDeciderApproach::MerchantPreference,
                     None,
                     functionalGateways,
                     None,
@@ -215,10 +215,10 @@ pub async fn runDeciderFlow(
                     gateway_priority_map: Some(json!(HashMap::from([(pgw.to_string(), 1.0)]))),
                     filter_wise_gateways: None,
                     priority_logic_tag: None,
-                    routing_approach: T::GatewayDeciderApproach::MERCHANT_PREFERENCE,
+                    routing_approach: T::GatewayDeciderApproach::MerchantPreference,
                     gateway_before_evaluation: Some(pgw.clone()),
                     priority_logic_output: None,
-                    reset_approach: T::ResetApproach::NO_RESET,
+                    reset_approach: T::ResetApproach::NoReset,
                     routing_dimension: None,
                     routing_dimension_level: None,
                     is_scheduled_outage: false,
@@ -265,7 +265,7 @@ pub async fn runDeciderFlow(
             }
         }
         _ => {
-            let gwPLogic = if rankingAlgorithm != Some(RankingAlgorithm::SR_BASED_ROUTING) {
+            let gwPLogic = if rankingAlgorithm != Some(RankingAlgorithm::SrBasedRouting) {
                 match deciderParams.dpPriorityLogicOutput {
                     Some(ref plOp) => plOp.clone(),
                     None => {
@@ -618,7 +618,7 @@ async fn filterFunctionalGatewaysWithEnforcment(
             decider_flow.writer.internalMetaData.clone(),
             decider_flow.get().dpOrderMetadata.metadata.clone(),
             plOp.clone(),
-            PriorityLogicFailure::NULL_AFTER_ENFORCE,
+            PriorityLogicFailure::NullAfterEnforce,
         )
         .await;
         let fallBackGwPriority =
@@ -639,7 +639,7 @@ async fn filterFunctionalGatewaysWithEnforcment(
                     decider_flow.writer.internalMetaData.clone(),
                     decider_flow.get().dpOrderMetadata.metadata.clone(),
                     updatedPlOp,
-                    PriorityLogicFailure::NULL_AFTER_ENFORCE,
+                    PriorityLogicFailure::NullAfterEnforce,
                 )
                 .await;
                 (updatedEnforcedGateways, updatedPlOp)

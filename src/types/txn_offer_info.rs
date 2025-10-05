@@ -24,7 +24,7 @@ pub enum OfferType {
     CASHBACK,
     VOUCHER,
     DISCOUNT,
-    REWARD_POINT,
+    RewardPoint,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

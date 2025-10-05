@@ -479,10 +479,10 @@ pub fn parse_log_entry(log: Vec<String>) -> LogEntry {
 
 pub fn pl_execution_retry_failure_reasons() -> Vec<DeciderTypes::PriorityLogicFailure> {
     vec![
-        DeciderTypes::PriorityLogicFailure::CONNECTION_FAILED,
-        DeciderTypes::PriorityLogicFailure::RESPONSE_CONTENT_TYPE_NOT_SUPPORTED,
-        DeciderTypes::PriorityLogicFailure::RESPONSE_DECODE_FAILURE,
-        DeciderTypes::PriorityLogicFailure::RESPONSE_PARSE_ERROR,
+        DeciderTypes::PriorityLogicFailure::ConnectionFailed,
+        DeciderTypes::PriorityLogicFailure::ResponseContentTypeNotSupported,
+        DeciderTypes::PriorityLogicFailure::ResponseDecodeFailure,
+        DeciderTypes::PriorityLogicFailure::ResponseParseError,
     ]
 }
 
@@ -815,7 +815,7 @@ async fn get_priority_logic_script_from_tenant_config(
         Some(ref tenant_account_id) => {
             match get_tenant_config_by_tenant_id_and_module_name_and_module_key_and_type(
                 tenant_account_id.to_string(),
-                ModuleName::PRIORITY_LOGIC,
+                ModuleName::PriorityLogic,
                 "priority_logic".to_string(),
                 ConfigType::FALLBACK,
             )
@@ -1164,7 +1164,7 @@ async fn handle_failure_response(
     let pl_data = DeciderTypes::PriorityLogicData {
         name: priority_logic_tag,
         status: DeciderTypes::Status::FAILURE,
-        failure_reason: DeciderTypes::PriorityLogicFailure::PL_EVALUATION_FAILED,
+        failure_reason: DeciderTypes::PriorityLogicFailure::PlEvaluationFailed,
     };
     EvaluationResult::EvaluationError(pl_data, log_entries)
 }
@@ -1179,7 +1179,7 @@ async fn handle_success_response(
     let pl_data = DeciderTypes::PriorityLogicData {
         name: priority_logic_tag.clone(),
         status: status.clone(),
-        failure_reason: DeciderTypes::PriorityLogicFailure::NO_ERROR,
+        failure_reason: DeciderTypes::PriorityLogicFailure::NoError,
     };
     let pl_output = DeciderTypes::GatewayPriorityLogicOutput {
         isEnforcement: response_body.result.isEnforcement.unwrap_or(false),
@@ -1196,7 +1196,7 @@ fn handle_client_error(client_error: ApiClientError) -> PLExecutorError {
     match client_error {
         ApiClientError::BadRequest(bytes) => PLExecutorError {
             error: true,
-            errorMessage: DeciderTypes::PriorityLogicFailure::COMPILATION_ERROR,
+            errorMessage: DeciderTypes::PriorityLogicFailure::CompilationError,
             userMessage: "Bad request sent to the server.".to_string(),
             log: Some(vec![vec![
                 "Error".to_string(),
@@ -1206,7 +1206,7 @@ fn handle_client_error(client_error: ApiClientError) -> PLExecutorError {
         },
         ApiClientError::Unauthorized(bytes) => PLExecutorError {
             error: true,
-            errorMessage: DeciderTypes::PriorityLogicFailure::CONNECTION_FAILED,
+            errorMessage: DeciderTypes::PriorityLogicFailure::ConnectionFailed,
             userMessage: "Unauthorized access.".to_string(),
             log: Some(vec![vec![
                 "Error".to_string(),
@@ -1216,7 +1216,7 @@ fn handle_client_error(client_error: ApiClientError) -> PLExecutorError {
         },
         ApiClientError::InternalServerError(bytes) => PLExecutorError {
             error: true,
-            errorMessage: DeciderTypes::PriorityLogicFailure::UNHANDLED_EXCEPTION,
+            errorMessage: DeciderTypes::PriorityLogicFailure::UnhandledException,
             userMessage: "Internal server error occurred.".to_string(),
             log: Some(vec![vec![
                 "Error".to_string(),
@@ -1226,7 +1226,7 @@ fn handle_client_error(client_error: ApiClientError) -> PLExecutorError {
         },
         ApiClientError::ResponseDecodingFailed => PLExecutorError {
             error: true,
-            errorMessage: DeciderTypes::PriorityLogicFailure::RESPONSE_DECODE_FAILURE,
+            errorMessage: DeciderTypes::PriorityLogicFailure::ResponseDecodeFailure,
             userMessage: "Failed to decode the response.".to_string(),
             log: Some(vec![vec![
                 "Error".to_string(),
@@ -1236,7 +1236,7 @@ fn handle_client_error(client_error: ApiClientError) -> PLExecutorError {
         },
         ApiClientError::RequestNotSent => PLExecutorError {
             error: true,
-            errorMessage: DeciderTypes::PriorityLogicFailure::CONNECTION_FAILED,
+            errorMessage: DeciderTypes::PriorityLogicFailure::ConnectionFailed,
             userMessage: "The request was not sent.".to_string(),
             log: Some(vec![vec![
                 "Error".to_string(),
@@ -1249,7 +1249,7 @@ fn handle_client_error(client_error: ApiClientError) -> PLExecutorError {
             message,
         } => PLExecutorError {
             error: true,
-            errorMessage: DeciderTypes::PriorityLogicFailure::UNHANDLED_EXCEPTION,
+            errorMessage: DeciderTypes::PriorityLogicFailure::UnhandledException,
             userMessage: "An unexpected error occurred.".to_string(),
             log: Some(vec![vec![
                 "Error".to_string(),
@@ -1259,7 +1259,7 @@ fn handle_client_error(client_error: ApiClientError) -> PLExecutorError {
         },
         _ => PLExecutorError {
             error: true,
-            errorMessage: DeciderTypes::PriorityLogicFailure::UNHANDLED_EXCEPTION,
+            errorMessage: DeciderTypes::PriorityLogicFailure::UnhandledException,
             userMessage: "An unknown error occurred.".to_string(),
             log: Some(vec![vec![
                 "Error".to_string(),

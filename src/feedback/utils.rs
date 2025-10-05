@@ -80,7 +80,7 @@ use crate::logger;
 #[derive(Debug, Serialize, Clone, Deserialize, PartialEq)]
 pub enum GatewayScoringType {
     PENALISE,
-    PENALISE_SRV3,
+    PenaliseSrv3,
     REWARD,
 }
 
@@ -256,17 +256,17 @@ pub fn getTxnCardInfoFromApiPayload(
 // Original Haskell function: convertTxnObjectTypeFli::
 // pub fn convertTxnObjectTypeFlip(txn_object_type: Option<TxnObjectType>) -> ETTD::TxnObjectType {
 //     match txn_object_type {
-//         Some(TxnObjectType::ORDER_PAYMENT) => ETTD::TxnObjectType::OrderPayment,
-//         Some(TxnObjectType::MANDATE_REGISTER) => ETTD::TxnObjectType::MandateRegister,
-//         Some(TxnObjectType::EMANDATE_REGISTER) => ETTD::TxnObjectType::EmandateRegister,
-//         Some(TxnObjectType::EMANDATE_PAYMENT) => ETTD::TxnObjectType::EmandatePayment,
-//         Some(TxnObjectType::MANDATE_PAYMENT) => ETTD::TxnObjectType::MandatePayment,
-//         Some(TxnObjectType::TPV_PAYMENT) => ETTD::TxnObjectType::TpvPayment,
-//         Some(TxnObjectType::PARTIAL_CAPTURE) => ETTD::TxnObjectType::PartialCapture,
-//         Some(TxnObjectType::TPV_EMANDATE_REGISTER) => ETTD::TxnObjectType::TpvEmandateRegister,
-//         Some(TxnObjectType::TPV_MANDATE_REGISTER) => ETTD::TxnObjectType::TpvMandateRegister,
-//         Some(TxnObjectType::TPV_EMANDATE_PAYMENT) => ETTD::TxnObjectType::TpvEmandatePayment,
-//         Some(TxnObjectType::TPV_MANDATE_PAYMENT) => ETTD::TxnObjectType::TpvMandatePayment,
+//         Some(TxnObjectType::OrderPayment) => ETTD::TxnObjectType::OrderPayment,
+//         Some(TxnObjectType::MandateRegister) => ETTD::TxnObjectType::MandateRegister,
+//         Some(TxnObjectType::EmandateRegister) => ETTD::TxnObjectType::EmandateRegister,
+//         Some(TxnObjectType::EmandatePayment) => ETTD::TxnObjectType::EmandatePayment,
+//         Some(TxnObjectType::MandatePayment) => ETTD::TxnObjectType::MandatePayment,
+//         Some(TxnObjectType::TpvPayment) => ETTD::TxnObjectType::TpvPayment,
+//         Some(TxnObjectType::PartialCapture) => ETTD::TxnObjectType::PartialCapture,
+//         Some(TxnObjectType::TpvEmandateRegister) => ETTD::TxnObjectType::TpvEmandateRegister,
+//         Some(TxnObjectType::TpvMandateRegister) => ETTD::TxnObjectType::TpvMandateRegister,
+//         Some(TxnObjectType::TpvEmandatePayment) => ETTD::TxnObjectType::TpvEmandatePayment,
+//         Some(TxnObjectType::TpvMandatePayment) => ETTD::TxnObjectType::TpvMandatePayment,
 //         _ => ETTD::TxnObjectType::OrderPayment,
 //     }
 // }
@@ -336,13 +336,13 @@ pub fn getTxnCardInfoFromApiPayload(
 // pub fn textToAuthType(auth_type: Option<Text>) -> Option<ETCa::AuthType> {
 //     match auth_type.as_deref() {
 //         Some("ATMPIN") => Some(ETCa::AuthType::ATMPIN),
-//         Some("THREE_DS") => Some(ETCa::AuthType::THREE_DS),
-//         Some("THREE_DS_2") => Some(ETCa::AuthType::THREE_DS_2),
+//         Some("THREE_DS") => Some(ETCa::AuthType::ThreeDs),
+//         Some("THREE_DS_2") => Some(ETCa::AuthType::ThreeDs2),
 //         Some("OTP") => Some(ETCa::AuthType::OTP),
-//         Some("OBO_OTP") => Some(ETCa::AuthType::OBO_OTP),
+//         Some("OBO_OTP") => Some(ETCa::AuthType::OboOtp),
 //         Some("VIES") => Some(ETCa::AuthType::VIES),
-//         Some("NO_THREE_DS") => Some(ETCa::AuthType::NO_THREE_DS),
-//         Some("NETWORK_TOKEN") => Some(ETCa::AuthType::NETWORK_TOKEN),
+//         Some("NO_THREE_DS") => Some(ETCa::AuthType::NoThreeDs),
+//         Some("NETWORK_TOKEN") => Some(ETCa::AuthType::NetworkToken),
 //         Some("MOTO") => Some(ETCa::AuthType::MOTO),
 //         Some("FIDO") => Some(ETCa::AuthType::FIDO),
 //         Some("CTP") => Some(ETCa::AuthType::CTP),
@@ -367,7 +367,7 @@ pub fn getTxnCardInfoFromApiPayload(
 //         Some(FT::PaymentMethodType::PAPERNACH) => ETP::PaymentMethodType::Papernach,
 //         Some(FT::PaymentMethodType::PAN) => ETP::PaymentMethodType::PAN,
 //         Some(FT::PaymentMethodType::UNKNOWN(ref val)) if val == "ATM_CARD" => ETP::PaymentMethodType::AtmCard,
-//         Some(FT::PaymentMethodType::MERCHANT_CONTAINER) => ETP::PaymentMethodType::MerchantContainer,
+//         Some(FT::PaymentMethodType::MerchantContainer) => ETP::PaymentMethodType::MerchantContainer,
 //         Some(FT::PaymentMethodType::Virtual_Account) => ETP::PaymentMethodType::VirtualAccount,
 //         Some(FT::PaymentMethodType::OTC) => ETP::PaymentMethodType::Otc,
 //         Some(FT::PaymentMethodType::RTP) => ETP::PaymentMethodType::Rtp,
@@ -622,11 +622,10 @@ pub async fn getProducerKey(
 ) -> Option<String> {
     match redis_gateway_score_data {
         Some(gateway_score_data) => {
-            let is_gri_enabled = if [ScoreKeyType::ELIMINATION_MERCHANT_KEY]
-                .contains(&score_key_type)
+            let is_gri_enabled = if [ScoreKeyType::EliminationMerchantKey].contains(&score_key_type)
             {
                 gateway_score_data.isGriEnabledForElimination
-            } else if [ScoreKeyType::SR_V2_KEY, ScoreKeyType::SR_V3_KEY].contains(&score_key_type) {
+            } else if [ScoreKeyType::SrV2Key, ScoreKeyType::SrV3Key].contains(&score_key_type) {
                 gateway_score_data.isGriEnabledForSrRouting
             } else {
                 false
@@ -677,17 +676,17 @@ pub fn logGatewayScoreType(
     txn_detail: TxnDetail,
 ) {
     let detailed_gateway_score_type = match routing_flow_type {
-        RoutingFlowType::ELIMINATION_FLOW => match gateway_score_type {
-            GatewayScoringType::REWARD => DetailedGatewayScoringType::ELIMINATION_REWARD,
-            _ => DetailedGatewayScoringType::ELIMINATION_PENALISE,
+        RoutingFlowType::EliminationFlow => match gateway_score_type {
+            GatewayScoringType::REWARD => DetailedGatewayScoringType::EliminationReward,
+            _ => DetailedGatewayScoringType::EliminationPenalise,
         },
-        RoutingFlowType::SRV2_FLOW => match gateway_score_type {
-            GatewayScoringType::REWARD => DetailedGatewayScoringType::SRV2_REWARD,
-            _ => DetailedGatewayScoringType::SRV2_PENALISE,
+        RoutingFlowType::Srv2Flow => match gateway_score_type {
+            GatewayScoringType::REWARD => DetailedGatewayScoringType::Srv2Reward,
+            _ => DetailedGatewayScoringType::Srv2Penalise,
         },
         _ => match gateway_score_type {
-            GatewayScoringType::REWARD => DetailedGatewayScoringType::SRV3_REWARD,
-            _ => DetailedGatewayScoringType::SRV3_PENALISE,
+            GatewayScoringType::REWARD => DetailedGatewayScoringType::Srv3Reward,
+            _ => DetailedGatewayScoringType::Srv3Penalise,
         },
     };
 

@@ -723,10 +723,10 @@ pub enum ChargeMethod {
 pub enum ChargeName {
     BASE,
     SURCHARGE,
-    TAX_ON_SURCHARGE,
+    TaxOnSurcharge,
     OFFER,
-    ADD_ON,
-    GATEWAY_ADJUSTMENT,
+    AddOn,
+    GatewayAdjustment,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

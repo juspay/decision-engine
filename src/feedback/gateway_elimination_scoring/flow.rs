@@ -8,7 +8,7 @@ use crate::{
     feedback::constants::{
         defaultGWScoringPenaltyFactor, defaultGWScoringRewardFactor, defaultMerchantArrMaxLength,
         defaultMinimumGatewayScore, defaultScoreGlobalKeysTTL, defaultScoreKeysTTL, ecRedis,
-        ecRedis2, kvRedis, kvRedis2, ENFORCE_GW_SCORE_KV_REDIS, GATEWAY_SCORE_THIRD_DIMENSION_TTL,
+        ecRedis2, kvRedis, kvRedis2, EnforceGwScoreKvRedis, GatewayScoreThirdDimensionTtl,
     },
     redis::types::ServiceConfigKey,
     types::{
@@ -24,7 +24,7 @@ use crate::storage::schema_pg::gateway_bank_emi_support::gateway;
 
 use crate::feedback::constants as C;
 
-use crate::decider::gatewaydecider::constants::{ENABLE_ELIMINATION_V2, ENABLE_OUTAGE_V2};
+use crate::decider::gatewaydecider::constants::{EnableEliminationV2, EnableOutageV2};
 
 use crate::types::gateway_routing_input as ETGRI;
 // use crate::feedback::types as F_TYPES;
@@ -104,8 +104,8 @@ pub async fn updateKeyScoreForKeysFromConsumer(
             // let gateway = txn_detail.gateway.unwrap_or_else(|| "".to_string());
             let hard_key_ttl = getTTLForKey(score_key_type).await;
             let timestamp = CUTILS::get_current_date_in_millis();
-            // let should_enforce_kv_redis = isFeatureEnabled(C::ENFORCE_GW_SCORE_KV_REDIS.get_key(), merchant_id, C::kvRedis()).await;
-            // let should_disable_fallback = isFeatureEnabled(C::SR_SCORE_REDIS_FALLBACK_LOOKUP_DISABLE.get_key(), merchant_id, C::kvRedis()).await;
+            // let should_enforce_kv_redis = isFeatureEnabled(C::GatewayScoreThirdDimensionTtl.get_key(), merchant_id, C::kvRedis()).await;
+            // let should_disable_fallback = isFeatureEnabled(C::SrScoreRedisFallbackLookupDisable.get_key(), merchant_id, C::kvRedis()).await;
             // let m_cached_gateway_score: Option<CachedGatewayScore> = readFromCacheWithFallback(should_enforce_kv_redis, should_disable_fallback, key);
             let m_cached_gateway_score = readGatewayScoreFromRedis(&key).await;
             let gw_score_to_be_updated: CachedGatewayScore = match m_cached_gateway_score {
@@ -247,17 +247,13 @@ pub async fn updateKeyScoreForTxnStatus(
     score_key_type: ScoreKeyType,
 ) -> f64 {
     let is_elimination_v2_enabled = isFeatureEnabled(
-        ENABLE_ELIMINATION_V2.get_key(),
+        EnableEliminationV2.get_key(),
         merchant_id.clone(),
         C::kvRedis(),
     )
     .await;
-    let is_elimination_v2_enabled_for_outage = isFeatureEnabled(
-        ENABLE_OUTAGE_V2.get_key(),
-        merchant_id.clone(),
-        C::kvRedis(),
-    )
-    .await;
+    let is_elimination_v2_enabled_for_outage =
+        isFeatureEnabled(EnableOutageV2.get_key(), merchant_id.clone(), C::kvRedis()).await;
     let is_outage_key = isKeyOutage(score_key_type);
     logger::debug!(
         action = "updateKeyScore",
@@ -393,7 +389,7 @@ pub async fn getFailureKeyScore(
     current_score: f64,
     penalty_factor: f64,
 ) -> f64 {
-    let m_score: Option<f64> = findByNameFromRedis(C::MINIMUM_GATEWAY_SCORE.get_key())
+    let m_score: Option<f64> = findByNameFromRedis(C::MinimumGatewayScore.get_key())
         .await
         .unwrap_or_default();
     let minimum_failure_score = m_score.unwrap_or(C::defaultMinimumGatewayScore());
@@ -412,11 +408,11 @@ pub async fn getFailureKeyScore(
 // Original Haskell function: getPenaltyFactor
 pub async fn getPenaltyFactor(scoreKeyType: ScoreKeyType) -> f64 {
     let penalty_factor = if isKeyOutage(scoreKeyType) {
-        findByNameFromRedis(C::OUTAGE_PENALTY_FACTOR.get_key())
+        findByNameFromRedis(C::OutagePenaltyFactor.get_key())
             .await
             .unwrap_or_else(|| defaultGWScoringPenaltyFactor())
     } else {
-        findByNameFromRedis(C::GATEWAY_PENALTY_FACTOR.get_key())
+        findByNameFromRedis(C::GatewayPenaltyFactor.get_key())
             .await
             .unwrap_or_else(|| defaultGWScoringPenaltyFactor())
     };
@@ -426,11 +422,11 @@ pub async fn getPenaltyFactor(scoreKeyType: ScoreKeyType) -> f64 {
 // Original Haskell function: getRewardFactor
 pub async fn getRewardFactor(scoreKeyType: ScoreKeyType) -> f64 {
     let reward_factor = if isKeyOutage(scoreKeyType) {
-        findByNameFromRedis(C::OUTAGE_REWARD_FACTOR.get_key())
+        findByNameFromRedis(C::OutageRewardFactor.get_key())
             .await
             .unwrap_or_else(|| defaultGWScoringRewardFactor())
     } else {
-        findByNameFromRedis(C::OUTAGE_REWARD_FACTOR.get_key())
+        findByNameFromRedis(C::OutageRewardFactor.get_key())
             .await
             .unwrap_or_else(|| defaultGWScoringRewardFactor())
     };
@@ -579,7 +575,7 @@ pub async fn getAllUnifiedKeys(
 ) -> Vec<(ScoreKeyType, Option<String>)> {
     let merchant_id = Merchant::merchant_id_to_text(txn_detail.merchantId.clone());
     let is_key_enabled_for_global_gateway_scoring = isFeatureEnabled(
-        C::GLOBAL_GATEWAY_SCORING_ENABLED_MERCHANTS.get_key(),
+        C::GlobalGatewayScoringEnabledMerchants.get_key(),
         merchant_id.clone(),
         C::kvRedis(),
     )
@@ -588,8 +584,8 @@ pub async fn getAllUnifiedKeys(
         || MCU::isPaymentFlowEnabledWithHierarchyCheck(
             mer_acc_p_id,
             mer_acc.tenantAccountId.clone(),
-            ModuleEnum::MERCHANT_CONFIG,
-            PaymentFlow::PaymentFlow::ELIMINATION_BASED_ROUTING,
+            ModuleEnum::MerchantConfig,
+            PaymentFlow::PaymentFlow::EliminationBasedRouting,
             crate::types::country::country_iso::text_db_to_country_iso(
                 mer_acc.country.as_deref().unwrap_or_default(),
             )
@@ -597,7 +593,7 @@ pub async fn getAllUnifiedKeys(
         )
         .await;
     let is_gateway_scoring_enabled_for_global_outage = isFeatureEnabled(
-        C::GLOBAL_OUTAGE_GATEWAY_SCORING_ENABLED_MERCHANTS.get_key(),
+        C::GlobalOutageGatewayScoringEnabledMerchants.get_key(),
         merchant_id.clone(),
         C::kvRedis(),
     )
@@ -606,7 +602,7 @@ pub async fn getAllUnifiedKeys(
         MCU::isPaymentFlowEnabledWithHierarchyCheck(
             mer_acc_p_id,
             mer_acc.tenantAccountId,
-            ModuleEnum::MERCHANT_CONFIG,
+            ModuleEnum::MerchantConfig,
             PaymentFlow::PaymentFlow::OUTAGE,
             crate::types::country::country_iso::text_db_to_country_iso(
                 mer_acc.country.as_deref().unwrap_or_default(),
@@ -619,12 +615,12 @@ pub async fn getAllUnifiedKeys(
         let key = EulerTransforms::getProducerKey(
             txn_detail.clone(),
             Some(gateway_scoring_data.clone()),
-            ScoreKeyType::ELIMINATION_GLOBAL_KEY,
+            ScoreKeyType::EliminationGlobalKey,
             false,
             gateway_reference_id.clone(),
         )
         .await;
-        vec![(ScoreKeyType::ELIMINATION_GLOBAL_KEY, key)]
+        vec![(ScoreKeyType::EliminationGlobalKey, key)]
     } else {
         logger::debug!(
             action = "getGlobalKeys",
@@ -632,19 +628,19 @@ pub async fn getAllUnifiedKeys(
             "Global gateway scoring not enabled for merchant {:?}",
             merchant_id
         );
-        vec![(ScoreKeyType::ELIMINATION_GLOBAL_KEY, None)]
+        vec![(ScoreKeyType::EliminationGlobalKey, None)]
     };
 
     let merchant_key = if is_key_enabled_for_merchant_gateway_scoring {
         let key = EulerTransforms::getProducerKey(
             txn_detail.clone(),
             Some(gateway_scoring_data.clone()),
-            ScoreKeyType::ELIMINATION_MERCHANT_KEY,
+            ScoreKeyType::EliminationMerchantKey,
             false,
             gateway_reference_id.clone(),
         )
         .await;
-        vec![(ScoreKeyType::ELIMINATION_MERCHANT_KEY, key)]
+        vec![(ScoreKeyType::EliminationMerchantKey, key)]
     } else {
         logger::debug!(
             action = "getMerchantBasedKeys",
@@ -652,19 +648,19 @@ pub async fn getAllUnifiedKeys(
             "Merchant gateway scoring not enabled for merchant {:?}",
             merchant_id
         );
-        vec![(ScoreKeyType::ELIMINATION_MERCHANT_KEY, None)]
+        vec![(ScoreKeyType::EliminationMerchantKey, None)]
     };
 
     let global_outage_keys = if is_gateway_scoring_enabled_for_global_outage {
         let key = EulerTransforms::getProducerKey(
             txn_detail.clone(),
             Some(gateway_scoring_data.clone()),
-            ScoreKeyType::OUTAGE_GLOBAL_KEY,
+            ScoreKeyType::OutageGlobalKey,
             false,
             gateway_reference_id.clone(),
         )
         .await;
-        vec![(ScoreKeyType::OUTAGE_GLOBAL_KEY, key)]
+        vec![(ScoreKeyType::OutageGlobalKey, key)]
     } else {
         logger::debug!(
             action = "getGlobalKeys",
@@ -672,19 +668,19 @@ pub async fn getAllUnifiedKeys(
             "Global gateway scoring not enabled for merchant {:?}",
             merchant_id
         );
-        vec![(ScoreKeyType::OUTAGE_GLOBAL_KEY, None)]
+        vec![(ScoreKeyType::OutageGlobalKey, None)]
     };
 
     let merchant_outage_keys = if is_gateway_scoring_enabled_for_merchant_outage {
         let key = EulerTransforms::getProducerKey(
             txn_detail.clone(),
             Some(gateway_scoring_data),
-            ScoreKeyType::OUTAGE_MERCHANT_KEY,
+            ScoreKeyType::OutageMerchantKey,
             false,
             gateway_reference_id.clone(),
         )
         .await;
-        vec![(ScoreKeyType::OUTAGE_MERCHANT_KEY, key)]
+        vec![(ScoreKeyType::OutageMerchantKey, key)]
     } else {
         logger::debug!(
             action = "getMerchantScopedOutageKeys",
@@ -692,7 +688,7 @@ pub async fn getAllUnifiedKeys(
             "Outage scoring not enabled for merchant {:?}",
             merchant_id
         );
-        vec![(ScoreKeyType::OUTAGE_MERCHANT_KEY, None)]
+        vec![(ScoreKeyType::OutageMerchantKey, None)]
     };
 
     global_key
@@ -708,10 +704,10 @@ pub async fn getTTLForKey(score_key_type: ScoreKeyType) -> u128 {
     let is_key_global = isGlobalKey(score_key_type);
     let is_outage_key = isKeyOutage(score_key_type);
     let key: Option<f64> = match (is_key_global, is_outage_key) {
-        (true, true) => findByNameFromRedis(C::GATEWAY_SCORE_GLOBAL_OUTAGE_TTL.get_key()).await,
-        (false, true) => findByNameFromRedis(C::GATEWAY_SCORE_OUTAGE_TTL.get_key()).await,
-        (true, false) => findByNameFromRedis(C::GATEWAY_SCORE_GLOBAL_TTL.get_key()).await,
-        _ => findByNameFromRedis(C::GATEWAY_SCORE_THIRD_DIMENSION_TTL.get_key()).await,
+        (true, true) => findByNameFromRedis(C::GatewayScoreGlobalOutageTtl.get_key()).await,
+        (false, true) => findByNameFromRedis(C::GatewayScoreOutageTtl.get_key()).await,
+        (true, false) => findByNameFromRedis(C::GatewayScoreGlobalTtl.get_key()).await,
+        _ => findByNameFromRedis(C::GatewayScoreThirdDimensionTtl.get_key()).await,
     };
     key.map_or_else(|| getDefaultTTL(score_key_type), |k| k.floor() as u128)
 }
@@ -857,7 +853,7 @@ pub fn findMerchantFromMerchantArray(
 
 // Original Haskell function: getMerchantArrMaxLength
 pub async fn getMerchantArrMaxLength() -> i32 {
-    let max_length = findByNameFromRedis(C::GATEWAY_SCORE_MERCHANT_ARR_MAX_LENGTH.get_key())
+    let max_length = findByNameFromRedis(C::GatewayScoreMerchantArrMaxLength.get_key())
         .await
         .unwrap_or_else(|| C::defaultMerchantArrMaxLength());
     max_length
@@ -865,14 +861,13 @@ pub async fn getMerchantArrMaxLength() -> i32 {
 
 // Original Haskell function: isGlobalKey
 pub fn isGlobalKey(scoreKeyType: ScoreKeyType) -> bool {
-    scoreKeyType == ScoreKeyType::ELIMINATION_GLOBAL_KEY
-        || scoreKeyType == ScoreKeyType::OUTAGE_GLOBAL_KEY
+    scoreKeyType == ScoreKeyType::EliminationGlobalKey
+        || scoreKeyType == ScoreKeyType::OutageGlobalKey
 }
 
 // Original Haskell function: isKeyOutage
 pub fn isKeyOutage(scoreKeyType: ScoreKeyType) -> bool {
-    scoreKeyType == ScoreKeyType::OUTAGE_GLOBAL_KEY
-        || scoreKeyType == ScoreKeyType::OUTAGE_MERCHANT_KEY
+    scoreKeyType == ScoreKeyType::OutageGlobalKey || scoreKeyType == ScoreKeyType::OutageMerchantKey
 }
 
 // Original Haskell function: filterAndTransformOutageKeys

@@ -32,17 +32,17 @@ pub async fn perform_debit_routing(
                     .await
                 {
                     return Ok(gateway_decider_types::DecidedGateway {
-                        // This field should not be consumed when the request is made to /decide-gateway with the rankingAlgorithm set to NTW_BASED_ROUTING.
+                        // This field should not be consumed when the request is made to /decide-gateway with the rankingAlgorithm set to NtwBasedRouting.
                         decided_gateway: first_connector_from_request.unwrap_or("".to_string()),
                         gateway_priority_map: None,
                         filter_wise_gateways: None,
                         priority_logic_tag: None,
                         routing_approach:
-                            gateway_decider_types::GatewayDeciderApproach::NTW_BASED_ROUTING,
+                            gateway_decider_types::GatewayDeciderApproach::NtwBasedRouting,
                         gateway_before_evaluation: None,
                         priority_logic_output: None,
                         debit_routing_output: Some(debit_routing_output),
-                        reset_approach: gateway_decider_types::ResetApproach::NO_RESET,
+                        reset_approach: gateway_decider_types::ResetApproach::NoReset,
                         routing_dimension: None,
                         routing_dimension_level: None,
                         is_scheduled_outage: false,

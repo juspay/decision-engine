@@ -89,7 +89,7 @@ Example :-
         fgws  
     }
 
-Use m_validation_type.map(|vt| vt == ValidationType::CARD_MANDATE).unwrap_or(false) this kind of syntaxes for equality on Options
+Use m_validation_type.map(|vt| vt == ValidationType::CardMandate).unwrap_or(false) this kind of syntaxes for equality on Options
 
 Please generate it for the below function
 

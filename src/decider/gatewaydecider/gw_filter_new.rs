@@ -151,7 +151,7 @@ pub async fn getFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList {
                 .collect(),  
         };  
   
-        let edcc_supported_gateways = findByNameFromRedis(C::EDCC_SUPPORTED_GATEWAYS.get_key()).await.unwrap_or_else(|| vec![]);  
+        let edcc_supported_gateways = findByNameFromRedis(C::EdccSupportedGateways.get_key()).await.unwrap_or_else(|| vec![]);  
   
         if txn_detail.currency != oref.currency && is_edcc_applied == Some(true) {  
             mgas.into_iter()  
@@ -208,7 +208,7 @@ pub async fn getFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList {
         let filtered_mgas = if proceed_with_all_mgas {  
             rpd_filter_mgas  
         } else {
-            let mga_eligible_seamless_gateways = findByNameFromRedis(C::MGA_ELIGIBLE_SEAMLESS_GATEWAYS.get_key())
+            let mga_eligible_seamless_gateways = findByNameFromRedis(C::MgaEligibleSeamlessGateways.get_key())
             .await.unwrap_or_else(|| vec![]);
             rpd_filter_mgas  
                 .into_iter()  
@@ -249,7 +249,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
         if let Some(true) = mInternalMeta.as_ref().and_then(|meta| meta.isCvvLessTxn) {  
             if txnCardInfo.authType == Some(AuthType::MOTO) {  
                 let st = getGws(this); 
-                let authTypeRestrictedGateways = findByNameFromRedis::<HashMap<AuthType, Vec<Gateway>>>(C::AUTH_TYPE_RESTRICTED_GATEWAYS.get_key()).await.unwrap_or_else(|| HashMap::new());  
+                let authTypeRestrictedGateways = findByNameFromRedis::<HashMap<AuthType, Vec<Gateway>>>(C::AuthTypeRestrictedGateways.get_key()).await.unwrap_or_else(|| HashMap::new());  
                 let motoSupportedGateways: Vec<Gateway> = txnCardInfo.authType.as_ref()  
                     .and_then(|auth_type| authTypeRestrictedGateways.get(auth_type))
                     .cloned()
@@ -274,7 +274,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
                         // let configResp = MerchantConfig::is_payment_flow_enabled_with_hierarchy_check(
                         //     mAcc.id,
                         //     mAcc.tenantAccountId,
-                        //     TC::MERCHANT_CONFIG,
+                        //     TC::MerchantConfig,
                         //     PF::CVVLESS,
                         //     None,
                         // ).await?;
@@ -361,8 +361,8 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
                         setGws(this, functionalGateways)
                     }  
                 } else {  
-                    let cardBrandToCvvLessTxnSupportedGateways: HashMap<String, Vec<Gateway>> = findByNameFromRedis(C::CARD_BRAND_TO_CVVLESS_TXN_SUPPORTED_GATEWAYS.get_key()).await.unwrap_or_default();  
-                    let cvvLessTxnSupportedCommonGateways: Vec<Gateway> = findByNameFromRedis(C::CVVLESS_TXN_SUPPORTED_COMMON_GATEWAYS.get_key()).await.unwrap_or_default();  
+                    let cardBrandToCvvLessTxnSupportedGateways: HashMap<String, Vec<Gateway>> = findByNameFromRedis(C::CardBrandToCvvlessTxnSupportedGateways.get_key()).await.unwrap_or_default();  
+                    let cvvLessTxnSupportedCommonGateways: Vec<Gateway> = findByNameFromRedis(C::CvvlessTxnSupportedCommonGateways.get_key()).await.unwrap_or_default();  
                     let cvvLessTxnSupportedGateways = cvvLessTxnSupportedCommonGateways.into_iter()  
                         .chain(cardBrandToCvvLessTxnSupportedGateways.get(&txnCardInfo.paymentMethod).cloned().unwrap_or_default())  
                         .collect::<HashSet<_>>()  
@@ -417,7 +417,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
         let paymentFlowList = Utils::get_payment_flow_list_from_txn_detail(&txnDetail);
         let st = getGws(this);
         if paymentFlowList.contains(&"TA_FILE".to_string()) {
-            let taOfflineEnabledGateways: Vec<Gateway> = findByNameFromRedis::<Vec<Gateway>>(C::TA_OFFLINE_ENABLED_GATEWAYS.get_key()).await.unwrap_or_default().into_iter().collect();
+            let taOfflineEnabledGateways: Vec<Gateway> = findByNameFromRedis::<Vec<Gateway>>(C::TaOfflineEnabledGateways.get_key()).await.unwrap_or_default().into_iter().collect();
             let filtered_gateways: Vec<Gateway> = st.into_iter()
                 .filter(|gw| taOfflineEnabledGateways.contains(gw))
                 .collect();
@@ -432,7 +432,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
         "Functional gateways before filtering for MerchantContainer for txn_id: {:?}",
         txnDetail.txnId
     );
-    let merchantContainerSupportedGateways: Vec<Gateway> = findByNameFromRedis(C::MERCHANT_CONTAINER_SUPPORTED_GATEWAYS.get_key()).await.unwrap_or_default();
+    let merchantContainerSupportedGateways: Vec<Gateway> = findByNameFromRedis(C::MerchantContainerSupportedGateways.get_key()).await.unwrap_or_default();
     let filtered_gateways: Vec<Gateway> = if txnCardInfo.paymentMethodType == PaymentMethodType::MerchantContainer {
         st.into_iter()
             .filter(|gw| merchantContainerSupportedGateways.contains(gw))
@@ -482,7 +482,7 @@ pub async fn filterGatewaysForEmi(this: &mut DeciderFlow<'_>) -> GatewayList {
 
     if txn_detail.isEmi {
         let is_mandate_txn = Utils::is_mandate_transaction(&txn_detail);
-        let si_on_emi_card_supported_gateways: HashSet<Gateway> = findByNameFromRedis::<HashSet<Gateway>>(C::SI_ON_EMI_CARD_SUPPORTED_GATEWAYS.get_key())
+        let si_on_emi_card_supported_gateways: HashSet<Gateway> = findByNameFromRedis::<HashSet<Gateway>>(C::SiOnEmiCardSupportedGateways.get_key())
             .await
             .unwrap_or_default()
             .into_iter()
@@ -500,7 +500,7 @@ pub async fn filterGatewaysForEmi(this: &mut DeciderFlow<'_>) -> GatewayList {
         let st_filtered = if is_mandate_txn {
             let card_brand = Utils::get_card_brand().await;
             let si_on_emi_disabled_card_brand_gateway_mapping: HashMap<String, Vec<Gateway>> = 
-                findByNameFromRedis::<HashMap<String, Vec<Gateway>>>(C::SI_ON_EMI_DISABLED_CARD_BRAND_GATEWAY_MAPPING.get_key())
+                findByNameFromRedis::<HashMap<String, Vec<Gateway>>>(C::SiOnEmiDisabledCardBrandGatewayMapping.get_key())
                 .await
                 .unwrap_or_default();
             
@@ -525,7 +525,7 @@ pub async fn filterGatewaysForEmi(this: &mut DeciderFlow<'_>) -> GatewayList {
         };
 
         let gws = if Utils::check_no_or_low_cost_emi(&txn_card_info) {
-            let no_or_low_cost_emi_supported_gateways: HashSet<Gateway> = findByNameFromRedis::<HashSet<Gateway>>(C::NO_OR_LOW_COST_EMI_SUPPORTED_GATEWAYS.get_key())
+            let no_or_low_cost_emi_supported_gateways: HashSet<Gateway> = findByNameFromRedis::<HashSet<Gateway>>(C::NoOrLowCostEmiSupportedGateways.get_key())
                 .await
                 .unwrap_or_default()
                 .into_iter()
@@ -607,7 +607,7 @@ pub async fn filterGatewaysForEmi(this: &mut DeciderFlow<'_>) -> GatewayList {
 
         setGws(this, gws);
     } else if Utils::is_card_transaction(&txn_card_info) {
-        let card_emi_explicit_gateways: HashSet<Gateway> = findByNameFromRedis::<HashSet<Gateway>>(C::CARD_EMI_EXPLICIT_GATEWAYS.get_key())
+        let card_emi_explicit_gateways: HashSet<Gateway> = findByNameFromRedis::<HashSet<Gateway>>(C::CardEmiExplicitGateways.get_key())
             .await
             .unwrap_or_default()
             .into_iter()
@@ -647,7 +647,7 @@ pub async fn filterGatewaysForTokenProvider(this: &mut DeciderFlow<'_>) -> Gatew
         None => returnGwListWithLog(this, DeciderFilterName::FilterFunctionalGatewaysForTokenProvider, false),
         Some(VaultProvider::Juspay) => returnGwListWithLog(this, DeciderFilterName::FilterFunctionalGatewaysForTokenProvider, true),
         Some(v) => {
-            let token_provider_gateway_mapping = findByNameFromRedis::<HashMap<VaultProvider, Gateway>>(C::TOKEN_PROVIDER_GATEWAY_MAPPING.get_key())
+            let token_provider_gateway_mapping = findByNameFromRedis::<HashMap<VaultProvider, Gateway>>(C::TokenProviderGatewayMapping.get_key())
                 .await.unwrap_or_default();
             let new_st = st
                 .into_iter()
@@ -672,10 +672,10 @@ pub async fn filterFunctionalGatewaysForMerchantRequiredFlow(this: &mut DeciderF
     let is_cb_order = payment_flow_list.contains(&"CROSS_BORDER_PAYMENT".to_string());
     let is_sbmd = payment_flow_list.contains(&"SINGLE_BLOCK_MULTIPLE_DEBIT".to_string());
 
-    let mf_filtered_gw = filter_gateways_for_flow(is_mf_order, C::MUTUAL_FUND_FLOW_SUPPORTED_GATEWAYS.get_key(), st).await;
+    let mf_filtered_gw = filter_gateways_for_flow(is_mf_order, C::MutualFundFlowSupportedGateways.get_key(), st).await;
     let mf_and_cb_filtered_gw =
-        filter_gateways_for_flow(is_cb_order, C::CROSS_BORDER_FLOW_SUPPORTED_GATEWAYS.get_key(), mf_filtered_gw).await;
-    let filtered_gw = filter_gateways_for_flow(is_sbmd, C::SBMD_SUPPORTED_GATEWAYS.get_key(), mf_and_cb_filtered_gw).await;
+        filter_gateways_for_flow(is_cb_order, C::CrossBorderFlowSupportedGateways.get_key(), mf_filtered_gw).await;
+    let filtered_gw = filter_gateways_for_flow(is_sbmd, C::SbmdSupportedGateways.get_key(), mf_and_cb_filtered_gw).await;
 
     setGws(this, filtered_gw);
     returnGwListWithLog(this, DeciderFilterName::FilterFunctionalGatewaysForMerchantRequiredFlow, true)
@@ -811,7 +811,7 @@ pub async fn filterFunctionalGatewaysForOTMFlow(this: &mut DeciderFlow<'_>) -> V
             let all_gpmf_entries = GPMF::find_all_gpmf_by_country_code_gw_pf_id_pmt_jbcid_db(
                 crate::types::country::country_iso::CountryISO::IND,
                 gw_list,
-                PaymentFlow::ONE_TIME_MANDATE,
+                PaymentFlow::OneTimeMandate,
                 txn_card_info.paymentMethodType,
                 jbc.id,
             )
@@ -968,7 +968,7 @@ pub async fn filterGatewaysForValidationType(this: &mut DeciderFlow<'_>) -> () {
     // Handle Card Mandate transactions
     if Utils::is_mandate_transaction(&txn_detail) && Utils::is_card_transaction(&txn_card_info) {
         // Get excluded gateways from Redis
-        let card_mandate_bin_filter_excluded_gateways = findByNameFromRedis(C::CARD_MANDATE_BIN_FILTER_EXCLUDED_GATEWAYS.get_key())
+        let card_mandate_bin_filter_excluded_gateways = findByNameFromRedis(C::CardMandateBinFilterExcludedGateways.get_key())
             .await
             .unwrap_or_else(Vec::new);
             
@@ -1160,7 +1160,7 @@ pub async fn filterGatewaysForValidationType(this: &mut DeciderFlow<'_>) -> () {
     } 
     // Handle other transaction types
     else {
-        let tpv_only_supported_gateways = findByNameFromRedis(C::TPV_ONLY_SUPPORTED_GATEWAYS.get_key())
+        let tpv_only_supported_gateways = findByNameFromRedis(C::TpvOnlySupportedGateways.get_key())
             .await
             .unwrap_or_else(Vec::new);
             
@@ -1266,7 +1266,7 @@ pub async fn filterGatewaysForAuthType(this: &mut DeciderFlow<'_>) -> Vec<ETG::G
                 mga_list.clone()
                     .into_iter()
                     .filter(|mga| {
-                        Utils::check_if_enabled_in_mga(mga, "CARD_DOTP", "cardDirectOtpEnabled")
+                        Utils::check_if_enabled_in_mga(mga, "CardDotp", "cardDirectOtpEnabled")
                             && st.contains(&mga.gateway)
                     })
                     .collect(),
@@ -1280,21 +1280,21 @@ pub async fn filterGatewaysForAuthType(this: &mut DeciderFlow<'_>) -> Vec<ETG::G
                 mga_list.clone()
                     .into_iter()
                     .filter(|mga| {
-                        Utils::check_if_enabled_in_mga(mga, "CARD_MOTO", "cardMotoEnabled")
+                        Utils::check_if_enabled_in_mga(mga, "CardMoto", "cardMotoEnabled")
                             && st.contains(&mga.gateway)
                     })
                     .collect(),
             );
         }
         
-        // Filter for NO_THREE_DS authentication type
-        if txn_card_info.authType.as_ref().map(|at| *at == AuthType::NO_THREE_DS).unwrap_or(false) {
+        // Filter for NoThreeDs authentication type
+        if txn_card_info.authType.as_ref().map(|at| *at == AuthType::NoThreeDs).unwrap_or(false) {
             setGwsAndMgas(
                 this,
                 mga_list.clone()
                     .into_iter()
                     .filter(|mga| {
-                        Utils::check_if_no_ds_enabled_in_mga(mga, "CARD_NO_3DS", "cardNo3DsEnabled")
+                        Utils::check_if_no_ds_enabled_in_mga(mga, "CardNo3ds", "cardNo3DsEnabled")
                             && st.contains(&mga.gateway)
                     })
                     .collect(),
@@ -1324,27 +1324,27 @@ pub async fn filterGatewaysForAuthType(this: &mut DeciderFlow<'_>) -> Vec<ETG::G
             let stt = getGws(this);
             
             // Get gateway restrictions and capabilities from Redis
-            let atm_pin_card_info_restricted_gateways = findByNameFromRedis(C::ATM_PIN_CARD_INFO_RESTRICTED_GATEWAYS.get_key()).await
+            let atm_pin_card_info_restricted_gateways = findByNameFromRedis(C::AtmPinCardInfoRestrictedGateways.get_key()).await
                 .unwrap_or_else(Vec::new)
                 .into_iter()
                 .collect::<HashSet<_>>();
                 
-            let otp_card_info_restricted_gateways = findByNameFromRedis(C::OTP_CARD_INFO_RESTRICTED_GATEWAYS.get_key()).await
+            let otp_card_info_restricted_gateways = findByNameFromRedis(C::OtpCardInfoRestrictedGateways.get_key()).await
                 .unwrap_or_else(Vec::new)
                 .into_iter()
                 .collect::<HashSet<_>>();
                 
-            let otp_card_info_supported_gateways = findByNameFromRedis(C::OTP_CARD_INFO_SUPPORTED_GATEWAYS.get_key()).await
+            let otp_card_info_supported_gateways = findByNameFromRedis(C::OtpCardInfoSupportedGateways.get_key()).await
                 .unwrap_or_else(Vec::new)
                 .into_iter()
                 .collect::<HashSet<_>>();
                 
-            let moto_card_info_supported_gateways = findByNameFromRedis(C::MOTO_CARD_INFO_SUPPORTED_GATEWAYS.get_key()).await
+            let moto_card_info_supported_gateways = findByNameFromRedis(C::MotoCardInfoSupportedGateways.get_key()).await
                 .unwrap_or_else(Vec::new)
                 .into_iter()
                 .collect::<HashSet<_>>();
                 
-            let auth_type_restricted_gateways = findByNameFromRedis(C::AUTH_TYPE_RESTRICTED_GATEWAYS.get_key()).await
+            let auth_type_restricted_gateways = findByNameFromRedis(C::AuthTypeRestrictedGateways.get_key()).await
                 .unwrap_or_else(Vec::new)
                 .into_iter()
                 .collect::<HashMap<AuthType, Vec<ETG::Gateway>>>();
@@ -1418,25 +1418,25 @@ pub async fn filterGatewaysForAuthType(this: &mut DeciderFlow<'_>) -> Vec<ETG::G
 /// - Others: filter out AMEX-not-supported and SODEXO-only gateways
 /// - Unknown brand: filter out AMEX-not-supported gateways
 pub async fn filterByCardBrand(this: &mut DeciderFlow<'_>, st: &[Gateway], card_brand: Option<&str>) -> Vec<Gateway> {
-    let amex_supported_gateways: HashSet<Gateway> = findByNameFromRedis(C::AMEX_SUPPORTED_GATEWAYS.get_key())
+    let amex_supported_gateways: HashSet<Gateway> = findByNameFromRedis(C::AmexSupportedGateways.get_key())
         .await
         .unwrap_or_else(Vec::new)
         .into_iter()
         .collect();
         
-    let amex_not_supported_gateways: HashSet<Gateway> = findByNameFromRedis(C::AMEX_NOT_SUPPORTED_GATEWAYS.get_key())
+    let amex_not_supported_gateways: HashSet<Gateway> = findByNameFromRedis(C::AmexNotSupportedGateways.get_key())
         .await
         .unwrap_or_else(Vec::new)
         .into_iter()
         .collect();
         
-    let sodexo_only_gateways: HashSet<Gateway> = findByNameFromRedis(C::SODEXO_ONLY_GATEWAYS.get_key())
+    let sodexo_only_gateways: HashSet<Gateway> = findByNameFromRedis(C::SodexoOnlyGateways.get_key())
         .await
         .unwrap_or_else(Vec::new)
         .into_iter()
         .collect();
         
-    let sodexo_also_gateways: HashSet<Gateway> = findByNameFromRedis(C::SODEXO_ALSO_GATEWAYS.get_key())
+    let sodexo_also_gateways: HashSet<Gateway> = findByNameFromRedis(C::SodexoAlsoGateways.get_key())
         .await
         .unwrap_or_else(Vec::new)
         .into_iter()
@@ -2130,17 +2130,17 @@ pub fn setGwsAndMgas(this: &mut DeciderFlow, filteredMgas: Vec<ETM::merchant_gat
 pub async fn filterGatewaysForWallet(this: &mut DeciderFlow<'_>) -> Vec<ETG::Gateway> {  
     let st = getGws(this);  
     let txn_card_info = this.get().dpTxnCardInfo.clone();
-    let upi_only_gateways = findByNameFromRedis::<Vec<Gateway>>(C::UPI_ONLY_GATEWAYS.get_key()).await  
+    let upi_only_gateways = findByNameFromRedis::<Vec<Gateway>>(C::UpiOnlyGateways.get_key()).await  
         .unwrap_or_default()  
         .into_iter()  
         .collect::<HashSet<_>>();  
-    let wallet_only_gateways:Vec<Gateway> = findByNameFromRedis::<Vec<Gateway>>(C::WALLET_ONLY_GATEWAYS.get_key()).await  
+    let wallet_only_gateways:Vec<Gateway> = findByNameFromRedis::<Vec<Gateway>>(C::WalletOnlyGateways.get_key()).await  
         .unwrap_or_default()  
         .into_iter()  
         .collect();  
     let wallet_only_gateways_hashset: HashSet<Gateway> = wallet_only_gateways.into_iter().collect::<HashSet<_>>();
 
-    let wallet_also_gateways:Vec<Gateway> = findByNameFromRedis::<Vec<Gateway>>(C::WALLET_ALSO_GATEWAYS.get_key()).await  
+    let wallet_also_gateways:Vec<Gateway> = findByNameFromRedis::<Vec<Gateway>>(C::WalletAlsoGateways.get_key()).await  
         .unwrap_or_default()  
         .into_iter()  
         .collect(); 
@@ -2170,7 +2170,7 @@ pub async fn filterGatewaysForNbOnly(this: &mut DeciderFlow<'_>) -> Vec<ETG::Gat
         let st = getGws(this);  
         let txn_card_info = this.get().dpTxnCardInfo.clone();
         if txn_card_info.card_type != Some(ETCA::CardType::NB) {  
-            let nb_only_gateways:Vec<Gateway> = findByNameFromRedis::<Vec<Gateway>>(C::NB_ONLY_GATEWAYS.get_key()).await  
+            let nb_only_gateways:Vec<Gateway> = findByNameFromRedis::<Vec<Gateway>>(C::NbOnlyGateways.get_key()).await  
                 .unwrap_or_default()  
                 .into_iter()  
                 .collect();
@@ -2189,7 +2189,7 @@ pub async fn filterGatewaysForNbOnly(this: &mut DeciderFlow<'_>) -> Vec<ETG::Gat
 pub async fn filterGatewaysForConsumerFinance(this: &mut DeciderFlow<'_>) -> Vec<ETG::Gateway> {
     let st = getGws(this);
     let txn_card_info = this.get().dpTxnCardInfo.clone();
-    let consumer_finance_only_gateways:Vec<Gateway> = findByNameFromRedis::<Vec<Gateway>>(C::CONSUMER_FINANCE_ONLY_GATEWAYS.get_key()).await
+    let consumer_finance_only_gateways:Vec<Gateway> = findByNameFromRedis::<Vec<Gateway>>(C::ConsumerFinanceOnlyGateways.get_key()).await
         .unwrap_or_default()
         .into_iter()
         .collect();
@@ -2198,7 +2198,7 @@ pub async fn filterGatewaysForConsumerFinance(this: &mut DeciderFlow<'_>) -> Vec
 
 
     if txn_card_info.paymentMethodType == ETP::PaymentMethodType::ConsumerFinance{
-        let consumer_finance_also_gateways:Vec<Gateway> = findByNameFromRedis::<Vec<Gateway>>(C::CONSUMER_FINANCE_ALSO_GATEWAYS.get_key())
+        let consumer_finance_also_gateways:Vec<Gateway> = findByNameFromRedis::<Vec<Gateway>>(C::ConsumerFinanceAlsoGateways.get_key())
             .await.unwrap_or_default()
             .into_iter()
             .collect();
@@ -2217,7 +2217,7 @@ pub async fn filterGatewaysForUpi(this: &mut DeciderFlow<'_>) -> Vec<ETG::Gatewa
     let st = getGws(this);
     let txn_card_info = this.get().dpTxnCardInfo.clone();
     let txn_detail = this.get().dpTxnDetail.clone();
-    let upi_only_gateways: Vec<Gateway> = findByNameFromRedis::<Vec<Gateway>>(C::UPI_ONLY_GATEWAYS.get_key()).await
+    let upi_only_gateways: Vec<Gateway> = findByNameFromRedis::<Vec<Gateway>>(C::UpiOnlyGateways.get_key()).await
         .unwrap_or_default()
         .into_iter()
         .collect();
@@ -2227,7 +2227,7 @@ pub async fn filterGatewaysForUpi(this: &mut DeciderFlow<'_>) -> Vec<ETG::Gatewa
    
 
     if txn_card_info.paymentMethodType == ETP::PaymentMethodType::UPI {
-        let upi_also_gateway: Vec<Gateway> = findByNameFromRedis::<Vec<Gateway>>(C::UPI_ALSO_GATEWAYS.get_key()).await
+        let upi_also_gateway: Vec<Gateway> = findByNameFromRedis::<Vec<Gateway>>(C::UpiAlsoGateways.get_key()).await
             .unwrap_or_default()
             .into_iter()
             .collect();
@@ -2279,8 +2279,8 @@ pub async fn filterGatewaysForTxnType(this: &mut DeciderFlow<'_>) -> Vec<ETG::Ga
                 (st.clone(), mgas)
             };
 
-            let v2_integration_not_supported_gateways: Vec<Gateway> = findByNameFromRedis(C::V2_INTEGRATION_NOT_SUPPORTED_GATEWAYS.get_key()).await.unwrap_or_default();
-            let upi_intent_not_supported_gateways: Vec<Gateway> = findByNameFromRedis(C::UPI_INTENT_NOT_SUPPORTED_GATEWAYS.get_key()).await.unwrap_or_default();
+            let v2_integration_not_supported_gateways: Vec<Gateway> = findByNameFromRedis(C::V2IntegrationNotSupportedGateways.get_key()).await.unwrap_or_default();
+            let upi_intent_not_supported_gateways: Vec<Gateway> = findByNameFromRedis(C::UpiIntentNotSupportedGateways.get_key()).await.unwrap_or_default();
             let (_, filtered_mgas) = if ["UPI_PAY", "UPI_QR"].contains(&txn_type.as_str())
                 // && intersect(&st, &(v2_integration_not_supported_gateways.clone() + upi_intent_not_supported_gateways.clone())).is_empty()
                 && {
@@ -2300,7 +2300,7 @@ pub async fn filterGatewaysForTxnType(this: &mut DeciderFlow<'_>) -> Vec<ETG::Ga
                 (st.clone(), curr_mgas)
             };
 
-            let txn_type_gateway_mapping = findByNameFromRedis(C::TXN_TYPE_GATEWAY_MAPPING.get_key()).await.unwrap_or_else(|| vec![]);
+            let txn_type_gateway_mapping = findByNameFromRedis(C::TxnTypeGatewayMapping.get_key()).await.unwrap_or_else(|| vec![]);
             setGwsAndMgas(this, 
                 filtered_mgas
                     .iter()
@@ -2327,9 +2327,9 @@ pub async fn filterGatewaysForTxnDetailType(this: &mut DeciderFlow<'_>,) -> Vec<
     let st = getGws(this);  
     let m_txn_type = this.get().dpTxnDetail.txnType.clone();
     let txn_type: &str = m_txn_type.as_str();
-    let txn_detail_type_restricted_gateways = findByNameFromRedis(C::TXN_DETAIL_TYPE_RESTRICTED_GATEWAYS.get_key())  
+    let txn_detail_type_restricted_gateways = findByNameFromRedis(C::TxnDetailTypeRestrictedGateways.get_key())  
         .await.unwrap_or_default();
-    let filter_gws = if txn_type == "ZERO_AUTH" {  
+    let filter_gws = if txn_type == "ZeroAuth" {  
         st.iter()  
             .filter(|gw| get_zero_auth_supported_gateways(&txn_type, &txn_detail_type_restricted_gateways).contains(gw))  
             .cloned()  
@@ -2345,11 +2345,11 @@ pub async fn filterGatewaysForReward(this: &mut DeciderFlow<'_>,) -> Vec<ETG::Ga
     let st = getGws(this) ;
     let payment_method_type = this.get().dpTxnCardInfo.paymentMethodType.clone(); 
     let card_type = this.get().dpTxnCardInfo.card_type.clone();
-    let reward_also_gateways: HashSet<Gateway> = findByNameFromRedis(C::REWARD_ALSO_GATEWAYS.get_key())  
+    let reward_also_gateways: HashSet<Gateway> = findByNameFromRedis(C::RewardAlsoGateways.get_key())  
         .await.unwrap_or_else(Vec::new)
         .into_iter()  
         .collect();
-    let reward_only_gateways: HashSet<Gateway> = findByNameFromRedis(C::REWARD_ONLY_GATEWAYS.get_key())  
+    let reward_only_gateways: HashSet<Gateway> = findByNameFromRedis(C::RewardOnlyGateways.get_key())  
     .await.unwrap_or_else(Vec::new) 
         .into_iter()  
         .collect();  
@@ -2372,7 +2372,7 @@ pub async fn filterGatewaysForCash(this: &mut DeciderFlow<'_>,) -> Vec<ETG::Gate
         let st = getGws(this);  
         let payment_method_type = this.get().dpTxnCardInfo.paymentMethodType.clone();
         if payment_method_type != ETP::PaymentMethodType::Cash {  
-            let cash_only_gateways: Vec<ETG::Gateway> = findByNameFromRedis(C::CASH_ONLY_GATEWAYS.get_key())
+            let cash_only_gateways: Vec<ETG::Gateway> = findByNameFromRedis(C::CashOnlyGateways.get_key())
                 .await.unwrap_or_else(Vec::new)  
                 .into_iter()  
                 .collect();  
@@ -2445,7 +2445,7 @@ pub async fn filterFunctionalGatewaysForSplitSettlement(this: &mut DeciderFlow<'
                                 .filter(|mgasi| {  
                                     mgasi.merchantGatewayAccountId == mga.id  
                                         && mgasi.subIdType == SubIdType::VENDOR
-                                        && mgasi.subInfoType == SubInfoType::SPLIT_SETTLEMENT
+                                        && mgasi.subInfoType == SubInfoType::SplitSettlement
                                         && !mgasi.disabled  
                                 })  
                                 .map(|mgasi| mgasi.juspaySubAccountId.clone())  
@@ -2476,7 +2476,7 @@ pub async fn filterFunctionalGatewaysForSplitSettlement(this: &mut DeciderFlow<'
                     msg
                 );  
                 let st = getGws(this);  
-                let split_settlement_supported_gateways: Option<Vec<ETG::Gateway>> = findByNameFromRedis(C::SPLIT_SETTLEMENT_SUPPORTED_GATEWAYS.get_key()).await;
+                let split_settlement_supported_gateways: Option<Vec<ETG::Gateway>> = findByNameFromRedis(C::SplitSettlementSupportedGateways.get_key()).await;
                 if !intersect(&split_settlement_supported_gateways.unwrap_or_else(Vec::new), &st).is_empty() {  
                     let mgas = SETMA::get_split_settlement_only_gateway_accounts(  
                         this,
@@ -2564,7 +2564,7 @@ pub async fn filterGatewaysForPaymentMethod (this: &mut DeciderFlow<'_>,) -> Vec
             );
   
             let pm = getPaymentMethodForNonCardTransaction(&txn_card_info);  
-            let v2_integration_not_supported_gateways:Vec<Gateway> = findByNameFromRedis::<Vec<Gateway>>(C::V2_INTEGRATION_NOT_SUPPORTED_GATEWAYS.get_key())
+            let v2_integration_not_supported_gateways:Vec<Gateway> = findByNameFromRedis::<Vec<Gateway>>(C::V2IntegrationNotSupportedGateways.get_key())
                 .await  
                 .unwrap_or_default()  
                 .into_iter()  
@@ -2572,7 +2572,7 @@ pub async fn filterGatewaysForPaymentMethod (this: &mut DeciderFlow<'_>,) -> Vec
 
             // let v2_integration_not_supported_gateways_hashset: HashSet<Gateway> = v2_integration_not_supported_gateways.iter().cloned().collect();
   
-            let upi_intent_not_supported_gateways: Vec<Gateway> = findByNameFromRedis::<Vec<Gateway>>(C::UPI_INTENT_NOT_SUPPORTED_GATEWAYS.get_key())  
+            let upi_intent_not_supported_gateways: Vec<Gateway> = findByNameFromRedis::<Vec<Gateway>>(C::UpiIntentNotSupportedGateways.get_key())  
                 .await  
                 .unwrap_or_default()  
                 .into_iter()  

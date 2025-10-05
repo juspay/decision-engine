@@ -59,13 +59,13 @@ pub struct FeatureDimension {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum DimensionType {
     #[serde(rename = "JUSPAY_BANK_CODE")]
-    JUSPAY_BANK_CODE,
+    JuspayBankCode,
 
     #[serde(rename = "GATEWAY")]
     GATEWAY,
 
     #[serde(rename = "CARD_BRAND")]
-    CARD_BRAND,
+    CardBrand,
 
     #[serde(rename = "SCOF")]
     SCOF,

@@ -46,7 +46,7 @@ pub fn to_mgasi_pid(id: i64) -> MgasiPId {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum SubInfoType {
-    SPLIT_SETTLEMENT,
+    SplitSettlement,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -57,7 +57,7 @@ pub enum SubIdType {
 
 pub fn text_to_sub_info_type(ctx: String) -> Result<SubInfoType, ApiError> {
     match ctx.as_str() {
-        "SPLIT_SETTLEMENT" => Ok(SubInfoType::SPLIT_SETTLEMENT),
+        "SPLIT_SETTLEMENT" => Ok(SubInfoType::SplitSettlement),
         _ => Err(ApiError::ParsingError("Invalid Sub Info Type")),
     }
 }
