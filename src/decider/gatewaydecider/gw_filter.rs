@@ -667,7 +667,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
                     .map(|provider| provider.peek().to_string())
                     .unwrap_or_else(|| "DEFAULT".to_string());
                 let isMerchantEnabledForCvvLessV2Flow = isFeatureEnabled(
-                    C::cvvLessV2Flow.get_key(),
+                    C::CVV_LESS_V2_FLOW.get_key(),
                     mAcc.merchantId.0,
                     "kv_redis".to_string(),
                 )
@@ -2240,7 +2240,7 @@ pub async fn filterGatewaysForEmi(this: &mut DeciderFlow<'_>) -> GatewayList {
             );
 
             let gbes_v2_flag = isFeatureEnabled(
-                C::gbesV2Enabled.get_key(),
+                C::GBES_V2_ENABLED.get_key(),
                 merchant_acc.merchantId.0,
                 "kv_redis".to_string(),
             )
@@ -2260,7 +2260,7 @@ pub async fn filterGatewaysForEmi(this: &mut DeciderFlow<'_>) -> GatewayList {
                     for gbes in gbes_v2_list_.clone() {
                         let is_enabled = if let Some(emi_bank) = emi_bank.clone() {
                             isFeatureEnabledByDimension(
-                                C::altIdEnabledGatewayEmiBank.get_key(),
+                                C::ALT_ID_ENABLED_GATEWAY_EMI_BANK.get_key(),
                                 format!("{}::{}", gbes.gateway, emi_bank),
                             )
                             .await
@@ -2319,7 +2319,7 @@ pub async fn filterGatewaysForEmi(this: &mut DeciderFlow<'_>) -> GatewayList {
                     for gbes in gbes_list_.clone() {
                         let is_enabled = if let Some(emi_bank) = emi_bank.clone() {
                             isFeatureEnabledByDimension(
-                                C::altIdEnabledGatewayEmiBank.get_key(),
+                                C::ALT_ID_ENABLED_GATEWAY_EMI_BANK.get_key(),
                                 format!("{}::{}", gbes.gateway, emi_bank),
                             )
                             .await
@@ -2825,7 +2825,7 @@ pub fn filterForEMITenureSpecificMGAs(this: &mut DeciderFlow<'_>) -> Vec<String>
                 // First check if gateway is in our functional list
                 if st.contains(&gw_account.gateway) {
                     // Check if gateway needs tenure-specific credentials
-                    if C::gatewaysWithTenureBasedCreds
+                    if C::GATEWAYS_WITH_TENURE_BASED_CREDS
                         .map(|str| str.to_string())
                         .contains(&gw_account.gateway.to_string())
                     {

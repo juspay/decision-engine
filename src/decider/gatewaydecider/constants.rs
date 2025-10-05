@@ -9,7 +9,7 @@ impl SC::ServiceConfigKey for EnableOptimizationDuringDowntime {
     }
 }
 
-pub const enableOptimizationDuringDowntime: EnableOptimizationDuringDowntime =
+pub const ENABLE_OPTIMIZATION_DURING_DOWNTIME: EnableOptimizationDuringDowntime =
     EnableOptimizationDuringDowntime;
 
 pub struct DefaultSrBasedGatewayEliminationInput;
@@ -19,7 +19,7 @@ impl SC::ServiceConfigKey for DefaultSrBasedGatewayEliminationInput {
     }
 }
 
-pub const defaultSRBasedGatewayEliminationInput: DefaultSrBasedGatewayEliminationInput =
+pub const DEFAULT_SRBASED_GATEWAY_ELIMINATION_INPUT: DefaultSrBasedGatewayEliminationInput =
     DefaultSrBasedGatewayEliminationInput;
 
 //TODO : This is duplicate and is same key is already there in decider constants.rs
@@ -42,12 +42,12 @@ impl SC::ServiceConfigKey for SrV3InputConfigDefault {
     }
 }
 
-pub const srV3DefaultInputConfig: SrV3InputConfigDefault = SrV3InputConfigDefault;
+pub const SR_V3_DEFAULT_INPUT_CONFIG: SrV3InputConfigDefault = SrV3InputConfigDefault;
 
 pub const DEFAULT_SR_V3_BASED_BUCKET_SIZE: i32 = 125;
-pub const defaultSrV3BasedUpperResetFactor: f64 = 3.0;
-pub const defaultSrV3BasedLowerResetFactor: f64 = 3.0;
-pub const defaultSrV3BasedHedgingPercent: f64 = 5.0;
+pub const DEFAULT_SR_V3_BASED_UPPER_RESET_FACTOR: f64 = 3.0;
+pub const DEFAULT_SR_V3_BASED_LOWER_RESET_FACTOR: f64 = 3.0;
+pub const DEFAULT_SR_V3_BASED_HEDGING_PERCENT: f64 = 5.0;
 pub const DEFAULT_SR_V3_BASED_GATEWAY_SIGMA_FACTOR: f64 = 0.0;
 
 pub struct AltIdEnabledGatewayForEmibank;
@@ -57,7 +57,8 @@ impl SC::ServiceConfigKey for AltIdEnabledGatewayForEmibank {
     }
 }
 
-pub const altIdEnabledGatewayEmiBank: AltIdEnabledGatewayForEmibank = AltIdEnabledGatewayForEmibank;
+pub const ALT_ID_ENABLED_GATEWAY_EMI_BANK: AltIdEnabledGatewayForEmibank =
+    AltIdEnabledGatewayForEmibank;
 
 pub struct SrBasedTransactionResetCount;
 impl SC::ServiceConfigKey for SrBasedTransactionResetCount {
@@ -66,7 +67,7 @@ impl SC::ServiceConfigKey for SrBasedTransactionResetCount {
     }
 }
 
-pub const srBasedTxnResetCount: SrBasedTransactionResetCount = SrBasedTransactionResetCount;
+pub const SR_BASED_TXN_RESET_COUNT: SrBasedTransactionResetCount = SrBasedTransactionResetCount;
 
 pub struct ScheduledOutageValidationDuration;
 impl SC::ServiceConfigKey for ScheduledOutageValidationDuration {
@@ -82,7 +83,7 @@ impl SC::ServiceConfigKey for EnableEliminationV2 {
     }
 }
 
-pub const enableEliminationV2: EnableEliminationV2 = EnableEliminationV2;
+pub const ENABLE_ELIMINATION_V2: EnableEliminationV2 = EnableEliminationV2;
 
 pub struct EnableOutageV2;
 impl SC::ServiceConfigKey for EnableOutageV2 {
@@ -91,10 +92,10 @@ impl SC::ServiceConfigKey for EnableOutageV2 {
     }
 }
 
-pub const enableEliminationV2ForOutage: EnableOutageV2 = EnableOutageV2;
+pub const ENABLE_ELIMINATION_V2_FOR_OUTAGE: EnableOutageV2 = EnableOutageV2;
 
-pub const thresholdWeightSr1: &str = "THRESHOLD_WEIGHT_SR1";
-pub const thresholdWeightSr2: &str = "THRESHOLD_WEIGHT_SR2";
+pub const THRESHOLD_WEIGHT_SR1: &str = "THRESHOLD_WEIGHT_SR1";
+pub const THRESHOLD_WEIGHT_SR2: &str = "THRESHOLD_WEIGHT_SR2";
 
 pub struct DefaultSr1(String);
 impl SC::ServiceConfigKey for DefaultSr1 {
@@ -134,12 +135,12 @@ pub fn internalDefaultEliminationV2SuccessRate1AndNPrefix(
     InternalDefaultEliminationV2SuccessRate1AndN(val)
 }
 
-pub const defaultFieldNameForSR1AndN: &str = "default";
-pub const sr1KeyPrefix: &str = "sr1_";
-pub const nKeyPrefix: &str = "n_";
+pub const DEFAULT_FIELD_NAME_FOR_SR1_AND_N: &str = "default";
+pub const SR1_KEY_PREFIX: &str = "sr1_";
+pub const N_KEY_PREFIX: &str = "n_";
 
-pub const gwDefaultTxnSoftResetCount: i64 = 10;
-pub const defaultGlobalSelectionVolumeThreshold: i64 = 20;
+pub const GW_DEFAULT_TXN_SOFT_RESET_COUNT: i64 = 10;
+pub const DEFAULT_GLOBAL_SELECTION_VOLUME_THRESHOLD: i64 = 20;
 
 pub struct GatewayResetScoreEnabled;
 impl SC::ServiceConfigKey for GatewayResetScoreEnabled {
@@ -148,10 +149,10 @@ impl SC::ServiceConfigKey for GatewayResetScoreEnabled {
     }
 }
 
-pub const gwResetScoreEnabled: GatewayResetScoreEnabled = GatewayResetScoreEnabled;
+pub const GW_RESET_SCORE_ENABLED: GatewayResetScoreEnabled = GatewayResetScoreEnabled;
 
-pub const defSRBasedGwLevelEliminationThreshold: f64 = 0.02;
-pub const defaultGlobalSelectionMaxCountThreshold: i64 = 5;
+pub const DEF_SRBASED_GW_LEVEL_ELIMINATION_THRESHOLD: f64 = 0.02;
+pub const DEFAULT_GLOBAL_SELECTION_MAX_COUNT_THRESHOLD: i64 = 5;
 
 pub struct GatewayScoreFirstDimensionSoftTtl;
 impl SC::ServiceConfigKey for GatewayScoreFirstDimensionSoftTtl {
@@ -160,7 +161,7 @@ impl SC::ServiceConfigKey for GatewayScoreFirstDimensionSoftTtl {
     }
 }
 
-pub const gwScoreFirstDimensionTtl: GatewayScoreFirstDimensionSoftTtl =
+pub const GW_SCORE_FIRST_DIMENSION_TTL: GatewayScoreFirstDimensionSoftTtl =
     GatewayScoreFirstDimensionSoftTtl;
 
 pub struct GatewayScoreSecondDimensionSoftTtl;
@@ -170,7 +171,7 @@ impl SC::ServiceConfigKey for GatewayScoreSecondDimensionSoftTtl {
     }
 }
 
-pub const gwScoreSecondDimensionTtl: GatewayScoreSecondDimensionSoftTtl =
+pub const GW_SCORE_SECOND_DIMENSION_TTL: GatewayScoreSecondDimensionSoftTtl =
     GatewayScoreSecondDimensionSoftTtl;
 
 pub struct ShouldConsumeResultFromRouter;
@@ -190,7 +191,7 @@ impl SC::ServiceConfigKey for GatewayScoreThirdDimensionSoftTtl {
     }
 }
 
-pub const gwScoreThirdDimensionTtl: GatewayScoreThirdDimensionSoftTtl =
+pub const GW_SCORE_THIRD_DIMENSION_TTL: GatewayScoreThirdDimensionSoftTtl =
     GatewayScoreThirdDimensionSoftTtl;
 
 pub struct GatewayScoreFourthDimensionSoftTtl;
@@ -200,10 +201,10 @@ impl SC::ServiceConfigKey for GatewayScoreFourthDimensionSoftTtl {
     }
 }
 
-pub const gwScoreFourthDimensionTtl: GatewayScoreFourthDimensionSoftTtl =
+pub const GW_SCORE_FOURTH_DIMENSION_TTL: GatewayScoreFourthDimensionSoftTtl =
     GatewayScoreFourthDimensionSoftTtl;
 
-pub const defScoreKeysTtl: f64 = 900000.0;
+pub const DEF_SCORE_KEYS_TTL: f64 = 900000.0;
 
 pub struct IsGbesv2Enabled;
 impl SC::ServiceConfigKey for IsGbesv2Enabled {
@@ -212,7 +213,7 @@ impl SC::ServiceConfigKey for IsGbesv2Enabled {
     }
 }
 
-pub const gbesV2Enabled: IsGbesv2Enabled = IsGbesv2Enabled;
+pub const GBES_V2_ENABLED: IsGbesv2Enabled = IsGbesv2Enabled;
 
 pub struct EnableGatewayLevelSrElimination;
 impl SC::ServiceConfigKey for EnableGatewayLevelSrElimination {
@@ -221,7 +222,7 @@ impl SC::ServiceConfigKey for EnableGatewayLevelSrElimination {
     }
 }
 
-pub const enableGwLevelSrElimination: EnableGatewayLevelSrElimination =
+pub const ENABLE_GW_LEVEL_SR_ELIMINATION: EnableGatewayLevelSrElimination =
     EnableGatewayLevelSrElimination;
 
 pub struct SrBasedGatewayEliminationThreshold;
@@ -231,10 +232,10 @@ impl SC::ServiceConfigKey for SrBasedGatewayEliminationThreshold {
     }
 }
 
-pub const srBasedGatewayEliminationThreshold: SrBasedGatewayEliminationThreshold =
+pub const SR_BASED_GATEWAY_ELIMINATION_THRESHOLD: SrBasedGatewayEliminationThreshold =
     SrBasedGatewayEliminationThreshold;
 
-pub const defaultSrBasedGatewayEliminationThreshold: f64 = 0.05;
+pub const DEFAULT_SR_BASED_GATEWAY_ELIMINATION_THRESHOLD: f64 = 0.05;
 
 pub struct OtpCardInfoRestrictedGateways;
 impl SC::ServiceConfigKey for OtpCardInfoRestrictedGateways {
@@ -545,7 +546,7 @@ impl SC::ServiceConfigKey for EmiBinValidationSupportedBanks {
     }
 }
 
-pub const getEmiBinValidationSupportedBanksKey: EmiBinValidationSupportedBanks =
+pub const GET_EMI_BIN_VALIDATION_SUPPORTED_BANKS_KEY: EmiBinValidationSupportedBanks =
     EmiBinValidationSupportedBanks;
 
 pub struct MetricTrackingLog;
@@ -554,7 +555,7 @@ impl SC::ServiceConfigKey for MetricTrackingLog {
         "METRIC_TRACKING_LOG".to_string()
     }
 }
-pub const metricTrackingLogDataKey: MetricTrackingLog = MetricTrackingLog;
+pub const METRIC_TRACKING_LOG_DATA_KEY: MetricTrackingLog = MetricTrackingLog;
 
 pub struct V2RoutingHandleList;
 impl SC::ServiceConfigKey for V2RoutingHandleList {
@@ -562,7 +563,7 @@ impl SC::ServiceConfigKey for V2RoutingHandleList {
         "V2_ROUTING_HANDLE_LIST".to_string()
     }
 }
-pub const v2RoutingHandleList: V2RoutingHandleList = V2RoutingHandleList;
+pub const V2_ROUTING_HANDLE_LIST: V2RoutingHandleList = V2RoutingHandleList;
 
 pub struct V2RoutingPspList;
 impl SC::ServiceConfigKey for V2RoutingPspList {
@@ -570,7 +571,7 @@ impl SC::ServiceConfigKey for V2RoutingPspList {
         "V2_ROUTING_PSP_LIST".to_string()
     }
 }
-pub const v2RoutingPspList: V2RoutingPspList = V2RoutingPspList;
+pub const V2_ROUTING_PSP_LIST: V2RoutingPspList = V2RoutingPspList;
 
 pub struct V2RoutingTopBankList;
 impl SC::ServiceConfigKey for V2RoutingTopBankList {
@@ -578,7 +579,7 @@ impl SC::ServiceConfigKey for V2RoutingTopBankList {
         "V2_ROUTING_TOP_BANK_LIST".to_string()
     }
 }
-pub const v2RoutingTopBankList: V2RoutingTopBankList = V2RoutingTopBankList;
+pub const V2_ROUTING_TOP_BANK_LIST: V2RoutingTopBankList = V2RoutingTopBankList;
 
 pub struct V2RoutingPspPackageList;
 impl SC::ServiceConfigKey for V2RoutingPspPackageList {
@@ -586,7 +587,7 @@ impl SC::ServiceConfigKey for V2RoutingPspPackageList {
         "V2_ROUTING_PSP_PACKAGE_LIST".to_string()
     }
 }
-pub const v2RoutingPspPackageList: V2RoutingPspPackageList = V2RoutingPspPackageList;
+pub const V2_ROUTING_PSP_PACKAGE_LIST: V2RoutingPspPackageList = V2RoutingPspPackageList;
 
 pub struct OptimizationRoutingConfig(pub String);
 impl SC::ServiceConfigKey for OptimizationRoutingConfig {
@@ -672,7 +673,7 @@ impl SC::ServiceConfigKey for EnableBetaDistributionOnSrV3 {
         "ENABLE_BETA_DISTRIBUTION_ON_SR_V3".to_string()
     }
 }
-pub const enable_beta_distribution_on_sr_v3: EnableBetaDistributionOnSrV3 =
+pub const ENABLE_BETA_DISTRIBUTION_ON_SR_V3: EnableBetaDistributionOnSrV3 =
     EnableBetaDistributionOnSrV3;
 
 pub struct EnableGatewaySelectionBasedOnSrV3Input(pub String);
@@ -693,7 +694,7 @@ impl SC::ServiceConfigKey for EnableBinomialDistributionOnSrV3 {
         "ENABLE_BINOMIAL_DISTRIBUTION_ON_SR_V3".to_string()
     }
 }
-pub const enable_binomial_distribution_on_sr_v3: EnableBinomialDistributionOnSrV3 =
+pub const ENABLE_BINOMIAL_DISTRIBUTION_ON_SR_V3: EnableBinomialDistributionOnSrV3 =
     EnableBinomialDistributionOnSrV3;
 
 pub struct EnableExtraScoreOnSrV3;
@@ -702,7 +703,7 @@ impl SC::ServiceConfigKey for EnableExtraScoreOnSrV3 {
         "ENABLE_EXTRA_SCORE_ON_SR_V3".to_string()
     }
 }
-pub const enable_extra_score_on_sr_v3: EnableExtraScoreOnSrV3 = EnableExtraScoreOnSrV3;
+pub const ENABLE_EXTRA_SCORE_ON_SR_V3: EnableExtraScoreOnSrV3 = EnableExtraScoreOnSrV3;
 
 pub struct EnableResetOnSrV3;
 impl SC::ServiceConfigKey for EnableResetOnSrV3 {
@@ -710,7 +711,7 @@ impl SC::ServiceConfigKey for EnableResetOnSrV3 {
         "ENABLE_RESET_ON_SR_V3".to_string()
     }
 }
-pub const enable_reset_on_sr_v3: EnableResetOnSrV3 = EnableResetOnSrV3;
+pub const ENABLE_RESET_ON_SR_V3: EnableResetOnSrV3 = EnableResetOnSrV3;
 
 pub struct GatewayReferenceIdEnabledMerchant;
 impl SC::ServiceConfigKey for GatewayReferenceIdEnabledMerchant {
@@ -718,7 +719,7 @@ impl SC::ServiceConfigKey for GatewayReferenceIdEnabledMerchant {
         "gateway_reference_id_enabled_merchant".to_string()
     }
 }
-pub const gatewayReferenceIdEnabledMerchant: GatewayReferenceIdEnabledMerchant =
+pub const GATEWAY_REFERENCE_ID_ENABLED_MERCHANT: GatewayReferenceIdEnabledMerchant =
     GatewayReferenceIdEnabledMerchant;
 
 pub struct GatewaydeciderScoringflow;
@@ -728,7 +729,7 @@ impl SC::ServiceConfigKey for GatewaydeciderScoringflow {
     }
 }
 
-pub const paymentFlowsRequiredForGwFiltering: [&str; 12] = [
+pub const PAYMENT_FLOWS_REQUIRED_FOR_GW_FILTERING: [&str; 12] = [
     "DOTP",
     "CARD_MOTO",
     "MANDATE_REGISTER",
@@ -743,10 +744,10 @@ pub const paymentFlowsRequiredForGwFiltering: [&str; 12] = [
     "ONE_TIME_MANDATE",
 ];
 
-pub const getCardBrandCacheExpiry: i32 = 2 * 24 * 60 * 60;
-pub const gatewayScoringData: &str = "gateway_scoring_data_";
-pub const globalLevelOutageKeyPrefix: &str = "gw_score_global_outage";
-pub const merchantLevelOutageKeyPrefix: &str = "gw_score_outage";
+pub const GET_CARD_BRAND_CACHE_EXPIRY: i32 = 2 * 24 * 60 * 60;
+pub const GATEWAY_SCORING_DATA: &str = "gateway_scoring_data_";
+pub const GLOBAL_LEVEL_OUTAGE_KEY_PREFIX: &str = "gw_score_global_outage";
+pub const MERCHANT_LEVEL_OUTAGE_KEY_PREFIX: &str = "gw_score_outage";
 
 pub struct MerchantsEnabledForScoreKeysUnification;
 impl SC::ServiceConfigKey for MerchantsEnabledForScoreKeysUnification {
@@ -754,14 +755,14 @@ impl SC::ServiceConfigKey for MerchantsEnabledForScoreKeysUnification {
         "merchants_enabled_for_score_keys_unification".to_string()
     }
 }
-pub const merchantsEnabledForScoreKeysUnification: MerchantsEnabledForScoreKeysUnification =
+pub const MERCHANTS_ENABLED_FOR_SCORE_KEYS_UNIFICATION: MerchantsEnabledForScoreKeysUnification =
     MerchantsEnabledForScoreKeysUnification;
 
-pub const gateway_selection_order_type_key_prefix: &str = "gw_sr_score";
-pub const gateway_selection_v3_order_type_key_prefix: &str = "{gw_sr_v3_score";
-pub const gatewayScoreKeysTTL: i64 = 1800;
-pub const elimination_based_routing_key_prefix: &str = "gw_score";
-pub const elimination_based_routing_global_key_prefix: &str = "gw_score_global";
+pub const GATEWAY_SELECTION_ORDER_TYPE_KEY_PREFIX: &str = "gw_sr_score";
+pub const GATEWAY_SELECTION_V3_ORDER_TYPE_KEY_PREFIX: &str = "{gw_sr_v3_score";
+pub const GATEWAY_SCORE_KEYS_TTL: i64 = 1800;
+pub const ELIMINATION_BASED_ROUTING_KEY_PREFIX: &str = "gw_score";
+pub const ELIMINATION_BASED_ROUTING_GLOBAL_KEY_PREFIX: &str = "gw_score_global";
 
 pub struct GwRefIdSelectionBasedEnabledMerchant;
 impl SC::ServiceConfigKey for GwRefIdSelectionBasedEnabledMerchant {
@@ -769,7 +770,7 @@ impl SC::ServiceConfigKey for GwRefIdSelectionBasedEnabledMerchant {
         "gw_ref_id_selection_based_enabled_merchant".to_string()
     }
 }
-pub const gwRefIdSelectionBasedEnabledMerchant: GwRefIdSelectionBasedEnabledMerchant =
+pub const GW_REF_ID_SELECTION_BASED_ENABLED_MERCHANT: GwRefIdSelectionBasedEnabledMerchant =
     GwRefIdSelectionBasedEnabledMerchant;
 
 pub struct EnableSelectionBasedAuthTypeEvaluation;
@@ -778,7 +779,7 @@ impl SC::ServiceConfigKey for EnableSelectionBasedAuthTypeEvaluation {
         "ENABLE_SELECTION_BASED_AUTH_TYPE_EVALUATION".to_string()
     }
 }
-pub const selectionBasedAuthTypeEnabledMerchant: EnableSelectionBasedAuthTypeEvaluation =
+pub const SELECTION_BASED_AUTH_TYPE_ENABLED_MERCHANT: EnableSelectionBasedAuthTypeEvaluation =
     EnableSelectionBasedAuthTypeEvaluation;
 
 pub struct EnableSelectionBasedBankLevelEvaluation;
@@ -787,7 +788,7 @@ impl SC::ServiceConfigKey for EnableSelectionBasedBankLevelEvaluation {
         "ENABLE_SELECTION_BASED_BANK_LEVEL_EVALUATION".to_string()
     }
 }
-pub const selectionBasedBankLevelEnabledMerchant: EnableSelectionBasedBankLevelEvaluation =
+pub const SELECTION_BASED_BANK_LEVEL_ENABLED_MERCHANT: EnableSelectionBasedBankLevelEvaluation =
     EnableSelectionBasedBankLevelEvaluation;
 
 pub struct PushDataToRoutingEtlStream;
@@ -796,7 +797,7 @@ impl SC::ServiceConfigKey for PushDataToRoutingEtlStream {
         "push_data_to_routing_ETL_stream".to_string()
     }
 }
-pub const pushDataToRoutingETLStream: PushDataToRoutingEtlStream = PushDataToRoutingEtlStream;
+pub const PUSH_DATA_TO_ROUTING_ETLSTREAM: PushDataToRoutingEtlStream = PushDataToRoutingEtlStream;
 
 pub struct SrVolumeCheckEnabledMerchant;
 impl SC::ServiceConfigKey for SrVolumeCheckEnabledMerchant {
@@ -804,10 +805,10 @@ impl SC::ServiceConfigKey for SrVolumeCheckEnabledMerchant {
         "SR_VOLUME_CHECK_ENABLED_MERCHANT".to_string()
     }
 }
-pub const isMerchantEnabledForVolumeCheck: SrVolumeCheckEnabledMerchant =
+pub const IS_MERCHANT_ENABLED_FOR_VOLUME_CHECK: SrVolumeCheckEnabledMerchant =
     SrVolumeCheckEnabledMerchant;
 
-pub const defaultSelectionBucketTxnVolumeThrehold: i64 = 5;
+pub const DEFAULT_SELECTION_BUCKET_TXN_VOLUME_THREHOLD: i64 = 5;
 
 pub struct SrSelectionBucketVolumeThreshold;
 impl SC::ServiceConfigKey for SrSelectionBucketVolumeThreshold {
@@ -815,7 +816,7 @@ impl SC::ServiceConfigKey for SrSelectionBucketVolumeThreshold {
         "SR_SELECTION_BUCKET_VOLUME_THRESHOLD".to_string()
     }
 }
-pub const selectionBucketTxnVolumeThreshold: SrSelectionBucketVolumeThreshold =
+pub const SELECTION_BUCKET_TXN_VOLUME_THRESHOLD: SrSelectionBucketVolumeThreshold =
     SrSelectionBucketVolumeThreshold;
 
 pub struct EnableMerchantOnVolumeDistributionFeature;
@@ -824,7 +825,7 @@ impl SC::ServiceConfigKey for EnableMerchantOnVolumeDistributionFeature {
         "ENABLE_MERCHANT_ON_VOLUME_DISTRIBUTION_FEATURE".to_string()
     }
 }
-pub const routeRandomTrafficEnabledMerchant: EnableMerchantOnVolumeDistributionFeature =
+pub const ROUTE_RANDOM_TRAFFIC_ENABLED_MERCHANT: EnableMerchantOnVolumeDistributionFeature =
     EnableMerchantOnVolumeDistributionFeature;
 
 pub struct EnableMerchantOnVolumeDistributionFeatureSrV3;
@@ -833,8 +834,8 @@ impl SC::ServiceConfigKey for EnableMerchantOnVolumeDistributionFeatureSrV3 {
         "ENABLE_MERCHANT_ON_VOLUME_DISTRIBUTION_FEATURE_SR_V3".to_string()
     }
 }
-pub const routeRandomTrafficSrV3EnabledMerchant: EnableMerchantOnVolumeDistributionFeatureSrV3 =
-    EnableMerchantOnVolumeDistributionFeatureSrV3;
+pub const ROUTE_RANDOM_TRAFFIC_SR_V3_ENABLED_MERCHANT:
+    EnableMerchantOnVolumeDistributionFeatureSrV3 = EnableMerchantOnVolumeDistributionFeatureSrV3;
 
 pub struct EnableExploreAndExploitOnSrv3(pub String);
 impl SC::ServiceConfigKey for EnableExploreAndExploitOnSrv3 {
@@ -853,9 +854,9 @@ impl SC::ServiceConfigKey for EnableDebugModeOnSrV3 {
         "ENABLE_DEBUG_MODE_ON_SR_V3".to_string()
     }
 }
-pub const enableDebugModeOnSrV3: EnableDebugModeOnSrV3 = EnableDebugModeOnSrV3;
+pub const ENABLE_DEBUG_MODE_ON_SR_V3: EnableDebugModeOnSrV3 = EnableDebugModeOnSrV3;
 
-pub const pendingTxnsKeyPrefix: &str = "PENDING_TXNS_";
+pub const PENDING_TXNS_KEY_PREFIX: &str = "PENDING_TXNS_";
 
 pub struct SrRoutingRandomDistributionPercentage;
 impl SC::ServiceConfigKey for SrRoutingRandomDistributionPercentage {
@@ -863,10 +864,10 @@ impl SC::ServiceConfigKey for SrRoutingRandomDistributionPercentage {
         "SR_ROUTING_RANDOM_DISTRIBUTION_PERCENTAGE".to_string()
     }
 }
-pub const srRoutingTrafficRandomDistribution: SrRoutingRandomDistributionPercentage =
+pub const SR_ROUTING_TRAFFIC_RANDOM_DISTRIBUTION: SrRoutingRandomDistributionPercentage =
     SrRoutingRandomDistributionPercentage;
 
-pub const defaultSrRoutingTrafficRandomDistribution: f64 = 10.0;
+pub const DEFAULT_SR_ROUTING_TRAFFIC_RANDOM_DISTRIBUTION: f64 = 10.0;
 
 pub struct WeightedBlockSrEvaluationEnabledMerchants;
 impl SC::ServiceConfigKey for WeightedBlockSrEvaluationEnabledMerchants {
@@ -874,10 +875,10 @@ impl SC::ServiceConfigKey for WeightedBlockSrEvaluationEnabledMerchants {
         "WEIGHTED_BLOCK_SR_EVALUATION_ENABLED_MERCHANTS".to_string()
     }
 }
-pub const isWeightedSrEvaluationEnabledMerchant: WeightedBlockSrEvaluationEnabledMerchants =
+pub const IS_WEIGHTED_SR_EVALUATION_ENABLED_MERCHANT: WeightedBlockSrEvaluationEnabledMerchants =
     WeightedBlockSrEvaluationEnabledMerchants;
 
-pub const defaultWeightsFactorForWeightedSrEvaluation: [(f64, i32); 4] =
+pub const DEFAULT_WEIGHTS_FACTOR_FOR_WEIGHTED_SR_EVALUATION: [(f64, i32); 4] =
     [(1.0, 1), (0.98, 6), (0.92, 18), (0.85, 0)];
 
 pub struct SrWeightFactorForWeightedEvaluation;
@@ -886,7 +887,7 @@ impl SC::ServiceConfigKey for SrWeightFactorForWeightedEvaluation {
         "SR_WEIGHT_FACTOR_FOR_WEIGHTED_EVALUATION".to_string()
     }
 }
-pub const selectionWeightsFactorForWeightedSrEvaluation: SrWeightFactorForWeightedEvaluation =
+pub const SELECTION_WEIGHTS_FACTOR_FOR_WEIGHTED_SR_EVALUATION: SrWeightFactorForWeightedEvaluation =
     SrWeightFactorForWeightedEvaluation;
 
 pub struct MerchantEnabledForRoutingExperiment;
@@ -895,7 +896,7 @@ impl SC::ServiceConfigKey for MerchantEnabledForRoutingExperiment {
         "MERCHANT_ENABLED_FOR_ROUTING_EXPERIMENT".to_string()
     }
 }
-pub const isPerformingExperiment: MerchantEnabledForRoutingExperiment =
+pub const IS_PERFORMING_EXPERIMENT: MerchantEnabledForRoutingExperiment =
     MerchantEnabledForRoutingExperiment;
 
 pub struct HandlePackageBasedRoutingCutover;
@@ -904,7 +905,7 @@ impl SC::ServiceConfigKey for HandlePackageBasedRoutingCutover {
         "HANDLE_PACKAGE_BASED_ROUTING_CUTOVER".to_string()
     }
 }
-pub const handleAndPackageBasedRouting: HandlePackageBasedRoutingCutover =
+pub const HANDLE_AND_PACKAGE_BASED_ROUTING: HandlePackageBasedRoutingCutover =
     HandlePackageBasedRoutingCutover;
 
 pub struct EdccSupportedGateways;
@@ -948,9 +949,9 @@ impl SC::ServiceConfigKey for EnabledCvvlessV2EnabledMerchants {
         "ENABLED_CVVLESS_V2_ENABLED_MERCHANTS".to_string()
     }
 }
-pub const cvvLessV2Flow: EnabledCvvlessV2EnabledMerchants = EnabledCvvlessV2EnabledMerchants;
+pub const CVV_LESS_V2_FLOW: EnabledCvvlessV2EnabledMerchants = EnabledCvvlessV2EnabledMerchants;
 
-pub const gatewaysWithTenureBasedCreds: [&str; 3] = ["HDFC", "HDFC_CC_EMI", "ICICI"];
+pub const GATEWAYS_WITH_TENURE_BASED_CREDS: [&str; 3] = ["HDFC", "HDFC_CC_EMI", "ICICI"];
 
 pub struct MerchantConfigEntityLevelLookupCutover;
 impl SC::ServiceConfigKey for MerchantConfigEntityLevelLookupCutover {

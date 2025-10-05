@@ -25,7 +25,7 @@ use masking::PeekInterface;
 // use eulerhs::types as et;
 // use eulerhs::tenant_redis_layer as rc;
 use crate::app::{get_tenant_app_state, APP_STATE};
-use crate::decider::gatewaydecider::constants::{self as DC, srV3DefaultInputConfig};
+use crate::decider::gatewaydecider::constants::{self as DC, SR_V3_DEFAULT_INPUT_CONFIG};
 use crate::decider::gatewaydecider::types as T;
 use crate::decider::gatewaydecider::types::GatewayScoringData;
 use crate::decider::gatewaydecider::types::{RoutingFlowType as RF, SrRoutingDimensions};
@@ -330,7 +330,7 @@ pub async fn getGatewayScoringType(
     let time_difference_threshold = match maybe_latency_threshold {
         None => {
             let default_sr_v3_input_config =
-                findByNameFromRedis(srV3DefaultInputConfig.get_key()).await;
+                findByNameFromRedis(SR_V3_DEFAULT_INPUT_CONFIG.get_key()).await;
             let maybe_default_latency_threshold = get_sr_v3_latency_threshold(
                 default_sr_v3_input_config,
                 &pmt,
@@ -401,7 +401,11 @@ pub fn invalid_request_error(detail: &str, e: &impl std::fmt::Display) -> T::Err
 pub async fn check_and_update_gateway_score_(
     apiPayload: FT::UpdateScorePayload,
 ) -> Result<String, T::ErrorResponse> {
-    let redis_key = format!("{}{}", C::gatewayScoringData, apiPayload.clone().paymentId);
+    let redis_key = format!(
+        "{}{}",
+        C::GATEWAY_SCORING_DATA,
+        apiPayload.clone().paymentId
+    );
     let app_state = get_tenant_app_state().await;
 
     // Attempt to fetch gateway scoring data from Redis
@@ -625,7 +629,7 @@ pub async fn updateGatewayScore(
         true
     };
 
-    let redis_key = format!("{}{}", C::gatewayScoringData, txn_detail.clone().txnUuid);
+    let redis_key = format!("{}{}", C::GATEWAY_SCORING_DATA, txn_detail.clone().txnUuid);
     let redis_gateway_score_data = if should_update_srv3_gateway_score
         && is_update_within_window
         && should_isolate_srv3_producer

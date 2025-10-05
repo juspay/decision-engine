@@ -1166,7 +1166,7 @@ pub fn get_payment_flow_list_from_txn_detail(txn_detail: &ETTD::TxnDetail) -> Ve
         Some(PaymentFlowInfoInInternalTrackingInfo { paymentFlowInfo }) => paymentFlowInfo
             .paymentFlows
             .into_iter()
-            .filter(|flow| C::paymentFlowsRequiredForGwFiltering.contains(&flow.as_str()))
+            .filter(|flow| C::PAYMENT_FLOWS_REQUIRED_FOR_GW_FILTERING.contains(&flow.as_str()))
             .collect(),
         None => vec![],
     }
@@ -1838,7 +1838,8 @@ pub async fn check_if_bin_is_eligible_for_emi(
         (card_isin, juspay_bank_code, card_type)
     {
         let bin_check_mandated_banks: Option<Vec<String>> =
-            RService::findByNameFromRedis(C::getEmiBinValidationSupportedBanksKey.get_key()).await;
+            RService::findByNameFromRedis(C::GET_EMI_BIN_VALIDATION_SUPPORTED_BANKS_KEY.get_key())
+                .await;
         let should_do_bin_validation = bin_check_mandated_banks
             .is_some_and(|banks| banks.contains(&format!("{}::{}", juspay_bank_code, card_type)));
         if should_do_bin_validation {
@@ -2061,7 +2062,7 @@ pub async fn get_gateway_scoring_data(
             get_experiment_tag(txn_detail.dateCreated, "GRI_BASED_SR_ROUTING").await;
         set_is_experiment_tag(decider_flow, experiment_tag);
     }
-    let key = [C::gatewayScoringData, &txn_detail.txnUuid.clone()].concat();
+    let key = [C::GATEWAY_SCORING_DATA, &txn_detail.txnUuid.clone()].concat();
     updated_gateway_scoring_data
 }
 
@@ -2078,7 +2079,7 @@ pub async fn get_unified_key(
 
     let gateway_redis_key_map = match score_key_type {
         ScoreKeyType::EliminationGlobalKey => {
-            let key_prefix = C::elimination_based_routing_global_key_prefix;
+            let key_prefix = C::ELIMINATION_BASED_ROUTING_GLOBAL_KEY_PREFIX;
             let (prefix_key, suffix_key) = if payment_method_type == CARD {
                 (
                     vec![key_prefix, &order_type.as_str()],
@@ -2126,7 +2127,7 @@ pub async fn get_unified_key(
         }
         ScoreKeyType::EliminationMerchantKey => {
             let isgri_enabled = gateway_scoring_data.isGriEnabledForElimination;
-            let key_prefix = C::elimination_based_routing_key_prefix;
+            let key_prefix = C::ELIMINATION_BASED_ROUTING_KEY_PREFIX;
             let (prefix_key, suffix_key) = if payment_method_type == CARD {
                 (
                     vec![key_prefix, &merchant_id, &order_type.as_str()],
@@ -2249,7 +2250,7 @@ pub async fn get_unified_key(
             }
         }
         ScoreKeyType::OutageGlobalKey => {
-            let key_prefix = C::globalLevelOutageKeyPrefix;
+            let key_prefix = C::GLOBAL_LEVEL_OUTAGE_KEY_PREFIX;
             let base_key = if payment_method_type == CARD {
                 vec![
                     key_prefix,
@@ -2283,7 +2284,7 @@ pub async fn get_unified_key(
             map
         }
         ScoreKeyType::OutageMerchantKey => {
-            let key_prefix = C::merchantLevelOutageKeyPrefix;
+            let key_prefix = C::MERCHANT_LEVEL_OUTAGE_KEY_PREFIX;
             let base_key = if payment_method_type == CARD {
                 vec![
                     key_prefix,
@@ -2358,9 +2359,9 @@ pub async fn get_unified_sr_key(
     let country = gateway_scoring_data.country.as_ref().map(|c| c.to_string());
     let auth_type = gateway_scoring_data.authType.clone();
     let key_prefix = if is_sr_v3_metric_enabled {
-        C::gateway_selection_v3_order_type_key_prefix.to_string()
+        C::GATEWAY_SELECTION_V3_ORDER_TYPE_KEY_PREFIX.to_string()
     } else {
-        C::gateway_selection_order_type_key_prefix.to_string()
+        C::GATEWAY_SELECTION_ORDER_TYPE_KEY_PREFIX.to_string()
     };
 
     // Base key components that are always present
@@ -2444,9 +2445,9 @@ async fn get_legacy_unified_sr_key(
     let payment_method_type = gateway_scoring_data.paymentMethodType.clone();
     let payment_method = gateway_scoring_data.paymentMethod.clone();
     let key_prefix = if is_sr_v3_metric_enabled {
-        C::gateway_selection_v3_order_type_key_prefix.to_string()
+        C::GATEWAY_SELECTION_V3_ORDER_TYPE_KEY_PREFIX.to_string()
     } else {
-        C::gateway_selection_order_type_key_prefix.to_string()
+        C::GATEWAY_SELECTION_ORDER_TYPE_KEY_PREFIX.to_string()
     };
     let base_key = vec![
         key_prefix.clone(),

@@ -308,14 +308,14 @@ pub fn kvRedis() -> String {
     "kv_redis".into()
 }
 
-// Original Haskell function: pendingTxnsKeyPrefix
-pub const pendingTxnsKeyPrefix: &str = "PENDING_TXNS_";
+// Original Haskell function: PENDING_TXNS_KEY_PREFIX
+pub const PENDING_TXNS_KEY_PREFIX: &str = "PENDING_TXNS_";
 
-// Original Haskell function: defaultSrV3BasedBucketSize
-pub const defaultSrV3BasedBucketSize: i32 = 125;
+// Original Haskell function: DEFAULT_SR_V3_BASED_BUCKET_SIZE
+pub const DEFAULT_SR_V3_BASED_BUCKET_SIZE: i32 = 125;
 
-// Original Haskell function: gatewaySelectionV3OrderTypeKeyPrefix
-pub const gatewaySelectionV3OrderTypeKeyPrefix: &str = "{gw_sr_v3_score";
+// Original Haskell function: GATEWAY_SELECTION_V3_ORDER_TYPE_KEY_PREFIX
+pub const GATEWAY_SELECTION_V3_ORDER_TYPE_KEY_PREFIX: &str = "{gw_sr_v3_score";
 
 // Original Haskell function: ecRedis
 pub fn ecRedis() -> String {
@@ -362,8 +362,8 @@ pub fn defaultMinimumGatewayScore() -> f64 {
     0.0
 }
 
-// Original Haskell function: gatewayScoringData
-pub const gatewayScoringData: &str = "gateway_scoring_data_";
+// Original Haskell function: GATEWAY_SCORING_DATA
+pub const GATEWAY_SCORING_DATA: &str = "gateway_scoring_data_";
 
 // Original Haskell function: defaultMerchantArrMaxLength
 pub fn defaultMerchantArrMaxLength() -> i32 {

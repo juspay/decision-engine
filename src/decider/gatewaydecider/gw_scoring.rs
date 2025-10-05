@@ -252,7 +252,7 @@ pub async fn scoring_flow(
                 )
                 .await;
                 let default_sr_v3_input_config =
-                    findByNameFromRedis(C::srV3DefaultInputConfig.get_key()).await;
+                    findByNameFromRedis(C::SR_V3_DEFAULT_INPUT_CONFIG.get_key()).await;
 
                 logger::info!(
                     tag = "scoringFlow_Sr_V3_Input_Config",
@@ -293,7 +293,7 @@ pub async fn scoring_flow(
                         &sr_routing_dimesions,
                     )
                 })
-                .unwrap_or(C::defaultSrV3BasedHedgingPercent);
+                .unwrap_or(C::DEFAULT_SR_V3_BASED_HEDGING_PERCENT);
 
                 Utils::set_sr_v3_hedging_percent(decider_flow, hedging_percent);
 
@@ -357,7 +357,7 @@ pub async fn scoring_flow(
                     }
 
                     let is_route_random_traffic_enabled = isFeatureEnabled(
-                        C::routeRandomTrafficSrV3EnabledMerchant.get_key(),
+                        C::ROUTE_RANDOM_TRAFFIC_SR_V3_ENABLED_MERCHANT.get_key(),
                         Utils::get_m_id(merchant.merchantId.clone()),
                         "kv_redis".to_string(),
                     )
@@ -386,7 +386,7 @@ pub async fn scoring_flow(
                     if sr_gw_score.len() > 1 && (!is_explore_and_exploit_enabled || should_explore)
                     {
                         let is_debug_mode_enabled = isFeatureEnabled(
-                            C::enableDebugModeOnSrV3.get_key(),
+                            C::ENABLE_DEBUG_MODE_ON_SR_V3.get_key(),
                             Utils::get_m_id(merchant.merchantId.clone()),
                             "kv_redis".to_string(),
                         );
@@ -600,7 +600,7 @@ pub async fn get_cached_scores_based_on_srv3(
                 &sr_routing_dimesions,
             )
         })
-        .unwrap_or(C::defaultSrV3BasedUpperResetFactor);
+        .unwrap_or(C::DEFAULT_SR_V3_BASED_UPPER_RESET_FACTOR);
         let lower_reset_factor = Utils::get_sr_v3_lower_reset_factor(
             merchant_srv3_input_config.clone(),
             &pmt_str,
@@ -615,7 +615,7 @@ pub async fn get_cached_scores_based_on_srv3(
                 &sr_routing_dimesions,
             )
         })
-        .unwrap_or(C::defaultSrV3BasedLowerResetFactor);
+        .unwrap_or(C::DEFAULT_SR_V3_BASED_LOWER_RESET_FACTOR);
         logger::debug!(
             tag = "Sr_V3_Upper_Reset_Factor",
             action = "Sr_V3_Upper_Reset_Factor",
@@ -657,7 +657,7 @@ pub async fn get_cached_scores_based_on_srv3(
     };
 
     let is_srv3_extra_score_enabled = M::isFeatureEnabled(
-        C::enable_extra_score_on_sr_v3.get_key(),
+        C::ENABLE_EXTRA_SCORE_ON_SR_V3.get_key(),
         Utils::get_m_id(merchant.merchantId.clone()),
         "kv_redis".to_string(),
     )
@@ -695,13 +695,13 @@ pub async fn get_cached_scores_based_on_srv3(
     };
 
     let is_srv3_binomial_distribution_enabled = M::isFeatureEnabled(
-        C::enable_binomial_distribution_on_sr_v3.get_key(),
+        C::ENABLE_BINOMIAL_DISTRIBUTION_ON_SR_V3.get_key(),
         Utils::get_m_id(merchant.merchantId.clone()),
         "kv_redis".to_string(),
     )
     .await;
     let is_srv3_beta_distribution_enabled = M::isFeatureEnabled(
-        C::enable_beta_distribution_on_sr_v3.get_key(),
+        C::ENABLE_BETA_DISTRIBUTION_ON_SR_V3.get_key(),
         Utils::get_m_id(merchant.merchantId.clone()),
         "kv_redis".to_string(),
     )
@@ -1801,9 +1801,9 @@ pub async fn get_gateway_wise_routing_inputs_for_merchant_sr(
     let m_option =
         RService::findByNameFromRedis(C::SrBasedGatewayEliminationThreshold.get_key()).await;
     let default_soft_txn_reset_count =
-        RService::findByNameFromRedis(C::srBasedTxnResetCount.get_key())
+        RService::findByNameFromRedis(C::SR_BASED_TXN_RESET_COUNT.get_key())
             .await
-            .unwrap_or(C::gwDefaultTxnSoftResetCount);
+            .unwrap_or(C::GW_DEFAULT_TXN_SOFT_RESET_COUNT);
     let is_elimination_v2_enabled = isFeatureEnabled(
         C::EnableEliminationV2.get_key(),
         merchant_acc.merchantId.0.clone(),
@@ -1812,7 +1812,7 @@ pub async fn get_gateway_wise_routing_inputs_for_merchant_sr(
     .await;
 
     let default_elimination_threshold =
-        m_option.unwrap_or(C::defaultSrBasedGatewayEliminationThreshold);
+        m_option.unwrap_or(C::DEFAULT_SR_BASED_GATEWAY_ELIMINATION_THRESHOLD);
     let merchant_given_default_threshold = gateway_success_rate_merchant_input
         .clone()
         .map(|input| input.defaultEliminationThreshold);
@@ -1875,7 +1875,7 @@ pub async fn get_gateway_wise_routing_inputs_for_merchant_sr(
             gatewayLevelEliminationThreshold: merchant_given_default_gateway_sr_threshold
                 .unwrap_or(
                     default_gateway_level_sr_elimination_threshold
-                        .unwrap_or(Some(C::defSRBasedGwLevelEliminationThreshold)),
+                        .unwrap_or(Some(C::DEF_SRBASED_GW_LEVEL_ELIMINATION_THRESHOLD)),
                 ),
             eliminationLevel: merchant_given_default_elimination_level
                 .or(default_merchant_elimination_level)
@@ -2836,20 +2836,20 @@ pub fn merchantGatewayScoreDimension(
 pub async fn getKeyTTLFromMerchantDimension(dimension: Dimension) -> f64 {
     let mTtl: Option<f64> = match dimension {
         Dimension::FIRST => {
-            RService::findByNameFromRedis(C::gwScoreFirstDimensionTtl.get_key()).await
+            RService::findByNameFromRedis(C::GW_SCORE_FIRST_DIMENSION_TTL.get_key()).await
         }
         Dimension::SECOND => {
-            RService::findByNameFromRedis(C::gwScoreSecondDimensionTtl.get_key()).await
+            RService::findByNameFromRedis(C::GW_SCORE_SECOND_DIMENSION_TTL.get_key()).await
         }
         Dimension::THIRD => {
-            RService::findByNameFromRedis(C::gwScoreThirdDimensionTtl.get_key()).await
+            RService::findByNameFromRedis(C::GW_SCORE_THIRD_DIMENSION_TTL.get_key()).await
         }
         Dimension::FOURTH => {
-            RService::findByNameFromRedis(C::gwScoreFourthDimensionTtl.get_key()).await
+            RService::findByNameFromRedis(C::GW_SCORE_FOURTH_DIMENSION_TTL.get_key()).await
         }
     };
 
-    mTtl.unwrap_or(C::defScoreKeysTtl)
+    mTtl.unwrap_or(C::DEF_SCORE_KEYS_TTL)
 }
 
 pub async fn evaluate_reset_gateway_score(

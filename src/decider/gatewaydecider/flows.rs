@@ -677,7 +677,7 @@ pub async fn runDeciderFlow(
     };
 
     let key = [
-        C::gatewayScoringData,
+        C::GATEWAY_SCORING_DATA,
         &deciderParams.dpTxnDetail.txnUuid.clone(),
     ]
     .concat();
@@ -695,7 +695,7 @@ pub async fn runDeciderFlow(
                 serde_json::to_string(&updated_gateway_scoring_data.clone())
                     .unwrap_or_default()
                     .as_str(),
-                C::gatewayScoreKeysTTL,
+                C::GATEWAY_SCORE_KEYS_TTL,
             )
             .await
             .unwrap_or_default();

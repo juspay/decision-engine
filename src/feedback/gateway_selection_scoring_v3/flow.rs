@@ -326,9 +326,9 @@ pub async fn getSrV3MerchantBucketSize(txn_detail: TxnDetail, txn_card_info: Txn
     let merchant_bucket_size = match maybe_bucket_size {
         None => {
             let default_sr_v3_input_config: Option<SrV3InputConfig> =
-                findByNameFromRedis(DC::srV3DefaultInputConfig.get_key()).await;
+                findByNameFromRedis(DC::SR_V3_DEFAULT_INPUT_CONFIG.get_key()).await;
             GU::get_sr_v3_bucket_size(default_sr_v3_input_config, &pmt, &pm, &sr_routing_dimesions)
-                .unwrap_or(C::defaultSrV3BasedBucketSize)
+                .unwrap_or(C::DEFAULT_SR_V3_BASED_BUCKET_SIZE)
         }
         Some(bucket_size) => bucket_size,
     };

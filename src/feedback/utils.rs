@@ -70,7 +70,7 @@ use crate::types::payment::payment_method as ETP;
 // use types::money::{from_double, Money};
 // use optics::core::{preview, review};
 // use control::category::<<<;
-use super::constants::gatewayScoringData;
+use super::constants::GATEWAY_SCORING_DATA;
 use crate::types::gateway::{gateway_any_to_text, GatewayAny};
 // use prelude::real_to_frac;
 // use data::time::clock::posix as DTP;
