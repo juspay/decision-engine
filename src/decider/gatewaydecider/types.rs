@@ -919,10 +919,17 @@ pub struct DomainDeciderRequest {
 
 // impl Given<SecretContext> for DomainDeciderRequest {}
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EligibleGatewayPaymentMethodsList {
+    pub gateway: String,
+    pub payment_methods: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DomainDeciderRequestForApiCallV2 {
     pub paymentInfo: PaymentInfo,
     pub merchantId: String,
     pub eligibleGatewayList: Option<Vec<String>>,
+    pub eligibleGatewayPaymentMethodsList: Option<Vec<EligibleGatewayPaymentMethodsList>>,
     pub rankingAlgorithm: Option<RankingAlgorithm>,
     pub eliminationEnabled: Option<bool>,
 }
