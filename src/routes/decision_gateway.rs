@@ -36,6 +36,7 @@ impl IntoResponse for ErrorResponse {
 pub struct DecidedGatewayResponse {
     pub decided_gateway: DecidedGateway,
     pub filter_list: Vec<(String, Vec<String>)>,
+    pub latency: Option<u64>,
 }
 
 #[axum::debug_handler]
@@ -145,9 +146,11 @@ where
 
             let final_result = match result {
                 Ok((decided_gateway, filter_list)) => {
+                    let cpu_time = cpu_start.elapsed().as_millis() as u64;
                     let response = DecidedGatewayResponse {
                         decided_gateway,
                         filter_list,
+                        latency: Some(cpu_time),
                     };
 
                     // Serialize response body and headers for logging
