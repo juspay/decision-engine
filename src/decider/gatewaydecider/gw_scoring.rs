@@ -1164,7 +1164,7 @@ fn check_scheduled_outage_metadata(
         Some(scheduled_outage_metadata) => {
             schedule_equal_to(
                 |x, y| x == y,
-                Some(txn_detail.txnObjectType.clone()),
+                txn_detail.txnObjectType.clone(),
                 scheduled_outage_metadata.txnObjectType.clone(),
             ) && schedule_equal_to(
                 |x, y| x == y,

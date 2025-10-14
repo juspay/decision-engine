@@ -380,6 +380,24 @@ pub fn updateGatewayScoreLock(
     }
 }
 
+pub fn invalid_request_error(detail: &str, e: &impl std::fmt::Display) -> T::ErrorResponse {
+    T::ErrorResponse {
+        status: "400".to_string(),
+        error_code: "INVALID_REQUEST".to_string(),
+        error_message: format!("Failed to extract {}: {}", detail, e),
+        priority_logic_tag: None,
+        routing_approach: None,
+        filter_wise_gateways: None,
+        error_info: T::UnifiedError {
+            code: "INVALID_REQUEST".to_string(),
+            user_message: "Invalid request data provided".to_string(),
+            developer_message: format!("Error extracting {}: {}", detail, e),
+        },
+        priority_logic_output: None,
+        is_dynamic_mga_enabled: false,
+    }
+}
+
 pub async fn check_and_update_gateway_score_(
     apiPayload: FT::UpdateScorePayload,
 ) -> Result<String, T::ErrorResponse> {
@@ -398,8 +416,15 @@ pub async fn check_and_update_gateway_score_(
     match m_gateway_scoring_data {
         Ok(gateway_scoring_data) => {
             // Extract transaction details and card info from the API payload
-            let txn_detail: TxnDetail =
-                Fbu::getTxnDetailFromApiPayload(apiPayload.clone(), gateway_scoring_data.clone());
+            let txn_detail: TxnDetail = match Fbu::getTxnDetailFromApiPayload(
+                apiPayload.clone(),
+                gateway_scoring_data.clone(),
+            ) {
+                Ok(detail) => detail,
+                Err(e) => {
+                    return Err(invalid_request_error("transaction details", &e));
+                }
+            };
             let txn_card_info: TxnCardInfo =
                 Fbu::getTxnCardInfoFromApiPayload(apiPayload.clone(), gateway_scoring_data.clone());
 
@@ -735,7 +760,7 @@ pub fn getRoutingApproach(txnDetail: TxnDetail) -> Option<String> {
 // Original Haskell function: getValueFromMetaData
 pub fn getValueFromMetaData<T: serde::de::DeserializeOwned>(txn_detail: &TxnDetail) -> Option<T> {
     let metadata = txn_detail.internalMetadata.clone()?;
-    serde_json::from_str(&metadata).ok()
+    serde_json::from_str(metadata.peek()).ok()
 }
 
 // Original Haskell function: isRoutingApproachInSRV2
@@ -827,7 +852,7 @@ pub async fn isUpdateWithinLatencyWindow(
 }
 
 async fn checkExemptIfMandateTxn(txn_detail: &TxnDetail, txn_card_info: &TxnCardInfo) -> bool {
-    let is_recurring = isRecurringTxn(Some(txn_detail.txnObjectType.clone()));
+    let is_recurring = isRecurringTxn(txn_detail.txnObjectType.clone());
     let is_nb_pmt = txn_card_info.paymentMethodType == (NB);
     let is_penny_reg_txn = isPennyMandateRegTxn(txn_detail.clone());
     is_recurring || (is_nb_pmt && is_penny_reg_txn)

@@ -1063,7 +1063,7 @@ pub async fn getFailureReasonWithFilter(
                     .unwrap_or_else(|| "emi".to_string())
             );
             let emi_bank = format!("{} ", txn_detail.emiBank.clone().unwrap_or_default());
-            if Utils::is_card_transaction(txn_card_info) && !txn_detail.isEmi {
+            if Utils::is_card_transaction(txn_card_info) && txn_detail.isEmi != Some(true) {
                 "Gateways configured supports only emi transaction.".to_string()
             } else if Utils::is_card_transaction(txn_card_info) {
                 let is_bin_eligible = Utils::check_if_bin_is_eligible_for_emi(
@@ -1142,7 +1142,7 @@ pub async fn getFailureReasonWithFilter(
         },
         "filterFunctionalGatewaysForTxnDetailType" => {
             format!(
-                "No functional gateways supporting {}transaction.",
+                "No functional gateways supporting {:?}transaction.",
                 txn_detail.txnType
             )
         }

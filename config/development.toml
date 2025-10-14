@@ -67,6 +67,7 @@ bank_transfer = { type = "enum", values = "ach, sepa, sepa_bank_transfer, bacs, 
 bank_redirect = { type = "enum", values = "giropay, ideal, sofort, eft, eps, bancontact_card, blik, local_bank_redirect, online_banking_thailand, online_banking_czech_republic, online_banking_finland, online_banking_fpx, online_banking_poland, online_banking_slovakia, przelewy24, trustly, bizum, interac, open_banking_uk, open_banking_pis" }
 customer_device_display_size = { type = "enum", values = "size320x568, size375x667, size390x844, size414x896, size428x926, size768x1024, size834x1112, size834x1194, size1024x1366, size1280x720, size1366x768, size1440x900, size1920x1080, size2560x1440, size3840x2160, size500x600, size600x400, size360x640, size412x915, size800x1280" }
 customer_device_type = { type = "enum", values = "mobile, tablet, desktop, gaming_console" }
+card = { type = "enum", values = "credit, debit" }
 customer_device_platform = { type = "enum", values = "web, android, ios" }
 bank_debit = { type = "enum", values = "ach, sepa, bacs, becs" }
 crypto = { type = "enum", values = "crypto_currency" }
