@@ -152,7 +152,7 @@ pub struct MetricEntry {
 
     #[serde(rename = "tp99_latency")]
     pub tp99_latency: f32,
-    
+
     #[serde(rename = "default_success_threshold")]
     pub default_success_threshold: f32,
 }
@@ -576,7 +576,6 @@ pub async fn updateGatewayScore(
     } else {
         Some(txn_card_info.paymentMethod.clone())
     };
-    
 
     let should_update_gateway_score = if gateway_scoring_type.clone() == GST::PENALISE_SRV3 {
         false
@@ -592,7 +591,6 @@ pub async fn updateGatewayScore(
     } else {
         true
     };
-
 
     let should_isolate_srv3_producer = if Cutover::isFeatureEnabled(
         C::SR_V3_PRODUCER_ISOLATION.get_key(),
@@ -629,21 +627,23 @@ pub async fn updateGatewayScore(
 
     let redis_key = format!("{}{}", C::gatewayScoringData, txn_detail.clone().txnUuid);
     let app_state = get_tenant_app_state().await;
-    
-    let redis_gateway_score_data_initial: Option<GatewayScoringData> = 
-    if should_update_srv3_gateway_score && should_isolate_srv3_producer && should_update_explore_txn {
-        let mb_gateway_scoring_data: Option<GatewayScoringData> = app_state
-            .redis_conn
-            .get_key(&redis_key, "GatewayScoringData")
-            .await
-            .ok();
-        mb_gateway_scoring_data
-    } else {
-        None
-    };
 
-    let mb_gateway_scoring_data: Option<GatewayScoringData> =
-    if should_update_gateway_score {
+    let redis_gateway_score_data_initial: Option<GatewayScoringData> =
+        if should_update_srv3_gateway_score
+            && should_isolate_srv3_producer
+            && should_update_explore_txn
+        {
+            let mb_gateway_scoring_data: Option<GatewayScoringData> = app_state
+                .redis_conn
+                .get_key(&redis_key, "GatewayScoringData")
+                .await
+                .ok();
+            mb_gateway_scoring_data
+        } else {
+            None
+        };
+
+    let mb_gateway_scoring_data: Option<GatewayScoringData> = if should_update_gateway_score {
         match redis_gateway_score_data_initial {
             None => {
                 let redis_data: Option<GatewayScoringData> = app_state
@@ -663,7 +663,11 @@ pub async fn updateGatewayScore(
         None => {
             let merchant_id_str = MID::merchant_id_to_text(txn_detail.clone().merchantId);
             let pmt_str = txn_card_info.paymentMethodType.to_string();
-            let txn_obj_type_str = txn_detail.txnObjectType.clone().map(|t| t.to_string()).unwrap_or_default();
+            let txn_obj_type_str = txn_detail
+                .txnObjectType
+                .clone()
+                .map(|t| t.to_string())
+                .unwrap_or_default();
             let card_type_str = txn_card_info.card_type.clone().map(|t| t.to_string());
             get_metric_entry_data(
                 merchant_id_str,
@@ -672,14 +676,18 @@ pub async fn updateGatewayScore(
                 txn_obj_type_str,
                 card_type_str,
                 false,
-                None
+                None,
             )
             .await
-        },
+        }
         Some(gateway_scoring_data) => {
             let merchant_id_str = MID::merchant_id_to_text(txn_detail.clone().merchantId);
             let pmt_str = txn_card_info.paymentMethodType.to_string();
-            let txn_obj_type_str = txn_detail.txnObjectType.clone().map(|t| t.to_string()).unwrap_or_default();
+            let txn_obj_type_str = txn_detail
+                .txnObjectType
+                .clone()
+                .map(|t| t.to_string())
+                .unwrap_or_default();
             let card_type_str = txn_card_info.card_type.clone().map(|t| t.to_string());
             get_metric_entry_data(
                 merchant_id_str,
@@ -688,10 +696,10 @@ pub async fn updateGatewayScore(
                 txn_obj_type_str,
                 card_type_str,
                 gateway_scoring_data.isGriEnabledForElimination,
-                gateway_scoring_data.gatewayReferenceId
+                gateway_scoring_data.gatewayReferenceId,
             )
             .await
-        },
+        }
     };
 
     let is_update_within_window = isUpdateWithinLatencyWindow(
@@ -700,7 +708,7 @@ pub async fn updateGatewayScore(
         gateway_scoring_type.clone(),
         mer_acc.clone(),
         txn_latency.clone(),
-        m_metric_entry
+        m_metric_entry,
     )
     .await;
 
@@ -727,7 +735,7 @@ pub async fn updateGatewayScore(
         .await;
     }
 
-    if should_update_gateway_score && is_update_within_window{
+    if should_update_gateway_score && is_update_within_window {
         let mer_acc_p_id: ETM::id::MerchantPId = mer_acc.id.clone();
         let m_pf_mc_config = MerchantConfig::getMerchantConfigEntityLevelLookupConfig().await;
         match mb_gateway_scoring_data {
@@ -878,10 +886,7 @@ pub async fn isUpdateWithinLatencyWindow(
                         txn_card_info.paymentMethod.clone(),
                         txn_detail.sourceObject.clone().unwrap_or_default(),
                     ),
-                    &txn_detail
-                        .gateway
-                        .clone()
-                        .unwrap_or_default(), // Convert Option to String
+                    &txn_detail.gateway.clone().unwrap_or_default(), // Convert Option to String
                 );
                 logger::info!(
                     action = "gw_wise_latency_threshold",
@@ -889,7 +894,6 @@ pub async fn isUpdateWithinLatencyWindow(
                     "gw_wise_latency_threshold: {}",
                     gw_wise_latency_threshold
                 );
-
 
                 /// check if the transaction latency calculated by orchestration is within the configured threshold
                 let is_gw_latency_within_threshold = isGwLatencyWithinConfiguredThreshold(
@@ -912,9 +916,12 @@ pub async fn isUpdateWithinLatencyWindow(
                 );
 
                 let gw_score_update_latency = Fbu::getTimeFromTxnCreatedInMills(txn_detail.clone());
-                let gw_latency_check_threshold_ = gw_wise_latency_threshold.min(gw_score_latency_threshold as f64);
+                let gw_latency_check_threshold_ =
+                    gw_wise_latency_threshold.min(gw_score_latency_threshold as f64);
                 let gw_latency_check_threshold = match m_metric_entry {
-                    Some(metric_entry) => gw_latency_check_threshold_.min(metric_entry.tp99_latency.into()),
+                    Some(metric_entry) => {
+                        gw_latency_check_threshold_.min(metric_entry.tp99_latency.into())
+                    }
                     None => gw_latency_check_threshold_,
                 };
                 logger::info!(
@@ -949,46 +956,53 @@ pub fn isTransactionPending(txnStatus: TxnStatus) -> bool {
 
 // Helper function to filter by gateway only
 fn filter_upto_gw<'a>(
-    latency_input: &'a [GatewayWiseLatencyInput], 
-    gw: &'a str
+    latency_input: &'a [GatewayWiseLatencyInput],
+    gw: &'a str,
 ) -> Option<&'a GatewayWiseLatencyInput> {
-    latency_input.iter().find(|x| {
-        x.gateway == gw && 
-        x.paymentMethodType.is_none() && 
-        x.paymentMethod.is_none()
-    })
+    latency_input
+        .iter()
+        .find(|x| x.gateway == gw && x.paymentMethodType.is_none() && x.paymentMethod.is_none())
 }
 
 // Helper function to filter by gateway and payment method type
 fn filter_upto_pmt<'a>(
-    latency_input: &'a [GatewayWiseLatencyInput], 
-    gw: &'a str, 
-    pmt: &'a str
+    latency_input: &'a [GatewayWiseLatencyInput],
+    gw: &'a str,
+    pmt: &'a str,
 ) -> Option<&'a GatewayWiseLatencyInput> {
     latency_input.iter().find(|x| {
-        x.gateway == gw && 
-        x.paymentMethodType.as_ref().map_or("".to_string(), |s| s.clone()) == pmt &&
-        x.paymentMethod.is_none()
+        x.gateway == gw
+            && x.paymentMethodType
+                .as_ref()
+                .map_or("".to_string(), |s| s.clone())
+                == pmt
+            && x.paymentMethod.is_none()
     })
 }
 
 // Helper function to filter by gateway, payment method type, and payment method
 fn filter_upto_pm<'a>(
-    latency_input: &'a [GatewayWiseLatencyInput], 
-    gw: &'a str, 
-    pmt: &'a str, 
-    pm: &'a str
+    latency_input: &'a [GatewayWiseLatencyInput],
+    gw: &'a str,
+    pmt: &'a str,
+    pm: &'a str,
 ) -> Option<&'a GatewayWiseLatencyInput> {
     latency_input.iter().find(|x| {
-        x.gateway == gw && 
-        x.paymentMethodType.as_ref().map_or("".to_string(), |s| s.clone()) == pmt &&
-        x.paymentMethod.as_ref().map_or("".to_string(), |s| s.clone()) == pm
+        x.gateway == gw
+            && x.paymentMethodType
+                .as_ref()
+                .map_or("".to_string(), |s| s.clone())
+                == pmt
+            && x.paymentMethod
+                .as_ref()
+                .map_or("".to_string(), |s| s.clone())
+                == pm
     })
 }
 
 // Helper function to get gateway latency threshold
 fn get_gw_latency_threshold(
-    merchant_latency_gateway_wise_input: &Option<Vec<GatewayWiseLatencyInput>>
+    merchant_latency_gateway_wise_input: &Option<Vec<GatewayWiseLatencyInput>>,
 ) -> Option<&GatewayWiseLatencyInput> {
     match merchant_latency_gateway_wise_input {
         None => None,
@@ -1005,10 +1019,11 @@ pub fn get_gateway_wise_latency(
     gateway_latency_threshold: &GatewayLatencyForScoring,
     pmt: &str,
     pm: &str,
-    gw: &str
+    gw: &str,
 ) -> f64 {
-    let m_gateway_wise_input = get_gw_latency_threshold(&gateway_latency_threshold.merchantLatencyGatewayWiseInput);
-    
+    let m_gateway_wise_input =
+        get_gw_latency_threshold(&gateway_latency_threshold.merchantLatencyGatewayWiseInput);
+
     // Log the input (similar to EL.logDebugV in Haskell)
     logger::debug!(
         action = "get_gateway_wise_latency",
@@ -1016,7 +1031,7 @@ pub fn get_gateway_wise_latency(
         "mGatewayWiseInput: {:?}",
         gateway_latency_threshold.merchantLatencyGatewayWiseInput
     );
-    
+
     match &gateway_latency_threshold.merchantLatencyGatewayWiseInput {
         Some(gw_wise_input) => {
             // Try to find the most specific match first, then fall back to less specific

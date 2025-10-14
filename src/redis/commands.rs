@@ -7,7 +7,7 @@ use fred::prelude::RedisKey;
 use fred::types::SetOptions;
 use fred::{
     clients::Transaction,
-    interfaces::{KeysInterface, ListInterface, TransactionInterface, HashesInterface},
+    interfaces::{HashesInterface, KeysInterface, ListInterface, TransactionInterface},
     types::{Expiration, FromRedis, MultipleValues, Scanner},
 };
 use redis_interface::{errors, types::DelReply, RedisConnectionPool};
@@ -185,12 +185,13 @@ impl RedisConnectionWrapper {
     where
         T: serde::de::DeserializeOwned,
     {
-        let result: Option<String> = self.conn
+        let result: Option<String> = self
+            .conn
             .pool
             .hget(key, field)
             .await
             .change_context(errors::RedisError::GetFailed)?;
-        
+
         match result {
             Some(value_str) => {
                 let value: T = serde_json::from_str(&value_str)

@@ -1385,15 +1385,15 @@ pub async fn get_common_gateway_ref_id(
 ) -> (bool, Option<String>) {
     let order_ref = decider_flow.get().dpOrder.clone();
     let merchant = decider_flow.get().dpMerchantAccount.clone();
-    
+
     let (meta, pl_ref_id_map) = get_order_metadata_and_pl_ref_id_map(
         decider_flow,
         merchant.enableGatewayReferenceIdBasedRouting,
         &order_ref,
     );
-    
+
     let gateway_list = decider_flow.writer.functionalGateways.clone();
-    
+
     let ref_ids: Vec<String> = gateway_list
         .iter()
         .map(|gw| {
@@ -1409,11 +1409,11 @@ pub async fn get_common_gateway_ref_id(
             }
         })
         .collect();
-    
+
     if ref_ids.is_empty() {
         return (false, None);
     }
-    
+
     let first_ref_id = &ref_ids[0];
     if ref_ids.iter().all(|ref_id| ref_id == first_ref_id) {
         (true, Some(first_ref_id.clone()))
@@ -2007,8 +2007,16 @@ pub fn get_default_gateway_scoring_data(
         isPaymentSourceEnabledForSrRouting: false,
         isAuthLevelEnabledForSrRouting: false,
         isBankLevelEnabledForSrRouting: false,
-        isGriEnabledForElimination: if useServiceConfigForGri { is_gri_enabled_for_elimination } else { false },
-        isGriEnabledForSrRouting: if useServiceConfigForGri { is_gri_enabled_for_sr_routing } else { false },
+        isGriEnabledForElimination: if useServiceConfigForGri {
+            is_gri_enabled_for_elimination
+        } else {
+            false
+        },
+        isGriEnabledForSrRouting: if useServiceConfigForGri {
+            is_gri_enabled_for_sr_routing
+        } else {
+            false
+        },
         routingApproach: None,
         dateCreated: date_created,
         eliminationEnabled: false,
@@ -2017,8 +2025,7 @@ pub fn get_default_gateway_scoring_data(
         currency: currency,
         country: country,
         is_legacy_decider_flow: false,
-        gatewayReferenceId:gatewayRefId,
-        
+        gatewayReferenceId: gatewayRefId,
     }
 }
 
@@ -2060,13 +2067,12 @@ pub async fn get_gateway_scoring_data(
         "kv_redis".to_string(),
     )
     .await;
-    let (useServiceConfigForGri, gatewayRefId) = if is_gri_enabled_for_sr_routing || is_gri_enabled_for_elimination {
-        (
-            get_common_gateway_ref_id(decider_flow).await
-        )
-    } else {
-        (true, None)
-    };
+    let (useServiceConfigForGri, gatewayRefId) =
+        if is_gri_enabled_for_sr_routing || is_gri_enabled_for_elimination {
+            (get_common_gateway_ref_id(decider_flow).await)
+        } else {
+            (true, None)
+        };
     let mut default_gateway_scoring_data = get_default_gateway_scoring_data(
         merchant_id.clone(),
         order_type,
@@ -2086,7 +2092,7 @@ pub async fn get_gateway_scoring_data(
             .as_ref()
             .map(|a| a.to_string()),
         useServiceConfigForGri,
-        gatewayRefId
+        gatewayRefId,
     );
     let updated_gateway_scoring_data = match txn_card_info.paymentMethodType.as_str() {
         UPI => {
@@ -2346,9 +2352,9 @@ pub async fn get_unified_key(
                     },
                 )
             } else {
-                gateway_ref_id_map.iter().fold(
-                    GatewayRedisKeyMap::new(),
-                    |mut acc, (gw, _)| {
+                gateway_ref_id_map
+                    .iter()
+                    .fold(GatewayRedisKeyMap::new(), |mut acc, (gw, _)| {
                         acc.insert(
                             gw.clone(),
                             intercalate_without_empty_string(
@@ -2357,8 +2363,7 @@ pub async fn get_unified_key(
                             ),
                         );
                         acc
-                    },
-                )
+                    })
             }
         }
         ScoreKeyType::OUTAGE_GLOBAL_KEY => {
@@ -2693,12 +2698,10 @@ pub async fn get_consumer_key(
         logger::debug!("gwRefId {:?}", gw_ref_ids);
         gw_ref_ids
     } else {
-        gateway_list
-            .iter()
-            .fold(HashMap::new(), |mut acc, gw| {
-                acc.insert(gw.clone(), None);
-                acc
-            })
+        gateway_list.iter().fold(HashMap::new(), |mut acc, gw| {
+            acc.insert(gw.clone(), None);
+            acc
+        })
     };
     let gateway_redis_key_map = get_unified_key(
         gateway_scoring_data,
@@ -2961,7 +2964,10 @@ pub async fn addToCacheWithExpiry(
     }
 }
 
-pub async fn get_penality_factor_(decider_flow: &mut DeciderFlow<'_>, gateway_scoring_data: &GatewayScoringData) -> f64 {
+pub async fn get_penality_factor_(
+    decider_flow: &mut DeciderFlow<'_>,
+    gateway_scoring_data: &GatewayScoringData,
+) -> f64 {
     let merchant = decider_flow.get().dpMerchantAccount.clone();
     let txn_detail = decider_flow.get().dpTxnDetail.clone();
     let txn_card_info = decider_flow.get().dpTxnCardInfo.clone();
@@ -2974,7 +2980,14 @@ pub async fn get_penality_factor_(decider_flow: &mut DeciderFlow<'_>, gateway_sc
     .await;
     if is_elimination_v2_enabled {
         let griEnabled = gateway_scoring_data.gatewayReferenceId.is_some();
-        let m_reward_factor = eliminationV2RewardFactor(&merchant_id, &txn_card_info, &txn_detail, griEnabled, gateway_scoring_data.gatewayReferenceId.clone()).await;
+        let m_reward_factor = eliminationV2RewardFactor(
+            &merchant_id,
+            &txn_card_info,
+            &txn_detail,
+            griEnabled,
+            gateway_scoring_data.gatewayReferenceId.clone(),
+        )
+        .await;
         match m_reward_factor {
             Some(reward_factor) => return (1.0 - reward_factor),
             None => {

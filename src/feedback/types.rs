@@ -120,7 +120,7 @@ pub struct GatewayScoringKeyType {
 
     #[serde(rename = "softTTL")]
     pub softTTL: Option<i32>,
-    
+
     #[serde(rename = "gatewayReferenceId")]
     pub gatewayReferenceId: Option<String>,
 }

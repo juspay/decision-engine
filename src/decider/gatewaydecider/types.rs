@@ -563,7 +563,7 @@ pub struct GatewayScoringData {
     pub currency: Option<Currency>,
     pub country: Option<CountryISO2>,
     pub is_legacy_decider_flow: bool,
-    pub gatewayReferenceId: Option<String>
+    pub gatewayReferenceId: Option<String>,
 }
 
 #[derive(Debug)]
