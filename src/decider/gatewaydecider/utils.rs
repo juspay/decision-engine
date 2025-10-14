@@ -756,7 +756,7 @@ pub fn get_metric_log_format(decider_flow: &mut DeciderFlow<'_>, stage: &str) ->
         .and_then(|ps| last(split("@", ps)));
 
     MessageFormat {
-        model: txn_detail.txnObjectType.to_string(),
+        model: txn_detail.txnObjectType.map(|t| t.to_string()).unwrap_or_default(),
         log_type: "APP_EVENT".to_string(),
         payment_method: txn_card_info.paymentMethod.clone(),
         payment_method_type: txn_card_info.paymentMethodType.clone(),
@@ -817,7 +817,7 @@ pub async fn log_gateway_decider_approach(
         "GATEWAY_DECIDER_APPROACH",
         "DECIDER",
         MessageFormat {
-            model: txn_detail.txnObjectType.to_string(),
+            model: txn_detail.txnObjectType.map(|t| t.to_string()).unwrap_or_default(),
             log_type: "APP_EVENT".to_string(),
             payment_method: txn_card_info.clone().paymentMethod,
             payment_method_type: txn_card_info.clone().paymentMethodType.to_string(),
@@ -1985,7 +1985,7 @@ pub async fn get_gateway_scoring_data(
     )
     .await;
     let merchant_id = merchant_id_to_text(merchant.merchantId.clone());
-    let order_type = txn_detail.txnObjectType.to_string();
+    let order_type = txn_detail.txnObjectType.map(|t| t.to_string()).unwrap_or_default();
     let payment_method_type = txn_card_info.paymentMethodType.to_uppercase();
     let m_source_object = if txn_card_info.paymentMethod == UPI {
         txn_detail.sourceObject.clone().unwrap_or_default()

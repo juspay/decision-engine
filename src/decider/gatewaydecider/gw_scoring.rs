@@ -1966,7 +1966,7 @@ pub async fn get_sr1_and_sr2_and_n(
             } else {
                 Some(txn_card_info.paymentMethod.clone())
             };
-            let txn_obj_type = txn_detail.txnObjectType.to_string();
+            let txn_obj_type = txn_detail.txnObjectType.map(|t| t.to_string()).unwrap_or_default();
 
             filter_using_service_config(merchant_id, pmt.to_string(), pm, txn_obj_type, inputs)
                 .await
