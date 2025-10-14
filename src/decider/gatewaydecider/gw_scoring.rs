@@ -1436,6 +1436,14 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                     })
                     .collect::<Vec<_>>();
 
+                logger::info!(
+                    tag = "scoringFlow",
+                    action = "scoringFlow",
+                    "Gateway Success Rate Inputs for Global SR based elimination for {:?} : {:?}",
+                    txn_detail.txnId,
+                    gateway_success_rate_inputs
+                );
+
                 let gateway_list = Utils::get_gateway_list(gateway_score.clone());
                 let gateway_redis_key_map = Utils::get_consumer_key(
                     decider_flow,
@@ -1446,6 +1454,14 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                 )
                 .await;
 
+                logger::info!(
+                    tag = "scoringFlow",
+                    action = "scoringFlow",
+                    "Gateway Redis Key Map for Global SR based elimination for {:?} : {:?}",
+                    txn_detail.txnId,
+                    gateway_redis_key_map
+                );
+
                 let mut upd_gateway_success_rate_inputs = Vec::new();
                 let mut global_gateway_scores = Vec::new();
                 for gsri in gateway_success_rate_inputs {
@@ -1454,21 +1470,56 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                         gsri.clone(),
                     )
                     .await;
+                    logger::info!(
+                        tag = "scoringFlow",
+                        action = "scoringFlow",
+                        "Global Elimination Gateway Score for {:?} : {:?}",
+                        txn_detail.txnId,
+                        global_elimination_gateway_score
+                    );
                     match global_elimination_gateway_score {
                         Some((global_gateway_score, s)) => {
+                            logger::info!(action = "global_gateway_score", "s-value : {:?}", s);
+                            logger::info!(
+                                action = "global_gateway_score",
+                                "global_gateway_score{:?}",
+                                global_gateway_score
+                            );
                             let new_gsri = GatewayWiseSuccessRateBasedRoutingInput {
                                 currentScore: Some(s),
                                 ..gsri.clone()
                             };
+                            logger::info!(
+                                action = "global_gateway_score",
+                                "Global Elimination Gateway Score for {:?} : {:?}",
+                                txn_detail.txnId,
+                                new_gsri
+                            );
                             upd_gateway_success_rate_inputs.push(new_gsri);
+                            logger::info!(
+                                action = "global_gateway_score",
+                                "upd_gateway_success_rate_inputs{:?}",
+                                upd_gateway_success_rate_inputs
+                            );
                             global_gateway_scores.extend(update_global_score_log(
                                 gsri.gateway.clone(),
                                 global_gateway_score,
                             ));
+                            logger::info!(
+                                action = "update_global_score_log",
+                                "global_gateway_scores{:?}",
+                                global_gateway_scores
+                            );
                         }
                         None => {}
                     }
                 }
+
+                logger::info!(
+                    action = "update_gateway_score_based_on_global_success_rate",
+                    "upd_gateway_success_rate_inputs{:?}",
+                    upd_gateway_success_rate_inputs
+                );
 
                 let filtered_gateway_success_rate_inputs: Vec<
                     GatewayWiseSuccessRateBasedRoutingInput,
@@ -1482,6 +1533,12 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                         }
                     })
                     .collect();
+
+                logger::info!(
+                    action = "filtered_gateway_success_rate_inputs",
+                    "filtered_gateway_success_rate_inputs{:?}",
+                    filtered_gateway_success_rate_inputs
+                );
 
                 reset_metric_log_data(decider_flow);
                 let init_metric_log_data = decider_flow.writer.srMetricLogData.clone();
@@ -1930,7 +1987,10 @@ pub async fn get_sr1_and_sr2_and_n(
             } else {
                 Some(txn_card_info.paymentMethod.clone())
             };
-            let txn_obj_type = format!("{:?}", txn_detail.txnObjectType);
+            let txn_obj_type = txn_detail
+                .txnObjectType
+                .map(|t| t.to_string())
+                .unwrap_or_default();
 
             filter_using_service_config(merchant_id, pmt.to_string(), pm, txn_obj_type, inputs)
                 .await
@@ -2308,12 +2368,29 @@ pub async fn update_gateway_score_based_on_success_rate(
         let (default_success_rate_based_routing_input, gateway_success_rate_merchant_input) =
             get_success_rate_routing_inputs(merchant_acc.clone()).await;
 
+        logger::info!(
+            action = "update_gateway_score_based_on_success_rate",
+            "Default SR based routing input: {:?}",
+            default_success_rate_based_routing_input
+        );
+        logger::info!(
+            action = "update_gateway_score_based_on_success_rate",
+            "Merchant SR based routing input: {:?}",
+            gateway_success_rate_merchant_input
+        );
+
         let is_reset_score_enabled_for_merchant = isFeatureEnabled(
             C::GATEWAY_RESET_SCORE_ENABLED.get_key(),
             Utils::get_m_id(txn_detail.merchantId.clone()),
             "kv_redis".to_string(),
         )
         .await;
+
+        logger::info!(
+            action = "update_gateway_score_based_on_success_rate",
+            "Is reset score enabled for merchant {:?}",
+            is_reset_score_enabled_for_merchant
+        );
 
         let payment_method_type = if Utils::is_card_transaction(&txn_card_info) {
             CARD
@@ -2325,6 +2402,8 @@ pub async fn update_gateway_score_based_on_success_rate(
             .clone()
             .map(|input| input.enabledPaymentMethodTypes.clone())
             .unwrap_or_default();
+
+        logger::info!(action = "update_gateway_score_based_on_success_rate","Enabled payment method types for merchant {:?} and Payment method type for transaction {:?}", enabled_payment_method_types, payment_method_type);
 
         if !enabled_payment_method_types.is_empty()
             && !enabled_payment_method_types.contains(&payment_method_type.to_string())
