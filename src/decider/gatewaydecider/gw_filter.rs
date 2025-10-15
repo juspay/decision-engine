@@ -1815,6 +1815,14 @@ pub async fn filterGatewaysCardInfo(
     m_validation_type: Option<ETGCI::ValidationType>,
 ) -> Result<Vec<GatewayCardInfo>, ErrorResponse> {
     let appState = this.state().clone();
+
+    fn normalize_auth_type(auth_type: &str) -> String {
+        match auth_type.to_uppercase().as_str() {
+            "THREE_DS_2" => "THREE_DS".to_string(),
+            other => other.to_string(),
+        }
+    }
+
     if !enabled_gateways.is_empty()
         && card_bins.iter().all(|bin| bin.is_some())
         && (m_auth_type.is_some() || m_validation_type.is_some())
@@ -1850,13 +1858,11 @@ pub async fn filterGatewaysCardInfo(
                         ci.gateway.is_some()
                             && merchant_wise_mandate_supported_gateway_prime.contains(&ci.gateway)
                             && ci.validationType == Some(ETGCI::ValidationType::CardMandate)
-                            && ci
-                                .authType
-                                .clone()
-                                .unwrap_or_else(|| "THREE_DS".to_string())
-                                == auth_type_to_text(
-                                    &m_auth_type.clone().unwrap_or(AuthType::THREE_DS),
-                                )
+                            && normalize_auth_type(
+                                &ci.authType.clone().unwrap_or_else(|| "THREE_DS".to_string()),
+                            ) == normalize_auth_type(&auth_type_to_text(
+                                &m_auth_type.clone().unwrap_or(AuthType::THREE_DS),
+                            ))
                     })
                     .collect::<Vec<_>>()
             } else {
@@ -1875,13 +1881,11 @@ pub async fn filterGatewaysCardInfo(
                     .into_iter()
                     .filter(|ci| {
                         (ci.validationType == Some(ETGCI::ValidationType::CardMandate)
-                            && ci
-                                .authType
-                                .clone()
-                                .unwrap_or_else(|| "THREE_DS".to_string())
-                                == auth_type_to_text(
-                                    &m_auth_type.clone().unwrap_or(AuthType::THREE_DS),
-                                ))
+                            && normalize_auth_type(
+                                &ci.authType.clone().unwrap_or_else(|| "THREE_DS".to_string()),
+                            ) == normalize_auth_type(&auth_type_to_text(
+                                &m_auth_type.clone().unwrap_or(AuthType::THREE_DS),
+                            )))
                     })
                     .collect::<Vec<GatewayCardInfo>>();
 
