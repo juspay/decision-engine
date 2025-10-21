@@ -39,7 +39,7 @@ pub enum AuthType {
 }
 
 impl std::fmt::Display for AuthType {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::ATMPIN => write!(f, "ATMPIN"),
             Self::THREE_DS => write!(f, "THREE_DS"),

@@ -66,7 +66,7 @@ where
     v_mut
 }
 
-pub fn getGws(this: &mut DeciderFlow) -> Vec<String> {
+pub fn getGws(this: &mut DeciderFlow<'_>) -> Vec<String> {
     this.writer.functionalGateways.clone()
 }
 
@@ -80,7 +80,7 @@ fn makeFirstLetterSmall(s: String) -> String {
 }
 
 pub fn returnGwListWithLog(
-    this: &mut DeciderFlow,
+    this: &mut DeciderFlow<'_>,
     fName: DeciderFilterName,
     doOrNot: bool,
 ) -> Vec<String> {
@@ -127,7 +127,7 @@ where
 }
 
 pub fn setGwsAndMgas(
-    this: &mut DeciderFlow,
+    this: &mut DeciderFlow<'_>,
     filteredMgas: Vec<ETM::merchant_gateway_account::MerchantGatewayAccount>,
 ) {
     Utils::set_mgas(this, filteredMgas.clone());
@@ -136,7 +136,7 @@ pub fn setGwsAndMgas(
 }
 
 /// Sets the functional gateways in the DeciderFlow and updates related merchant gateway accounts
-pub fn setGws(this: &mut DeciderFlow, gws: Vec<String>) {
+pub fn setGws(this: &mut DeciderFlow<'_>, gws: Vec<String>) {
     // Get the merchant gateway accounts
     let m_mgas = Utils::get_mgas(this);
 
@@ -406,7 +406,7 @@ pub async fn getFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList {
 }
 
 fn validateAndSetDynamicMGAFlag(
-    this: &mut DeciderFlow,
+    this: &mut DeciderFlow<'_>,
     proceed_with_all_mgas: bool,
     mgas: &Vec<ETM::merchant_gateway_account::MerchantGatewayAccount>,
 ) {
@@ -424,7 +424,7 @@ fn validateAndSetDynamicMGAFlag(
 }
 
 pub fn filterMGAsByEnforcedPaymentFlows(
-    this: &mut DeciderFlow,
+    this: &mut DeciderFlow<'_>,
     initial_mgas: Vec<ETM::merchant_gateway_account::MerchantGatewayAccount>,
 ) -> Vec<ETM::merchant_gateway_account::MerchantGatewayAccount> {
     // Extract unique gateways from the merchant gateway accounts
@@ -1793,7 +1793,7 @@ where
 /// Determines if a merchant gateway account matches the provided gateway reference ID
 /// Used for gateway reference ID based routing
 pub fn predicate(
-    this: &mut DeciderFlow,
+    this: &mut DeciderFlow<'_>,
     mga: ETM::merchant_gateway_account::MerchantGatewayAccount,
     gw: String,
     metadata: HashMap<String, String>,
@@ -2809,7 +2809,7 @@ pub fn validate_only_one_mga(
 
 /// Filters gateways for EMI tenure-specific merchant gateway accounts
 /// Keeps only gateways that support the specific EMI tenure requested in the transaction
-pub fn filterForEMITenureSpecificMGAs(this: &mut DeciderFlow) -> Vec<String> {
+pub fn filterForEMITenureSpecificMGAs(this: &mut DeciderFlow<'_>) -> Vec<String> {
     // Get transaction details from context
     let txn_detail = this.get().dpTxnDetail.clone();
 
@@ -3082,7 +3082,7 @@ fn getTxnTypeSupportedGateways(
 /// Filters gateways and merchant gateway accounts based on UPI payment flow support
 /// Checks both V2 integration and UPI intent capabilities
 pub fn filterGatewaysForUpiPayBasedOnSupportedFlow(
-    this: &mut DeciderFlow,
+    this: &mut DeciderFlow<'_>,
     gws: Vec<String>,
     mgas: Vec<MerchantGatewayAccount>,
     v2_integration_not_supported_gateways: Vec<String>,
