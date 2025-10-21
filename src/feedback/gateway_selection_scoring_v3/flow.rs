@@ -292,28 +292,6 @@ pub async fn updateScoreAndQueue(
     }
 }
 
-fn debugBlock(
-    txn_detail: TxnDetail,
-    current_time: String,
-    date_created: String,
-    value: String,
-) -> SrV3DebugBlock {
-    SrV3DebugBlock {
-        txn_uuid: txn_detail.txnUuid,
-        order_id: txn_detail.orderId.0,
-        date_created,
-        current_time,
-        txn_status: value,
-    }
-}
-
-fn getStatus(maybe_popped_status_block: Option<SrV3DebugBlock>, popped_status: String) -> String {
-    match maybe_popped_status_block {
-        Some(popped_status_block) => popped_status_block.txn_status.clone(),
-        None => popped_status,
-    }
-}
-
 //Original Haskell function: getSrV3MerchantBucketSize
 pub async fn getSrV3MerchantBucketSize(txn_detail: TxnDetail, txn_card_info: TxnCardInfo) -> i32 {
     let merchant_sr_v3_input_config: Option<SrV3InputConfig> = findByNameFromRedis(

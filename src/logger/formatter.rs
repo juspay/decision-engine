@@ -31,7 +31,6 @@ use tracing_subscriber::{
 
 // Implicit keys
 
-const MESSAGE: &str = "message";
 const HOSTNAME: &str = "hostname";
 const PID: &str = "pid";
 const LEVEL: &str = "level";
@@ -91,6 +90,7 @@ impl fmt::Display for RecordType {
 /// `FormattingLayer` relies on the `tracing_bunyan_formatter::JsonStorageLayer` which is storage of entries.
 ///
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct FormattingLayer<W>
 where
     W: for<'a> MakeWriter<'a> + 'static,

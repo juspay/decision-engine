@@ -111,17 +111,6 @@ pub struct TenantSecrets {
     pub schema: String,
 }
 
-fn deserialize_hex<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let deserialized_str: String = serde::Deserialize::deserialize(deserializer)?;
-
-    let deserialized_str = deserialized_str.into_bytes();
-
-    Ok(deserialized_str)
-}
-
 #[derive(serde::Deserialize, Debug, Clone)]
 pub struct TenantsSecrets(HashMap<String, TenantSecrets>);
 

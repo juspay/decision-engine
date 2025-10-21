@@ -563,6 +563,7 @@ pub async fn runDeciderFlow(
     }
 }
 
+#[allow(dead_code)]
 fn getGatewayToMGAIdMapF(allMgas: &Vec<MerchantGatewayAccount>, gateways: &Vec<String>) -> AValue {
     json!(gateways
         .iter()
@@ -660,38 +661,6 @@ async fn filterFunctionalGatewaysWithEnforcment(
 //         Some(f) => f.to_lowercase().collect::<String>() + chars.as_str(),
 //     }
 // }
-
-fn defaultDecidedGateway(
-    gw: String,
-    gpm: Option<AValue>,
-    priorityLogicTag: Option<String>,
-    finalDeciderApproach: T::GatewayDeciderApproach,
-    topGatewayBeforeSRDowntimeEvaluation: Option<String>,
-    priorityLogicOutput: Option<T::GatewayPriorityLogicOutput>,
-    resetApproach: T::ResetApproach,
-    routingDimension: Option<String>,
-    routingDimensionLevel: Option<String>,
-    isScheduledOutage: bool,
-    isDynamicMGAEnabled: bool,
-) -> T::DecidedGateway {
-    T::DecidedGateway {
-        decided_gateway: gw,
-        gateway_priority_map: gpm,
-        filter_wise_gateways: None,
-        priority_logic_tag: priorityLogicTag,
-        routing_approach: finalDeciderApproach,
-        gateway_before_evaluation: topGatewayBeforeSRDowntimeEvaluation,
-        priority_logic_output: priorityLogicOutput,
-        debit_routing_output: None,
-        reset_approach: resetApproach,
-        routing_dimension: routingDimension,
-        routing_dimension_level: routingDimensionLevel,
-        is_scheduled_outage: isScheduledOutage,
-        is_dynamic_mga_enabled: isDynamicMGAEnabled,
-        gateway_mga_id_map: None,
-        is_rust_based_decider: true,
-    }
-}
 
 // async fn addMetricsToStream(
 //     decidedGateway: Option<&Gateway>,
