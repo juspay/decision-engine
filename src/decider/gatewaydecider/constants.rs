@@ -53,7 +53,7 @@ pub const DEFAULT_SR_V3_BASED_GATEWAY_SIGMA_FACTOR: f64 = 0.0;
 pub struct AltIdEnabledGatewayForEmibank;
 impl SC::ServiceConfigKey for AltIdEnabledGatewayForEmibank {
     fn get_key(&self) -> String {
-        "AltIdEnabledGatewayForEmibank".to_string()
+        "ALT_ID_ENABLED_GATEWAY_FOR_EMIBANK".to_string()
     }
 }
 

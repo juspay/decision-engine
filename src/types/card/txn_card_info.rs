@@ -13,88 +13,76 @@ use std::option::Option;
 use std::string::String;
 
 #[derive(Debug, PartialEq, Clone, Eq, Serialize, Deserialize, Hash)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum AuthType {
-    #[serde(rename = "ATMPIN")]
-    ATMPIN,
-    #[serde(rename = "THREE_DS")]
+    Atmpin,
     ThreeDs,
-    #[serde(rename = "THREE_DS_2")]
     ThreeDs2,
-    #[serde(rename = "OTP")]
-    OTP,
-    #[serde(rename = "OBO_OTP")]
+    Otp,
     OboOtp,
-    #[serde(rename = "VIES")]
-    VIES,
-    #[serde(rename = "NO_THREE_DS")]
+    Vies,
     NoThreeDs,
-    #[serde(rename = "NETWORK_TOKEN")]
     NetworkToken,
-    #[serde(rename = "MOTO")]
-    MOTO,
-    #[serde(rename = "FIDO")]
-    FIDO,
-    #[serde(rename = "CTP")]
-    CTP,
+    Moto,
+    Fido,
+    Ctp,
 }
 
 impl std::fmt::Display for AuthType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::ATMPIN => write!(f, "ATMPIN"),
+            Self::Atmpin => write!(f, "ATMPIN"),
             Self::ThreeDs => write!(f, "THREE_DS"),
             Self::ThreeDs2 => write!(f, "THREE_DS_2"),
-            Self::OTP => write!(f, "OTP"),
+            Self::Otp => write!(f, "OTP"),
             Self::OboOtp => write!(f, "OBO_OTP"),
-            Self::VIES => write!(f, "VIES"),
+            Self::Vies => write!(f, "VIES"),
             Self::NoThreeDs => write!(f, "NO_THREE_DS"),
             Self::NetworkToken => write!(f, "NETWORK_TOKEN"),
-            Self::MOTO => write!(f, "MOTO"),
-            Self::FIDO => write!(f, "FIDO"),
-            Self::CTP => write!(f, "CTP"),
+            Self::Moto => write!(f, "MOTO"),
+            Self::Fido => write!(f, "FIDO"),
+            Self::Ctp => write!(f, "CTP"),
         }
     }
 }
 
 pub fn text_to_auth_type(ctx: &str) -> Result<AuthType, ApiError> {
     match ctx {
-        "ATMPIN" => Ok(AuthType::ATMPIN),
+        "ATMPIN" => Ok(AuthType::Atmpin),
         "THREE_DS" => Ok(AuthType::ThreeDs),
         "THREE_DS_2" => Ok(AuthType::ThreeDs2),
-        "OTP" => Ok(AuthType::OTP),
+        "OTP" => Ok(AuthType::Otp),
         "OBO_OTP" => Ok(AuthType::OboOtp),
-        "VIES" => Ok(AuthType::VIES),
+        "VIES" => Ok(AuthType::Vies),
         "NO_THREE_DS" => Ok(AuthType::NoThreeDs),
         "NETWORK_TOKEN" => Ok(AuthType::NetworkToken),
-        "MOTO" => Ok(AuthType::MOTO),
-        "FIDO" => Ok(AuthType::FIDO),
-        "CTP" => Ok(AuthType::CTP),
+        "MOTO" => Ok(AuthType::Moto),
+        "FIDO" => Ok(AuthType::Fido),
+        "CTP" => Ok(AuthType::Ctp),
         _ => Err(ApiError::ParsingError("Invalid Auth Type")),
     }
 }
 pub fn auth_type_to_text(ctx: &AuthType) -> String {
     match ctx {
-        AuthType::ATMPIN => "ATMPIN".to_string(),
+        AuthType::Atmpin => "ATMPIN".to_string(),
         AuthType::ThreeDs => "THREE_DS".to_string(),
         AuthType::ThreeDs2 => "THREE_DS_2".to_string(),
-        AuthType::OTP => "OTP".to_string(),
+        AuthType::Otp => "OTP".to_string(),
         AuthType::OboOtp => "OBO_OTP".to_string(),
-        AuthType::VIES => "VIES".to_string(),
+        AuthType::Vies => "VIES".to_string(),
         AuthType::NoThreeDs => "NO_THREE_DS".to_string(),
         AuthType::NetworkToken => "NETWORK_TOKEN".to_string(),
-        AuthType::MOTO => "MOTO".to_string(),
-        AuthType::FIDO => "FIDO".to_string(),
-        AuthType::CTP => "CTP".to_string(),
+        AuthType::Moto => "MOTO".to_string(),
+        AuthType::Fido => "FIDO".to_string(),
+        AuthType::Ctp => "CTP".to_string(),
     }
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum EMIType {
-    #[serde(rename = "NO_COST_EMI")]
     NoCostEmi,
-    #[serde(rename = "LOW_COST_EMI")]
     LowCostEmi,
-    #[serde(rename = "STANDARD_EMI")]
     StandardEmi,
 }
 

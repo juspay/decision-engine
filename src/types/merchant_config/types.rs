@@ -10,6 +10,7 @@ pub struct MerchantConfigPId(pub String);
 pub struct ConfigName(pub String);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ConfigCategory {
     PaymentFlow,
     GeneralConfig,

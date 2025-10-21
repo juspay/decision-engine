@@ -635,7 +635,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
     // CVV Less Gateway Validations
     if Utils::is_card_transaction(&txnCardInfo) {
         if let Some(true) = mInternalMeta.as_ref().and_then(|meta| meta.isCvvLessTxn) {
-            if txnCardInfo.authType == Some(AuthType::MOTO) {
+            if txnCardInfo.authType == Some(AuthType::Moto) {
                 let st = getGws(this);
                 let authTypeRestrictedGateways =
                     findByNameFromRedis::<HashMap<AuthType, Vec<String>>>(
@@ -677,7 +677,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
                         mAcc.id.clone(),
                         mAcc.tenantAccountId,
                         TC::MerchantConfig,
-                        PF::CVVLESS,
+                        PF::Cvvless,
                         crate::types::country::country_iso::text_db_to_country_iso(
                             mAcc.country.as_deref().unwrap_or_default(),
                         )
@@ -705,7 +705,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
                                     GPMF::find_all_gpmf_by_gateway_payment_flow_payment_method(
                                         uniqueGwLs.clone(),
                                         cardPaymentMethod.id,
-                                        PaymentFlow::CVVLESS,
+                                        PaymentFlow::Cvvless,
                                     )
                                     .await;
                                 let gmpfGws: Vec<String> = allGPMfEntries
@@ -831,7 +831,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
     if Utils::is_card_transaction(&txnCardInfo) && Utils::is_token_repeat_txn(mInternalMeta.clone())
     {
         if let Some(secAuthType) = txnCardInfo.authType.clone() {
-            if secAuthType == AuthType::OTP {
+            if secAuthType == AuthType::Otp {
                 let mTokenRepeatOtpSupportedGateways = Utils::get_token_supported_gateways(
                     txnDetail.clone(),
                     txnCardInfo.clone(),
@@ -869,7 +869,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
     }
 
     // Amex BTA Card based gateway filter
-    if Utils::is_card_transaction(&txnCardInfo) && txnCardInfo.authType == Some(AuthType::MOTO) {
+    if Utils::is_card_transaction(&txnCardInfo) && txnCardInfo.authType == Some(AuthType::Moto) {
         let paymentFlowList = Utils::get_payment_flow_list_from_txn_detail(&txnDetail);
         let st = getGws(this);
         if paymentFlowList.contains(&"TA_FILE".to_string()) {
@@ -1042,7 +1042,7 @@ pub async fn filterGatewaysForAuthType(
         if txn_card_info
             .authType
             .as_ref()
-            .map(|at| *at == AuthType::OTP)
+            .map(|at| *at == AuthType::Otp)
             .unwrap_or(false)
         {
             setGwsAndMgas(
@@ -1051,7 +1051,7 @@ pub async fn filterGatewaysForAuthType(
                     .clone()
                     .into_iter()
                     .filter(|mga| {
-                        Utils::check_if_enabled_in_mga(mga, "CardDotp", "cardDirectOtpEnabled")
+                        Utils::check_if_enabled_in_mga(mga, "CARD_DOTP", "cardDirectOtpEnabled")
                             && st.contains(&mga.gateway)
                     })
                     .collect(),
@@ -1062,7 +1062,7 @@ pub async fn filterGatewaysForAuthType(
         if txn_card_info
             .authType
             .as_ref()
-            .map(|at| *at == AuthType::MOTO)
+            .map(|at| *at == AuthType::Moto)
             .unwrap_or(false)
         {
             setGwsAndMgas(
@@ -1071,7 +1071,7 @@ pub async fn filterGatewaysForAuthType(
                     .clone()
                     .into_iter()
                     .filter(|mga| {
-                        Utils::check_if_enabled_in_mga(mga, "CardMoto", "cardMotoEnabled")
+                        Utils::check_if_enabled_in_mga(mga, "CARD_MOTO", "cardMotoEnabled")
                             && st.contains(&mga.gateway)
                     })
                     .collect(),
@@ -1091,7 +1091,7 @@ pub async fn filterGatewaysForAuthType(
                     .clone()
                     .into_iter()
                     .filter(|mga| {
-                        Utils::check_if_no_ds_enabled_in_mga(mga, "CardNo3ds", "cardNo3DsEnabled")
+                        Utils::check_if_no_ds_enabled_in_mga(mga, "CARD_NO_3DS", "cardNo3DsEnabled")
                             && st.contains(&mga.gateway)
                     })
                     .collect(),
@@ -1102,7 +1102,7 @@ pub async fn filterGatewaysForAuthType(
         if txn_card_info
             .authType
             .as_ref()
-            .map(|at| *at == AuthType::VIES)
+            .map(|at| *at == AuthType::Vies)
             .unwrap_or(false)
         {
             setGwsAndMgas(
@@ -1250,7 +1250,7 @@ fn isGatewayCardInfoCheckNeeded(
     txn_card_info
         .authType
         .as_ref()
-        .map(|at| *at == AuthType::ATMPIN)
+        .map(|at| *at == AuthType::Atmpin)
         .unwrap_or(false)
         && atm_pin_card_info_restricted_gateways.contains(gateway)
         ||
@@ -1258,7 +1258,7 @@ fn isGatewayCardInfoCheckNeeded(
         txn_card_info
             .authType
             .as_ref()
-            .map(|at| *at == AuthType::OTP)
+            .map(|at| *at == AuthType::Otp)
             .unwrap_or(false)
             && otp_card_info_supported_gateways.contains(gateway)
         ||
@@ -1266,7 +1266,7 @@ fn isGatewayCardInfoCheckNeeded(
         txn_card_info
             .authType
             .as_ref()
-            .map(|at| *at == AuthType::MOTO)
+            .map(|at| *at == AuthType::Moto)
             .unwrap_or(false)
             && moto_card_info_supported_gateways.contains(gateway)
 }
@@ -1289,13 +1289,13 @@ fn isAuthTypeSupportedGateway(
             (txn_card_info
                 .authType
                 .as_ref()
-                .map(|at| *at == AuthType::VIES)
+                .map(|at| *at == AuthType::Vies)
                 .unwrap_or(false))
                 || !(txn_card_info
                     .authType
                     .as_ref()
                     .map(|auth_type| {
-                        *auth_type != AuthType::ATMPIN
+                        *auth_type != AuthType::Atmpin
                             && atm_pin_card_info_restricted_gateways.contains(gateway)
                     })
                     .unwrap_or(false))
@@ -1303,7 +1303,7 @@ fn isAuthTypeSupportedGateway(
                         .authType
                         .as_ref()
                         .map(|auth_type| {
-                            *auth_type != AuthType::OTP
+                            *auth_type != AuthType::Otp
                                 && otp_card_info_restricted_gateways.contains(gateway)
                         })
                         .unwrap_or(false))
@@ -3140,7 +3140,7 @@ pub async fn filterGatewaysForTxnDetailType(this: &mut DeciderFlow<'_>) -> Vec<S
         findByNameFromRedis(C::TxnDetailTypeRestrictedGateways.get_key())
             .await
             .unwrap_or_default();
-    let filter_gws = if txn_type == "ZeroAuth" {
+    let filter_gws = if txn_type == "ZERO_AUTH" {
         st.iter()
             .filter(|gw| {
                 get_zero_auth_supported_gateways(txn_type, &txn_detail_type_restricted_gateways)

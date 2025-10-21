@@ -7,20 +7,17 @@ use std::string::String;
 use std::vec::Vec;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum EliminationLevel {
-    #[serde(rename = "GATEWAY")]
-    GATEWAY,
-    #[serde(rename = "PAYMENT_METHOD_TYPE")]
+    Gateway,
     PaymentMethodType,
-    #[serde(rename = "PAYMENT_METHOD")]
     PaymentMethod,
-    #[serde(rename = "NONE")]
-    NONE,
-    #[serde(rename = "FORCED_PAYMENT_METHOD")]
+    None,
     ForcedPaymentMethod,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum SelectionLevel {
     #[serde(rename = "PAYMENT_MODE")]
     SlPaymentMode,

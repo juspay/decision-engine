@@ -78,10 +78,11 @@ use crate::logger;
 // Converted data types
 // Original Haskell data type: GatewayScoringType
 #[derive(Debug, Serialize, Clone, Deserialize, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum GatewayScoringType {
-    PENALISE,
+    Penalise,
     PenaliseSrv3,
-    REWARD,
+    Reward,
 }
 
 // Original Haskell data type: JuspayBankCode
@@ -335,17 +336,17 @@ pub fn getTxnCardInfoFromApiPayload(
 // Original Haskell function: textToAuthType
 // pub fn textToAuthType(auth_type: Option<Text>) -> Option<ETCa::AuthType> {
 //     match auth_type.as_deref() {
-//         Some("ATMPIN") => Some(ETCa::AuthType::ATMPIN),
+//         Some("ATMPIN") => Some(ETCa::AuthType::Atmpin),
 //         Some("THREE_DS") => Some(ETCa::AuthType::ThreeDs),
 //         Some("THREE_DS_2") => Some(ETCa::AuthType::ThreeDs2),
-//         Some("OTP") => Some(ETCa::AuthType::OTP),
+//         Some("OTP") => Some(ETCa::AuthType::Otp),
 //         Some("OBO_OTP") => Some(ETCa::AuthType::OboOtp),
-//         Some("VIES") => Some(ETCa::AuthType::VIES),
+//         Some("VIES") => Some(ETCa::AuthType::Vies),
 //         Some("NO_THREE_DS") => Some(ETCa::AuthType::NoThreeDs),
 //         Some("NETWORK_TOKEN") => Some(ETCa::AuthType::NetworkToken),
-//         Some("MOTO") => Some(ETCa::AuthType::MOTO),
-//         Some("FIDO") => Some(ETCa::AuthType::FIDO),
-//         Some("CTP") => Some(ETCa::AuthType::CTP),
+//         Some("MOTO") => Some(ETCa::AuthType::Moto),
+//         Some("FIDO") => Some(ETCa::AuthType::Fido),
+//         Some("CTP") => Some(ETCa::AuthType::Ctp),
 //         _ => None,
 //     }
 // }
@@ -677,15 +678,15 @@ pub fn logGatewayScoreType(
 ) {
     let detailed_gateway_score_type = match routing_flow_type {
         RoutingFlowType::EliminationFlow => match gateway_score_type {
-            GatewayScoringType::REWARD => DetailedGatewayScoringType::EliminationReward,
+            GatewayScoringType::Reward => DetailedGatewayScoringType::EliminationReward,
             _ => DetailedGatewayScoringType::EliminationPenalise,
         },
         RoutingFlowType::Srv2Flow => match gateway_score_type {
-            GatewayScoringType::REWARD => DetailedGatewayScoringType::Srv2Reward,
+            GatewayScoringType::Reward => DetailedGatewayScoringType::Srv2Reward,
             _ => DetailedGatewayScoringType::Srv2Penalise,
         },
         _ => match gateway_score_type {
-            GatewayScoringType::REWARD => DetailedGatewayScoringType::Srv3Reward,
+            GatewayScoringType::Reward => DetailedGatewayScoringType::Srv3Reward,
             _ => DetailedGatewayScoringType::Srv3Penalise,
         },
     };
@@ -877,12 +878,12 @@ pub fn getTxnTypeFromInternalMetadata(internal_metadata: Option<Secret<String>>)
                 tag = "APP_DEBUG",
                 "FETCH_TXN_TYPE_FROM_IM_FLOW"
             );
-            (MandateTxnType::DEFAULT)
+            (MandateTxnType::Default)
         }
         Some(internal_metadata) => {
             match serde_json::from_str::<MandateTxnInfo>(internal_metadata.peek()) {
                 Ok(txn_info) => txn_info.mandateTxnInfo.txnType,
-                Err(_) => MandateTxnType::DEFAULT,
+                Err(_) => MandateTxnType::Default,
             }
         }
     }
@@ -897,7 +898,7 @@ pub fn isMandateRegTxn(txn_object_type: TxnObjectType) -> bool {
 pub fn isPennyTxnType(txn_detail: TxnDetail) -> bool {
     let mandate = getTxnTypeFromInternalMetadata(txn_detail.internalMetadata);
     match mandate {
-        MandateTxnType::REGISTER => true,
+        MandateTxnType::Register => true,
         _ => false,
     }
 }

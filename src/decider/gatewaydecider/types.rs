@@ -180,6 +180,7 @@ pub enum DeciderScoringName {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum DetailedGatewayScoringType {
     EliminationPenalise,
     EliminationReward,
@@ -190,6 +191,7 @@ pub enum DetailedGatewayScoringType {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum RoutingFlowType {
     EliminationFlow,
     Srv2Flow,
@@ -197,6 +199,7 @@ pub enum RoutingFlowType {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ScoreUpdateStatus {
     PENALISED,
     REWARDED,
@@ -589,6 +592,7 @@ pub struct MetricsStreamKey(String);
 // }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ScoreKeyType {
     EliminationGlobalKey,
     EliminationMerchantKey,
@@ -599,6 +603,7 @@ pub enum ScoreKeyType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum GatewayDeciderApproach {
     SrSelection,
     SrSelectionV2Routing,
@@ -628,6 +633,7 @@ pub enum GatewayDeciderApproach {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum DownTime {
     AllDowntime,
     GlobalDowntime,
@@ -636,6 +642,7 @@ pub enum DownTime {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ResetApproach {
     EliminationReset,
     Srv2Reset,
@@ -646,6 +653,7 @@ pub enum ResetApproach {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum RankingAlgorithm {
     SrBasedRouting,
     PlBasedRouting,
@@ -1292,12 +1300,14 @@ pub struct Offer {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum EmiType {
     NoCostEmi,
     LowCostEmi,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ValidationType {
     CardMandate,
     EMANDATE,
@@ -1616,7 +1626,7 @@ pub struct PriorityLogicData {
 }
 
 #[derive(Debug, PartialEq, Clone, Eq, Serialize, Deserialize)]
-// #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum PriorityLogicFailure {
     NoError,
     ConnectionFailed,
@@ -1633,7 +1643,7 @@ pub enum PriorityLogicFailure {
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
-// #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum Status {
     SUCCESS,
     FAILURE,
@@ -1805,6 +1815,7 @@ pub struct SuccessRate1AndNConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum FilterLevel {
     TxnObjectType,
     PaymentMethod,
@@ -1812,6 +1823,7 @@ pub enum FilterLevel {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ConfigSource {
     GlobalDefault,
     MerchantDefault,

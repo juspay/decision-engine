@@ -42,10 +42,11 @@ pub struct TxnInfo {
 
 // Original Haskell data type: MandateTxnType
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum MandateTxnType {
-    REGISTER,
+    Register,
     RegisterAndDebit,
-    DEFAULT,
+    Default,
 }
 
 // Original Haskell data type: MerchantScoringDetails

@@ -351,11 +351,11 @@ pub async fn getGatewayScoringType(
     );
 
     if is_success {
-        GatewayScoringType::REWARD
+        GatewayScoringType::Reward
     } else if is_failure {
         GatewayScoringType::PenaliseSrv3
     } else if time_difference < ((time_difference_threshold * 1000.0) as u128) {
-        GatewayScoringType::PENALISE
+        GatewayScoringType::Penalise
     } else {
         GatewayScoringType::PenaliseSrv3
     }
@@ -367,13 +367,13 @@ pub fn updateGatewayScoreLock(
     gateway: String,
 ) -> String {
     match (gateway_scoring_type) {
-        (GatewayScoringType::PENALISE) => {
+        (GatewayScoringType::Penalise) => {
             format!("gateway_scores_lock_PENALISE_{}_{}", txn_uuid, gateway)
         }
         (GatewayScoringType::PenaliseSrv3) => {
             format!("gateway_scores_lock_PENALISE_SRV3_{}_{}", txn_uuid, gateway)
         }
-        (GatewayScoringType::REWARD) => {
+        (GatewayScoringType::Reward) => {
             format!("gateway_scores_lock_REWARD_{}_{}", txn_uuid, gateway)
         }
         _ => String::new(),
@@ -574,14 +574,14 @@ pub async fn updateGatewayScore(
 
     let should_update_gateway_score = if gateway_scoring_type.clone() == GST::PenaliseSrv3 {
         false
-    } else if gateway_scoring_type.clone() == GST::PENALISE {
+    } else if gateway_scoring_type.clone() == GST::Penalise {
         isTransactionPending(txn_detail.clone().status)
     } else {
         true
     };
 
     //let is_pm_and_pmt_present = Fbu::isTrueString(txn_card_info.paymentMethod) && txn_card_info.paymentMethodType.is_some();
-    let should_update_srv3_gateway_score = if gateway_scoring_type.clone() == GST::PENALISE {
+    let should_update_srv3_gateway_score = if gateway_scoring_type.clone() == GST::Penalise {
         false
     } else {
         true
@@ -800,7 +800,7 @@ pub async fn isUpdateWithinLatencyWindow(
     txn_latency: Option<TransactionLatency>,
 ) -> bool {
     match gateway_scoring_type {
-        GatewayScoringType::PENALISE => true,
+        GatewayScoringType::Penalise => true,
         _ => {
             let exempt_for_mandate_txn = checkExemptIfMandateTxn(&txn_detail, &txn_card_info).await;
             if exempt_for_mandate_txn

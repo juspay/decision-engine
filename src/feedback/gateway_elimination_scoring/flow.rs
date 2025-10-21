@@ -227,7 +227,7 @@ fn getTransactionCount(
         match previous_transaction_count {
             None => Some(1),
             Some(transaction_count) => {
-                if gateway_scoring_type == GatewayScoreType::PENALISE {
+                if gateway_scoring_type == GatewayScoreType::Penalise {
                     Some(transaction_count + 1)
                 } else {
                     Some(transaction_count)
@@ -263,7 +263,7 @@ pub async fn updateKeyScoreForTxnStatus(
     );
 
     match gateway_scoring_type {
-        GatewayScoreType::PENALISE => {
+        GatewayScoreType::Penalise => {
             return updateScoreWithPenalty(
                 is_elimination_v2_enabled,
                 is_outage_key,
@@ -276,7 +276,7 @@ pub async fn updateKeyScoreForTxnStatus(
             )
             .await;
         }
-        GatewayScoreType::REWARD => {
+        GatewayScoreType::Reward => {
             return updateScoreWithReward(
                 is_elimination_v2_enabled,
                 is_outage_key,
@@ -501,7 +501,7 @@ pub async fn replaceTransactionCount(
             score_key_type,
         )
         .await;
-        let new_count = if gateway_scoring_type == GatewayScoreType::PENALISE {
+        let new_count = if gateway_scoring_type == GatewayScoreType::Penalise {
             merchant_scoring_details.transactionCount + 1
         } else {
             merchant_scoring_details.transactionCount
@@ -603,7 +603,7 @@ pub async fn getAllUnifiedKeys(
             mer_acc_p_id,
             mer_acc.tenantAccountId,
             ModuleEnum::MerchantConfig,
-            PaymentFlow::PaymentFlow::OUTAGE,
+            PaymentFlow::PaymentFlow::Outage,
             crate::types::country::country_iso::text_db_to_country_iso(
                 mer_acc.country.as_deref().unwrap_or_default(),
             )

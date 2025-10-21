@@ -23,6 +23,7 @@ use crate::storage::schema::merchant_gateway_account_sub_info::dsl;
 use crate::storage::schema_pg::merchant_gateway_account_sub_info::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct MerchantGatewayAccountSubInfo {
@@ -44,7 +45,8 @@ pub fn to_mgasi_pid(id: i64) -> MgasiPId {
     MgasiPId { mgasiPId: id }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum SubInfoType {
     SplitSettlement,
 }

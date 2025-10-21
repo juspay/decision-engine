@@ -197,7 +197,7 @@ pub async fn updateScoreAndQueue(
     .await;
     let (value, should_score_increase): (String, bool) = match gateway_scoring_type {
         GatewayScoringType::PenaliseSrv3 => ("0".into(), false),
-        GatewayScoringType::REWARD => ("1".into(), true),
+        GatewayScoringType::Reward => ("1".into(), true),
         _ => ("0".into(), false),
     };
     // let is_debug_mode_enabled = isFeatureEnabled(

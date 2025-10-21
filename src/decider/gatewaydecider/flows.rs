@@ -1141,7 +1141,7 @@ pub async fn getFailureReasonWithFilter(
                     .as_ref()
                     .and_then(|meta| meta.isCvvLessTxn)
                     .unwrap_or(false)
-                    && txn_card_info.authType == Some(AuthType::MOTO)
+                    && txn_card_info.authType == Some(AuthType::Moto)
                 {
                     format!(
                         "No functional gateways supporting cvv less {}repeat moto transaction.",

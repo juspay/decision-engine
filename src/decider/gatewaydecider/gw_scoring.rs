@@ -1387,7 +1387,7 @@ pub async fn get_global_elimination_gateway_score(
     gateway_key_map: GatewayRedisKeyMap,
     gsri: GatewayWiseSuccessRateBasedRoutingInput,
 ) -> Option<(Vec<GlobalScoreLog>, f64)> {
-    if gsri.eliminationLevel != Some(ETGRI::EliminationLevel::NONE) {
+    if gsri.eliminationLevel != Some(ETGRI::EliminationLevel::None) {
         let redis_key = gateway_key_map
             .get(&gsri.gateway.to_string())
             .cloned()
@@ -1787,7 +1787,7 @@ pub fn is_forced_pm(v: &GatewaySuccessRateBasedRoutingInput) -> bool {
 }
 
 pub fn global_elim_lvl_not_none(v: &GatewaySuccessRateBasedRoutingInput) -> bool {
-    v.defaultGlobalEliminationLevel != Some(EliminationLevel::NONE)
+    v.defaultGlobalEliminationLevel != Some(EliminationLevel::None)
 }
 
 pub async fn get_gateway_wise_routing_inputs_for_merchant_sr(
@@ -1861,7 +1861,7 @@ pub async fn get_gateway_wise_routing_inputs_for_merchant_sr(
                 .eliminationLevel
                 .clone()
                 .or(merchant_given_default_elimination_level.clone())
-                .or(Some(EliminationLevel::GATEWAY)),
+                .or(Some(EliminationLevel::Gateway)),
             ..e.clone()
         })
         .unwrap_or(GatewayWiseSuccessRateBasedRoutingInput {

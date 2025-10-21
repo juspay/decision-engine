@@ -20,10 +20,12 @@ pub enum OfferStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum OfferType {
-    CASHBACK,
-    VOUCHER,
-    DISCOUNT,
+    Cashback,
+    VCoucher,
+    Discount,
+    #[serde(rename = "REWARD_POINT")]
     RewardPoint,
 }
 

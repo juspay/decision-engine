@@ -57,21 +57,13 @@ pub struct FeatureDimension {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum DimensionType {
-    #[serde(rename = "JUSPAY_BANK_CODE")]
     JuspayBankCode,
-
-    #[serde(rename = "GATEWAY")]
-    GATEWAY,
-
-    #[serde(rename = "CARD_BRAND")]
+    Gateway,
     CardBrand,
-
-    #[serde(rename = "SCOF")]
-    SCOF,
-
-    #[serde(rename = "FIDO")]
-    FIDO,
+    Scof,
+    Fido,
 }
 
 pub trait ServiceConfigKey {
