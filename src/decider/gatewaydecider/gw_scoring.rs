@@ -3171,11 +3171,9 @@ pub fn route_random_traffic(
                 .chain(head_gateways.iter())
                 .collect::<Vec<_>>()
         );
-        if is_sr_v3_metric_enabled {
-            set_decider_approach(decider_flow, GatewayDeciderApproach::SR_V3_HEDGING);
-        } else {
-            set_decider_approach(decider_flow, GatewayDeciderApproach::SR_V3_HEDGING);
-        }
+
+        set_decider_approach(decider_flow, GatewayDeciderApproach::SR_V3_HEDGING);
+
         remaining_gateways
             .into_iter()
             .map(|(gw, score)| (gw.clone(), score))
