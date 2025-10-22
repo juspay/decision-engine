@@ -10,6 +10,8 @@ use crate::{
     logger::config::Log,
 };
 use error_stack::ResultExt;
+#[cfg(feature = "kms-hashicorp-vault")]
+use masking::ExposeInterface;
 use redis_interface::RedisSettings;
 use std::{
     collections::HashMap,
