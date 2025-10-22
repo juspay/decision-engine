@@ -200,7 +200,7 @@ pub async fn newGwFilters(
             None,
             None,
             vec![],
-            GatewayDeciderApproach::NONE,
+            GatewayDeciderApproach::None,
             None,
             vec![],
             None,

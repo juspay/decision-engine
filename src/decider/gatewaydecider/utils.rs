@@ -1246,10 +1246,10 @@ pub fn get_gateway_decider_approach(
         if gw_set.len() > 1 {
             gateway_decider_approach
         } else {
-            types::GatewayDeciderApproach::DEFAULT
+            types::GatewayDeciderApproach::Default
         }
     } else {
-        types::GatewayDeciderApproach::NONE
+        types::GatewayDeciderApproach::None
     }
 }
 
@@ -1263,7 +1263,7 @@ pub fn modify_gateway_decider_approach(
             types::DownTime::GlobalDowntime => {
                 types::GatewayDeciderApproach::SrV3GlobalDowntimeRouting
             }
-            types::DownTime::DOWNTIME => types::GatewayDeciderApproach::SrV3DowntimeRouting,
+            types::DownTime::Downtime => types::GatewayDeciderApproach::SrV3DowntimeRouting,
             types::DownTime::NoDowntime => types::GatewayDeciderApproach::SrSelectionV3Routing,
         },
         types::GatewayDeciderApproach::SrV3Hedging => match down_time {
@@ -1271,7 +1271,7 @@ pub fn modify_gateway_decider_approach(
             types::DownTime::GlobalDowntime => {
                 types::GatewayDeciderApproach::SrV3GlobalDowntimeHedging
             }
-            types::DownTime::DOWNTIME => types::GatewayDeciderApproach::SrV3DowntimeHedging,
+            types::DownTime::Downtime => types::GatewayDeciderApproach::SrV3DowntimeHedging,
             types::DownTime::NoDowntime => types::GatewayDeciderApproach::SrV3Hedging,
         },
         types::GatewayDeciderApproach::SrSelectionV2Routing => match down_time {
@@ -1279,7 +1279,7 @@ pub fn modify_gateway_decider_approach(
             types::DownTime::GlobalDowntime => {
                 types::GatewayDeciderApproach::SrV2GlobalDowntimeRouting
             }
-            types::DownTime::DOWNTIME => types::GatewayDeciderApproach::SrV2DowntimeRouting,
+            types::DownTime::Downtime => types::GatewayDeciderApproach::SrV2DowntimeRouting,
             types::DownTime::NoDowntime => types::GatewayDeciderApproach::SrSelectionV2Routing,
         },
         types::GatewayDeciderApproach::SrV2Hedging => match down_time {
@@ -1287,7 +1287,7 @@ pub fn modify_gateway_decider_approach(
             types::DownTime::GlobalDowntime => {
                 types::GatewayDeciderApproach::SrV2GlobalDowntimeHedging
             }
-            types::DownTime::DOWNTIME => types::GatewayDeciderApproach::SrV2DowntimeHedging,
+            types::DownTime::Downtime => types::GatewayDeciderApproach::SrV2DowntimeHedging,
             types::DownTime::NoDowntime => types::GatewayDeciderApproach::SrV2Hedging,
         },
         _ => match down_time {
@@ -1295,7 +1295,7 @@ pub fn modify_gateway_decider_approach(
             types::DownTime::GlobalDowntime => {
                 types::GatewayDeciderApproach::PlGlobalDowntimeRouting
             }
-            types::DownTime::DOWNTIME => types::GatewayDeciderApproach::PlDowntimeRouting,
+            types::DownTime::Downtime => types::GatewayDeciderApproach::PlDowntimeRouting,
             types::DownTime::NoDowntime => types::GatewayDeciderApproach::PriorityLogic,
         },
     }

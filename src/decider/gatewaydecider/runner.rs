@@ -1073,7 +1073,7 @@ fn check_and_update_pl_failure_reason(
         None => None,
         Some(mut data) => {
             if data.failure_reason != pl_failure_reason {
-                data.status = DeciderTypes::Status::FAILURE;
+                data.status = DeciderTypes::Status::Failure;
                 data.failure_reason = pl_failure_reason;
             }
             Some(data)
@@ -1135,7 +1135,7 @@ async fn handle_response(
                 .collect();
             let pl_data = DeciderTypes::PriorityLogicData {
                 name: priority_logic_tag,
-                status: DeciderTypes::Status::FAILURE,
+                status: DeciderTypes::Status::Failure,
                 failure_reason: pl_resp.errorMessage,
             };
             EvaluationResult::EvaluationError(pl_data, log_entries)
@@ -1163,7 +1163,7 @@ async fn handle_failure_response(
 ) -> EvaluationResult {
     let pl_data = DeciderTypes::PriorityLogicData {
         name: priority_logic_tag,
-        status: DeciderTypes::Status::FAILURE,
+        status: DeciderTypes::Status::Failure,
         failure_reason: DeciderTypes::PriorityLogicFailure::PlEvaluationFailed,
     };
     EvaluationResult::EvaluationError(pl_data, log_entries)
@@ -1175,7 +1175,7 @@ async fn handle_success_response(
     log_entries: Vec<LogEntry>,
 ) -> EvaluationResult {
     let gws = response_body.result.gatewayPriority.unwrap_or_default();
-    let status = DeciderTypes::Status::SUCCESS;
+    let status = DeciderTypes::Status::Success;
     let pl_data = DeciderTypes::PriorityLogicData {
         name: priority_logic_tag.clone(),
         status: status.clone(),

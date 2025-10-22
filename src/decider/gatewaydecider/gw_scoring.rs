@@ -189,7 +189,7 @@ pub async fn scoring_flow(
 
     if functional_gateways.len() == 1 {
         set_gwsm(decider_flow, create_score_map(functional_gateways.clone()));
-        set_decider_approach(decider_flow, GatewayDeciderApproach::DEFAULT);
+        set_decider_approach(decider_flow, GatewayDeciderApproach::Default);
         Utils::set_top_gateway_before_sr_downtime_evaluation(
             decider_flow,
             functional_gateways.first().cloned(),
@@ -2708,7 +2708,7 @@ pub async fn update_gateway_score_based_on_success_rate(
                     } else if !filtered_gateway_success_rate_inputs.is_empty() {
                         (
                             new_gateway_score.clone(),
-                            DownTime::DOWNTIME,
+                            DownTime::Downtime,
                             sr_based_elimination_approach_info,
                         )
                     } else {

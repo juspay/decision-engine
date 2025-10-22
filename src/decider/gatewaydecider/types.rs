@@ -201,8 +201,8 @@ pub enum RoutingFlowType {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ScoreUpdateStatus {
-    PENALISED,
-    REWARDED,
+    Penalised,
+    Rewarded,
     NotInitiated,
 }
 
@@ -494,7 +494,7 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
             dateCreated: date_created,
             gatewayBeforeDowntimeEvaluation: None,
         },
-        gwDeciderApproach: GatewayDeciderApproach::NONE,
+        gwDeciderApproach: GatewayDeciderApproach::None,
         srElminiationApproachInfo: vec![],
         allMgas: None,
         paymentFlowList: vec![],
@@ -609,8 +609,8 @@ pub enum GatewayDeciderApproach {
     SrSelectionV2Routing,
     SrSelectionV3Routing,
     PriorityLogic,
-    DEFAULT,
-    NONE,
+    Default,
+    None,
     MerchantPreference,
     PlAllDowntimeRouting,
     PlDowntimeRouting,
@@ -637,7 +637,7 @@ pub enum GatewayDeciderApproach {
 pub enum DownTime {
     AllDowntime,
     GlobalDowntime,
-    DOWNTIME,
+    Downtime,
     NoDowntime,
 }
 
@@ -1310,10 +1310,10 @@ pub enum EmiType {
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ValidationType {
     CardMandate,
-    EMANDATE,
-    TPV,
+    Emandate,
+    Tpv,
     TpvMandate,
-    REWARD,
+    Reward,
     TpvEmandate,
 }
 
@@ -1372,8 +1372,8 @@ impl fmt::Display for RoutingFlowType {
 impl fmt::Display for ScoreUpdateStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::PENALISED => write!(f, "PENALISED"),
-            Self::REWARDED => write!(f, "REWARDED"),
+            Self::Penalised => write!(f, "PENALISED"),
+            Self::Rewarded => write!(f, "REWARDED"),
             Self::NotInitiated => write!(f, "NOT_INITIATED"),
         }
     }
@@ -1399,8 +1399,8 @@ impl fmt::Display for GatewayDeciderApproach {
             Self::SrSelectionV2Routing => write!(f, "SR_SELECTION_V2_ROUTING"),
             Self::SrSelectionV3Routing => write!(f, "SR_SELECTION_V3_ROUTING"),
             Self::PriorityLogic => write!(f, "PRIORITY_LOGIC"),
-            Self::DEFAULT => write!(f, "DEFAULT"),
-            Self::NONE => write!(f, "NONE"),
+            Self::Default => write!(f, "DEFAULT"),
+            Self::None => write!(f, "NONE"),
             Self::MerchantPreference => write!(f, "MERCHANT_PREFERENCE"),
             Self::PlAllDowntimeRouting => write!(f, "PL_ALL_DOWNTIME_ROUTING"),
             Self::PlDowntimeRouting => write!(f, "PL_DOWNTIME_ROUTING"),
@@ -1449,7 +1449,7 @@ impl fmt::Display for DownTime {
         match self {
             Self::AllDowntime => write!(f, "ALL_DOWNTIME"),
             Self::GlobalDowntime => write!(f, "GLOBAL_DOWNTIME"),
-            Self::DOWNTIME => write!(f, "DOWNTIME"),
+            Self::Downtime => write!(f, "DOWNTIME"),
             Self::NoDowntime => write!(f, "NO_DOWNTIME"),
         }
     }
@@ -1472,10 +1472,10 @@ impl fmt::Display for ValidationType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::CardMandate => write!(f, "CARD_MANDATE"),
-            Self::EMANDATE => write!(f, "EMANDATE"),
-            Self::TPV => write!(f, "TPV"),
+            Self::Emandate => write!(f, "EMANDATE"),
+            Self::Tpv => write!(f, "TPV"),
             Self::TpvMandate => write!(f, "TPV_MANDATE"),
-            Self::REWARD => write!(f, "REWARD"),
+            Self::Reward => write!(f, "REWARD"),
             Self::TpvEmandate => write!(f, "TPV_EMANDATE"),
         }
     }
@@ -1484,8 +1484,8 @@ impl fmt::Display for ValidationType {
 impl fmt::Display for Status {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::SUCCESS => write!(f, "SUCCESS"),
-            Self::FAILURE => write!(f, "FAILURE"),
+            Self::Success => write!(f, "SUCCESS"),
+            Self::Failure => write!(f, "FAILURE"),
         }
     }
 }
@@ -1645,8 +1645,8 @@ pub enum PriorityLogicFailure {
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum Status {
-    SUCCESS,
-    FAILURE,
+    Success,
+    Failure,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

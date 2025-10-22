@@ -72,7 +72,7 @@ pub async fn newGwFilters(this: &mut DeciderFlow<'_>) -> (GatewayList, Vec<ETM::
             txnId,
             merchantId
         );
-        Utils::log_gateway_decider_approach(this, None, None, vec![], GatewayDeciderApproach::NONE, None, vec![], None);
+        Utils::log_gateway_decider_approach(this, None, None, vec![], GatewayDeciderApproach::None, None, vec![], None);
         (vec![], vec![])
     } else {
         let _ = filterGatewaysForBrand(this).await;

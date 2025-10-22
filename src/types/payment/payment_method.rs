@@ -46,69 +46,57 @@ pub struct PaymentMethod {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum PaymentMethodSubType {
-    #[serde(rename = "WALLET")]
-    WALLET,
-    #[serde(rename = "CF_BNPL")]
+    Wallet,
     CfBnpl,
-    #[serde(rename = "GIFT_CARD")]
     GiftCard,
-    #[serde(rename = "CF_EMI")]
     CfEmi,
-    #[serde(rename = "REAL_TIME")]
     RealTime,
-    #[serde(rename = "CF_POD")]
     CfPod,
-    #[serde(rename = "REWARD")]
-    REWARD,
-    #[serde(rename = "VAN")]
-    VAN,
-    #[serde(rename = "STORE")]
-    STORE,
-    #[serde(rename = "POS")]
-    POS,
-    #[serde(rename = "CF_LSP")]
+    Reward,
+    Van,
+    Store,
+    Pos,
     CfLsp,
-    #[serde(rename = "FPX")]
-    FPX,
-    #[serde(rename = "UNKNOWN")]
-    UNKNOWN,
+    Fpx,
+    Unknown,
 }
 
 impl PaymentMethodSubType {
     pub fn to_text(&self) -> &'static str {
         match self {
-            Self::WALLET => "WALLET",
+            Self::Wallet => "WALLET",
             Self::CfBnpl => "CF_BNPL",
             Self::GiftCard => "GIFT_CARD",
             Self::CfEmi => "CF_EMI",
             Self::RealTime => "REAL_TIME",
             Self::CfPod => "CF_POD",
-            Self::REWARD => "REWARD",
-            Self::VAN => "VAN",
-            Self::STORE => "STORE",
-            Self::POS => "POS",
+            Self::Reward => "REWARD",
+            Self::Van => "VAN",
+            Self::Store => "STORE",
+            Self::Pos => "POS",
             Self::CfLsp => "CF_LSP",
-            Self::FPX => "FPX",
-            Self::UNKNOWN => "UNKNOWN",
+            Self::Fpx => "FPX",
+            Self::Unknown => "UNKNOWN",
         }
     }
 
     pub fn from_text(ctx: &str) -> Result<Self, ApiError> {
         match ctx {
-            "WALLET" => Ok(Self::WALLET),
+            "WALLET" => Ok(Self::Wallet),
             "CF_BNPL" => Ok(Self::CfBnpl),
             "GIFT_CARD" => Ok(Self::GiftCard),
             "CF_EMI" => Ok(Self::CfEmi),
             "REAL_TIME" => Ok(Self::RealTime),
             "CF_POD" => Ok(Self::CfPod),
-            "REWARD" => Ok(Self::REWARD),
-            "VAN" => Ok(Self::VAN),
-            "STORE" => Ok(Self::STORE),
-            "POS" => Ok(Self::POS),
+            "REWARD" => Ok(Self::Reward),
+            "VAN" => Ok(Self::Van),
+            "STORE" => Ok(Self::Store),
+            "POS" => Ok(Self::Pos),
             "CF_LSP" => Ok(Self::CfLsp),
-            "FPX" => Ok(Self::FPX),
-            "UNKNOWN" => Ok(Self::UNKNOWN),
+            "FPX" => Ok(Self::Fpx),
+            "UNKNOWN" => Ok(Self::Unknown),
             _ => Err(ApiError::ParsingError("Invalid Payment Method Sub Type")),
         }
     }
