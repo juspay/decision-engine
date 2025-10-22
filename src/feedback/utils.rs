@@ -70,7 +70,7 @@ use crate::types::payment::payment_method as ETP;
 // use types::money::{from_double, Money};
 // use optics::core::{preview, review};
 // use control::category::<<<;
-use super::constants::gatewayScoringData;
+use super::constants::GATEWAY_SCORING_DATA;
 use crate::types::gateway::{gateway_any_to_text, GatewayAny};
 // use prelude::real_to_frac;
 // use data::time::clock::posix as DTP;
@@ -78,10 +78,11 @@ use crate::logger;
 // Converted data types
 // Original Haskell data type: GatewayScoringType
 #[derive(Debug, Serialize, Clone, Deserialize, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum GatewayScoringType {
-    PENALISE,
-    PENALISE_SRV3,
-    REWARD,
+    Penalise,
+    PenaliseSrv3,
+    Reward,
 }
 
 // Original Haskell data type: JuspayBankCode
@@ -256,17 +257,17 @@ pub fn getTxnCardInfoFromApiPayload(
 // Original Haskell function: convertTxnObjectTypeFli::
 // pub fn convertTxnObjectTypeFlip(txn_object_type: Option<TxnObjectType>) -> ETTD::TxnObjectType {
 //     match txn_object_type {
-//         Some(TxnObjectType::ORDER_PAYMENT) => ETTD::TxnObjectType::OrderPayment,
-//         Some(TxnObjectType::MANDATE_REGISTER) => ETTD::TxnObjectType::MandateRegister,
-//         Some(TxnObjectType::EMANDATE_REGISTER) => ETTD::TxnObjectType::EmandateRegister,
-//         Some(TxnObjectType::EMANDATE_PAYMENT) => ETTD::TxnObjectType::EmandatePayment,
-//         Some(TxnObjectType::MANDATE_PAYMENT) => ETTD::TxnObjectType::MandatePayment,
-//         Some(TxnObjectType::TPV_PAYMENT) => ETTD::TxnObjectType::TpvPayment,
-//         Some(TxnObjectType::PARTIAL_CAPTURE) => ETTD::TxnObjectType::PartialCapture,
-//         Some(TxnObjectType::TPV_EMANDATE_REGISTER) => ETTD::TxnObjectType::TpvEmandateRegister,
-//         Some(TxnObjectType::TPV_MANDATE_REGISTER) => ETTD::TxnObjectType::TpvMandateRegister,
-//         Some(TxnObjectType::TPV_EMANDATE_PAYMENT) => ETTD::TxnObjectType::TpvEmandatePayment,
-//         Some(TxnObjectType::TPV_MANDATE_PAYMENT) => ETTD::TxnObjectType::TpvMandatePayment,
+//         Some(TxnObjectType::OrderPayment) => ETTD::TxnObjectType::OrderPayment,
+//         Some(TxnObjectType::MandateRegister) => ETTD::TxnObjectType::MandateRegister,
+//         Some(TxnObjectType::EmandateRegister) => ETTD::TxnObjectType::EmandateRegister,
+//         Some(TxnObjectType::EmandatePayment) => ETTD::TxnObjectType::EmandatePayment,
+//         Some(TxnObjectType::MandatePayment) => ETTD::TxnObjectType::MandatePayment,
+//         Some(TxnObjectType::TpvPayment) => ETTD::TxnObjectType::TpvPayment,
+//         Some(TxnObjectType::PartialCapture) => ETTD::TxnObjectType::PartialCapture,
+//         Some(TxnObjectType::TpvEmandateRegister) => ETTD::TxnObjectType::TpvEmandateRegister,
+//         Some(TxnObjectType::TpvMandateRegister) => ETTD::TxnObjectType::TpvMandateRegister,
+//         Some(TxnObjectType::TpvEmandatePayment) => ETTD::TxnObjectType::TpvEmandatePayment,
+//         Some(TxnObjectType::TpvMandatePayment) => ETTD::TxnObjectType::TpvMandatePayment,
 //         _ => ETTD::TxnObjectType::OrderPayment,
 //     }
 // }
@@ -335,17 +336,17 @@ pub fn getTxnCardInfoFromApiPayload(
 // Original Haskell function: textToAuthType
 // pub fn textToAuthType(auth_type: Option<Text>) -> Option<ETCa::AuthType> {
 //     match auth_type.as_deref() {
-//         Some("ATMPIN") => Some(ETCa::AuthType::ATMPIN),
-//         Some("THREE_DS") => Some(ETCa::AuthType::THREE_DS),
-//         Some("THREE_DS_2") => Some(ETCa::AuthType::THREE_DS_2),
-//         Some("OTP") => Some(ETCa::AuthType::OTP),
-//         Some("OBO_OTP") => Some(ETCa::AuthType::OBO_OTP),
-//         Some("VIES") => Some(ETCa::AuthType::VIES),
-//         Some("NO_THREE_DS") => Some(ETCa::AuthType::NO_THREE_DS),
-//         Some("NETWORK_TOKEN") => Some(ETCa::AuthType::NETWORK_TOKEN),
-//         Some("MOTO") => Some(ETCa::AuthType::MOTO),
-//         Some("FIDO") => Some(ETCa::AuthType::FIDO),
-//         Some("CTP") => Some(ETCa::AuthType::CTP),
+//         Some("ATMPIN") => Some(ETCa::AuthType::Atmpin),
+//         Some("THREE_DS") => Some(ETCa::AuthType::ThreeDs),
+//         Some("THREE_DS_2") => Some(ETCa::AuthType::ThreeDs2),
+//         Some("OTP") => Some(ETCa::AuthType::Otp),
+//         Some("OBO_OTP") => Some(ETCa::AuthType::OboOtp),
+//         Some("VIES") => Some(ETCa::AuthType::Vies),
+//         Some("NO_THREE_DS") => Some(ETCa::AuthType::NoThreeDs),
+//         Some("NETWORK_TOKEN") => Some(ETCa::AuthType::NetworkToken),
+//         Some("MOTO") => Some(ETCa::AuthType::Moto),
+//         Some("FIDO") => Some(ETCa::AuthType::Fido),
+//         Some("CTP") => Some(ETCa::AuthType::Ctp),
 //         _ => None,
 //     }
 // }
@@ -367,7 +368,7 @@ pub fn getTxnCardInfoFromApiPayload(
 //         Some(FT::PaymentMethodType::PAPERNACH) => ETP::PaymentMethodType::Papernach,
 //         Some(FT::PaymentMethodType::PAN) => ETP::PaymentMethodType::PAN,
 //         Some(FT::PaymentMethodType::UNKNOWN(ref val)) if val == "ATM_CARD" => ETP::PaymentMethodType::AtmCard,
-//         Some(FT::PaymentMethodType::MERCHANT_CONTAINER) => ETP::PaymentMethodType::MerchantContainer,
+//         Some(FT::PaymentMethodType::MerchantContainer) => ETP::PaymentMethodType::MerchantContainer,
 //         Some(FT::PaymentMethodType::Virtual_Account) => ETP::PaymentMethodType::VirtualAccount,
 //         Some(FT::PaymentMethodType::OTC) => ETP::PaymentMethodType::Otc,
 //         Some(FT::PaymentMethodType::RTP) => ETP::PaymentMethodType::Rtp,
@@ -622,11 +623,10 @@ pub async fn getProducerKey(
 ) -> Option<String> {
     match redis_gateway_score_data {
         Some(gateway_score_data) => {
-            let is_gri_enabled = if [ScoreKeyType::ELIMINATION_MERCHANT_KEY]
-                .contains(&score_key_type)
+            let is_gri_enabled = if [ScoreKeyType::EliminationMerchantKey].contains(&score_key_type)
             {
                 gateway_score_data.isGriEnabledForElimination
-            } else if [ScoreKeyType::SR_V2_KEY, ScoreKeyType::SR_V3_KEY].contains(&score_key_type) {
+            } else if [ScoreKeyType::SrV2Key, ScoreKeyType::SrV3Key].contains(&score_key_type) {
                 gateway_score_data.isGriEnabledForSrRouting
             } else {
                 false
@@ -677,17 +677,17 @@ pub fn logGatewayScoreType(
     txn_detail: TxnDetail,
 ) {
     let detailed_gateway_score_type = match routing_flow_type {
-        RoutingFlowType::ELIMINATION_FLOW => match gateway_score_type {
-            GatewayScoringType::REWARD => DetailedGatewayScoringType::ELIMINATION_REWARD,
-            _ => DetailedGatewayScoringType::ELIMINATION_PENALISE,
+        RoutingFlowType::EliminationFlow => match gateway_score_type {
+            GatewayScoringType::Reward => DetailedGatewayScoringType::EliminationReward,
+            _ => DetailedGatewayScoringType::EliminationPenalise,
         },
-        RoutingFlowType::SRV2_FLOW => match gateway_score_type {
-            GatewayScoringType::REWARD => DetailedGatewayScoringType::SRV2_REWARD,
-            _ => DetailedGatewayScoringType::SRV2_PENALISE,
+        RoutingFlowType::Srv2Flow => match gateway_score_type {
+            GatewayScoringType::Reward => DetailedGatewayScoringType::Srv2Reward,
+            _ => DetailedGatewayScoringType::Srv2Penalise,
         },
         _ => match gateway_score_type {
-            GatewayScoringType::REWARD => DetailedGatewayScoringType::SRV3_REWARD,
-            _ => DetailedGatewayScoringType::SRV3_PENALISE,
+            GatewayScoringType::Reward => DetailedGatewayScoringType::Srv3Reward,
+            _ => DetailedGatewayScoringType::Srv3Penalise,
         },
     };
 
@@ -878,12 +878,12 @@ pub fn getTxnTypeFromInternalMetadata(internal_metadata: Option<Secret<String>>)
                 tag = "APP_DEBUG",
                 "FETCH_TXN_TYPE_FROM_IM_FLOW"
             );
-            (MandateTxnType::DEFAULT)
+            (MandateTxnType::Default)
         }
         Some(internal_metadata) => {
             match serde_json::from_str::<MandateTxnInfo>(internal_metadata.peek()) {
                 Ok(txn_info) => txn_info.mandateTxnInfo.txnType,
-                Err(_) => MandateTxnType::DEFAULT,
+                Err(_) => MandateTxnType::Default,
             }
         }
     }
@@ -898,7 +898,7 @@ pub fn isMandateRegTxn(txn_object_type: TxnObjectType) -> bool {
 pub fn isPennyTxnType(txn_detail: TxnDetail) -> bool {
     let mandate = getTxnTypeFromInternalMetadata(txn_detail.internalMetadata);
     match mandate {
-        MandateTxnType::REGISTER => true,
+        MandateTxnType::Register => true,
         _ => false,
     }
 }

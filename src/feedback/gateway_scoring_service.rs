@@ -5,7 +5,7 @@ use crate::redis::cache::findByNameFromRedis;
 use crate::redis::feature::isFeatureEnabled;
 use masking::PeekInterface;
 // Converted imports
-// use gateway_decider::constants as c::{enable_elimination_v2, gateway_scoring_data, ENABLE_EXPLORE_AND_EXPLOIT_ON_SRV3, SR_V3_INPUT_CONFIG, GATEWAY_SCORE_FIRST_DIMENSION_SOFT_TTL};
+// use gateway_decider::constants as c::{enable_elimination_v2, gateway_scoring_data, EnableExploreAndExploitOnSrv3, SrV3InputConfig, GatewayScoreFirstDimensionSoftTtl};
 // use feedback::constants as c;
 // use data::text::encoding as de::encode_utf8;
 // use db::storage::types::merchant_account as merchant_account;
@@ -25,7 +25,7 @@ use masking::PeekInterface;
 // use eulerhs::types as et;
 // use eulerhs::tenant_redis_layer as rc;
 use crate::app::{get_tenant_app_state, APP_STATE};
-use crate::decider::gatewaydecider::constants::{self as DC, srV3DefaultInputConfig};
+use crate::decider::gatewaydecider::constants::{self as DC, SR_V3_DEFAULT_INPUT_CONFIG};
 use crate::decider::gatewaydecider::types as T;
 use crate::decider::gatewaydecider::types::GatewayScoringData;
 use crate::decider::gatewaydecider::types::{RoutingFlowType as RF, SrRoutingDimensions};
@@ -80,8 +80,8 @@ use crate::{
 };
 
 use super::constants::{
-    defaultSrV3LatencyThresholdInSecs, SR_V3_INPUT_CONFIG, UPDATE_GATEWAY_SCORE_LOCK_FLAG_TTL,
-    UPDATE_SCORE_LOCK_FEATURE_ENABLED_MERCHANT,
+    defaultSrV3LatencyThresholdInSecs, SrV3InputConfig, UpdateGatewayScoreLockFlagTtl,
+    UpdateScoreLockFeatureEnabledMerchant,
 };
 use super::utils::getTimeFromTxnCreatedInMills;
 use crate::logger;
@@ -291,7 +291,7 @@ pub async fn getGatewayScoringType(
     flag: bool,
 ) -> GatewayScoringType {
     if flag {
-        return GatewayScoringType::PENALISE_SRV3;
+        return GatewayScoringType::PenaliseSrv3;
     }
 
     let txn_status = txn_detail.status.clone();
@@ -300,7 +300,7 @@ pub async fn getGatewayScoringType(
     let is_failure = isTransactionFailure(txn_status.clone());
     let time_difference = getTimeFromTxnCreatedInMills(txn_detail.clone());
     let merchant_sr_v3_input_config =
-        findByNameFromRedis(SR_V3_INPUT_CONFIG(get_m_id(merchant_id)).get_key()).await;
+        findByNameFromRedis(SrV3InputConfig(get_m_id(merchant_id)).get_key()).await;
     let pmt = txn_card_info.paymentMethodType;
     let pm = get_payment_method(
         pmt.to_string(),
@@ -330,7 +330,7 @@ pub async fn getGatewayScoringType(
     let time_difference_threshold = match maybe_latency_threshold {
         None => {
             let default_sr_v3_input_config =
-                findByNameFromRedis(srV3DefaultInputConfig.get_key()).await;
+                findByNameFromRedis(SR_V3_DEFAULT_INPUT_CONFIG.get_key()).await;
             let maybe_default_latency_threshold = get_sr_v3_latency_threshold(
                 default_sr_v3_input_config,
                 &pmt,
@@ -351,13 +351,13 @@ pub async fn getGatewayScoringType(
     );
 
     if is_success {
-        GatewayScoringType::REWARD
+        GatewayScoringType::Reward
     } else if is_failure {
-        GatewayScoringType::PENALISE_SRV3
+        GatewayScoringType::PenaliseSrv3
     } else if time_difference < ((time_difference_threshold * 1000.0) as u128) {
-        GatewayScoringType::PENALISE
+        GatewayScoringType::Penalise
     } else {
-        GatewayScoringType::PENALISE_SRV3
+        GatewayScoringType::PenaliseSrv3
     }
 }
 
@@ -367,13 +367,13 @@ pub fn updateGatewayScoreLock(
     gateway: String,
 ) -> String {
     match (gateway_scoring_type) {
-        (GatewayScoringType::PENALISE) => {
+        (GatewayScoringType::Penalise) => {
             format!("gateway_scores_lock_PENALISE_{}_{}", txn_uuid, gateway)
         }
-        (GatewayScoringType::PENALISE_SRV3) => {
+        (GatewayScoringType::PenaliseSrv3) => {
             format!("gateway_scores_lock_PENALISE_SRV3_{}_{}", txn_uuid, gateway)
         }
-        (GatewayScoringType::REWARD) => {
+        (GatewayScoringType::Reward) => {
             format!("gateway_scores_lock_REWARD_{}_{}", txn_uuid, gateway)
         }
         _ => String::new(),
@@ -401,7 +401,11 @@ pub fn invalid_request_error(detail: &str, e: &impl std::fmt::Display) -> T::Err
 pub async fn check_and_update_gateway_score_(
     apiPayload: FT::UpdateScorePayload,
 ) -> Result<String, T::ErrorResponse> {
-    let redis_key = format!("{}{}", C::gatewayScoringData, apiPayload.clone().paymentId);
+    let redis_key = format!(
+        "{}{}",
+        C::GATEWAY_SCORING_DATA,
+        apiPayload.clone().paymentId
+    );
     let app_state = get_tenant_app_state().await;
 
     // Attempt to fetch gateway scoring data from Redis
@@ -489,7 +493,7 @@ pub async fn check_and_update_gateway_score(
         gateway_in_string,          // Convert Option to String
     );
 
-    let lock_key_ttl = findByNameFromRedis(UPDATE_GATEWAY_SCORE_LOCK_FLAG_TTL.get_key())
+    let lock_key_ttl = findByNameFromRedis(UpdateGatewayScoreLockFlagTtl.get_key())
         .await
         .unwrap_or(300);
 
@@ -498,7 +502,7 @@ pub async fn check_and_update_gateway_score(
 
     // Check if feature is enabled for merchant
     let feature_enabled = isFeatureEnabled(
-        UPDATE_SCORE_LOCK_FEATURE_ENABLED_MERCHANT.get_key(),
+        UpdateScoreLockFeatureEnabledMerchant.get_key(),
         get_m_id(txn_detail.merchantId.clone()),
         "kv_redis".to_string(),
     )
@@ -568,16 +572,16 @@ pub async fn updateGatewayScore(
         routing_approach
     );
 
-    let should_update_gateway_score = if gateway_scoring_type.clone() == GST::PENALISE_SRV3 {
+    let should_update_gateway_score = if gateway_scoring_type.clone() == GST::PenaliseSrv3 {
         false
-    } else if gateway_scoring_type.clone() == GST::PENALISE {
+    } else if gateway_scoring_type.clone() == GST::Penalise {
         isTransactionPending(txn_detail.clone().status)
     } else {
         true
     };
 
     //let is_pm_and_pmt_present = Fbu::isTrueString(txn_card_info.paymentMethod) && txn_card_info.paymentMethodType.is_some();
-    let should_update_srv3_gateway_score = if gateway_scoring_type.clone() == GST::PENALISE {
+    let should_update_srv3_gateway_score = if gateway_scoring_type.clone() == GST::Penalise {
         false
     } else {
         true
@@ -593,7 +597,7 @@ pub async fn updateGatewayScore(
     .await;
 
     let should_isolate_srv3_producer = if Cutover::isFeatureEnabled(
-        C::SR_V3_PRODUCER_ISOLATION.get_key(),
+        C::SrV3ProducerIsolation.get_key(),
         MID::merchant_id_to_text(txn_detail.clone().merchantId),
         C::kvRedis(),
     )
@@ -609,7 +613,7 @@ pub async fn updateGatewayScore(
     };
 
     let should_update_explore_txn = if Cutover::isFeatureEnabled(
-        DC::ENABLE_EXPLORE_AND_EXPLOIT_ON_SRV3(txn_card_info.clone().paymentMethodType.to_string())
+        DC::EnableExploreAndExploitOnSrv3(txn_card_info.clone().paymentMethodType.to_string())
             .get_key(),
         MID::merchant_id_to_text(txn_detail.clone().merchantId),
         C::kvRedis(),
@@ -625,7 +629,7 @@ pub async fn updateGatewayScore(
         true
     };
 
-    let redis_key = format!("{}{}", C::gatewayScoringData, txn_detail.clone().txnUuid);
+    let redis_key = format!("{}{}", C::GATEWAY_SCORING_DATA, txn_detail.clone().txnUuid);
     let redis_gateway_score_data = if should_update_srv3_gateway_score
         && is_update_within_window
         && should_isolate_srv3_producer
@@ -718,7 +722,7 @@ pub async fn updateGatewayScore(
         }
         Fbu::logGatewayScoreType(
             gateway_scoring_type,
-            RF::ELIMINATION_FLOW,
+            RF::EliminationFlow,
             txn_detail.clone(),
         );
     } else {
@@ -796,7 +800,7 @@ pub async fn isUpdateWithinLatencyWindow(
     txn_latency: Option<TransactionLatency>,
 ) -> bool {
     match gateway_scoring_type {
-        GatewayScoringType::PENALISE => true,
+        GatewayScoringType::Penalise => true,
         _ => {
             let exempt_for_mandate_txn = checkExemptIfMandateTxn(&txn_detail, &txn_card_info).await;
             if exempt_for_mandate_txn
@@ -809,7 +813,7 @@ pub async fn isUpdateWithinLatencyWindow(
             } else {
                 // let m_auto_refund_conflict_threshold_in_mins: Option<i32> = None; // Placeholder for actual implementation
                 let gw_latency_check_threshold =
-                    findByNameFromRedis(C::GATEWAY_SCORE_LATENCY_CHECK_IN_MINS.get_key())
+                    findByNameFromRedis(C::GatewayScoreLatencyCheckInMins.get_key())
                         .await
                         .unwrap_or(C::defaultGatewayScoreLatencyCheckInMins());
                 /// check if the transaction latency calculated by orchestration is within the configured threshold

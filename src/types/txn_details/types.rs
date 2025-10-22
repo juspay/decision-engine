@@ -720,13 +720,14 @@ pub enum ChargeMethod {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ChargeName {
-    BASE,
-    SURCHARGE,
-    TAX_ON_SURCHARGE,
-    OFFER,
-    ADD_ON,
-    GATEWAY_ADJUSTMENT,
+    Base,
+    Surcharge,
+    TaxOnSurcharge,
+    Offer,
+    AddOn,
+    GatewayAdjustment,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

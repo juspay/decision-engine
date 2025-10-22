@@ -42,10 +42,11 @@ pub struct TxnInfo {
 
 // Original Haskell data type: MandateTxnType
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum MandateTxnType {
-    REGISTER,
-    REGISTER_AND_DEBIT,
-    DEFAULT,
+    Register,
+    RegisterAndDebit,
+    Default,
 }
 
 // Original Haskell data type: MerchantScoringDetails
@@ -217,20 +218,20 @@ pub struct GatewayScoringKeyType {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum TxnObjectType {
-    MANDATE_REGISTER,
-    MANDATE_PAYMENT,
-    ORDER_PAYMENT,
-    EMANDATE_REGISTER,
-    EMANDATE_PAYMENT,
-    TPV_PAYMENT,
-    PARTIAL_CAPTURE,
-    PARTIAL_VOID,
-    TPV_EMANDATE_REGISTER,
-    TPV_MANDATE_REGISTER,
-    TPV_EMANDATE_PAYMENT,
-    TPV_MANDATE_PAYMENT,
-    VAN_PAYMENT,
-    MOTO_PAYMENT,
+    MandateRegister,
+    MandatePayment,
+    OrderPayment,
+    EmandateRegister,
+    EmandatePayment,
+    TpvPayment,
+    PartialCapture,
+    PartialVoid,
+    TpvEmandateRegister,
+    TpvMandateRegister,
+    TpvEmandatePayment,
+    TpvMandatePayment,
+    VanPayment,
+    MotoPayment,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -443,7 +444,7 @@ pub struct SrV3DebugBlock {
 //     AADHAAR,
 //     PAPERNACH,
 //     PAN,
-//     MERCHANT_CONTAINER,
+//     MerchantContainer,
 //     Virtual_Account,
 //     OTC,
 //     RTP,
@@ -547,7 +548,7 @@ pub struct Date {
 //         PaymentMethodType::AADHAAR => "AADHAAR".into(),
 //         PaymentMethodType::PAPERNACH => "PAPERNACH".into(),
 //         PaymentMethodType::PAN => "PAN".into(),
-//         PaymentMethodType::MERCHANT_CONTAINER => "MERCHANT_CONTAINER".into(),
+//         PaymentMethodType::MerchantContainer => "MERCHANT_CONTAINER".into(),
 //         PaymentMethodType::Virtual_Account => "VIRTUAL_ACCOUNT".into(),
 //         PaymentMethodType::OTC => "OTC".into(),
 //         PaymentMethodType::RTP => "RTP".into(),
@@ -571,7 +572,7 @@ pub struct Date {
 //         "AADHAAR" => PaymentMethodType::AADHAAR,
 //         "PAPERNACH" => PaymentMethodType::PAPERNACH,
 //         "PAN" => PaymentMethodType::PAN,
-//         "MERCHANT_CONTAINER" => PaymentMethodType::MERCHANT_CONTAINER,
+//         "MERCHANT_CONTAINER" => PaymentMethodType::MerchantContainer,
 //         "VIRTUAL_ACCOUNT" => PaymentMethodType::Virtual_Account,
 //         "OTC" => PaymentMethodType::OTC,
 //         "RTP" => PaymentMethodType::RTP,

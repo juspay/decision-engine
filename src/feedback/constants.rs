@@ -24,274 +24,274 @@ pub enum Database {
     UnknownDB(String),
 }
 
-// Original Haskell data type: SR_V3_BASED_FLOW_CUTOVER
+// Original Haskell data type: SrV3BasedFlowCutover
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct SR_V3_BASED_FLOW_CUTOVER;
+pub struct SrV3BasedFlowCutover;
 
-impl SC::ServiceConfigKey for SR_V3_BASED_FLOW_CUTOVER {
+impl SC::ServiceConfigKey for SrV3BasedFlowCutover {
     fn get_key(&self) -> std::string::String {
         "sr_v3_based_flow_cutover".to_string()
     }
 }
 
-// Original Haskell data type: ENABLE_DEBUG_MODE_ON_SR_V3
+// Original Haskell data type: EnableDebugModeOnSrV3
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct ENABLE_DEBUG_MODE_ON_SR_V3;
+pub struct EnableDebugModeOnSrV3;
 
-// Original Haskell data type: SR_V3_INPUT_CONFIG_DEFAULT
+// Original Haskell data type: SrV3InputConfigDefault
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct SR_V3_INPUT_CONFIG_DEFAULT;
+pub struct SrV3InputConfigDefault;
 
-// Original Haskell data type: GW_REF_ID_ENABLED_MERCHANTS_SRV2_PRODUCER
+// Original Haskell data type: GwRefIdEnabledMerchantsSrv2Producer
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct GW_REF_ID_ENABLED_MERCHANTS_SRV2_PRODUCER;
+pub struct GwRefIdEnabledMerchantsSrv2Producer;
 
-impl SC::ServiceConfigKey for GW_REF_ID_ENABLED_MERCHANTS_SRV2_PRODUCER {
+impl SC::ServiceConfigKey for GwRefIdEnabledMerchantsSrv2Producer {
     fn get_key(&self) -> std::string::String {
         "gw_ref_id_enabled_merchants_SRv2_producer".to_string()
     }
 }
 
-// Original Haskell data type: AUTH_TYPE_SR_ROUTING_PRODUCER_ENABLED_MERCHANT
+// Original Haskell data type: AuthTypeSrRoutingProducerEnabledMerchant
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct AUTH_TYPE_SR_ROUTING_PRODUCER_ENABLED_MERCHANT;
+pub struct AuthTypeSrRoutingProducerEnabledMerchant;
 
-impl SC::ServiceConfigKey for AUTH_TYPE_SR_ROUTING_PRODUCER_ENABLED_MERCHANT {
+impl SC::ServiceConfigKey for AuthTypeSrRoutingProducerEnabledMerchant {
     fn get_key(&self) -> std::string::String {
         "auth_type_sr_routing_producer_enabled_merchant".to_string()
     }
 }
 
-// Original Haskell data type: BANK_LEVEL_SR_ROUTING_PRODUCER_ENABLED_MERCHANT
+// Original Haskell data type: BankLevelSrRoutingProducerEnabledMerchant
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct BANK_LEVEL_SR_ROUTING_PRODUCER_ENABLED_MERCHANT;
+pub struct BankLevelSrRoutingProducerEnabledMerchant;
 
-impl SC::ServiceConfigKey for BANK_LEVEL_SR_ROUTING_PRODUCER_ENABLED_MERCHANT {
+impl SC::ServiceConfigKey for BankLevelSrRoutingProducerEnabledMerchant {
     fn get_key(&self) -> std::string::String {
         "bank_level_sr_routing_producer_enabled_merchant".to_string()
     }
 }
 
-// Original Haskell data type: PSP_APP_SR_ROUTING_PRODUCER_ENABLED_MERCHANT
+// Original Haskell data type: PspAppSrRoutingProducerEnabledMerchant
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct PSP_APP_SR_ROUTING_PRODUCER_ENABLED_MERCHANT;
+pub struct PspAppSrRoutingProducerEnabledMerchant;
 
-impl SC::ServiceConfigKey for PSP_APP_SR_ROUTING_PRODUCER_ENABLED_MERCHANT {
+impl SC::ServiceConfigKey for PspAppSrRoutingProducerEnabledMerchant {
     fn get_key(&self) -> std::string::String {
         "psp_app_sr_routing_producer_enabled_merchant".to_string()
     }
 }
 
-// Original Haskell data type: PSP_PACKAGE_SR_ROUTING_PRODUCER_ENABLED_MERCHANT
+// Original Haskell data type: PspPackageSrRoutingProducerEnabledMerchant
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct PSP_PACKAGE_SR_ROUTING_PRODUCER_ENABLED_MERCHANT;
+pub struct PspPackageSrRoutingProducerEnabledMerchant;
 
-impl SC::ServiceConfigKey for PSP_PACKAGE_SR_ROUTING_PRODUCER_ENABLED_MERCHANT {
+impl SC::ServiceConfigKey for PspPackageSrRoutingProducerEnabledMerchant {
     fn get_key(&self) -> std::string::String {
         "psp_package_sr_routing_producer_enabled_merchant".to_string()
     }
 }
 
-// Original Haskell data type: SR_V3_INPUT_CONFIG
+// Original Haskell data type: SrV3InputConfig
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct SR_V3_INPUT_CONFIG(pub String);
+pub struct SrV3InputConfig(pub String);
 
-impl SC::ServiceConfigKey for SR_V3_INPUT_CONFIG {
+impl SC::ServiceConfigKey for SrV3InputConfig {
     fn get_key(&self) -> String {
         format!("SR_V3_INPUT_CONFIG_{}", self.0)
     }
 }
 
-// Original Haskell data type: GLOBAL_GATEWAY_SCORING_ENABLED_MERCHANTS
+// Original Haskell data type: GlobalGatewayScoringEnabledMerchants
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct GLOBAL_GATEWAY_SCORING_ENABLED_MERCHANTS;
+pub struct GlobalGatewayScoringEnabledMerchants;
 
-impl SC::ServiceConfigKey for GLOBAL_GATEWAY_SCORING_ENABLED_MERCHANTS {
+impl SC::ServiceConfigKey for GlobalGatewayScoringEnabledMerchants {
     fn get_key(&self) -> std::string::String {
         "global_gateway_scoring_enabled_merchants".to_string()
     }
 }
 
-// Original Haskell data type: GLOBAL_OUTAGE_GATEWAY_SCORING_ENABLED_MERCHANTS
+// Original Haskell data type: GlobalOutageGatewayScoringEnabledMerchants
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct GLOBAL_OUTAGE_GATEWAY_SCORING_ENABLED_MERCHANTS;
+pub struct GlobalOutageGatewayScoringEnabledMerchants;
 
-impl SC::ServiceConfigKey for GLOBAL_OUTAGE_GATEWAY_SCORING_ENABLED_MERCHANTS {
+impl SC::ServiceConfigKey for GlobalOutageGatewayScoringEnabledMerchants {
     fn get_key(&self) -> std::string::String {
         "global_outage_gateway_scoring_enabled_merchants".to_string()
     }
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct UPDATE_SCORE_LOCK_FEATURE_ENABLED_MERCHANT;
+pub struct UpdateScoreLockFeatureEnabledMerchant;
 
-impl SC::ServiceConfigKey for UPDATE_SCORE_LOCK_FEATURE_ENABLED_MERCHANT {
+impl SC::ServiceConfigKey for UpdateScoreLockFeatureEnabledMerchant {
     fn get_key(&self) -> std::string::String {
         "update_score_lock_feature_enabled_merchant".to_string()
     }
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct UPDATE_GATEWAY_SCORE_LOCK_FLAG_TTL;
+pub struct UpdateGatewayScoreLockFlagTtl;
 
-impl SC::ServiceConfigKey for UPDATE_GATEWAY_SCORE_LOCK_FLAG_TTL {
+impl SC::ServiceConfigKey for UpdateGatewayScoreLockFlagTtl {
     fn get_key(&self) -> std::string::String {
         "update_gateway_score_lock_flag_ttl".to_string()
     }
 }
 
-// Original Haskell data type: MINIMUM_GATEWAY_SCORE
+// Original Haskell data type: MinimumGatewayScore
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct MINIMUM_GATEWAY_SCORE;
+pub struct MinimumGatewayScore;
 
-impl SC::ServiceConfigKey for MINIMUM_GATEWAY_SCORE {
+impl SC::ServiceConfigKey for MinimumGatewayScore {
     fn get_key(&self) -> std::string::String {
         "minimum_gateway_score".to_string()
     }
 }
 
-// Original Haskell data type: GATEWAY_SCORE_LATENCY_CHECK_IN_MINS
+// Original Haskell data type: GatewayScoreLatencyCheckInMins
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct GATEWAY_SCORE_LATENCY_CHECK_IN_MINS;
+pub struct GatewayScoreLatencyCheckInMins;
 
-impl SC::ServiceConfigKey for GATEWAY_SCORE_LATENCY_CHECK_IN_MINS {
+impl SC::ServiceConfigKey for GatewayScoreLatencyCheckInMins {
     fn get_key(&self) -> std::string::String {
         "gateway_score_latency_check_in_mins".to_string()
     }
 }
 
-// Original Haskell data type: GATEWAY_SCORE_LATENCY_CHECK_EXEMPT_GATEWAYS
+// Original Haskell data type: GatewayScoreLatencyCheckExemptGateways
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct GATEWAY_SCORE_LATENCY_CHECK_EXEMPT_GATEWAYS;
+pub struct GatewayScoreLatencyCheckExemptGateways;
 
-impl SC::ServiceConfigKey for GATEWAY_SCORE_LATENCY_CHECK_EXEMPT_GATEWAYS {
+impl SC::ServiceConfigKey for GatewayScoreLatencyCheckExemptGateways {
     fn get_key(&self) -> std::string::String {
         "gateway_score_latency_check_exempt_gateways".to_string()
     }
 }
 
-// Original Haskell data type: DEFAULT_GW_SCORE_LATENCY_THRESHOLD
+// Original Haskell data type: DefaultGwScoreLatencyThreshold
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct DEFAULT_GW_SCORE_LATENCY_THRESHOLD {
+pub struct DefaultGwScoreLatencyThreshold {
     #[serde(rename = "default_gw_score_latency_threshold")]
     pub default_gw_score_latency_threshold: Option<String>,
 }
 
-// Original Haskell data type: GATEWAY_PENALTY_FACTOR
+// Original Haskell data type: GatewayPenaltyFactor
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct GATEWAY_PENALTY_FACTOR;
+pub struct GatewayPenaltyFactor;
 
-impl SC::ServiceConfigKey for GATEWAY_PENALTY_FACTOR {
+impl SC::ServiceConfigKey for GatewayPenaltyFactor {
     fn get_key(&self) -> std::string::String {
         "gateway_penalty_factor".to_string()
     }
 }
 
-// Original Haskell data type: GATEWAY_REWARD_FACTOR
+// Original Haskell data type: GatewayRewardFactor
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct GATEWAY_REWARD_FACTOR;
+pub struct GatewayRewardFactor;
 
-impl SC::ServiceConfigKey for GATEWAY_REWARD_FACTOR {
+impl SC::ServiceConfigKey for GatewayRewardFactor {
     fn get_key(&self) -> std::string::String {
         "gateway_reward_factor".to_string()
     }
 }
 
-// Original Haskell data type: OUTAGE_PENALTY_FACTOR
+// Original Haskell data type: OutagePenaltyFactor
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct OUTAGE_PENALTY_FACTOR;
+pub struct OutagePenaltyFactor;
 
-impl SC::ServiceConfigKey for OUTAGE_PENALTY_FACTOR {
+impl SC::ServiceConfigKey for OutagePenaltyFactor {
     fn get_key(&self) -> std::string::String {
         "outage_penalty_factor".to_string()
     }
 }
 
-// Original Haskell data type: OUTAGE_REWARD_FACTOR
+// Original Haskell data type: OutageRewardFactor
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct OUTAGE_REWARD_FACTOR;
+pub struct OutageRewardFactor;
 
-impl SC::ServiceConfigKey for OUTAGE_REWARD_FACTOR {
+impl SC::ServiceConfigKey for OutageRewardFactor {
     fn get_key(&self) -> std::string::String {
         "outage_reward_factor".to_string()
     }
 }
 
-// Original Haskell data type: GATEWAY_SCORE_OUTAGE_TTL
+// Original Haskell data type: GatewayScoreOutageTtl
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct GATEWAY_SCORE_OUTAGE_TTL;
+pub struct GatewayScoreOutageTtl;
 
-impl SC::ServiceConfigKey for GATEWAY_SCORE_OUTAGE_TTL {
+impl SC::ServiceConfigKey for GatewayScoreOutageTtl {
     fn get_key(&self) -> std::string::String {
         "gateway_score_outage_ttl".to_string()
     }
 }
 
-// Original Haskell data type: GATEWAY_SCORE_GLOBAL_TTL
+// Original Haskell data type: GatewayScoreGlobalTtl
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct GATEWAY_SCORE_GLOBAL_TTL;
+pub struct GatewayScoreGlobalTtl;
 
-impl SC::ServiceConfigKey for GATEWAY_SCORE_GLOBAL_TTL {
+impl SC::ServiceConfigKey for GatewayScoreGlobalTtl {
     fn get_key(&self) -> std::string::String {
         "gateway_score_global_ttl".to_string()
     }
 }
 
-// Original Haskell data type: GATEWAY_SCORE_GLOBAL_OUTAGE_TTL
+// Original Haskell data type: GatewayScoreGlobalOutageTtl
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct GATEWAY_SCORE_GLOBAL_OUTAGE_TTL;
+pub struct GatewayScoreGlobalOutageTtl;
 
-impl SC::ServiceConfigKey for GATEWAY_SCORE_GLOBAL_OUTAGE_TTL {
+impl SC::ServiceConfigKey for GatewayScoreGlobalOutageTtl {
     fn get_key(&self) -> std::string::String {
         "gateway_score_global_outage_ttl".to_string()
     }
 }
 
-// Original Haskell data type: GATEWAY_SCORE_MERCHANT_ARR_MAX_LENGTH
+// Original Haskell data type: GatewayScoreMerchantArrMaxLength
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct GATEWAY_SCORE_MERCHANT_ARR_MAX_LENGTH;
+pub struct GatewayScoreMerchantArrMaxLength;
 
-impl SC::ServiceConfigKey for GATEWAY_SCORE_MERCHANT_ARR_MAX_LENGTH {
+impl SC::ServiceConfigKey for GatewayScoreMerchantArrMaxLength {
     fn get_key(&self) -> std::string::String {
         "gateway_score_merchant_arr_max_length".to_string()
     }
 }
 
-// Original Haskell data type: GATEWAY_SCORE_THIRD_DIMENSION_TTL
+// Original Haskell data type: GatewayScoreThirdDimensionTtl
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct GATEWAY_SCORE_THIRD_DIMENSION_TTL;
+pub struct GatewayScoreThirdDimensionTtl;
 
-impl SC::ServiceConfigKey for GATEWAY_SCORE_THIRD_DIMENSION_TTL {
+impl SC::ServiceConfigKey for GatewayScoreThirdDimensionTtl {
     fn get_key(&self) -> std::string::String {
         "gateway_score_third_dimension_ttl".to_string()
     }
 }
 
-// Original Haskell data type: ENFORCE_GW_SCORE_KV_REDIS
+// Original Haskell data type: EnforceGwScoreKvRedis
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct ENFORCE_GW_SCORE_KV_REDIS;
+pub struct EnforceGwScoreKvRedis;
 
-impl SC::ServiceConfigKey for ENFORCE_GW_SCORE_KV_REDIS {
+impl SC::ServiceConfigKey for EnforceGwScoreKvRedis {
     fn get_key(&self) -> std::string::String {
         "enforce_gw_score_kv_redis".to_string()
     }
 }
 
-// Original Haskell data type: SR_SCORE_REDIS_FALLBACK_LOOKUP_DISABLE
+// Original Haskell data type: SrScoreRedisFallbackLookupDisable
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct SR_SCORE_REDIS_FALLBACK_LOOKUP_DISABLE;
+pub struct SrScoreRedisFallbackLookupDisable;
 
-impl SC::ServiceConfigKey for SR_SCORE_REDIS_FALLBACK_LOOKUP_DISABLE {
+impl SC::ServiceConfigKey for SrScoreRedisFallbackLookupDisable {
     fn get_key(&self) -> std::string::String {
         "sr_score_redis_fallback_lookup_disable".to_string()
     }
 }
 
-// Original Haskell data type: SR_V3_PRODUCER_ISOLATION
+// Original Haskell data type: SrV3ProducerIsolation
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct SR_V3_PRODUCER_ISOLATION;
+pub struct SrV3ProducerIsolation;
 
-impl SC::ServiceConfigKey for SR_V3_PRODUCER_ISOLATION {
+impl SC::ServiceConfigKey for SrV3ProducerIsolation {
     fn get_key(&self) -> std::string::String {
         "sr_v3_producer_isolation".to_string()
     }
@@ -308,14 +308,14 @@ pub fn kvRedis() -> String {
     "kv_redis".into()
 }
 
-// Original Haskell function: pendingTxnsKeyPrefix
-pub const pendingTxnsKeyPrefix: &str = "PENDING_TXNS_";
+// Original Haskell function: PENDING_TXNS_KEY_PREFIX
+pub const PENDING_TXNS_KEY_PREFIX: &str = "PENDING_TXNS_";
 
-// Original Haskell function: defaultSrV3BasedBucketSize
-pub const defaultSrV3BasedBucketSize: i32 = 125;
+// Original Haskell function: DEFAULT_SR_V3_BASED_BUCKET_SIZE
+pub const DEFAULT_SR_V3_BASED_BUCKET_SIZE: i32 = 125;
 
-// Original Haskell function: gatewaySelectionV3OrderTypeKeyPrefix
-pub const gatewaySelectionV3OrderTypeKeyPrefix: &str = "{gw_sr_v3_score";
+// Original Haskell function: GATEWAY_SELECTION_V3_ORDER_TYPE_KEY_PREFIX
+pub const GATEWAY_SELECTION_V3_ORDER_TYPE_KEY_PREFIX: &str = "{gw_sr_v3_score";
 
 // Original Haskell function: ecRedis
 pub fn ecRedis() -> String {
@@ -362,8 +362,8 @@ pub fn defaultMinimumGatewayScore() -> f64 {
     0.0
 }
 
-// Original Haskell function: gatewayScoringData
-pub const gatewayScoringData: &str = "gateway_scoring_data_";
+// Original Haskell function: GATEWAY_SCORING_DATA
+pub const GATEWAY_SCORING_DATA: &str = "gateway_scoring_data_";
 
 // Original Haskell function: defaultMerchantArrMaxLength
 pub fn defaultMerchantArrMaxLength() -> i32 {

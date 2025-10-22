@@ -180,27 +180,30 @@ pub enum DeciderScoringName {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum DetailedGatewayScoringType {
-    ELIMINATION_PENALISE,
-    ELIMINATION_REWARD,
-    SRV2_PENALISE,
-    SRV2_REWARD,
-    SRV3_PENALISE,
-    SRV3_REWARD,
+    EliminationPenalise,
+    EliminationReward,
+    Srv2Penalise,
+    Srv2Reward,
+    Srv3Penalise,
+    Srv3Reward,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum RoutingFlowType {
-    ELIMINATION_FLOW,
-    SRV2_FLOW,
-    SRV3_FLOW,
+    EliminationFlow,
+    Srv2Flow,
+    Srv3Flow,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ScoreUpdateStatus {
-    PENALISED,
-    REWARDED,
-    NOT_INITIATED,
+    Penalised,
+    Rewarded,
+    NotInitiated,
 }
 
 pub type GatewayScoreMap = HMap<String, f64>;
@@ -491,7 +494,7 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
             dateCreated: date_created,
             gatewayBeforeDowntimeEvaluation: None,
         },
-        gwDeciderApproach: GatewayDeciderApproach::NONE,
+        gwDeciderApproach: GatewayDeciderApproach::None,
         srElminiationApproachInfo: vec![],
         allMgas: None,
         paymentFlowList: vec![],
@@ -501,7 +504,7 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
         isSrV3MetricEnabled: false,
         isPrimaryGateway: Some(true),
         experiment_tag: None,
-        reset_approach: ResetApproach::NO_RESET,
+        reset_approach: ResetApproach::NoReset,
         routing_dimension: None,
         routing_dimension_level: None,
         isScheduledOutage: false,
@@ -589,67 +592,72 @@ pub struct MetricsStreamKey(String);
 // }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ScoreKeyType {
-    ELIMINATION_GLOBAL_KEY,
-    ELIMINATION_MERCHANT_KEY,
-    OUTAGE_GLOBAL_KEY,
-    OUTAGE_MERCHANT_KEY,
-    SR_V2_KEY,
-    SR_V3_KEY,
+    EliminationGlobalKey,
+    EliminationMerchantKey,
+    OutageGlobalKey,
+    OutageMerchantKey,
+    SrV2Key,
+    SrV3Key,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum GatewayDeciderApproach {
-    SR_SELECTION,
-    SR_SELECTION_V2_ROUTING,
-    SR_SELECTION_V3_ROUTING,
-    PRIORITY_LOGIC,
-    DEFAULT,
-    NONE,
-    MERCHANT_PREFERENCE,
-    PL_ALL_DOWNTIME_ROUTING,
-    PL_DOWNTIME_ROUTING,
-    PL_GLOBAL_DOWNTIME_ROUTING,
-    SR_V2_ALL_DOWNTIME_ROUTING,
-    SR_V2_DOWNTIME_ROUTING,
-    SR_V2_GLOBAL_DOWNTIME_ROUTING,
-    SR_V2_HEDGING,
-    SR_V2_ALL_DOWNTIME_HEDGING,
-    SR_V2_DOWNTIME_HEDGING,
-    SR_V2_GLOBAL_DOWNTIME_HEDGING,
-    SR_V3_ALL_DOWNTIME_ROUTING,
-    SR_V3_DOWNTIME_ROUTING,
-    SR_V3_GLOBAL_DOWNTIME_ROUTING,
-    SR_V3_HEDGING,
-    SR_V3_ALL_DOWNTIME_HEDGING,
-    SR_V3_DOWNTIME_HEDGING,
-    SR_V3_GLOBAL_DOWNTIME_HEDGING,
-    NTW_BASED_ROUTING,
+    SrSelection,
+    SrSelectionV2Routing,
+    SrSelectionV3Routing,
+    PriorityLogic,
+    Default,
+    None,
+    MerchantPreference,
+    PlAllDowntimeRouting,
+    PlDowntimeRouting,
+    PlGlobalDowntimeRouting,
+    SrV2AllDowntimeRouting,
+    SrV2DowntimeRouting,
+    SrV2GlobalDowntimeRouting,
+    SrV2Hedging,
+    SrV2AllDowntimeHedging,
+    SrV2DowntimeHedging,
+    SrV2GlobalDowntimeHedging,
+    SrV3AllDowntimeRouting,
+    SrV3DowntimeRouting,
+    SrV3GlobalDowntimeRouting,
+    SrV3Hedging,
+    SrV3AllDowntimeHedging,
+    SrV3DowntimeHedging,
+    SrV3GlobalDowntimeHedging,
+    NtwBasedRouting,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum DownTime {
-    ALL_DOWNTIME,
-    GLOBAL_DOWNTIME,
-    DOWNTIME,
-    NO_DOWNTIME,
+    AllDowntime,
+    GlobalDowntime,
+    Downtime,
+    NoDowntime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ResetApproach {
-    ELIMINATION_RESET,
-    SRV2_RESET,
-    SRV3_RESET,
-    NO_RESET,
-    SRV2_ELIMINATION_RESET,
-    SRV3_ELIMINATION_RESET,
+    EliminationReset,
+    Srv2Reset,
+    Srv3Reset,
+    NoReset,
+    Srv2EliminationReset,
+    Srv3EliminationReset,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum RankingAlgorithm {
-    SR_BASED_ROUTING,
-    PL_BASED_ROUTING,
-    NTW_BASED_ROUTING,
+    SrBasedRouting,
+    PlBasedRouting,
+    NtwBasedRouting,
 }
 
 // pub type DeciderFlow<R> = for<'a> fn(&'a mut (dyn MonadFlow + 'a)) -> ReaderT<DeciderParams, StateT<DeciderState, &'a mut (dyn MonadFlow + 'a)>, R>;
@@ -1292,19 +1300,21 @@ pub struct Offer {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum EmiType {
-    NO_COST_EMI,
-    LOW_COST_EMI,
+    NoCostEmi,
+    LowCostEmi,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ValidationType {
-    CARD_MANDATE,
-    EMANDATE,
-    TPV,
-    TPV_MANDATE,
-    REWARD,
-    TPV_EMANDATE,
+    CardMandate,
+    Emandate,
+    Tpv,
+    TpvMandate,
+    Reward,
+    TpvEmandate,
 }
 
 impl fmt::Display for DeciderScoringName {
@@ -1339,12 +1349,12 @@ impl fmt::Display for DeciderScoringName {
 impl fmt::Display for DetailedGatewayScoringType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ELIMINATION_PENALISE => write!(f, "ELIMINATION_PENALISE"),
-            Self::ELIMINATION_REWARD => write!(f, "ELIMINATION_REWARD"),
-            Self::SRV2_PENALISE => write!(f, "SRV2_PENALISE"),
-            Self::SRV2_REWARD => write!(f, "SRV2_REWARD"),
-            Self::SRV3_PENALISE => write!(f, "SRV3_PENALISE"),
-            Self::SRV3_REWARD => write!(f, "SRV3_REWARD"),
+            Self::EliminationPenalise => write!(f, "ELIMINATION_PENALISE"),
+            Self::EliminationReward => write!(f, "ELIMINATION_REWARD"),
+            Self::Srv2Penalise => write!(f, "SRV2_PENALISE"),
+            Self::Srv2Reward => write!(f, "SRV2_REWARD"),
+            Self::Srv3Penalise => write!(f, "SRV3_PENALISE"),
+            Self::Srv3Reward => write!(f, "SRV3_REWARD"),
         }
     }
 }
@@ -1352,9 +1362,9 @@ impl fmt::Display for DetailedGatewayScoringType {
 impl fmt::Display for RoutingFlowType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ELIMINATION_FLOW => write!(f, "ELIMINATION_FLOW"),
-            Self::SRV2_FLOW => write!(f, "SRV2_FLOW"),
-            Self::SRV3_FLOW => write!(f, "SRV3_FLOW"),
+            Self::EliminationFlow => write!(f, "ELIMINATION_FLOW"),
+            Self::Srv2Flow => write!(f, "SRV2_FLOW"),
+            Self::Srv3Flow => write!(f, "SRV3_FLOW"),
         }
     }
 }
@@ -1362,9 +1372,9 @@ impl fmt::Display for RoutingFlowType {
 impl fmt::Display for ScoreUpdateStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::PENALISED => write!(f, "PENALISED"),
-            Self::REWARDED => write!(f, "REWARDED"),
-            Self::NOT_INITIATED => write!(f, "NOT_INITIATED"),
+            Self::Penalised => write!(f, "PENALISED"),
+            Self::Rewarded => write!(f, "REWARDED"),
+            Self::NotInitiated => write!(f, "NOT_INITIATED"),
         }
     }
 }
@@ -1372,12 +1382,12 @@ impl fmt::Display for ScoreUpdateStatus {
 impl fmt::Display for ScoreKeyType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ELIMINATION_GLOBAL_KEY => write!(f, "ELIMINATION_GLOBAL_KEY"),
-            Self::ELIMINATION_MERCHANT_KEY => write!(f, "ELIMINATION_MERCHANT_KEY"),
-            Self::OUTAGE_GLOBAL_KEY => write!(f, "OUTAGE_GLOBAL_KEY"),
-            Self::OUTAGE_MERCHANT_KEY => write!(f, "OUTAGE_MERCHANT_KEY"),
-            Self::SR_V2_KEY => write!(f, "SR_V2_KEY"),
-            Self::SR_V3_KEY => write!(f, "SR_V3_KEY"),
+            Self::EliminationGlobalKey => write!(f, "ELIMINATION_GLOBAL_KEY"),
+            Self::EliminationMerchantKey => write!(f, "ELIMINATION_MERCHANT_KEY"),
+            Self::OutageGlobalKey => write!(f, "OUTAGE_GLOBAL_KEY"),
+            Self::OutageMerchantKey => write!(f, "OUTAGE_MERCHANT_KEY"),
+            Self::SrV2Key => write!(f, "SR_V2_KEY"),
+            Self::SrV3Key => write!(f, "SR_V3_KEY"),
         }
     }
 }
@@ -1385,49 +1395,49 @@ impl fmt::Display for ScoreKeyType {
 impl fmt::Display for GatewayDeciderApproach {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::SR_SELECTION => write!(f, "SR_SELECTION"),
-            Self::SR_SELECTION_V2_ROUTING => write!(f, "SR_SELECTION_V2_ROUTING"),
-            Self::SR_SELECTION_V3_ROUTING => write!(f, "SR_SELECTION_V3_ROUTING"),
-            Self::PRIORITY_LOGIC => write!(f, "PRIORITY_LOGIC"),
-            Self::DEFAULT => write!(f, "DEFAULT"),
-            Self::NONE => write!(f, "NONE"),
-            Self::MERCHANT_PREFERENCE => write!(f, "MERCHANT_PREFERENCE"),
-            Self::PL_ALL_DOWNTIME_ROUTING => write!(f, "PL_ALL_DOWNTIME_ROUTING"),
-            Self::PL_DOWNTIME_ROUTING => write!(f, "PL_DOWNTIME_ROUTING"),
-            Self::PL_GLOBAL_DOWNTIME_ROUTING => {
+            Self::SrSelection => write!(f, "SR_SELECTION"),
+            Self::SrSelectionV2Routing => write!(f, "SR_SELECTION_V2_ROUTING"),
+            Self::SrSelectionV3Routing => write!(f, "SR_SELECTION_V3_ROUTING"),
+            Self::PriorityLogic => write!(f, "PRIORITY_LOGIC"),
+            Self::Default => write!(f, "DEFAULT"),
+            Self::None => write!(f, "NONE"),
+            Self::MerchantPreference => write!(f, "MERCHANT_PREFERENCE"),
+            Self::PlAllDowntimeRouting => write!(f, "PL_ALL_DOWNTIME_ROUTING"),
+            Self::PlDowntimeRouting => write!(f, "PL_DOWNTIME_ROUTING"),
+            Self::PlGlobalDowntimeRouting => {
                 write!(f, "PL_GLOBAL_DOWNTIME_ROUTING")
             }
-            Self::SR_V2_ALL_DOWNTIME_ROUTING => {
+            Self::SrV2AllDowntimeRouting => {
                 write!(f, "SR_V2_ALL_DOWNTIME_ROUTING")
             }
-            Self::SR_V2_DOWNTIME_ROUTING => write!(f, "SR_V2_DOWNTIME_ROUTING"),
-            Self::SR_V2_GLOBAL_DOWNTIME_ROUTING => {
+            Self::SrV2DowntimeRouting => write!(f, "SR_V2_DOWNTIME_ROUTING"),
+            Self::SrV2GlobalDowntimeRouting => {
                 write!(f, "SR_V2_GLOBAL_DOWNTIME_ROUTING")
             }
-            Self::SR_V2_HEDGING => write!(f, "SR_V2_HEDGING"),
-            Self::SR_V2_ALL_DOWNTIME_HEDGING => {
+            Self::SrV2Hedging => write!(f, "SR_V2_HEDGING"),
+            Self::SrV2AllDowntimeHedging => {
                 write!(f, "SR_V2_ALL_DOWNTIME_HEDGING")
             }
-            Self::SR_V2_DOWNTIME_HEDGING => write!(f, "SR_V2_DOWNTIME_HEDGING"),
-            Self::SR_V2_GLOBAL_DOWNTIME_HEDGING => {
+            Self::SrV2DowntimeHedging => write!(f, "SR_V2_DOWNTIME_HEDGING"),
+            Self::SrV2GlobalDowntimeHedging => {
                 write!(f, "SR_V2_GLOBAL_DOWNTIME_HEDGING")
             }
-            Self::SR_V3_ALL_DOWNTIME_ROUTING => {
+            Self::SrV3AllDowntimeRouting => {
                 write!(f, "SR_V3_ALL_DOWNTIME_ROUTING")
             }
-            Self::SR_V3_DOWNTIME_ROUTING => write!(f, "SR_V3_DOWNTIME_ROUTING"),
-            Self::SR_V3_GLOBAL_DOWNTIME_ROUTING => {
+            Self::SrV3DowntimeRouting => write!(f, "SR_V3_DOWNTIME_ROUTING"),
+            Self::SrV3GlobalDowntimeRouting => {
                 write!(f, "SR_V3_GLOBAL_DOWNTIME_ROUTING")
             }
-            Self::SR_V3_HEDGING => write!(f, "SR_V3_HEDGING"),
-            Self::SR_V3_ALL_DOWNTIME_HEDGING => {
+            Self::SrV3Hedging => write!(f, "SR_V3_HEDGING"),
+            Self::SrV3AllDowntimeHedging => {
                 write!(f, "SR_V3_ALL_DOWNTIME_HEDGING")
             }
-            Self::SR_V3_DOWNTIME_HEDGING => write!(f, "SR_V3_DOWNTIME_HEDGING"),
-            Self::SR_V3_GLOBAL_DOWNTIME_HEDGING => {
+            Self::SrV3DowntimeHedging => write!(f, "SR_V3_DOWNTIME_HEDGING"),
+            Self::SrV3GlobalDowntimeHedging => {
                 write!(f, "SR_V3_GLOBAL_DOWNTIME_HEDGING")
             }
-            Self::NTW_BASED_ROUTING => {
+            Self::NtwBasedRouting => {
                 write!(f, "NTW_BASED_ROUTING")
             }
         }
@@ -1437,10 +1447,10 @@ impl fmt::Display for GatewayDeciderApproach {
 impl fmt::Display for DownTime {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ALL_DOWNTIME => write!(f, "ALL_DOWNTIME"),
-            Self::GLOBAL_DOWNTIME => write!(f, "GLOBAL_DOWNTIME"),
-            Self::DOWNTIME => write!(f, "DOWNTIME"),
-            Self::NO_DOWNTIME => write!(f, "NO_DOWNTIME"),
+            Self::AllDowntime => write!(f, "ALL_DOWNTIME"),
+            Self::GlobalDowntime => write!(f, "GLOBAL_DOWNTIME"),
+            Self::Downtime => write!(f, "DOWNTIME"),
+            Self::NoDowntime => write!(f, "NO_DOWNTIME"),
         }
     }
 }
@@ -1448,12 +1458,12 @@ impl fmt::Display for DownTime {
 impl fmt::Display for ResetApproach {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ELIMINATION_RESET => write!(f, "ELIMINATION_RESET"),
-            Self::SRV2_RESET => write!(f, "SRV2_RESET"),
-            Self::SRV3_RESET => write!(f, "SRV3_RESET"),
-            Self::NO_RESET => write!(f, "NO_RESET"),
-            Self::SRV2_ELIMINATION_RESET => write!(f, "SRV2_ELIMINATION_RESET"),
-            Self::SRV3_ELIMINATION_RESET => write!(f, "SRV3_ELIMINATION_RESET"),
+            Self::EliminationReset => write!(f, "ELIMINATION_RESET"),
+            Self::Srv2Reset => write!(f, "SRV2_RESET"),
+            Self::Srv3Reset => write!(f, "SRV3_RESET"),
+            Self::NoReset => write!(f, "NO_RESET"),
+            Self::Srv2EliminationReset => write!(f, "SRV2_ELIMINATION_RESET"),
+            Self::Srv3EliminationReset => write!(f, "SRV3_ELIMINATION_RESET"),
         }
     }
 }
@@ -1461,12 +1471,12 @@ impl fmt::Display for ResetApproach {
 impl fmt::Display for ValidationType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::CARD_MANDATE => write!(f, "CARD_MANDATE"),
-            Self::EMANDATE => write!(f, "EMANDATE"),
-            Self::TPV => write!(f, "TPV"),
-            Self::TPV_MANDATE => write!(f, "TPV_MANDATE"),
-            Self::REWARD => write!(f, "REWARD"),
-            Self::TPV_EMANDATE => write!(f, "TPV_EMANDATE"),
+            Self::CardMandate => write!(f, "CARD_MANDATE"),
+            Self::Emandate => write!(f, "EMANDATE"),
+            Self::Tpv => write!(f, "TPV"),
+            Self::TpvMandate => write!(f, "TPV_MANDATE"),
+            Self::Reward => write!(f, "REWARD"),
+            Self::TpvEmandate => write!(f, "TPV_EMANDATE"),
         }
     }
 }
@@ -1474,8 +1484,8 @@ impl fmt::Display for ValidationType {
 impl fmt::Display for Status {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::SUCCESS => write!(f, "SUCCESS"),
-            Self::FAILURE => write!(f, "FAILURE"),
+            Self::Success => write!(f, "SUCCESS"),
+            Self::Failure => write!(f, "FAILURE"),
         }
     }
 }
@@ -1483,22 +1493,22 @@ impl fmt::Display for Status {
 impl fmt::Display for PriorityLogicFailure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NO_ERROR => write!(f, "NO_ERROR"),
-            Self::CONNECTION_FAILED => write!(f, "CONNECTION_FAILED"),
-            Self::COMPILATION_ERROR => write!(f, "COMPILATION_ERROR"),
-            Self::MEMORY_EXCEEDED => write!(f, "MEMORY_EXCEEDED"),
-            Self::GATEWAY_NAME_PARSE_FAILURE => {
+            Self::NoError => write!(f, "NO_ERROR"),
+            Self::ConnectionFailed => write!(f, "CONNECTION_FAILED"),
+            Self::CompilationError => write!(f, "COMPILATION_ERROR"),
+            Self::MemoryExceeded => write!(f, "MEMORY_EXCEEDED"),
+            Self::GatewayNameParseFailure => {
                 write!(f, "GATEWAY_NAME_PARSE_FAILURE")
             }
-            Self::RESPONSE_CONTENT_TYPE_NOT_SUPPORTED => {
+            Self::ResponseContentTypeNotSupported => {
                 write!(f, "RESPONSE_CONTENT_TYPE_NOT_SUPPORTED")
             }
-            Self::RESPONSE_DECODE_FAILURE => write!(f, "RESPONSE_DECODE_FAILURE"),
-            Self::RESPONSE_PARSE_ERROR => write!(f, "RESPONSE_PARSE_ERROR"),
-            Self::PL_EVALUATION_FAILED => write!(f, "PL_EVALUATION_FAILED"),
-            Self::NULL_AFTER_ENFORCE => write!(f, "NULL_AFTER_ENFORCE"),
-            Self::UNHANDLED_EXCEPTION => write!(f, "UNHANDLED_EXCEPTION"),
-            Self::CODE_TOO_LARGE => write!(f, "CODE_TOO_LARGE"),
+            Self::ResponseDecodeFailure => write!(f, "RESPONSE_DECODE_FAILURE"),
+            Self::ResponseParseError => write!(f, "RESPONSE_PARSE_ERROR"),
+            Self::PlEvaluationFailed => write!(f, "PL_EVALUATION_FAILED"),
+            Self::NullAfterEnforce => write!(f, "NULL_AFTER_ENFORCE"),
+            Self::UnhandledException => write!(f, "UNHANDLED_EXCEPTION"),
+            Self::CodeTooLarge => write!(f, "CODE_TOO_LARGE"),
         }
     }
 }
@@ -1517,8 +1527,8 @@ impl fmt::Display for Dimension {
 impl fmt::Display for EmiType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NO_COST_EMI => write!(f, "NO_COST_EMI"),
-            Self::LOW_COST_EMI => write!(f, "LOW_COST_EMI"),
+            Self::NoCostEmi => write!(f, "NO_COST_EMI"),
+            Self::LowCostEmi => write!(f, "LOW_COST_EMI"),
         }
     }
 }
@@ -1616,27 +1626,27 @@ pub struct PriorityLogicData {
 }
 
 #[derive(Debug, PartialEq, Clone, Eq, Serialize, Deserialize)]
-// #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum PriorityLogicFailure {
-    NO_ERROR,
-    CONNECTION_FAILED,
-    COMPILATION_ERROR,
-    MEMORY_EXCEEDED,
-    GATEWAY_NAME_PARSE_FAILURE,
-    RESPONSE_CONTENT_TYPE_NOT_SUPPORTED,
-    RESPONSE_DECODE_FAILURE,
-    RESPONSE_PARSE_ERROR,
-    PL_EVALUATION_FAILED,
-    NULL_AFTER_ENFORCE,
-    UNHANDLED_EXCEPTION,
-    CODE_TOO_LARGE,
+    NoError,
+    ConnectionFailed,
+    CompilationError,
+    MemoryExceeded,
+    GatewayNameParseFailure,
+    ResponseContentTypeNotSupported,
+    ResponseDecodeFailure,
+    ResponseParseError,
+    PlEvaluationFailed,
+    NullAfterEnforce,
+    UnhandledException,
+    CodeTooLarge,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
-// #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum Status {
-    SUCCESS,
-    FAILURE,
+    Success,
+    Failure,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1805,17 +1815,19 @@ pub struct SuccessRate1AndNConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum FilterLevel {
-    TXN_OBJECT_TYPE,
-    PAYMENT_METHOD,
-    PAYMENT_METHOD_TYPE,
+    TxnObjectType,
+    PaymentMethod,
+    PaymentMethodType,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ConfigSource {
-    GLOBAL_DEFAULT,
-    MERCHANT_DEFAULT,
-    SERVICE_CONFIG,
+    GlobalDefault,
+    MerchantDefault,
+    ServiceConfig,
     REDIS,
 }
 

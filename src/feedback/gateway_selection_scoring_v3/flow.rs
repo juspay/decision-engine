@@ -74,7 +74,7 @@ pub async fn updateSrV3Score(
     mb_gateway_scoring_data: Option<GatewayScoringData>,
     gateway_reference_id: Option<String>,
 ) {
-    // let is_merchant_enabled_globally = MC::isMerchantEnabledForPaymentFlows(merchant_acc.id, [PF::SR_BASED_ROUTING].to_vec()).await;
+    // let is_merchant_enabled_globally = MC::isMerchantEnabledForPaymentFlows(merchant_acc.id, [PF::SrBasedRouting].to_vec()).await;
     match (txn_detail.gateway.clone()) {
         (None) => {
             logger::info!(
@@ -87,7 +87,7 @@ pub async fn updateSrV3Score(
             let unified_sr_v3_key = getProducerKey(
                 txn_detail.clone(),
                 mb_gateway_scoring_data,
-                SK::SR_V3_KEY,
+                SK::SrV3Key,
                 false,
                 gateway_reference_id.clone(),
             )
@@ -131,7 +131,7 @@ pub async fn updateSrV3Score(
                     .await;
                 }
             }
-            logGatewayScoreType(gateway_scoring_type, RF::SRV3_FLOW, txn_detail);
+            logGatewayScoreType(gateway_scoring_type, RF::Srv3Flow, txn_detail);
         }
     }
 }
@@ -196,8 +196,8 @@ pub async fn updateScoreAndQueue(
     )
     .await;
     let (value, should_score_increase): (String, bool) = match gateway_scoring_type {
-        GatewayScoringType::PENALISE_SRV3 => ("0".into(), false),
-        GatewayScoringType::REWARD => ("1".into(), true),
+        GatewayScoringType::PenaliseSrv3 => ("0".into(), false),
+        GatewayScoringType::Reward => ("1".into(), true),
         _ => ("0".into(), false),
     };
     // let is_debug_mode_enabled = isFeatureEnabled(
@@ -295,7 +295,7 @@ pub async fn updateScoreAndQueue(
 //Original Haskell function: getSrV3MerchantBucketSize
 pub async fn getSrV3MerchantBucketSize(txn_detail: TxnDetail, txn_card_info: TxnCardInfo) -> i32 {
     let merchant_sr_v3_input_config: Option<SrV3InputConfig> = findByNameFromRedis(
-        C::SR_V3_INPUT_CONFIG(MID::merchant_id_to_text(txn_detail.merchantId)).get_key(),
+        C::SrV3InputConfig(MID::merchant_id_to_text(txn_detail.merchantId)).get_key(),
     )
     .await;
     let pmt = txn_card_info.paymentMethodType;
@@ -326,9 +326,9 @@ pub async fn getSrV3MerchantBucketSize(txn_detail: TxnDetail, txn_card_info: Txn
     let merchant_bucket_size = match maybe_bucket_size {
         None => {
             let default_sr_v3_input_config: Option<SrV3InputConfig> =
-                findByNameFromRedis(DC::srV3DefaultInputConfig.get_key()).await;
+                findByNameFromRedis(DC::SR_V3_DEFAULT_INPUT_CONFIG.get_key()).await;
             GU::get_sr_v3_bucket_size(default_sr_v3_input_config, &pmt, &pm, &sr_routing_dimesions)
-                .unwrap_or(C::defaultSrV3BasedBucketSize)
+                .unwrap_or(C::DEFAULT_SR_V3_BASED_BUCKET_SIZE)
         }
         Some(bucket_size) => bucket_size,
     };

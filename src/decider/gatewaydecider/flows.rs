@@ -375,7 +375,7 @@ pub async fn runDeciderFlow(
                     Some(pgw.clone()),
                     None,
                     Vec::new(),
-                    T::GatewayDeciderApproach::MERCHANT_PREFERENCE,
+                    T::GatewayDeciderApproach::MerchantPreference,
                     None,
                     functionalGateways,
                     None,
@@ -386,10 +386,10 @@ pub async fn runDeciderFlow(
                     gateway_priority_map: Some(json!(HashMap::from([(pgw.to_string(), 1.0)]))),
                     filter_wise_gateways: None,
                     priority_logic_tag: None,
-                    routing_approach: T::GatewayDeciderApproach::MERCHANT_PREFERENCE,
+                    routing_approach: T::GatewayDeciderApproach::MerchantPreference,
                     gateway_before_evaluation: Some(pgw.clone()),
                     priority_logic_output: None,
-                    reset_approach: T::ResetApproach::NO_RESET,
+                    reset_approach: T::ResetApproach::NoReset,
                     routing_dimension: None,
                     routing_dimension_level: None,
                     is_scheduled_outage: false,
@@ -420,7 +420,7 @@ pub async fn runDeciderFlow(
                     None,
                     None,
                     Vec::new(),
-                    T::GatewayDeciderApproach::NONE,
+                    T::GatewayDeciderApproach::None,
                     None,
                     functionalGateways,
                     None,
@@ -430,7 +430,7 @@ pub async fn runDeciderFlow(
                     decider_flow.writer.debugFilterList.clone(),
                     decider_flow.writer.debugScoringList.clone(),
                     None,
-                    T::GatewayDeciderApproach::NONE,
+                    T::GatewayDeciderApproach::None,
                     None,
                     decider_flow.writer.is_dynamic_mga_enabled,
                 ))
@@ -559,7 +559,7 @@ pub async fn runDeciderFlow(
                     decider_flow.writer.debugFilterList.clone(),
                     decider_flow.writer.debugScoringList.clone(),
                     updatedPriorityLogicOutput.priorityLogicTag.clone(),
-                    T::GatewayDeciderApproach::NONE,
+                    T::GatewayDeciderApproach::None,
                     Some(updatedPriorityLogicOutput),
                     decider_flow.writer.is_dynamic_mga_enabled,
                 )),
@@ -677,7 +677,7 @@ pub async fn runDeciderFlow(
     };
 
     let key = [
-        C::gatewayScoringData,
+        C::GATEWAY_SCORING_DATA,
         &deciderParams.dpTxnDetail.txnUuid.clone(),
     ]
     .concat();
@@ -695,7 +695,7 @@ pub async fn runDeciderFlow(
                 serde_json::to_string(&updated_gateway_scoring_data.clone())
                     .unwrap_or_default()
                     .as_str(),
-                C::gatewayScoreKeysTTL,
+                C::GATEWAY_SCORE_KEYS_TTL,
             )
             .await
             .unwrap_or_default();
@@ -796,7 +796,7 @@ async fn filterFunctionalGatewaysWithEnforcment(
             decider_flow.writer.internalMetaData.clone(),
             decider_flow.get().dpOrderMetadata.metadata.clone(),
             plOp.clone(),
-            PriorityLogicFailure::NULL_AFTER_ENFORCE,
+            PriorityLogicFailure::NullAfterEnforce,
         )
         .await;
         let fallBackGwPriority =
@@ -817,7 +817,7 @@ async fn filterFunctionalGatewaysWithEnforcment(
                     decider_flow.writer.internalMetaData.clone(),
                     decider_flow.get().dpOrderMetadata.metadata.clone(),
                     updatedPlOp,
-                    PriorityLogicFailure::NULL_AFTER_ENFORCE,
+                    PriorityLogicFailure::NullAfterEnforce,
                 )
                 .await;
                 (updatedEnforcedGateways, updatedPlOp)
@@ -1141,7 +1141,7 @@ pub async fn getFailureReasonWithFilter(
                     .as_ref()
                     .and_then(|meta| meta.isCvvLessTxn)
                     .unwrap_or(false)
-                    && txn_card_info.authType == Some(AuthType::MOTO)
+                    && txn_card_info.authType == Some(AuthType::Moto)
                 {
                     format!(
                         "No functional gateways supporting cvv less {}repeat moto transaction.",
