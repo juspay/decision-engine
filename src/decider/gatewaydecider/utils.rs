@@ -1131,7 +1131,7 @@ pub async fn get_card_info_by_bin(card_bin: Option<String>) -> Option<ETCa::card
             let bin_list = if bin.len() > 6 {
                 (6..=9)
                     .filter(|&len| len <= bin.len())
-                    .map(|len| (ETCa::isin::to_isin(bin[..len].to_string())))
+                    .map(|len| ETCa::isin::to_isin(bin[..len].to_string()))
                     .collect()
             } else {
                 vec![(ETCa::isin::to_isin(bin))]
@@ -2864,7 +2864,7 @@ pub async fn get_penality_factor_(decider_flow: &mut DeciderFlow<'_>) -> f64 {
         let m_reward_factor =
             eliminationV2RewardFactor(&merchant_id, &txn_card_info, &txn_detail).await;
         match m_reward_factor {
-            Some(reward_factor) => return (1.0 - reward_factor),
+            Some(reward_factor) => return 1.0 - reward_factor,
             None => {
                 return getPenaltyFactor(ScoreKeyType::EliminationMerchantKey).await;
             }

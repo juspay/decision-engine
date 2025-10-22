@@ -450,11 +450,11 @@ pub async fn getUpdatedMerchantDetailsForGlobalKey(
                 if filtered_merchant_details_array.is_empty() {
                     let arr_max_length = getMerchantArrMaxLength().await;
                     if merchant_details_array.len() as i32 >= arr_max_length {
-                        return (Some(merchant_details_array));
+                        return Some(merchant_details_array);
                     } else {
                         let merchant_detail =
                             getDefaultMerchantScoringDetailsArray(merchant_id, 1.0, 1, None);
-                        return (Some([merchant_details_array, vec![merchant_detail]].concat()));
+                        return Some([merchant_details_array, vec![merchant_detail]].concat());
                     }
                 } else {
                     let mut results = Vec::new();
@@ -475,11 +475,11 @@ pub async fn getUpdatedMerchantDetailsForGlobalKey(
             None => {
                 let merchant_scoring_details =
                     getDefaultMerchantScoringDetailsArray(merchant_id, 1.0, 1, None);
-                return (Some(vec![merchant_scoring_details]));
+                return Some(vec![merchant_scoring_details]);
             }
         }
     } else {
-        return (None);
+        return None;
     }
 }
 
@@ -506,13 +506,13 @@ pub async fn replaceTransactionCount(
         } else {
             merchant_scoring_details.transactionCount
         };
-        (MerchantScoringDetails {
+        MerchantScoringDetails {
             score: updated_score,
             transactionCount: new_count,
             ..merchant_scoring_details
-        })
+        }
     } else {
-        (merchant_scoring_details)
+        merchant_scoring_details
     }
 }
 

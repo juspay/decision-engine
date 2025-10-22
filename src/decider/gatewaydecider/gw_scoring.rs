@@ -2637,7 +2637,7 @@ pub async fn update_gateway_score_based_on_success_rate(
                 // };
 
                 let reset_gw_list = decider_flow.writer.resetGatewayList.clone();
-                if (!reset_gw_list.is_empty()) {
+                if !reset_gw_list.is_empty() {
                     trigger_reset_gateway_score(
                         decider_flow,
                         gateway_success_rate_inputs,

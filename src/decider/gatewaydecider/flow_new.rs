@@ -42,7 +42,7 @@ use crate::types::txn_details::types as ETTD;
 
 pub async fn deciderFullPayloadHSFunction(
     dreq_: T::DomainDeciderRequestForApiCallV2,
-) -> Result<(T::DecidedGateway), T::ErrorResponse> {
+) -> Result<T::DecidedGateway, T::ErrorResponse> {
     let merchant_account =
         ETM::merchant_account::load_merchant_by_merchant_id(dreq_.merchantId.clone())
             .await
@@ -148,7 +148,7 @@ pub async fn runDeciderFlow(
     rankingAlgorithm: Option<RankingAlgorithm>,
     eliminationEnabled: Option<bool>,
     is_legacy_decider_flow: bool,
-) -> Result<(T::DecidedGateway), T::ErrorResponse> {
+) -> Result<T::DecidedGateway, T::ErrorResponse> {
     let txnCreationTime = deciderParams
         .dpTxnDetail
         .dateCreated
@@ -168,7 +168,7 @@ pub async fn runDeciderFlow(
         deciderParams.dpMerchantAccount.clone(),
     )
     .await;
-    let (functionalGateways) = deciderParams
+    let functionalGateways = deciderParams
         .dpEnforceGatewayList
         .clone()
         .unwrap_or_default();
@@ -536,7 +536,7 @@ pub async fn runDeciderFlow(
         .unwrap_or_default();
     updated_gateway_scoring_data;
     match dResult {
-        Ok(result) => Ok((result)),
+        Ok(result) => Ok(result),
         Err((
             debugFilterList,
             _,
