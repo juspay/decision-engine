@@ -5,7 +5,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 // use chrono::NaiveDateTime;
 // use data::text::Text;
 // use juspay::extra::nonemptytext::NonEmptyText;
-use crate::types::txn_details::types::{TxnDetailId,deserialize_optional_primitive_datetime};
+use crate::types::txn_details::types::{deserialize_optional_primitive_datetime, TxnDetailId};
 use serde::{de, ser};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
