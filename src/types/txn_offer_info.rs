@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 use time::PrimitiveDateTime;
 
-use crate::decider::gatewaydecider::types::Gateway;
-
 use super::money::internal::Money;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Serialize, Deserialize)]

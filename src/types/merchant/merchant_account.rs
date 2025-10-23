@@ -4,8 +4,7 @@ use serde::{Deserialize, Serialize};
 // use db::mesh::internal::*;
 use crate::error::ApiError;
 use crate::storage::types::{
-    BitBool, BitBoolWrite, MerchantAccount as DBMerchantAccount, MerchantAccountNew,
-    MerchantAccountUpdate,
+    BitBoolWrite, MerchantAccount as DBMerchantAccount, MerchantAccountNew, MerchantAccountUpdate,
 };
 // use types::utils::dbconfig::get_euler_db_conf;
 // use types::locker::id::{LockerId, to_locker_id};

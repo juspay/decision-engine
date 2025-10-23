@@ -5,11 +5,11 @@ use crate::storage::schema_pg::routing_algorithm::dsl;
 use crate::{
     error::ApiErrorResponse,
     euclid::{
-        ast::{self, ComparisonType, ConnectorInfo, Output, ValueType},
+        ast::{ComparisonType, ConnectorInfo, Output, ValueType},
         cgraph,
         interpreter::{evaluate_output, InterpreterBackend},
         types::{
-            ActivateRoutingConfigRequest, Context, DataType, JsonifiedRoutingAlgorithm,
+            ActivateRoutingConfigRequest, Context, JsonifiedRoutingAlgorithm,
             RoutingAlgorithmMapperNew, RoutingDictionaryRecord, RoutingEvaluateResponse,
             RoutingRequest, RoutingRule, SrDimensionConfig, StaticRoutingAlgorithm,
             ELIGIBLE_DIMENSIONS,
@@ -30,7 +30,7 @@ use error_stack::ResultExt;
 
 use crate::app::get_tenant_app_state;
 
-use crate::error::{self, ContainerError};
+use crate::error::ContainerError;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
 use serde_json::{json, Value};
 

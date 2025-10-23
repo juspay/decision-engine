@@ -3,6 +3,7 @@ use crate::decider::network_decider;
 use crate::error;
 use crate::utils::CustomResult;
 use diesel::sql_types::Bit;
+#[cfg(feature = "postgres")]
 use diesel::sql_types::Bool;
 
 #[cfg(feature = "mysql")]

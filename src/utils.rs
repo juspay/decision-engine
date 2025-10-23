@@ -1,6 +1,5 @@
-use crate::logger::storage::Storage;
 use crate::{
-    decider::gatewaydecider::runner::ResponseBody, error::ApiClientError, logger, storage::consts,
+    decider::gatewaydecider::runner::ResponseBody, error::ApiClientError, storage::consts,
 };
 use axum::{body::Body, extract::Request};
 use error_stack::ResultExt;
@@ -11,7 +10,6 @@ use reqwest::{
     Client,
 };
 use serde::Deserialize;
-use serde_json::Value;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 /// Date-time utilities.

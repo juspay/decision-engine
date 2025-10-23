@@ -2,14 +2,12 @@ use crate::decider::gatewaydecider::types::{ErrorResponse, UnifiedError};
 use crate::feedback::gateway_scoring_service::{
     check_and_update_gateway_score, invalid_request_error,
 };
+use crate::logger;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
-use crate::types::card::txn_card_info::{
-    convert_safe_to_txn_card_info, SafeTxnCardInfo, TxnCardInfo,
-};
+use crate::types::card::txn_card_info::{convert_safe_to_txn_card_info, SafeTxnCardInfo};
 use crate::types::txn_details::types::{
     convert_safe_txn_detail_to_txn_detail, SafeTxnDetail, TransactionLatency,
 };
-use crate::{logger, metrics};
 use axum::body::to_bytes;
 use cpu_time::ProcessTime;
 use serde::{Deserialize, Serialize};

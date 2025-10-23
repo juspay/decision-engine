@@ -1,9 +1,11 @@
 use crate::{
     config::Database,
-    config::PgDatabase,
     error::{self, ContainerError},
     logger,
 };
+
+#[cfg(feature = "postgres")]
+use crate::config::PgDatabase;
 
 use crate::generics::StorageResult;
 use bb8::PooledConnection;

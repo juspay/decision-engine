@@ -3,8 +3,6 @@ use super::types::RankingAlgorithm;
 use super::types::UnifiedError;
 use crate::app::get_tenant_app_state;
 use crate::decider::network_decider;
-use axum::response::IntoResponse;
-use diesel::expression::is_aggregate::No;
 use serde_json::json;
 use serde_json::Value as AValue;
 use std::collections::HashMap;
@@ -20,25 +18,12 @@ use super::runner::handle_fallback_logic;
 use super::types as T;
 use super::types::PriorityLogicFailure;
 use super::utils as Utils;
-use super::utils::is_card_transaction;
-use super::utils::is_emandate_transaction;
-use super::utils::is_mandate_transaction;
-use super::utils::is_tpv_mandate_transaction;
-use super::utils::is_tpv_transaction;
-use crate::decider::storage::utils::txn_card_info::is_google_pay_txn;
-use crate::types::card::card_type::card_type_to_text;
-use crate::types::card::card_type::CardType;
-use crate::types::card::txn_card_info::AuthType;
-// use crate::types::card::txn_card_info::TxnCardInfo;
-use crate::types::card::vault_provider::VaultProvider;
 // use optics_core::{preview, review};
 use crate::decider::gatewaydecider::constants as C;
 use crate::logger;
 use crate::types::card::txn_card_info::TxnCardInfo;
-use crate::types::gateway_card_info::ValidationType;
 use crate::types::merchant as ETM;
 use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
-use crate::types::txn_details::types as ETTD;
 
 pub async fn deciderFullPayloadHSFunction(
     dreq_: T::DomainDeciderRequestForApiCallV2,

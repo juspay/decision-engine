@@ -1,5 +1,5 @@
+use crate::error;
 use crate::types::{merchant::id::MerchantId, routing_configuration};
-use crate::{error, logger};
 use error_stack::ResultExt;
 use serde::{Deserialize, Serialize};
 use std::option::Option;

@@ -1,7 +1,7 @@
 use crate::app::get_tenant_app_state;
 // use db::eulermeshimpl::mesh_config;
 // use db::mesh::internal::*;
-use crate::storage::types::{BitBool, Feature as DBFeature};
+use crate::storage::types::Feature as DBFeature;
 // use types::utils::dbconfig::get_euler_db_conf;
 use crate::types::merchant::id::{merchant_id_to_text, to_merchant_id, MerchantId};
 // use juspay::extra::parsing::{Parsed, Step, around, lift_pure, mandated, parse_field, project};

@@ -7,10 +7,8 @@ use serde::{Deserialize, Serialize};
 use time::PrimitiveDateTime;
 // use database::beam as B;
 // use chrono::{Local, Utc};
-use crate::types::gateway as ETG;
-use crate::types::txn_details::types::{Offset, TransactionLatency, TxnStatus};
+use crate::types::txn_details::types::{TransactionLatency, TxnStatus};
 use std::string::String;
-use time::OffsetDateTime;
 // use eulerhs::types::MeshError;
 
 // // Converted type synonyms
