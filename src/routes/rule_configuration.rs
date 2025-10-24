@@ -464,7 +464,7 @@ pub async fn delete_rule_config(
                 API_REQUEST_COUNTER
                     .with_label_values(&["elimination_delete_rule_config", "failure"])
                     .inc();
-                return Err(error::RuleConfigurationError::StorageError.into());
+                return Err(error::RuleConfigurationError::ConfigurationNotFound.into());
             }
 
             let result = types::merchant::merchant_account::update_merchant_account(
