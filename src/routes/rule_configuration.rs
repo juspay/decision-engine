@@ -328,7 +328,7 @@ pub async fn update_rule_config(
 
             let result = types::service_configuration::update_config(name, Some(serialized_config))
                 .await
-                .change_context(error::RuleConfigurationError::StorageError);
+                .change_context(error::RuleConfigurationError::ConfigurationNotFound);
 
             match result {
                 Ok(_) => {
@@ -359,7 +359,7 @@ pub async fn update_rule_config(
                 Some(serialized_config),
             )
             .await
-            .change_context(error::RuleConfigurationError::StorageError);
+            .change_context(error::RuleConfigurationError::ConfigurationNotFound);
 
             match result {
                 Ok(_) => {
@@ -387,7 +387,7 @@ pub async fn update_rule_config(
 
             let result = types::service_configuration::update_config(name, Some(serialized_config))
                 .await
-                .change_context(error::RuleConfigurationError::StorageError);
+                .change_context(error::RuleConfigurationError::ConfigurationNotFound);
 
             match result {
                 Ok(_) => {
@@ -436,7 +436,7 @@ pub async fn delete_rule_config(
             let config_name = format!("SR_V3_INPUT_CONFIG_{}", mid);
             let result = types::service_configuration::delete_config(config_name)
                 .await
-                .change_context(error::RuleConfigurationError::StorageError);
+                .change_context(error::RuleConfigurationError::ConfigurationNotFound);
 
             match result {
                 Ok(_) => {
@@ -496,7 +496,7 @@ pub async fn delete_rule_config(
             let config_name = format!("DEBIT_ROUTING_CONFIG_{}", mid);
             let result = types::service_configuration::delete_config(config_name)
                 .await
-                .change_context(error::RuleConfigurationError::StorageError);
+                .change_context(error::RuleConfigurationError::ConfigurationNotFound);
 
             match result {
                 Ok(_) => {
