@@ -576,6 +576,7 @@ pub async fn getAllUnifiedKeys(
     mer_acc: MerchantAccount,
     gateway_scoring_data: GatewayScoringData,
     gateway_reference_id: Option<String>,
+    updated_payment_method: Option<String>,
 ) -> Vec<(ScoreKeyType, Option<String>)> {
     let merchant_id = Merchant::merchant_id_to_text(txn_detail.merchantId.clone());
     let is_key_enabled_for_global_gateway_scoring = isFeatureEnabled(
@@ -616,12 +617,13 @@ pub async fn getAllUnifiedKeys(
         .await;
 
     let global_key = if is_key_enabled_for_global_gateway_scoring {
-        let key = EulerTransforms::getProducerKey(
+        let key = EulerTransforms::getProducerKeyWithUpdatedPaymentMethod(
             txn_detail.clone(),
             Some(gateway_scoring_data.clone()),
             ScoreKeyType::ELIMINATION_GLOBAL_KEY,
             false,
             gateway_reference_id.clone(),
+            updated_payment_method.clone(),
         )
         .await;
         vec![(ScoreKeyType::ELIMINATION_GLOBAL_KEY, key)]
@@ -636,12 +638,13 @@ pub async fn getAllUnifiedKeys(
     };
 
     let merchant_key = if is_key_enabled_for_merchant_gateway_scoring {
-        let key = EulerTransforms::getProducerKey(
+        let key = EulerTransforms::getProducerKeyWithUpdatedPaymentMethod(
             txn_detail.clone(),
             Some(gateway_scoring_data.clone()),
             ScoreKeyType::ELIMINATION_MERCHANT_KEY,
             false,
             gateway_reference_id.clone(),
+            updated_payment_method.clone(),
         )
         .await;
         vec![(ScoreKeyType::ELIMINATION_MERCHANT_KEY, key)]
@@ -656,12 +659,13 @@ pub async fn getAllUnifiedKeys(
     };
 
     let global_outage_keys = if is_gateway_scoring_enabled_for_global_outage {
-        let key = EulerTransforms::getProducerKey(
+        let key = EulerTransforms::getProducerKeyWithUpdatedPaymentMethod(
             txn_detail.clone(),
             Some(gateway_scoring_data.clone()),
             ScoreKeyType::OUTAGE_GLOBAL_KEY,
             false,
             gateway_reference_id.clone(),
+            updated_payment_method.clone(),
         )
         .await;
         vec![(ScoreKeyType::OUTAGE_GLOBAL_KEY, key)]
@@ -676,12 +680,13 @@ pub async fn getAllUnifiedKeys(
     };
 
     let merchant_outage_keys = if is_gateway_scoring_enabled_for_merchant_outage {
-        let key = EulerTransforms::getProducerKey(
+        let key = EulerTransforms::getProducerKeyWithUpdatedPaymentMethod(
             txn_detail.clone(),
             Some(gateway_scoring_data),
             ScoreKeyType::OUTAGE_MERCHANT_KEY,
             false,
             gateway_reference_id.clone(),
+            updated_payment_method.clone(),
         )
         .await;
         vec![(ScoreKeyType::OUTAGE_MERCHANT_KEY, key)]

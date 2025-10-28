@@ -173,6 +173,7 @@ pub async fn update_score(
                 enforce_failure,
                 gateway_reference_id,
                 txn_latency,
+                None, // updated_payment_method - not available in this legacy route
             )
             .await;
 

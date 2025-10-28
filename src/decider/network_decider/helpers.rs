@@ -252,3 +252,33 @@ impl gateway_decider_types::NETWORK {
         }
     }
 }
+
+// Using max normalization strategy
+// min cost saving will always be 0. So, max normalization is equivalent to min-max normalization
+pub fn normalize_cost_savings(
+    network_cost_savings: Vec<types::NetworkSavingInfoForSuperRouter>,
+) -> Vec<types::NetworkSavingInfoForSuperRouter> {
+    let mut max_saving = f64::NEG_INFINITY;
+
+    for network_cost in &network_cost_savings {
+        max_saving = max_saving.max(network_cost.savings_absolute);
+    }
+
+    // If all the cost savings are 0, return the original array.
+    // This avoids division by zero in next code segment while normalizing cost savings.
+    if (max_saving - 0.0).abs() < f64::EPSILON {
+        return network_cost_savings;
+    }
+
+    network_cost_savings
+        .iter()
+        .map(|network_cost| {
+            let normalized_cost_saving = network_cost.savings_absolute / max_saving;
+            types::NetworkSavingInfoForSuperRouter {
+                network: network_cost.network.clone(),
+                savings_absolute: network_cost.savings_absolute.clone(),
+                savings_normalized: normalized_cost_saving,
+            }
+        })
+        .collect()
+}

@@ -252,6 +252,13 @@ pub struct NetworkSavingInfo {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+pub struct NetworkSavingInfoForSuperRouter {
+    pub network: String,
+    pub savings_absolute: f64,
+    pub savings_normalized: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct DebitRoutingOutput {
     pub co_badged_card_networks_info: Vec<NetworkSavingInfo>,
     pub issuer_country: CountryAlpha2,

@@ -27,6 +27,8 @@ use error_stack::ResultExt;
 use fred::prelude::{KeysInterface, ListInterface};
 use masking::PeekInterface;
 use masking::Secret;
+use rand::seq::SliceRandom;
+use rand::SeedableRng;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::from_value;
@@ -2999,3 +3001,65 @@ pub async fn get_penality_factor_(decider_flow: &mut DeciderFlow<'_>) -> f64 {
 //     Ok(None)
 //     }
 // }
+
+pub async fn perform_super_router_hedging(
+    decider_params: &types::DeciderParams,
+    super_router_priority_map: Vec<types::SUPERROUTERPRIORITYMAP>,
+) -> (Vec<types::SUPERROUTERPRIORITYMAP>, bool) { 
+    use rand::rngs::StdRng;
+    use rand::{Rng, SeedableRng};
+    use std::hash::{Hash, Hasher};
+    use std::collections::hash_map::DefaultHasher;
+    // Developer should configure this variable as per their requirement
+    let hedging_percent = 10.0;
+    let txn_id = decider_params.dpTxnDetail.txnUuid.clone();
+
+    // Generate a seed value from txn_id
+    let mut hasher = DefaultHasher::new();
+    txn_id.hash(&mut hasher);
+    let seed = hasher.finish();
+
+    // Range
+    let (min, max) = (0.0, 100.0);
+
+    let mut rng = StdRng::seed_from_u64(seed);
+    let random_val = rng.gen_range(min..=max);
+    let should_explore = (random_val < hedging_percent);
+
+    if should_explore {
+        logger::debug!(
+            action = "perform_super_router_hedging",
+            tag = "perform_super_router_hedging",
+            "Performing super router hedging for transaction: {}",
+            txn_id
+        );
+        return (apply_super_router_hedging(super_router_priority_map, seed), true);
+    }
+    (super_router_priority_map, false)
+}
+
+// randomize_super_router_selection
+pub fn apply_super_router_hedging (
+    mut super_router_priority_map: Vec<types::SUPERROUTERPRIORITYMAP>,
+    seed: u64,
+) -> Vec<types::SUPERROUTERPRIORITYMAP> {
+    if super_router_priority_map.len() <= 1 {
+        return super_router_priority_map;
+    }
+
+    let first_entry = super_router_priority_map.remove(0);
+
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+    super_router_priority_map.shuffle(&mut rng);
+
+    super_router_priority_map.push(first_entry);
+
+    logger::debug!(
+        action = "apply_super_router_hedging",
+        tag = "apply_super_router_hedging",
+        "super_router_priority_map after shuffling: {:?}",
+        super_router_priority_map
+    );
+
+    super_router_priority_map
+}
