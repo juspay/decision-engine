@@ -5,10 +5,14 @@ use crate::app::get_tenant_app_state;
 use crate::decider::network_decider;
 use axum::response::IntoResponse;
 use diesel::expression::is_aggregate::No;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_json::Value as AValue;
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::BufReader;
 use std::option::Option;
+use std::path::Path;
 use std::string::String;
 use std::vec::Vec;
 // use eulerhs::prelude::*;
@@ -41,8 +45,66 @@ use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
 use crate::types::txn_details::types as ETTD;
 use crate::decider::network_decider::types as NetworkTypes;
 
-const SUPER_ROUTER_SUCCESS_RATE_DELTA: f64 = 0.01; // 1% delta for success rate windowing
+/// Struct representing the super router constants configuration
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct SuperRouterConstants {
+    success_rate_delta: f64,
+}
 
+impl SuperRouterConstants {
+    /// Default value for success_rate_delta if JSON file cannot be read
+    const DEFAULT_SUCCESS_RATE_DELTA: f64 = 0.05;
+    
+    /// Path to the super router constants JSON file
+    const CONFIG_FILE_PATH: &'static str = "super_router_constants.json";
+    
+    /// Reads the super router constants from the JSON file
+    /// Returns the default value if the file cannot be read or parsed
+    fn read_from_file() -> SuperRouterConstants {
+        Self::read_from_file_with_path(Self::CONFIG_FILE_PATH)
+    }
+    
+    /// Reads the super router constants from a JSON file at the specified path
+    /// Returns the default value if the file cannot be read or parsed
+    fn read_from_file_with_path<P: AsRef<Path>>(path: P) -> SuperRouterConstants {
+        match File::open(path) {
+            Ok(file) => {
+                let reader = BufReader::new(file);
+                match serde_json::from_reader(reader) {
+                    Ok(config) => {
+                        tracing::info!("Successfully loaded super router constants from JSON file");
+                        config
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Failed to parse super router constants JSON file: {}. Using default values.",
+                            e
+                        );
+                        SuperRouterConstants {
+                            success_rate_delta: Self::DEFAULT_SUCCESS_RATE_DELTA,
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to open super router constants JSON file: {}. Using default values.",
+                    e
+                );
+                SuperRouterConstants {
+                    success_rate_delta: Self::DEFAULT_SUCCESS_RATE_DELTA,
+                }
+            }
+        }
+    }
+}
+
+/// Function to read the super router constants and return the success_rate_delta value
+/// Returns an f64 value that can be used in the super router logic
+fn read_super_router_constants() -> f64 {
+    let config = SuperRouterConstants::read_from_file();
+    config.success_rate_delta
+}
 
 pub async fn deciderFullPayloadHSFunction(
     dreq_: T::DomainDeciderRequestForApiCallV2,
@@ -817,7 +879,7 @@ pub async fn runSuperRouterFlow(
     // Sort the super router priority map using dynamic windows
     let sorted_priority_map = sort_super_router_priority_map_by_dynamic_windows(
         super_router_priority_map,
-        SUPER_ROUTER_SUCCESS_RATE_DELTA,
+        read_super_router_constants(),
     );
     
     // Return the result
