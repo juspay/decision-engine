@@ -2,6 +2,77 @@ use super::types;
 use crate::logger;
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::Path;
+
+// Configuration structure for SR cost routing parameters
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct SrCostRoutingConstants {
+    pub sr_threshold: f64,
+    pub spread_threshold: f64,
+    pub alpha: f64,
+    pub beta: f64,
+}
+
+// Root configuration structure
+#[derive(Debug, Deserialize, Serialize)]
+pub struct SrCostRoutingConfig {
+    pub sr_cost_routing_constants: SrCostRoutingConstants,
+}
+
+// Default configuration values
+impl Default for SrCostRoutingConstants {
+    fn default() -> Self {
+        SrCostRoutingConstants {
+            sr_threshold: 0.85,
+            spread_threshold: 0.02,
+            alpha: 3.0,
+            beta: 1.0,
+        }
+    }
+}
+
+// Function to load configuration from JSON file
+fn load_config() -> SrCostRoutingConstants {
+    let config_path = "config/sr_cost_routing_constants.json";
+    
+    match fs::read_to_string(config_path) {
+        Ok(config_content) => {
+            match serde_json::from_str::<SrCostRoutingConfig>(&config_content) {
+                Ok(config) => {
+                    logger::info!(
+                        tag = "Config_Loading",
+                        action = "Config_Loading",
+                        "Successfully loaded SR cost routing configuration: {:?}",
+                        config.sr_cost_routing_constants
+                    );
+                    config.sr_cost_routing_constants
+                }
+                Err(parse_error) => {
+                    logger::error!(
+                        tag = "Config_Loading",
+                        action = "Config_Loading",
+                        "Failed to parse config file {}: {}. Using default values.",
+                        config_path,
+                        parse_error
+                    );
+                    SrCostRoutingConstants::default()
+                }
+            }
+        }
+        Err(read_error) => {
+            logger::error!(
+                tag = "Config_Loading",
+                action = "Config_Loading",
+                "Failed to read config file {}: {}. Using default values.",
+                config_path,
+                read_error
+            );
+            SrCostRoutingConstants::default()
+        }
+    }
+}
 
 // Structure to hold gap analysis results
 struct GapAnalysisResult {
@@ -28,20 +99,20 @@ fn prepare_entries(entries: &[(String, f64, f64)]) -> Vec<(String, f64, f64)> {
         .collect()
 }
 
-// Function to analyze success rates and determine weights based on a fixed threshold
-fn analyze_gaps_and_weights(entries: &[(String, f64, f64)]) -> GapAnalysisResult {
+// Function to analyze success rates and determine weights based on configurable threshold
+fn analyze_gaps_and_weights(entries: &[(String, f64, f64)], config: &SrCostRoutingConstants) -> GapAnalysisResult {
     // Default result with no significant gap and equal weights
     let mut result = GapAnalysisResult {
         has_significant_gap: false,
         gap_index: 0,
-        sr_weight: 1.0,
-        cost_weight: 1.0,
+        sr_weight: config.beta,
+        cost_weight: config.beta,
     };
 
     // If we have at least 1 entry, analyze success rates
     if !entries.is_empty() {
-        // Fixed threshold for success rate (85%)
-        let sr_threshold = 0.85;
+        // Use configurable threshold for success rate
+        let sr_threshold = config.sr_threshold;
 
         // Find entries above the threshold
         let above_threshold: Vec<&(String, f64, f64)> = entries
@@ -62,19 +133,19 @@ fn analyze_gaps_and_weights(entries: &[(String, f64, f64)]) -> GapAnalysisResult
                 0.0
             };
 
-            // Fixed spread value for weight determination (5%)
-            let spread_threshold = 0.02;
+            // Use configurable spread threshold for weight determination
+            let spread_threshold = config.spread_threshold;
 
             // Calculate weights based on spread
             // If spread is small, cost dominates; if spread is large, SR dominates
             if sr_spread < spread_threshold {
-                // Small spread, cost dominates
-                result.sr_weight = 1.0;
-                result.cost_weight = 3.0;
+                // Small spread, cost dominates (cost gets higher weight)
+                result.sr_weight = config.beta;
+                result.cost_weight = config.alpha;
             } else {
-                // Large spread, SR dominates
-                result.sr_weight = 3.0;
-                result.cost_weight = 1.0;
+                // Large spread, SR dominates (SR gets higher weight)
+                result.sr_weight = config.alpha;
+                result.cost_weight = config.beta;
             }
 
             logger::info!(
@@ -108,6 +179,9 @@ fn analyze_gaps_and_weights(entries: &[(String, f64, f64)]) -> GapAnalysisResult
 pub fn sort_by_euclidean_distance_original(
     combined_map: &mut Vec<types::SUPERROUTERPRIORITYMAP>,
 ) -> Vec<types::SUPERROUTERPRIORITYMAP> {
+    // Load configuration from JSON file
+    let config = load_config();
+
     // Create a vector of (key, score, cost) tuples
     let mut entries: Vec<(String, f64, f64)> = Vec::new();
 
@@ -134,7 +208,7 @@ pub fn sort_by_euclidean_distance_original(
     );
 
     // Analyze gaps and determine weights using original scores
-    let gap_analysis = analyze_gaps_and_weights(&sorted_entries);
+    let gap_analysis = analyze_gaps_and_weights(&sorted_entries, &config);
 
     // Create a map to store calculated distances
     let mut distance_map: HashMap<String, f64> = HashMap::new();
