@@ -624,6 +624,7 @@ pub enum GatewayDeciderApproach {
     SR_V3_GLOBAL_DOWNTIME_HEDGING,
     NTW_BASED_ROUTING,
     SUPER_ROUTER,
+    SUPER_ROUTER_HEDGING,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -918,10 +919,17 @@ pub struct DomainDeciderRequest {
 
 // impl Given<SecretContext> for DomainDeciderRequest {}
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EligibleGatewayPaymentMethodsList {
+    pub gateway: String,
+    pub payment_methods: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DomainDeciderRequestForApiCallV2 {
     pub paymentInfo: PaymentInfo,
     pub merchantId: String,
     pub eligibleGatewayList: Option<Vec<String>>,
+    pub eligibleGatewayPaymentMethodsList: Option<Vec<EligibleGatewayPaymentMethodsList>>,
     pub rankingAlgorithm: Option<RankingAlgorithm>,
     pub eliminationEnabled: Option<bool>,
 }
@@ -1448,6 +1456,9 @@ impl fmt::Display for GatewayDeciderApproach {
             }
             Self::SUPER_ROUTER => {
                 write!(f, "SUPER_ROUTER")
+            }
+            Self::SUPER_ROUTER_HEDGING => {
+                write!(f, "SUPER_ROUTER_HEDGING")
             }
         }
     }

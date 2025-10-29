@@ -2,12 +2,14 @@ use super::runner::get_gateway_priority;
 use super::types::RankingAlgorithm;
 use super::types::UnifiedError;
 use crate::app::get_tenant_app_state;
+use crate::config::SuperRouterSortingStrategy;
 use crate::decider::network_decider;
 use axum::response::IntoResponse;
 use diesel::expression::is_aggregate::No;
 use serde_json::json;
 use serde_json::Value as AValue;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::option::Option;
 use std::string::String;
 use std::vec::Vec;
@@ -33,13 +35,13 @@ use crate::types::card::txn_card_info::AuthType;
 use crate::types::card::vault_provider::VaultProvider;
 // use optics_core::{preview, review};
 use crate::decider::gatewaydecider::constants as C;
-use crate::decider::network_decider::types as NetworkTypes;
 use crate::logger;
 use crate::types::card::txn_card_info::TxnCardInfo;
 use crate::types::gateway_card_info::ValidationType;
 use crate::types::merchant as ETM;
 use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
 use crate::types::txn_details::types as ETTD;
+use crate::decider::network_decider::types as NetworkTypes;
 
 pub async fn deciderFullPayloadHSFunction(
     dreq_: T::DomainDeciderRequestForApiCallV2,
@@ -870,6 +872,7 @@ async fn get_sr_for_each_gateway_network_combination(
 fn build_super_router_response(
     first_gateway_result: Option<T::DecidedGateway>,
     super_router_priority_map: Vec<T::SUPERROUTERPRIORITYMAP>,
+    hedging_performed: bool,
 ) -> Result<T::DecidedGateway, T::ErrorResponse> {
     logger::debug!(
         "Sorted super_router_priority_map by success_rate: {:?}",
@@ -886,7 +889,11 @@ fn build_super_router_response(
             gateway_result.gateway_priority_map = None;
             // Update the decided gateway to use the best one from our sorted list
             // gateway_result.decided_gateway = best_gateway;
-            gateway_result.routing_approach = T::GatewayDeciderApproach::SUPER_ROUTER;
+            if hedging_performed {
+                gateway_result.routing_approach = T::GatewayDeciderApproach::SUPER_ROUTER_HEDGING;
+            } else {
+                gateway_result.routing_approach = T::GatewayDeciderApproach::SUPER_ROUTER;
+            }
 
             logger::debug!("SUPER_ROUTER flow completed successfully");
             Ok(gateway_result)
@@ -975,8 +982,15 @@ pub async fn runSuperRouterFlow(
         best_distance
     );
 
+    // Perform hedging
+    let (final_priority_map, hedging_performed) = Utils::perform_super_router_hedging(
+        &decider_params, 
+        sorted_priority_map,
+    )
+    .await;
+
     // Build super router response
-    build_super_router_response(first_gateway_result, sorted_priority_map)
+    build_super_router_response(first_gateway_result, final_priority_map, hedging_performed)
 }
 
 // async fn addMetricsToStream(
