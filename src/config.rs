@@ -19,6 +19,27 @@ use std::{
 };
 
 #[derive(Clone, serde::Deserialize, Debug)]
+pub struct SuperRouterConfig {
+    pub sorting_strategy: SuperRouterSortingStrategy,
+}
+
+#[derive(Clone, serde::Deserialize, Debug)]
+pub enum SuperRouterSortingStrategy {
+    #[serde(rename = "sr")]
+    SuccessRate,
+    #[serde(rename = "cost")]
+    Cost,
+}
+
+impl Default for SuperRouterConfig {
+    fn default() -> Self {
+        Self {
+            sorting_strategy: SuperRouterSortingStrategy::SuccessRate,
+        }
+    }
+}
+
+#[derive(Clone, serde::Deserialize, Debug)]
 pub struct GlobalConfig {
     pub server: Server,
     pub metrics: Server,
@@ -40,6 +61,8 @@ pub struct GlobalConfig {
     pub routing_config: Option<TomlConfig>,
     #[serde(default)]
     pub debit_routing_config: network_decider::types::DebitRoutingConfig,
+    #[serde(default)]
+    pub super_router_config: SuperRouterConfig,
 }
 
 #[derive(Clone, Debug)]
@@ -48,6 +71,7 @@ pub struct TenantConfig {
     pub tenant_secrets: TenantSecrets,
     pub routing_config: Option<TomlConfig>,
     pub debit_routing_config: network_decider::types::DebitRoutingConfig,
+    pub super_router_config: SuperRouterConfig,
 }
 
 impl TenantConfig {
@@ -67,6 +91,7 @@ impl TenantConfig {
                 .cloned()
                 .unwrap(),
             debit_routing_config: global_config.debit_routing_config.clone(),
+            super_router_config: global_config.super_router_config.clone(),
         }
     }
 }

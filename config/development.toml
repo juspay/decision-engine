@@ -210,3 +210,6 @@ merchant_category_code_0001.accel = { percentage = 1.55, fixed_amount = 4.0 }
 merchant_category_code_0001.nyce = { percentage = 1.30, fixed_amount = 21.3125 }
 merchant_category_code_0001.pulse = { percentage = 1.60, fixed_amount = 15.0 }
 merchant_category_code_0001.star = { percentage = 1.63, fixed_amount = 15.0 }
+
+[super_router_config]
+sorting_strategy = "sr"
