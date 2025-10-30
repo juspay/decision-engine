@@ -1,8 +1,6 @@
 {
-  "sr_cost_routing_constants": {
-    "sr_threshold": 0.90,
-    "spread_threshold":0.22,
-    "alpha": 0.33,
-    "beta":  0.11
-  }
+  "sr_threshold": 0.91,
+  "spread_threshold": 0.145,
+  "alpha": 1.66,
+  "beta": 1.39
 }

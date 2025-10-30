@@ -15,11 +15,7 @@ pub struct SrCostRoutingConstants {
     pub beta: f64,
 }
 
-// Root configuration structure
-#[derive(Debug, Deserialize, Serialize)]
-pub struct SrCostRoutingConfig {
-    pub sr_cost_routing_constants: SrCostRoutingConstants,
-}
+// Note: We directly deserialize from the root level of the JSON file
 
 // Default configuration values
 impl Default for SrCostRoutingConstants {
@@ -33,21 +29,21 @@ impl Default for SrCostRoutingConstants {
     }
 }
 
-// Function to load configuration from JSON file
+// Function to load configuration directly from JSON file
 fn load_config() -> SrCostRoutingConstants {
     let config_path = "config/sr_cost_routing_constants.json";
     
     match fs::read_to_string(config_path) {
         Ok(config_content) => {
-            match serde_json::from_str::<SrCostRoutingConfig>(&config_content) {
+            match serde_json::from_str::<SrCostRoutingConstants>(&config_content) {
                 Ok(config) => {
                     logger::info!(
                         tag = "Config_Loading",
                         action = "Config_Loading",
                         "Successfully loaded SR cost routing configuration: {:?}",
-                        config.sr_cost_routing_constants
+                        config
                     );
-                    config.sr_cost_routing_constants
+                    config
                 }
                 Err(parse_error) => {
                     logger::error!(
