@@ -1830,7 +1830,7 @@ pub async fn filterGatewaysCardInfo(
                     .collect();
 
             let merchant_wise_eligible_gateway_card_info = if !enabled_gateways.is_empty() {
-                let supported_gci = ETGCIS::getSupportedGatewayCardInfoForBins(
+                let supported_gci = ETGCIS::get_supported_gateway_card_info_for_bins(
                     &appState,
                     merchant_account,
                     card_bins.clone(),
@@ -2242,7 +2242,7 @@ pub async fn filterGatewaysForEmi(this: &mut DeciderFlow<'_>) -> GatewayList {
             )
             .await;
             if gbes_v2_flag {
-                let gbes_v2_list_ = SGBES::getGatewayBankEmiSupportV2(
+                let gbes_v2_list_ = SGBES::get_gateway_bank_emi_support_v2(
                     txn_detail.emiBank.clone(),
                     gws.clone(),
                     scope_.to_string(),
@@ -2302,7 +2302,7 @@ pub async fn filterGatewaysForEmi(this: &mut DeciderFlow<'_>) -> GatewayList {
 
                 extractGatewaysV2(gbes_v2_filtered)
             } else {
-                let gbes_list_ = SGBES::getGatewayBankEmiSupport(
+                let gbes_list_ = SGBES::get_gateway_bank_emi_support(
                     txn_detail.emiBank.clone(),
                     gws.clone(),
                     scope_.to_string(),

@@ -59,7 +59,7 @@ impl TryFrom<DBGatewayBankEmiSupportV2> for GatewayBankEmiSupportV2 {
     }
 }
 
-pub async fn getGatewayBankEmiSupportV2DB(
+pub async fn get_gateway_bank_emi_support_v2_db(
     jbc_id: i64,
     gateway_strings: Vec<String>,
     scp: String,
@@ -86,7 +86,7 @@ pub async fn getGatewayBankEmiSupportV2DB(
 }
 
 // Domain-level function with error handling and conversion
-pub async fn getGatewayBankEmiSupportV2(
+pub async fn get_gateway_bank_emi_support_v2(
     jbc_id: i64,
     gws: Vec<String>,
     scp: String,
@@ -94,7 +94,7 @@ pub async fn getGatewayBankEmiSupportV2(
     ten: i32,
 ) -> Vec<GatewayBankEmiSupportV2> {
     // Call the DB function and handle results
-    match getGatewayBankEmiSupportV2DB(jbc_id, gws, scp, ct, ten).await {
+    match get_gateway_bank_emi_support_v2_db(jbc_id, gws, scp, ct, ten).await {
         Ok(db_results) => db_results
             .into_iter()
             .filter_map(|db_record| GatewayBankEmiSupportV2::try_from(db_record).ok())

@@ -25,7 +25,7 @@ use crate::types::card::txn_card_info::TxnCardInfo;
 use crate::types::merchant as ETM;
 use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
 
-pub async fn deciderFullPayloadHSFunction(
+pub async fn decider_full_payload_hs_function(
     dreq_: T::DomainDeciderRequestForApiCallV2,
 ) -> Result<T::DecidedGateway, T::ErrorResponse> {
     let merchant_account =
@@ -46,7 +46,7 @@ pub async fn deciderFullPayloadHSFunction(
                 priority_logic_output: None,
                 is_dynamic_mga_enabled: false,
             })?;
-    let enforced_gateway_filter = handleEnforcedGateway(dreq_.clone().eligibleGatewayList);
+    let enforced_gateway_filter = handle_enforced_gateway(dreq_.clone().eligibleGatewayList);
 
     // check if type formation is correct
     let merchant_prefs = ETM::merchant_iframe_preferences::MerchantIframePreferences {
@@ -110,7 +110,7 @@ pub async fn deciderFullPayloadHSFunction(
         network_decider::debit_routing::perform_debit_routing(dreq_).await
     } else {
         logger::debug!("Performing gateway routing");
-        runDeciderFlow(
+        run_decider_flow(
             decider_params,
             dreq_.clone().rankingAlgorithm,
             dreq_.clone().eliminationEnabled,
@@ -120,7 +120,7 @@ pub async fn deciderFullPayloadHSFunction(
     }
 }
 
-fn handleEnforcedGateway(gateway_list: Option<Vec<String>>) -> Option<Vec<String>> {
+fn handle_enforced_gateway(gateway_list: Option<Vec<String>>) -> Option<Vec<String>> {
     match gateway_list {
         None => None,
         Some(list) if list.is_empty() => None,
@@ -128,7 +128,7 @@ fn handleEnforcedGateway(gateway_list: Option<Vec<String>>) -> Option<Vec<String
     }
 }
 
-pub async fn runDeciderFlow(
+pub async fn run_decider_flow(
     deciderParams: T::DeciderParams,
     rankingAlgorithm: Option<RankingAlgorithm>,
     eliminationEnabled: Option<bool>,
@@ -278,7 +278,7 @@ pub async fn runDeciderFlow(
             };
 
             let gatewayPriorityList =
-                addPreferredGatewaysToPriorityList(gwPLogic.gws.clone(), preferredGateway.clone());
+                add_preferred_gateways_to_priority_list(gwPLogic.gws.clone(), preferredGateway.clone());
             logger::info!(
                 tag = "gatewayPriorityList",
                 action = "gatewayPriorityList",
@@ -294,7 +294,7 @@ pub async fn runDeciderFlow(
                     "Enforcing Priority Logic for {:?}",
                     deciderParams.dpTxnDetail.txnId
                 );
-                let (res, priorityLogicOutput) = filterFunctionalGatewaysWithEnforcment(
+                let (res, priorityLogicOutput) = filter_functional_gateways_with_enforcement(
                     &mut decider_flow,
                     &functionalGateways,
                     &gatewayPriorityList,
@@ -549,7 +549,7 @@ pub async fn runDeciderFlow(
 }
 
 #[allow(dead_code)]
-fn getGatewayToMGAIdMapF(allMgas: &Vec<MerchantGatewayAccount>, gateways: &Vec<String>) -> AValue {
+fn get_gateway_to_mga_id_map_f(allMgas: &Vec<MerchantGatewayAccount>, gateways: &Vec<String>) -> AValue {
     json!(gateways
         .iter()
         .map(|x| {
@@ -564,7 +564,7 @@ fn getGatewayToMGAIdMapF(allMgas: &Vec<MerchantGatewayAccount>, gateways: &Vec<S
         .collect::<HashMap<_, _>>())
 }
 
-fn addPreferredGatewaysToPriorityList(
+fn add_preferred_gateways_to_priority_list(
     gwPriority: Vec<String>,
     preferredGateway: Option<String>,
 ) -> Vec<String> {
@@ -579,7 +579,7 @@ fn addPreferredGatewaysToPriorityList(
     }
 }
 
-async fn filterFunctionalGatewaysWithEnforcment(
+async fn filter_functional_gateways_with_enforcement(
     decider_flow: &mut T::DeciderFlow<'_>,
     fGws: &[String],
     priorityGws: &[String],
@@ -607,7 +607,7 @@ async fn filterFunctionalGatewaysWithEnforcment(
         )
         .await;
         let fallBackGwPriority =
-            addPreferredGatewaysToPriorityList(updatedPlOp.gws.clone(), preferredGw);
+            add_preferred_gateways_to_priority_list(updatedPlOp.gws.clone(), preferredGw);
         if updatedPlOp.isEnforcement {
             let updatedEnforcedGateways = fGws
                 .iter()
