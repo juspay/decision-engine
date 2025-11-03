@@ -1,5 +1,5 @@
 use crate::decider::gatewaydecider::{
-    flows::deciderFullPayloadHSFunction,
+    flows::decider_full_payload_hs_function,
     types::{DecidedGateway, DomainDeciderRequest, ErrorResponse, UnifiedError},
 };
 use crate::logger;
@@ -142,7 +142,7 @@ where
             jemalloc_ctl::epoch::advance().unwrap();
             let allocated_before = jemalloc_ctl::stats::allocated::read().unwrap_or(0);
 
-            let result = deciderFullPayloadHSFunction(payload.clone()).await;
+            let result = decider_full_payload_hs_function(payload.clone()).await;
 
             jemalloc_ctl::epoch::advance().unwrap();
             let allocated_after = jemalloc_ctl::stats::allocated::read().unwrap_or(0);

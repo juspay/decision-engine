@@ -576,7 +576,7 @@ pub async fn filterGatewaysForEmi(this: &mut DeciderFlow<'_>) -> GatewayList {
 
              let gbes_v2_flag = isFeatureEnabled(C::gbesV2Enabled.get_key(), merchant_acc.merchantId.merchantId, "kv_redis".to_string()).await;
              if gbes_v2_flag {
-                 let gbes_v2s = SGBES::getGatewayBankEmiSupportV2(
+                 let gbes_v2s = SGBES::get_gateway_bank_emi_support_v2(
                      txn_detail.emiBank,
                      gws,
                      scope.to_string(),
@@ -595,7 +595,7 @@ pub async fn filterGatewaysForEmi(this: &mut DeciderFlow<'_>) -> GatewayList {
                  }
                  extractGatewaysV2(gbes_v2s)
              } else {
-                 extractGateways(SGBES::getGatewayBankEmiSupport(
+                 extractGateways(SGBES::get_gateway_bank_emi_support(
                      txn_detail.emiBank,
                      gws,
                      scope.to_string()
@@ -1919,7 +1919,7 @@ pub async fn filterGatewaysCardInfo(
                     .collect();
 
             let merchant_wise_eligible_gateway_card_info = if !merchant_wise_mandate_supported_gateway.is_empty() {
-                ETGCIS::getSupportedGatewayCardInfoForBins(&appState, merchant_account, card_bins.clone())
+                ETGCIS::get_supported_gateway_card_info_for_bins(&appState, merchant_account, card_bins.clone())
                     .await.into_iter()
                     .filter(|ci| {
                         ci.gateway.is_some() && merchant_wise_mandate_supported_gateway_prime.contains(&ci.gateway)
