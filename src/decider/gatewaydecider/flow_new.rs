@@ -277,8 +277,10 @@ pub async fn run_decider_flow(
                 }
             };
 
-            let gatewayPriorityList =
-                add_preferred_gateways_to_priority_list(gwPLogic.gws.clone(), preferredGateway.clone());
+            let gatewayPriorityList = add_preferred_gateways_to_priority_list(
+                gwPLogic.gws.clone(),
+                preferredGateway.clone(),
+            );
             logger::info!(
                 tag = "gatewayPriorityList",
                 action = "gatewayPriorityList",
@@ -549,7 +551,10 @@ pub async fn run_decider_flow(
 }
 
 #[allow(dead_code)]
-fn get_gateway_to_mga_id_map_f(allMgas: &Vec<MerchantGatewayAccount>, gateways: &Vec<String>) -> AValue {
+fn get_gateway_to_mga_id_map_f(
+    allMgas: &Vec<MerchantGatewayAccount>,
+    gateways: &Vec<String>,
+) -> AValue {
     json!(gateways
         .iter()
         .map(|x| {
