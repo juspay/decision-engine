@@ -2,7 +2,7 @@
 // Generated on 2025-03-23 10:24:42
 
 use crate::redis::cache::findByNameFromRedis;
-use crate::redis::feature::isFeatureEnabled;
+use crate::redis::feature::is_feature_enabled;
 use masking::PeekInterface;
 // Converted imports
 // use gateway_decider::constants as c::{enable_elimination_v2, gateway_scoring_data, EnableExploreAndExploitOnSrv3, SrV3InputConfig, GatewayScoreFirstDimensionSoftTtl};
@@ -79,10 +79,10 @@ use crate::{
 };
 
 use super::constants::{
-    defaultSrV3LatencyThresholdInSecs, SrV3InputConfig, UpdateGatewayScoreLockFlagTtl,
+    default_sr_v3_latency_threshold_in_secs, SrV3InputConfig, UpdateGatewayScoreLockFlagTtl,
     UpdateScoreLockFeatureEnabledMerchant,
 };
-use super::utils::getTimeFromTxnCreatedInMills;
+use super::utils::get_time_from_txn_created_in_mills;
 use crate::logger;
 use crate::types::payment::payment_method_type_const::*;
 // Converted data types
@@ -215,7 +215,7 @@ pub fn defaultGwLatencyCheckInMins() -> GatewayLatencyForScoring {
     }
 }
 
-pub fn txnSuccessStates() -> Vec<TxnStatus> {
+pub fn txn_success_states() -> Vec<TxnStatus> {
     vec![
         TS::Charged,
         TS::Authorized,
@@ -231,7 +231,7 @@ pub fn txnSuccessStates() -> Vec<TxnStatus> {
     ]
 }
 
-pub fn txnFailureStates() -> Vec<TxnStatus> {
+pub fn txn_failure_states() -> Vec<TxnStatus> {
     vec![
         TxnStatus::AuthenticationFailed,
         TxnStatus::AuthorizationFailed,
@@ -240,7 +240,10 @@ pub fn txnFailureStates() -> Vec<TxnStatus> {
     ]
 }
 
-pub async fn checkAndSendShouldUpdateGatewayScore(lock_key: String, lock_key_ttl: i32) -> bool {
+pub async fn check_and_send_should_update_gateway_score(
+    lock_key: String,
+    lock_key_ttl: i32,
+) -> bool {
     let app_state = get_tenant_app_state().await;
     let is_set_either = app_state
         .redis_conn
@@ -258,12 +261,12 @@ pub async fn checkAndSendShouldUpdateGatewayScore(lock_key: String, lock_key_ttl
     }
 }
 
-pub fn isTransactionSuccess(txn_status: TxnStatus) -> bool {
-    txnSuccessStates().contains(&txn_status)
+pub fn is_transaction_success(txn_status: TxnStatus) -> bool {
+    txn_success_states().contains(&txn_status)
 }
 
-pub fn isTransactionFailure(txn_status: TxnStatus) -> bool {
-    txnFailureStates().contains(&txn_status)
+pub fn is_transaction_failure(txn_status: TxnStatus) -> bool {
+    txn_failure_states().contains(&txn_status)
 }
 
 pub fn isGwLatencyWithinConfiguredThreshold(
@@ -284,7 +287,7 @@ pub fn isGwLatencyWithinConfiguredThreshold(
     }
 }
 
-pub async fn getGatewayScoringType(
+pub async fn get_gateway_scoring_type(
     txn_detail: TxnDetail,
     txn_card_info: TxnCardInfo,
     flag: bool,
@@ -295,9 +298,9 @@ pub async fn getGatewayScoringType(
 
     let txn_status = txn_detail.status.clone();
     let merchant_id = txn_detail.merchantId.clone();
-    let is_success = isTransactionSuccess(txn_status.clone());
-    let is_failure = isTransactionFailure(txn_status.clone());
-    let time_difference = getTimeFromTxnCreatedInMills(txn_detail.clone());
+    let is_success = is_transaction_success(txn_status.clone());
+    let is_failure = is_transaction_failure(txn_status.clone());
+    let time_difference = get_time_from_txn_created_in_mills(txn_detail.clone());
     let merchant_sr_v3_input_config =
         findByNameFromRedis(SrV3InputConfig(get_m_id(merchant_id)).get_key()).await;
     let pmt = txn_card_info.paymentMethodType;
@@ -336,7 +339,7 @@ pub async fn getGatewayScoringType(
                 &pm,
                 &sr_routing_dimesions,
             );
-            maybe_default_latency_threshold.unwrap_or(defaultSrV3LatencyThresholdInSecs())
+            maybe_default_latency_threshold.unwrap_or(default_sr_v3_latency_threshold_in_secs())
         }
         Some(latency_threshold) => latency_threshold,
     };
@@ -360,7 +363,7 @@ pub async fn getGatewayScoringType(
     }
 }
 
-pub fn updateGatewayScoreLock(
+pub fn update_gateway_score_lock(
     gateway_scoring_type: GatewayScoringType,
     txn_uuid: String,
     gateway: String,
@@ -398,12 +401,12 @@ pub fn invalid_request_error(detail: &str, e: &impl std::fmt::Display) -> T::Err
 }
 
 pub async fn check_and_update_gateway_score_(
-    apiPayload: FT::UpdateScorePayload,
+    api_payload: FT::UpdateScorePayload,
 ) -> Result<String, T::ErrorResponse> {
     let redis_key = format!(
         "{}{}",
         C::GATEWAY_SCORING_DATA,
-        apiPayload.clone().paymentId
+        api_payload.clone().payment_id
     );
     let app_state = get_tenant_app_state().await;
 
@@ -419,8 +422,8 @@ pub async fn check_and_update_gateway_score_(
     match m_gateway_scoring_data {
         Ok(gateway_scoring_data) => {
             // Extract transaction details and card info from the API payload
-            let txn_detail: TxnDetail = match Fbu::getTxnDetailFromApiPayload(
-                apiPayload.clone(),
+            let txn_detail: TxnDetail = match Fbu::get_txn_detail_from_api_payload(
+                api_payload.clone(),
                 gateway_scoring_data.clone(),
             ) {
                 Ok(detail) => detail,
@@ -428,11 +431,13 @@ pub async fn check_and_update_gateway_score_(
                     return Err(invalid_request_error("transaction details", &e));
                 }
             };
-            let txn_card_info: TxnCardInfo =
-                Fbu::getTxnCardInfoFromApiPayload(apiPayload.clone(), gateway_scoring_data.clone());
+            let txn_card_info: TxnCardInfo = Fbu::get_txn_card_info_from_api_payload(
+                api_payload.clone(),
+                gateway_scoring_data.clone(),
+            );
 
             let log_message = "update_gateway_score";
-            let enforce_failure = apiPayload.enforceDynamicRoutingFailure.unwrap_or(false);
+            let enforce_failure = api_payload.enforce_dynamic_routing_failure.unwrap_or(false);
 
             // Call the function to check and update the gateway score
             check_and_update_gateway_score(
@@ -440,8 +445,8 @@ pub async fn check_and_update_gateway_score_(
                 txn_card_info,
                 log_message,
                 enforce_failure,
-                apiPayload.gatewayReferenceId.clone(),
-                apiPayload.txnLatency.clone(),
+                api_payload.gateway_reference_id.clone(),
+                api_payload.txn_latency.clone(),
             )
             .await;
 
@@ -481,12 +486,12 @@ pub async fn check_and_update_gateway_score(
 ) -> () {
     // Get gateway scoring type
     let gateway_scoring_type =
-        getGatewayScoringType(txn_detail.clone(), txn_card_info.clone(), enforce_failure).await;
+        get_gateway_scoring_type(txn_detail.clone(), txn_card_info.clone(), enforce_failure).await;
 
     let gateway_in_string = txn_detail.gateway.clone().unwrap_or_default();
 
     // Create update score lock key
-    let update_score_lock_key = updateGatewayScoreLock(
+    let update_score_lock_key = update_gateway_score_lock(
         gateway_scoring_type.clone(),
         txn_detail.txnUuid.clone(), // This is Maybe type in haskell and here it is not Option
         gateway_in_string,          // Convert Option to String
@@ -497,10 +502,10 @@ pub async fn check_and_update_gateway_score(
         .unwrap_or(300);
 
     let should_compute_gw_score =
-        checkAndSendShouldUpdateGatewayScore(update_score_lock_key, lock_key_ttl).await;
+        check_and_send_should_update_gateway_score(update_score_lock_key, lock_key_ttl).await;
 
     // Check if feature is enabled for merchant
-    let feature_enabled = isFeatureEnabled(
+    let feature_enabled = is_feature_enabled(
         UpdateScoreLockFeatureEnabledMerchant.get_key(),
         get_m_id(txn_detail.merchantId.clone()),
         "kv_redis".to_string(),
@@ -518,7 +523,7 @@ pub async fn check_and_update_gateway_score(
                 txn_detail.status,
                 gateway_scoring_type
             );
-            updateGatewayScore(
+            update_gateway_score(
                 gateway_scoring_type.clone(),
                 txn_detail.clone(),
                 txn_card_info.clone(),
@@ -536,7 +541,7 @@ pub async fn check_and_update_gateway_score(
             txn_detail.status,
             gateway_scoring_type
         );
-        updateGatewayScore(
+        update_gateway_score(
             gateway_scoring_type.clone(),
             txn_detail,
             txn_card_info.clone(),
@@ -550,7 +555,7 @@ pub async fn check_and_update_gateway_score(
 }
 
 // Original Haskell function: updateGatewayScore
-pub async fn updateGatewayScore(
+pub async fn update_gateway_score(
     gateway_scoring_type: GatewayScoringType,
     txn_detail: TxnDetail,
     txn_card_info: TxnCardInfo,
@@ -563,7 +568,7 @@ pub async fn updateGatewayScore(
             .expect("Merchant account not found");
 
     //let mer_acc =
-    let routing_approach = getRoutingApproach(txn_detail.clone());
+    let routing_approach = get_routing_approach(txn_detail.clone());
     logger::info!(
         action = "routing_approach_value",
         tag = "routing_approach_value",
@@ -574,7 +579,7 @@ pub async fn updateGatewayScore(
     let should_update_gateway_score = if gateway_scoring_type.clone() == GST::PenaliseSrv3 {
         false
     } else if gateway_scoring_type.clone() == GST::Penalise {
-        isTransactionPending(txn_detail.clone().status)
+        is_transaction_pending(txn_detail.clone().status)
     } else {
         true
     };
@@ -586,7 +591,7 @@ pub async fn updateGatewayScore(
         true
     };
 
-    let is_update_within_window = isUpdateWithinLatencyWindow(
+    let is_update_within_window = is_update_within_latency_window(
         txn_detail.clone(),
         txn_card_info.clone(),
         gateway_scoring_type.clone(),
@@ -595,14 +600,14 @@ pub async fn updateGatewayScore(
     )
     .await;
 
-    let should_isolate_srv3_producer = if Cutover::isFeatureEnabled(
+    let should_isolate_srv3_producer = if Cutover::is_feature_enabled(
         C::SrV3ProducerIsolation.get_key(),
         MID::merchant_id_to_text(txn_detail.clone().merchantId),
         C::kvRedis(),
     )
     .await
     {
-        if isRoutingApproachInSRV3(routing_approach.clone()) {
+        if is_routing_approach_in_srv3(routing_approach.clone()) {
             true
         } else {
             false
@@ -611,7 +616,7 @@ pub async fn updateGatewayScore(
         true
     };
 
-    let should_update_explore_txn = if Cutover::isFeatureEnabled(
+    let should_update_explore_txn = if Cutover::is_feature_enabled(
         DC::EnableExploreAndExploitOnSrv3(txn_card_info.clone().paymentMethodType.to_string())
             .get_key(),
         MID::merchant_id_to_text(txn_detail.clone().merchantId),
@@ -619,7 +624,7 @@ pub async fn updateGatewayScore(
     )
     .await
     {
-        if isRoutingApproachInExplore(routing_approach.clone()) {
+        if is_routing_approach_in_explore(routing_approach.clone()) {
             true
         } else {
             false
@@ -647,7 +652,7 @@ pub async fn updateGatewayScore(
             .get_key(&redis_key, "GatewayScoringData")
             .await
             .ok();
-        GSSV3::flow::updateSrV3Score(
+        GSSV3::flow::update_sr_v3_score(
             gateway_scoring_type.clone(),
             txn_detail.clone(),
             txn_card_info.clone(),
@@ -719,7 +724,7 @@ pub async fn updateGatewayScore(
                 }
             }
         }
-        Fbu::logGatewayScoreType(
+        Fbu::log_gateway_score_type(
             gateway_scoring_type,
             RF::EliminationFlow,
             txn_detail.clone(),
@@ -752,16 +757,16 @@ pub async fn updateGatewayScore(
 }
 
 // Original Haskell function: getRoutingApproach
-pub fn getRoutingApproach(txnDetail: TxnDetail) -> Option<String> {
-    let internalMeta: Option<FT::InternalMetadata> = getValueFromMetaData(&txnDetail);
-    match internalMeta {
+pub fn get_routing_approach(txn_detail: TxnDetail) -> Option<String> {
+    let internal_meta: Option<FT::InternalMetadata> = get_value_from_meta_data(&txn_detail);
+    match internal_meta {
         Some(meta) => Some(meta.internal_tracking_info.routing_approach),
         None => None,
     }
 }
 
 // Original Haskell function: getValueFromMetaData
-pub fn getValueFromMetaData<T: serde::de::DeserializeOwned>(txn_detail: &TxnDetail) -> Option<T> {
+pub fn get_value_from_meta_data<T: serde::de::DeserializeOwned>(txn_detail: &TxnDetail) -> Option<T> {
     let metadata = txn_detail.internalMetadata.clone()?;
     serde_json::from_str(metadata.peek()).ok()
 }
@@ -775,7 +780,7 @@ pub fn isRoutingApproachInSRV2(maybe_text: Option<String>) -> bool {
 }
 
 // Original Haskell function: isRoutingApproachInSRV3
-pub fn isRoutingApproachInSRV3(maybe_text: Option<String>) -> bool {
+pub fn is_routing_approach_in_srv3(maybe_text: Option<String>) -> bool {
     match maybe_text {
         Some(text) => text.contains("V3"),
         None => false,
@@ -783,7 +788,7 @@ pub fn isRoutingApproachInSRV3(maybe_text: Option<String>) -> bool {
 }
 
 // Original Haskell function: isRoutingApproachInExplore
-pub fn isRoutingApproachInExplore(maybe_text: Option<String>) -> bool {
+pub fn is_routing_approach_in_explore(maybe_text: Option<String>) -> bool {
     match maybe_text {
         Some(text) => text.contains("HEDGING"),
         None => false,
@@ -791,7 +796,7 @@ pub fn isRoutingApproachInExplore(maybe_text: Option<String>) -> bool {
 }
 
 // Original Haskell function: isUpdateWithinLatencyWindow
-pub async fn isUpdateWithinLatencyWindow(
+pub async fn is_update_within_latency_window(
     txn_detail: TxnDetail,
     txn_card_info: TxnCardInfo,
     gateway_scoring_type: GatewayScoringType,
@@ -817,7 +822,7 @@ pub async fn isUpdateWithinLatencyWindow(
                         .unwrap_or(C::defaultGatewayScoreLatencyCheckInMins());
                 /// check if the transaction latency calculated by orchestration is within the configured threshold
                 let is_gw_latency_within_threshold = isGwLatencyWithinConfiguredThreshold(
-                    txn_latency.and_then(|m| m.gatewayLatency),
+                    txn_latency.and_then(|m| m.gateway_latency),
                     GatewaySuccessRateBasedRoutingInput::from_str(
                         &mer_acc.gatewaySuccessRateBasedDeciderInput,
                     )
@@ -835,7 +840,8 @@ pub async fn isUpdateWithinLatencyWindow(
                     txn_detail.sourceObject.clone().unwrap_or_default(),
                 );
 
-                let gw_score_update_latency = Fbu::getTimeFromTxnCreatedInMills(txn_detail.clone());
+                let gw_score_update_latency =
+                    Fbu::get_time_from_txn_created_in_mills(txn_detail.clone());
                 logger::info!(
                     action = "gwLatencyCheckThreshold",
                     tag = "gwLatencyCheckThreshold",
@@ -862,6 +868,6 @@ async fn checkExemptIfMandateTxn(txn_detail: &TxnDetail, txn_card_info: &TxnCard
 }
 
 // Original Haskell function: isTransactionPending
-pub fn isTransactionPending(txnStatus: TxnStatus) -> bool {
-    txnStatus == TS::PendingVBV || txnStatus == TS::Started
+pub fn is_transaction_pending(txn_status: TxnStatus) -> bool {
+    txn_status == TS::PendingVBV || txn_status == TS::Started
 }

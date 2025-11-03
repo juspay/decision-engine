@@ -370,10 +370,10 @@ pub fn defaultMerchantArrMaxLength() -> i32 {
     40
 }
 
-pub fn defaultUpdateGatewayScoreLockFlagTtl() -> i32 {
+pub fn default_update_gateway_score_lock_flag_ttl() -> i32 {
     300
 }
 
-pub fn defaultSrV3LatencyThresholdInSecs() -> f64 {
+pub fn default_sr_v3_latency_threshold_in_secs() -> f64 {
     300 as f64
 }

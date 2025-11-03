@@ -732,5 +732,5 @@ pub enum ChargeName {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TransactionLatency {
     #[serde(rename = "gatewayLatency")]
-    pub gatewayLatency: Option<f64>,
+    pub gateway_latency: Option<f64>,
 }
