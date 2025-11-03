@@ -29,7 +29,7 @@ pub async fn decider_full_payload_hs_function(
     dreq_: T::DomainDeciderRequestForApiCallV2,
 ) -> Result<T::DecidedGateway, T::ErrorResponse> {
     let merchant_account =
-        ETM::merchant_account::load_merchant_by_merchant_id(dreq_.merchantId.clone())
+        ETM::merchant_account::load_merchant_by_merchant_id(dreq_.merchant_id.clone())
             .await
             .ok_or(T::ErrorResponse {
                 status: "Invalid Request".to_string(),
@@ -46,7 +46,7 @@ pub async fn decider_full_payload_hs_function(
                 priority_logic_output: None,
                 is_dynamic_mga_enabled: false,
             })?;
-    let enforced_gateway_filter = handle_enforced_gateway(dreq_.clone().eligibleGatewayList);
+    let enforced_gateway_filter = handle_enforced_gateway(dreq_.clone().eligible_gateway_list);
 
     // check if type formation is correct
     let merchant_prefs = ETM::merchant_iframe_preferences::MerchantIframePreferences {
@@ -105,15 +105,15 @@ pub async fn decider_full_payload_hs_function(
         dpShouldConsumeResult: dreq.shouldConsumeResult,
     };
 
-    if dreq_.rankingAlgorithm == Some(RankingAlgorithm::NtwBasedRouting) {
+    if dreq_.ranking_algorithm == Some(RankingAlgorithm::NtwBasedRouting) {
         logger::debug!("Performing debit routing");
         network_decider::debit_routing::perform_debit_routing(dreq_).await
     } else {
         logger::debug!("Performing gateway routing");
         run_decider_flow(
             decider_params,
-            dreq_.clone().rankingAlgorithm,
-            dreq_.clone().eliminationEnabled,
+            dreq_.clone().ranking_algorithm,
+            dreq_.clone().elimination_enabled,
             false,
         )
         .await
@@ -269,11 +269,11 @@ pub async fn run_decider_flow(
             } else {
                 T::GatewayPriorityLogicOutput {
                     gws: functionalGateways.clone(),
-                    isEnforcement: false,
-                    priorityLogicTag: None,
-                    primaryLogic: None,
-                    gatewayReferenceIds: HashMap::new(),
-                    fallbackLogic: None,
+                    is_enforcement: false,
+                    priority_logic_tag: None,
+                    primary_logic: None,
+                    gateway_reference_ids: HashMap::new(),
+                    fallback_logic: None,
                 }
             };
 
@@ -287,7 +287,7 @@ pub async fn run_decider_flow(
                 gatewayPriorityList
             );
 
-            let (mut functionalGateways, updatedPriorityLogicOutput) = if gwPLogic.isEnforcement {
+            let (mut functionalGateways, updatedPriorityLogicOutput) = if gwPLogic.is_enforcement {
                 logger::info!(
                     tag = "gatewayPriorityList",
                     action = "Enforcing Priority Logic",
@@ -382,7 +382,7 @@ pub async fn run_decider_flow(
                 [] => Err((
                     decider_flow.writer.debugFilterList.clone(),
                     decider_flow.writer.debugScoringList.clone(),
-                    updatedPriorityLogicOutput.priorityLogicTag.clone(),
+                    updatedPriorityLogicOutput.priority_logic_tag.clone(),
                     T::GatewayDeciderApproach::None,
                     Some(updatedPriorityLogicOutput),
                     decider_flow.writer.is_dynamic_mga_enabled,
@@ -467,7 +467,7 @@ pub async fn run_decider_flow(
                             decided_gateway: decideGatewayOutput,
                             gateway_priority_map: gatewayPriorityMap,
                             filter_wise_gateways: None,
-                            priority_logic_tag: updatedPriorityLogicOutput.priorityLogicTag.clone(),
+                            priority_logic_tag: updatedPriorityLogicOutput.priority_logic_tag.clone(),
                             routing_approach: finalDeciderApproach.clone(),
                             gateway_before_evaluation: topGatewayBeforeSRDowntimeEvaluation.clone(),
                             priority_logic_output: Some(updatedPriorityLogicOutput),
@@ -486,7 +486,7 @@ pub async fn run_decider_flow(
                         None => Err((
                             decider_flow.writer.debugFilterList.clone(),
                             decider_flow.writer.debugScoringList.clone(),
-                            updatedPriorityLogicOutput.priorityLogicTag.clone(),
+                            updatedPriorityLogicOutput.priority_logic_tag.clone(),
                             finalDeciderApproach.clone(),
                             Some(updatedPriorityLogicOutput),
                             decider_flow.writer.is_dynamic_mga_enabled,
@@ -608,7 +608,7 @@ async fn filter_functional_gateways_with_enforcement(
         .await;
         let fallBackGwPriority =
             add_preferred_gateways_to_priority_list(updatedPlOp.gws.clone(), preferredGw);
-        if updatedPlOp.isEnforcement {
+        if updatedPlOp.is_enforcement {
             let updatedEnforcedGateways = fGws
                 .iter()
                 .filter(|&gw| fallBackGwPriority.contains(gw))

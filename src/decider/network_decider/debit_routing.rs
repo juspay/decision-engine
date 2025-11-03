@@ -10,15 +10,15 @@ pub async fn perform_debit_routing(
     decider_request: gateway_decider_types::DomainDeciderRequestForApiCallV2,
 ) -> Result<gateway_decider_types::DecidedGateway, gateway_decider_types::ErrorResponse> {
     let app_state = get_tenant_app_state().await;
-    let card_isin_optional = decider_request.paymentInfo.cardIsin;
-    let amount = decider_request.paymentInfo.amount;
+    let card_isin_optional = decider_request.payment_info.card_isin;
+    let amount = decider_request.payment_info.amount;
     let first_connector_from_request = decider_request
-        .eligibleGatewayList
+        .eligible_gateway_list
         .as_ref()
         .and_then(|connector| connector.first().cloned());
 
     if let Some(metadata_value) = decider_request
-        .paymentInfo
+        .payment_info
         .metadata
         .map(|metadata_string| gateway_decider_utils::parse_json_from_string(&metadata_string))
         .flatten()
