@@ -992,7 +992,8 @@ pub async fn handle_fallback_logic(
     primary_logic_output: DeciderTypes::GatewayPriorityLogicOutput,
     pl_failure_reason: DeciderTypes::PriorityLogicFailure,
 ) -> DeciderTypes::GatewayPriorityLogicOutput {
-    if primary_logic_output.fallback_logic.is_none() && primary_logic_output.primary_logic.is_some() {
+    if primary_logic_output.fallback_logic.is_none() && primary_logic_output.primary_logic.is_some()
+    {
         let (fallback_logic, fallback_pl_tag) = get_fallback_priority_logic_script(&macc).await;
         match fallback_logic {
             Some(fallback_script) => {
