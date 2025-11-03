@@ -33,7 +33,7 @@ use crate::{
     logger,
 };
 
-pub async fn getSupportedGatewayCardInfoForBins(
+pub async fn get_supported_gateway_card_info_for_bins(
     app_state: &crate::app::TenantAppState,
     input_merchant_account: MerchantAccount,
     card_bins: Vec<Option<String>>,

@@ -125,7 +125,7 @@ pub trait ResponseDecider {
     type ErrorResponse: IntoResponse;
 }
 
-pub async fn deciderFullPayloadHSFunction(
+pub async fn decider_full_payload_hs_function(
     dreq: T::DomainDeciderRequest,
 ) -> Result<(T::DecidedGateway, Vec<(String, Vec<String>)>), T::ErrorResponse> {
     let merchant_prefs = match ETM::merchant_iframe_preferences::getMerchantIPrefsByMId(
@@ -160,7 +160,7 @@ pub async fn deciderFullPayloadHSFunction(
             })?
         }
     };
-    let enforced_gateway_filter = handleEnforcedGateway(dreq.enforceGatewayList);
+    let enforced_gateway_filter = handle_enforced_gateway(dreq.enforceGatewayList);
     let resolve_bin = match Utils::fetch_extended_card_bin(&dreq.txnCardInfo.clone()) {
         Some(card_bin) => Some(card_bin),
         None => match dreq.txnCardInfo.card_isin {
@@ -200,10 +200,10 @@ pub async fn deciderFullPayloadHSFunction(
         dpEDCCApplied: dreq.isEdccApplied,
         dpShouldConsumeResult: dreq.shouldConsumeResult,
     };
-    runDeciderFlow(decider_params, true).await
+    run_decider_flow(decider_params, true).await
 }
 
-fn handleEnforcedGateway(gateway_list: Option<Vec<String>>) -> Option<Vec<String>> {
+fn handle_enforced_gateway(gateway_list: Option<Vec<String>>) -> Option<Vec<String>> {
     match gateway_list {
         None => None,
         Some(list) if list.is_empty() => None,
@@ -310,7 +310,7 @@ fn handleEnforcedGateway(gateway_list: Option<Vec<String>>) -> Option<Vec<String
 //     }
 // }
 
-pub async fn runDeciderFlow(
+pub async fn run_decider_flow(
     deciderParams: T::DeciderParams,
     is_legacy_decider_flow: bool,
 ) -> Result<(T::DecidedGateway, Vec<(String, Vec<String>)>), T::ErrorResponse> {
@@ -347,7 +347,7 @@ pub async fn runDeciderFlow(
         .gateway
         .clone()
         .or(deciderParams.dpOrder.preferredGateway.clone());
-    let gatewayMgaIdMap = getGatewayToMGAIdMapF(&allMgas, &functionalGateways);
+    let gatewayMgaIdMap = get_gateway_to_mga_id_map_f(&allMgas, &functionalGateways);
 
     logger::warn!(
         action = "PreferredGateway",
@@ -451,8 +451,10 @@ pub async fn runDeciderFlow(
                 }
             };
 
-            let gatewayPriorityList =
-                addPreferredGatewaysToPriorityList(gwPLogic.gws.clone(), preferredGateway.clone());
+            let gatewayPriorityList = add_preferred_gateways_to_priority_list(
+                gwPLogic.gws.clone(),
+                preferredGateway.clone(),
+            );
             logger::info!(
                 tag = "gatewayPriorityList",
                 action = "gatewayPriorityList",
@@ -461,14 +463,14 @@ pub async fn runDeciderFlow(
                 gatewayPriorityList
             );
 
-            let (mut functionalGateways, updatedPriorityLogicOutput) = if gwPLogic.isEnforcement {
+            let (mut functionalGateways, updatedPriorityLogicOutput) = if gwPLogic.is_enforcement {
                 logger::info!(
                     tag = "gatewayPriorityList",
                     action = "Enforcing Priority Logic",
                     "Enforcing Priority Logic for {:?}",
                     deciderParams.dpTxnDetail.txnId
                 );
-                let (res, priorityLogicOutput) = filterFunctionalGatewaysWithEnforcment(
+                let (res, priorityLogicOutput) = filter_functional_gateways_with_enforcement(
                     &mut decider_flow,
                     &functionalGateways,
                     &gatewayPriorityList,
@@ -556,7 +558,7 @@ pub async fn runDeciderFlow(
                 [] => Err((
                     decider_flow.writer.debugFilterList.clone(),
                     decider_flow.writer.debugScoringList.clone(),
-                    updatedPriorityLogicOutput.priorityLogicTag.clone(),
+                    updatedPriorityLogicOutput.priority_logic_tag.clone(),
                     T::GatewayDeciderApproach::None,
                     Some(updatedPriorityLogicOutput),
                     decider_flow.writer.is_dynamic_mga_enabled,
@@ -642,7 +644,9 @@ pub async fn runDeciderFlow(
                             decided_gateway: decideGatewayOutput,
                             gateway_priority_map: gatewayPriorityMap,
                             filter_wise_gateways: None,
-                            priority_logic_tag: updatedPriorityLogicOutput.priorityLogicTag.clone(),
+                            priority_logic_tag: updatedPriorityLogicOutput
+                                .priority_logic_tag
+                                .clone(),
                             routing_approach: finalDeciderApproach.clone(),
                             gateway_before_evaluation: topGatewayBeforeSRDowntimeEvaluation.clone(),
                             priority_logic_output: Some(updatedPriorityLogicOutput),
@@ -663,7 +667,7 @@ pub async fn runDeciderFlow(
                         None => Err((
                             decider_flow.writer.debugFilterList.clone(),
                             decider_flow.writer.debugScoringList.clone(),
-                            updatedPriorityLogicOutput.priorityLogicTag.clone(),
+                            updatedPriorityLogicOutput.priority_logic_tag.clone(),
                             finalDeciderApproach.clone(),
                             Some(updatedPriorityLogicOutput),
                             decider_flow.writer.is_dynamic_mga_enabled,
@@ -740,7 +744,10 @@ pub async fn runDeciderFlow(
     }
 }
 
-fn getGatewayToMGAIdMapF(allMgas: &Vec<MerchantGatewayAccount>, gateways: &Vec<String>) -> AValue {
+fn get_gateway_to_mga_id_map_f(
+    allMgas: &Vec<MerchantGatewayAccount>,
+    gateways: &Vec<String>,
+) -> AValue {
     json!(gateways
         .iter()
         .map(|x| {
@@ -755,7 +762,7 @@ fn getGatewayToMGAIdMapF(allMgas: &Vec<MerchantGatewayAccount>, gateways: &Vec<S
         .collect::<HashMap<_, _>>())
 }
 
-fn addPreferredGatewaysToPriorityList(
+fn add_preferred_gateways_to_priority_list(
     gwPriority: Vec<String>,
     preferredGatewayM: Option<String>,
 ) -> Vec<String> {
@@ -770,7 +777,7 @@ fn addPreferredGatewaysToPriorityList(
     }
 }
 
-async fn filterFunctionalGatewaysWithEnforcment(
+async fn filter_functional_gateways_with_enforcement(
     decider_flow: &mut T::DeciderFlow<'_>,
     fGws: &[String],
     priorityGws: &[String],
@@ -798,8 +805,8 @@ async fn filterFunctionalGatewaysWithEnforcment(
         )
         .await;
         let fallBackGwPriority =
-            addPreferredGatewaysToPriorityList(updatedPlOp.gws.clone(), preferredGw);
-        if updatedPlOp.isEnforcement {
+            add_preferred_gateways_to_priority_list(updatedPlOp.gws.clone(), preferredGw);
+        if updatedPlOp.is_enforcement {
             let updatedEnforcedGateways = fGws
                 .iter()
                 .filter(|&gw| fallBackGwPriority.contains(gw))
@@ -981,7 +988,7 @@ pub async fn getFailureReasonWithFilter(
             let reference_ids = Utils::get_all_ref_ids(
                 decider_flow.writer.metadata.clone().unwrap_or_default(),
                 priority_logic_output
-                    .map(|logic| logic.gatewayReferenceIds.clone())
+                    .map(|logic| logic.gateway_reference_ids.clone())
                     .unwrap_or_default(),
             )
             .await;

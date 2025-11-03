@@ -573,12 +573,12 @@ pub async fn get_gateway_priority(
                     logs
                 );
                 DeciderTypes::GatewayPriorityLogicOutput {
-                    isEnforcement: gws.isEnforcement,
+                    is_enforcement: gws.is_enforcement,
                     gws: gws.gws,
-                    priorityLogicTag: gws.priorityLogicTag,
-                    gatewayReferenceIds: gws.gatewayReferenceIds,
-                    primaryLogic: Some(pl_data),
-                    fallbackLogic: gws.fallbackLogic,
+                    priority_logic_tag: gws.priority_logic_tag,
+                    gateway_reference_ids: gws.gateway_reference_ids,
+                    primary_logic: Some(pl_data),
+                    fallback_logic: gws.fallback_logic,
                 }
             }
             EvaluationResult::EvaluationError(priority_logic_data, err) => {
@@ -603,12 +603,12 @@ pub async fn get_gateway_priority(
                                 logs
                             );
                             DeciderTypes::GatewayPriorityLogicOutput {
-                                isEnforcement: retry_gws.isEnforcement,
+                                is_enforcement: retry_gws.is_enforcement,
                                 gws: retry_gws.gws,
-                                priorityLogicTag: retry_gws.priorityLogicTag,
-                                gatewayReferenceIds: retry_gws.gatewayReferenceIds,
-                                primaryLogic: Some(retry_pl_data),
-                                fallbackLogic: retry_gws.fallbackLogic,
+                                priority_logic_tag: retry_gws.priority_logic_tag,
+                                gateway_reference_ids: retry_gws.gateway_reference_ids,
+                                primary_logic: Some(retry_pl_data),
+                                fallback_logic: retry_gws.fallback_logic,
                             }
                         }
                         EvaluationResult::EvaluationError(retry_pl_data, err) => {
@@ -627,8 +627,8 @@ pub async fn get_gateway_priority(
                                 m_internal_meta,
                                 order_meta_data,
                                 default_gateway_priority_logic_output()
-                                    .setPriorityLogicTag(priority_logic_tag)
-                                    .setPrimaryLogic(Some(retry_pl_data))
+                                    .set_priority_logic_tag(priority_logic_tag)
+                                    .set_primary_logic(Some(retry_pl_data))
                                     .build(),
                                 priority_logic_data.failure_reason.clone(),
                             )
@@ -646,8 +646,8 @@ pub async fn get_gateway_priority(
                             m_internal_meta,
                             order_meta_data,
                             default_gateway_priority_logic_output()
-                                .setPriorityLogicTag(priority_logic_tag)
-                                .setPrimaryLogic(Some(priority_logic_data.clone()))
+                                .set_priority_logic_tag(priority_logic_tag)
+                                .set_primary_logic(Some(priority_logic_data.clone()))
                                 .build(),
                             priority_logic_data.failure_reason.clone(),
                         )
@@ -697,7 +697,7 @@ pub async fn get_gateway_priority(
                                 res
                             );
                             default_gateway_priority_logic_output()
-                                .setGws(res.to_vec())
+                                .set_gws(res.to_vec())
                                 .build()
                         }
                     }
@@ -719,12 +719,12 @@ async fn get_script(
 
 fn default_gateway_priority_logic_output() -> DeciderTypes::GatewayPriorityLogicOutput {
     DeciderTypes::GatewayPriorityLogicOutput {
-        isEnforcement: false,
+        is_enforcement: false,
         gws: vec![],
-        priorityLogicTag: None,
-        gatewayReferenceIds: std::collections::HashMap::new(),
-        primaryLogic: None,
-        fallbackLogic: None,
+        priority_logic_tag: None,
+        gateway_reference_ids: std::collections::HashMap::new(),
+        primary_logic: None,
+        fallback_logic: None,
     }
 }
 
@@ -992,7 +992,8 @@ pub async fn handle_fallback_logic(
     primary_logic_output: DeciderTypes::GatewayPriorityLogicOutput,
     pl_failure_reason: DeciderTypes::PriorityLogicFailure,
 ) -> DeciderTypes::GatewayPriorityLogicOutput {
-    if primary_logic_output.fallbackLogic.is_none() && primary_logic_output.primaryLogic.is_some() {
+    if primary_logic_output.fallback_logic.is_none() && primary_logic_output.primary_logic.is_some()
+    {
         let (fallback_logic, fallback_pl_tag) = get_fallback_priority_logic_script(&macc).await;
         match fallback_logic {
             Some(fallback_script) => {
@@ -1018,10 +1019,10 @@ pub async fn handle_fallback_logic(
                             logs
                         );
                         DeciderTypes::GatewayPriorityLogicOutput {
-                            fallbackLogic: Some(pl_data),
-                            priorityLogicTag: fallback_pl_tag,
-                            primaryLogic: check_and_update_pl_failure_reason(
-                                primary_logic_output.primaryLogic,
+                            fallback_logic: Some(pl_data),
+                            priority_logic_tag: fallback_pl_tag,
+                            primary_logic: check_and_update_pl_failure_reason(
+                                primary_logic_output.primary_logic,
                                 pl_failure_reason,
                             ),
                             ..primary_logic_output
@@ -1035,20 +1036,20 @@ pub async fn handle_fallback_logic(
                             err
                         );
                         DeciderTypes::GatewayPriorityLogicOutput {
-                            primaryLogic: check_and_update_pl_failure_reason(
-                                primary_logic_output.primaryLogic,
+                            primary_logic: check_and_update_pl_failure_reason(
+                                primary_logic_output.primary_logic,
                                 pl_failure_reason,
                             ),
-                            fallbackLogic: Some(priority_logic_data),
-                            priorityLogicTag: fallback_pl_tag,
+                            fallback_logic: Some(priority_logic_data),
+                            priority_logic_tag: fallback_pl_tag,
                             ..primary_logic_output
                         }
                     }
                 }
             }
             None => DeciderTypes::GatewayPriorityLogicOutput {
-                primaryLogic: check_and_update_pl_failure_reason(
-                    primary_logic_output.primaryLogic,
+                primary_logic: check_and_update_pl_failure_reason(
+                    primary_logic_output.primary_logic,
                     pl_failure_reason,
                 ),
                 ..primary_logic_output
@@ -1056,8 +1057,8 @@ pub async fn handle_fallback_logic(
         }
     } else {
         DeciderTypes::GatewayPriorityLogicOutput {
-            fallbackLogic: check_and_update_pl_failure_reason(
-                primary_logic_output.fallbackLogic,
+            fallback_logic: check_and_update_pl_failure_reason(
+                primary_logic_output.fallback_logic,
                 pl_failure_reason,
             ),
             ..primary_logic_output
@@ -1182,12 +1183,12 @@ async fn handle_success_response(
         failure_reason: DeciderTypes::PriorityLogicFailure::NoError,
     };
     let pl_output = DeciderTypes::GatewayPriorityLogicOutput {
-        isEnforcement: response_body.result.isEnforcement.unwrap_or(false),
+        is_enforcement: response_body.result.isEnforcement.unwrap_or(false),
         gws,
-        priorityLogicTag: priority_logic_tag.clone(),
-        gatewayReferenceIds: response_body.result.gatewayReferenceIds.unwrap_or_default(),
-        primaryLogic: None,
-        fallbackLogic: None,
+        priority_logic_tag: priority_logic_tag.clone(),
+        gateway_reference_ids: response_body.result.gatewayReferenceIds.unwrap_or_default(),
+        primary_logic: None,
+        fallback_logic: None,
     };
     EvaluationResult::PLResponse(pl_output, pl_data, log_entries, status)
 }

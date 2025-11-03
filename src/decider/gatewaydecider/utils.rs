@@ -170,7 +170,7 @@ pub fn get_pl_gw_ref_id_map(decider_flow: &DeciderFlow<'_>) -> HashMap<String, S
         .get()
         .dpPriorityLogicOutput
         .as_ref()
-        .map_or_else(HashMap::new, |output| output.gatewayReferenceIds.clone())
+        .map_or_else(HashMap::new, |output| output.gateway_reference_ids.clone())
 }
 
 pub fn get_order_metadata_and_pl_ref_id_map(

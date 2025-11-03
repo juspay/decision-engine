@@ -909,37 +909,39 @@ pub struct DomainDeciderRequest {
 
 // impl Given<SecretContext> for DomainDeciderRequest {}
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DomainDeciderRequestForApiCallV2 {
-    pub paymentInfo: PaymentInfo,
-    pub merchantId: String,
-    pub eligibleGatewayList: Option<Vec<String>>,
-    pub rankingAlgorithm: Option<RankingAlgorithm>,
-    pub eliminationEnabled: Option<bool>,
+    pub payment_info: PaymentInfo,
+    pub merchant_id: String,
+    pub eligible_gateway_list: Option<Vec<String>>,
+    pub ranking_algorithm: Option<RankingAlgorithm>,
+    pub elimination_enabled: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PaymentInfo {
-    paymentId: String,
+    payment_id: String,
     pub amount: f64,
     currency: Currency,
     country: Option<CountryISO2>,
-    customerId: Option<ETCu::CustomerId>,
+    customer_id: Option<ETCu::CustomerId>,
     udfs: Option<UDFs>,
-    preferredGateway: Option<String>,
-    paymentType: TxnObjectType,
+    preferred_gateway: Option<String>,
+    payment_type: TxnObjectType,
     pub metadata: Option<String>,
-    internalMetadata: Option<String>,
-    isEmi: Option<bool>,
-    emiBank: Option<String>,
-    emiTenure: Option<i32>,
-    paymentMethodType: String,
-    paymentMethod: String,
-    paymentSource: Option<String>,
-    authType: Option<ETCa::txn_card_info::AuthType>,
-    cardIssuerBankName: Option<String>,
-    pub cardIsin: Option<String>,
-    cardType: Option<ETCa::card_type::CardType>,
-    cardSwitchProvider: Option<Secret<String>>,
+    internal_metadata: Option<String>,
+    is_emi: Option<bool>,
+    emi_bank: Option<String>,
+    emi_tenure: Option<i32>,
+    payment_method_type: String,
+    payment_method: String,
+    payment_source: Option<String>,
+    auth_type: Option<ETCa::txn_card_info::AuthType>,
+    card_issuer_bank_name: Option<String>,
+    pub card_isin: Option<String>,
+    card_type: Option<ETCa::card_type::CardType>,
+    card_switch_provider: Option<Secret<String>>,
 }
 
 // write a function to transfer DomainDeciderRequestForApiCallV2 to DomainDeciderRequest
@@ -949,64 +951,64 @@ impl DomainDeciderRequestForApiCallV2 {
         DomainDeciderRequest {
             orderReference: ETO::Order {
                 id: ETO::id::to_order_prim_id(1),
-                amount: ETMo::Money::from_double(self.paymentInfo.amount),
-                currency: self.paymentInfo.currency.clone(),
+                amount: ETMo::Money::from_double(self.payment_info.amount),
+                currency: self.payment_info.currency.clone(),
                 dateCreated: OffsetDateTime::now_utc(),
-                merchantId: ETM::id::to_merchant_id(self.merchantId.clone()),
-                orderId: ETO::id::to_order_id(self.paymentInfo.paymentId.clone()),
+                merchantId: ETM::id::to_merchant_id(self.merchant_id.clone()),
+                orderId: ETO::id::to_order_id(self.payment_info.payment_id.clone()),
                 status: ETO::OrderStatus::Created,
                 description: None,
-                customerId: self.paymentInfo.customerId.clone(),
+                customerId: self.payment_info.customer_id.clone(),
                 udfs: self
-                    .paymentInfo
+                    .payment_info
                     .udfs
                     .clone()
                     .unwrap_or(UDFs(HashMap::new())),
-                preferredGateway: self.paymentInfo.preferredGateway.clone(),
+                preferredGateway: self.payment_info.preferred_gateway.clone(),
                 productId: None,
                 orderType: ETO::OrderType::from_txn_object_type(
-                    self.paymentInfo.paymentType.clone(),
+                    self.payment_info.payment_type.clone(),
                 ),
-                metadata: self.paymentInfo.metadata.clone(),
-                internalMetadata: self.paymentInfo.internalMetadata.clone(),
+                metadata: self.payment_info.metadata.clone(),
+                internalMetadata: self.payment_info.internal_metadata.clone(),
             },
             shouldConsumeResult: None,
             orderMetadata: ETOMV2::OrderMetadataV2 {
                 id: ETOMV2::to_order_metadata_v2_pid(1),
                 date_created: OffsetDateTime::now_utc(),
                 last_updated: OffsetDateTime::now_utc(),
-                metadata: self.paymentInfo.metadata.clone(),
+                metadata: self.payment_info.metadata.clone(),
                 order_reference_id: 1,
                 ip_address: None,
                 partition_key: None,
             },
             txnDetail: ETTD::TxnDetail {
                 id: ETTD::to_txn_detail_id(1),
-                orderId: ETO::id::to_order_id(self.paymentInfo.paymentId.clone()),
+                orderId: ETO::id::to_order_id(self.payment_info.payment_id.clone()),
                 status: ETTD::TxnStatus::Started,
-                txnId: ETId::to_transaction_id(self.paymentInfo.paymentId.clone()),
+                txnId: ETId::to_transaction_id(self.payment_info.payment_id.clone()),
                 txnType: Some("NOT_DEFINED".to_string()),
                 dateCreated: OffsetDateTime::now_utc(),
                 addToLocker: Some(false),
-                merchantId: ETM::id::to_merchant_id(self.merchantId.clone()),
+                merchantId: ETM::id::to_merchant_id(self.merchant_id.clone()),
                 gateway: None,
                 expressCheckout: Some(false),
-                isEmi: Some(self.paymentInfo.isEmi.clone().unwrap_or(false)),
-                emiBank: self.paymentInfo.emiBank.clone(),
-                emiTenure: self.paymentInfo.emiTenure.clone(),
-                txnUuid: self.paymentInfo.paymentId.clone(),
+                isEmi: Some(self.payment_info.is_emi.clone().unwrap_or(false)),
+                emiBank: self.payment_info.emi_bank.clone(),
+                emiTenure: self.payment_info.emi_tenure.clone(),
+                txnUuid: self.payment_info.payment_id.clone(),
                 merchantGatewayAccountId: None,
-                txnAmount: Some(ETMo::Money::from_double(self.paymentInfo.amount)),
-                txnObjectType: Some(self.paymentInfo.paymentType.clone()),
-                sourceObject: Some(self.paymentInfo.paymentMethod.clone()),
+                txnAmount: Some(ETMo::Money::from_double(self.payment_info.amount)),
+                txnObjectType: Some(self.payment_info.payment_type.clone()),
+                sourceObject: Some(self.payment_info.payment_method.clone()),
                 sourceObjectId: None,
-                currency: self.paymentInfo.currency.clone(),
-                country: self.paymentInfo.country.clone(),
-                netAmount: Some(ETMo::Money::from_double(self.paymentInfo.amount)),
+                currency: self.payment_info.currency.clone(),
+                country: self.payment_info.country.clone(),
+                netAmount: Some(ETMo::Money::from_double(self.payment_info.amount)),
                 surchargeAmount: None,
                 taxAmount: None,
-                internalMetadata: self.paymentInfo.internalMetadata.clone().map(Secret::new),
-                metadata: self.paymentInfo.metadata.clone().map(Secret::new),
+                internalMetadata: self.payment_info.internal_metadata.clone().map(Secret::new),
+                metadata: self.payment_info.metadata.clone().map(Secret::new),
                 offerDeductionAmount: None,
                 internalTrackingInfo: None,
                 partitionKey: None,
@@ -1015,20 +1017,20 @@ impl DomainDeciderRequestForApiCallV2 {
             txnOfferDetails: None,
             txnCardInfo: ETCa::txn_card_info::TxnCardInfo {
                 id: ETCa::txn_card_info::to_txn_card_info_pid(1),
-                card_isin: self.paymentInfo.cardIsin.clone(),
-                cardIssuerBankName: self.paymentInfo.cardIssuerBankName.clone(),
-                cardSwitchProvider: self.paymentInfo.cardSwitchProvider.clone(),
-                card_type: self.paymentInfo.cardType.clone(),
+                card_isin: self.payment_info.card_isin.clone(),
+                cardIssuerBankName: self.payment_info.card_issuer_bank_name.clone(),
+                cardSwitchProvider: self.payment_info.card_switch_provider.clone(),
+                card_type: self.payment_info.card_type.clone(),
                 nameOnCard: None,
                 dateCreated: OffsetDateTime::now_utc(),
-                paymentMethodType: self.paymentInfo.paymentMethodType.to_string(),
-                paymentMethod: self.paymentInfo.paymentMethod.clone(),
-                paymentSource: self.paymentInfo.paymentSource.clone(),
-                authType: self.paymentInfo.authType.clone(),
+                paymentMethodType: self.payment_info.payment_method_type.to_string(),
+                paymentMethod: self.payment_info.payment_method.clone(),
+                paymentSource: self.payment_info.payment_source.clone(),
+                authType: self.payment_info.auth_type.clone(),
                 partitionKey: None,
             },
             merchantAccount: ETM::merchant_account::load_merchant_by_merchant_id(
-                self.merchantId.clone(),
+                self.merchant_id.clone(),
             )
             .await
             .expect("Merchant account not found"),
@@ -1561,57 +1563,58 @@ pub struct ApiDeciderFullRequest {
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GatewayPriorityLogicOutput {
-    pub isEnforcement: bool,
+    pub is_enforcement: bool,
     pub gws: Vec<String>,
-    pub priorityLogicTag: Option<String>,
-    pub gatewayReferenceIds: HMap<String, String>,
-    pub primaryLogic: Option<PriorityLogicData>,
-    pub fallbackLogic: Option<PriorityLogicData>,
+    pub priority_logic_tag: Option<String>,
+    pub gateway_reference_ids: HMap<String, String>,
+    pub primary_logic: Option<PriorityLogicData>,
+    pub fallback_logic: Option<PriorityLogicData>,
 }
 
 impl GatewayPriorityLogicOutput {
     pub fn new(
-        isEnforcement: bool,
+        is_enforcement: bool,
         gws: Vec<String>,
-        priorityLogicTag: Option<String>,
-        gatewayReferenceIds: HMap<String, String>,
-        primaryLogic: Option<PriorityLogicData>,
-        fallbackLogic: Option<PriorityLogicData>,
+        priority_logic_tag: Option<String>,
+        gateway_reference_ids: HMap<String, String>,
+        primary_logic: Option<PriorityLogicData>,
+        fallback_logic: Option<PriorityLogicData>,
     ) -> Self {
         Self {
-            isEnforcement,
+            is_enforcement,
             gws,
-            priorityLogicTag,
-            gatewayReferenceIds,
-            primaryLogic,
-            fallbackLogic,
+            priority_logic_tag,
+            gateway_reference_ids,
+            primary_logic,
+            fallback_logic,
         }
     }
-    pub fn setIsEnforcement(&mut self, isEnforcement: bool) -> &mut Self {
-        self.isEnforcement = isEnforcement;
+    pub fn set_is_enforcement(&mut self, is_enforcement: bool) -> &mut Self {
+        self.is_enforcement = is_enforcement;
         self
     }
-    pub fn setPriorityLogicTag(&mut self, priorityLogicTag: Option<String>) -> &mut Self {
-        self.priorityLogicTag = priorityLogicTag;
+    pub fn set_priority_logic_tag(&mut self, priorityLogicTag: Option<String>) -> &mut Self {
+        self.priority_logic_tag = priorityLogicTag;
         self
     }
-    pub fn setPrimaryLogic(&mut self, primaryLogic: Option<PriorityLogicData>) -> &mut Self {
-        self.primaryLogic = primaryLogic;
+    pub fn set_primary_logic(&mut self, primaryLogic: Option<PriorityLogicData>) -> &mut Self {
+        self.primary_logic = primaryLogic;
         self
     }
-    pub fn setGws(&mut self, setGws: Vec<String>) -> &mut Self {
+    pub fn set_gws(&mut self, setGws: Vec<String>) -> &mut Self {
         self.gws = setGws;
         self
     }
     pub fn build(&self) -> Self {
         Self {
-            isEnforcement: self.isEnforcement,
+            is_enforcement: self.is_enforcement,
             gws: self.gws.clone(),
-            priorityLogicTag: self.priorityLogicTag.clone(),
-            gatewayReferenceIds: self.gatewayReferenceIds.clone(),
-            primaryLogic: self.primaryLogic.clone(),
-            fallbackLogic: self.fallbackLogic.clone(),
+            priority_logic_tag: self.priority_logic_tag.clone(),
+            gateway_reference_ids: self.gateway_reference_ids.clone(),
+            primary_logic: self.primary_logic.clone(),
+            fallback_logic: self.fallback_logic.clone(),
         }
     }
 }
