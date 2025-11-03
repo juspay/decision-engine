@@ -90,10 +90,10 @@ use crate::types::payment::payment_method_type_const::*;
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct GatewayLatencyForScoring {
     #[serde(rename = "defaultLatencyThreshold")]
-    pub defaultLatencyThreshold: f64,
+    pub default_latency_threshold: f64,
 
     #[serde(rename = "merchantLatencyGatewayWiseInput")]
-    pub merchantLatencyGatewayWiseInput: Option<Vec<GatewayWiseLatencyInput>>,
+    pub merchant_latency_gateway_wise_input: Option<Vec<GatewayWiseLatencyInput>>,
 }
 
 // Original Haskell data type: GatewayWiseLatencyInput
@@ -205,13 +205,13 @@ pub struct ResetGatewayScoreBulkRequest {
     pub order_id: Option<String>,
 
     #[serde(rename = "resetGatewayScoreReqArr")]
-    pub resetGatewayScoreReqArr: Vec<ResetGatewayScoreRequest>,
+    pub reset_gateway_score_req_arr: Vec<ResetGatewayScoreRequest>,
 }
 
-pub fn defaultGwLatencyCheckInMins() -> GatewayLatencyForScoring {
+pub fn default_gw_latency_check_in_mins() -> GatewayLatencyForScoring {
     GatewayLatencyForScoring {
-        defaultLatencyThreshold: 10.0,
-        merchantLatencyGatewayWiseInput: None,
+        default_latency_threshold: 10.0,
+        merchant_latency_gateway_wise_input: None,
     }
 }
 
