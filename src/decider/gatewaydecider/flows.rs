@@ -806,7 +806,7 @@ async fn filter_functional_gateways_with_enforcement(
         .await;
         let fallBackGwPriority =
             add_preferred_gateways_to_priority_list(updatedPlOp.gws.clone(), preferredGw);
-        if updatedPlOp.isEnforcement {
+        if updatedPlOp.is_enforcement {
             let updatedEnforcedGateways = fGws
                 .iter()
                 .filter(|&gw| fallBackGwPriority.contains(gw))

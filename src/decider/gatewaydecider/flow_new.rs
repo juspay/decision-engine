@@ -46,7 +46,7 @@ pub async fn decider_full_payload_hs_function(
                 priority_logic_output: None,
                 is_dynamic_mga_enabled: false,
             })?;
-    let enforced_gateway_filter = handle_enforced_gateway(dreq_.clone().eligibleGatewayList);
+    let enforced_gateway_filter = handle_enforced_gateway(dreq_.clone().eligible_gateway_list);
 
     // check if type formation is correct
     let merchant_prefs = ETM::merchant_iframe_preferences::MerchantIframePreferences {
@@ -615,7 +615,7 @@ async fn filter_functional_gateways_with_enforcement(
         .await;
         let fallBackGwPriority =
             add_preferred_gateways_to_priority_list(updatedPlOp.gws.clone(), preferredGw);
-        if updatedPlOp.isEnforcement {
+        if updatedPlOp.is_enforcement {
             let updatedEnforcedGateways = fGws
                 .iter()
                 .filter(|&gw| fallBackGwPriority.contains(gw))
