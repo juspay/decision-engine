@@ -85,7 +85,7 @@ pub async fn updateKeyScoreForKeysFromConsumer(
     mer_acc: MerchantAccount,
     gateway_scoring_key: (ScoreKeyType, Option<String>),
 ) -> Option<((ScoreKeyType, String), CachedGatewayScore)> {
-    let merchant_id = Merchant::merchant_id_to_text(txn_detail.merchantId.clone());
+    let merchant_id = Merchant::merchant_id_to_text(txn_detail.merchant_id.clone());
     let (score_key_type, m_key) = gateway_scoring_key;
     match m_key {
         Some(key) => {
@@ -429,7 +429,7 @@ pub async fn getUpdatedMerchantDetailsForGlobalKey(
     txn_detail: TxnDetail,
     txn_card_info: TxnCardInfo,
 ) -> Option<Vec<MerchantScoringDetails>> {
-    let merchant_id = Merchant::merchant_id_to_text(txn_detail.merchantId.clone());
+    let merchant_id = Merchant::merchant_id_to_text(txn_detail.merchant_id.clone());
     if isGlobalKey(score_key_type) {
         match cached_gateway_score.merchants {
             Some(merchant_details_array) => {
@@ -478,7 +478,7 @@ pub async fn replaceTransactionCount(
     gateway_scoring_type: GatewayScoreType,
     score_key_type: ScoreKeyType,
 ) -> MerchantScoringDetails {
-    let merchant_id = Merchant::merchant_id_to_text(txn_detail.merchantId.clone());
+    let merchant_id = Merchant::merchant_id_to_text(txn_detail.merchant_id.clone());
     if merchant_scoring_details.merchantId == merchant_id {
         let updated_score = updateKeyScoreForTxnStatus(
             txn_detail,
@@ -512,7 +512,7 @@ pub fn getNewCachedGatewayScore(
     txn_detail: TxnDetail,
     txn_card_info: TxnCardInfo,
 ) -> CachedGatewayScore {
-    let merchant_id = Merchant::merchant_id_to_text(txn_detail.merchantId);
+    let merchant_id = Merchant::merchant_id_to_text(txn_detail.merchant_id);
     let current_date: u128 = CUTILS::get_current_date_in_millis();
     if isGlobalKey(score_key_type) {
         let merchant_scoring_details =
@@ -561,7 +561,7 @@ pub async fn getAllUnifiedKeys(
     gateway_scoring_data: GatewayScoringData,
     gateway_reference_id: Option<String>,
 ) -> Vec<(ScoreKeyType, Option<String>)> {
-    let merchant_id = Merchant::merchant_id_to_text(txn_detail.merchantId.clone());
+    let merchant_id = Merchant::merchant_id_to_text(txn_detail.merchant_id.clone());
     let is_key_enabled_for_global_gateway_scoring = isFeatureEnabled(
         C::GlobalGatewayScoringEnabledMerchants.get_key(),
         merchant_id.clone(),
@@ -768,7 +768,7 @@ pub async fn eliminationV2RewardFactor(
     txn_detail: &TxnDetail,
 ) -> Option<f64> {
     let merch_acc: MerchantAccount =
-        MA::load_merchant_by_merchant_id(MID::merchant_id_to_text(txn_detail.clone().merchantId))
+        MA::load_merchant_by_merchant_id(MID::merchant_id_to_text(txn_detail.clone().merchant_id))
             .await
             .expect("Merchant account not found");
 
@@ -813,10 +813,10 @@ pub async fn eliminationV2RewardFactor(
         }
         None => {
             logger::info!("ELIMINATION_V2_VALUES_NOT_FOUND:ALPHA:PMT_PM_TXNOBJECTTYPE_SOURCEOBJECT {:?} {:?} {:?} {:?}",
-                    txn_card_info.paymentMethodType,
-                    if txn_card_info.paymentMethod.is_empty() { "Nothing".to_string() } else { txn_card_info.paymentMethod.clone() },
-                    txn_detail.txnObjectType,
-                    txn_detail.sourceObject.as_ref().map_or_else(|| "Nothing".to_string(), |s| s.clone()),
+                    txn_card_info.payment_method_type,
+                    if txn_card_info.payment_method.is_empty() { "Nothing".to_string() } else { txn_card_info.payment_method.clone() },
+                    txn_detail.txn_object_type,
+                    txn_detail.source_object.as_ref().map_or_else(|| "Nothing".to_string(), |s| s.clone()),
                 );
             None
         }
@@ -892,7 +892,7 @@ pub fn isKeyOutage(scoreKeyType: ScoreKeyType) -> bool {
 //         downThreshold: None,
 //         eliminationMaxCount: None,
 //         dimension: None,
-//         merchantId: txn_detail.merchantId,
+//         merchantId: txn_detail.merchant_id,
 //         gateway: txn_detail.gateway.unwrap_or_else(|| "".to_string()),
 //         authType: None,
 //         cardBin: None,

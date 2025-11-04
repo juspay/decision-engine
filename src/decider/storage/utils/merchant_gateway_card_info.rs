@@ -47,8 +47,8 @@ pub async fn filter_gateways_for_payment_method_and_validation_type(
         .map(|acc| merchant_gw_acc_id_to_id(acc.id.clone()))
         .collect();
 
-    let given_payment_method = txn_card_info.paymentMethod.clone();
-    let given_payment_method_type = txn_card_info.paymentMethodType;
+    let given_payment_method = txn_card_info.payment_method.clone();
+    let given_payment_method_type = txn_card_info.payment_method_type;
 
     // Step 1: Fetch Juspay Bank Codes
     let jpbc_records: Vec<DBJuspayBankCode> = match crate::generics::generic_find_all::<

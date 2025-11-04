@@ -146,21 +146,21 @@ pub fn check_no_or_low_cost_emi(txn_card_info: &ETCa::txn_card_info::TxnCardInfo
 
 pub fn fetch_emi_type(txn_card_info: &ETCa::txn_card_info::TxnCardInfo) -> Option<String> {
     txn_card_info
-        .paymentSource
+        .payment_source
         .as_ref()
         .and_then(|source| get_value("emi_type", source))
 }
 
 pub fn fetch_extended_card_bin(txn_card_info: &ETCa::txn_card_info::TxnCardInfo) -> Option<String> {
     txn_card_info
-        .paymentSource
+        .payment_source
         .as_ref()
         .and_then(|source| get_value("extended_card_bin", source))
 }
 
 pub fn fetch_juspay_bank_code(txn_card_info: &ETCa::txn_card_info::TxnCardInfo) -> Option<String> {
     txn_card_info
-        .paymentSource
+        .payment_source
         .as_ref()
         .and_then(|source| get_value("juspay_bank_code", source))
 }
@@ -191,14 +191,14 @@ pub fn is_emandate_supported_payment_method(
     txn_card_info: &ETCa::txn_card_info::TxnCardInfo,
 ) -> bool {
     matches!(
-        txn_card_info.paymentMethodType.as_str(),
+        txn_card_info.payment_method_type.as_str(),
         CARD | NB | WALLET | UPI | AADHAAR | PAPERNACH | PAN | RTP
     )
 }
 
 pub fn is_emandate_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
     matches!(
-        txn_detail.txnObjectType,
+        txn_detail.txn_object_type,
         Some(ETTD::TxnObjectType::EmandateRegister)
             | Some(ETTD::TxnObjectType::TpvEmandateRegister)
             | Some(ETTD::TxnObjectType::EmandatePayment)
@@ -208,14 +208,14 @@ pub fn is_emandate_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
 
 pub fn is_emandate_payment_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
     matches!(
-        txn_detail.txnObjectType,
+        txn_detail.txn_object_type,
         Some(ETTD::TxnObjectType::EmandatePayment) | Some(ETTD::TxnObjectType::TpvEmandatePayment)
     )
 }
 
 pub fn is_reccuring_payment_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
     matches!(
-        txn_detail.txnObjectType,
+        txn_detail.txn_object_type,
         Some(ETTD::TxnObjectType::EmandatePayment)
             | Some(ETTD::TxnObjectType::TpvEmandatePayment)
             | Some(ETTD::TxnObjectType::MandatePayment)
@@ -225,13 +225,13 @@ pub fn is_reccuring_payment_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
 
 pub fn is_tpv_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
     matches!(
-        txn_detail.txnObjectType,
+        txn_detail.txn_object_type,
         Some(ETTD::TxnObjectType::TpvPayment)
     )
 }
 
 pub fn is_tpv_mandate_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
-    txn_detail.txnObjectType == Some(ETTD::TxnObjectType::TpvEmandateRegister)
+    txn_detail.txn_object_type == Some(ETTD::TxnObjectType::TpvEmandateRegister)
 }
 
 pub fn get_merchant_wise_si_bin_key(gw: &String) -> String {
@@ -251,7 +251,7 @@ fn get_merchant_gateway_card_info_feature_name(
 
 pub fn is_mandate_transaction(txn: &ETTD::TxnDetail) -> bool {
     matches!(
-        txn.txnObjectType,
+        txn.txn_object_type,
         Some(ETTD::TxnObjectType::MandateRegister) | Some(ETTD::TxnObjectType::MandatePayment)
     )
 }
@@ -548,7 +548,7 @@ pub fn get_gateway_reference_id(
 
 pub async fn effective_amount_with_txn_amount(txn_detail: ETTD::TxnDetail) -> Money {
     let def_amount = Money::from_double(0.0);
-    let amount_txn = txn_detail.txnAmount.as_ref().unwrap_or(&def_amount);
+    let amount_txn = txn_detail.txn_amount.as_ref().unwrap_or(&def_amount);
     let offers = ETTO::getOffers(&txn_detail.id).await;
     let discount_sum: Money = Money::from_double(
         offers
@@ -560,8 +560,8 @@ pub async fn effective_amount_with_txn_amount(txn_detail: ETTD::TxnDetail) -> Mo
 
     amount_txn
         .m_sub(&discount_sum)
-        .m_add(&txn_detail.surchargeAmount.unwrap_or(def_amount.clone()))
-        .m_add(&txn_detail.taxAmount.unwrap_or(def_amount))
+        .m_add(&txn_detail.surcharge_amount.unwrap_or(def_amount.clone()))
+        .m_add(&txn_detail.tax_amount.unwrap_or(def_amount))
 }
 
 pub fn filter_gateway_card_info_for_max_register_amount(
@@ -590,13 +590,13 @@ pub fn is_emandate_amount_filter_needed(
 ) -> bool {
     is_emandate_register_transaction(txn_detail)
         && matches!(
-            txn_card_info.paymentMethodType.as_str(),
+            txn_card_info.payment_method_type.as_str(),
             CARD | NB | AADHAAR | PAN
         )
 }
 
 pub fn is_emandate_register_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
-    txn_detail.txnObjectType == Some(ETTD::TxnObjectType::EmandateRegister)
+    txn_detail.txn_object_type == Some(ETTD::TxnObjectType::EmandateRegister)
 }
 
 pub async fn get_card_brand(decider_flow: &mut DeciderFlow<'_>) -> Option<String> {
@@ -731,31 +731,31 @@ pub fn get_metric_log_format(decider_flow: &mut DeciderFlow<'_>, stage: &str) ->
     let order_reference = decider_flow.get().dpOrder.clone();
     let x_req_id = decider_flow.logger.get("x-request-id");
     let payment_source_m = txn_card_info
-        .paymentSource
+        .payment_source
         .as_ref()
         .and_then(|ps| last(split("@", ps)));
 
     MessageFormat {
         model: txn_detail
-            .txnObjectType
+            .txn_object_type
             .map(|t| t.to_string())
             .unwrap_or_default(),
         log_type: "APP_EVENT".to_string(),
-        payment_method: txn_card_info.paymentMethod.clone(),
-        payment_method_type: txn_card_info.paymentMethodType.clone(),
+        payment_method: txn_card_info.payment_method.clone(),
+        payment_method_type: txn_card_info.payment_method_type.clone(),
         payment_source: payment_source_m,
-        source_object: txn_detail.sourceObject.clone(),
+        source_object: txn_detail.source_object.clone(),
         txn_detail_id: txn_detail.id.clone(),
         stage: stage.to_string(),
-        merchant_id: merchant_id_to_text(order_reference.merchantId.clone()),
-        txn_uuid: txn_detail.txnUuid.clone(),
-        order_id: order_reference.orderId.0.clone(),
+        merchant_id: merchant_id_to_text(order_reference.merchant_id.clone()),
+        txn_uuid: txn_detail.txn_uuid.clone(),
+        order_id: order_reference.order_id.0.clone(),
         card_type: txn_card_info
             .card_type
             .as_ref()
             .map(|ct| ct.to_string())
             .unwrap_or_default(),
-        auth_type: txn_card_info.authType.as_ref().map(|at| at.to_string()),
+        auth_type: txn_card_info.auth_type.as_ref().map(|at| at.to_string()),
         bank_code: fetch_juspay_bank_code(&txn_card_info),
         x_request_id: x_req_id.cloned(),
         log_data: serde_json::to_value(mp).unwrap(),
@@ -778,7 +778,7 @@ pub async fn log_gateway_decider_approach(
     let order_reference = decider_flow.get().dpOrder.clone();
     let txn_card_info = decider_flow.get().dpTxnCardInfo.clone();
     let x_req_id = decider_flow.logger.get("x-request-id").cloned();
-    let txn_creation_time = txn_detail.dateCreated.to_string(); // Assuming dateCreated is a DateTime field
+    let txn_creation_time = txn_detail.date_created.to_string(); // Assuming dateCreated is a DateTime field
 
     let mp = types::DeciderApproachLogData {
         decided_gateway: m_decided_gateway,
@@ -792,7 +792,7 @@ pub async fn log_gateway_decider_approach(
     };
 
     let payment_source_m = txn_card_info
-        .paymentSource
+        .payment_source
         .as_ref()
         .and_then(|ps| ps.split('@').next_back().map(String::from));
 
@@ -801,25 +801,25 @@ pub async fn log_gateway_decider_approach(
         "DECIDER",
         MessageFormat {
             model: txn_detail
-                .txnObjectType
+                .txn_object_type
                 .map(|t| t.to_string())
                 .unwrap_or_default(),
             log_type: "APP_EVENT".to_string(),
-            payment_method: txn_card_info.clone().paymentMethod,
-            payment_method_type: txn_card_info.clone().paymentMethodType.to_string(),
+            payment_method: txn_card_info.clone().payment_method,
+            payment_method_type: txn_card_info.clone().payment_method_type.to_string(),
             payment_source: payment_source_m,
-            source_object: txn_detail.sourceObject,
+            source_object: txn_detail.source_object,
             txn_detail_id: txn_detail.id,
             stage: "GATEWAY_DECIDER_APPROACH".to_string(),
-            merchant_id: merchant_id_to_text(order_reference.merchantId),
-            txn_uuid: txn_detail.txnUuid,
-            order_id: order_reference.orderId.0,
+            merchant_id: merchant_id_to_text(order_reference.merchant_id),
+            txn_uuid: txn_detail.txn_uuid,
+            order_id: order_reference.order_id.0,
             card_type: txn_card_info
                 .card_type
                 .clone()
                 .map(|ct| ct.to_string())
                 .unwrap_or_default(),
-            auth_type: txn_card_info.authType.clone().map(|at| at.to_string()),
+            auth_type: txn_card_info.auth_type.clone().map(|at| at.to_string()),
             bank_code: fetch_juspay_bank_code(&txn_card_info),
             x_request_id: x_req_id,
             log_data: serde_json::to_value(mp).unwrap(),
@@ -934,7 +934,7 @@ pub async fn get_token_supported_gateways(
 ) -> Option<Vec<String>> {
     let token_type = get_stored_card_vault_provider(m_internal_meta.clone());
     let brand = txn_card_info
-        .cardSwitchProvider
+        .card_switch_provider
         .as_ref()
         .map_or("DEFAULT".to_string(), |secret| secret.peek().to_string());
     let token_provider = get_token_provider(m_internal_meta, &txn_card_info, &brand);
@@ -1154,7 +1154,7 @@ fn get_int_isin(isin: &ETCa::isin::Isin) -> i32 {
 
 pub fn get_payment_flow_list_from_txn_detail(txn_detail: &ETTD::TxnDetail) -> Vec<String> {
     match txn_detail
-        .internalTrackingInfo
+        .internal_tracking_info
         .as_ref()
         .and_then(|info| either_decode_t(info).ok())
     {
@@ -1297,7 +1297,7 @@ pub fn modify_gateway_decider_approach(
 }
 
 pub fn get_juspay_bank_code_from_internal_metadata(txn_detail: &ETTD::TxnDetail) -> Option<String> {
-    txn_detail.internalMetadata.as_ref().and_then(|metadata| {
+    txn_detail.internal_metadata.as_ref().and_then(|metadata| {
         from_str::<Value>(metadata.peek()).ok().and_then(|json| {
             json.get("juspayBankCode")
                 .and_then(|v| v.as_str().map(|s| s.to_string()))
@@ -1925,14 +1925,14 @@ pub async fn get_gateway_scoring_data(
     .await;
     let merchant_id = merchant_id_to_text(merchant.merchantId.clone());
     let order_type = txn_detail
-        .txnObjectType
+        .txn_object_type
         .map(|t| t.to_string())
         .unwrap_or_default();
-    let payment_method_type = txn_card_info.paymentMethodType.to_uppercase();
-    let m_source_object = if txn_card_info.paymentMethod == UPI {
-        txn_detail.sourceObject.clone().unwrap_or_default()
+    let payment_method_type = txn_card_info.payment_method_type.to_uppercase();
+    let m_source_object = if txn_card_info.payment_method == UPI {
+        txn_detail.source_object.clone().unwrap_or_default()
     } else {
-        txn_card_info.paymentMethod.clone()
+        txn_card_info.payment_method.clone()
     };
     let is_performing_experiment = isFeatureEnabled(
         C::MerchantEnabledForRoutingExperiment.get_key(),
@@ -1959,19 +1959,19 @@ pub async fn get_gateway_scoring_data(
         m_source_object,
         is_gri_enabled_for_elimination,
         is_gri_enabled_for_sr_routing,
-        decider_flow.get().dpTxnDetail.dateCreated.clone(),
+        decider_flow.get().dpTxnDetail.date_created.clone(),
         decider_flow.get().dpTxnCardInfo.card_isin.clone(),
-        decider_flow.get().dpTxnCardInfo.cardSwitchProvider.clone(),
+        decider_flow.get().dpTxnCardInfo.card_switch_provider.clone(),
         Some(decider_flow.get().dpOrder.currency.clone()),
         decider_flow.get().dpTxnDetail.country.clone(),
         decider_flow
             .get()
             .dpTxnCardInfo
-            .authType
+            .auth_type
             .as_ref()
             .map(|a| a.to_string()),
     );
-    let updated_gateway_scoring_data = match txn_card_info.paymentMethodType.as_str() {
+    let updated_gateway_scoring_data = match txn_card_info.payment_method_type.as_str() {
         UPI => {
             let handle_and_package_based_routing = isFeatureEnabled(
                 C::HandlePackageBasedRoutingCutover.get_key(),
@@ -1980,11 +1980,11 @@ pub async fn get_gateway_scoring_data(
             )
             .await;
             if is_performing_experiment && handle_and_package_based_routing {
-                let experiment_tag = get_experiment_tag(txn_detail.dateCreated, "HANDLE_PSP").await;
+                let experiment_tag = get_experiment_tag(txn_detail.date_created, "HANDLE_PSP").await;
                 set_is_experiment_tag(decider_flow, experiment_tag);
             }
 
-            let payment_source = get_true_string(txn_card_info.paymentSource.clone())
+            let payment_source = get_true_string(txn_card_info.payment_source.clone())
                 .map(|source| source.split("@").last().unwrap_or_default().to_uppercase())
                 .unwrap_or_default();
             default_gateway_scoring_data.paymentSource = Some(payment_source);
@@ -2008,11 +2008,11 @@ pub async fn get_gateway_scoring_data(
             if is_performing_experiment {
                 if sr_evaluation_at_auth_level {
                     let experiment_tag =
-                        get_experiment_tag(txn_detail.dateCreated, "AUTH_TYPE").await;
+                        get_experiment_tag(txn_detail.date_created, "AUTH_TYPE").await;
                     set_is_experiment_tag(decider_flow, experiment_tag);
                 } else if sr_evaluation_at_bank_level {
                     let experiment_tag =
-                        get_experiment_tag(txn_detail.dateCreated, "BANK_TYPE").await;
+                        get_experiment_tag(txn_detail.date_created, "BANK_TYPE").await;
                     set_is_experiment_tag(decider_flow, experiment_tag);
                 }
             }
@@ -2022,7 +2022,7 @@ pub async fn get_gateway_scoring_data(
                 .map(|card| card_type_to_text(&card).to_uppercase())
                 .unwrap_or_default();
             let auth_type = txn_card_info
-                .authType
+                .auth_type
                 .clone()
                 .map(|auth| auth_type_to_text(&auth).to_uppercase())
                 .unwrap_or_default();
@@ -2049,15 +2049,15 @@ pub async fn get_gateway_scoring_data(
 
     if is_performing_experiment && is_gri_enabled_for_elimination {
         let experiment_tag =
-            get_experiment_tag(txn_detail.dateCreated, "GRI_BASED_ELIMINATION").await;
+            get_experiment_tag(txn_detail.date_created, "GRI_BASED_ELIMINATION").await;
         set_is_experiment_tag(decider_flow, experiment_tag);
     }
     if is_performing_experiment && is_gri_enabled_for_sr_routing {
         let experiment_tag =
-            get_experiment_tag(txn_detail.dateCreated, "GRI_BASED_SR_ROUTING").await;
+            get_experiment_tag(txn_detail.date_created, "GRI_BASED_SR_ROUTING").await;
         set_is_experiment_tag(decider_flow, experiment_tag);
     }
-    let key = [C::GATEWAY_SCORING_DATA, &txn_detail.txnUuid.clone()].concat();
+    let key = [C::GATEWAY_SCORING_DATA, &txn_detail.txn_uuid.clone()].concat();
     updated_gateway_scoring_data
 }
 

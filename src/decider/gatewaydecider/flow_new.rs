@@ -65,14 +65,14 @@ pub async fn decider_full_payload_hs_function(
     };
 
     let dreq = dreq_.to_domain_decider_request().await;
-    let resolve_bin = match Utils::fetch_extended_card_bin(&dreq.txnCardInfo.clone()) {
+    let resolve_bin = match Utils::fetch_extended_card_bin(&dreq.txn_card_info.clone()) {
         Some(card_bin) => Some(card_bin),
-        None => match dreq.txnCardInfo.card_isin {
+        None => match dreq.txn_card_info.card_isin {
             Some(c_isin) => {
                 let res_bin = Utils::get_card_bin_from_token_bin(6, c_isin.as_str()).await;
                 Some(res_bin)
             }
-            None => dreq.txnCardInfo.card_isin.clone(),
+            None => dreq.txn_card_info.card_isin.clone(),
         },
     };
     logger::debug!(
@@ -81,28 +81,28 @@ pub async fn decider_full_payload_hs_function(
         "{:?}",
         resolve_bin.clone()
     );
-    let m_vault_provider = Utils::get_vault_provider(dreq.cardToken.as_deref());
+    let m_vault_provider = Utils::get_vault_provider(dreq.card_token.as_deref());
     let update_txn_card_info = TxnCardInfo {
         card_isin: resolve_bin,
-        ..dreq.txnCardInfo
+        ..dreq.txn_card_info
     };
 
     let decider_params = T::DeciderParams {
-        dpMerchantAccount: dreq.merchantAccount,
-        dpOrder: dreq.orderReference,
-        dpTxnDetail: dreq.txnDetail,
-        dpTxnOfferDetails: dreq.txnOfferDetails,
+        dpMerchantAccount: dreq.merchant_account,
+        dpOrder: dreq.order_reference,
+        dpTxnDetail: dreq.txn_detail,
+        dpTxnOfferDetails: dreq.txn_offer_details,
         dpTxnCardInfo: update_txn_card_info,
         dpTxnOfferInfo: None,
         dpVaultProvider: m_vault_provider,
-        dpTxnType: dreq.txnType,
+        dpTxnType: dreq.txn_type,
         dpMerchantPrefs: merchant_prefs,
-        dpOrderMetadata: dreq.orderMetadata,
+        dpOrderMetadata: dreq.order_metadata,
         dpEnforceGatewayList: enforced_gateway_filter,
-        dpPriorityLogicOutput: dreq.priorityLogicOutput,
-        dpPriorityLogicScript: dreq.priorityLogicScript,
-        dpEDCCApplied: dreq.isEdccApplied,
-        dpShouldConsumeResult: dreq.shouldConsumeResult,
+        dpPriorityLogicOutput: dreq.priority_logic_output,
+        dpPriorityLogicScript: dreq.priority_logic_script,
+        dpEDCCApplied: dreq.is_edcc_applied,
+        dpShouldConsumeResult: dreq.should_consume_result,
     };
 
     if dreq_.ranking_algorithm == Some(RankingAlgorithm::NtwBasedRouting) {
@@ -136,7 +136,7 @@ pub async fn run_decider_flow(
 ) -> Result<T::DecidedGateway, T::ErrorResponse> {
     let txnCreationTime = deciderParams
         .dpTxnDetail
-        .dateCreated
+        .date_created
         .clone()
         .to_string()
         .replace(" ", "T")
@@ -162,14 +162,14 @@ pub async fn run_decider_flow(
         .dpTxnDetail
         .gateway
         .clone()
-        .or(deciderParams.dpOrder.preferredGateway.clone());
+        .or(deciderParams.dpOrder.preferred_gateway.clone());
     // let gatewayMgaIdMap = getGatewayToMGAIdMapF(&allMgas, &functionalGateways);
 
     logger::warn!(
         action = "PreferredGateway",
         tag = "PreferredGateway",
         "Preferred gateway provided by merchant for {:?} = {:?}",
-        &deciderParams.dpTxnDetail.txnId,
+        &deciderParams.dpTxnDetail.txn_id,
         preferredGateway
             .clone()
             .map_or("None".to_string(), |pgw| pgw.to_string())
@@ -226,7 +226,7 @@ pub async fn run_decider_flow(
                     "Preferred gateway {:?} functional/valid for merchant {:?} in txn {:?}",
                     pgw,
                     &deciderParams.dpMerchantAccount.merchantId,
-                    deciderParams.dpTxnDetail.txnId
+                    deciderParams.dpTxnDetail.txn_id
                 );
                 Utils::log_gateway_decider_approach(
                     &mut decider_flow,
@@ -285,7 +285,7 @@ pub async fn run_decider_flow(
                 tag = "gatewayPriorityList",
                 action = "gatewayPriorityList",
                 "Gateway priority for merchant for {:?} = {:?}",
-                &deciderParams.dpTxnDetail.txnId,
+                &deciderParams.dpTxnDetail.txn_id,
                 gatewayPriorityList
             );
 
@@ -294,7 +294,7 @@ pub async fn run_decider_flow(
                     tag = "gatewayPriorityList",
                     action = "Enforcing Priority Logic",
                     "Enforcing Priority Logic for {:?}",
-                    deciderParams.dpTxnDetail.txnId
+                    deciderParams.dpTxnDetail.txn_id
                 );
                 let (res, priorityLogicOutput) = filter_functional_gateways_with_enforcement(
                     &mut decider_flow,
@@ -308,7 +308,7 @@ pub async fn run_decider_flow(
                     tag = "gatewayPriorityList",
                     action = "gatewayPriorityList",
                     "Functional gateways after filtering for Enforcement Logic for {:?} : {:?}",
-                    &deciderParams.dpTxnDetail.txnId,
+                    &deciderParams.dpTxnDetail.txn_id,
                     res
                 );
                 decider_flow
@@ -337,7 +337,7 @@ pub async fn run_decider_flow(
                 action = "GW_Filtering",
                 "Functional gateways after {:?} for {:?} : {:?}",
                 "FilterByPriorityLogic",
-                &deciderParams.dpTxnDetail.txnId,
+                &deciderParams.dpTxnDetail.txn_id,
                 uniqueFunctionalGateways
             );
 
@@ -444,7 +444,7 @@ pub async fn run_decider_flow(
                         action = "Decided Gateway",
                         tag = "Decided Gateway",
                         "Gateway decided for {:?} = {:?}",
-                        &deciderParams.dpTxnDetail.txnId,
+                        &deciderParams.dpTxnDetail.txn_id,
                         decidedGateway
                     );
 
@@ -502,7 +502,7 @@ pub async fn run_decider_flow(
     };
     let key = [
         C::GATEWAY_SCORING_DATA,
-        &deciderParams.dpTxnDetail.txnUuid.clone(),
+        &deciderParams.dpTxnDetail.txn_uuid.clone(),
     ]
     .concat();
     let updated_gateway_scoring_data = T::GatewayScoringData {

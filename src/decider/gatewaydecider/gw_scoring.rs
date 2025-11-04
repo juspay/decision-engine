@@ -120,7 +120,7 @@ pub fn reset_metric_log_data(decider_flow: &mut DeciderFlow<'_>) {
         dateCreated: decider_flow
             .get()
             .dpTxnDetail
-            .dateCreated
+            .date_created
             .clone()
             .to_string()
             .replace(" UTC", "Z")
@@ -147,7 +147,7 @@ pub fn return_sm_with_log(
     do_or_not: bool,
 ) -> GatewayScoreMap {
     let sr = decider_flow.writer.gwScoreMap.clone();
-    let txn_id = decider_flow.get().dpTxnDetail.txnId.clone();
+    let txn_id = decider_flow.get().dpTxnDetail.txn_id.clone();
     logger::debug!(
         tag = "GW_Scoring",
         action = "GW_Scoring",
@@ -204,12 +204,12 @@ pub async fn scoring_flow(
             action = "scoringFlow",
             "Intelligent routing not triggered due to 1 gateway eligible for merchant {:?} and for txn Id {:?}",
             Utils::get_m_id(merchant.merchantId.clone()),
-            txn_detail.txnId
+            txn_detail.txn_id
             );
     } else {
-        let pmt = decider_flow.get().dpTxnCardInfo.paymentMethodType.clone();
-        let pm = decider_flow.get().dpTxnCardInfo.paymentMethod.clone();
-        let maybe_source_object = decider_flow.get().dpTxnDetail.sourceObject.clone();
+        let pmt = decider_flow.get().dpTxnCardInfo.payment_method_type.clone();
+        let pm = decider_flow.get().dpTxnCardInfo.payment_method.clone();
+        let maybe_source_object = decider_flow.get().dpTxnDetail.source_object.clone();
 
         let pmt_str = pmt.clone();
         let pm_str = Utils::get_payment_method(
@@ -240,7 +240,7 @@ pub async fn scoring_flow(
                     action = "scoringFlow",
                     "Deciding Gateway based on SR V3 Routing for merchant {:?} and for txn Id {:?}",
                     Utils::get_m_id(merchant.merchantId.clone()),
-                    txn_detail.txnId.clone()
+                    txn_detail.txn_id.clone()
                 );
 
                 let merchant_sr_v3_input_config = findByNameFromRedis(
@@ -266,13 +266,13 @@ pub async fn scoring_flow(
 
                 let sr_routing_dimesions = SrRoutingDimensions {
                     card_network: txn_card_info
-                        .cardSwitchProvider
+                        .card_switch_provider
                         .as_ref()
                         .map(|s| s.peek().to_string()),
                     card_isin: txn_card_info.card_isin.clone(),
                     currency: Some(decider_flow.get().dpOrder.currency.to_string()),
                     country: txn_detail.country.as_ref().map(|a| a.to_string()),
-                    auth_type: txn_card_info.authType.as_ref().map(|a| a.to_string()),
+                    auth_type: txn_card_info.auth_type.as_ref().map(|a| a.to_string()),
                 };
 
                 let hedging_percent = Utils::get_sr_v3_hedging_percent(
@@ -329,7 +329,7 @@ pub async fn scoring_flow(
                     tag = "scoringFlow",
                     action = "scoringFlow",
                     "Gateway Scores based on SR V3 Routing for txn id : {:?} is {:?}",
-                    txn_detail.txnId.clone(),
+                    txn_detail.txn_id.clone(),
                     initial_sr_gw_scores_list
                 );
 
@@ -340,7 +340,7 @@ pub async fn scoring_flow(
                         tag = "scoringFlow",
                         action = "scoringFlow",
                         "Considering Gateway Scores based on SR V3 for txn id : {:?}",
-                        txn_detail.txnId.clone()
+                        txn_detail.txn_id.clone()
                     );
 
                     if should_explore {
@@ -389,7 +389,7 @@ pub async fn scoring_flow(
 
                         // Utils::add_txn_to_hash_map_if_debug_mode(
                         //     is_debug_mode_enabled,
-                        //     Utils::get_m_id(&merchant.merchant_id),
+                        //     Utils::get_m_id(&merchant.merchantId),
                         //     txn_detail.clone(),
                         // );
                     }
@@ -400,7 +400,7 @@ pub async fn scoring_flow(
                         tag="scoringFlow",
                         action = "scoringFlow",
                         "Gateway Scores based on SR V3 for txn id : {:?} and for merchant : {:?} is null, So falling back to priorityLogic",
-                        txn_detail.txnId.clone(),
+                        txn_detail.txn_id.clone(),
                         Utils::get_m_id(merchant.merchantId.clone())
                     );
 
@@ -426,7 +426,7 @@ pub async fn scoring_flow(
                 action = "scoringFlow",
                 "Ordering gateways available based on PRIORITY for merchant {:?} and for txn Id {:?}",
                 Utils::get_m_id(merchant.merchantId.clone()),
-                txn_detail.txnId.clone()
+                txn_detail.txn_id.clone()
             );
             set_decider_approach(decider_flow, GatewayDeciderApproach::PriorityLogic);
             let gateway_score =
@@ -437,7 +437,7 @@ pub async fn scoring_flow(
                 tag = "scoringFlow",
                 action = "scoringFlow",
                 "Gateway scores after considering priority for {:?} : {:?}",
-                txn_detail.txnId.clone(),
+                txn_detail.txn_id.clone(),
                 toListOfGatewayScore(gateway_score.clone())
             );
             // update_score_for_issuer(decider_flow);
@@ -449,7 +449,7 @@ pub async fn scoring_flow(
                 action = "scoringFlow",
                 "skipped priority for merchant {:?} and for txn Id {:?}",
                 Utils::get_m_id(merchant.merchantId.clone()),
-                txn_detail.txnId.clone()
+                txn_detail.txn_id.clone()
             );
         }
 
@@ -481,7 +481,7 @@ pub async fn get_cached_scores_based_on_srv3(
     gateway_scoring_data: GatewayScoringData,
 ) -> GatewayScoreMap {
     let merchant = decider_flow.get().dpMerchantAccount.clone();
-    let pmt = decider_flow.get().dpTxnCardInfo.paymentMethodType.clone();
+    let pmt = decider_flow.get().dpTxnCardInfo.payment_method_type.clone();
     let order_ref = decider_flow.get().dpOrder.clone();
     let pmt_str = pmt;
     let functional_gateways = getGws(decider_flow);
@@ -509,7 +509,7 @@ pub async fn get_cached_scores_based_on_srv3(
 
     let sr_routing_dimesions = SrRoutingDimensions {
         card_network: txn_card_info
-            .cardSwitchProvider
+            .card_switch_provider
             .as_ref()
             .map(|s| s.peek().to_string()),
         card_isin: txn_card_info.card_isin,
@@ -520,7 +520,7 @@ pub async fn get_cached_scores_based_on_srv3(
             .country
             .as_ref()
             .map(|a| a.to_string()),
-        auth_type: txn_card_info.authType.as_ref().map(|a| a.to_string()),
+        auth_type: txn_card_info.auth_type.as_ref().map(|a| a.to_string()),
     };
 
     let merchant_bucket_size = Utils::get_sr_v3_bucket_size(
@@ -1030,8 +1030,8 @@ pub async fn update_score_for_outage(decider_flow: &mut DeciderFlow<'_>) -> Gate
     logger::debug!("updated score for outage filtered {:?}", out_gws);
     logger::debug!(
         "updated score for outage info: {:?}, {:?}, {:?}",
-        txn_detail.txnObjectType,
-        txn_detail.sourceObject,
+        txn_detail.txn_object_type,
+        txn_detail.source_object,
         Utils::fetch_juspay_bank_code(&txn_card_info)
     );
 
@@ -1052,11 +1052,11 @@ pub async fn update_score_for_outage(decider_flow: &mut DeciderFlow<'_>) -> Gate
 
 // checkScheduledOutage :: ETTD.TxnDetail -> TxnCardInfo -> ETM.MerchantId -> Maybe ETJ.JuspayBankCode -> ETGO.GatewayOutage -> Bool
 // checkScheduledOutage txnDetail txnCardInfo merchantId juspayBankCode scheduledOutage =
-//   (scheduleEqualTo (==) (Just merchantId) scheduledOutage.merchantId)
-//   && (if (txnCardInfo.paymentMethod == UPI)
-//         then (scheduleEqualTo (==) txnDetail.sourceObject scheduledOutage.paymentMethod)
-//         else scheduleEqualTo (==)  (Just txnCardInfo.paymentMethod) scheduledOutage.paymentMethod)
-//   && (scheduleEqualTo (==) (Just txnCardInfo.paymentMethodType) scheduledOutage.paymentMethodType)
+//   (scheduleEqualTo (==) (Just merchantId) scheduledOutage.merchant_id)
+//   && (if (txnCardInfo.payment_method == UPI)
+//         then (scheduleEqualTo (==) txnDetail.source_object scheduledOutage.payment_method)
+//         else scheduleEqualTo (==)  (Just txnCardInfo.payment_method) scheduledOutage.payment_method)
+//   && (scheduleEqualTo (==) (Just txnCardInfo.payment_method_type) scheduledOutage.payment_method_type)
 //   && (scheduleEqualTo (\jbc outageBank -> jbc.bankCode == outageBank || jbc.bankName == outageBank ) juspayBankCode  scheduledOutage.bank)
 //   && (checkScheduledOutageMetadata txnDetail txnCardInfo scheduledOutage.metadata)
 
@@ -1089,21 +1089,21 @@ fn check_scheduled_outtage(
         |x: ETM::id::MerchantId, y: ETM::id::MerchantId| x == y,
         Some(merchant_id.clone()),
         scheduled_outage.merchantId.clone(),
-    ) && if txn_card_info.paymentMethodType == UPI {
+    ) && if txn_card_info.payment_method_type == UPI {
         schedule_equal_to(
             |x, y| x == y,
-            txn_detail.sourceObject.clone(),
+            txn_detail.source_object.clone(),
             scheduled_outage.paymentMethod.clone(),
         )
     } else {
         schedule_equal_to(
             |x, y| x == y,
-            Some(txn_card_info.paymentMethod.clone()),
+            Some(txn_card_info.payment_method.clone()),
             scheduled_outage.paymentMethod.clone(),
         )
     } && schedule_equal_to(
         |x, y| x == y,
-        Some(txn_card_info.paymentMethodType.clone()),
+        Some(txn_card_info.payment_method_type.clone()),
         scheduled_outage.paymentMethodType.clone(),
     ) && schedule_equal_to(
         |jbc, outage_bank| {
@@ -1125,15 +1125,15 @@ fn check_scheduled_outtage(
 // checkScheduledOutageMetadata :: ETTD.TxnDetail -> TxnCardInfo -> Maybe ETGO.ScheduledOutageMetadata -> Bool
 //     checkScheduledOutageMetadata _         _           Nothing                        = True
 //     checkScheduledOutageMetadata txnDetail txnCardInfo (Just scheduledOutageMetadata) =
-//       (scheduleEqualTo (==) (Just txnDetail.txnObjectType) scheduledOutageMetadata.txnObjectType)
-//       && (scheduleEqualTo (==) txnDetail.sourceObject scheduledOutageMetadata.sourceObject)
+//       (scheduleEqualTo (==) (Just txnDetail.txn_object_type) scheduledOutageMetadata.txn_object_type)
+//       && (scheduleEqualTo (==) txnDetail.source_object scheduledOutageMetadata.source_object)
 //       && (scheduleEqualTo (==) Nothing scheduledOutageMetadata.flowType)
-//       && (case txnCardInfo.paymentMethodType of
+//       && (case txnCardInfo.payment_method_type of
 //         ETP.Card -> scheduleEqualTo (==) txnCardInfo.cardType scheduledOutageMetadata.cardType
 //         ETP.UPI  -> maybe False (\paymentSource -> bool
 //                   (scheduleEqualTo (==) (Just paymentSource) scheduledOutageMetadata.app)
 //                   (scheduleEqualTo (==) (Just paymentSource) scheduledOutageMetadata.handle)
-//                   (T.any (== '@') paymentSource)) txnCardInfo.paymentSource
+//                   (T.any (== '@') paymentSource)) txnCardInfo.payment_source
 //         _    -> True)
 //     getScheduledOutage scheduledOutageValidationDuration = do
 //           currentTime <- getCurrentTimeUTC
@@ -1160,24 +1160,24 @@ fn check_scheduled_outage_metadata(
         Some(scheduled_outage_metadata) => {
             schedule_equal_to(
                 |x, y| x == y,
-                txn_detail.txnObjectType.clone(),
+                txn_detail.txn_object_type.clone(),
                 scheduled_outage_metadata.txnObjectType.clone(),
             ) && schedule_equal_to(
                 |x, y| x == y,
-                txn_detail.sourceObject.clone(),
+                txn_detail.source_object.clone(),
                 scheduled_outage_metadata.sourceObject.clone(),
             ) && schedule_equal_to(
                 |x: _, y| x == Some(y),
                 Some(None),
                 scheduled_outage_metadata.flowType.clone(),
-            ) && match txn_card_info.paymentMethodType.as_str() {
+            ) && match txn_card_info.payment_method_type.as_str() {
                 CARD => schedule_equal_to(
                     |x, y| x == y,
                     txn_card_info.card_type.clone(),
                     scheduled_outage_metadata.cardType.clone(),
                 ),
                 UPI => txn_card_info
-                    .paymentSource
+                    .payment_source
                     .as_ref()
                     .map_or(false, |payment_source| {
                         if payment_source.contains('@') {
@@ -1411,7 +1411,7 @@ pub async fn update_gateway_score_based_on_global_success_rate(
 ) {
     let gateway_score = get_gwsm(decider_flow);
     let txn_detail = decider_flow.get().dpTxnDetail.clone();
-    let merchant_id = txn_detail.merchantId.clone();
+    let merchant_id = txn_detail.merchant_id.clone();
 
     let (global_elimination_occurred, global_elimination_gateway_score_map) =
         match check_sr_global_routing_defaults(
@@ -1436,7 +1436,7 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                     tag = "scoringFlow",
                     action = "scoringFlow",
                     "Gateway Success Rate Inputs for Global SR based elimination for {:?} : {:?}",
-                    txn_detail.txnId,
+                    txn_detail.txn_id,
                     gateway_success_rate_inputs
                 );
 
@@ -1454,7 +1454,7 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                     tag = "scoringFlow",
                     action = "scoringFlow",
                     "Gateway Redis Key Map for Global SR based elimination for {:?} : {:?}",
-                    txn_detail.txnId,
+                    txn_detail.txn_id,
                     gateway_redis_key_map
                 );
 
@@ -1470,7 +1470,7 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                         tag = "scoringFlow",
                         action = "scoringFlow",
                         "Global Elimination Gateway Score for {:?} : {:?}",
-                        txn_detail.txnId,
+                        txn_detail.txn_id,
                         global_elimination_gateway_score
                     );
                     match global_elimination_gateway_score {
@@ -1488,7 +1488,7 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                             logger::info!(
                                 action = "global_gateway_score",
                                 "Global Elimination Gateway Score for {:?} : {:?}",
-                                txn_detail.txnId,
+                                txn_detail.txn_id,
                                 new_gsri
                             );
                             upd_gateway_success_rate_inputs.push(new_gsri);
@@ -1556,7 +1556,7 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                     let new_gateway_score = filtered_gateway_success_rate_inputs
                         .iter()
                         .fold(gateway_score.clone(), |acc, x| {
-                            penalize_gsr(txn_detail.txnId.clone(), acc, x.clone())
+                            penalize_gsr(txn_detail.txn_id.clone(), acc, x.clone())
                         });
                     set_gwsm(decider_flow, new_gateway_score.clone());
                     let old_sr_metric_log_data = decider_flow.writer.srMetricLogData.clone();
@@ -1575,7 +1575,7 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                     tag="scoringFlow",
                     action = "scoringFlow",
                     "No gateways are eligible for penalties & fallback {:?} based on global score",
-                    txn_detail.txnId
+                    txn_detail.txn_id
                 );
                     let old_sr_metric_log_data = decider_flow.writer.srMetricLogData.clone();
                     set_metric_log_data(
@@ -1621,7 +1621,7 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                         action = "scoringFlow",
                         "Global scores not available for {:?} {:?}",
                         merchant_id,
-                        txn_detail.txnId
+                        txn_detail.txn_id
                     );
                 }
 
@@ -1629,7 +1629,7 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                     tag = "scoringFlow",
                     action = "scoringFlow",
                     "Gateway scores after considering global SR based elimination for {:?} : {:?}",
-                    txn_detail.txnId,
+                    txn_detail.txn_id,
                     global_gateway_scores
                 );
 
@@ -1650,7 +1650,7 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                     action = "scoringFlow",
                     "Global SR routing not enabled for merchant {:?} txn {:?}",
                     merchant_id,
-                    txn_detail.txnId
+                    txn_detail.txn_id
                 );
                 (false, None)
             }
@@ -1927,7 +1927,7 @@ async fn get_elimination_v2_threshold(
             m_pmt.unwrap_or_else(|| "Nothing".to_string()),
             m_pm.unwrap_or_else(|| "Nothing".to_string()),
             m_txn_object_type.unwrap_or_else(|| "Nothing".to_string()),
-            txn_detail.sourceObject.as_ref().unwrap_or(&"Nothing".to_string())
+            txn_detail.source_object.as_ref().unwrap_or(&"Nothing".to_string())
         );
 
         logger::info!(
@@ -1945,10 +1945,10 @@ async fn get_elimination_v2_threshold(
             tag="scoringFlow",
             action = "scoringFlow",
             "Elimination V2 values not found: Threshold: PMT: {:?} PM: {:?} TxnObjectType: {:?} SourceObject: {:?}",
-            txn_card_info.paymentMethodType,
-            txn_card_info.paymentMethod,
-            txn_detail.txnObjectType,
-            txn_detail.sourceObject.as_ref().unwrap_or(&"Nothing".to_string())
+            txn_card_info.payment_method_type,
+            txn_card_info.payment_method,
+            txn_detail.txn_object_type,
+            txn_detail.source_object.as_ref().unwrap_or(&"Nothing".to_string())
         );
         // .await;
 
@@ -1972,19 +1972,19 @@ pub async fn get_sr1_and_sr2_and_n(
 )> {
     if let Some(gateway_success_rate_merchant_input) = m_gateway_success_rate_merchant_input {
         if let Some(inputs) = gateway_success_rate_merchant_input.eliminationV2SuccessRateInputs {
-            let pmt = &txn_card_info.paymentMethodType;
-            let source_obj = if txn_card_info.paymentMethod == UPI {
-                txn_detail.sourceObject.clone()
+            let pmt = &txn_card_info.payment_method_type;
+            let source_obj = if txn_card_info.payment_method == UPI {
+                txn_detail.source_object.clone()
             } else {
-                Some(txn_card_info.paymentMethod.clone())
+                Some(txn_card_info.payment_method.clone())
             };
-            let pm = if txn_card_info.paymentMethodType == UPI {
+            let pm = if txn_card_info.payment_method_type == UPI {
                 source_obj.clone()
             } else {
-                Some(txn_card_info.paymentMethod.clone())
+                Some(txn_card_info.payment_method.clone())
             };
             let txn_obj_type = txn_detail
-                .txnObjectType
+                .txn_object_type
                 .map(|t| t.to_string())
                 .unwrap_or_default();
 
@@ -2112,9 +2112,9 @@ pub fn filter_inputs_upto(
 //             sr1,
 //             input.success_rate,
 //             n,
-//             Some(input.payment_method_type),
-//             input.payment_method.clone(),
-//             input.txn_object_type.clone(),
+//             Some(input.paymentMethodType),
+//             input.paymentMethod.clone(),
+//             input.txnObjectType.clone(),
 //             ConfigSource::Redis,
 //         )),
 //         _ => None,
@@ -2251,7 +2251,9 @@ fn filter_configs_upto_payment_method_type(
     configs
         .iter()
         .find(|x| {
-            x.paymentMethodType == *pmt && x.paymentMethod.is_none() && x.txnObjectType.is_none()
+            x.paymentMethodType == *pmt
+                && x.paymentMethod.is_none()
+                && x.txnObjectType.is_none()
         })
         .cloned()
 }
@@ -2376,7 +2378,7 @@ pub async fn update_gateway_score_based_on_success_rate(
 
         let is_reset_score_enabled_for_merchant = isFeatureEnabled(
             C::GatewayResetScoreEnabled.get_key(),
-            Utils::get_m_id(txn_detail.merchantId.clone()),
+            Utils::get_m_id(txn_detail.merchant_id.clone()),
             "kv_redis".to_string(),
         )
         .await;
@@ -2390,7 +2392,7 @@ pub async fn update_gateway_score_based_on_success_rate(
         let payment_method_type = if Utils::is_card_transaction(&txn_card_info) {
             CARD
         } else {
-            txn_card_info.paymentMethodType.as_str()
+            txn_card_info.payment_method_type.as_str()
         };
 
         let enabled_payment_method_types = gateway_success_rate_merchant_input
@@ -2407,7 +2409,7 @@ pub async fn update_gateway_score_based_on_success_rate(
                 tag="scoringFlow",
                 action = "scoringFlow",
                 "Transaction {:?} with payment method types {:?} not enabled by {:?} for SR based routing",
-                txn_detail.txnId,
+                txn_detail.txn_id,
                 payment_method_type,
                 merchant_acc.merchantId
             );
@@ -2428,7 +2430,7 @@ pub async fn update_gateway_score_based_on_success_rate(
                 tag = "scoringFlow",
                 action = "scoringFlow",
                 "Gateway scores input for merchant wise SR based evaluation for {:?} : {:?}",
-                txn_detail.txnId,
+                txn_detail.txn_id,
                 gateway_score_global_sr,
             );
 
@@ -2509,7 +2511,7 @@ pub async fn update_gateway_score_based_on_success_rate(
                     let new_sm = filtered_gateway_success_rate_inputs.iter().fold(
                         gateway_score_global_sr.clone(),
                         |acc, input| {
-                            update_score_with_log(txn_detail.txnId.clone(), acc, input.clone())
+                            update_score_with_log(txn_detail.txn_id.clone(), acc, input.clone())
                         },
                     );
 
@@ -2550,7 +2552,7 @@ pub async fn update_gateway_score_based_on_success_rate(
                         tag = "scoringFlow",
                         action = "scoringFlow",
                         "No gateways are eligible for penalties & fallback : {:?}",
-                        txn_detail.txnId
+                        txn_detail.txn_id
                     );
                 }
 
@@ -2652,7 +2654,7 @@ pub async fn update_gateway_score_based_on_success_rate(
                     {
                         let optimization_during_downtime_enabled = isFeatureEnabled(
                             C::EnableOptimizationDuringDowntime.get_key(),
-                            Utils::get_m_id(txn_detail.merchantId.clone()),
+                            Utils::get_m_id(txn_detail.merchant_id.clone()),
                             "kv_redis".to_string(),
                         )
                         .await;
@@ -2663,7 +2665,7 @@ pub async fn update_gateway_score_based_on_success_rate(
                                     tag="scoringFlow",
                                     action = "scoringFlow",
                                     "Overriding priority with SR Scores during downtime for {:?} : {:?}",
-                                    txn_detail.txnId,
+                                    txn_detail.txn_id,
                                     new_gateway_score,
                                 );
 
@@ -2671,7 +2673,7 @@ pub async fn update_gateway_score_based_on_success_rate(
                             } else {
                                 logger::info!(
                                     "Overriding priority with PL during downtime for {:?} : {:?}",
-                                    txn_detail.txnId,
+                                    txn_detail.txn_id,
                                     initial_gw_scores,
                                 );
 
@@ -2682,7 +2684,7 @@ pub async fn update_gateway_score_based_on_success_rate(
                                 tag="scoringFlow",
                                 action = "scoringFlow",
                                 "Overriding priority with SR Scores during downtime is not enabled for {:?} : {:?}",
-                                txn_detail.txnId,
+                                txn_detail.txn_id,
                                 new_gateway_score,
                             );
 
@@ -2739,7 +2741,7 @@ pub async fn update_gateway_score_based_on_success_rate(
         tag = "GW_Scoring",
         action = "GW_Scoring",
         "Gateway scores after considering SR based elimination for {:?} : {:?}",
-        txn_detail.txnId,
+        txn_detail.txn_id,
         toListOfGatewayScore(gateway_score_sr_based),
     );
 
@@ -2801,7 +2803,7 @@ pub async fn update_current_score(
         tag = "scoringFlow",
         action = "scoringFlow",
         "Current score for {:?} {:?} : {:?} with elimination level {:?} threshold {:?}",
-        txn_detail.txnId,
+        txn_detail.txn_id,
         i.gateway,
         m_score.as_ref().map(|score| score.score),
         i.eliminationLevel,
@@ -2856,7 +2858,7 @@ pub async fn evaluate_reset_gateway_score(
         tag = "evaluateResetGatewayScore",
         action = "evaluateResetGatewayScore",
         "Evaluating Reset Logic for Gateways for {:?}",
-        txnDetail.txnId
+        txnDetail.txn_id
     );
 
     let current_time: i64 = SystemTime::now()
@@ -2876,7 +2878,7 @@ pub async fn evaluate_reset_gateway_score(
                     action = "evaluateResetGatewayScore",
                     "Adding gateway {} to reset Request for {:?} for level {:?}",
                     it.gateway,
-                    txnDetail.txnId,
+                    txnDetail.txn_id,
                     it.eliminationLevel
                 );
                 acc.push(it.gateway.clone());
@@ -2906,8 +2908,8 @@ pub async fn trigger_reset_gateway_score(
             tag = "scoringFlow",
             action = "scoringFlow",
             "Reset Gateway Scores is enabled for {:?} and merchantId {:?}",
-            txn_detail.txnId,
-            Utils::get_m_id(txn_detail.clone().merchantId)
+            txn_detail.txn_id,
+            Utils::get_m_id(txn_detail.clone().merchant_id)
         );
         let mut reset_gateway_sr_list = Vec::new();
         for it in &reset_gateway_list {
@@ -2916,7 +2918,7 @@ pub async fn trigger_reset_gateway_score(
                 action = "scoringFlow",
                 "Adding gateway {:?} to resetAPI Request for {:?}",
                 it,
-                txn_detail.txnId
+                txn_detail.txn_id
             );
 
             let m_sr_input = get_gateway_success_rate_input(it, &gateway_success_rate_inputs);
@@ -2959,7 +2961,7 @@ pub async fn trigger_reset_gateway_score(
                     action = "scoringFlow",
                     "No SR Input for {:?} and {:?}",
                     it,
-                    txn_detail.txnId
+                    txn_detail.txn_id
                 );
             }
         }
@@ -2984,7 +2986,7 @@ pub async fn trigger_reset_gateway_score(
             tag = "scoringFlow",
             action = "scoringFlow",
             "Reset Gateway List for {:?} is {:?}",
-            txn_detail.txnId,
+            txn_detail.txn_id,
             reset_gateway_sr_list
         );
     } else {
@@ -2992,8 +2994,8 @@ pub async fn trigger_reset_gateway_score(
             tag = "scoringFlow",
             action = "scoringFlow",
             "Reset Gateway Scores is not enabled for {:?} and merchantId {:?}",
-            txn_detail.txnId,
-            Utils::get_m_id(txn_detail.clone().merchantId)
+            txn_detail.txn_id,
+            Utils::get_m_id(txn_detail.clone().merchant_id)
         );
     }
 }
@@ -3091,7 +3093,7 @@ pub async fn reset_gateway_score(
                             tag = "scoringFlow",
                             action = "scoringFlow",
                             "Resetting Gateway Score for {:?} with new score {:?}",
-                            txn_detail.txnId,
+                            txn_detail.txn_id,
                             reset_cached_gateway_score
                         );
                     } else {
@@ -3099,7 +3101,7 @@ pub async fn reset_gateway_score(
                             tag = "scoringFlow",
                             action = "scoringFlow",
                             "Gateway Score is not eligible for reset for {:?}",
-                            txn_detail.txnId
+                            txn_detail.txn_id
                         );
                     }
                 }
@@ -3108,7 +3110,7 @@ pub async fn reset_gateway_score(
                         tag = "scoringFlow",
                         action = "scoringFlow",
                         "Failed to reset Gateway Score for {:?} with error: {:?}",
-                        txn_detail.txnId,
+                        txn_detail.txn_id,
                         e
                     );
                 }
@@ -3119,8 +3121,8 @@ pub async fn reset_gateway_score(
                 tag = "scoringFlow",
                 action = "scoringFlow",
                 "Reset Gateway Score is not enabled for {:?} and merchantId {:?}",
-                txn_detail.txnId,
-                Utils::get_m_id(txn_detail.clone().merchantId)
+                txn_detail.txn_id,
+                Utils::get_m_id(txn_detail.clone().merchant_id)
             );
         }
     }

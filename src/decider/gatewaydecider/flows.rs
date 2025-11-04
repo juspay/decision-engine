@@ -129,7 +129,7 @@ pub async fn decider_full_payload_hs_function(
     dreq: T::DomainDeciderRequest,
 ) -> Result<(T::DecidedGateway, Vec<(String, Vec<String>)>), T::ErrorResponse> {
     let merchant_prefs = match ETM::merchant_iframe_preferences::getMerchantIPrefsByMId(
-        dreq.txnDetail.merchantId.0.clone(),
+        dreq.txn_detail.merchant_id.0.clone(),
     )
     .await
     {
@@ -139,7 +139,7 @@ pub async fn decider_full_payload_hs_function(
                 tag = "getMerchantPrefsByMId",
                 action = "getMerchantPrefsByMId",
                 "Merchant iframe preferences not found for id: {:?}",
-                dreq.txnDetail.merchantId
+                dreq.txn_detail.merchant_id
             );
             Err(T::ErrorResponse {
                 status: "400".to_string(),
@@ -160,15 +160,15 @@ pub async fn decider_full_payload_hs_function(
             })?
         }
     };
-    let enforced_gateway_filter = handle_enforced_gateway(dreq.enforceGatewayList);
-    let resolve_bin = match Utils::fetch_extended_card_bin(&dreq.txnCardInfo.clone()) {
+    let enforced_gateway_filter = handle_enforced_gateway(dreq.enforce_gateway_list);
+    let resolve_bin = match Utils::fetch_extended_card_bin(&dreq.txn_card_info.clone()) {
         Some(card_bin) => Some(card_bin),
-        None => match dreq.txnCardInfo.card_isin {
+        None => match dreq.txn_card_info.card_isin {
             Some(c_isin) => {
                 let res_bin = Utils::get_card_bin_from_token_bin(6, c_isin.as_str()).await;
                 Some(res_bin)
             }
-            None => dreq.txnCardInfo.card_isin.clone(),
+            None => dreq.txn_card_info.card_isin.clone(),
         },
     };
     logger::debug!(
@@ -177,28 +177,28 @@ pub async fn decider_full_payload_hs_function(
         "{:?}",
         resolve_bin.clone()
     );
-    let m_vault_provider = Utils::get_vault_provider(dreq.cardToken.as_deref());
+    let m_vault_provider = Utils::get_vault_provider(dreq.card_token.as_deref());
     let update_txn_card_info = TxnCardInfo {
         card_isin: resolve_bin,
-        ..dreq.txnCardInfo
+        ..dreq.txn_card_info
     };
 
     let decider_params = T::DeciderParams {
-        dpMerchantAccount: dreq.merchantAccount,
-        dpOrder: dreq.orderReference,
-        dpTxnDetail: dreq.txnDetail,
-        dpTxnOfferDetails: dreq.txnOfferDetails,
+        dpMerchantAccount: dreq.merchant_account,
+        dpOrder: dreq.order_reference,
+        dpTxnDetail: dreq.txn_detail,
+        dpTxnOfferDetails: dreq.txn_offer_details,
         dpTxnCardInfo: update_txn_card_info,
         dpTxnOfferInfo: None,
         dpVaultProvider: m_vault_provider,
-        dpTxnType: dreq.txnType,
+        dpTxnType: dreq.txn_type,
         dpMerchantPrefs: merchant_prefs,
-        dpOrderMetadata: dreq.orderMetadata,
+        dpOrderMetadata: dreq.order_metadata,
         dpEnforceGatewayList: enforced_gateway_filter,
-        dpPriorityLogicOutput: dreq.priorityLogicOutput,
-        dpPriorityLogicScript: dreq.priorityLogicScript,
-        dpEDCCApplied: dreq.isEdccApplied,
-        dpShouldConsumeResult: dreq.shouldConsumeResult,
+        dpPriorityLogicOutput: dreq.priority_logic_output,
+        dpPriorityLogicScript: dreq.priority_logic_script,
+        dpEDCCApplied: dreq.is_edcc_applied,
+        dpShouldConsumeResult: dreq.should_consume_result,
     };
     run_decider_flow(decider_params, true).await
 }
@@ -255,7 +255,7 @@ fn handle_enforced_gateway(gateway_list: Option<Vec<String>>) -> Option<Vec<Stri
 //         txnCardInfo: update_txn_card_info,
 //         cardToken: None,
 //         vaultProvider: m_vault_provider,
-//         txnType: dreq.txnType,
+//         txnType: dreq.txn_type,
 //         merchantPrefs: merchant_prefs,
 //         orderMetadata: dreq.orderMetadata,
 //         enforceGatewayList: enforced_gateway_filter,
@@ -272,7 +272,7 @@ fn handle_enforced_gateway(gateway_list: Option<Vec<String>>) -> Option<Vec<Stri
 
 //     let txnCreationTime = deciderParams
 //         .dpTxnDetail
-//         .dateCreated
+//         .date_created
 //         .clone()
 //         .to_string()
 //         .replace(" ", "T")
@@ -316,7 +316,7 @@ pub async fn run_decider_flow(
 ) -> Result<(T::DecidedGateway, Vec<(String, Vec<String>)>), T::ErrorResponse> {
     let txnCreationTime = deciderParams
         .dpTxnDetail
-        .dateCreated
+        .date_created
         .clone()
         .to_string()
         .replace(" ", "T")
@@ -346,14 +346,14 @@ pub async fn run_decider_flow(
         .dpTxnDetail
         .gateway
         .clone()
-        .or(deciderParams.dpOrder.preferredGateway.clone());
+        .or(deciderParams.dpOrder.preferred_gateway.clone());
     let gatewayMgaIdMap = get_gateway_to_mga_id_map_f(&allMgas, &functionalGateways);
 
     logger::warn!(
         action = "PreferredGateway",
         tag = "PreferredGateway",
         "Preferred gateway provided by merchant for {:?} = {:?}",
-        &deciderParams.dpTxnDetail.txnId,
+        &deciderParams.dpTxnDetail.txn_id,
         preferredGateway
             .clone()
             .map_or("None".to_string(), |pgw| pgw.to_string())
@@ -411,7 +411,7 @@ pub async fn run_decider_flow(
                     "Preferred gateway {:?} functional/valid for merchant {:?} in txn {:?}",
                     pgw,
                     &deciderParams.dpMerchantAccount.merchantId,
-                    deciderParams.dpTxnDetail.txnId
+                    deciderParams.dpTxnDetail.txn_id
                 );
                 Utils::log_gateway_decider_approach(
                     &mut decider_flow,
@@ -459,7 +459,7 @@ pub async fn run_decider_flow(
                 tag = "gatewayPriorityList",
                 action = "gatewayPriorityList",
                 "Gateway priority for merchant for {:?} = {:?}",
-                &deciderParams.dpTxnDetail.txnId,
+                &deciderParams.dpTxnDetail.txn_id,
                 gatewayPriorityList
             );
 
@@ -468,7 +468,7 @@ pub async fn run_decider_flow(
                     tag = "gatewayPriorityList",
                     action = "Enforcing Priority Logic",
                     "Enforcing Priority Logic for {:?}",
-                    deciderParams.dpTxnDetail.txnId
+                    deciderParams.dpTxnDetail.txn_id
                 );
                 let (res, priorityLogicOutput) = filter_functional_gateways_with_enforcement(
                     &mut decider_flow,
@@ -482,7 +482,7 @@ pub async fn run_decider_flow(
                     tag = "gatewayPriorityList",
                     action = "gatewayPriorityList",
                     "Functional gateways after filtering for Enforcement Logic for {:?} : {:?}",
-                    &deciderParams.dpTxnDetail.txnId,
+                    &deciderParams.dpTxnDetail.txn_id,
                     res
                 );
                 decider_flow
@@ -511,7 +511,7 @@ pub async fn run_decider_flow(
                 action = "GW_Filtering",
                 "Functional gateways after {:?} for {:?} : {:?}",
                 "FilterByPriorityLogic",
-                &deciderParams.dpTxnDetail.txnId,
+                &deciderParams.dpTxnDetail.txn_id,
                 uniqueFunctionalGateways
             );
 
@@ -619,7 +619,7 @@ pub async fn run_decider_flow(
                         action = "Decided Gateway",
                         tag = "Decided Gateway",
                         "Gateway decided for {:?} = {:?}",
-                        &deciderParams.dpTxnDetail.txnId,
+                        &deciderParams.dpTxnDetail.txn_id,
                         decidedGateway
                     );
 
@@ -680,7 +680,7 @@ pub async fn run_decider_flow(
 
     let key = [
         C::GATEWAY_SCORING_DATA,
-        &deciderParams.dpTxnDetail.txnUuid.clone(),
+        &deciderParams.dpTxnDetail.txn_uuid.clone(),
     ]
     .concat();
     let updated_gateway_scoring_data = T::GatewayScoringData {
@@ -969,7 +969,7 @@ pub async fn getFailureReasonWithFilter(
     let preferred_gateway_m = txn_detail
         .gateway
         .clone()
-        .or_else(|| order_reference.preferredGateway.clone());
+        .or_else(|| order_reference.preferred_gateway.clone());
     let filter_list = filterList(&debug_filter_list);
     let configured_gateways_m = filter_list
         .iter()
@@ -1013,7 +1013,7 @@ pub async fn getFailureReasonWithFilter(
             format!(
                 "No functional gateways after filtering for authType {}",
                 txn_card_info
-                    .authType
+                    .auth_type
                     .as_ref()
                     .map(|auth_type| auth_type.clone().to_string())
                     .unwrap_or_default()
@@ -1034,8 +1034,8 @@ pub async fn getFailureReasonWithFilter(
                     .map(|emi| emi.to_lowercase())
                     .unwrap_or_else(|| "emi".to_string())
             );
-            let emi_bank = format!("{} ", txn_detail.emiBank.clone().unwrap_or_default());
-            if Utils::is_card_transaction(txn_card_info) && txn_detail.isEmi != Some(true) {
+            let emi_bank = format!("{} ", txn_detail.emi_bank.clone().unwrap_or_default());
+            if Utils::is_card_transaction(txn_card_info) && txn_detail.is_emi != Some(true) {
                 "Gateways configured supports only emi transaction.".to_string()
             } else if Utils::is_card_transaction(txn_card_info) {
                 let is_bin_eligible = Utils::check_if_bin_is_eligible_for_emi(
@@ -1065,7 +1065,7 @@ pub async fn getFailureReasonWithFilter(
         "filterFunctionalGatewaysForPaymentMethod" => {
             format!(
                 "No functional gateways supporting {} payment method.",
-                txn_card_info.paymentMethod
+                txn_card_info.payment_method
             )
         }
         "filterFunctionalGatewaysForTokenProvider" => {
@@ -1090,14 +1090,14 @@ pub async fn getFailureReasonWithFilter(
             }
         }
         "filterFunctionalGatewaysForConsumerFinance" => {
-            if txn_card_info.paymentMethodType == CONSUMER_FINANCE {
+            if txn_card_info.payment_method_type == CONSUMER_FINANCE {
                 "No functional gateways supporting Consumer Finance transaction.".to_string()
             } else {
                 "Gateways configured supports only Consumer Finance transaction.".to_string()
             }
         }
         "filterFunctionalGatewaysForUpi" => {
-            if txn_card_info.paymentMethodType == UPI {
+            if txn_card_info.payment_method_type == UPI {
                 "No functional gateways supporting UPI transaction.".to_string()
             } else if !is_google_pay_txn(txn_card_info.clone()) {
                 "Gateways configured supports only UPI transaction.".to_string()
@@ -1115,12 +1115,12 @@ pub async fn getFailureReasonWithFilter(
         "filterFunctionalGatewaysForTxnDetailType" => {
             format!(
                 "No functional gateways supporting {:?}transaction.",
-                txn_detail.txnType
+                txn_detail.txn_type
             )
         }
         "filterFunctionalGatewaysForReward" => {
             if txn_card_info.card_type == Some(CardType::Reward)
-                || txn_card_info.paymentMethodType == REWARD
+                || txn_card_info.payment_method_type == REWARD
             {
                 "No functional gateways supporting Reward transaction.".to_string()
             } else {
@@ -1128,7 +1128,7 @@ pub async fn getFailureReasonWithFilter(
             }
         }
         "filterFunctionalGatewaysForCash" => {
-            if txn_card_info.paymentMethodType == CASH {
+            if txn_card_info.payment_method_type == CASH {
                 "No functional gateways supporting CASH transaction.".to_string()
             } else {
                 "Gateways configured supports only CASH transaction.".to_string()
@@ -1146,7 +1146,7 @@ pub async fn getFailureReasonWithFilter(
                     .as_ref()
                     .and_then(|meta| meta.isCvvLessTxn)
                     .unwrap_or(false)
-                    && txn_card_info.authType == Some(AuthType::Moto)
+                    && txn_card_info.auth_type == Some(AuthType::Moto)
                 {
                     format!(
                         "No functional gateways supporting cvv less {}repeat moto transaction.",
