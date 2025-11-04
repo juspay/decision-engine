@@ -41,24 +41,24 @@ pub struct TxnOfferDetail {
     #[serde(rename = "id")]
     pub id: TxnOfferDetailId,
     #[serde(rename = "txnDetailId")]
-    pub txnDetailId: TxnDetailId,
+    pub txn_detail_id: TxnDetailId,
     #[serde(rename = "offerId")]
-    pub offerId: String,
+    pub offer_id: String,
     #[serde(rename = "status")]
     pub status: TxnOfferDetailStatus,
     #[serde(rename = "dateCreated")]
     #[serde(with = "time::serde::iso8601::option")]
-    pub dateCreated: Option<OffsetDateTime>,
+    pub date_created: Option<OffsetDateTime>,
     #[serde(rename = "lastUpdated")]
     #[serde(with = "time::serde::iso8601::option")]
-    pub lastUpdated: Option<OffsetDateTime>,
+    pub last_updated: Option<OffsetDateTime>,
     #[serde(rename = "gatewayInfo")]
-    pub gatewayInfo: Option<String>,
+    pub gateway_info: Option<String>,
     #[serde(rename = "internalMetadata")]
-    pub internalMetadata: Option<String>,
+    pub internal_metadata: Option<String>,
     #[serde(rename = "partitionKey")]
     #[serde(deserialize_with = "deserialize_optional_primitive_datetime")]
-    pub partitionKey: Option<PrimitiveDateTime>,
+    pub partition_key: Option<PrimitiveDateTime>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

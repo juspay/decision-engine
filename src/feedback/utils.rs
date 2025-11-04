@@ -163,35 +163,35 @@ pub fn getTxnDetailFromApiPayload(
 ) -> Result<ETTD::TxnDetail, crate::error::ApiError> {
     let txn_detail = ETTD::TxnDetail {
         id: ETTD::to_txn_detail_id(1),
-        dateCreated: gateway_scoring_data.dateCreated,
-        orderId: ETO::id::to_order_id(apiPayload.paymentId.clone()),
+        date_created: gateway_scoring_data.dateCreated,
+        order_id: ETO::id::to_order_id(apiPayload.paymentId.clone()),
         status: apiPayload.status.clone(),
-        txnId: ETId::to_transaction_id(apiPayload.paymentId.clone()),
-        txnType: Some("NOT_DEFINED".to_string()),
-        addToLocker: Some(false),
-        merchantId: ETM::id::to_merchant_id(apiPayload.merchantId.clone()),
+        txn_id: ETId::to_transaction_id(apiPayload.paymentId.clone()),
+        txn_type: Some("NOT_DEFINED".to_string()),
+        add_to_locker: Some(false),
+        merchant_id: ETM::id::to_merchant_id(apiPayload.merchantId.clone()),
         gateway: Some(apiPayload.gateway),
-        expressCheckout: Some(false),
-        isEmi: Some(false),
-        emiBank: None,
-        emiTenure: None,
-        txnUuid: apiPayload.paymentId.clone(),
-        merchantGatewayAccountId: None,
-        txnAmount: Some(ETMo::Money::from_double(0.0)),
-        txnObjectType: Some(
+        express_checkout: Some(false),
+        is_emi: Some(false),
+        emi_bank: None,
+        emi_tenure: None,
+        txn_uuid: apiPayload.paymentId.clone(),
+        merchant_gateway_account_id: None,
+        txn_amount: Some(ETMo::Money::from_double(0.0)),
+        txn_object_type: Some(
             ETTD::TxnObjectType::from_text(gateway_scoring_data.orderType.clone())
                 .unwrap_or_else(|| ETTD::TxnObjectType::OrderPayment),
         ),
-        sourceObject: Some(gateway_scoring_data.paymentMethod.clone()),
-        sourceObjectId: None,
+        source_object: Some(gateway_scoring_data.paymentMethod.clone()),
+        source_object_id: None,
         currency: gateway_scoring_data
             .currency
             .clone()
             .ok_or(crate::error::ApiError::MissingRequiredField("currency"))?,
         country: gateway_scoring_data.country.clone(),
-        surchargeAmount: None,
-        taxAmount: None,
-        internalMetadata: Some(Secret::new(
+        surcharge_amount: None,
+        tax_amount: None,
+        internal_metadata: Some(Secret::new(
             serde_json::to_string(&InternalMetadata {
                 internal_tracking_info: InternalTrackingInfo {
                     routing_approach: gateway_scoring_data.routingApproach.unwrap_or_default(),
@@ -199,12 +199,12 @@ pub fn getTxnDetailFromApiPayload(
             })
             .unwrap(),
         )),
-        netAmount: Some(ETMo::Money::from_double(0.0)),
+        net_amount: Some(ETMo::Money::from_double(0.0)),
         metadata: None,
-        offerDeductionAmount: None,
-        internalTrackingInfo: None,
-        partitionKey: None,
-        txnAmountBreakup: None,
+        offer_deduction_amount: None,
+        internal_tracking_info: None,
+        partition_key: None,
+        txn_amount_breakup: None,
     };
     Ok(txn_detail)
 }
@@ -216,21 +216,21 @@ pub fn getTxnCardInfoFromApiPayload(
     let txnCardInfo = ETCa::txn_card_info::TxnCardInfo {
         id: ETCa::txn_card_info::to_txn_card_info_pid(1),
         card_isin: None,
-        cardIssuerBankName: None,
-        cardSwitchProvider: None,
+        card_issuer_bank_name: None,
+        card_switch_provider: None,
         card_type: None,
-        nameOnCard: None,
-        dateCreated: gateway_scoring_data.dateCreated,
-        paymentMethodType: gateway_scoring_data.paymentMethodType.clone(),
-        paymentMethod: gateway_scoring_data.paymentMethod.clone(),
-        paymentSource: gateway_scoring_data.paymentSource.clone(),
-        authType: gateway_scoring_data
+        name_on_card: None,
+        date_created: gateway_scoring_data.dateCreated,
+        payment_method_type: gateway_scoring_data.paymentMethodType.clone(),
+        payment_method: gateway_scoring_data.paymentMethod.clone(),
+        payment_source: gateway_scoring_data.paymentSource.clone(),
+        auth_type: gateway_scoring_data
             .authType
             .clone()
             .and_then(|auth_type_text| {
                 ETCa::txn_card_info::text_to_auth_type(&auth_type_text).ok()
             }),
-        partitionKey: None,
+        partition_key: None,
     };
     txnCardInfo
 }
@@ -687,7 +687,7 @@ pub fn logGatewayScoreType(
     };
 
     let txn_creation_time = txn_detail
-        .dateCreated
+        .date_created
         .to_string()
         .replace(" ", "T")
         .replace(" UTC", "Z");
@@ -853,7 +853,7 @@ pub fn mandateRegisterTxnObjectTypes() -> Vec<TxnObjectType> {
 }
 
 pub fn isPennyMandateRegTxn(txn_detail: TxnDetail) -> bool {
-    if let Some(txn_object_type) = txn_detail.clone().txnObjectType {
+    if let Some(txn_object_type) = txn_detail.clone().txn_object_type {
         if isMandateRegTxn(txn_object_type) {
             isPennyTxnType(txn_detail.clone())
         } else {
@@ -891,7 +891,7 @@ pub fn isMandateRegTxn(txn_object_type: TxnObjectType) -> bool {
 
 // Original Haskell function: isPennyTxnType
 pub fn isPennyTxnType(txn_detail: TxnDetail) -> bool {
-    let mandate = getTxnTypeFromInternalMetadata(txn_detail.internalMetadata);
+    let mandate = getTxnTypeFromInternalMetadata(txn_detail.internal_metadata);
     match mandate {
         MandateTxnType::Register => true,
         _ => false,
@@ -917,7 +917,7 @@ pub fn isRecurringTxn(txn_object_type: Option<TxnObjectType>) -> bool {
 
 // Original Haskell function: getTimeFromTxnCreatedInMills
 pub fn getTimeFromTxnCreatedInMills(txn: TxnDetail) -> u128 {
-    let dateCreated = txn.dateCreated.unix_timestamp_nanos() as u128 / 1_000_000;
+    let dateCreated = txn.date_created.unix_timestamp_nanos() as u128 / 1_000_000;
     let currentTime = EU::get_current_date_in_millis();
     currentTime.saturating_sub(dateCreated)
 }

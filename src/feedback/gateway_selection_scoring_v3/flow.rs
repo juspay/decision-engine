@@ -85,7 +85,7 @@ pub async fn updateSrV3Score(
             .await;
             let key_for_gateway_selection =
                 unified_sr_v3_key.clone().unwrap_or_else(|| "".to_string());
-            let payment_method_type = txn_card_info.paymentMethodType.clone();
+            let payment_method_type = txn_card_info.payment_method_type.clone();
             let key_for_gateway_selection_queue =
                 format!("{}_{}queue", key_for_gateway_selection, "}");
             let key_for_gateway_selection_score =
@@ -193,7 +193,7 @@ pub async fn updateScoreAndQueue(
     };
     // let is_debug_mode_enabled = isFeatureEnabled(
     //     DC::enableDebugModeOnSrV3.get_key(),
-    //     MID::merchant_id_to_text(txn_detail.merchantId),
+    //     MID::merchant_id_to_text(txn_detail.merchant_id),
     //     C::kvRedis(),
     // ).await;
     // if is_debug_mode_enabled {
@@ -202,7 +202,7 @@ pub async fn updateScoreAndQueue(
     //         &format!(
     //             "{}{}",
     //             C::pendingTxnsKeyPrefix,
-    //             txn_detail.merchantId.clone()
+    //             txn_detail.merchant_id.clone()
     //         ),
     //         &[txn_detail.txnUuid.clone()],
     //     );
@@ -214,7 +214,7 @@ pub async fn updateScoreAndQueue(
     //         .delete_key(&[format!(
     //             "{}{}",
     //             C::pendingTxnsKeyPrefix,
-    //             txn_detail.merchantId.clone()
+    //             txn_detail.merchant_id.clone()
     //         )])
     //         .await
     //     {
@@ -232,7 +232,7 @@ pub async fn updateScoreAndQueue(
     // }
     let current_ist_time = getCurrentIstDateWithFormat("YYYY-MM-DD HH:mm:SS.sss".to_string());
     let date_created = dateInIST(
-        txn_detail.clone().dateCreated.to_string(),
+        txn_detail.clone().date_created.to_string(),
         "YYYY-MM-DD HH:mm:SS.sss".to_string(),
     )
     .unwrap_or_default();
@@ -286,26 +286,26 @@ pub async fn updateScoreAndQueue(
 //Original Haskell function: getSrV3MerchantBucketSize
 pub async fn getSrV3MerchantBucketSize(txn_detail: TxnDetail, txn_card_info: TxnCardInfo) -> i32 {
     let merchant_sr_v3_input_config: Option<SrV3InputConfig> = findByNameFromRedis(
-        C::SrV3InputConfig(MID::merchant_id_to_text(txn_detail.merchantId)).get_key(),
+        C::SrV3InputConfig(MID::merchant_id_to_text(txn_detail.merchant_id)).get_key(),
     )
     .await;
-    let pmt = txn_card_info.paymentMethodType;
+    let pmt = txn_card_info.payment_method_type;
     let pm = GU::get_payment_method(
         (&pmt).to_string(),
-        txn_card_info.paymentMethod,
-        txn_detail.sourceObject.unwrap_or_default(),
+        txn_card_info.payment_method,
+        txn_detail.source_object.unwrap_or_default(),
     );
     // Extract the new parameters from txn_card_info
 
     let sr_routing_dimesions = SrRoutingDimensions {
         card_network: txn_card_info
-            .cardSwitchProvider
+            .card_switch_provider
             .as_ref()
             .map(|s| s.peek().to_string()),
         card_isin: txn_card_info.card_isin,
         currency: Some(txn_detail.currency.to_string()),
         country: txn_detail.country.as_ref().map(|c| c.to_string()),
-        auth_type: txn_card_info.authType.as_ref().map(|a| a.to_string()),
+        auth_type: txn_card_info.auth_type.as_ref().map(|a| a.to_string()),
     };
 
     let maybe_bucket_size = GU::get_sr_v3_bucket_size(

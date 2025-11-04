@@ -560,112 +560,83 @@ pub fn convert_safe_txn_detail_to_txn_detail(
             .and_then(|s| s.parse::<i64>().ok())
             .map(to_txn_detail_id)
             .unwrap(),
-        dateCreated: safe_detail
+        date_created: safe_detail
             .dateCreated
             .unwrap_or_else(|| OffsetDateTime::now_utc()),
-        orderId: safe_detail.orderId,
+        order_id: safe_detail.orderId,
         status: TxnStatus::from_text(safe_detail.status).unwrap_or(TxnStatus::Failure),
-        txnId: safe_detail.txnId,
-        txnType: Some(safe_detail.txnType),
-        addToLocker: safe_detail.addToLocker,
-        merchantId: safe_detail.merchantId,
+        txn_id: safe_detail.txnId,
+        txn_type: Some(safe_detail.txnType),
+        add_to_locker: safe_detail.addToLocker,
+        merchant_id: safe_detail.merchantId,
         gateway: safe_detail.gateway,
-        expressCheckout: safe_detail.expressCheckout,
-        isEmi: safe_detail.isEmi,
-        emiBank: safe_detail.emiBank,
-        emiTenure: safe_detail.emiTenure.map(|t| t as i32),
-        txnUuid: safe_detail.txnUuid,
-        merchantGatewayAccountId: safe_detail
+        express_checkout: safe_detail.expressCheckout,
+        is_emi: safe_detail.isEmi,
+        emi_bank: safe_detail.emiBank,
+        emi_tenure: safe_detail.emiTenure.map(|t| t as i32),
+        txn_uuid: safe_detail.txnUuid,
+        merchant_gateway_account_id: safe_detail
             .merchantGatewayAccountId
             .map(|id| MerchantGwAccId {
                 merchantGwAccId: id,
             }),
-        netAmount: safe_detail.netAmount,
-        txnAmount: safe_detail.txnAmount,
-        txnObjectType: safe_detail
+        net_amount: safe_detail.netAmount,
+        txn_amount: safe_detail.txnAmount,
+        txn_object_type: safe_detail
             .txnObjectType
             .and_then(|s| TxnObjectType::from_text(s)),
-        sourceObject: safe_detail.sourceObject,
-        sourceObjectId: safe_detail.sourceObjectId.map(to_source_object_id),
+        source_object: safe_detail.sourceObject,
+        source_object_id: safe_detail.sourceObjectId.map(to_source_object_id),
         currency: safe_detail
             .currency
             .and_then(|s| Currency::text_to_curr(&s).ok())
             .ok_or(crate::error::ApiError::MissingRequiredField("currency"))?,
         country: None,
-        surchargeAmount: safe_detail.surchargeAmount,
-        taxAmount: safe_detail.taxAmount,
-        internalMetadata: safe_detail.internalMetadata,
+        surcharge_amount: safe_detail.surchargeAmount,
+        tax_amount: safe_detail.taxAmount,
+        internal_metadata: safe_detail.internalMetadata,
         metadata: safe_detail.metadata,
-        offerDeductionAmount: safe_detail.offerDeductionAmount,
-        internalTrackingInfo: safe_detail.internalTrackingInfo,
-        partitionKey: safe_detail.partitionKey,
-        txnAmountBreakup: safe_detail.txnAmountBreakup,
+        offer_deduction_amount: safe_detail.offerDeductionAmount,
+        internal_tracking_info: safe_detail.internalTrackingInfo,
+        partition_key: safe_detail.partitionKey,
+        txn_amount_breakup: safe_detail.txnAmountBreakup,
     })
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TxnDetail {
-    #[serde(rename = "id")]
     pub id: TxnDetailId,
     #[serde(with = "time::serde::iso8601")]
-    #[serde(rename = "dateCreated")]
-    pub dateCreated: OffsetDateTime,
-    #[serde(rename = "orderId")]
-    pub orderId: OrderId,
-    #[serde(rename = "status")]
+    pub date_created: OffsetDateTime,
+    pub order_id: OrderId,
     pub status: TxnStatus,
-    #[serde(rename = "txnId")]
-    pub txnId: TransactionId,
-    #[serde(rename = "txnType")]
-    pub txnType: Option<String>,
-    #[serde(rename = "addToLocker")]
-    pub addToLocker: Option<bool>,
-    #[serde(rename = "merchantId")]
-    pub merchantId: MerchantId,
-    #[serde(rename = "gateway")]
+    pub txn_id: TransactionId,
+    pub txn_type: Option<String>,
+    pub add_to_locker: Option<bool>,
+    pub merchant_id: MerchantId,
     pub gateway: Option<String>,
-    #[serde(rename = "expressCheckout")]
-    pub expressCheckout: Option<bool>,
-    #[serde(rename = "isEmi")]
-    pub isEmi: Option<bool>,
-    #[serde(rename = "emiBank")]
-    pub emiBank: Option<String>,
-    #[serde(rename = "emiTenure")]
-    pub emiTenure: Option<i32>,
-    #[serde(rename = "txnUuid")]
-    pub txnUuid: String,
-    #[serde(rename = "merchantGatewayAccountId")]
-    pub merchantGatewayAccountId: Option<MerchantGwAccId>,
-    #[serde(rename = "netAmount")]
-    pub netAmount: Option<Money>,
-    #[serde(rename = "txnAmount")]
-    pub txnAmount: Option<Money>,
-    #[serde(rename = "txnObjectType")]
-    pub txnObjectType: Option<TxnObjectType>,
-    #[serde(rename = "sourceObject")]
-    pub sourceObject: Option<String>,
-    #[serde(rename = "sourceObjectId")]
-    pub sourceObjectId: Option<SourceObjectId>,
-    #[serde(rename = "currency")]
+    pub express_checkout: Option<bool>,
+    pub is_emi: Option<bool>,
+    pub emi_bank: Option<String>,
+    pub emi_tenure: Option<i32>,
+    pub txn_uuid: String,
+    pub merchant_gateway_account_id: Option<MerchantGwAccId>,
+    pub net_amount: Option<Money>,
+    pub txn_amount: Option<Money>,
+    pub txn_object_type: Option<TxnObjectType>,
+    pub source_object: Option<String>,
+    pub source_object_id: Option<SourceObjectId>,
     pub currency: Currency,
-    #[serde(rename = "country")]
     pub country: Option<CountryISO2>,
-    #[serde(rename = "surchargeAmount")]
-    pub surchargeAmount: Option<Money>,
-    #[serde(rename = "taxAmount")]
-    pub taxAmount: Option<Money>,
-    #[serde(rename = "internalMetadata")]
-    pub internalMetadata: Option<masking::Secret<String>>,
-    #[serde(rename = "metadata")]
+    pub surcharge_amount: Option<Money>,
+    pub tax_amount: Option<Money>,
+    pub internal_metadata: Option<masking::Secret<String>>,
     pub metadata: Option<masking::Secret<String>>,
-    #[serde(rename = "offerDeductionAmount")]
-    pub offerDeductionAmount: Option<Money>,
-    #[serde(rename = "internalTrackingInfo")]
-    pub internalTrackingInfo: Option<String>,
+    pub offer_deduction_amount: Option<Money>,
+    pub internal_tracking_info: Option<String>,
     #[serde(deserialize_with = "deserialize_optional_primitive_datetime")]
-    #[serde(rename = "partitionKey")]
-    pub partitionKey: Option<PrimitiveDateTime>,
-    #[serde(rename = "txnAmountBreakup")]
-    pub txnAmountBreakup: Option<Vec<TransactionCharge>>,
+    pub partition_key: Option<PrimitiveDateTime>,
+    pub txn_amount_breakup: Option<Vec<TransactionCharge>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -213,24 +213,25 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Order {
     pub id: OrderPrimId,
     pub amount: Money,
     pub currency: Currency,
     #[serde(with = "time::serde::iso8601")]
-    pub dateCreated: OffsetDateTime,
-    pub merchantId: MerchantId,
-    pub orderId: OrderId,
+    pub date_created: OffsetDateTime,
+    pub merchant_id: MerchantId,
+    pub order_id: OrderId,
     pub status: OrderStatus,
-    pub customerId: Option<CustomerId>,
+    pub customer_id: Option<CustomerId>,
     pub description: Option<String>,
     #[serde(deserialize_with = "deserialize_udfs_to_hashmap")]
     pub udfs: UDFs,
-    pub preferredGateway: Option<String>,
-    pub productId: Option<ProductId>,
-    pub orderType: OrderType,
+    pub preferred_gateway: Option<String>,
+    pub product_id: Option<ProductId>,
+    pub order_type: OrderType,
     pub metadata: Option<String>,
-    pub internalMetadata: Option<String>,
+    pub internal_metadata: Option<String>,
 }
 
 // #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

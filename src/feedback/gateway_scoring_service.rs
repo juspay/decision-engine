@@ -294,29 +294,29 @@ pub async fn getGatewayScoringType(
     }
 
     let txn_status = txn_detail.status.clone();
-    let merchant_id = txn_detail.merchantId.clone();
+    let merchant_id = txn_detail.merchant_id.clone();
     let is_success = isTransactionSuccess(txn_status.clone());
     let is_failure = isTransactionFailure(txn_status.clone());
     let time_difference = getTimeFromTxnCreatedInMills(txn_detail.clone());
     let merchant_sr_v3_input_config =
         findByNameFromRedis(SrV3InputConfig(get_m_id(merchant_id)).get_key()).await;
-    let pmt = txn_card_info.paymentMethodType;
+    let pmt = txn_card_info.payment_method_type;
     let pm = get_payment_method(
         pmt.to_string(),
-        txn_card_info.paymentMethod,
-        txn_detail.sourceObject.unwrap_or_default(),
+        txn_card_info.payment_method,
+        txn_detail.source_object.unwrap_or_default(),
     );
     // Extract the new parameters from txn_card_info
 
     let sr_routing_dimesions = SrRoutingDimensions {
         card_network: txn_card_info
-            .cardSwitchProvider
+            .card_switch_provider
             .as_ref()
             .map(|s| s.peek().to_string()),
         card_isin: txn_card_info.card_isin.clone(),
         currency: Some(txn_detail.currency.to_string()),
         country: txn_detail.country.as_ref().map(|c| c.to_string()),
-        auth_type: txn_card_info.authType.as_ref().map(|a| a.to_string()),
+        auth_type: txn_card_info.auth_type.as_ref().map(|a| a.to_string()),
     };
 
     let maybe_latency_threshold = get_sr_v3_latency_threshold(
@@ -488,7 +488,7 @@ pub async fn check_and_update_gateway_score(
     // Create update score lock key
     let update_score_lock_key = updateGatewayScoreLock(
         gateway_scoring_type.clone(),
-        txn_detail.txnUuid.clone(), // This is Maybe type in haskell and here it is not Option
+        txn_detail.txn_uuid.clone(), // This is Maybe type in haskell and here it is not Option
         gateway_in_string,          // Convert Option to String
     );
 
@@ -502,7 +502,7 @@ pub async fn check_and_update_gateway_score(
     // Check if feature is enabled for merchant
     let feature_enabled = isFeatureEnabled(
         UpdateScoreLockFeatureEnabledMerchant.get_key(),
-        get_m_id(txn_detail.merchantId.clone()),
+        get_m_id(txn_detail.merchant_id.clone()),
         "kv_redis".to_string(),
     )
     .await;
@@ -558,7 +558,7 @@ pub async fn updateGatewayScore(
     txn_latency: Option<TransactionLatency>,
 ) -> () {
     let mer_acc: MerchantAccount =
-        MA::load_merchant_by_merchant_id(MID::merchant_id_to_text(txn_detail.clone().merchantId))
+        MA::load_merchant_by_merchant_id(MID::merchant_id_to_text(txn_detail.clone().merchant_id))
             .await
             .expect("Merchant account not found");
 
@@ -579,7 +579,7 @@ pub async fn updateGatewayScore(
         true
     };
 
-    //let is_pm_and_pmt_present = Fbu::isTrueString(txn_card_info.paymentMethod) && txn_card_info.paymentMethodType.is_some();
+    //let is_pm_and_pmt_present = Fbu::isTrueString(txn_card_info.payment_method) && txn_card_info.payment_method_type.is_some();
     let should_update_srv3_gateway_score = if gateway_scoring_type.clone() == GST::Penalise {
         false
     } else {
@@ -597,7 +597,7 @@ pub async fn updateGatewayScore(
 
     let should_isolate_srv3_producer = if Cutover::isFeatureEnabled(
         C::SrV3ProducerIsolation.get_key(),
-        MID::merchant_id_to_text(txn_detail.clone().merchantId),
+        MID::merchant_id_to_text(txn_detail.clone().merchant_id),
         C::kvRedis(),
     )
     .await
@@ -612,9 +612,9 @@ pub async fn updateGatewayScore(
     };
 
     let should_update_explore_txn = if Cutover::isFeatureEnabled(
-        DC::EnableExploreAndExploitOnSrv3(txn_card_info.clone().paymentMethodType.to_string())
+        DC::EnableExploreAndExploitOnSrv3(txn_card_info.clone().payment_method_type.to_string())
             .get_key(),
-        MID::merchant_id_to_text(txn_detail.clone().merchantId),
+        MID::merchant_id_to_text(txn_detail.clone().merchant_id),
         C::kvRedis(),
     )
     .await
@@ -628,7 +628,7 @@ pub async fn updateGatewayScore(
         true
     };
 
-    let redis_key = format!("{}{}", C::GATEWAY_SCORING_DATA, txn_detail.clone().txnUuid);
+    let redis_key = format!("{}{}", C::GATEWAY_SCORING_DATA, txn_detail.clone().txn_uuid);
     let redis_gateway_score_data = if should_update_srv3_gateway_score
         && is_update_within_window
         && should_isolate_srv3_producer
@@ -762,7 +762,7 @@ pub fn getRoutingApproach(txnDetail: TxnDetail) -> Option<String> {
 
 // Original Haskell function: getValueFromMetaData
 pub fn getValueFromMetaData<T: serde::de::DeserializeOwned>(txn_detail: &TxnDetail) -> Option<T> {
-    let metadata = txn_detail.internalMetadata.clone()?;
+    let metadata = txn_detail.internal_metadata.clone()?;
     serde_json::from_str(metadata.peek()).ok()
 }
 
@@ -827,12 +827,12 @@ pub async fn isUpdateWithinLatencyWindow(
                 // Cutover::findByNameFromRedis(C.gatewayScoreLatencyCheckInMins)
                 //     .await
                 //     .unwrap_or(C.defaultGatewayScoreLatencyCheckInMins);
-                let merchant_id = MID::merchant_id_to_text(txn_detail.merchantId.clone());
-                let pmt = txn_card_info.paymentMethodType;
+                let merchant_id = MID::merchant_id_to_text(txn_detail.merchant_id.clone());
+                let pmt = txn_card_info.payment_method_type;
                 let pm = GU::get_payment_method(
                     pmt,
-                    txn_card_info.paymentMethod,
-                    txn_detail.sourceObject.clone().unwrap_or_default(),
+                    txn_card_info.payment_method,
+                    txn_detail.source_object.clone().unwrap_or_default(),
                 );
 
                 let gw_score_update_latency = Fbu::getTimeFromTxnCreatedInMills(txn_detail.clone());
@@ -855,8 +855,8 @@ pub async fn isUpdateWithinLatencyWindow(
 }
 
 async fn checkExemptIfMandateTxn(txn_detail: &TxnDetail, txn_card_info: &TxnCardInfo) -> bool {
-    let is_recurring = isRecurringTxn(txn_detail.txnObjectType.clone());
-    let is_nb_pmt = txn_card_info.paymentMethodType == (NB);
+    let is_recurring = isRecurringTxn(txn_detail.txn_object_type.clone());
+    let is_nb_pmt = txn_card_info.payment_method_type == (NB);
     let is_penny_reg_txn = isPennyMandateRegTxn(txn_detail.clone());
     is_recurring || (is_nb_pmt && is_penny_reg_txn)
 }

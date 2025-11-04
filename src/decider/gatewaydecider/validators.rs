@@ -65,17 +65,17 @@ pub fn parse_from_api_order_reference(apiType: T::ApiOrderReference) -> Option<E
             .as_deref()
             .map(Currency::text_to_curr)?
             .ok()?,
-        dateCreated: apiType.dateCreated,
-        merchantId: apiType.merchantId.map(to_merchant_id)?,
-        orderId: apiType.orderId.map(to_order_id)?,
+        date_created: apiType.dateCreated,
+        merchant_id: apiType.merchantId.map(to_merchant_id)?,
+        order_id: apiType.orderId.map(to_order_id)?,
         status: ETO::OrderStatus::from_text(apiType.status)?,
-        customerId: apiType.customerId.map(ETC::customer_id_text),
+        customer_id: apiType.customerId.map(ETC::customer_id_text),
         description: apiType.description,
         udfs,
-        preferredGateway: apiType.preferredGateway,
-        productId: apiType.productId.map(ETOID::to_product_id),
-        orderType: ETO::OrderType::from_text(apiType.orderType?)?,
-        internalMetadata: apiType.internalMetadata,
+        preferred_gateway: apiType.preferredGateway,
+        product_id: apiType.productId.map(ETOID::to_product_id),
+        order_type: ETO::OrderType::from_text(apiType.orderType?)?,
+        internal_metadata: apiType.internalMetadata,
         metadata: apiType.metadata,
     })
 }
@@ -204,29 +204,29 @@ pub fn parse_from_api_txn_detail(apiType: T::ApiTxnDetail) -> Option<ETTD::TxnDe
             .id
             .and_then(|id_str| id_str.parse::<i64>().ok())
             .map(ETTD::to_txn_detail_id)?,
-        dateCreated: apiType.dateCreated?,
-        orderId: ETOID::to_order_id(apiType.orderId),
+        date_created: apiType.dateCreated?,
+        order_id: ETOID::to_order_id(apiType.orderId),
         status: ETTD::TxnStatus::from_text(apiType.status)?,
-        txnId: ETTID::to_transaction_id(apiType.txnId),
-        txnType: Some(apiType.txnType),
-        addToLocker: Some(apiType.addToLocker.unwrap_or(false)),
-        merchantId: apiType.merchantId.map(to_merchant_id)?,
+        txn_id: ETTID::to_transaction_id(apiType.txnId),
+        txn_type: Some(apiType.txnType),
+        add_to_locker: Some(apiType.addToLocker.unwrap_or(false)),
+        merchant_id: apiType.merchantId.map(to_merchant_id)?,
         gateway: apiType.gateway,
-        expressCheckout: Some(apiType.expressCheckout.unwrap_or(false)),
-        isEmi: Some(apiType.isEmi.unwrap_or(false)),
-        emiBank: apiType.emiBank,
-        emiTenure: apiType.emiTenure,
-        txnUuid: apiType.txnUuid.unwrap_or_default(),
-        merchantGatewayAccountId: apiType
+        express_checkout: Some(apiType.expressCheckout.unwrap_or(false)),
+        is_emi: Some(apiType.isEmi.unwrap_or(false)),
+        emi_bank: apiType.emiBank,
+        emi_tenure: apiType.emiTenure,
+        txn_uuid: apiType.txnUuid.unwrap_or_default(),
+        merchant_gateway_account_id: apiType
             .merchantGatewayAccountId
             .map(ETMGA::to_merchant_gw_acc_id),
-        netAmount: apiType.netAmount.map(Money::from_double),
-        txnAmount: apiType.txnAmount.map(Money::from_double),
-        txnObjectType: apiType
+        net_amount: apiType.netAmount.map(Money::from_double),
+        txn_amount: apiType.txnAmount.map(Money::from_double),
+        txn_object_type: apiType
             .txnObjectType
             .and_then(ETTD::TxnObjectType::from_text),
-        sourceObject: apiType.sourceObject,
-        sourceObjectId: apiType.sourceObjectId.map(SO::to_source_object_id),
+        source_object: apiType.sourceObject,
+        source_object_id: apiType.sourceObjectId.map(SO::to_source_object_id),
         currency: apiType
             .currency
             .as_deref()
@@ -237,14 +237,14 @@ pub fn parse_from_api_txn_detail(apiType: T::ApiTxnDetail) -> Option<ETTD::TxnDe
             .as_deref()
             .map(CountryISO2::text_to_country)?
             .ok(),
-        surchargeAmount: apiType.surchargeAmount.map(Money::from_double),
-        taxAmount: apiType.taxAmount.map(Money::from_double),
-        internalMetadata: apiType.internalMetadata.map(Secret::new),
+        surcharge_amount: apiType.surchargeAmount.map(Money::from_double),
+        tax_amount: apiType.taxAmount.map(Money::from_double),
+        internal_metadata: apiType.internalMetadata.map(Secret::new),
         metadata: apiType.metadata.map(Secret::new),
-        offerDeductionAmount: apiType.offerDeductionAmount.map(Money::from_double),
-        internalTrackingInfo: apiType.internalTrackingInfo,
-        partitionKey: apiType.partitionKey,
-        txnAmountBreakup: apiType.txnAmountBreakup.as_deref().and_then(|breakup_str| {
+        offer_deduction_amount: apiType.offerDeductionAmount.map(Money::from_double),
+        internal_tracking_info: apiType.internalTrackingInfo,
+        partition_key: apiType.partitionKey,
+        txn_amount_breakup: apiType.txnAmountBreakup.as_deref().and_then(|breakup_str| {
             serde_json::from_str::<Vec<ETTD::TransactionCharge>>(breakup_str).ok()
         }),
     })
@@ -258,25 +258,25 @@ pub fn parse_from_api_txn_card_info(apiType: T::ApiTxnCardInfo) -> Option<ETCa::
             .map(ETCa::to_txn_card_info_pid)?,
         // txnId: ETTID::to_transaction_id(apiType.txnId),
         card_isin: apiType.cardIsin,
-        cardIssuerBankName: apiType.cardIssuerBankName,
-        cardSwitchProvider: apiType.cardSwitchProvider.map(Secret::new),
+        card_issuer_bank_name: apiType.cardIssuerBankName,
+        card_switch_provider: apiType.cardSwitchProvider.map(Secret::new),
         card_type: apiType.cardType.as_deref().map(Ca::to_card_type)?.ok(),
         // cardLastFourDigits: apiType.cardLastFourDigits,
-        nameOnCard: apiType.nameOnCard.map(Secret::new),
+        name_on_card: apiType.nameOnCard.map(Secret::new),
         // cardFingerprint: apiType.cardFingerprint,
         // cardReferenceId: apiType.cardReferenceId,
         // txnDetailId: apiType.txnDetailId.and_then(|id_str| id_str.parse::<i64>().ok()).map(ETTD::to_txn_detail_id)?,
-        dateCreated: apiType.dateCreated?,
-        paymentMethodType: apiType.paymentMethodType?,
-        paymentMethod: apiType.paymentMethod?,
+        date_created: apiType.dateCreated?,
+        payment_method_type: apiType.paymentMethodType?,
+        payment_method: apiType.paymentMethod?,
         // cardGlobalFingerprint: apiType.cardGlobalFingerprint,
-        paymentSource: apiType.paymentSource,
-        authType: apiType
+        payment_source: apiType.paymentSource,
+        auth_type: apiType
             .authType
             .as_deref()
             .map(ETCa::text_to_auth_type)?
             .ok(),
-        partitionKey: apiType.partitionKey,
+        partition_key: apiType.partitionKey,
     })
 }
 

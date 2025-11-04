@@ -135,29 +135,29 @@ pub struct TxnCardInfo {
     #[serde(rename = "cardIsin")]
     pub card_isin: Option<String>,
     #[serde(rename = "cardIssuerBankName")]
-    pub cardIssuerBankName: Option<String>,
+    pub card_issuer_bank_name: Option<String>,
     #[serde(rename = "cardSwitchProvider")]
-    pub cardSwitchProvider: Option<Secret<String>>,
+    pub card_switch_provider: Option<Secret<String>>,
     #[serde(rename = "cardType")]
     pub card_type: Option<CardType>,
     #[serde(rename = "nameOnCard")]
-    pub nameOnCard: Option<Secret<String>>,
+    pub name_on_card: Option<Secret<String>>,
     // #[serde(rename = "txnDetailId")]
     // pub txnDetailId: TxnDetailId,
     #[serde(with = "time::serde::iso8601")]
     #[serde(rename = "dateCreated")]
-    pub dateCreated: OffsetDateTime,
+    pub date_created: OffsetDateTime,
     #[serde(rename = "paymentMethodType")]
-    pub paymentMethodType: String,
+    pub payment_method_type: String,
     #[serde(rename = "paymentMethod")]
-    pub paymentMethod: String,
+    pub payment_method: String,
     #[serde(rename = "paymentSource")]
-    pub paymentSource: Option<String>,
+    pub payment_source: Option<String>,
     #[serde(rename = "authType")]
-    pub authType: Option<AuthType>,
+    pub auth_type: Option<AuthType>,
     #[serde(rename = "partitionKey")]
     #[serde(deserialize_with = "deserialize_optional_primitive_datetime")]
-    pub partitionKey: Option<PrimitiveDateTime>,
+    pub partition_key: Option<PrimitiveDateTime>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -201,17 +201,17 @@ pub fn convert_safe_to_txn_card_info(
     Ok(TxnCardInfo {
         id: TxnCardInfoPId(id_i64),
         card_isin: safe_info.card_isin,
-        cardIssuerBankName: safe_info.cardIssuerBankName,
-        cardSwitchProvider: safe_info.cardSwitchProvider,
+        card_issuer_bank_name: safe_info.cardIssuerBankName,
+        card_switch_provider: safe_info.cardSwitchProvider,
         card_type: safe_info.card_type,
-        nameOnCard: safe_info.nameOnCard,
-        dateCreated: safe_info.dateCreated,
-        paymentMethodType: safe_info.paymentMethodType,
-        paymentMethod: safe_info.paymentMethod,
-        paymentSource: safe_info.paymentSource,
-        authType: safe_info
+        name_on_card: safe_info.nameOnCard,
+        date_created: safe_info.dateCreated,
+        payment_method_type: safe_info.paymentMethodType,
+        payment_method: safe_info.paymentMethod,
+        payment_source: safe_info.paymentSource,
+        auth_type: safe_info
             .authType
             .and_then(|auth| text_to_auth_type(&auth).ok()),
-        partitionKey: safe_info.partitionKey,
+        partition_key: safe_info.partitionKey,
     })
 }

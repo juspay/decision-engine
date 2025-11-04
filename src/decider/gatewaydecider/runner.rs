@@ -123,11 +123,11 @@ pub fn filter_order(order: Order, metaData: Option<Value>) -> FilteredOrderInfo 
     FilteredOrderInfo {
         amount: Money::to_double(&order.amount) / 10000.0,
         currency: order.currency,
-        customerId: order.customerId,
-        orderId: order.orderId,
-        productId: order.productId,
+        customerId: order.customer_id,
+        orderId: order.order_id,
+        productId: order.product_id,
         description: order.description,
-        preferredGateway: order.preferredGateway,
+        preferredGateway: order.preferred_gateway,
         udf1: get_udf(&order.udfs, 0).cloned(),
         udf2: get_udf(&order.udfs, 1).cloned(),
         udf3: get_udf(&order.udfs, 2).cloned(),
@@ -156,19 +156,19 @@ pub struct FilteredTxnInfo {
 
 pub fn filter_txn(detail: TxnDetail) -> FilteredTxnInfo {
     FilteredTxnInfo {
-        isEmi: detail.isEmi.unwrap_or(false),
-        emiBank: detail.emiBank,
-        emiTenure: detail.emiTenure,
-        txnId: detail.txnId,
-        addToLocker: detail.addToLocker.unwrap_or(false),
-        expressCheckout: detail.expressCheckout.unwrap_or(false),
-        sourceObject: detail.sourceObject,
-        txnObjectType: detail.txnObjectType.unwrap_or(TxnObjectType::Unknown),
+        isEmi: detail.is_emi.unwrap_or(false),
+        emiBank: detail.emi_bank,
+        emiTenure: detail.emi_tenure,
+        txnId: detail.txn_id,
+        addToLocker: detail.add_to_locker.unwrap_or(false),
+        expressCheckout: detail.express_checkout.unwrap_or(false),
+        sourceObject: detail.source_object,
+        txnObjectType: detail.txn_object_type.unwrap_or(TxnObjectType::Unknown),
     }
 }
 
 pub fn fetch_emi_type(txnCardInfo: TxnCardInfo) -> Result<String, Vec<LogEntry>> {
-    match txnCardInfo.paymentSource {
+    match txnCardInfo.payment_source {
         None => Err(vec![]),
         Some(ps) => {
             if ps.contains("emi_type") {
@@ -236,13 +236,13 @@ pub fn make_payment_info(
                 .card_type
                 .as_ref()
                 .map(|ct| card_type_to_text(&ct))
-                .or_else(|| Some(txnCardInfo.paymentMethodType)),
+                .or_else(|| Some(txnCardInfo.payment_method_type)),
             paymentMethod: txnCardInfo
-                .cardIssuerBankName
+                .card_issuer_bank_name
                 .clone()
-                .or_else(|| Some(txnCardInfo.paymentMethod)),
-            paymentSource: txnCardInfo.paymentSource,
-            cardIssuer: txnCardInfo.cardIssuerBankName,
+                .or_else(|| Some(txnCardInfo.payment_method)),
+            paymentSource: txnCardInfo.payment_source,
+            cardIssuer: txnCardInfo.card_issuer_bank_name,
             cardType: txnCardInfo.card_type.map(|c| card_type_to_text(&c)),
             cardBin: None,
             extendedCardBin: None,
@@ -315,12 +315,12 @@ fn go_card_isin(
     FilteredPaymentInfo {
         paymentMethodType: Some(CARD.to_string()),
         paymentMethod: txnCardInfo
-            .cardSwitchProvider
+            .card_switch_provider
             .clone()
             .map(|csp| csp.peek().to_uppercase()),
         paymentSource: None,
         cardIssuer: txnCardInfo
-            .cardIssuerBankName
+            .card_issuer_bank_name
             .clone()
             .map(|ci| ci.to_uppercase()),
         cardType: cloned_txn_card_info
@@ -330,7 +330,7 @@ fn go_card_isin(
         cardBin: Some(cardIsin.chars().take(6).collect()),
         extendedCardBin: extended_card_bin,
         cardBrand: cloned_txn_card_info
-            .cardSwitchProvider
+            .card_switch_provider
             .clone()
             .map(|csp| csp.peek().to_uppercase()),
         cardIssuerCountry: mCardInfo
@@ -338,7 +338,7 @@ fn go_card_isin(
             .and_then(|ci| ci.card_issuer_country.clone().map(|c| c.to_uppercase()))
             .or_else(|| Some("".to_string())),
         authType: txnCardInfo
-            .authType
+            .auth_type
             .clone()
             .map(|at| auth_type_to_text(&at)),
         emiType: fetch_emi_type(txnCardInfo.clone())
@@ -491,7 +491,7 @@ pub async fn execute_priority_logic(
 ) -> DeciderTypes::GatewayPriorityLogicOutput {
     let internal_metadata: Option<DeciderTypes::InternalMetadata> = req
         .txnDetail
-        .internalMetadata
+        .internal_metadata
         .as_ref()
         .and_then(|im| serde_json::from_str(im.peek()).ok());
     let order_metadata = req.orderMetadata.metadata.clone();

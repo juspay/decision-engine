@@ -128,16 +128,16 @@ where
     let api_decider_request: Result<DomainDeciderRequest, _> = serde_json::from_slice(&body);
     match api_decider_request {
         Ok(payload) => {
-            let merchant_id = payload.orderReference.merchantId.clone();
+            let merchant_id = payload.order_reference.merchant_id.clone();
             let merchant_id_txt = crate::types::merchant::id::merchant_id_to_text(merchant_id);
             tracing::Span::current().record("merchant_id", merchant_id_txt.clone());
-            tracing::Span::current().record("udf_txn_uuid", payload.txnDetail.txnUuid.clone());
-            tracing::Span::current().record("txn_uuid", payload.txnDetail.txnUuid.clone());
+            tracing::Span::current().record("udf_txn_uuid", payload.txn_detail.txn_uuid.clone());
+            tracing::Span::current().record("txn_uuid", payload.txn_detail.txn_uuid.clone());
             tracing::Span::current()
-                .record("udf_order_id", payload.orderReference.orderId.0.as_str());
+                .record("udf_order_id", payload.order_reference.order_id.0.as_str());
             tracing::Span::current().record(
                 "is_audit_trail_log",
-                payload.shouldConsumeResult.unwrap_or(false),
+                payload.should_consume_result.unwrap_or(false),
             );
             jemalloc_ctl::epoch::advance().unwrap();
             let allocated_before = jemalloc_ctl::stats::allocated::read().unwrap_or(0);
