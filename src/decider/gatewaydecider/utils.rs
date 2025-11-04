@@ -2057,7 +2057,7 @@ pub async fn get_gateway_scoring_data(
             get_experiment_tag(txn_detail.date_created, "GRI_BASED_SR_ROUTING").await;
         set_is_experiment_tag(decider_flow, experiment_tag);
     }
-    let key = [C::GATEWAY_SCORING_DATA, &txn_detail.txn_uuid.to_string()].concat();
+    let key = [C::GATEWAY_SCORING_DATA, &txn_detail.txn_uuid.clone()].concat();
     updated_gateway_scoring_data
 }
 
