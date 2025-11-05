@@ -44,7 +44,7 @@ use crate::{
         types::SrV3DebugBlock,
         utils::{
             dateInIST, getCurrentIstDateWithFormat, getProducerKey, isKeyExistsRedis,
-            logGatewayScoreType, updateMovingWindow, updateScore, GatewayScoringType,
+            log_gateway_score_type, updateMovingWindow, updateScore, GatewayScoringType,
         },
     },
     redis::types::ServiceConfigKey,
@@ -57,7 +57,7 @@ use masking::PeekInterface;
 
 // Converted functions
 // Original Haskell function: updateSrV3Score
-pub async fn updateSrV3Score(
+pub async fn update_sr_v3_score(
     gateway_scoring_type: GatewayScoringType,
     txn_detail: TxnDetail,
     txn_card_info: TxnCardInfo,
@@ -122,7 +122,7 @@ pub async fn updateSrV3Score(
                     .await;
                 }
             }
-            logGatewayScoreType(gateway_scoring_type, RF::Srv3Flow, txn_detail);
+            log_gateway_score_type(gateway_scoring_type, RF::Srv3Flow, txn_detail);
         }
     }
 }

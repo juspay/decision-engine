@@ -30,7 +30,7 @@ use rand_distr::{Beta, Binomial, Distribution};
 use serde::{Deserialize, Serialize};
 use time::{OffsetDateTime, PrimitiveDateTime};
 // use crate::types::card_brand_routes as ETCBR;
-use crate::redis::feature::{self as M, isFeatureEnabled};
+use crate::redis::feature::{self as M, is_feature_enabled};
 use crate::types::gateway_routing_input as ETGRI;
 // use crate::types::gateway_health as ETGH;
 use crate::types::card as ETCT;
@@ -226,7 +226,7 @@ pub async fn scoring_flow(
             || ranking_algorithm == Some(RankingAlgorithm::SrBasedRouting);
 
         let is_sr_v3_metric_enabled = if is_merchant_enabled_for_sr_based_routing {
-            let is_sr_v3_metric_enabled = isFeatureEnabled(
+            let is_sr_v3_metric_enabled = is_feature_enabled(
                 C::enable_gateway_selection_based_on_sr_v3_input(pmt_str.clone()).get_key(),
                 Utils::get_m_id(merchant.merchantId.clone()),
                 "kv_redis".to_string(),
@@ -293,7 +293,7 @@ pub async fn scoring_flow(
 
                 Utils::set_sr_v3_hedging_percent(decider_flow, hedging_percent);
 
-                let is_explore_and_exploit_enabled = isFeatureEnabled(
+                let is_explore_and_exploit_enabled = is_feature_enabled(
                     C::enableExploreAndExploitOnSrV3(pmt_str).get_key(),
                     Utils::get_m_id(merchant.merchantId.clone()),
                     "kv_redis".to_string(),
@@ -352,7 +352,7 @@ pub async fn scoring_flow(
                         );
                     }
 
-                    let is_route_random_traffic_enabled = isFeatureEnabled(
+                    let is_route_random_traffic_enabled = is_feature_enabled(
                         C::ROUTE_RANDOM_TRAFFIC_SR_V3_ENABLED_MERCHANT.get_key(),
                         Utils::get_m_id(merchant.merchantId.clone()),
                         "kv_redis".to_string(),
@@ -381,7 +381,7 @@ pub async fn scoring_flow(
 
                     if sr_gw_score.len() > 1 && (!is_explore_and_exploit_enabled || should_explore)
                     {
-                        let is_debug_mode_enabled = isFeatureEnabled(
+                        let is_debug_mode_enabled = is_feature_enabled(
                             C::ENABLE_DEBUG_MODE_ON_SR_V3.get_key(),
                             Utils::get_m_id(merchant.merchantId.clone()),
                             "kv_redis".to_string(),
@@ -575,7 +575,7 @@ pub async fn get_cached_scores_based_on_srv3(
     )
     .await;
 
-    let is_srv3_reset_enabled = M::isFeatureEnabled(
+    let is_srv3_reset_enabled = M::is_feature_enabled(
         C::EnableResetOnSrV3.get_key(),
         Utils::get_m_id(merchant.merchantId.clone()),
         "kv_redis".to_string(),
@@ -652,7 +652,7 @@ pub async fn get_cached_scores_based_on_srv3(
         score_map
     };
 
-    let is_srv3_extra_score_enabled = M::isFeatureEnabled(
+    let is_srv3_extra_score_enabled = M::is_feature_enabled(
         C::ENABLE_EXTRA_SCORE_ON_SR_V3.get_key(),
         Utils::get_m_id(merchant.merchantId.clone()),
         "kv_redis".to_string(),
@@ -690,13 +690,13 @@ pub async fn get_cached_scores_based_on_srv3(
         updated_score_map_after_reset
     };
 
-    let is_srv3_binomial_distribution_enabled = M::isFeatureEnabled(
+    let is_srv3_binomial_distribution_enabled = M::is_feature_enabled(
         C::ENABLE_BINOMIAL_DISTRIBUTION_ON_SR_V3.get_key(),
         Utils::get_m_id(merchant.merchantId.clone()),
         "kv_redis".to_string(),
     )
     .await;
-    let is_srv3_beta_distribution_enabled = M::isFeatureEnabled(
+    let is_srv3_beta_distribution_enabled = M::is_feature_enabled(
         C::ENABLE_BETA_DISTRIBUTION_ON_SR_V3.get_key(),
         Utils::get_m_id(merchant.merchantId.clone()),
         "kv_redis".to_string(),
@@ -1800,7 +1800,7 @@ pub async fn get_gateway_wise_routing_inputs_for_merchant_sr(
         RService::findByNameFromRedis(C::SR_BASED_TXN_RESET_COUNT.get_key())
             .await
             .unwrap_or(C::GW_DEFAULT_TXN_SOFT_RESET_COUNT);
-    let is_elimination_v2_enabled = isFeatureEnabled(
+    let is_elimination_v2_enabled = is_feature_enabled(
         C::EnableEliminationV2.get_key(),
         merchant_acc.merchantId.0.clone(),
         "kv_redis".to_string(),
@@ -2374,7 +2374,7 @@ pub async fn update_gateway_score_based_on_success_rate(
             gateway_success_rate_merchant_input
         );
 
-        let is_reset_score_enabled_for_merchant = isFeatureEnabled(
+        let is_reset_score_enabled_for_merchant = is_feature_enabled(
             C::GatewayResetScoreEnabled.get_key(),
             Utils::get_m_id(txn_detail.merchantId.clone()),
             "kv_redis".to_string(),
@@ -2650,7 +2650,7 @@ pub async fn update_gateway_score_based_on_success_rate(
                     if filtered_gateway_success_rate_inputs.len() > 1
                         && new_gateway_score.len() == filtered_gateway_success_rate_inputs.len()
                     {
-                        let optimization_during_downtime_enabled = isFeatureEnabled(
+                        let optimization_during_downtime_enabled = is_feature_enabled(
                             C::EnableOptimizationDuringDowntime.get_key(),
                             Utils::get_m_id(txn_detail.merchantId.clone()),
                             "kv_redis".to_string(),

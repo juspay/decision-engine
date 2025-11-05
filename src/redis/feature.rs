@@ -5,29 +5,29 @@ use rand::Rng;
 
 // Converted functions
 // Original Haskell function: isFeatureEnabled
-pub async fn isFeatureEnabled(f_name: String, mid: String, redis_name: String) -> bool {
-    isFeatureEnabledWithMaybeDBConf(None, f_name, mid, redis_name).await
+pub async fn is_feature_enabled(f_name: String, mid: String, redis_name: String) -> bool {
+    is_feature_enabled_with_maybe_db_conf(None, f_name, mid, redis_name).await
 }
 
 // Original Haskell function: isFeatureEnabledWithMaybeDBConf
-pub async fn isFeatureEnabledWithMaybeDBConf(
+pub async fn is_feature_enabled_with_maybe_db_conf(
     maybe_db_conf: Option<String>,
     f_name: String,
     mid: String,
     _: String,
 ) -> bool {
     let maybe_conf = findByNameFromRedis::<FeatureConf>(f_name.clone()).await;
-    checkMerchantEnabled(maybe_conf, mid, f_name)
+    check_merchant_enabled(maybe_conf, mid, f_name)
 }
 
 // Original Haskell function: isFeatureEnabledByDimension
-pub async fn isFeatureEnabledByDimension(f_name: String, dimension: String) -> bool {
+pub async fn is_feature_enabled_by_dimension(f_name: String, dimension: String) -> bool {
     let maybe_conf = findByNameFromRedis::<DimensionConf>(f_name.clone()).await;
-    checkDimensionEnabled(maybe_conf, dimension, f_name)
+    check_dimension_enabled(maybe_conf, dimension, f_name)
 }
 
 // Original Haskell function: checkDimensionEnabled
-pub fn checkDimensionEnabled(
+pub fn check_dimension_enabled(
     dimension_conf: Option<DimensionConf>,
     dimension: String,
     key: String,
@@ -54,12 +54,12 @@ pub fn checkDimensionEnabled(
                     None => false,
                 }
             };
-            isDimensionConfigEnabled(conf, dimension, is_enabled, key)
+            is_dimension_config_enabled(conf, dimension, is_enabled, key)
         }
     }
 }
 
-pub fn isDimensionConfigEnabled(
+pub fn is_dimension_config_enabled(
     dimension_conf: DimensionConf,
     dimension: String,
     is_enabled: bool,
@@ -80,7 +80,7 @@ pub fn isDimensionConfigEnabled(
 }
 
 // Original Haskell function: checkMerchantEnabled
-pub fn checkMerchantEnabled(conf: Option<FeatureConf>, mid: String, key: String) -> bool {
+pub fn check_merchant_enabled(conf: Option<FeatureConf>, mid: String, key: String) -> bool {
     match conf {
         None => false,
         Some(conf) => {

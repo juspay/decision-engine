@@ -51,7 +51,7 @@ use crate::logger;
 // use eulerhs::language::get_current_date_in_millis;
 // use eulerhs::language as EL;
 
-use crate::redis::feature::isFeatureEnabled;
+use crate::redis::feature::is_feature_enabled;
 
 use crate::types::merchant::id as Merchant;
 // use crate::types::txn_details::types::TxnDetail::
@@ -234,14 +234,14 @@ pub async fn updateKeyScoreForTxnStatus(
     current_key_score: f64,
     score_key_type: ScoreKeyType,
 ) -> f64 {
-    let is_elimination_v2_enabled = isFeatureEnabled(
+    let is_elimination_v2_enabled = is_feature_enabled(
         EnableEliminationV2.get_key(),
         merchant_id.clone(),
         C::kvRedis(),
     )
     .await;
     let is_elimination_v2_enabled_for_outage =
-        isFeatureEnabled(EnableOutageV2.get_key(), merchant_id.clone(), C::kvRedis()).await;
+        is_feature_enabled(EnableOutageV2.get_key(), merchant_id.clone(), C::kvRedis()).await;
     let is_outage_key = isKeyOutage(score_key_type);
     logger::debug!(
         action = "updateKeyScore",
@@ -562,7 +562,7 @@ pub async fn getAllUnifiedKeys(
     gateway_reference_id: Option<String>,
 ) -> Vec<(ScoreKeyType, Option<String>)> {
     let merchant_id = Merchant::merchant_id_to_text(txn_detail.merchantId.clone());
-    let is_key_enabled_for_global_gateway_scoring = isFeatureEnabled(
+    let is_key_enabled_for_global_gateway_scoring = is_feature_enabled(
         C::GlobalGatewayScoringEnabledMerchants.get_key(),
         merchant_id.clone(),
         C::kvRedis(),
@@ -580,7 +580,7 @@ pub async fn getAllUnifiedKeys(
             .ok(),
         )
         .await;
-    let is_gateway_scoring_enabled_for_global_outage = isFeatureEnabled(
+    let is_gateway_scoring_enabled_for_global_outage = is_feature_enabled(
         C::GlobalOutageGatewayScoringEnabledMerchants.get_key(),
         merchant_id.clone(),
         C::kvRedis(),

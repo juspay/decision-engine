@@ -2,7 +2,7 @@ use crate::decider::gatewaydecider::types::*;
 use crate::decider::gatewaydecider::utils as Utils;
 use crate::decider::storage::utils::gateway_card_info as ETGCIS;
 use crate::merchant_config_util::isPaymentFlowEnabledWithHierarchyCheck;
-use crate::redis::feature::{isFeatureEnabled, isFeatureEnabledByDimension};
+use crate::redis::feature::{is_feature_enabled, is_feature_enabled_by_dimension};
 use crate::redis::types::ServiceConfigKey;
 use crate::types::bank_code::find_bank_code;
 use crate::types::card::card_type as ETCA;
@@ -662,7 +662,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
                     .as_ref()
                     .map(|provider| provider.peek().to_string())
                     .unwrap_or_else(|| "DEFAULT".to_string());
-                let isMerchantEnabledForCvvLessV2Flow = isFeatureEnabled(
+                let isMerchantEnabledForCvvLessV2Flow = is_feature_enabled(
                     C::CVV_LESS_V2_FLOW.get_key(),
                     mAcc.merchantId.0,
                     "kv_redis".to_string(),
@@ -926,7 +926,7 @@ async fn check_cvv_less_support_rupay(txnCardInfo: &TxnCardInfo) -> bool {
             bCode,
             mCardType.unwrap_or_default().to_uppercase()
         );
-        isFeatureEnabledByDimension(feature_key, dimension).await
+        is_feature_enabled_by_dimension(feature_key, dimension).await
     } else {
         false
     }
@@ -2235,7 +2235,7 @@ pub async fn filterGatewaysForEmi(this: &mut DeciderFlow<'_>) -> GatewayList {
                 gws.clone()
             );
 
-            let gbes_v2_flag = isFeatureEnabled(
+            let gbes_v2_flag = is_feature_enabled(
                 C::GBES_V2_ENABLED.get_key(),
                 merchant_acc.merchantId.0,
                 "kv_redis".to_string(),
@@ -2255,7 +2255,7 @@ pub async fn filterGatewaysForEmi(this: &mut DeciderFlow<'_>) -> GatewayList {
                     let mut gbesV2List = Vec::new();
                     for gbes in gbes_v2_list_.clone() {
                         let is_enabled = if let Some(emi_bank) = emi_bank.clone() {
-                            isFeatureEnabledByDimension(
+                            is_feature_enabled_by_dimension(
                                 C::ALT_ID_ENABLED_GATEWAY_EMI_BANK.get_key(),
                                 format!("{}::{}", gbes.gateway, emi_bank),
                             )
@@ -2314,7 +2314,7 @@ pub async fn filterGatewaysForEmi(this: &mut DeciderFlow<'_>) -> GatewayList {
                     let mut gbesList = Vec::new();
                     for gbes in gbes_list_.clone() {
                         let is_enabled = if let Some(emi_bank) = emi_bank.clone() {
-                            isFeatureEnabledByDimension(
+                            is_feature_enabled_by_dimension(
                                 C::ALT_ID_ENABLED_GATEWAY_EMI_BANK.get_key(),
                                 format!("{}::{}", gbes.gateway, emi_bank),
                             )

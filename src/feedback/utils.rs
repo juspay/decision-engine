@@ -157,25 +157,25 @@ pub fn convertSuccessResponseIdFlip(x: i32) -> ETTD::SuccessResponseId {
     ETTD::SuccessResponseId(x as i64)
 }
 
-pub fn getTxnDetailFromApiPayload(
-    apiPayload: UpdateScorePayload,
+pub fn get_txn_detail_from_api_payload(
+    api_payload: UpdateScorePayload,
     gateway_scoring_data: GatewayScoringData,
 ) -> Result<ETTD::TxnDetail, crate::error::ApiError> {
     let txn_detail = ETTD::TxnDetail {
         id: ETTD::to_txn_detail_id(1),
         dateCreated: gateway_scoring_data.dateCreated,
-        orderId: ETO::id::to_order_id(apiPayload.paymentId.clone()),
-        status: apiPayload.status.clone(),
-        txnId: ETId::to_transaction_id(apiPayload.paymentId.clone()),
+        orderId: ETO::id::to_order_id(api_payload.payment_id.clone()),
+        status: api_payload.status.clone(),
+        txnId: ETId::to_transaction_id(api_payload.payment_id.clone()),
         txnType: Some("NOT_DEFINED".to_string()),
         addToLocker: Some(false),
-        merchantId: ETM::id::to_merchant_id(apiPayload.merchantId.clone()),
-        gateway: Some(apiPayload.gateway),
+        merchantId: ETM::id::to_merchant_id(api_payload.merchant_id.clone()),
+        gateway: Some(api_payload.gateway),
         expressCheckout: Some(false),
         isEmi: Some(false),
         emiBank: None,
         emiTenure: None,
-        txnUuid: apiPayload.paymentId.clone(),
+        txnUuid: api_payload.payment_id.clone(),
         merchantGatewayAccountId: None,
         txnAmount: Some(ETMo::Money::from_double(0.0)),
         txnObjectType: Some(
@@ -209,11 +209,11 @@ pub fn getTxnDetailFromApiPayload(
     Ok(txn_detail)
 }
 
-pub fn getTxnCardInfoFromApiPayload(
-    apiPayload: UpdateScorePayload,
+pub fn get_txn_card_info_from_api_payload(
+    api_payload: UpdateScorePayload,
     gateway_scoring_data: GatewayScoringData,
 ) -> ETCa::txn_card_info::TxnCardInfo {
-    let txnCardInfo = ETCa::txn_card_info::TxnCardInfo {
+    let txn_card_info = ETCa::txn_card_info::TxnCardInfo {
         id: ETCa::txn_card_info::to_txn_card_info_pid(1),
         card_isin: None,
         cardIssuerBankName: None,
@@ -232,7 +232,7 @@ pub fn getTxnCardInfoFromApiPayload(
             }),
         partitionKey: None,
     };
-    txnCardInfo
+    txn_card_info
 }
 // Original Haskell function: convertMerchantIdFlip
 // pub fn convertMerchantIdFlip(s: &str) -> Option<ETM::MerchantId> {
@@ -666,7 +666,7 @@ pub async fn getProducerKey(
 }
 
 // Original Haskell function: logGatewayScoreType
-pub fn logGatewayScoreType(
+pub fn log_gateway_score_type(
     gateway_score_type: GatewayScoringType,
     routing_flow_type: RoutingFlowType,
     txn_detail: TxnDetail,
@@ -916,10 +916,10 @@ pub fn isRecurringTxn(txn_object_type: Option<TxnObjectType>) -> bool {
 // }
 
 // Original Haskell function: getTimeFromTxnCreatedInMills
-pub fn getTimeFromTxnCreatedInMills(txn: TxnDetail) -> u128 {
-    let dateCreated = txn.dateCreated.unix_timestamp_nanos() as u128 / 1_000_000;
-    let currentTime = EU::get_current_date_in_millis();
-    currentTime.saturating_sub(dateCreated)
+pub fn get_time_from_txn_created_in_mills(txn: TxnDetail) -> u128 {
+    let date_created = txn.dateCreated.unix_timestamp_nanos() as u128 / 1_000_000;
+    let current_time = EU::get_current_date_in_millis();
+    current_time.saturating_sub(date_created)
 }
 
 // Original Haskell function: dateToMilliSeconds

@@ -5,7 +5,7 @@ use crate::euclid::types::SrDimensionConfig;
 use crate::feedback::gateway_elimination_scoring::flow::{
     eliminationV2RewardFactor, getPenaltyFactor,
 };
-use crate::redis::feature::isFeatureEnabled;
+use crate::redis::feature::is_feature_enabled;
 use crate::redis::types::ServiceConfigKey;
 use crate::types::card::card_type::card_type_to_text;
 use crate::types::country::country_iso::CountryISO2;
@@ -1917,7 +1917,7 @@ pub async fn get_gateway_scoring_data(
     txn_card_info: ETCa::txn_card_info::TxnCardInfo,
     merchant: ETM::merchant_account::MerchantAccount,
 ) -> GatewayScoringData {
-    let merchant_enabled_for_unification = isFeatureEnabled(
+    let merchant_enabled_for_unification = is_feature_enabled(
         C::MerchantsEnabledForScoreKeysUnification.get_key(),
         merchant_id_to_text(merchant.merchantId.clone()),
         "kv_redis".to_string(),
@@ -1934,19 +1934,19 @@ pub async fn get_gateway_scoring_data(
     } else {
         txn_card_info.paymentMethod.clone()
     };
-    let is_performing_experiment = isFeatureEnabled(
+    let is_performing_experiment = is_feature_enabled(
         C::MerchantEnabledForRoutingExperiment.get_key(),
         merchant_id_to_text(merchant.merchantId.clone()),
         "kv_redis".to_string(),
     )
     .await;
-    let is_gri_enabled_for_elimination = isFeatureEnabled(
+    let is_gri_enabled_for_elimination = is_feature_enabled(
         C::GatewayReferenceIdEnabledMerchant.get_key(),
         merchant_id_to_text(merchant.merchantId.clone()),
         "kv_redis".to_string(),
     )
     .await;
-    let is_gri_enabled_for_sr_routing = isFeatureEnabled(
+    let is_gri_enabled_for_sr_routing = is_feature_enabled(
         C::GwRefIdSelectionBasedEnabledMerchant.get_key(),
         merchant_id_to_text(merchant.merchantId.clone()),
         "kv_redis".to_string(),
@@ -1973,7 +1973,7 @@ pub async fn get_gateway_scoring_data(
     );
     let updated_gateway_scoring_data = match txn_card_info.paymentMethodType.as_str() {
         UPI => {
-            let handle_and_package_based_routing = isFeatureEnabled(
+            let handle_and_package_based_routing = is_feature_enabled(
                 C::HandlePackageBasedRoutingCutover.get_key(),
                 merchant_id.clone(),
                 "kv_redis".to_string(),
@@ -1993,13 +1993,13 @@ pub async fn get_gateway_scoring_data(
             default_gateway_scoring_data
         }
         CARD => {
-            let sr_evaluation_at_auth_level = isFeatureEnabled(
+            let sr_evaluation_at_auth_level = is_feature_enabled(
                 C::EnableSelectionBasedAuthTypeEvaluation.get_key(),
                 merchant_id.clone(),
                 "kv_redis".to_string(),
             )
             .await;
-            let sr_evaluation_at_bank_level = isFeatureEnabled(
+            let sr_evaluation_at_bank_level = is_feature_enabled(
                 C::EnableSelectionBasedBankLevelEvaluation.get_key(),
                 merchant_id.clone(),
                 "kv_redis".to_string(),
@@ -2849,7 +2849,7 @@ pub async fn get_penality_factor_(decider_flow: &mut DeciderFlow<'_>) -> f64 {
     let txn_detail = decider_flow.get().dpTxnDetail.clone();
     let txn_card_info = decider_flow.get().dpTxnCardInfo.clone();
     let merchant_id = get_m_id(merchant.merchantId);
-    let is_elimination_v2_enabled = isFeatureEnabled(
+    let is_elimination_v2_enabled = is_feature_enabled(
         C::EnableEliminationV2.get_key(),
         merchant_id.clone(),
         feedback::constants::kvRedis(),

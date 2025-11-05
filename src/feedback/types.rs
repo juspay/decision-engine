@@ -233,14 +233,15 @@ pub enum TxnObjectType {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateScorePayload {
-    pub merchantId: String,
+    pub merchant_id: String,
     pub gateway: String,
-    pub gatewayReferenceId: Option<String>,
+    pub gateway_reference_id: Option<String>,
     pub status: TxnStatus,
-    pub paymentId: String,
-    pub enforceDynamicRoutingFailure: Option<bool>,
-    pub txnLatency: Option<TransactionLatency>,
+    pub payment_id: String,
+    pub enforce_dynamic_routing_failure: Option<bool>,
+    pub txn_latency: Option<TransactionLatency>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
