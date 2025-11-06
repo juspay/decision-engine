@@ -1230,6 +1230,7 @@ pub struct DecidedGateway {
     pub is_dynamic_mga_enabled: bool,
     pub gateway_mga_id_map: Option<AValue>,
     pub is_rust_based_decider: bool,
+    pub latency: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Clone, Deserialize)]

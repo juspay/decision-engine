@@ -8,6 +8,7 @@ use crate::{
 use axum::body::to_bytes;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
+use cpu_time::ProcessTime;
 
 // impl IntoResponse for ErrorResponse {
 //     fn into_response(self) -> axum::http::Response<axum::body::Body> {
@@ -35,6 +36,7 @@ impl IntoResponse for DecidedGateway {
 pub async fn decide_gateway(
     req: axum::http::Request<axum::body::Body>,
 ) -> Result<DecidedGateway, ErrorResponse> {
+    let cpu_start = ProcessTime::now();
     let timer = metrics::API_LATENCY_HISTOGRAM
         .with_label_values(&["decide_gateway"])
         .start_timer();
@@ -77,7 +79,7 @@ pub async fn decide_gateway(
     let api_decider_request: Result<DomainDeciderRequestForApiCallV2, _> =
         serde_json::from_slice(&body);
     let result = match api_decider_request {
-        Ok(payload) => match decider_full_payload_hs_function(payload).await {
+        Ok(payload) => match decider_full_payload_hs_function(payload, cpu_start).await {
             Ok(decided_gateway) => {
                 metrics::API_REQUEST_COUNTER
                     .with_label_values(&["decide_gateway", "success"])

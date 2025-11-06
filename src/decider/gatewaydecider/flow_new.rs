@@ -3,6 +3,7 @@ use super::types::RankingAlgorithm;
 use super::types::UnifiedError;
 use crate::app::get_tenant_app_state;
 use crate::decider::network_decider;
+use cpu_time::ProcessTime;
 use serde_json::json;
 use serde_json::Value as AValue;
 use std::collections::HashMap;
@@ -27,6 +28,7 @@ use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
 
 pub async fn decider_full_payload_hs_function(
     dreq_: T::DomainDeciderRequestForApiCallV2,
+    cpu_start: ProcessTime,
 ) -> Result<T::DecidedGateway, T::ErrorResponse> {
     let merchant_account =
         ETM::merchant_account::load_merchant_by_merchant_id(dreq_.merchant_id.clone())
@@ -115,6 +117,7 @@ pub async fn decider_full_payload_hs_function(
             dreq_.clone().ranking_algorithm,
             dreq_.clone().elimination_enabled,
             false,
+            cpu_start,
         )
         .await
     }
@@ -133,6 +136,7 @@ pub async fn run_decider_flow(
     rankingAlgorithm: Option<RankingAlgorithm>,
     eliminationEnabled: Option<bool>,
     is_legacy_decider_flow: bool,
+    cpu_start: ProcessTime,
 ) -> Result<T::DecidedGateway, T::ErrorResponse> {
     let txnCreationTime = deciderParams
         .dpTxnDetail
@@ -195,6 +199,7 @@ pub async fn run_decider_flow(
                     None,
                 )
                 .await;
+                let cpu_time = cpu_start.elapsed().as_millis() as u64;
                 Ok(T::DecidedGateway {
                     decided_gateway: pgw.clone(),
                     gateway_priority_map: Some(json!(HashMap::from([(pgw.to_string(), 1.0)]))),
@@ -211,6 +216,7 @@ pub async fn run_decider_flow(
                     gateway_mga_id_map: None,
                     debit_routing_output: None,
                     is_rust_based_decider: true,
+                    latency: Some(cpu_time),
                 })
             } else {
                 decider_flow
@@ -465,7 +471,9 @@ pub async fn run_decider_flow(
                     );
 
                     match decidedGateway {
-                        Some(decideGatewayOutput) => Ok(T::DecidedGateway {
+                        Some(decideGatewayOutput) => {
+                            let cpu_time = cpu_start.elapsed().as_millis() as u64;
+                            Ok(T::DecidedGateway {
                             decided_gateway: decideGatewayOutput,
                             gateway_priority_map: gatewayPriorityMap,
                             filter_wise_gateways: None,
@@ -486,7 +494,8 @@ pub async fn run_decider_flow(
                             gateway_mga_id_map: None,
                             debit_routing_output: None,
                             is_rust_based_decider: true,
-                        }),
+                            latency: Some(cpu_time),
+                        })},
                         None => Err((
                             decider_flow.writer.debugFilterList.clone(),
                             decider_flow.writer.debugScoringList.clone(),

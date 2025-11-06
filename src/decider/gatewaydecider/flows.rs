@@ -395,6 +395,7 @@ pub async fn run_decider_flow(
                     gateway_mga_id_map: Some(gatewayMgaIdMap),
                     debit_routing_output: None,
                     is_rust_based_decider: deciderParams.dpShouldConsumeResult.unwrap_or(false),
+                    latency: None,
                 })
             } else {
                 decider_flow
@@ -663,6 +664,7 @@ pub async fn run_decider_flow(
                             is_rust_based_decider: deciderParams
                                 .dpShouldConsumeResult
                                 .unwrap_or(false),
+                            latency: None,
                         }),
                         None => Err((
                             decider_flow.writer.debugFilterList.clone(),
