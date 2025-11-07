@@ -3,12 +3,12 @@ use super::types::RankingAlgorithm;
 use super::types::UnifiedError;
 use crate::app::get_tenant_app_state;
 use crate::decider::network_decider;
-use cpu_time::ProcessTime;
 use serde_json::json;
 use serde_json::Value as AValue;
 use std::collections::HashMap;
 use std::option::Option;
 use std::string::String;
+use std::time::Instant;
 use std::vec::Vec;
 // use eulerhs::prelude::*;
 // use eulerhs::language as L;
@@ -28,7 +28,7 @@ use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
 
 pub async fn decider_full_payload_hs_function(
     dreq_: T::DomainDeciderRequestForApiCallV2,
-    cpu_start: ProcessTime,
+    cpu_start: Instant,
 ) -> Result<T::DecidedGateway, T::ErrorResponse> {
     let merchant_account =
         ETM::merchant_account::load_merchant_by_merchant_id(dreq_.merchant_id.clone())
@@ -136,7 +136,7 @@ pub async fn run_decider_flow(
     rankingAlgorithm: Option<RankingAlgorithm>,
     eliminationEnabled: Option<bool>,
     is_legacy_decider_flow: bool,
-    cpu_start: ProcessTime,
+    cpu_start: Instant,
 ) -> Result<T::DecidedGateway, T::ErrorResponse> {
     let txnCreationTime = deciderParams
         .dpTxnDetail
