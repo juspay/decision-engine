@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use crate::decider::gatewaydecider::{
     flows::decider_full_payload_hs_function,
     types::{DecidedGateway, DomainDeciderRequest, ErrorResponse, UnifiedError},
@@ -47,7 +49,7 @@ where
     DecidedGatewayResponse: IntoResponse,
     ErrorResponse: IntoResponse,
 {
-    let cpu_start = ProcessTime::now();
+    let cpu_start = Instant::now();
     let timer = API_LATENCY_HISTOGRAM
         .with_label_values(&["decision_gateway"])
         .start_timer();
