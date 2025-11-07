@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use crate::{
     decider::gatewaydecider::{
         flow_new::decider_full_payload_hs_function,
@@ -8,7 +10,6 @@ use crate::{
 use axum::body::to_bytes;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use cpu_time::ProcessTime;
 
 // impl IntoResponse for ErrorResponse {
 //     fn into_response(self) -> axum::http::Response<axum::body::Body> {
@@ -36,7 +37,7 @@ impl IntoResponse for DecidedGateway {
 pub async fn decide_gateway(
     req: axum::http::Request<axum::body::Body>,
 ) -> Result<DecidedGateway, ErrorResponse> {
-    let cpu_start = ProcessTime::now();
+    let cpu_start = Instant::now();
     let timer = metrics::API_LATENCY_HISTOGRAM
         .with_label_values(&["decide_gateway"])
         .start_timer();
