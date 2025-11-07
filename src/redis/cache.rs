@@ -3,6 +3,9 @@ use crate::types::service_configuration;
 use crate::utils::StringExt;
 use serde::Deserialize;
 
+// Cache TTL configuration
+const CACHE_TTL_SECONDS: i64 = 300; // 5 minutes
+
 // Converted type synonyms
 // Original Haskell type: KVDBName
 pub type KVDBName = String;
@@ -69,12 +72,6 @@ where
     match app_state.redis_conn.get_key_string(&key).await {
         Ok(redis_value) => {
             // Found in Redis, decode and return
-            logger::debug!(
-                tag = "redis_cache_hit",
-                action = "redis_cache_hit",
-                "Cache hit for key: {}",
-                key
-            );
             match decode_fn {
                 Some(func) => func(redis_value),
                 None => extractValue(redis_value),
@@ -83,8 +80,8 @@ where
         Err(_) => {
             // Redis miss, fallback to database
             crate::logger::debug!(
-                tag = "redis_cache_miss",
-                action = "redis_cache_miss",
+                tag = "redis_cache",
+                action = "miss",
                 "Cache miss for key: {}, falling back to database",
                 key
             );
@@ -95,7 +92,16 @@ where
                 Ok(Some(service_config)) => match service_config.value {
                     Some(value) => {
                         // Cache the value in Redis for future use (TTL: 5 minutes)
-                        let _ = app_state.redis_conn.setx(&key, &value, 300).await;
+                        match app_state.redis_conn.setx(&key, &value, CACHE_TTL_SECONDS).await {
+                            Ok(_) => {},
+                            Err(e) => {
+                                crate::logger::warn!(
+                                    tag = "redis_cache_write_failed",
+                                    action = "redis_cache_write_failed",
+                                    "Failed to write cache for key: {}, error: {:?}", key, e
+                                );
+                            }
+                        }
                         
                         match decode_fn {
                             Some(func) => func(value),
