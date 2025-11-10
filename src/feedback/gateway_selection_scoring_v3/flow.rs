@@ -43,8 +43,9 @@ use crate::{
         constants as C,
         types::SrV3DebugBlock,
         utils::{
-            dateInIST, findKeysByPattern, getCurrentIstDateWithFormat, getProducerKey, isKeyExistsRedis,
-            log_gateway_score_type, updateMovingWindow, updateScore, GatewayScoringType,
+            dateInIST, findKeysByPattern, getCurrentIstDateWithFormat, getProducerKey,
+            isKeyExistsRedis, log_gateway_score_type, updateMovingWindow, updateScore,
+            GatewayScoringType,
         },
     },
     redis::types::ServiceConfigKey,
@@ -190,7 +191,11 @@ pub async fn createKeysIfNotExist(
 
             // Create MessageFormat for metric logging
             let message_format = MessageFormat {
-                model: txn_detail.txnObjectType.to_string(),
+                model: txn_detail
+                    .txnObjectType
+                    .clone()
+                    .map(|t| t.to_string())
+                    .unwrap_or_default(),
                 log_type: "APP_EVENT".to_string(),
                 payment_method: txn_card_info.paymentMethod.clone(),
                 payment_method_type: txn_card_info.paymentMethodType.clone(),
@@ -200,7 +205,7 @@ pub async fn createKeysIfNotExist(
                 stage: "REDIS_KEYS_THRESHOLD_EXCEEDED".to_string(),
                 merchant_id: MID::merchant_id_to_text(txn_detail.merchantId.clone()),
                 txn_uuid: txn_detail.txnUuid.clone(),
-                order_id: txn_detail.clone().orderId.0.clone(),
+                order_id: txn_detail.clone().orderId.0,
                 card_type: txn_card_info
                     .card_type
                     .as_ref()
