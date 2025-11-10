@@ -12,31 +12,28 @@ use crate::merchant_config_util::{
 };
 use crate::redis::types::ServiceConfigKey;
 #[cfg(feature = "mysql")]
+#[warn(unused_imports)]
 use crate::storage::schema::txn_detail;
 #[cfg(feature = "postgres")]
 use crate::storage::schema_pg::txn_detail;
 use crate::types::gateway_routing_input::{
     EliminationLevel, EliminationSuccessRateInput, GatewayScore,
     GatewaySuccessRateBasedRoutingInput, GatewayWiseSuccessRateBasedRoutingInput,
-    GlobalGatewayScore, GlobalScore, GlobalScoreLog, SelectionLevel,
+    GlobalGatewayScore, GlobalScore, GlobalScoreLog,
 };
 use crate::types::payment_flow::PaymentFlow;
 use crate::types::tenant::tenant_config::ModuleName;
 use crate::types::transaction::id::TransactionId;
 use crate::utils::{generate_random_number, get_current_date_in_millis};
-use diesel::dsl::update;
 use masking::PeekInterface;
-use rand::prelude::*;
 use rand_distr::{Beta, Binomial, Distribution};
 use serde::{Deserialize, Serialize};
 use time::{OffsetDateTime, PrimitiveDateTime};
 // use crate::types::card_brand_routes as ETCBR;
-use crate::redis::feature::{self as M, isFeatureEnabled};
-use crate::types::gateway as ETG;
+use crate::redis::feature::{self as M, is_feature_enabled};
 use crate::types::gateway_routing_input as ETGRI;
 // use crate::types::gateway_health as ETGH;
 use crate::types::card as ETCT;
-use crate::types::payment as ETP;
 // use crate::types::issuer_routes as ETIssuerR;
 use crate::types::merchant as ETM;
 use crate::types::txn_details::types as ETTD;
@@ -66,7 +63,7 @@ use crate::types::gateway_outage::{self as ETGO, GatewayOutage};
 // use system_random::internal::StdGen;
 use super::types::{
     transform_gateway_wise_success_rate_based_routing, ConfigSource, DebugScoringEntry,
-    DeciderGatewayWiseSuccessRateBasedRoutingInput, Dimension, DownTime, FilterLevel, Gateway,
+    DeciderGatewayWiseSuccessRateBasedRoutingInput, Dimension, DownTime, FilterLevel,
     GatewayRedisKeyMap, GatewayScoringData, GlobalSREvaluationScoreLog, LogCurrScore,
     RankingAlgorithm, RedisKey, ResetApproach, ResetGatewayInput, ScoreKeyType, SrV3InputConfig,
     SuccessRate1AndNConfig,
@@ -76,7 +73,6 @@ use crate::types::payment::payment_method_type_const::*;
 use std::collections::HashMap as MP;
 use std::iter::Iterator;
 use std::option::Option;
-use std::primitive;
 use std::string::String as T;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::vec::Vec;
@@ -189,7 +185,7 @@ pub async fn scoring_flow(
 
     if functional_gateways.len() == 1 {
         set_gwsm(decider_flow, create_score_map(functional_gateways.clone()));
-        set_decider_approach(decider_flow, GatewayDeciderApproach::DEFAULT);
+        set_decider_approach(decider_flow, GatewayDeciderApproach::Default);
         Utils::set_top_gateway_before_sr_downtime_evaluation(
             decider_flow,
             functional_gateways.first().cloned(),
@@ -224,19 +220,19 @@ pub async fn scoring_flow(
 
         let is_merchant_enabled_for_sr_based_routing = isMerchantEnabledForPaymentFlows(
             merchant.id.clone(),
-            vec![PaymentFlow::SR_BASED_ROUTING],
+            vec![PaymentFlow::SrBasedRouting],
         )
         .await
-            || ranking_algorithm == Some(RankingAlgorithm::SR_BASED_ROUTING);
+            || ranking_algorithm == Some(RankingAlgorithm::SrBasedRouting);
 
         let is_sr_v3_metric_enabled = if is_merchant_enabled_for_sr_based_routing {
-            let is_sr_v3_metric_enabled = isFeatureEnabled(
+            let is_sr_v3_metric_enabled = is_feature_enabled(
                 C::enable_gateway_selection_based_on_sr_v3_input(pmt_str.clone()).get_key(),
                 Utils::get_m_id(merchant.merchantId.clone()),
                 "kv_redis".to_string(),
             )
             .await
-                || ranking_algorithm == Some(RankingAlgorithm::SR_BASED_ROUTING);
+                || ranking_algorithm == Some(RankingAlgorithm::SrBasedRouting);
 
             if is_sr_v3_metric_enabled {
                 logger::info!(
@@ -252,7 +248,7 @@ pub async fn scoring_flow(
                 )
                 .await;
                 let default_sr_v3_input_config =
-                    findByNameFromRedis(C::srV3DefaultInputConfig.get_key()).await;
+                    findByNameFromRedis(C::SR_V3_DEFAULT_INPUT_CONFIG.get_key()).await;
 
                 logger::info!(
                     tag = "scoringFlow_Sr_V3_Input_Config",
@@ -293,11 +289,11 @@ pub async fn scoring_flow(
                         &sr_routing_dimesions,
                     )
                 })
-                .unwrap_or(C::defaultSrV3BasedHedgingPercent);
+                .unwrap_or(C::DEFAULT_SR_V3_BASED_HEDGING_PERCENT);
 
                 Utils::set_sr_v3_hedging_percent(decider_flow, hedging_percent);
 
-                let is_explore_and_exploit_enabled = isFeatureEnabled(
+                let is_explore_and_exploit_enabled = is_feature_enabled(
                     C::enableExploreAndExploitOnSrV3(pmt_str).get_key(),
                     Utils::get_m_id(merchant.merchantId.clone()),
                     "kv_redis".to_string(),
@@ -348,16 +344,16 @@ pub async fn scoring_flow(
                     );
 
                     if should_explore {
-                        set_decider_approach(decider_flow, GatewayDeciderApproach::SR_V3_HEDGING);
+                        set_decider_approach(decider_flow, GatewayDeciderApproach::SrV3Hedging);
                     } else {
                         set_decider_approach(
                             decider_flow,
-                            GatewayDeciderApproach::SR_SELECTION_V3_ROUTING,
+                            GatewayDeciderApproach::SrSelectionV3Routing,
                         );
                     }
 
-                    let is_route_random_traffic_enabled = isFeatureEnabled(
-                        C::routeRandomTrafficSrV3EnabledMerchant.get_key(),
+                    let is_route_random_traffic_enabled = is_feature_enabled(
+                        C::ROUTE_RANDOM_TRAFFIC_SR_V3_ENABLED_MERCHANT.get_key(),
                         Utils::get_m_id(merchant.merchantId.clone()),
                         "kv_redis".to_string(),
                     )
@@ -385,8 +381,8 @@ pub async fn scoring_flow(
 
                     if sr_gw_score.len() > 1 && (!is_explore_and_exploit_enabled || should_explore)
                     {
-                        let is_debug_mode_enabled = isFeatureEnabled(
-                            C::enableDebugModeOnSrV3.get_key(),
+                        let is_debug_mode_enabled = is_feature_enabled(
+                            C::ENABLE_DEBUG_MODE_ON_SR_V3.get_key(),
                             Utils::get_m_id(merchant.merchantId.clone()),
                             "kv_redis".to_string(),
                         );
@@ -432,7 +428,7 @@ pub async fn scoring_flow(
                 Utils::get_m_id(merchant.merchantId.clone()),
                 txn_detail.txnId.clone()
             );
-            set_decider_approach(decider_flow, GatewayDeciderApproach::PRIORITY_LOGIC);
+            set_decider_approach(decider_flow, GatewayDeciderApproach::PriorityLogic);
             let gateway_score =
                 get_score_with_priority(functional_gateways.clone(), gateway_priority_list.clone());
             set_gwsm(decider_flow, gateway_score.clone());
@@ -502,7 +498,7 @@ pub async fn get_cached_scores_based_on_srv3(
     let sr_gateway_redis_key_map: GatewayRedisKeyMap = Utils::get_consumer_key(
         decider_flow,
         gateway_scoring_data,
-        super::types::ScoreKeyType::SR_V3_KEY,
+        super::types::ScoreKeyType::SrV3Key,
         false,
         functional_gateways.clone(),
     )
@@ -579,8 +575,8 @@ pub async fn get_cached_scores_based_on_srv3(
     )
     .await;
 
-    let is_srv3_reset_enabled = M::isFeatureEnabled(
-        C::ENABLE_RESET_ON_SR_V3.get_key(),
+    let is_srv3_reset_enabled = M::is_feature_enabled(
+        C::EnableResetOnSrV3.get_key(),
         Utils::get_m_id(merchant.merchantId.clone()),
         "kv_redis".to_string(),
     )
@@ -600,7 +596,7 @@ pub async fn get_cached_scores_based_on_srv3(
                 &sr_routing_dimesions,
             )
         })
-        .unwrap_or(C::defaultSrV3BasedUpperResetFactor);
+        .unwrap_or(C::DEFAULT_SR_V3_BASED_UPPER_RESET_FACTOR);
         let lower_reset_factor = Utils::get_sr_v3_lower_reset_factor(
             merchant_srv3_input_config.clone(),
             &pmt_str,
@@ -615,7 +611,7 @@ pub async fn get_cached_scores_based_on_srv3(
                 &sr_routing_dimesions,
             )
         })
-        .unwrap_or(C::defaultSrV3BasedLowerResetFactor);
+        .unwrap_or(C::DEFAULT_SR_V3_BASED_LOWER_RESET_FACTOR);
         logger::debug!(
             tag = "Sr_V3_Upper_Reset_Factor",
             action = "Sr_V3_Upper_Reset_Factor",
@@ -649,15 +645,15 @@ pub async fn get_cached_scores_based_on_srv3(
                 "SR_SELECTION_V3_EVALUATION_AFTER_RESET".to_string(),
             )
             .await;
-            Utils::set_reset_approach(decider_flow, ResetApproach::SRV3_RESET);
+            Utils::set_reset_approach(decider_flow, ResetApproach::Srv3Reset);
         }
         updated_score_map_after_reset
     } else {
         score_map
     };
 
-    let is_srv3_extra_score_enabled = M::isFeatureEnabled(
-        C::enable_extra_score_on_sr_v3.get_key(),
+    let is_srv3_extra_score_enabled = M::is_feature_enabled(
+        C::ENABLE_EXTRA_SCORE_ON_SR_V3.get_key(),
         Utils::get_m_id(merchant.merchantId.clone()),
         "kv_redis".to_string(),
     )
@@ -694,14 +690,14 @@ pub async fn get_cached_scores_based_on_srv3(
         updated_score_map_after_reset
     };
 
-    let is_srv3_binomial_distribution_enabled = M::isFeatureEnabled(
-        C::enable_binomial_distribution_on_sr_v3.get_key(),
+    let is_srv3_binomial_distribution_enabled = M::is_feature_enabled(
+        C::ENABLE_BINOMIAL_DISTRIBUTION_ON_SR_V3.get_key(),
         Utils::get_m_id(merchant.merchantId.clone()),
         "kv_redis".to_string(),
     )
     .await;
-    let is_srv3_beta_distribution_enabled = M::isFeatureEnabled(
-        C::enable_beta_distribution_on_sr_v3.get_key(),
+    let is_srv3_beta_distribution_enabled = M::is_feature_enabled(
+        C::ENABLE_BETA_DISTRIBUTION_ON_SR_V3.get_key(),
         Utils::get_m_id(merchant.merchantId.clone()),
         "kv_redis".to_string(),
     )
@@ -1008,7 +1004,7 @@ pub async fn update_score_for_outage(decider_flow: &mut DeciderFlow<'_>) -> Gate
     let txn_card_info = decider_flow.get().dpTxnCardInfo.clone();
     let merchant = decider_flow.get().dpMerchantAccount.clone();
     let scheduled_outage_validation_duration =
-        RService::findByNameFromRedis(C::SCHEDULED_OUTAGE_VALIDATION_DURATION.get_key())
+        RService::findByNameFromRedis(C::ScheduledOutageValidationDuration.get_key())
             .await
             .unwrap_or(86400);
 
@@ -1164,7 +1160,7 @@ fn check_scheduled_outage_metadata(
         Some(scheduled_outage_metadata) => {
             schedule_equal_to(
                 |x, y| x == y,
-                Some(txn_detail.txnObjectType.clone()),
+                txn_detail.txnObjectType.clone(),
                 scheduled_outage_metadata.txnObjectType.clone(),
             ) && schedule_equal_to(
                 |x, y| x == y,
@@ -1367,7 +1363,7 @@ pub fn get_gateway_wise_routing_inputs_for_global_sr(
                     .as_ref()
                     .and_then(|input| input.defaultGlobalEliminationLevel.clone())
             })
-            .or(Some(ETGRI::EliminationLevel::PAYMENT_METHOD));
+            .or(Some(ETGRI::EliminationLevel::PaymentMethod));
         gri.eliminationMaxCountThreshold = gri
             .eliminationMaxCountThreshold
             .or(global_routing_defaults.defaultGlobalEliminationMaxCountThreshold);
@@ -1387,7 +1383,7 @@ pub async fn get_global_elimination_gateway_score(
     gateway_key_map: GatewayRedisKeyMap,
     gsri: GatewayWiseSuccessRateBasedRoutingInput,
 ) -> Option<(Vec<GlobalScoreLog>, f64)> {
-    if gsri.eliminationLevel != Some(ETGRI::EliminationLevel::NONE) {
+    if gsri.eliminationLevel != Some(ETGRI::EliminationLevel::None) {
         let redis_key = gateway_key_map
             .get(&gsri.gateway.to_string())
             .cloned()
@@ -1436,15 +1432,31 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                     })
                     .collect::<Vec<_>>();
 
+                logger::info!(
+                    tag = "scoringFlow",
+                    action = "scoringFlow",
+                    "Gateway Success Rate Inputs for Global SR based elimination for {:?} : {:?}",
+                    txn_detail.txnId,
+                    gateway_success_rate_inputs
+                );
+
                 let gateway_list = Utils::get_gateway_list(gateway_score.clone());
                 let gateway_redis_key_map = Utils::get_consumer_key(
                     decider_flow,
                     gateway_scoring_data,
-                    ScoreKeyType::ELIMINATION_GLOBAL_KEY,
+                    ScoreKeyType::EliminationGlobalKey,
                     false,
                     gateway_list,
                 )
                 .await;
+
+                logger::info!(
+                    tag = "scoringFlow",
+                    action = "scoringFlow",
+                    "Gateway Redis Key Map for Global SR based elimination for {:?} : {:?}",
+                    txn_detail.txnId,
+                    gateway_redis_key_map
+                );
 
                 let mut upd_gateway_success_rate_inputs = Vec::new();
                 let mut global_gateway_scores = Vec::new();
@@ -1454,21 +1466,56 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                         gsri.clone(),
                     )
                     .await;
+                    logger::info!(
+                        tag = "scoringFlow",
+                        action = "scoringFlow",
+                        "Global Elimination Gateway Score for {:?} : {:?}",
+                        txn_detail.txnId,
+                        global_elimination_gateway_score
+                    );
                     match global_elimination_gateway_score {
                         Some((global_gateway_score, s)) => {
+                            logger::info!(action = "global_gateway_score", "s-value : {:?}", s);
+                            logger::info!(
+                                action = "global_gateway_score",
+                                "global_gateway_score{:?}",
+                                global_gateway_score
+                            );
                             let new_gsri = GatewayWiseSuccessRateBasedRoutingInput {
                                 currentScore: Some(s),
                                 ..gsri.clone()
                             };
+                            logger::info!(
+                                action = "global_gateway_score",
+                                "Global Elimination Gateway Score for {:?} : {:?}",
+                                txn_detail.txnId,
+                                new_gsri
+                            );
                             upd_gateway_success_rate_inputs.push(new_gsri);
+                            logger::info!(
+                                action = "global_gateway_score",
+                                "upd_gateway_success_rate_inputs{:?}",
+                                upd_gateway_success_rate_inputs
+                            );
                             global_gateway_scores.extend(update_global_score_log(
                                 gsri.gateway.clone(),
                                 global_gateway_score,
                             ));
+                            logger::info!(
+                                action = "update_global_score_log",
+                                "global_gateway_scores{:?}",
+                                global_gateway_scores
+                            );
                         }
                         None => {}
                     }
                 }
+
+                logger::info!(
+                    action = "update_gateway_score_based_on_global_success_rate",
+                    "upd_gateway_success_rate_inputs{:?}",
+                    upd_gateway_success_rate_inputs
+                );
 
                 let filtered_gateway_success_rate_inputs: Vec<
                     GatewayWiseSuccessRateBasedRoutingInput,
@@ -1482,6 +1529,12 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                         }
                     })
                     .collect();
+
+                logger::info!(
+                    action = "filtered_gateway_success_rate_inputs",
+                    "filtered_gateway_success_rate_inputs{:?}",
+                    filtered_gateway_success_rate_inputs
+                );
 
                 reset_metric_log_data(decider_flow);
                 let init_metric_log_data = decider_flow.writer.srMetricLogData.clone();
@@ -1726,11 +1779,11 @@ pub fn check_sr_global_routing_defaults(
 }
 
 pub fn is_forced_pm(v: &GatewaySuccessRateBasedRoutingInput) -> bool {
-    v.defaultGlobalEliminationLevel == Some(EliminationLevel::FORCED_PAYMENT_METHOD)
+    v.defaultGlobalEliminationLevel == Some(EliminationLevel::ForcedPaymentMethod)
 }
 
 pub fn global_elim_lvl_not_none(v: &GatewaySuccessRateBasedRoutingInput) -> bool {
-    v.defaultGlobalEliminationLevel != Some(EliminationLevel::NONE)
+    v.defaultGlobalEliminationLevel != Some(EliminationLevel::None)
 }
 
 pub async fn get_gateway_wise_routing_inputs_for_merchant_sr(
@@ -1742,20 +1795,20 @@ pub async fn get_gateway_wise_routing_inputs_for_merchant_sr(
     default_success_rate_based_routing_input: Option<GatewaySuccessRateBasedRoutingInput>,
 ) -> GatewayWiseSuccessRateBasedRoutingInput {
     let m_option =
-        RService::findByNameFromRedis(C::SR_BASED_GATEWAY_ELIMINATION_THRESHOLD.get_key()).await;
+        RService::findByNameFromRedis(C::SrBasedGatewayEliminationThreshold.get_key()).await;
     let default_soft_txn_reset_count =
-        RService::findByNameFromRedis(C::srBasedTxnResetCount.get_key())
+        RService::findByNameFromRedis(C::SR_BASED_TXN_RESET_COUNT.get_key())
             .await
-            .unwrap_or(C::gwDefaultTxnSoftResetCount);
-    let is_elimination_v2_enabled = isFeatureEnabled(
-        C::ENABLE_ELIMINATION_V2.get_key(),
+            .unwrap_or(C::GW_DEFAULT_TXN_SOFT_RESET_COUNT);
+    let is_elimination_v2_enabled = is_feature_enabled(
+        C::EnableEliminationV2.get_key(),
         merchant_acc.merchantId.0.clone(),
         "kv_redis".to_string(),
     )
     .await;
 
     let default_elimination_threshold =
-        m_option.unwrap_or(C::defaultSrBasedGatewayEliminationThreshold);
+        m_option.unwrap_or(C::DEFAULT_SR_BASED_GATEWAY_ELIMINATION_THRESHOLD);
     let merchant_given_default_threshold = gateway_success_rate_merchant_input
         .clone()
         .map(|input| input.defaultEliminationThreshold);
@@ -1804,7 +1857,7 @@ pub async fn get_gateway_wise_routing_inputs_for_merchant_sr(
                 .eliminationLevel
                 .clone()
                 .or(merchant_given_default_elimination_level.clone())
-                .or(Some(EliminationLevel::GATEWAY)),
+                .or(Some(EliminationLevel::Gateway)),
             ..e.clone()
         })
         .unwrap_or(GatewayWiseSuccessRateBasedRoutingInput {
@@ -1818,11 +1871,11 @@ pub async fn get_gateway_wise_routing_inputs_for_merchant_sr(
             gatewayLevelEliminationThreshold: merchant_given_default_gateway_sr_threshold
                 .unwrap_or(
                     default_gateway_level_sr_elimination_threshold
-                        .unwrap_or(Some(C::defSRBasedGwLevelEliminationThreshold)),
+                        .unwrap_or(Some(C::DEF_SRBASED_GW_LEVEL_ELIMINATION_THRESHOLD)),
                 ),
             eliminationLevel: merchant_given_default_elimination_level
                 .or(default_merchant_elimination_level)
-                .or(Some(EliminationLevel::PAYMENT_METHOD)),
+                .or(Some(EliminationLevel::PaymentMethod)),
             currentScore: None,
             lastResetTimeStamp: None,
         })
@@ -1930,7 +1983,10 @@ pub async fn get_sr1_and_sr2_and_n(
             } else {
                 Some(txn_card_info.paymentMethod.clone())
             };
-            let txn_obj_type = txn_detail.txnObjectType.to_string();
+            let txn_obj_type = txn_detail
+                .txnObjectType
+                .map(|t| t.to_string())
+                .unwrap_or_default();
 
             filter_using_service_config(merchant_id, pmt.to_string(), pm, txn_obj_type, inputs)
                 .await
@@ -1958,13 +2014,13 @@ pub async fn get_sr1_and_sr2_and_n(
 //     let m_default_n = RC::r_hget(Config::EC_REDIS, construct_n_key(merchant_id), C::DEFAULT_FIELD_NAME_FOR_SR1_AND_N).await;
 
 //     if let (Some(sr1), Some(n)) = (m_default_sr1, m_default_n) {
-//         Some((sr1, sr2, n, None, None, None, ConfigSource::MERCHANT_DEFAULT))
+//         Some((sr1, sr2, n, None, None, None, ConfigSource::MerchantDefault))
 //     } else {
 //         let m_s_config_sr1 = RService::find_by_name_from_redis(C::DEFAULT_SR1_S_CONFIG_PREFIX(merchant_id)).await;
 //         let m_s_config_n = RService::find_by_name_from_redis(C::DEFAULT_N_S_CONFIG_PREFIX(merchant_id)).await;
 
 //         if let (Some(sr1), Some(n)) = (m_s_config_sr1, m_s_config_n) {
-//             Some((sr1, sr2, n, None, None, None, ConfigSource::GLOBAL_DEFAULT))
+//             Some((sr1, sr2, n, None, None, None, ConfigSource::GlobalDefault))
 //         } else {
 //             None
 //         }
@@ -1993,7 +2049,7 @@ async fn filter_using_service_config(
     let configs = m_configs.unwrap_or_else(Vec::new);
 
     fetch_sr1_and_n_from_service_config_upto(
-        FilterLevel::TXN_OBJECT_TYPE,
+        FilterLevel::TxnObjectType,
         merchant_id.clone(),
         pmt.clone(),
         pm.clone(),
@@ -2003,7 +2059,7 @@ async fn filter_using_service_config(
     )
     .or_else(|| {
         fetch_sr1_and_n_from_service_config_upto(
-            FilterLevel::PAYMENT_METHOD,
+            FilterLevel::PaymentMethod,
             merchant_id.clone(),
             pmt.clone(),
             pm.clone(),
@@ -2014,7 +2070,7 @@ async fn filter_using_service_config(
     })
     .or_else(|| {
         fetch_sr1_and_n_from_service_config_upto(
-            FilterLevel::PAYMENT_METHOD_TYPE,
+            FilterLevel::PaymentMethodType,
             merchant_id,
             pmt,
             pm,
@@ -2033,11 +2089,11 @@ pub fn filter_inputs_upto(
     inputs: Vec<ETGRI::EliminationSuccessRateInput>,
 ) -> Option<ETGRI::EliminationSuccessRateInput> {
     match level {
-        FilterLevel::TXN_OBJECT_TYPE => {
+        FilterLevel::TxnObjectType => {
             filter_inputs_upto_txn_object_type(pmt, pm, txn_obj_type, inputs)
         }
-        FilterLevel::PAYMENT_METHOD => filter_inputs_upto_payment_method(pmt, pm, inputs),
-        FilterLevel::PAYMENT_METHOD_TYPE => filter_inputs_upto_payment_method_type(pmt, inputs),
+        FilterLevel::PaymentMethod => filter_inputs_upto_payment_method(pmt, pm, inputs),
+        FilterLevel::PaymentMethodType => filter_inputs_upto_payment_method_type(pmt, inputs),
     }
 }
 
@@ -2130,13 +2186,13 @@ pub fn fetch_sr1_and_n_from_service_config_upto(
         inputs,
     );
     let m_config = match level {
-        FilterLevel::TXN_OBJECT_TYPE => {
+        FilterLevel::TxnObjectType => {
             filter_configs_upto_txn_object_type(&pmt, pm.as_ref(), &txn_object_type, &configs)
         }
-        FilterLevel::PAYMENT_METHOD => {
+        FilterLevel::PaymentMethod => {
             filter_configs_upto_payment_method(&pmt, pm.as_ref(), &configs)
         }
-        FilterLevel::PAYMENT_METHOD_TYPE => filter_configs_upto_payment_method_type(&pmt, &configs),
+        FilterLevel::PaymentMethodType => filter_configs_upto_payment_method_type(&pmt, &configs),
     };
 
     match (m_input, m_config) {
@@ -2147,7 +2203,7 @@ pub fn fetch_sr1_and_n_from_service_config_upto(
             Some(input.paymentMethodType),
             input.paymentMethod.clone(),
             input.txnObjectType.clone(),
-            ConfigSource::SERVICE_CONFIG,
+            ConfigSource::ServiceConfig,
         )),
         _ => None,
     }
@@ -2244,8 +2300,7 @@ pub async fn get_success_rate_routing_inputs(
     Option<ETGRI::GatewaySuccessRateBasedRoutingInput>,
     Option<ETGRI::GatewaySuccessRateBasedRoutingInput>,
 ) {
-    let redis_input =
-        findByNameFromRedis(C::DEFAULT_SR_BASED_GATEWAY_ELIMINATION_INPUT.get_key()).await;
+    let redis_input = findByNameFromRedis(C::DefaultSrBasedGatewayEliminationInput.get_key()).await;
     let decoded_input = Utils::decode_and_log_error(
         "Gateway Decider Input Decode Error",
         &merchant_acc.gatewaySuccessRateBasedDeciderInput,
@@ -2286,8 +2341,8 @@ pub async fn update_gateway_score_based_on_success_rate(
     let enable_success_rate_based_gateway_elimination = isPaymentFlowEnabledWithHierarchyCheck(
         merchant_acc.id.clone(),
         merchant_acc.tenantAccountId.clone(),
-        ModuleName::MERCHANT_CONFIG,
-        PaymentFlow::ELIMINATION_BASED_ROUTING,
+        ModuleName::MerchantConfig,
+        PaymentFlow::EliminationBasedRouting,
         crate::types::country::country_iso::text_db_to_country_iso(
             merchant_acc.country.as_deref().unwrap_or_default(),
         )
@@ -2308,12 +2363,29 @@ pub async fn update_gateway_score_based_on_success_rate(
         let (default_success_rate_based_routing_input, gateway_success_rate_merchant_input) =
             get_success_rate_routing_inputs(merchant_acc.clone()).await;
 
-        let is_reset_score_enabled_for_merchant = isFeatureEnabled(
-            C::GATEWAY_RESET_SCORE_ENABLED.get_key(),
+        logger::info!(
+            action = "update_gateway_score_based_on_success_rate",
+            "Default SR based routing input: {:?}",
+            default_success_rate_based_routing_input
+        );
+        logger::info!(
+            action = "update_gateway_score_based_on_success_rate",
+            "Merchant SR based routing input: {:?}",
+            gateway_success_rate_merchant_input
+        );
+
+        let is_reset_score_enabled_for_merchant = is_feature_enabled(
+            C::GatewayResetScoreEnabled.get_key(),
             Utils::get_m_id(txn_detail.merchantId.clone()),
             "kv_redis".to_string(),
         )
         .await;
+
+        logger::info!(
+            action = "update_gateway_score_based_on_success_rate",
+            "Is reset score enabled for merchant {:?}",
+            is_reset_score_enabled_for_merchant
+        );
 
         let payment_method_type = if Utils::is_card_transaction(&txn_card_info) {
             CARD
@@ -2325,6 +2397,8 @@ pub async fn update_gateway_score_based_on_success_rate(
             .clone()
             .map(|input| input.enabledPaymentMethodTypes.clone())
             .unwrap_or_default();
+
+        logger::info!(action = "update_gateway_score_based_on_success_rate","Enabled payment method types for merchant {:?} and Payment method type for transaction {:?}", enabled_payment_method_types, payment_method_type);
 
         if !enabled_payment_method_types.is_empty()
             && !enabled_payment_method_types.contains(&payment_method_type.to_string())
@@ -2384,7 +2458,7 @@ pub async fn update_gateway_score_based_on_success_rate(
                 let gateway_redis_key_map = Utils::get_consumer_key(
                     decider_flow,
                     gateway_scoring_data.clone(),
-                    ScoreKeyType::ELIMINATION_MERCHANT_KEY,
+                    ScoreKeyType::EliminationMerchantKey,
                     false,
                     gateway_list.clone(),
                 )
@@ -2559,7 +2633,7 @@ pub async fn update_gateway_score_based_on_success_rate(
                 // };
 
                 let reset_gw_list = decider_flow.writer.resetGatewayList.clone();
-                if (!reset_gw_list.is_empty()) {
+                if !reset_gw_list.is_empty() {
                     trigger_reset_gateway_score(
                         decider_flow,
                         gateway_success_rate_inputs,
@@ -2576,8 +2650,8 @@ pub async fn update_gateway_score_based_on_success_rate(
                     if filtered_gateway_success_rate_inputs.len() > 1
                         && new_gateway_score.len() == filtered_gateway_success_rate_inputs.len()
                     {
-                        let optimization_during_downtime_enabled = isFeatureEnabled(
-                            C::ENABLE_OPTIMIZATION_DURING_DOWNTIME.get_key(),
+                        let optimization_during_downtime_enabled = is_feature_enabled(
+                            C::EnableOptimizationDuringDowntime.get_key(),
                             Utils::get_m_id(txn_detail.merchantId.clone()),
                             "kv_redis".to_string(),
                         )
@@ -2593,7 +2667,7 @@ pub async fn update_gateway_score_based_on_success_rate(
                                     new_gateway_score,
                                 );
 
-                                (new_gateway_score.clone(), DownTime::ALL_DOWNTIME, vec![])
+                                (new_gateway_score.clone(), DownTime::AllDowntime, vec![])
                             } else {
                                 logger::info!(
                                     "Overriding priority with PL during downtime for {:?} : {:?}",
@@ -2601,7 +2675,7 @@ pub async fn update_gateway_score_based_on_success_rate(
                                     initial_gw_scores,
                                 );
 
-                                (initial_gw_scores.clone(), DownTime::ALL_DOWNTIME, vec![])
+                                (initial_gw_scores.clone(), DownTime::AllDowntime, vec![])
                             }
                         } else {
                             logger::info!(
@@ -2614,7 +2688,7 @@ pub async fn update_gateway_score_based_on_success_rate(
 
                             (
                                 new_gateway_score.clone(),
-                                DownTime::ALL_DOWNTIME,
+                                DownTime::AllDowntime,
                                 sr_based_elimination_approach_info,
                             )
                         }
@@ -2624,19 +2698,19 @@ pub async fn update_gateway_score_based_on_success_rate(
                     {
                         (
                             new_gateway_score.clone(),
-                            DownTime::GLOBAL_DOWNTIME,
+                            DownTime::GlobalDowntime,
                             sr_based_elimination_approach_info,
                         )
                     } else if !filtered_gateway_success_rate_inputs.is_empty() {
                         (
                             new_gateway_score.clone(),
-                            DownTime::DOWNTIME,
+                            DownTime::Downtime,
                             sr_based_elimination_approach_info,
                         )
                     } else {
                         (
                             new_gateway_score.clone(),
-                            DownTime::NO_DOWNTIME,
+                            DownTime::NoDowntime,
                             sr_based_elimination_approach_info,
                         )
                     };
@@ -2749,8 +2823,8 @@ pub fn merchantGatewayScoreDimension(
     routingInput: GatewayWiseSuccessRateBasedRoutingInput,
 ) -> Dimension {
     match routingInput.eliminationLevel {
-        Some(EliminationLevel::PAYMENT_METHOD_TYPE) => Dimension::SECOND,
-        Some(EliminationLevel::PAYMENT_METHOD) => Dimension::THIRD,
+        Some(EliminationLevel::PaymentMethodType) => Dimension::SECOND,
+        Some(EliminationLevel::PaymentMethod) => Dimension::THIRD,
         _ => Dimension::FIRST,
     }
 }
@@ -2758,20 +2832,20 @@ pub fn merchantGatewayScoreDimension(
 pub async fn getKeyTTLFromMerchantDimension(dimension: Dimension) -> f64 {
     let mTtl: Option<f64> = match dimension {
         Dimension::FIRST => {
-            RService::findByNameFromRedis(C::gwScoreFirstDimensionTtl.get_key()).await
+            RService::findByNameFromRedis(C::GW_SCORE_FIRST_DIMENSION_TTL.get_key()).await
         }
         Dimension::SECOND => {
-            RService::findByNameFromRedis(C::gwScoreSecondDimensionTtl.get_key()).await
+            RService::findByNameFromRedis(C::GW_SCORE_SECOND_DIMENSION_TTL.get_key()).await
         }
         Dimension::THIRD => {
-            RService::findByNameFromRedis(C::gwScoreThirdDimensionTtl.get_key()).await
+            RService::findByNameFromRedis(C::GW_SCORE_THIRD_DIMENSION_TTL.get_key()).await
         }
         Dimension::FOURTH => {
-            RService::findByNameFromRedis(C::gwScoreFourthDimensionTtl.get_key()).await
+            RService::findByNameFromRedis(C::GW_SCORE_FOURTH_DIMENSION_TTL.get_key()).await
         }
     };
 
-    mTtl.unwrap_or(C::defScoreKeysTtl)
+    mTtl.unwrap_or(C::DEF_SCORE_KEYS_TTL)
 }
 
 pub async fn evaluate_reset_gateway_score(
@@ -2856,7 +2930,7 @@ pub async fn trigger_reset_gateway_score(
 
             if let Some(sr_input) = m_sr_input {
                 let gw_ref_id = Utils::get_gateway_reference_id(meta, it, oref, pl_ref_id_map);
-                let hard_ttl = getTTLForKey(ScoreKeyType::ELIMINATION_MERCHANT_KEY).await;
+                let hard_ttl = getTTLForKey(ScoreKeyType::EliminationMerchantKey).await;
                 let soft_ttl =
                     getKeyTTLFromMerchantDimension(merchantGatewayScoreDimension(sr_input.clone()))
                         .await;
@@ -2892,13 +2966,13 @@ pub async fn trigger_reset_gateway_score(
 
         let reset_approach = Utils::get_reset_approach(decider_flow);
         match reset_approach {
-            ResetApproach::SRV2_RESET => {
-                Utils::set_reset_approach(decider_flow, ResetApproach::SRV2_ELIMINATION_RESET)
+            ResetApproach::Srv2Reset => {
+                Utils::set_reset_approach(decider_flow, ResetApproach::Srv2EliminationReset)
             }
-            ResetApproach::SRV3_RESET => {
-                Utils::set_reset_approach(decider_flow, ResetApproach::SRV3_ELIMINATION_RESET)
+            ResetApproach::Srv3Reset => {
+                Utils::set_reset_approach(decider_flow, ResetApproach::Srv3EliminationReset)
             }
-            _ => Utils::set_reset_approach(decider_flow, ResetApproach::ELIMINATION_RESET),
+            _ => Utils::set_reset_approach(decider_flow, ResetApproach::EliminationReset),
         }
         logger::info!(
             tag = "RESET_APPROACH",
@@ -3092,11 +3166,9 @@ pub fn route_random_traffic(
                 .chain(head_gateways.iter())
                 .collect::<Vec<_>>()
         );
-        if is_sr_v3_metric_enabled {
-            set_decider_approach(decider_flow, GatewayDeciderApproach::SR_V3_HEDGING);
-        } else {
-            set_decider_approach(decider_flow, GatewayDeciderApproach::SR_V3_HEDGING);
-        }
+
+        set_decider_approach(decider_flow, GatewayDeciderApproach::SrV3Hedging);
+
         remaining_gateways
             .into_iter()
             .map(|(gw, score)| (gw.clone(), score))

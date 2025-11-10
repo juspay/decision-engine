@@ -1,9 +1,11 @@
 use crate::{
     config::Database,
-    config::PgDatabase,
     error::{self, ContainerError},
     logger,
 };
+
+#[cfg(feature = "postgres")]
+use crate::config::PgDatabase;
 
 use crate::generics::StorageResult;
 use bb8::PooledConnection;
@@ -70,9 +72,6 @@ pub type MysqlPool = bb8::Pool<MysqlPooledConn>;
 
 #[cfg(feature = "postgres")]
 type DeadPoolConnType = Object<AsyncPgConnection>;
-
-#[cfg(feature = "mysql")]
-type DeadPoolConnType = Object<AsyncMysqlConnection>;
 
 #[cfg(feature = "postgres")]
 impl Storage {

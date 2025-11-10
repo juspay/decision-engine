@@ -1,9 +1,9 @@
 use crate::decider::gatewaydecider::{
-    flows::deciderFullPayloadHSFunction,
+    flows::decider_full_payload_hs_function,
     types::{DecidedGateway, DomainDeciderRequest, ErrorResponse, UnifiedError},
 };
+use crate::logger;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
-use crate::{logger, metrics};
 use axum::body::to_bytes;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
@@ -36,6 +36,7 @@ impl IntoResponse for ErrorResponse {
 pub struct DecidedGatewayResponse {
     pub decided_gateway: DecidedGateway,
     pub filter_list: Vec<(String, Vec<String>)>,
+    pub latency: Option<u64>,
 }
 
 #[axum::debug_handler]
@@ -130,10 +131,18 @@ where
             let merchant_id = payload.orderReference.merchantId.clone();
             let merchant_id_txt = crate::types::merchant::id::merchant_id_to_text(merchant_id);
             tracing::Span::current().record("merchant_id", merchant_id_txt.clone());
+            tracing::Span::current().record("udf_txn_uuid", payload.txnDetail.txnUuid.clone());
+            tracing::Span::current().record("txn_uuid", payload.txnDetail.txnUuid.clone());
+            tracing::Span::current()
+                .record("udf_order_id", payload.orderReference.orderId.0.as_str());
+            tracing::Span::current().record(
+                "is_audit_trail_log",
+                payload.shouldConsumeResult.unwrap_or(false),
+            );
             jemalloc_ctl::epoch::advance().unwrap();
             let allocated_before = jemalloc_ctl::stats::allocated::read().unwrap_or(0);
 
-            let result = deciderFullPayloadHSFunction(payload.clone()).await;
+            let result = decider_full_payload_hs_function(payload.clone()).await;
 
             jemalloc_ctl::epoch::advance().unwrap();
             let allocated_after = jemalloc_ctl::stats::allocated::read().unwrap_or(0);
@@ -141,9 +150,11 @@ where
 
             let final_result = match result {
                 Ok((decided_gateway, filter_list)) => {
+                    let cpu_time = cpu_start.elapsed().as_millis() as u64;
                     let response = DecidedGatewayResponse {
                         decided_gateway,
                         filter_list,
+                        latency: Some(cpu_time),
                     };
 
                     // Serialize response body and headers for logging

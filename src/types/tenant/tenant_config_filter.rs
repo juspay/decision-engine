@@ -1,5 +1,5 @@
 #[cfg(feature = "mysql")]
-use crate::storage::schema::tenant_config_filter::{dimension_value, dsl, filter_group_id};
+use crate::storage::schema::tenant_config_filter::dsl;
 #[cfg(feature = "postgres")]
 use crate::storage::schema_pg::tenant_config_filter::{dimension_value, dsl, filter_group_id};
 use crate::{

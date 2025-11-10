@@ -13,7 +13,6 @@ use time::Time;
 // use db::mesh::internal;
 // use crate::storage::internal::primd_id_to_int;
 // use types::utils::dbconfig::get_euler_db_conf;
-use crate::feedback::types::Milliseconds;
 use crate::types::country::country_iso::CountryISO2;
 use crate::types::currency::Currency;
 use crate::types::merchant::id::MerchantId;
@@ -21,7 +20,7 @@ use crate::types::merchant::merchant_gateway_account::MerchantGwAccId;
 use crate::types::money::internal::Money;
 use crate::types::order::id::OrderId;
 // use juspay::extra::parsing::{Parsed, ParsingErrorType, Step, around, defaulting, lift_either, lift_pure, mandated, non_empty_text, non_negative, parse_field, project, to_utc};
-use crate::types::source_object_id::SourceObjectId;
+use crate::types::source_object_id::{to_source_object_id, SourceObjectId};
 // use juspay::extra::nonemptytext::NonEmptyText;
 use crate::types::transaction::id::TransactionId;
 // use eulerhs::extra::combinators::to_domain_all;
@@ -79,6 +78,8 @@ pub enum TxnObjectType {
     VanPayment,
     #[serde(rename = "MOTO_PAYMENT")]
     MotoPayment,
+    #[serde(rename = "UNKNOWN")]
+    Unknown,
 }
 
 impl fmt::Display for TxnObjectType {
@@ -101,6 +102,7 @@ impl fmt::Display for TxnObjectType {
                 Self::PartialVoid => "PARTIAL_VOID",
                 Self::VanPayment => "VAN_PAYMENT",
                 Self::MotoPayment => "MOTO_PAYMENT",
+                Self::Unknown => "UNKNOWN",
             }
         )
     }
@@ -123,6 +125,7 @@ impl TxnObjectType {
             "PARTIAL_VOID" => Some(Self::PartialVoid),
             "VAN_PAYMENT" => Some(Self::VanPayment),
             "MOTO_PAYMENT" => Some(Self::MotoPayment),
+            "UNKNOWN" => Some(Self::Unknown),
             _ => None,
         }
     }
@@ -143,6 +146,7 @@ impl TxnObjectType {
             Self::PartialVoid => "PARTIAL_VOID",
             Self::VanPayment => "VAN_PAYMENT",
             Self::MotoPayment => "MOTO_PAYMENT",
+            Self::Unknown => "UNKNOWN",
         }
     }
 }
@@ -488,6 +492,117 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SafeTxnDetail {
+    #[serde(rename = "id")]
+    pub id: Option<String>,
+    #[serde(rename = "orderId")]
+    pub orderId: OrderId,
+    pub status: String,
+    #[serde(rename = "txnId")]
+    pub txnId: TransactionId,
+    #[serde(rename = "type")]
+    pub txnType: String,
+    #[serde(with = "time::serde::iso8601::option", rename = "dateCreated")]
+    pub dateCreated: Option<OffsetDateTime>,
+    #[serde(rename = "addToLocker")]
+    pub addToLocker: Option<bool>,
+    #[serde(rename = "merchantId")]
+    pub merchantId: MerchantId,
+    pub gateway: Option<String>,
+    #[serde(rename = "expressCheckout")]
+    pub expressCheckout: Option<bool>,
+    #[serde(rename = "isEmi")]
+    pub isEmi: Option<bool>,
+    #[serde(rename = "emiBank")]
+    pub emiBank: Option<String>,
+    #[serde(rename = "emiTenure")]
+    pub emiTenure: Option<i64>,
+    #[serde(rename = "txnUuid")]
+    pub txnUuid: String,
+    #[serde(rename = "merchantGatewayAccountId")]
+    pub merchantGatewayAccountId: Option<i64>,
+    #[serde(rename = "txnAmount")]
+    pub txnAmount: Option<Money>,
+    #[serde(rename = "txnObjectType")]
+    pub txnObjectType: Option<String>,
+    #[serde(rename = "sourceObject")]
+    pub sourceObject: Option<String>,
+    #[serde(rename = "sourceObjectId")]
+    pub sourceObjectId: Option<String>,
+    pub currency: Option<String>,
+    #[serde(rename = "netAmount")]
+    pub netAmount: Option<Money>,
+    #[serde(rename = "surchargeAmount")]
+    pub surchargeAmount: Option<Money>,
+    #[serde(rename = "taxAmount")]
+    pub taxAmount: Option<Money>,
+    #[serde(rename = "offerDeductionAmount")]
+    pub offerDeductionAmount: Option<Money>,
+    pub metadata: Option<masking::Secret<String>>,
+    #[serde(rename = "internalMetadata")]
+    pub internalMetadata: Option<masking::Secret<String>>,
+    #[serde(rename = "internalTrackingInfo")]
+    pub internalTrackingInfo: Option<String>,
+    #[serde(
+        deserialize_with = "deserialize_optional_primitive_datetime",
+        rename = "partitionKey"
+    )]
+    pub partitionKey: Option<PrimitiveDateTime>,
+    pub txnAmountBreakup: Option<Vec<TransactionCharge>>,
+}
+
+pub fn convert_safe_txn_detail_to_txn_detail(
+    safe_detail: SafeTxnDetail,
+) -> Result<TxnDetail, crate::error::ApiError> {
+    Ok(TxnDetail {
+        id: safe_detail
+            .id
+            .and_then(|s| s.parse::<i64>().ok())
+            .map(to_txn_detail_id)
+            .unwrap(),
+        dateCreated: safe_detail
+            .dateCreated
+            .unwrap_or_else(|| OffsetDateTime::now_utc()),
+        orderId: safe_detail.orderId,
+        status: TxnStatus::from_text(safe_detail.status).unwrap_or(TxnStatus::Failure),
+        txnId: safe_detail.txnId,
+        txnType: Some(safe_detail.txnType),
+        addToLocker: safe_detail.addToLocker,
+        merchantId: safe_detail.merchantId,
+        gateway: safe_detail.gateway,
+        expressCheckout: safe_detail.expressCheckout,
+        isEmi: safe_detail.isEmi,
+        emiBank: safe_detail.emiBank,
+        emiTenure: safe_detail.emiTenure.map(|t| t as i32),
+        txnUuid: safe_detail.txnUuid,
+        merchantGatewayAccountId: safe_detail
+            .merchantGatewayAccountId
+            .map(|id| MerchantGwAccId {
+                merchantGwAccId: id,
+            }),
+        netAmount: safe_detail.netAmount,
+        txnAmount: safe_detail.txnAmount,
+        txnObjectType: safe_detail
+            .txnObjectType
+            .and_then(|s| TxnObjectType::from_text(s)),
+        sourceObject: safe_detail.sourceObject,
+        sourceObjectId: safe_detail.sourceObjectId.map(to_source_object_id),
+        currency: safe_detail
+            .currency
+            .and_then(|s| Currency::text_to_curr(&s).ok())
+            .ok_or(crate::error::ApiError::MissingRequiredField("currency"))?,
+        country: None,
+        surchargeAmount: safe_detail.surchargeAmount,
+        taxAmount: safe_detail.taxAmount,
+        internalMetadata: safe_detail.internalMetadata,
+        metadata: safe_detail.metadata,
+        offerDeductionAmount: safe_detail.offerDeductionAmount,
+        internalTrackingInfo: safe_detail.internalTrackingInfo,
+        partitionKey: safe_detail.partitionKey,
+        txnAmountBreakup: safe_detail.txnAmountBreakup,
+    })
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TxnDetail {
     #[serde(rename = "id")]
     pub id: TxnDetailId,
@@ -501,17 +616,17 @@ pub struct TxnDetail {
     #[serde(rename = "txnId")]
     pub txnId: TransactionId,
     #[serde(rename = "txnType")]
-    pub txnType: String,
+    pub txnType: Option<String>,
     #[serde(rename = "addToLocker")]
-    pub addToLocker: bool,
+    pub addToLocker: Option<bool>,
     #[serde(rename = "merchantId")]
     pub merchantId: MerchantId,
     #[serde(rename = "gateway")]
     pub gateway: Option<String>,
     #[serde(rename = "expressCheckout")]
-    pub expressCheckout: bool,
+    pub expressCheckout: Option<bool>,
     #[serde(rename = "isEmi")]
-    pub isEmi: bool,
+    pub isEmi: Option<bool>,
     #[serde(rename = "emiBank")]
     pub emiBank: Option<String>,
     #[serde(rename = "emiTenure")]
@@ -521,11 +636,11 @@ pub struct TxnDetail {
     #[serde(rename = "merchantGatewayAccountId")]
     pub merchantGatewayAccountId: Option<MerchantGwAccId>,
     #[serde(rename = "netAmount")]
-    pub netAmount: Money,
+    pub netAmount: Option<Money>,
     #[serde(rename = "txnAmount")]
-    pub txnAmount: Money,
+    pub txnAmount: Option<Money>,
     #[serde(rename = "txnObjectType")]
-    pub txnObjectType: TxnObjectType,
+    pub txnObjectType: Option<TxnObjectType>,
     #[serde(rename = "sourceObject")]
     pub sourceObject: Option<String>,
     #[serde(rename = "sourceObjectId")]
@@ -539,9 +654,9 @@ pub struct TxnDetail {
     #[serde(rename = "taxAmount")]
     pub taxAmount: Option<Money>,
     #[serde(rename = "internalMetadata")]
-    pub internalMetadata: Option<String>,
+    pub internalMetadata: Option<masking::Secret<String>>,
     #[serde(rename = "metadata")]
-    pub metadata: Option<String>,
+    pub metadata: Option<masking::Secret<String>>,
     #[serde(rename = "offerDeductionAmount")]
     pub offerDeductionAmount: Option<Money>,
     #[serde(rename = "internalTrackingInfo")]
@@ -604,17 +719,18 @@ pub enum ChargeMethod {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ChargeName {
-    BASE,
-    SURCHARGE,
-    TAX_ON_SURCHARGE,
-    OFFER,
-    ADD_ON,
-    GATEWAY_ADJUSTMENT,
+    Base,
+    Surcharge,
+    TaxOnSurcharge,
+    Offer,
+    AddOn,
+    GatewayAdjustment,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TransactionLatency {
     #[serde(rename = "gatewayLatency")]
-    pub gatewayLatency: Option<f64>,
+    pub gateway_latency: Option<f64>,
 }

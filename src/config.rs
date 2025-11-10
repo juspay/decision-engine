@@ -10,6 +10,7 @@ use crate::{
     logger::config::Log,
 };
 use error_stack::ResultExt;
+#[cfg(feature = "kms-hashicorp-vault")]
 use masking::ExposeInterface;
 use redis_interface::RedisSettings;
 use std::{
@@ -109,17 +110,6 @@ pub struct PgDatabase {
 pub struct TenantSecrets {
     /// schema name for the tenant (defaults to tenant_id)
     pub schema: String,
-}
-
-fn deserialize_hex<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let deserialized_str: String = serde::Deserialize::deserialize(deserializer)?;
-
-    let deserialized_str = deserialized_str.into_bytes();
-
-    Ok(deserialized_str)
 }
 
 #[derive(serde::Deserialize, Debug, Clone)]

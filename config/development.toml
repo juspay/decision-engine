@@ -67,6 +67,7 @@ bank_transfer = { type = "enum", values = "ach, sepa, sepa_bank_transfer, bacs, 
 bank_redirect = { type = "enum", values = "giropay, ideal, sofort, eft, eps, bancontact_card, blik, local_bank_redirect, online_banking_thailand, online_banking_czech_republic, online_banking_finland, online_banking_fpx, online_banking_poland, online_banking_slovakia, przelewy24, trustly, bizum, interac, open_banking_uk, open_banking_pis" }
 customer_device_display_size = { type = "enum", values = "size320x568, size375x667, size390x844, size414x896, size428x926, size768x1024, size834x1112, size834x1194, size1024x1366, size1280x720, size1366x768, size1440x900, size1920x1080, size2560x1440, size3840x2160, size500x600, size600x400, size360x640, size412x915, size800x1280" }
 customer_device_type = { type = "enum", values = "mobile, tablet, desktop, gaming_console" }
+card = { type = "enum", values = "credit, debit" }
 customer_device_platform = { type = "enum", values = "web, android, ios" }
 bank_debit = { type = "enum", values = "ach, sepa, bacs, becs" }
 crypto = { type = "enum", values = "crypto_currency" }
@@ -190,23 +191,23 @@ pred = 1
 succ = 3
 
 [debit_routing_config]
-fraud_check_fee = 0.01
+fraud_check_fee = 1.0
 
 [debit_routing_config.network_fee]
-visa = { percentage = 0.1375, fixed_amount = 0.020 }
-mastercard = { percentage = 0.15, fixed_amount = 0.040 }
-accel = { percentage = 0.0, fixed_amount = 0.040 }
-nyce = { percentage = 0.10, fixed_amount = 0.015 }
-pulse = { percentage = 0.10, fixed_amount = 0.03 }
-star = { percentage = 0.10, fixed_amount = 0.015 }
+visa = { percentage = 0.1375, fixed_amount = 2.0 }
+mastercard = { percentage = 0.15, fixed_amount = 4.0 }
+accel = { percentage = 0.0, fixed_amount = 4.0 }
+nyce = { percentage = 0.10, fixed_amount = 1.5 }
+pulse = { percentage = 0.10, fixed_amount = 3.0 }
+star = { percentage = 0.10, fixed_amount = 1.5 }
 
 [debit_routing_config.interchange_fee]
 regulated = { percentage = 0.05, fixed_amount = 0.21 }
 
 [debit_routing_config.interchange_fee.non_regulated]
-merchant_category_code_0001.visa = { percentage = 1.65, fixed_amount = 0.15 }
-merchant_category_code_0001.mastercard = { percentage = 1.65, fixed_amount = 0.15 }
-merchant_category_code_0001.accel = { percentage = 1.55, fixed_amount = 0.04 }
-merchant_category_code_0001.nyce = { percentage = 1.30, fixed_amount = 0.213125 }
-merchant_category_code_0001.pulse = { percentage = 1.60, fixed_amount = 0.15 }
-merchant_category_code_0001.star = { percentage = 1.63, fixed_amount = 0.15 }
+merchant_category_code_0001.visa = { percentage = 1.65, fixed_amount = 15.0 }
+merchant_category_code_0001.mastercard = { percentage = 1.65, fixed_amount = 15.0 }
+merchant_category_code_0001.accel = { percentage = 1.55, fixed_amount = 4.0 }
+merchant_category_code_0001.nyce = { percentage = 1.30, fixed_amount = 21.3125 }
+merchant_category_code_0001.pulse = { percentage = 1.60, fixed_amount = 15.0 }
+merchant_category_code_0001.star = { percentage = 1.63, fixed_amount = 15.0 }

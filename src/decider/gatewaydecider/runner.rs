@@ -157,14 +157,14 @@ pub struct FilteredTxnInfo {
 
 pub fn filter_txn(detail: TxnDetail) -> FilteredTxnInfo {
     FilteredTxnInfo {
-        isEmi: detail.isEmi,
+        isEmi: detail.isEmi.unwrap_or(false),
         emiBank: detail.emiBank,
         emiTenure: detail.emiTenure,
         txnId: detail.txnId,
-        addToLocker: detail.addToLocker,
-        expressCheckout: detail.expressCheckout,
+        addToLocker: detail.addToLocker.unwrap_or(false),
+        expressCheckout: detail.expressCheckout.unwrap_or(false),
         sourceObject: detail.sourceObject,
-        txnObjectType: detail.txnObjectType,
+        txnObjectType: detail.txnObjectType.unwrap_or(TxnObjectType::Unknown),
     }
 }
 
@@ -480,10 +480,10 @@ pub fn parse_log_entry(log: Vec<String>) -> LogEntry {
 
 pub fn pl_execution_retry_failure_reasons() -> Vec<DeciderTypes::PriorityLogicFailure> {
     vec![
-        DeciderTypes::PriorityLogicFailure::CONNECTION_FAILED,
-        DeciderTypes::PriorityLogicFailure::RESPONSE_CONTENT_TYPE_NOT_SUPPORTED,
-        DeciderTypes::PriorityLogicFailure::RESPONSE_DECODE_FAILURE,
-        DeciderTypes::PriorityLogicFailure::RESPONSE_PARSE_ERROR,
+        DeciderTypes::PriorityLogicFailure::ConnectionFailed,
+        DeciderTypes::PriorityLogicFailure::ResponseContentTypeNotSupported,
+        DeciderTypes::PriorityLogicFailure::ResponseDecodeFailure,
+        DeciderTypes::PriorityLogicFailure::ResponseParseError,
     ]
 }
 
@@ -494,7 +494,7 @@ pub async fn execute_priority_logic(
         .txnDetail
         .internalMetadata
         .as_ref()
-        .and_then(|im| serde_json::from_str(im).ok());
+        .and_then(|im| serde_json::from_str(im.peek()).ok());
     let order_metadata = req.orderMetadata.metadata.clone();
     // resolveBin <- case Utils.fetchExtendedCardBin req.txnCardInfo of
     // Just cardBin -> pure (Just cardBin)
@@ -574,12 +574,12 @@ pub async fn get_gateway_priority(
                     logs
                 );
                 DeciderTypes::GatewayPriorityLogicOutput {
-                    isEnforcement: gws.isEnforcement,
+                    is_enforcement: gws.is_enforcement,
                     gws: gws.gws,
-                    priorityLogicTag: gws.priorityLogicTag,
-                    gatewayReferenceIds: gws.gatewayReferenceIds,
-                    primaryLogic: Some(pl_data),
-                    fallbackLogic: gws.fallbackLogic,
+                    priority_logic_tag: gws.priority_logic_tag,
+                    gateway_reference_ids: gws.gateway_reference_ids,
+                    primary_logic: Some(pl_data),
+                    fallback_logic: gws.fallback_logic,
                 }
             }
             EvaluationResult::EvaluationError(priority_logic_data, err) => {
@@ -604,12 +604,12 @@ pub async fn get_gateway_priority(
                                 logs
                             );
                             DeciderTypes::GatewayPriorityLogicOutput {
-                                isEnforcement: retry_gws.isEnforcement,
+                                is_enforcement: retry_gws.is_enforcement,
                                 gws: retry_gws.gws,
-                                priorityLogicTag: retry_gws.priorityLogicTag,
-                                gatewayReferenceIds: retry_gws.gatewayReferenceIds,
-                                primaryLogic: Some(retry_pl_data),
-                                fallbackLogic: retry_gws.fallbackLogic,
+                                priority_logic_tag: retry_gws.priority_logic_tag,
+                                gateway_reference_ids: retry_gws.gateway_reference_ids,
+                                primary_logic: Some(retry_pl_data),
+                                fallback_logic: retry_gws.fallback_logic,
                             }
                         }
                         EvaluationResult::EvaluationError(retry_pl_data, err) => {
@@ -628,8 +628,8 @@ pub async fn get_gateway_priority(
                                 m_internal_meta,
                                 order_meta_data,
                                 default_gateway_priority_logic_output()
-                                    .setPriorityLogicTag(priority_logic_tag)
-                                    .setPrimaryLogic(Some(retry_pl_data))
+                                    .set_priority_logic_tag(priority_logic_tag)
+                                    .set_primary_logic(Some(retry_pl_data))
                                     .build(),
                                 priority_logic_data.failure_reason.clone(),
                             )
@@ -647,8 +647,8 @@ pub async fn get_gateway_priority(
                             m_internal_meta,
                             order_meta_data,
                             default_gateway_priority_logic_output()
-                                .setPriorityLogicTag(priority_logic_tag)
-                                .setPrimaryLogic(Some(priority_logic_data.clone()))
+                                .set_priority_logic_tag(priority_logic_tag)
+                                .set_primary_logic(Some(priority_logic_data.clone()))
                                 .build(),
                             priority_logic_data.failure_reason.clone(),
                         )
@@ -698,7 +698,7 @@ pub async fn get_gateway_priority(
                                 res
                             );
                             default_gateway_priority_logic_output()
-                                .setGws(res.to_vec())
+                                .set_gws(res.to_vec())
                                 .build()
                         }
                     }
@@ -720,12 +720,12 @@ async fn get_script(
 
 fn default_gateway_priority_logic_output() -> DeciderTypes::GatewayPriorityLogicOutput {
     DeciderTypes::GatewayPriorityLogicOutput {
-        isEnforcement: false,
+        is_enforcement: false,
         gws: vec![],
-        priorityLogicTag: None,
-        gatewayReferenceIds: std::collections::HashMap::new(),
-        primaryLogic: None,
-        fallbackLogic: None,
+        priority_logic_tag: None,
+        gateway_reference_ids: std::collections::HashMap::new(),
+        primary_logic: None,
+        fallback_logic: None,
     }
 }
 
@@ -816,7 +816,7 @@ async fn get_priority_logic_script_from_tenant_config(
         Some(ref tenant_account_id) => {
             match get_tenant_config_by_tenant_id_and_module_name_and_module_key_and_type(
                 tenant_account_id.to_string(),
-                ModuleName::PRIORITY_LOGIC,
+                ModuleName::PriorityLogic,
                 "priority_logic".to_string(),
                 ConfigType::FALLBACK,
             )
@@ -993,7 +993,8 @@ pub async fn handle_fallback_logic(
     primary_logic_output: DeciderTypes::GatewayPriorityLogicOutput,
     pl_failure_reason: DeciderTypes::PriorityLogicFailure,
 ) -> DeciderTypes::GatewayPriorityLogicOutput {
-    if primary_logic_output.fallbackLogic.is_none() && primary_logic_output.primaryLogic.is_some() {
+    if primary_logic_output.fallback_logic.is_none() && primary_logic_output.primary_logic.is_some()
+    {
         let (fallback_logic, fallback_pl_tag) = get_fallback_priority_logic_script(&macc).await;
         match fallback_logic {
             Some(fallback_script) => {
@@ -1019,10 +1020,10 @@ pub async fn handle_fallback_logic(
                             logs
                         );
                         DeciderTypes::GatewayPriorityLogicOutput {
-                            fallbackLogic: Some(pl_data),
-                            priorityLogicTag: fallback_pl_tag,
-                            primaryLogic: check_and_update_pl_failure_reason(
-                                primary_logic_output.primaryLogic,
+                            fallback_logic: Some(pl_data),
+                            priority_logic_tag: fallback_pl_tag,
+                            primary_logic: check_and_update_pl_failure_reason(
+                                primary_logic_output.primary_logic,
                                 pl_failure_reason,
                             ),
                             ..primary_logic_output
@@ -1036,20 +1037,20 @@ pub async fn handle_fallback_logic(
                             err
                         );
                         DeciderTypes::GatewayPriorityLogicOutput {
-                            primaryLogic: check_and_update_pl_failure_reason(
-                                primary_logic_output.primaryLogic,
+                            primary_logic: check_and_update_pl_failure_reason(
+                                primary_logic_output.primary_logic,
                                 pl_failure_reason,
                             ),
-                            fallbackLogic: Some(priority_logic_data),
-                            priorityLogicTag: fallback_pl_tag,
+                            fallback_logic: Some(priority_logic_data),
+                            priority_logic_tag: fallback_pl_tag,
                             ..primary_logic_output
                         }
                     }
                 }
             }
             None => DeciderTypes::GatewayPriorityLogicOutput {
-                primaryLogic: check_and_update_pl_failure_reason(
-                    primary_logic_output.primaryLogic,
+                primary_logic: check_and_update_pl_failure_reason(
+                    primary_logic_output.primary_logic,
                     pl_failure_reason,
                 ),
                 ..primary_logic_output
@@ -1057,8 +1058,8 @@ pub async fn handle_fallback_logic(
         }
     } else {
         DeciderTypes::GatewayPriorityLogicOutput {
-            fallbackLogic: check_and_update_pl_failure_reason(
-                primary_logic_output.fallbackLogic,
+            fallback_logic: check_and_update_pl_failure_reason(
+                primary_logic_output.fallback_logic,
                 pl_failure_reason,
             ),
             ..primary_logic_output
@@ -1074,7 +1075,7 @@ fn check_and_update_pl_failure_reason(
         None => None,
         Some(mut data) => {
             if data.failure_reason != pl_failure_reason {
-                data.status = DeciderTypes::Status::FAILURE;
+                data.status = DeciderTypes::Status::Failure;
                 data.failure_reason = pl_failure_reason;
             }
             Some(data)
@@ -1136,7 +1137,7 @@ async fn handle_response(
                 .collect();
             let pl_data = DeciderTypes::PriorityLogicData {
                 name: priority_logic_tag,
-                status: DeciderTypes::Status::FAILURE,
+                status: DeciderTypes::Status::Failure,
                 failure_reason: pl_resp.errorMessage,
             };
             EvaluationResult::EvaluationError(pl_data, log_entries)
@@ -1164,8 +1165,8 @@ async fn handle_failure_response(
 ) -> EvaluationResult {
     let pl_data = DeciderTypes::PriorityLogicData {
         name: priority_logic_tag,
-        status: DeciderTypes::Status::FAILURE,
-        failure_reason: DeciderTypes::PriorityLogicFailure::PL_EVALUATION_FAILED,
+        status: DeciderTypes::Status::Failure,
+        failure_reason: DeciderTypes::PriorityLogicFailure::PlEvaluationFailed,
     };
     EvaluationResult::EvaluationError(pl_data, log_entries)
 }
@@ -1176,19 +1177,19 @@ async fn handle_success_response(
     log_entries: Vec<LogEntry>,
 ) -> EvaluationResult {
     let gws = response_body.result.gatewayPriority.unwrap_or_default();
-    let status = DeciderTypes::Status::SUCCESS;
+    let status = DeciderTypes::Status::Success;
     let pl_data = DeciderTypes::PriorityLogicData {
         name: priority_logic_tag.clone(),
         status: status.clone(),
-        failure_reason: DeciderTypes::PriorityLogicFailure::NO_ERROR,
+        failure_reason: DeciderTypes::PriorityLogicFailure::NoError,
     };
     let pl_output = DeciderTypes::GatewayPriorityLogicOutput {
-        isEnforcement: response_body.result.isEnforcement.unwrap_or(false),
+        is_enforcement: response_body.result.isEnforcement.unwrap_or(false),
         gws,
-        priorityLogicTag: priority_logic_tag.clone(),
-        gatewayReferenceIds: response_body.result.gatewayReferenceIds.unwrap_or_default(),
-        primaryLogic: None,
-        fallbackLogic: None,
+        priority_logic_tag: priority_logic_tag.clone(),
+        gateway_reference_ids: response_body.result.gatewayReferenceIds.unwrap_or_default(),
+        primary_logic: None,
+        fallback_logic: None,
     };
     EvaluationResult::PLResponse(pl_output, pl_data, log_entries, status)
 }
@@ -1197,7 +1198,7 @@ fn handle_client_error(client_error: ApiClientError) -> PLExecutorError {
     match client_error {
         ApiClientError::BadRequest(bytes) => PLExecutorError {
             error: true,
-            errorMessage: DeciderTypes::PriorityLogicFailure::COMPILATION_ERROR,
+            errorMessage: DeciderTypes::PriorityLogicFailure::CompilationError,
             userMessage: "Bad request sent to the server.".to_string(),
             log: Some(vec![vec![
                 "Error".to_string(),
@@ -1207,7 +1208,7 @@ fn handle_client_error(client_error: ApiClientError) -> PLExecutorError {
         },
         ApiClientError::Unauthorized(bytes) => PLExecutorError {
             error: true,
-            errorMessage: DeciderTypes::PriorityLogicFailure::CONNECTION_FAILED,
+            errorMessage: DeciderTypes::PriorityLogicFailure::ConnectionFailed,
             userMessage: "Unauthorized access.".to_string(),
             log: Some(vec![vec![
                 "Error".to_string(),
@@ -1217,7 +1218,7 @@ fn handle_client_error(client_error: ApiClientError) -> PLExecutorError {
         },
         ApiClientError::InternalServerError(bytes) => PLExecutorError {
             error: true,
-            errorMessage: DeciderTypes::PriorityLogicFailure::UNHANDLED_EXCEPTION,
+            errorMessage: DeciderTypes::PriorityLogicFailure::UnhandledException,
             userMessage: "Internal server error occurred.".to_string(),
             log: Some(vec![vec![
                 "Error".to_string(),
@@ -1227,7 +1228,7 @@ fn handle_client_error(client_error: ApiClientError) -> PLExecutorError {
         },
         ApiClientError::ResponseDecodingFailed => PLExecutorError {
             error: true,
-            errorMessage: DeciderTypes::PriorityLogicFailure::RESPONSE_DECODE_FAILURE,
+            errorMessage: DeciderTypes::PriorityLogicFailure::ResponseDecodeFailure,
             userMessage: "Failed to decode the response.".to_string(),
             log: Some(vec![vec![
                 "Error".to_string(),
@@ -1237,7 +1238,7 @@ fn handle_client_error(client_error: ApiClientError) -> PLExecutorError {
         },
         ApiClientError::RequestNotSent => PLExecutorError {
             error: true,
-            errorMessage: DeciderTypes::PriorityLogicFailure::CONNECTION_FAILED,
+            errorMessage: DeciderTypes::PriorityLogicFailure::ConnectionFailed,
             userMessage: "The request was not sent.".to_string(),
             log: Some(vec![vec![
                 "Error".to_string(),
@@ -1250,7 +1251,7 @@ fn handle_client_error(client_error: ApiClientError) -> PLExecutorError {
             message,
         } => PLExecutorError {
             error: true,
-            errorMessage: DeciderTypes::PriorityLogicFailure::UNHANDLED_EXCEPTION,
+            errorMessage: DeciderTypes::PriorityLogicFailure::UnhandledException,
             userMessage: "An unexpected error occurred.".to_string(),
             log: Some(vec![vec![
                 "Error".to_string(),
@@ -1260,7 +1261,7 @@ fn handle_client_error(client_error: ApiClientError) -> PLExecutorError {
         },
         _ => PLExecutorError {
             error: true,
-            errorMessage: DeciderTypes::PriorityLogicFailure::UNHANDLED_EXCEPTION,
+            errorMessage: DeciderTypes::PriorityLogicFailure::UnhandledException,
             userMessage: "An unknown error occurred.".to_string(),
             log: Some(vec![vec![
                 "Error".to_string(),
