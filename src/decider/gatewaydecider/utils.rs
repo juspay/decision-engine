@@ -2341,10 +2341,6 @@ pub async fn get_unified_sr_key(
     is_sr_v3_metric_enabled: bool,
     enforce1d: bool,
 ) -> String {
-    print!(
-        ">>>gateway_scoring_data: {:?}",
-        gateway_scoring_data.clone()
-    );
 
     let merchant_id = gateway_scoring_data.merchantId.clone();
 
@@ -2402,10 +2398,7 @@ pub async fn get_unified_sr_key(
         };
         return sr_key_with_udfs;
     }
-    println!(
-        "Generating unified SR key for merchant: {}",
-        gateway_scoring_data.merchantId
-    );
+
     let order_type = gateway_scoring_data.orderType.clone();
     let payment_method_type = gateway_scoring_data.paymentMethodType.clone();
     let payment_method = gateway_scoring_data.paymentMethod.clone();
@@ -2475,7 +2468,6 @@ pub async fn get_unified_sr_key(
     }
 
     let val = intercalate_without_empty_string("_", &key_components);
-    println!("Unified SR Key: {}", val);
     return val;
 }
 
