@@ -147,8 +147,7 @@ pub async fn createKeysIfNotExist(
     if is_queue_key_exists && is_score_key_exists {
         return;
     } else {
-        let merchant_bucket_size =
-            getSrV3MerchantBucketSize(txn_detail.clone(), txn_card_info.clone()).await;
+        let merchant_bucket_size = getSrV3MerchantBucketSize(txn_detail, txn_card_info).await;
         logger::info!(
             tag = "createKeysIfNotExist",
             action = "createKeysIfNotExist",
