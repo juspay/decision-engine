@@ -535,7 +535,7 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
             cardSwitchProvider: None,
             currency: None,
             country: None,
-            is_legacy_decider_flow: false,
+            is_legacy_decider_flow: true,
             udfs: None,
         },
     }

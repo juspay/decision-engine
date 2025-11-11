@@ -50,9 +50,14 @@ pub async fn config_sr_dimentions(
     let invalid_dimensions: Vec<&String> = payload
         .paymentInfo
         .fields
-        .iter()
-        .filter(|field| !ELIGIBLE_DIMENSIONS.contains(&field.as_str()))
-        .collect();
+        .as_ref()
+        .map(|fields| {
+            fields
+                .iter()
+                .filter(|field| !ELIGIBLE_DIMENSIONS.contains(&field.as_str()))
+                .collect()
+        })
+        .unwrap_or_default();
 
     if !invalid_dimensions.is_empty() {
         metrics::API_REQUEST_COUNTER

@@ -105,8 +105,8 @@ pub struct SrDimensionConfig {
 }
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SrDimensionInfo {
-    pub udfs: Option<Vec<i32>>,
-    pub fields: Vec<String>,
+    pub udfs: Vec<i32>,
+    pub fields: Option<Vec<String>>,
 }
 pub const ELIGIBLE_DIMENSIONS: [&str; 5] = [
     "currency",

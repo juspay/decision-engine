@@ -1887,6 +1887,7 @@ pub fn get_default_gateway_scoring_data(
     country: Option<CountryISO2>,
     auth_type: Option<String>,
     udfs: Option<UDFs>,
+    is_legacy_decider_flow: bool,
 ) -> GatewayScoringData {
     GatewayScoringData {
         merchantId: merchant_id,
@@ -1909,7 +1910,7 @@ pub fn get_default_gateway_scoring_data(
         cardSwitchProvider: card_switch_provider,
         currency: currency,
         country: country,
-        is_legacy_decider_flow: false,
+        is_legacy_decider_flow,
         udfs,
     }
 }
@@ -1919,6 +1920,7 @@ pub async fn get_gateway_scoring_data(
     txn_detail: ETTD::TxnDetail,
     txn_card_info: ETCa::txn_card_info::TxnCardInfo,
     merchant: ETM::merchant_account::MerchantAccount,
+    is_legacy_decider_flow: bool,
 ) -> GatewayScoringData {
     let merchant_enabled_for_unification = is_feature_enabled(
         C::MerchantsEnabledForScoreKeysUnification.get_key(),
@@ -1974,6 +1976,7 @@ pub async fn get_gateway_scoring_data(
             .as_ref()
             .map(|a| a.to_string()),
         Some(decider_flow.get().dpOrder.udfs.clone()),
+        is_legacy_decider_flow,
     );
     let updated_gateway_scoring_data = match txn_card_info.paymentMethodType.as_str() {
         UPI => {
@@ -2341,7 +2344,6 @@ pub async fn get_unified_sr_key(
     is_sr_v3_metric_enabled: bool,
     enforce1d: bool,
 ) -> String {
-
     let merchant_id = gateway_scoring_data.merchantId.clone();
 
     let name = format!("SR_DIMENSION_CONFIG_{}", merchant_id);
@@ -2373,13 +2375,18 @@ pub async fn get_unified_sr_key(
         gateway_scoring_data
             .udfs
             .as_ref()
-            .zip(udfs.as_ref())
-            .map(|(udf_map, udf_keys)| {
-                udf_keys
-                    .iter()
-                    .filter_map(|&udf| get_udf(udf_map, udf))
-                    .map(|value| value.to_string())
-                    .collect::<Vec<String>>()
+            .zip(Some(udfs))
+            .and_then(|(udf_map, udf_keys)| {
+                let mut values = Vec::with_capacity(udf_keys.len());
+
+                for udf in udf_keys {
+                    match get_udf(udf_map, udf) {
+                        Some(value) => values.push(value.to_string()),
+                        None => return None,
+                    }
+                }
+
+                Some(values)
             });
 
     let is_legacy_decider_flow = gateway_scoring_data.is_legacy_decider_flow;
@@ -2430,7 +2437,7 @@ pub async fn get_unified_sr_key(
         .map(|config| config.paymentInfo.fields.clone())
         .unwrap_or_default();
 
-    for field in fields {
+    for field in fields.into_iter().flatten() {
         match field.as_str() {
             "card_network" => {
                 if let Some(cn) = card_network.clone() {

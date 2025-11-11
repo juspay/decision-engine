@@ -151,6 +151,7 @@ pub async fn run_decider_flow(
         deciderParams.dpTxnDetail.clone(),
         deciderParams.dpTxnCardInfo.clone(),
         deciderParams.dpMerchantAccount.clone(),
+        is_legacy_decider_flow.clone(),
     )
     .await;
     let functionalGateways = deciderParams
