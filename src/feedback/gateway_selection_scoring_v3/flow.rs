@@ -34,7 +34,7 @@ use crate::logger;
 use crate::redis::cache::findByNameFromRedis;
 use crate::types::payment::payment_method_type_const::*;
 use crate::{
-    decider::gatewaydecider::types::{GatewayScoringData, MessageFormat, SrRoutingDimensions},
+    decider::gatewaydecider::types::{GatewayScoringData, SrRoutingDimensions},
     decider::{
         gatewaydecider::constants as DC, gatewaydecider::types::RoutingFlowType as RF,
         gatewaydecider::types::ScoreKeyType as SK, gatewaydecider::types::SrV3InputConfig,
@@ -43,9 +43,8 @@ use crate::{
         constants as C,
         types::SrV3DebugBlock,
         utils::{
-            dateInIST, findKeysByPattern, getCurrentIstDateWithFormat, getProducerKey,
-            isKeyExistsRedis, log_gateway_score_type, updateMovingWindow, updateScore,
-            GatewayScoringType,
+            dateInIST, getCurrentIstDateWithFormat, getProducerKey, isKeyExistsRedis,
+            log_gateway_score_type, updateMovingWindow, updateScore, GatewayScoringType,
         },
     },
     redis::types::ServiceConfigKey,
@@ -166,65 +165,6 @@ pub async fn createKeysIfNotExist(
             score_list,
         )
         .await;
-
-        const PREFIX: &str = "{gw_sr_v3_score_";
-        const SUFFIX: &str = "_}queue";
-        const SR_KEYS_THRESHOLD: i32 = 5000;
-
-        let pattern = format!("{}*{}", PREFIX, SUFFIX);
-        let total_keys = findKeysByPattern(&pattern).await.len() as i32;
-
-        if total_keys >= SR_KEYS_THRESHOLD {
-            // Create log data for Redis keys threshold exceeded
-            let redis_keys_log_data = serde_json::json!({
-                "total_keys": total_keys,
-                "threshold": SR_KEYS_THRESHOLD,
-                "pattern": pattern,
-                "action": "REDIS_KEYS_THRESHOLD_EXCEEDED"
-            });
-
-            // Extract payment source for logging
-            let payment_source_m = txn_card_info
-                .paymentSource
-                .as_ref()
-                .and_then(|ps| ps.split('@').next_back().map(String::from));
-
-            // Create MessageFormat for metric logging
-            let message_format = MessageFormat {
-                model: txn_detail
-                    .txnObjectType
-                    .clone()
-                    .map(|t| t.to_string())
-                    .unwrap_or_default(),
-                log_type: "APP_EVENT".to_string(),
-                payment_method: txn_card_info.paymentMethod.clone(),
-                payment_method_type: txn_card_info.paymentMethodType.clone(),
-                payment_source: payment_source_m,
-                source_object: txn_detail.sourceObject.clone(),
-                txn_detail_id: txn_detail.id.clone(),
-                stage: "REDIS_KEYS_THRESHOLD_EXCEEDED".to_string(),
-                merchant_id: MID::merchant_id_to_text(txn_detail.merchantId.clone()),
-                txn_uuid: txn_detail.txnUuid.clone(),
-                order_id: txn_detail.clone().orderId.0,
-                card_type: txn_card_info
-                    .card_type
-                    .as_ref()
-                    .map(|ct| ct.to_string())
-                    .unwrap_or_default(),
-                auth_type: txn_card_info.authType.as_ref().map(|at| at.to_string()),
-                bank_code: GU::fetch_juspay_bank_code(&txn_card_info),
-                x_request_id: None, // Not available in this context
-                log_data: redis_keys_log_data,
-            };
-
-            // Log the metric
-            GU::metric_tracker_log(
-                "REDIS_KEYS_THRESHOLD_EXCEEDED",
-                "SR_V3_FLOW",
-                message_format,
-            )
-            .await;
-        }
     }
 }
 

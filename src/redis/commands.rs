@@ -174,7 +174,4 @@ impl RedisConnectionWrapper {
             .await
             .change_context(errors::RedisError::UnknownResult)
     }
-    pub async fn scan_match(&self, pattern: &str) -> Result<Vec<String>, errors::RedisError> {
-        self.conn.scan(pattern, None, None).await
-    }
 }
