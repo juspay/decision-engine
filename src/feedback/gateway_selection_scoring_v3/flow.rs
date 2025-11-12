@@ -54,6 +54,7 @@ use crate::{
     },
 };
 use masking::PeekInterface;
+use serde_json;
 
 // Converted functions
 // Original Haskell function: updateSrV3Score

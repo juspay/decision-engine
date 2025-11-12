@@ -101,16 +101,20 @@ impl RoutingDictionaryRecord {
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SrDimensionConfig {
     pub merchant_id: String,
-    pub fields: Vec<String>,
+    pub paymentInfo: SrDimensionInfo,
+}
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SrDimensionInfo {
+    pub udfs: Vec<i32>,
+    pub fields: Option<Vec<String>>,
 }
 pub const ELIGIBLE_DIMENSIONS: [&str; 5] = [
-    "paymentInfo.currency",
-    "paymentInfo.country",
-    "paymentInfo.auth_type",
-    "paymentInfo.card_is_in",
-    "paymentInfo.card_network",
+    "currency",
+    "country",
+    "auth_type",
+    "card_is_in",
+    "card_network",
 ];
-
 #[derive(Debug, serde::Serialize)]
 pub struct RoutingEvaluateResponse {
     pub status: String,

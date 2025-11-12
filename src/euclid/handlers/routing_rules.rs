@@ -48,10 +48,16 @@ pub async fn config_sr_dimentions(
 
     // Validate dimensions against ELIGIBLE_DIMENSIONS
     let invalid_dimensions: Vec<&String> = payload
+        .paymentInfo
         .fields
-        .iter()
-        .filter(|field| !ELIGIBLE_DIMENSIONS.contains(&field.as_str()))
-        .collect();
+        .as_ref()
+        .map(|fields| {
+            fields
+                .iter()
+                .filter(|field| !ELIGIBLE_DIMENSIONS.contains(&field.as_str()))
+                .collect()
+        })
+        .unwrap_or_default();
 
     if !invalid_dimensions.is_empty() {
         metrics::API_REQUEST_COUNTER
@@ -59,21 +65,15 @@ pub async fn config_sr_dimentions(
             .inc();
         timer.observe_duration();
 
-        let invalid_dims_str = invalid_dimensions
-            .iter()
-            .map(|d| format!("'{}'", d))
-            .collect::<Vec<_>>()
-            .join(", ");
-
         logger::error!(
-            "Invalid dimensions found for merchant {}: {}",
+            "Invalid dimensions found for merchant {}: {:?}",
             payload.merchant_id,
-            invalid_dims_str
+            invalid_dimensions.clone()
         );
 
         return Err(EuclidErrors::InvalidSrDimensionConfig(format!(
-            "Invalid dimensions: {}. Valid dimensions are: {}",
-            invalid_dims_str,
+            "Invalid dimensions: {:?}. Valid dimensions are: {}",
+            invalid_dimensions.clone(),
             ELIGIBLE_DIMENSIONS.join(", ")
         ))
         .into());

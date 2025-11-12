@@ -155,6 +155,7 @@ pub async fn run_decider_flow(
         deciderParams.dpTxnDetail.clone(),
         deciderParams.dpTxnCardInfo.clone(),
         deciderParams.dpMerchantAccount.clone(),
+        is_legacy_decider_flow.clone(),
     )
     .await;
     let functionalGateways = deciderParams
@@ -518,6 +519,7 @@ pub async fn run_decider_flow(
         routingApproach: Some(decider_flow.writer.gwDeciderApproach.clone().to_string()),
         eliminationEnabled: eliminationEnabled.unwrap_or_default(),
         is_legacy_decider_flow,
+        udfs: Some(deciderParams.dpOrder.udfs.clone()),
         ..decider_flow.writer.gateway_scoring_data.clone()
     };
     let app_state = get_tenant_app_state().await;

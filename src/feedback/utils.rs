@@ -413,7 +413,6 @@ pub async fn isKeyExistsRedis(key: String) -> bool {
         }
     }
 }
-
 // Original Haskell function: updateQueue
 pub async fn updateQueue(
     redis_name: String,

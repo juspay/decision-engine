@@ -90,6 +90,7 @@ use crate::types::isin_routes as ETIsinR;
 // // use configs::env_vars as ENV;
 use crate::error::StorageError;
 use crate::types::gateway_card_info::ValidationType;
+use crate::types::order::udfs::{get_udf, UDFs};
 
 pub fn either_decode_t<T: for<'de> Deserialize<'de>>(text: &str) -> Result<T, String> {
     from_slice(text.as_bytes()).map_err(|e| e.to_string())
@@ -1885,6 +1886,8 @@ pub fn get_default_gateway_scoring_data(
     currency: Option<Currency>,
     country: Option<CountryISO2>,
     auth_type: Option<String>,
+    udfs: Option<UDFs>,
+    is_legacy_decider_flow: bool,
 ) -> GatewayScoringData {
     GatewayScoringData {
         merchantId: merchant_id,
@@ -1907,7 +1910,8 @@ pub fn get_default_gateway_scoring_data(
         cardSwitchProvider: card_switch_provider,
         currency: currency,
         country: country,
-        is_legacy_decider_flow: false,
+        is_legacy_decider_flow,
+        udfs,
     }
 }
 
@@ -1916,6 +1920,7 @@ pub async fn get_gateway_scoring_data(
     txn_detail: ETTD::TxnDetail,
     txn_card_info: ETCa::txn_card_info::TxnCardInfo,
     merchant: ETM::merchant_account::MerchantAccount,
+    is_legacy_decider_flow: bool,
 ) -> GatewayScoringData {
     let merchant_enabled_for_unification = is_feature_enabled(
         C::MerchantsEnabledForScoreKeysUnification.get_key(),
@@ -1970,6 +1975,8 @@ pub async fn get_gateway_scoring_data(
             .authType
             .as_ref()
             .map(|a| a.to_string()),
+        Some(decider_flow.get().dpOrder.udfs.clone()),
+        is_legacy_decider_flow,
     );
     let updated_gateway_scoring_data = match txn_card_info.paymentMethodType.as_str() {
         UPI => {
@@ -2336,12 +2343,68 @@ pub async fn get_unified_sr_key(
     is_sr_v3_metric_enabled: bool,
     enforce1d: bool,
 ) -> String {
-    let is_legacy_decider_flow = gateway_scoring_data.is_legacy_decider_flow;
-    if is_legacy_decider_flow {
-        return get_legacy_unified_sr_key(gateway_scoring_data, is_sr_v3_metric_enabled, enforce1d)
-            .await;
-    }
     let merchant_id = gateway_scoring_data.merchantId.clone();
+
+    let name = format!("SR_DIMENSION_CONFIG_{}", merchant_id);
+
+    let service_config = find_config_by_name(name.clone())
+        .await
+        .change_context(EuclidErrors::StorageError)
+        .and_then(|opt_config| {
+            opt_config.and_then(|config| config.value).ok_or_else(|| {
+                error_stack::report!(EuclidErrors::InvalidSrDimensionConfig(
+                    "SR dimension config not found".to_string()
+                ))
+            })
+        })
+        .and_then(|config| {
+            serde_json::from_str::<SrDimensionConfig>(&config).change_context(
+                EuclidErrors::InvalidSrDimensionConfig(
+                    "Failed to parse SR dimension config".to_string(),
+                ),
+            )
+        });
+
+    let udfs = service_config
+        .as_ref()
+        .map(|config| config.paymentInfo.udfs.clone())
+        .unwrap_or_default();
+
+    let udf_values =
+        gateway_scoring_data
+            .udfs
+            .as_ref()
+            .zip(Some(udfs))
+            .and_then(|(udf_map, udf_keys)| {
+                let mut values = Vec::with_capacity(udf_keys.len());
+
+                for udf in udf_keys {
+                    match get_udf(udf_map, udf) {
+                        Some(value) => values.push(value.to_string()),
+                        None => return None,
+                    }
+                }
+
+                Some(values)
+            });
+
+    let is_legacy_decider_flow = gateway_scoring_data.is_legacy_decider_flow;
+
+    if is_legacy_decider_flow {
+        let sr_keys =
+            get_legacy_unified_sr_key(gateway_scoring_data, is_sr_v3_metric_enabled, enforce1d)
+                .await;
+
+        let sr_key_with_udfs = if let Some(udf_values) = udf_values.clone() {
+            let mut key_components = vec![sr_keys];
+            key_components.extend(udf_values);
+            intercalate_without_empty_string("_", &key_components)
+        } else {
+            sr_keys
+        };
+        return sr_key_with_udfs;
+    }
+
     let order_type = gateway_scoring_data.orderType.clone();
     let payment_method_type = gateway_scoring_data.paymentMethodType.clone();
     let payment_method = gateway_scoring_data.paymentMethod.clone();
@@ -2368,66 +2431,50 @@ pub async fn get_unified_sr_key(
         payment_method,
     ];
 
-    let name = format!("SR_DIMENSION_CONFIG_{}", merchant_id);
-
-    let service_config = find_config_by_name(name.clone())
-        .await
-        .change_context(EuclidErrors::StorageError)
-        .and_then(|opt_config| {
-            opt_config.and_then(|config| config.value).ok_or_else(|| {
-                error_stack::report!(EuclidErrors::InvalidSrDimensionConfig(
-                    "SR dimension config not found".to_string()
-                ))
-            })
-        })
-        .and_then(|config| {
-            serde_json::from_str::<SrDimensionConfig>(&config).change_context(
-                EuclidErrors::InvalidSrDimensionConfig(
-                    "Failed to parse SR dimension config".to_string(),
-                ),
-            )
-        });
-
     let fields = service_config
-        .map(|config| config.fields)
+        .as_ref()
+        .map(|config| config.paymentInfo.fields.clone())
         .unwrap_or_default();
 
-    for field in fields {
-        if let Some(suffix) = field.strip_prefix("paymentInfo.") {
-            match suffix {
-                "card_network" => {
-                    if let Some(cn) = card_network.clone() {
-                        key_components.push(cn.peek().to_string());
-                    }
+    for field in fields.into_iter().flatten() {
+        match field.as_str() {
+            "card_network" => {
+                if let Some(cn) = card_network.clone() {
+                    key_components.push(cn.peek().to_string());
                 }
-                "card_is_in" => {
-                    if let Some(ci) = card_isin.clone() {
-                        key_components.push(ci);
-                    }
+            }
+            "card_is_in" => {
+                if let Some(ci) = card_isin.clone() {
+                    key_components.push(ci);
                 }
-                "currency" => {
-                    if let Some(cu) = currency.clone() {
-                        key_components.push(cu);
-                    }
+            }
+            "currency" => {
+                if let Some(cu) = currency.clone() {
+                    key_components.push(cu);
                 }
-                "country" => {
-                    if let Some(co) = country.clone() {
-                        key_components.push(co);
-                    }
+            }
+            "country" => {
+                if let Some(co) = country.clone() {
+                    key_components.push(co);
                 }
-                "auth_type" => {
-                    if let Some(at) = auth_type.clone() {
-                        key_components.push(at);
-                    }
+            }
+            "auth_type" => {
+                if let Some(at) = auth_type.clone() {
+                    key_components.push(at);
                 }
-                _ => {
-                    // Unknown field under payment_info
-                }
+            }
+            _ => {
+                // Unknown field
             }
         }
     }
 
-    intercalate_without_empty_string("_", &key_components)
+    if let Some(udf_values) = udf_values {
+        key_components.extend(udf_values);
+    }
+
+    let val = intercalate_without_empty_string("_", &key_components);
+    return val;
 }
 
 async fn get_legacy_unified_sr_key(
