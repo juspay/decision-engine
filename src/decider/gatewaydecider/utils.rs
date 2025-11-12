@@ -2217,7 +2217,6 @@ pub async fn get_unified_key(
         }
         ScoreKeyType::SrV3Key => {
             let base_key = get_unified_sr_key(&gateway_scoring_data, true, enforce1d).await;
-            println!("Base Key: {}", base_key);
             let gri_sr_v2_cutover = gateway_scoring_data.isGriEnabledForSrRouting;
 
             if gri_sr_v2_cutover {
