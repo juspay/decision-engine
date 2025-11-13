@@ -643,6 +643,7 @@ pub async fn getProducerKey(
 
             let gateway_key = get_unified_key(
                 gateway_score_data,
+                None,
                 score_key_type,
                 enforce1d,
                 gateway_and_reference_id,

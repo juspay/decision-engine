@@ -709,7 +709,7 @@ pub async fn metric_tracker_log(stage: &str, flowtype: &str, log_data: MessageFo
     let normalized_log_data = match serde_json::to_value(&log_data) {
         Ok(value) => value,
         Err(e) => {
-            crate::logger::error!(
+            crate::logger::warn!(
                 action = "metric_tracking_log_error",
                 "Failed to serialize log_data: {}",
                 e
@@ -717,7 +717,7 @@ pub async fn metric_tracker_log(stage: &str, flowtype: &str, log_data: MessageFo
             return;
         }
     };
-    crate::logger::info!(
+    crate::logger::warn!(
         action = "metric_tracking_log",
         "{}",
         normalized_log_data.to_string(),
@@ -760,6 +760,7 @@ pub fn get_metric_log_format(decider_flow: &mut DeciderFlow<'_>, stage: &str) ->
         bank_code: fetch_juspay_bank_code(&txn_card_info),
         x_request_id: x_req_id.cloned(),
         log_data: serde_json::to_value(mp).unwrap(),
+        is_udf_consumed: decider_flow.writer.gateway_scoring_data.udfs_consumed_for_routing
     }
 }
 
@@ -824,6 +825,7 @@ pub async fn log_gateway_decider_approach(
             bank_code: fetch_juspay_bank_code(&txn_card_info),
             x_request_id: x_req_id,
             log_data: serde_json::to_value(mp).unwrap(),
+            is_udf_consumed: None
         },
     )
     .await;
@@ -1912,6 +1914,7 @@ pub fn get_default_gateway_scoring_data(
         country: country,
         is_legacy_decider_flow,
         udfs,
+        udfs_consumed_for_routing: None
     }
 }
 
@@ -2070,6 +2073,7 @@ pub async fn get_gateway_scoring_data(
 
 pub async fn get_unified_key(
     gateway_scoring_data: GatewayScoringData,
+    decider_flow: Option<&mut DeciderFlow<'_>>,
     score_key_type: ScoreKeyType,
     enforce1d: bool,
     gateway_ref_id_map: types::GatewayReferenceIdMap,
@@ -2192,7 +2196,7 @@ pub async fn get_unified_key(
             result_keys
         }
         ScoreKeyType::SrV2Key => {
-            let key = get_unified_sr_key(&gateway_scoring_data, false, enforce1d).await;
+            let key = get_unified_sr_key(&gateway_scoring_data, false, enforce1d, decider_flow).await;
             let gri_sr_v2_cutover = gateway_scoring_data.isGriEnabledForSrRouting;
 
             if gri_sr_v2_cutover {
@@ -2216,7 +2220,7 @@ pub async fn get_unified_key(
             }
         }
         ScoreKeyType::SrV3Key => {
-            let base_key = get_unified_sr_key(&gateway_scoring_data, true, enforce1d).await;
+            let base_key = get_unified_sr_key(&gateway_scoring_data, true, enforce1d, decider_flow).await;
             let gri_sr_v2_cutover = gateway_scoring_data.isGriEnabledForSrRouting;
 
             if gri_sr_v2_cutover {
@@ -2342,6 +2346,7 @@ pub async fn get_unified_sr_key(
     gateway_scoring_data: &GatewayScoringData,
     is_sr_v3_metric_enabled: bool,
     enforce1d: bool,
+    decider_flow: Option<&mut DeciderFlow<'_>>,
 ) -> String {
     let merchant_id = gateway_scoring_data.merchantId.clone();
 
@@ -2369,7 +2374,7 @@ pub async fn get_unified_sr_key(
         .as_ref()
         .map(|config| config.paymentInfo.udfs.clone())
         .unwrap_or_default();
-
+    let mut udf_used = true;
     let udf_values =
         gateway_scoring_data
             .udfs
@@ -2381,12 +2386,19 @@ pub async fn get_unified_sr_key(
                 for udf in udf_keys {
                     match get_udf(udf_map, udf) {
                         Some(value) => values.push(value.to_string()),
-                        None => return None,
+                        None => {
+                            udf_used = false;
+                            return None;
+                        },
                     }
                 }
 
                 Some(values)
             });
+
+    if let Some(df) = decider_flow {
+        df.writer.gateway_scoring_data.udfs_consumed_for_routing = Some(udf_used);
+    }
 
     let is_legacy_decider_flow = gateway_scoring_data.is_legacy_decider_flow;
 
@@ -2632,6 +2644,7 @@ pub async fn get_consumer_key(
     };
     let gateway_redis_key_map = get_unified_key(
         gateway_scoring_data,
+        Some(decider_flow),
         score_key_type,
         enforce1d,
         gw_ref_id_map,

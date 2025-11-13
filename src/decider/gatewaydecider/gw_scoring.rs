@@ -1432,7 +1432,7 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                     })
                     .collect::<Vec<_>>();
 
-                logger::info!(
+                logger::warn!(
                     tag = "scoringFlow",
                     action = "scoringFlow",
                     "Gateway Success Rate Inputs for Global SR based elimination for {:?} : {:?}",
@@ -1450,7 +1450,7 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                 )
                 .await;
 
-                logger::info!(
+                logger::warn!(
                     tag = "scoringFlow",
                     action = "scoringFlow",
                     "Gateway Redis Key Map for Global SR based elimination for {:?} : {:?}",
@@ -1466,7 +1466,7 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                         gsri.clone(),
                     )
                     .await;
-                    logger::info!(
+                    logger::warn!(
                         tag = "scoringFlow",
                         action = "scoringFlow",
                         "Global Elimination Gateway Score for {:?} : {:?}",
@@ -1475,8 +1475,8 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                     );
                     match global_elimination_gateway_score {
                         Some((global_gateway_score, s)) => {
-                            logger::info!(action = "global_gateway_score", "s-value : {:?}", s);
-                            logger::info!(
+                            logger::warn!(action = "global_gateway_score", "s-value : {:?}", s);
+                            logger::warn!(
                                 action = "global_gateway_score",
                                 "global_gateway_score{:?}",
                                 global_gateway_score
@@ -1485,14 +1485,14 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                                 currentScore: Some(s),
                                 ..gsri.clone()
                             };
-                            logger::info!(
+                            logger::warn!(
                                 action = "global_gateway_score",
                                 "Global Elimination Gateway Score for {:?} : {:?}",
                                 txn_detail.txnId,
                                 new_gsri
                             );
                             upd_gateway_success_rate_inputs.push(new_gsri);
-                            logger::info!(
+                            logger::warn!(
                                 action = "global_gateway_score",
                                 "upd_gateway_success_rate_inputs{:?}",
                                 upd_gateway_success_rate_inputs
@@ -1501,7 +1501,7 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                                 gsri.gateway.clone(),
                                 global_gateway_score,
                             ));
-                            logger::info!(
+                            logger::warn!(
                                 action = "update_global_score_log",
                                 "global_gateway_scores{:?}",
                                 global_gateway_scores
@@ -1511,7 +1511,7 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                     }
                 }
 
-                logger::info!(
+                logger::warn!(
                     action = "update_gateway_score_based_on_global_success_rate",
                     "upd_gateway_success_rate_inputs{:?}",
                     upd_gateway_success_rate_inputs
@@ -1530,7 +1530,7 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                     })
                     .collect();
 
-                logger::info!(
+                logger::warn!(
                     action = "filtered_gateway_success_rate_inputs",
                     "filtered_gateway_success_rate_inputs{:?}",
                     filtered_gateway_success_rate_inputs
@@ -1571,7 +1571,7 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                         },
                     );
                 } else {
-                    logger::info!(
+                    logger::warn!(
                     tag="scoringFlow",
                     action = "scoringFlow",
                     "No gateways are eligible for penalties & fallback {:?} based on global score",
@@ -1589,7 +1589,7 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                 }
 
                 let old_sr_metric_log_data = decider_flow.writer.srMetricLogData.clone();
-                logger::debug!(
+                logger::warn!(
                     tag = "MetricData-GLOBAL-ELIMINATION",
                     action = "MetricData-GLOBAL-ELIMINATION",
                     "{:?}",
@@ -1616,7 +1616,7 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                     )
                     .await;
                 } else {
-                    logger::info!(
+                    logger::warn!(
                         tag = "scoringFlow",
                         action = "scoringFlow",
                         "Global scores not available for {:?} {:?}",
@@ -1625,7 +1625,7 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                     );
                 }
 
-                logger::info!(
+                logger::warn!(
                     tag = "scoringFlow",
                     action = "scoringFlow",
                     "Gateway scores after considering global SR based elimination for {:?} : {:?}",
@@ -1639,13 +1639,13 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                 )
             }
             Err(reason) => {
-                logger::debug!(
+                logger::warn!(
                     tag = "Global SR routing",
                     action = "Global SR routing",
                     "{:?}",
                     reason
                 );
-                logger::info!(
+                logger::warn!(
                     tag = "scoringFlow",
                     action = "scoringFlow",
                     "Global SR routing not enabled for merchant {:?} txn {:?}",

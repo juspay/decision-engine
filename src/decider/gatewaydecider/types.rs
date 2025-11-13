@@ -415,6 +415,7 @@ pub struct MessageFormat {
     pub x_request_id: Option<String>,
     #[serde(rename = "data")]
     pub log_data: AValue,
+    pub is_udf_consumed: Option<bool>
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -537,6 +538,7 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
             country: None,
             is_legacy_decider_flow: true,
             udfs: None,
+            udfs_consumed_for_routing: None,
         },
     }
 }
@@ -565,6 +567,7 @@ pub struct GatewayScoringData {
     pub country: Option<CountryISO2>,
     pub is_legacy_decider_flow: bool,
     pub udfs: Option<UDFs>,
+    pub udfs_consumed_for_routing: Option<bool>,
 }
 
 #[derive(Debug)]
