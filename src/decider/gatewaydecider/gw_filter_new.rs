@@ -295,7 +295,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
                                 let mPmEntryDB = ETP::get_by_name(brand).await;  
                                 if let Some(cardPaymentMethod) = mPmEntryDB {  
                                     let uniqueGwLs: Vec<Gateway> = st.into_iter().collect();  
-                                    let allGPMfEntries = GPMF::find_all_gpmf_by_gateway_payment_flow_payment_method(uniqueGwLs.clone(), cardPaymentMethod.id, PaymentFlow::CVVLESS,).await;
+                                    let allGPMfEntries = GPMF::find_all_gpmf_by_gateway_payment_flow_payment_method(uniqueGwLs.clone(), cardPaymentMethod.id, PaymentFlow::CVVLESS).await;
                                     let gmpfGws: Vec<Gateway> = allGPMfEntries.iter()  
                                         .map(|gpmf| gpmf.gateway.clone())  
                                         .collect();  
@@ -2323,7 +2323,7 @@ fn get_zero_auth_supported_gateways(txn_type: &str, txn_detail_type_restricted_g
         .map_or_else(Vec::new, |mapping| mapping.1.clone())  
 } 
 
-pub async fn filterGatewaysForTxnDetailType(this: &mut DeciderFlow<'_>,) -> Vec<ETG::Gateway> {  
+pub async fn filterGatewaysForTxnDetailType(this: &mut DeciderFlow<'_>) -> Vec<ETG::Gateway> {  
     let st = getGws(this);  
     let m_txn_type = this.get().dpTxnDetail.txnType.clone();
     let txn_type: &str = m_txn_type.as_str();
@@ -2341,7 +2341,7 @@ pub async fn filterGatewaysForTxnDetailType(this: &mut DeciderFlow<'_>,) -> Vec<
     returnGwListWithLog(this, DeciderFilterName::FilterFunctionalGatewaysForTxnDetailType, true)
 }
 
-pub async fn filterGatewaysForReward(this: &mut DeciderFlow<'_>,) -> Vec<ETG::Gateway> {  
+pub async fn filterGatewaysForReward(this: &mut DeciderFlow<'_>) -> Vec<ETG::Gateway> {  
     let st = getGws(this) ;
     let payment_method_type = this.get().dpTxnCardInfo.paymentMethodType.clone(); 
     let card_type = this.get().dpTxnCardInfo.card_type.clone();
@@ -2368,7 +2368,7 @@ pub async fn filterGatewaysForReward(this: &mut DeciderFlow<'_>,) -> Vec<ETG::Ga
 
 
 
-pub async fn filterGatewaysForCash(this: &mut DeciderFlow<'_>,) -> Vec<ETG::Gateway> {  
+pub async fn filterGatewaysForCash(this: &mut DeciderFlow<'_>) -> Vec<ETG::Gateway> {  
         let st = getGws(this);  
         let payment_method_type = this.get().dpTxnCardInfo.paymentMethodType.clone();
         if payment_method_type != ETP::PaymentMethodType::Cash {  
@@ -2382,7 +2382,7 @@ pub async fn filterGatewaysForCash(this: &mut DeciderFlow<'_>,) -> Vec<ETG::Gate
         returnGwListWithLog(this, DeciderFilterName::FilterFunctionalGatewaysForCash, true)
 }  
 
-pub async fn filterFunctionalGatewaysForSplitSettlement(this: &mut DeciderFlow<'_>,) -> Vec<ETG::Gateway> {  
+pub async fn filterFunctionalGatewaysForSplitSettlement(this: &mut DeciderFlow<'_>) -> Vec<ETG::Gateway> {  
         let oref = this.get().dpOrder.clone();
         let txn_id = this.get().dpTxnDetail.clone();
         let e_split_settlement_details = Utils::get_split_settlement_details(this).await;
@@ -2491,11 +2491,11 @@ pub async fn filterFunctionalGatewaysForSplitSettlement(this: &mut DeciderFlow<'
         returnGwListWithLog(this, DeciderFilterName::FilterFunctionalGatewaysForSplitSettlement, true)  
     }  
       
-    pub fn log_final_functional_gateways(this: &mut DeciderFlow<'_>,) -> Vec<ETG::Gateway> {  
+    pub fn log_final_functional_gateways(this: &mut DeciderFlow<'_>) -> Vec<ETG::Gateway> {  
         returnGwListWithLog(this, DeciderFilterName::FinalFunctionalGateways, false)
     }
 
-pub async fn filterGatewaysForPaymentMethod (this: &mut DeciderFlow<'_>,) -> Vec<ETG::Gateway> {  
+pub async fn filterGatewaysForPaymentMethod (this: &mut DeciderFlow<'_>) -> Vec<ETG::Gateway> {  
     let st = getGws(this) ;  
     let txn = this.get().dpTxnDetail.clone();
     let merchant_acc = this.get().dpMerchantAccount.clone();
