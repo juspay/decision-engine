@@ -5,9 +5,13 @@ use crate::storage::schema::service_configuration::dsl;
 use crate::storage::schema_pg::service_configuration::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
+use serde_json::json;
 use std::option::Option;
 use std::string::String;
 // use sequelize::{Clause::{Is, And}, Term::{Eq, In}};
+use crate::shard_queue::{
+    find_config_in_mem, store_config_in_mem, ShardQueueItem, GLOBAL_SHARD_QUEUE_HANDLER,
+};
 use crate::storage::types::{
     ServiceConfiguration, ServiceConfigurationNew, ServiceConfigurationUpdate,
 };
@@ -15,15 +19,19 @@ use crate::storage::types::{
 pub async fn find_config_by_name(
     name: String,
 ) -> Result<Option<ServiceConfiguration>, crate::generics::MeshError> {
-    // Extract IDs from GciPId objects
-    let app_state = get_tenant_app_state().await;
-    // Use Diesel's query builder with multiple conditions
-    crate::generics::generic_find_one_optional::<
-        <ServiceConfiguration as HasTable>::Table,
-        _,
-        ServiceConfiguration,
-    >(&app_state.db, dsl::name.eq(name))
-    .await
+    // Check IMC first
+    if let Ok(cached_value) = find_config_in_mem(&name) {
+        crate::logger::debug!("Found config '{}' in IMC", name);
+
+        // Try to deserialize from JSON to ServiceConfiguration
+        if let Ok(config) = serde_json::from_value::<ServiceConfiguration>(cached_value) {
+            return Ok(Some(config));
+        }
+    }
+
+    // Not in IMC, return None (caller will check DB if needed)
+    crate::logger::debug!("Config '{}' not found in IMC", name);
+    Ok(None)
 }
 
 pub async fn insert_config(
@@ -33,14 +41,35 @@ pub async fn insert_config(
     let app_state = get_tenant_app_state().await;
 
     let config = ServiceConfigurationNew {
-        name,
+        name: name.clone(),
+        value: value.clone(),
+        new_value: None,
+        previous_value: None,
+        new_value_status: None,
+    };
+
+    // Insert to database
+    crate::generics::generic_insert(&app_state.db, config).await?;
+
+    // Create ServiceConfiguration for shard queue (after successful DB insert)
+    let service_config = ServiceConfiguration {
+        id: 0, // We don't need the actual DB ID for IMC, using 0 as placeholder
+        name: name.clone(),
         value,
         new_value: None,
         previous_value: None,
         new_value_status: None,
     };
 
-    crate::generics::generic_insert(&app_state.db, config).await?;
+    // Push to shard queue so IMC gets updated automatically via polling
+    if let Ok(config_json) = serde_json::to_value(&service_config) {
+        let queue_item = ShardQueueItem::new(name.clone(), config_json);
+        if let Err(e) = GLOBAL_SHARD_QUEUE_HANDLER.push_to_shard(queue_item) {
+            crate::logger::error!("Failed to push config '{}' to shard queue: {:?}", name, e);
+        } else {
+            crate::logger::debug!("Pushed config '{}' to shard queue for IMC update", name);
+        }
+    }
 
     Ok(())
 }

@@ -23,7 +23,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let global_app_state = GlobalAppState::new(global_config.clone()).await;
 
-    // Run both servers concurrently using tokio::spawn
+    // Run all three threads concurrently using tokio::spawn
     let main_server_handle = tokio::spawn(async move {
         open_router::app::server_builder(global_app_state)
             .await
@@ -36,8 +36,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .expect("Failed while building the metrics server")
     });
 
-    // Wait for both servers to complete (they should run indefinitely)
-    tokio::try_join!(main_server_handle, metrics_server_handle)?;
+    let shard_queue_handle = tokio::spawn(async move {
+        open_router::shard_queue::GLOBAL_SHARD_QUEUE_HANDLER.spawn()
+            .await
+            .expect("Failed while running the shard queue handler")
+    });
+
+    // Wait for all three threads to complete (they should run indefinitely)
+    tokio::try_join!(main_server_handle, metrics_server_handle, shard_queue_handle)?;
 
     Ok(())
 }

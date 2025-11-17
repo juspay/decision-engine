@@ -54,7 +54,7 @@ where
     findByNameFromRedisHelper(key, Some(decode_fn)).await
 }
 
-// Original Haskell function: findByNameFromRedisHelper
+/// Enhanced Cache-Aside Pattern: Check IMC → DB → Cache Result
 pub async fn findByNameFromRedisHelper<A>(
     key: String,
     decode_fn: Option<impl Fn(String) -> Option<A>>,
@@ -62,21 +62,69 @@ pub async fn findByNameFromRedisHelper<A>(
 where
     A: for<'de> Deserialize<'de>,
 {
-    let res = service_configuration::find_config_by_name(key).await;
+    use crate::shard_queue::{find_config_in_mem, store_config_in_mem};
 
-    match res {
-        Ok(m_service_config) => match m_service_config {
-            Some(service_config) => match service_config.value {
-                Some(value) => match decode_fn {
+    // Step 1: Check IMC first (fast path)
+    if let Ok(cached_value) = find_config_in_mem(&key) {
+        crate::logger::debug!("Cache HIT: Found config '{}' in IMC", key);
+        
+        // Try to deserialize from JSON to ServiceConfiguration
+        if let Ok(service_config) = serde_json::from_value::<crate::storage::types::ServiceConfiguration>(cached_value) {
+            if let Some(value) = service_config.value {
+                return match decode_fn {
                     Some(func) => func(value),
                     None => None,
-                },
-                None => None,
-            },
-            None => None,
-        },
-        Err(_) => None,
+                };
+            }
+        }
     }
+    
+    // Step 2: Cache MISS - Check database using existing service_configuration function
+    crate::logger::debug!("Cache MISS: Config '{}' not found in IMC, checking DB", key);
+    
+    // Use existing database query function that handles async properly
+    if let Ok(Some(config)) = check_database_for_service_config(key.clone()).await {
+        crate::logger::debug!("DB HIT: Found config '{}' in database, caching for future", key);
+        
+        // Step 3: Store in IMC for next cache hit (600 seconds TTL)
+        if let Ok(config_json) = serde_json::to_value(&config) {
+            if let Err(_) = store_config_in_mem(key.clone(), config_json) {
+                crate::logger::warn!("Failed to cache config '{}' in IMC", key);
+            } else {
+                crate::logger::debug!("Successfully cached config '{}' in IMC", key);
+            }
+        }
+        
+        // Return the decoded value
+        if let Some(value) = config.value {
+            return match decode_fn {
+                Some(func) => func(value),
+                None => None,
+            };
+        }
+    } else {
+        crate::logger::debug!("DB MISS: Config '{}' not found in database", key);
+    }
+
+    None
+}
+
+// Helper function to query database using existing patterns from the codebase
+async fn check_database_for_service_config(name: String) -> Result<Option<crate::storage::types::ServiceConfiguration>, crate::generics::MeshError> {
+    use crate::app::get_tenant_app_state;
+    #[cfg(feature = "mysql")]
+    use crate::storage::schema::service_configuration::dsl;
+    #[cfg(feature = "postgres")]
+    use crate::storage::schema_pg::service_configuration::dsl;
+    use diesel::prelude::*;
+    
+    let app_state = get_tenant_app_state().await;
+    
+    // Use the generic function that handles async queries properly
+    crate::generics::generic_find_one_optional::<crate::storage::schema::service_configuration::table, _, crate::storage::types::ServiceConfiguration>(
+        &app_state.db,
+        dsl::name.eq(name),
+    ).await.map_err(|e| crate::generics::MeshError::from(e))
 }
 
 pub fn extractValue<A>(value: String) -> Option<A>
