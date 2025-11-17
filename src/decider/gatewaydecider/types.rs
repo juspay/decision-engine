@@ -402,7 +402,7 @@ pub struct MessageFormat {
     pub log_type: String,
     pub payment_method: String,
     pub payment_method_type: String,
-    pub payment_source: Option<String>,
+    pub payment_source: Option<Secret<String>>,
     pub source_object: Option<String>,
     pub txn_detail_id: ETTD::TxnDetailId,
     pub stage: String,
