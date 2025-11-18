@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 
-/// Custom object for shard queues - simple structure  
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ShardQueueItem {
     pub key: String,
     pub value: serde_json::Value,
@@ -19,17 +18,14 @@ impl ShardQueueItem {
     }
 }
 
-/// Simple metadata for each shard
 #[derive(Debug, Clone)]
 pub struct ShardMetadata {
-    pub shard_id: u8,
     pub last_modified_at: DateTime<Utc>,
 }
 
 impl ShardMetadata {
-    pub fn new(shard_id: u8) -> Self {
+    pub fn new() -> Self {
         Self {
-            shard_id,
             last_modified_at: Utc::now(),
         }
     }
@@ -39,10 +35,14 @@ impl ShardMetadata {
     }
 }
 
-/// Simple in-memory cache
+impl Default for ShardMetadata {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub type InMemoryCache = HashMap<String, serde_json::Value>;
 
-/// Simple errors
 #[derive(Debug, thiserror::Error)]
 pub enum ShardQueueError {
     #[error("Invalid shard ID: {0}")]

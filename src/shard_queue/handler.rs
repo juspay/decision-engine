@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::HashMap,
     hash::{Hash, Hasher},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -12,6 +12,7 @@ use once_cell::sync::Lazy;
 use tokio::{sync::mpsc, time};
 
 use crate::{
+    app::get_tenant_app_state,
     generics::{MeshError, StorageResult},
     logger,
 };
@@ -37,8 +38,6 @@ impl std::ops::Deref for ShardedQueueHandler {
 }
 
 pub struct ShardedQueueHandlerInner {
-    /// 10 shards, each with a VecDeque
-    shards: Arc<Mutex<HashMap<u8, VecDeque<ShardQueueItem>>>>,
     /// Metadata for each shard with last_modified
     shard_metadata: Arc<Mutex<HashMap<u8, ShardMetadata>>>,
     /// Polling interval (10 seconds)
@@ -50,19 +49,16 @@ pub struct ShardedQueueHandlerInner {
 impl ShardedQueueHandler {
     /// Create new handler with 10 shards
     pub fn new() -> Self {
-        let mut shards = HashMap::new();
         let mut shard_metadata = HashMap::new();
 
-        // Initialize 10 shards (0-9)
+        // Initialize metadata for 10 shards (0-9)
         for shard_id in 0..10 {
-            shards.insert(shard_id, VecDeque::new());
-            shard_metadata.insert(shard_id, ShardMetadata::new(shard_id));
+            shard_metadata.insert(shard_id, ShardMetadata::new());
         }
 
         let inner = ShardedQueueHandlerInner {
-            shards: Arc::new(Mutex::new(shards)),
             shard_metadata: Arc::new(Mutex::new(shard_metadata)),
-            loop_interval: Duration::from_secs(10), // 10 seconds
+            loop_interval: Duration::from_secs(10), // 30 seconds for testing
             running: Arc::new(AtomicBool::new(true)),
         };
 
@@ -78,30 +74,41 @@ impl ShardedQueueHandler {
         (hasher.finish() % 10) as u8
     }
 
-    /// Push item to appropriate shard
-    pub fn push_to_shard(&self, item: ShardQueueItem) -> ShardQueueResult<()> {
+    /// Push item to appropriate Redis shard queue
+    pub async fn push_to_shard(&self, item: ShardQueueItem) -> ShardQueueResult<()> {
         let shard_id = self.get_shard_id(&item.key);
+        let redis_key = format!("shard_queue_{}", shard_id);
 
-        let mut shards = self.shards.lock().map_err(|e| {
-            ShardQueueError::QueueError(format!("Failed to acquire shard lock: {}", e))
-        })?;
+        let app_state = get_tenant_app_state().await;
+        let redis_conn = app_state.redis_conn.clone();
 
-        if let Some(shard_queue) = shards.get_mut(&shard_id) {
-            shard_queue.push_back(item.clone());
-            logger::debug!("value:{}",item.value);
-            logger::debug!("Item pushed to shard {}", shard_id);
-        }
+        // Serialize the entire item (with timestamp) for Redis storage
+        let serialized_item = serde_json::to_string(&item)
+            .map_err(|e| ShardQueueError::QueueError(format!("Serialization error: {}", e)))?;
 
+        redis_conn
+            .append_to_list_start(&redis_key.into(), vec![serialized_item])
+            .await
+            .map_err(|e| ShardQueueError::QueueError(format!("Redis push failed: {:?}", e)))?;
+
+        logger::debug!(
+            "Item pushed to Redis shard queue {}: key={}",
+            shard_id,
+            item.key
+        );
         Ok(())
     }
 
-    /// Start the polling thread - similar to drainer spawn()
+    /// Start the polling thread
     pub async fn spawn(&self) -> ShardQueueResult<()> {
-        logger::info!("Shard queue polling thread started, checking every {} seconds", self.loop_interval.as_secs());
-        
+        logger::info!(
+            "Shard queue polling thread started, checking every {} seconds",
+            self.loop_interval.as_secs()
+        );
+
         while self.running.load(Ordering::SeqCst) {
             logger::debug!("Shard queue polling cycle started");
-            
+
             // Process all shards (0-9)
             for shard_id in 0..10 {
                 if let Err(e) = self.process_shard(shard_id).await {
@@ -116,58 +123,62 @@ impl ShardedQueueHandler {
         Ok(())
     }
 
-    /// Process a single shard - only process items newer than last_modified_at
+    /// Process a single shard - poll items from Redis and filter by timestamp
     async fn process_shard(&self, shard_id: u8) -> ShardQueueResult<()> {
-        // Get shard's last_modified_at timestamp
+        let app_state = get_tenant_app_state().await;
+        let redis_conn = app_state.redis_conn.clone();
+        let redis_key = format!("shard_queue_{}", shard_id);
+
         let last_modified_at = {
             let metadata = self.shard_metadata.lock().map_err(|e| {
                 ShardQueueError::QueueError(format!("Failed to acquire metadata lock: {}", e))
             })?;
-            
-            metadata.get(&shard_id)
+
+            metadata
+                .get(&shard_id)
                 .map(|meta| meta.last_modified_at)
                 .unwrap_or_else(|| chrono::Utc::now()) // Default to now if no metadata
         };
 
-        // Get items from shard queue that are newer than last_modified_at
-        let (new_items, processed_items) = {
-            let mut shards = self.shards.lock().map_err(|e| {
-                ShardQueueError::QueueError(format!("Failed to acquire shard lock: {}", e))
-            })?;
+        let max_items_per_cycle = 100;
+        let raw_items = redis_conn
+            .get_range_from_list(&redis_key, 0, max_items_per_cycle - 1)
+            .await
+            .map_err(|e| ShardQueueError::QueueError(format!("Redis read failed: {:?}", e)))?;
 
-            if let Some(shard_queue) = shards.get_mut(&shard_id) {
-                let mut new_items = Vec::new();
-                let mut processed_count = 0;
-                
-                // Check each item's modified_at against shard's last_modified_at
-                let mut remaining_items = VecDeque::new();
-                
-                while let Some(item) = shard_queue.pop_front() {
+        if raw_items.is_empty() {
+            return Ok(());
+        }
+
+        logger::debug!(
+            "Polled {} items from Redis shard queue {}",
+            raw_items.len(),
+            shard_id
+        );
+
+        for raw_item in raw_items {
+            match serde_json::from_str::<ShardQueueItem>(&raw_item) {
+                Ok(item) => {
                     if item.modified_at > last_modified_at {
-                        // This item is newer, process it
                         new_items.push(item);
-                        processed_count += 1;
-                    } else {
-                        // This item is older or same, keep it in queue
-                        remaining_items.push_back(item);
                     }
                 }
-                
-                // Put back the items we're not processing
-                *shard_queue = remaining_items;
-                
-                (new_items, processed_count)
-            } else {
-                (Vec::new(), 0)
+                Err(e) => {
+                    logger::error!("Failed to deserialize item from Redis queue: {}", e);
+                }
             }
-        };
+        }
 
         if new_items.is_empty() {
             return Ok(());
         }
 
-        logger::debug!("Processing {} new items from shard {} (last_modified: {})", 
-                      new_items.len(), shard_id, last_modified_at);
+        logger::debug!(
+            "Processing {} new items from Redis shard {} (last_modified: {})",
+            new_items.len(),
+            shard_id,
+            last_modified_at
+        );
 
         // Store only new items in IMC using Registry pattern
         for item in &new_items {
@@ -214,15 +225,26 @@ impl ShardedQueueHandler {
         Ok(metadata.clone())
     }
 
-    /// Get queue sizes for all shards
-    pub fn get_queue_sizes(&self) -> ShardQueueResult<HashMap<u8, usize>> {
-        let shards = self.shards.lock().map_err(|e| {
-            ShardQueueError::QueueError(format!("Failed to acquire shard lock: {}", e))
-        })?;
+    /// Get queue sizes for all Redis-backed shards
+    pub async fn get_queue_sizes(&self) -> ShardQueueResult<HashMap<u8, usize>> {
+        let app_state = get_tenant_app_state().await;
+        let redis_conn = app_state.redis_conn.clone();
 
         let mut sizes = HashMap::new();
-        for (shard_id, queue) in shards.iter() {
-            sizes.insert(*shard_id, queue.len());
+
+        // Check queue size for each shard (0-9)
+        for shard_id in 0..10 {
+            let redis_key = format!("shard_queue_{}", shard_id);
+
+            match redis_conn.get_list_length(&redis_key).await {
+                Ok(size) => {
+                    sizes.insert(shard_id, size);
+                }
+                Err(e) => {
+                    logger::warn!("Failed to get size for shard {}: {:?}", shard_id, e);
+                    sizes.insert(shard_id, 0); // Default to 0 if we can't get the size
+                }
+            }
         }
 
         Ok(sizes)

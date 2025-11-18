@@ -97,6 +97,19 @@ impl RedisConnectionWrapper {
             .change_context(errors::RedisError::PopListElementsFailed)
     }
 
+    pub async fn get_range_from_list(
+        &self,
+        key: &str,
+        start: i64,
+        end: i64,
+    ) -> Result<Vec<String>, errors::RedisError> {
+        self.conn
+            .pool
+            .lrange(key, start, end)
+            .await
+            .change_context(errors::RedisError::GetFailed)
+    }
+
     pub async fn delete_key(&self, key: &str) -> Result<DelReply, errors::RedisError> {
         self.conn
             .pool

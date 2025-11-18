@@ -64,7 +64,7 @@ pub async fn insert_config(
     // Push to shard queue so IMC gets updated automatically via polling
     if let Ok(config_json) = serde_json::to_value(&service_config) {
         let queue_item = ShardQueueItem::new(name.clone(), config_json);
-        if let Err(e) = GLOBAL_SHARD_QUEUE_HANDLER.push_to_shard(queue_item) {
+        if let Err(e) = GLOBAL_SHARD_QUEUE_HANDLER.push_to_shard(queue_item).await {
             crate::logger::error!("Failed to push config '{}' to shard queue: {:?}", name, e);
         } else {
             crate::logger::debug!("Pushed config '{}' to shard queue for IMC update", name);
