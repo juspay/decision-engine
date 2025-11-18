@@ -760,7 +760,7 @@ pub fn get_metric_log_format(decider_flow: &mut DeciderFlow<'_>, stage: &str) ->
         bank_code: fetch_juspay_bank_code(&txn_card_info),
         x_request_id: x_req_id.cloned(),
         log_data: serde_json::to_value(mp).unwrap(),
-        is_udf_consumed: decider_flow.writer.gateway_scoring_data.udfs_consumed_for_routing.as_ref().cloned()
+        udf_consumed: decider_flow.writer.gateway_scoring_data.udfs_consumed_for_routing.as_ref().cloned()
     }
 }
 
@@ -825,7 +825,7 @@ pub async fn log_gateway_decider_approach(
             bank_code: fetch_juspay_bank_code(&txn_card_info),
             x_request_id: x_req_id,
             log_data: serde_json::to_value(mp).unwrap(),
-            is_udf_consumed: None
+            udf_consumed: None
         },
     )
     .await;
