@@ -227,6 +227,8 @@ pub async fn routing_create(
 pub async fn routing_evaluate(
     Json(payload): Json<RoutingRequest>,
 ) -> Result<Json<RoutingEvaluateResponse>, ContainerError<EuclidErrors>> {
+
+    println!(">>>>>>>>>>>>>>> {:?}", payload.parameters);
     let timer = metrics::API_LATENCY_HISTOGRAM
         .with_label_values(&["routing_evaluate"])
         .start_timer();
