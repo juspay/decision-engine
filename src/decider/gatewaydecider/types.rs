@@ -415,7 +415,7 @@ pub struct MessageFormat {
     pub x_request_id: Option<String>,
     #[serde(rename = "data")]
     pub log_data: AValue,
-    pub is_udf_consumed: Option<bool>
+    pub is_udf_consumed: Option<String>
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -567,7 +567,7 @@ pub struct GatewayScoringData {
     pub country: Option<CountryISO2>,
     pub is_legacy_decider_flow: bool,
     pub udfs: Option<UDFs>,
-    pub udfs_consumed_for_routing: Option<bool>,
+    pub udfs_consumed_for_routing: Option<String>,
 }
 
 #[derive(Debug)]

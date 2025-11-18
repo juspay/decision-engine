@@ -214,15 +214,15 @@ pub async fn newGwFilters(
         let _ = filterGatewaysForWallet(this).await;
         let _ = filterGatewaysForNbOnly(this).await;
         let _ = filterGatewaysForConsumerFinance(this).await;
-        let _ = filterGatewaysForUpi(this).await;
-        let _ = filterGatewaysForTxnType(this).await;
-        let _ = filterGatewaysForTxnDetailType(this).await;
-        let _ = filterGatewaysForReward(this).await;
-        let _ = filterGatewaysForCash(this).await;
-        let _ = filterFunctionalGatewaysForSplitSettlement(this).await;
-        let _ = filterFunctionalGatewaysForMerchantRequiredFlow(this).await;
-        let _ = filterFunctionalGatewaysForOTMFlow(this).await;
-        let _ = filterGatewaysForMGASelectionIntegrity(this).await;
+        // let _ = filterGatewaysForUpi(this).await;
+        // let _ = filterGatewaysForTxnType(this).await;
+        // let _ = filterGatewaysForTxnDetailType(this).await;
+        // let _ = filterGatewaysForReward(this).await;
+        // let _ = filterGatewaysForCash(this).await;
+        // let _ = filterFunctionalGatewaysForSplitSettlement(this).await;
+        // let _ = filterFunctionalGatewaysForMerchantRequiredFlow(this).await;
+        // let _ = filterFunctionalGatewaysForOTMFlow(this).await;
+        // let _ = filterGatewaysForMGASelectionIntegrity(this).await;
         let funcGateways =
             returnGwListWithLog(this, DeciderFilterName::FinalFunctionalGateways, false);
         let allMgas = if Utils::get_is_merchant_enabled_for_dynamic_mga_selection(this).await {
