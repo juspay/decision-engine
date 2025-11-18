@@ -2375,7 +2375,6 @@ pub async fn get_unified_sr_key(
         .map(|config| config.paymentInfo.udfs.clone())
         .unwrap_or_default();
 
-    println!("UDF Keys: {:?}", udfs);
     let udf_values =
         gateway_scoring_data
             .udfs
