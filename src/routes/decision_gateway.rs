@@ -9,7 +9,6 @@ use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOT
 use axum::body::to_bytes;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use chrono::format;
 use cpu_time::ProcessTime;
 use serde::{Deserialize, Serialize};
 

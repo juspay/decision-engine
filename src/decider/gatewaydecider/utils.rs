@@ -722,7 +722,7 @@ pub async fn metric_tracker_log(stage: &str, flowtype: &str, log_data: MessageFo
 
     crate::logger::warn!(
         action = "metric_tracking_log",
-        "{}", normalized_log_data,
+        "{}",normalized_log_data.to_string(),
     );
 }
 
@@ -752,10 +752,7 @@ pub fn get_metric_log_format(decider_flow: &mut DeciderFlow<'_>, stage: &str) ->
     let txn_card_info = decider_flow.get().dpTxnCardInfo.clone();
     let order_reference = decider_flow.get().dpOrder.clone();
     let x_req_id = decider_flow.logger.get("x-request-id");
-    let payment_source_m = txn_card_info
-            .paymentSource
-            .as_ref()
-            .and_then(|ps| last(split("@", ps.peek())));
+    let payment_source_m = txn_card_info.get_payment_source_last();
 
     MessageFormat {
         model: txn_detail
@@ -814,11 +811,8 @@ pub async fn log_gateway_decider_approach(
         dateCreated: txn_creation_time,
     };
 
-    let payment_source_m = txn_card_info
-        .paymentSource
-        .as_ref()
-        .and_then(|ps| ps.peek().split('@').last().map(String::from));
-
+    let payment_source_m = txn_card_info.get_payment_source_last();
+    
     metric_tracker_log(
         "GATEWAY_DECIDER_APPROACH",
         "DECIDER",
@@ -2016,7 +2010,7 @@ pub async fn get_gateway_scoring_data(
             }
 
             let payment_source = get_true_string(
-                txn_card_info.paymentSource.clone().map(|s| s.peek().to_string())
+                txn_card_info.get_payment_source()
             )
                 .map(|source| source.split("@").last().unwrap_or_default().to_uppercase())
                 .map(Secret::new)
@@ -2110,9 +2104,9 @@ pub async fn get_unified_key(
     let gateway_redis_key_map = match score_key_type {
         ScoreKeyType::EliminationGlobalKey => {
             let key_prefix = C::ELIMINATION_BASED_ROUTING_GLOBAL_KEY_PREFIX;
-            let (prefix_key, suffix_key): (Vec<String>, Vec<String>) = if payment_method_type == CARD {
+            let (prefix_key, suffix_key) = if payment_method_type == CARD {
                 (
-                    vec![key_prefix.to_string(), order_type.to_string()],
+                    vec![key_prefix, &order_type.as_str()],
                     vec![
                         payment_method_type.to_string(),
                         payment_method.to_string(),
@@ -2126,8 +2120,8 @@ pub async fn get_unified_key(
                 )
             } else {
                 (
-                    vec![key_prefix.to_string(), order_type.to_string()],
-                    vec![payment_method_type.to_string(), payment_method.to_string()],
+                    vec![key_prefix, &order_type.as_str()],
+                    vec![payment_method_type, payment_method],
                 )
             };
 
@@ -2290,11 +2284,7 @@ pub async fn get_unified_key(
                     gateway_scoring_data.cardType.as_deref().unwrap_or("").to_string(),
                 ]
             } else if payment_method_type == UPI {
-                let peek = gateway_scoring_data
-                    .paymentSource
-                    .as_ref()
-                    .map(|s| s.peek().to_string())
-                    .unwrap_or_default();
+                let peek = gateway_scoring_data.get_payment_source();
 
                 vec![
                     key_prefix.to_string(),
@@ -2339,11 +2329,7 @@ pub async fn get_unified_key(
                         .to_string(),
                 ]
             } else if payment_method_type == UPI {
-                let peek = gateway_scoring_data
-                    .paymentSource
-                    .as_ref()
-                    .map(|s| s.peek().to_string())
-                    .unwrap_or_default();
+                let peek = gateway_scoring_data.get_payment_source();
 
                 vec![
                     key_prefix.to_string(),
@@ -2569,11 +2555,7 @@ async fn get_legacy_unified_sr_key(
             match payment_method.as_str() {
                 "UPI_COLLECT" | "COLLECT" => {
                     let handle_list = get_upi_handle_list().await;
-                    let upi_handle = gateway_scoring_data
-                        .paymentSource
-                        .as_ref()
-                        .map(|s| s.peek().to_string())
-                        .unwrap_or_else(|| String::new());
+                    let upi_handle = gateway_scoring_data.get_payment_source();
                     let append_handle = if handle_list.contains(&upi_handle) {
                         &upi_handle
                     } else {
@@ -2586,11 +2568,7 @@ async fn get_legacy_unified_sr_key(
                 }
                 "UPI_PAY" | "PAY" => {
                     let package_list = get_upi_package_list().await;
-                    let upi_package = gateway_scoring_data
-                        .paymentSource
-                        .as_ref()
-                        .map(|s| s.peek().to_string())
-                        .unwrap_or_else(|| String::new());
+                    let upi_package = gateway_scoring_data.get_payment_source();
                     let append_package = if package_list.contains(&upi_package) {
                         upi_package.as_str()
                     } else {
@@ -2727,7 +2705,7 @@ async fn set_routing_dimension_and_reference(
                         let upi_handle = gateway_scoring_data.paymentSource.unwrap_or_default();
                         let upi_handle_peek = upi_handle.peek().to_string();
                         let append_handle = if handle_list.contains(&upi_handle_peek) {
-                            upi_handle_peek.clone()
+                            upi_handle_peek
                         } else {
                             "".to_string()
                         };

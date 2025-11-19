@@ -1,6 +1,6 @@
 use crate::error::ApiError;
 use crate::types::card::card_type::CardType;
-use masking::Secret;
+use masking::{PeekInterface, Secret};
 use serde::{Deserialize, Deserializer, Serialize};
 use time::{OffsetDateTime, PrimitiveDateTime};
 // use crate::types::transaction::id::TransactionId;
@@ -159,6 +159,23 @@ pub struct TxnCardInfo {
     #[serde(deserialize_with = "deserialize_optional_primitive_datetime")]
     pub partitionKey: Option<PrimitiveDateTime>,
 }
+
+impl TxnCardInfo {
+    pub fn get_payment_source_last(&self) -> Option<String> {
+        self.paymentSource
+            .as_ref()
+            .and_then(|ps| {
+                // use `expose_secret()` instead of peek()
+                let ps_str = ps.peek();
+                ps_str.split('@').last().map(|s| s.to_string())
+            })
+    }
+
+    pub fn get_payment_source(&self) -> Option<String> {
+         self.paymentSource.clone().map(|s| s.peek().to_string())
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct SafeTxnCardInfo {

@@ -174,9 +174,9 @@ pub async fn update_score(
             };
 
             let log_message = payload.log_message.clone();
-            let enforce_failure = payload.enforce_dynaic_routing_failure.unwrap_or(false).clone();
+            let enforce_failure = payload.enforce_dynaic_routing_failure.unwrap_or(false);
             let gateway_reference_id = payload.gateway_reference_id.clone();
-            let txn_latency = payload.txn_latency.clone();;
+            let txn_latency = payload.txn_latency.clone();
 
             jemalloc_ctl::epoch::advance().unwrap();
             let allocated_before = jemalloc_ctl::stats::allocated::read().unwrap_or(0);

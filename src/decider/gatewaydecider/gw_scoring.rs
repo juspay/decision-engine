@@ -1184,11 +1184,11 @@ fn check_scheduled_outage_metadata(
                             false
                         } else {
                             schedule_equal_to(
-                                |x, y| x == y.into(),
+                                |x, y| x.peek() == &y,
                                 Some(payment_source.clone()),
                                 scheduled_outage_metadata.app.clone(),
                             ) && schedule_equal_to(
-                                |x, y| x == y.into(),
+                                |x, y| x.peek() == &y,
                                 Some(payment_source.clone()),
                                 scheduled_outage_metadata.handle.clone(),
                             )

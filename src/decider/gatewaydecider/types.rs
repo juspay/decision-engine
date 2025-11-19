@@ -6,7 +6,7 @@ use crate::types::money::internal as ETMo;
 use crate::types::order::udfs::UDFs;
 use crate::types::transaction::id as ETId;
 use crate::types::txn_details::types::TxnObjectType;
-use masking::Secret;
+use masking::{Secret, PeekInterface};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value as AValue;
@@ -568,6 +568,15 @@ pub struct GatewayScoringData {
     pub is_legacy_decider_flow: bool,
     pub udfs: Option<UDFs>,
     pub udfs_consumed_for_routing: Option<bool>,
+}
+
+impl GatewayScoringData {
+    pub fn get_payment_source(&self) -> String {
+        self.paymentSource
+            .as_ref()
+            .map(|s| s.peek().to_string())
+            .unwrap_or_default()
+    }
 }
 
 #[derive(Debug)]
