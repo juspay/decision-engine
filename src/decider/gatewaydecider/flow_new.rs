@@ -868,6 +868,103 @@ async fn get_sr_for_each_gateway_network_combination(
     (first_gateway_result, super_router_priority_map)
 }
 
+/// Filter out invalid gateway-network combinations based on eligible gateway network list
+fn filter_valid_gateway_network_combinations(
+    super_router_priority_map: Vec<T::SUPERROUTERPRIORITYMAP>,
+    eligible_gateway_network_list: Option<Vec<T::EligibleGatewayPaymentMethodsList>>,
+) -> Vec<T::SUPERROUTERPRIORITYMAP> {
+    match eligible_gateway_network_list {
+        Some(eligible_list) => {
+            // Create a lookup map for faster access
+            let mut gateway_networks_map_from_request: HashMap<String, HashSet<String>> =
+                HashMap::new();
+            for eligible_gw in eligible_list {
+                gateway_networks_map_from_request.insert(
+                    eligible_gw.gateway,
+                    eligible_gw.payment_methods.into_iter().collect(),
+                );
+            }
+
+            let initial_count = super_router_priority_map.len();
+
+            // Filter combinations
+            let filtered_combinations: Vec<T::SUPERROUTERPRIORITYMAP> = super_router_priority_map
+                .into_iter()
+                .filter(|combination| {
+                    if let Some(supported_networks) = gateway_networks_map_from_request.get(&combination.gateway) {
+                        supported_networks.contains(&combination.payment_method)
+                    } else {
+                        // If gateway not specified in eligible list, include all the combinations for that gateway
+                        logger::debug!(
+                            "Gateway {} not specified in eligible list, including all its combinations",
+                            combination.gateway
+                        );
+                        true
+                    }
+                })
+                .collect();
+
+            let filtered_count = filtered_combinations.len();
+            let removed_count = initial_count - filtered_count;
+
+            logger::debug!(
+                "Gateway-network filtering: {} total combinations, {} valid combinations, {} filtered out",
+                initial_count,
+                filtered_count,
+                removed_count
+            );
+
+            filtered_combinations
+        }
+        None => {
+            // If no filtering list provided, return all combinations
+            logger::debug!("No eligible gateway network list provided, returning all combinations");
+            super_router_priority_map
+        }
+    }
+}
+
+fn filter_and_apply_super_router_sorting(
+    super_router_priority_map: Vec<T::SUPERROUTERPRIORITYMAP>,
+    sorting_strategy: &SuperRouterSortingStrategy,
+    eligible_gateway_network_list: Option<Vec<T::EligibleGatewayPaymentMethodsList>>,
+) -> Vec<T::SUPERROUTERPRIORITYMAP> {
+    // First apply filtering
+    let filtered_combinations = filter_valid_gateway_network_combinations(
+        super_router_priority_map,
+        eligible_gateway_network_list,
+    );
+
+    // Then apply sorting
+    let mut sorted_combinations = filtered_combinations;
+    match sorting_strategy {
+        SuperRouterSortingStrategy::SuccessRate => {
+            logger::debug!("Applying SUCCESS_RATE sorting strategy");
+            sorted_combinations.sort_by(|a, b| {
+                let success_rate_a = a.success_rate.unwrap_or(0.0);
+                let success_rate_b = b.success_rate.unwrap_or(0.0);
+                success_rate_b.total_cmp(&success_rate_a) // Descending order
+            });
+        }
+        SuperRouterSortingStrategy::Cost => {
+            logger::debug!("Applying COST sorting strategy");
+            sorted_combinations.sort_by(|a, b| {
+                let saving_a = a.saving_normalized.unwrap_or(0.0);
+                let saving_b = b.saving_normalized.unwrap_or(0.0);
+                saving_b.total_cmp(&saving_a) // Descending order (higher savings first)
+            });
+        }
+    }
+    
+    logger::debug!(
+        "Super router priority map after filtering and {:?} sorting: {:?}",
+        sorting_strategy,
+        sorted_combinations
+    );
+    
+    sorted_combinations
+}
+
 /// Build the final Super Router response with sorted results
 fn build_super_router_response(
     first_gateway_result: Option<T::DecidedGateway>,
@@ -940,8 +1037,18 @@ pub async fn runSuperRouterFlow(
         get_sr_for_each_gateway_network_combination(networks_to_process, &decider_params, &dreq)
             .await;
 
+    // Get sorting strategy from configuration
+    let sorting_strategy = &app_state.config.super_router_config.sorting_strategy;
+
+    // Apply filtering and configurable sorting
+    let mut sorted_priority_map = filter_and_apply_super_router_sorting(
+        super_router_priority_map,
+        sorting_strategy,
+        dreq.eligibleGatewayPaymentMethodsList.clone(),
+    );
+
     let sorted_priority_map =
-        super::sr_cost_routing::sort_by_euclidean_distance_original(&mut super_router_priority_map);
+        super::sr_cost_routing::sort_by_euclidean_distance_original(&mut sorted_priority_map);
 
     // Check if there are any combinations
     if sorted_priority_map.is_empty() {
@@ -989,7 +1096,7 @@ pub async fn runSuperRouterFlow(
     )
     .await;
 
-    // Build super router response
+    // Build super router response with filtered and sorted data
     build_super_router_response(first_gateway_result, final_priority_map, hedging_performed)
 }
 
