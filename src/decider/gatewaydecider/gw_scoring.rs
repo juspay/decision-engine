@@ -1180,15 +1180,15 @@ fn check_scheduled_outage_metadata(
                     .paymentSource
                     .as_ref()
                     .map_or(false, |payment_source| {
-                        if payment_source.contains('@') {
+                        if payment_source.peek().contains('@') {
                             false
                         } else {
                             schedule_equal_to(
-                                |x, y| x == y,
+                                |x, y| x == y.into(),
                                 Some(payment_source.clone()),
                                 scheduled_outage_metadata.app.clone(),
                             ) && schedule_equal_to(
-                                |x, y| x == y,
+                                |x, y| x == y.into(),
                                 Some(payment_source.clone()),
                                 scheduled_outage_metadata.handle.clone(),
                             )

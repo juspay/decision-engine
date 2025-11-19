@@ -9,6 +9,7 @@ use time::PrimitiveDateTime;
 // use chrono::{Local, Utc};
 use crate::types::txn_details::types::{TransactionLatency, TxnStatus};
 use std::string::String;
+use masking::Secret;
 // use eulerhs::types::MeshError;
 
 // // Converted type synonyms
@@ -106,7 +107,7 @@ pub struct GatewayScoringKeyType {
     pub sourceObject: Option<String>,
 
     #[serde(rename = "paymentSource")]
-    pub paymentSource: Option<String>,
+    pub paymentSource: Option<Secret<String>>,
 
     #[serde(rename = "cardType")]
     pub cardType: Option<String>,

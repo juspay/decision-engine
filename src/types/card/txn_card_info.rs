@@ -152,7 +152,7 @@ pub struct TxnCardInfo {
     #[serde(rename = "paymentMethod")]
     pub paymentMethod: String,
     #[serde(rename = "paymentSource")]
-    pub paymentSource: Option<String>,
+    pub paymentSource: Option<Secret<String>>,
     #[serde(rename = "authType")]
     pub authType: Option<AuthType>,
     #[serde(rename = "partitionKey")]
@@ -182,7 +182,7 @@ pub struct SafeTxnCardInfo {
     #[serde(rename = "paymentMethod")]
     pub paymentMethod: String,
     #[serde(rename = "paymentSource")]
-    pub paymentSource: Option<String>,
+    pub paymentSource: Option<Secret<String>>,
     #[serde(rename = "authType")]
     pub authType: Option<String>,
     #[serde(rename = "partitionKey")]

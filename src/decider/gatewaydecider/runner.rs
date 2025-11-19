@@ -35,7 +35,7 @@ use crate::{
     },
     utils::call_api,
 };
-use masking::PeekInterface;
+use masking::{PeekInterface,Secret};
 use serde::{Deserialize, Serialize};
 use serde_json::{from_str, Value};
 
@@ -172,10 +172,10 @@ pub fn fetch_emi_type(txnCardInfo: TxnCardInfo) -> Result<String, Vec<LogEntry>>
     match txnCardInfo.paymentSource {
         None => Err(vec![]),
         Some(ps) => {
-            if ps.contains("emi_type") {
+            if ps.peek().contains("emi_type") {
                 Err(vec![])
             } else {
-                match from_str::<Value>(&ps) {
+                match from_str::<Value>(ps.peek()) {
                     Ok(value) => match value.get("emi_type") {
                         Some(emi_type) => match emi_type.as_str() {
                             Some(emi_type_str) => Ok(emi_type_str.to_string()),
@@ -207,7 +207,7 @@ pub struct FilteredPaymentInfo {
     pub paymentMethod: Option<String>,
     pub paymentMethodType: Option<String>,
     pub authType: Option<String>,
-    pub paymentSource: Option<String>,
+    pub paymentSource: Option<Secret<String>>,
     pub emiType: Option<String>,
     pub cardSubType: Option<String>,
     pub storedCardProvider: Option<String>,

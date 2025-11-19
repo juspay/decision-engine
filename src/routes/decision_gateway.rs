@@ -9,6 +9,7 @@ use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOT
 use axum::body::to_bytes;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
+use chrono::format;
 use cpu_time::ProcessTime;
 use serde::{Deserialize, Serialize};
 
@@ -179,7 +180,7 @@ where
                         env =
                             std::env::var("APP_ENV").unwrap_or_else(|_| "development".to_string()),
                         action = "POST",
-                        req_body = String::from_utf8_lossy(&body).to_string(),
+                        req_body = format!("{:?}", payload),
                         req_headers = format!("{:?}", headers),
                         res_body = res_body,
                         res_code = 200,
