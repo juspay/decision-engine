@@ -6,7 +6,7 @@ use crate::types::money::internal as ETMo;
 use crate::types::order::udfs::UDFs;
 use crate::types::transaction::id as ETId;
 use crate::types::txn_details::types::TxnObjectType;
-use masking::Secret;
+use masking::{PeekInterface, Secret};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value as AValue;
@@ -23,6 +23,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 // use data::reflection::Given;
 // use data::time::{UTCTime, LocalTime};
 // use unsafe_coerce::unsafeCoerce;
+use crate::decider::gatewaydecider::utils::mask_secret_option;
 use crate::types::card as ETCa;
 use crate::types::merchant as ETM;
 use crate::types::merchant::id::MerchantId;
@@ -402,7 +403,8 @@ pub struct MessageFormat {
     pub log_type: String,
     pub payment_method: String,
     pub payment_method_type: String,
-    pub payment_source: Option<String>,
+    #[serde(serialize_with = "mask_secret_option")]
+    pub payment_source: Option<Secret<String>>,
     pub source_object: Option<String>,
     pub txn_detail_id: ETTD::TxnDetailId,
     pub stage: String,
@@ -415,7 +417,7 @@ pub struct MessageFormat {
     pub x_request_id: Option<String>,
     #[serde(rename = "data")]
     pub log_data: AValue,
-    pub udf_consumed: Option<String>
+    pub udf_consumed: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -552,7 +554,8 @@ pub struct GatewayScoringData {
     pub cardType: Option<String>,
     pub bankCode: Option<String>,
     pub authType: Option<String>,
-    pub paymentSource: Option<String>,
+    #[serde(serialize_with = "mask_secret_option")]
+    pub paymentSource: Option<Secret<String>>,
     pub isPaymentSourceEnabledForSrRouting: bool,
     pub isAuthLevelEnabledForSrRouting: bool,
     pub isBankLevelEnabledForSrRouting: bool,
@@ -568,6 +571,15 @@ pub struct GatewayScoringData {
     pub is_legacy_decider_flow: bool,
     pub udfs: Option<UDFs>,
     pub udfs_consumed_for_routing: Option<String>,
+}
+
+impl GatewayScoringData {
+    pub fn get_payment_source(&self) -> String {
+        self.paymentSource
+            .as_ref()
+            .map(|s| s.peek().to_string())
+            .unwrap_or_default()
+    }
 }
 
 #[derive(Debug)]
@@ -875,7 +887,8 @@ pub struct ApiTxnCardInfo {
     pub paymentMethodType: Option<String>,
     pub paymentMethod: Option<String>,
     pub cardGlobalFingerprint: Option<String>,
-    pub paymentSource: Option<String>,
+    #[serde(serialize_with = "mask_secret_option")]
+    pub paymentSource: Option<Secret<String>>,
     pub authType: Option<String>,
     pub partitionKey: Option<PrimitiveDateTime>,
 }
@@ -1055,7 +1068,7 @@ impl DomainDeciderRequestForApiCallV2 {
                 dateCreated: OffsetDateTime::now_utc(),
                 paymentMethodType: self.payment_info.payment_method_type.to_string(),
                 paymentMethod: self.payment_info.payment_method.clone(),
-                paymentSource: self.payment_info.payment_source.clone(),
+                paymentSource: self.payment_info.payment_source.clone().map(Secret::new),
                 authType: self.payment_info.auth_type.clone(),
                 partitionKey: None,
             },

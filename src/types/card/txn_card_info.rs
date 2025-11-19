@@ -1,12 +1,13 @@
 use crate::error::ApiError;
 use crate::types::card::card_type::CardType;
-use masking::Secret;
+use masking::{PeekInterface, Secret};
 use serde::{Deserialize, Deserializer, Serialize};
 use time::{OffsetDateTime, PrimitiveDateTime};
 // use crate::types::transaction::id::TransactionId;
 // use crate::types::txn_details::types::TxnDetailId;
 // use juspay::extra::parsing::{Step, lift_either, lift_pure, ParsingErrorType};
 // use juspay::extra::secret::{Secret, SecretContext};
+use crate::decider::gatewaydecider::utils::mask_secret_option;
 use std::fmt::Debug;
 use std::option::Option;
 use std::string::String;
@@ -152,12 +153,27 @@ pub struct TxnCardInfo {
     #[serde(rename = "paymentMethod")]
     pub paymentMethod: String,
     #[serde(rename = "paymentSource")]
-    pub paymentSource: Option<String>,
+    #[serde(serialize_with = "mask_secret_option")]
+    pub paymentSource: Option<Secret<String>>,
     #[serde(rename = "authType")]
     pub authType: Option<AuthType>,
     #[serde(rename = "partitionKey")]
     #[serde(deserialize_with = "deserialize_optional_primitive_datetime")]
     pub partitionKey: Option<PrimitiveDateTime>,
+}
+
+impl TxnCardInfo {
+    pub fn get_payment_source_last(&self) -> Option<String> {
+        self.paymentSource.as_ref().and_then(|ps| {
+            // use `expose_secret()` instead of peek()
+            let ps_str = ps.peek();
+            ps_str.split('@').last().map(|s| s.to_string())
+        })
+    }
+
+    pub fn get_payment_source(&self) -> Option<String> {
+        self.paymentSource.clone().map(|s| s.peek().to_string())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -182,7 +198,8 @@ pub struct SafeTxnCardInfo {
     #[serde(rename = "paymentMethod")]
     pub paymentMethod: String,
     #[serde(rename = "paymentSource")]
-    pub paymentSource: Option<String>,
+    #[serde(serialize_with = "mask_secret_option")]
+    pub paymentSource: Option<Secret<String>>,
     #[serde(rename = "authType")]
     pub authType: Option<String>,
     #[serde(rename = "partitionKey")]
