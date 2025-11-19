@@ -160,7 +160,8 @@ pub async fn update_score(
             }
 
             // Process the request
-            let txn_detail = match convert_safe_txn_detail_to_txn_detail(payload.txn_detail.clone()) {
+            let txn_detail = match convert_safe_txn_detail_to_txn_detail(payload.txn_detail.clone())
+            {
                 Ok(detail) => detail,
                 Err(e) => {
                     return Err(invalid_request_error("transaction details", &e));

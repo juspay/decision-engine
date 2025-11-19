@@ -6,7 +6,7 @@ use crate::types::money::internal as ETMo;
 use crate::types::order::udfs::UDFs;
 use crate::types::transaction::id as ETId;
 use crate::types::txn_details::types::TxnObjectType;
-use masking::{Secret, PeekInterface};
+use masking::{PeekInterface, Secret};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value as AValue;
@@ -23,6 +23,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 // use data::reflection::Given;
 // use data::time::{UTCTime, LocalTime};
 // use unsafe_coerce::unsafeCoerce;
+use crate::decider::gatewaydecider::utils::mask_secret_option;
 use crate::types::card as ETCa;
 use crate::types::merchant as ETM;
 use crate::types::merchant::id::MerchantId;
@@ -31,7 +32,6 @@ use crate::types::order_metadata_v2 as ETOMV2;
 use crate::types::txn_details::types as ETTD;
 use crate::types::txn_offer_detail as ETTOD;
 use crate::types::txn_offer_info as ETTOI;
-use crate::decider::gatewaydecider::utils::mask_secret_option;
 // use utils::framework::capture as Capture;
 use crate::types::gateway_routing_input as ETGRI;
 // use eulerhs::language as L;
@@ -417,7 +417,7 @@ pub struct MessageFormat {
     pub x_request_id: Option<String>,
     #[serde(rename = "data")]
     pub log_data: AValue,
-    pub is_udf_consumed: Option<bool>
+    pub is_udf_consumed: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

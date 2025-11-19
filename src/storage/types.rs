@@ -10,6 +10,7 @@ use diesel::sql_types::Bool;
 use super::schema;
 #[cfg(feature = "postgres")]
 use super::schema_pg;
+use crate::decider::gatewaydecider::utils::mask_secret_option;
 #[cfg(feature = "mysql")]
 use diesel::mysql::Mysql;
 #[cfg(feature = "postgres")]
@@ -22,12 +23,11 @@ use diesel::{
     Queryable, Selectable,
 };
 use error_stack::ResultExt;
+use masking::{PeekInterface, Secret};
 use serde::Serialize;
 use serde::{self, Deserialize};
 use std::io::Write;
 use time::PrimitiveDateTime;
-use masking::{Secret, PeekInterface};
-use crate::decider::gatewaydecider::utils::mask_secret_option;
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
 #[cfg_attr(feature = "mysql", diesel(table_name = schema::card_brand_routes))]

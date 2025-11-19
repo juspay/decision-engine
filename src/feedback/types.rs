@@ -7,10 +7,10 @@ use serde::{Deserialize, Serialize};
 use time::PrimitiveDateTime;
 // use database::beam as B;
 // use chrono::{Local, Utc};
-use crate::types::txn_details::types::{TransactionLatency, TxnStatus};
-use std::string::String;
-use masking::Secret;
 use crate::decider::gatewaydecider::utils::mask_secret_option;
+use crate::types::txn_details::types::{TransactionLatency, TxnStatus};
+use masking::Secret;
+use std::string::String;
 // use eulerhs::types::MeshError;
 
 // // Converted type synonyms

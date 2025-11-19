@@ -35,15 +35,15 @@ use crate::{
     },
     utils::call_api,
 };
-use masking::{PeekInterface,Secret};
+use masking::{PeekInterface, Secret};
 use serde::{Deserialize, Serialize};
 use serde_json::{from_str, Value};
 
 use crate::decider::gatewaydecider::types as DeciderTypes;
 
 use super::utils;
-use crate::types::payment::payment_method_type_const::*;
 use crate::decider::gatewaydecider::utils::mask_secret_option;
+use crate::types::payment::payment_method_type_const::*;
 
 // use serde_json::Value as AValue;
 // use eulerhs::prelude::*;
