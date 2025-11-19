@@ -10,6 +10,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 use std::fmt::Debug;
 use std::option::Option;
 use std::string::String;
+use crate::decider::gatewaydecider::utils::mask_secret_option;
 
 #[derive(Debug, PartialEq, Clone, Eq, Serialize, Deserialize, Hash)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -152,6 +153,7 @@ pub struct TxnCardInfo {
     #[serde(rename = "paymentMethod")]
     pub paymentMethod: String,
     #[serde(rename = "paymentSource")]
+    #[serde(serialize_with = "mask_secret_option")]
     pub paymentSource: Option<Secret<String>>,
     #[serde(rename = "authType")]
     pub authType: Option<AuthType>,
@@ -199,6 +201,7 @@ pub struct SafeTxnCardInfo {
     #[serde(rename = "paymentMethod")]
     pub paymentMethod: String,
     #[serde(rename = "paymentSource")]
+    #[serde(serialize_with = "mask_secret_option")]
     pub paymentSource: Option<Secret<String>>,
     #[serde(rename = "authType")]
     pub authType: Option<String>,

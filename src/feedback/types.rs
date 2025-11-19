@@ -10,6 +10,7 @@ use time::PrimitiveDateTime;
 use crate::types::txn_details::types::{TransactionLatency, TxnStatus};
 use std::string::String;
 use masking::Secret;
+use crate::decider::gatewaydecider::utils::mask_secret_option;
 // use eulerhs::types::MeshError;
 
 // // Converted type synonyms
@@ -107,6 +108,7 @@ pub struct GatewayScoringKeyType {
     pub sourceObject: Option<String>,
 
     #[serde(rename = "paymentSource")]
+    #[serde(serialize_with = "mask_secret_option")]
     pub paymentSource: Option<Secret<String>>,
 
     #[serde(rename = "cardType")]

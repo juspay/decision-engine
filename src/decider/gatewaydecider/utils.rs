@@ -26,7 +26,7 @@ use fred::prelude::{KeysInterface, ListInterface};
 use masking::PeekInterface;
 use masking::Secret;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{from_slice, from_str, Value};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -718,8 +718,6 @@ pub async fn metric_tracker_log(stage: &str, flowtype: &str, log_data: MessageFo
         }
     };
 
-    mask_sensitive(&mut normalized_log_data);
-
     crate::logger::warn!(
         action = "metric_tracking_log",
         "{}",normalized_log_data.to_string(),
@@ -727,22 +725,13 @@ pub async fn metric_tracker_log(stage: &str, flowtype: &str, log_data: MessageFo
 }
 
 
-fn mask_sensitive(value: &mut serde_json::Value) {
-    if let serde_json::Value::Object(map) = value {
-        for (k, v) in map.iter_mut() {
-            match k.as_str() {
-                "payment_source" => {
-                    *v = serde_json::Value::String("***FILTERED***".to_string());
-                }
-                _ => mask_sensitive(v),
-            }
-        }
-    } else if let serde_json::Value::Array(arr) = value {
-        for v in arr.iter_mut() {
-            mask_sensitive(v);
-        }
-    }
+pub fn mask_secret_option<S>(_: &Option<Secret<String>>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.serialize_str("FILTERED")
 }
+
 
 
 pub fn get_metric_log_format(decider_flow: &mut DeciderFlow<'_>, stage: &str) -> MessageFormat {

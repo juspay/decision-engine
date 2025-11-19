@@ -43,6 +43,7 @@ use crate::decider::gatewaydecider::types as DeciderTypes;
 
 use super::utils;
 use crate::types::payment::payment_method_type_const::*;
+use crate::decider::gatewaydecider::utils::mask_secret_option;
 
 // use serde_json::Value as AValue;
 // use eulerhs::prelude::*;
@@ -207,6 +208,7 @@ pub struct FilteredPaymentInfo {
     pub paymentMethod: Option<String>,
     pub paymentMethodType: Option<String>,
     pub authType: Option<String>,
+    #[serde(serialize_with = "mask_secret_option")]
     pub paymentSource: Option<Secret<String>>,
     pub emiType: Option<String>,
     pub cardSubType: Option<String>,

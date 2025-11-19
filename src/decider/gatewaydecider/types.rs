@@ -31,6 +31,7 @@ use crate::types::order_metadata_v2 as ETOMV2;
 use crate::types::txn_details::types as ETTD;
 use crate::types::txn_offer_detail as ETTOD;
 use crate::types::txn_offer_info as ETTOI;
+use crate::decider::gatewaydecider::utils::mask_secret_option;
 // use utils::framework::capture as Capture;
 use crate::types::gateway_routing_input as ETGRI;
 // use eulerhs::language as L;
@@ -402,6 +403,7 @@ pub struct MessageFormat {
     pub log_type: String,
     pub payment_method: String,
     pub payment_method_type: String,
+    #[serde(serialize_with = "mask_secret_option")]
     pub payment_source: Option<Secret<String>>,
     pub source_object: Option<String>,
     pub txn_detail_id: ETTD::TxnDetailId,
@@ -552,6 +554,7 @@ pub struct GatewayScoringData {
     pub cardType: Option<String>,
     pub bankCode: Option<String>,
     pub authType: Option<String>,
+    #[serde(serialize_with = "mask_secret_option")]
     pub paymentSource: Option<Secret<String>>,
     pub isPaymentSourceEnabledForSrRouting: bool,
     pub isAuthLevelEnabledForSrRouting: bool,
@@ -884,6 +887,7 @@ pub struct ApiTxnCardInfo {
     pub paymentMethodType: Option<String>,
     pub paymentMethod: Option<String>,
     pub cardGlobalFingerprint: Option<String>,
+    #[serde(serialize_with = "mask_secret_option")]
     pub paymentSource: Option<Secret<String>>,
     pub authType: Option<String>,
     pub partitionKey: Option<PrimitiveDateTime>,
