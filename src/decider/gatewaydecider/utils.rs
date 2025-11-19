@@ -765,7 +765,12 @@ pub fn get_metric_log_format(decider_flow: &mut DeciderFlow<'_>, stage: &str) ->
         bank_code: fetch_juspay_bank_code(&txn_card_info),
         x_request_id: x_req_id.cloned(),
         log_data: serde_json::to_value(mp).unwrap(),
-        udf_consumed: decider_flow.writer.gateway_scoring_data.udfs_consumed_for_routing.as_ref().cloned()
+        udf_consumed: decider_flow
+            .writer
+            .gateway_scoring_data
+            .udfs_consumed_for_routing
+            .as_ref()
+            .cloned(),
     }
 }
 
@@ -827,7 +832,7 @@ pub async fn log_gateway_decider_approach(
             bank_code: fetch_juspay_bank_code(&txn_card_info),
             x_request_id: x_req_id,
             log_data: serde_json::to_value(mp).unwrap(),
-            udf_consumed: None
+            udf_consumed: None,
         },
     )
     .await;
@@ -2427,7 +2432,8 @@ pub async fn get_unified_sr_key(
     if let Some(df) = decider_flow {
         if let Some(udf_values) = udf_values.as_ref() {
             if udf_values.len() == 1 {
-                df.writer.gateway_scoring_data.udfs_consumed_for_routing = Some(udf_values[0].clone());
+                df.writer.gateway_scoring_data.udfs_consumed_for_routing =
+                    Some(udf_values[0].clone());
             }
         }
     }
