@@ -241,6 +241,7 @@ pub async fn getFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList {
     let txn_id = this.get().dpTxnDetail.txnId.clone();
     let txn_detail = this.get().dpTxnDetail.clone();
     let is_edcc_applied = this.get().dpEDCCApplied;
+    let is_on_us_txn = this.get().dpIsOnUsTxn.unwrap_or(false);
     let enforce_gateway_list = this.get().dpEnforceGatewayList.clone();
 
     logger::info!(
@@ -279,8 +280,17 @@ pub async fn getFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList {
     let payment_flow_list = Utils::get_payment_flow_list_from_txn_detail(&txn_detail);
     Utils::set_payment_flow_list(this, payment_flow_list);
 
+    let whitelisted_pms_for_enforce_gateway_list: HashSet<String> =
+        findByNameFromRedis::<HashSet<String>>(C::WHITELISTED_PAYMENT_METHODS_FOR_ENFORCE_GATEWAY_LIST.get_key())
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+
+    let is_whitelisted_pm = whitelisted_pms_for_enforce_gateway_list.contains(&txn_card_info.paymentMethod);
+
     let mgas_ = match (
-        txn_detail.isEmi.unwrap_or(false) || Utils::is_reccuring_payment_transaction(&txn_detail),
+        txn_detail.isEmi.unwrap_or(false) || Utils::is_reccuring_payment_transaction(&txn_detail) || is_on_us_txn || is_whitelisted_pm,
         &enforce_gateway_list,
     ) {
         (false, _) => enabled_gateway_accounts.clone(),
@@ -1014,10 +1024,7 @@ pub async fn filterByCardBrand(
             .collect(),
 
         _ => st
-            .iter()
-            .filter(|gw| !amex_not_supported_gateways.contains(*gw))
-            .cloned()
-            .collect(),
+            .to_vec(),
     }
 }
 
@@ -2429,6 +2436,7 @@ pub async fn filterGatewaysForPaymentMethod(this: &mut DeciderFlow<'_>) -> Vec<S
                 &payment_method,
                 proceed_with_all_mgas,
                 is_dynamic_mga_enabled,
+                None,
             )
             .await;
 
@@ -2484,6 +2492,11 @@ pub async fn filterGatewaysForPaymentMethod(this: &mut DeciderFlow<'_>) -> Vec<S
             (st, eligible_mgas)
         };
 
+        let brand = txn_card_info
+            .cardSwitchProvider
+            .clone()
+            .map(|csp| csp.peek().to_uppercase());
+
         let (_, rem_mgas) = getGatewaysAcceptingPaymentMethod(
             &oref,
             &merchant_acc,
@@ -2492,6 +2505,7 @@ pub async fn filterGatewaysForPaymentMethod(this: &mut DeciderFlow<'_>) -> Vec<S
             &pm,
             proceed_with_all_mgas,
             is_dynamic_mga_enabled,
+            brand,
         )
         .await;
 
@@ -2520,6 +2534,7 @@ async fn getGatewaysAcceptingPaymentMethod(
     payment_method: &str,
     proceed_with_all_mgas: bool,
     is_dynamic_mga_enabled: bool,
+    m_network: Option<String>,
 ) -> (GatewayList, Vec<MerchantGatewayAccount>) {
     let filtered_mgas: Vec<_> = eligible_mgas
         .iter()
@@ -2528,6 +2543,24 @@ async fn getGatewaysAcceptingPaymentMethod(
         })
         .cloned()
         .collect();
+
+    let wallet_pms_enabled_for_network_based_routing: HashSet<String> =
+        findByNameFromRedis::<HashSet<String>>(C::WALLET_PMS_ENABLED_FOR_NETWORK_BASED_ROUTING.get_key())
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+
+    let filtered_mgas: Vec<_> = match (
+        wallet_pms_enabled_for_network_based_routing.contains(&payment_method),
+        m_network.as_ref(),
+    ) {
+        (true, Some(network)) => filtered_mgas
+            .into_iter()
+            .filter(|mga| canAcceptPaymentMethod(mga, network))
+            .collect(),
+        _ => filtered_mgas,
+    };
 
     let gateways: GatewayList = filtered_mgas
         .iter()
