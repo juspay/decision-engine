@@ -968,7 +968,7 @@ pub struct PaymentInfo {
     currency: Currency,
     country: Option<CountryISO2>,
     customer_id: Option<ETCu::CustomerId>,
-    #[serde(deserialize_with = "deserialize_optional_udfs_to_hashmap")]
+    #[serde(default, deserialize_with = "deserialize_optional_udfs_to_hashmap")]
     udfs: Option<UDFs>,
     preferred_gateway: Option<String>,
     payment_type: TxnObjectType,
