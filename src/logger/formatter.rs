@@ -26,6 +26,7 @@ use tracing_subscriber::{
     registry::{LookupSpan, SpanRef},
     Layer,
 };
+use std::sync::Mutex;
 
 // TODO: Documentation coverage for this crate
 
@@ -342,7 +343,11 @@ where
                 explicit_entries_set.insert("resp_code");
             }
             if !explicit_entries_set.contains("level") {
-                map_serializer.serialize_entry("level", &Value::String("Info".to_string()))?;
+                if metadata.level() == &tracing::Level::ERROR {
+                    map_serializer.serialize_entry("level", &Value::String("Error".to_string()))?;
+                } else {
+                    map_serializer.serialize_entry("level", &Value::String("Info".to_string()))?;
+                }
                 explicit_entries_set.insert("level");
             }
             if !explicit_entries_set.contains("cell_id") {
@@ -350,8 +355,7 @@ where
                 explicit_entries_set.insert("cell_id");
             }
         } else {
-            // DOMAIN category logic.
-            // Serialize keys from the span that match the domain keys array.
+
             if let Some(span) = span {
                 let extensions = span.extensions();
                 if let Some(visitor) = extensions.get::<Storage<'_>>() {
