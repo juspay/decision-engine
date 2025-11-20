@@ -415,7 +415,7 @@ pub struct MessageFormat {
     pub x_request_id: Option<String>,
     #[serde(rename = "data")]
     pub log_data: AValue,
-    pub is_udf_consumed: Option<bool>
+    pub is_udf_consumed: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -18,6 +18,7 @@ use crate::logger;
 
 use super::env::get_env_var;
 use super::storage::Storage;
+use std::sync::Mutex;
 use time::format_description::well_known::Iso8601;
 use tracing::{Event, Metadata, Subscriber};
 use tracing_subscriber::{
@@ -26,7 +27,6 @@ use tracing_subscriber::{
     registry::{LookupSpan, SpanRef},
     Layer,
 };
-use std::sync::Mutex;
 
 // TODO: Documentation coverage for this crate
 
@@ -355,7 +355,6 @@ where
                 explicit_entries_set.insert("cell_id");
             }
         } else {
-
             if let Some(span) = span {
                 let extensions = span.extensions();
                 if let Some(visitor) = extensions.get::<Storage<'_>>() {

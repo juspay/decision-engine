@@ -761,7 +761,10 @@ pub fn get_metric_log_format(decider_flow: &mut DeciderFlow<'_>, stage: &str) ->
         bank_code: fetch_juspay_bank_code(&txn_card_info),
         x_request_id: x_req_id.cloned(),
         log_data: serde_json::to_value(mp).unwrap(),
-        is_udf_consumed: decider_flow.writer.gateway_scoring_data.udfs_consumed_for_routing
+        is_udf_consumed: decider_flow
+            .writer
+            .gateway_scoring_data
+            .udfs_consumed_for_routing,
     }
 }
 
@@ -826,7 +829,7 @@ pub async fn log_gateway_decider_approach(
             bank_code: fetch_juspay_bank_code(&txn_card_info),
             x_request_id: x_req_id,
             log_data: serde_json::to_value(mp).unwrap(),
-            is_udf_consumed: None
+            is_udf_consumed: None,
         },
     )
     .await;
@@ -1915,7 +1918,7 @@ pub fn get_default_gateway_scoring_data(
         country: country,
         is_legacy_decider_flow,
         udfs,
-        udfs_consumed_for_routing: None
+        udfs_consumed_for_routing: None,
     }
 }
 
@@ -2197,7 +2200,8 @@ pub async fn get_unified_key(
             result_keys
         }
         ScoreKeyType::SrV2Key => {
-            let key = get_unified_sr_key(&gateway_scoring_data, false, enforce1d, decider_flow).await;
+            let key =
+                get_unified_sr_key(&gateway_scoring_data, false, enforce1d, decider_flow).await;
             let gri_sr_v2_cutover = gateway_scoring_data.isGriEnabledForSrRouting;
 
             if gri_sr_v2_cutover {
@@ -2221,7 +2225,8 @@ pub async fn get_unified_key(
             }
         }
         ScoreKeyType::SrV3Key => {
-            let base_key = get_unified_sr_key(&gateway_scoring_data, true, enforce1d, decider_flow).await;
+            let base_key =
+                get_unified_sr_key(&gateway_scoring_data, true, enforce1d, decider_flow).await;
             let gri_sr_v2_cutover = gateway_scoring_data.isGriEnabledForSrRouting;
 
             if gri_sr_v2_cutover {
@@ -2390,7 +2395,7 @@ pub async fn get_unified_sr_key(
                         None => {
                             udf_used = false;
                             return None;
-                        },
+                        }
                     }
                 }
 
