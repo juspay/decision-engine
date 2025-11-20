@@ -19,19 +19,15 @@ use crate::storage::types::{
 pub async fn find_config_by_name(
     name: String,
 ) -> Result<Option<ServiceConfiguration>, crate::generics::MeshError> {
-    // Check IMC first
-    if let Ok(cached_value) = find_config_in_mem(&name) {
-        crate::logger::debug!("Found config '{}' in IMC", name);
-
-        // Try to deserialize from JSON to ServiceConfiguration
-        if let Ok(config) = serde_json::from_value::<ServiceConfiguration>(cached_value) {
-            return Ok(Some(config));
-        }
-    }
-
-    // Not in IMC, return None (caller will check DB if needed)
-    crate::logger::debug!("Config '{}' not found in IMC", name);
-    Ok(None)
+    // Extract IDs from GciPId objects
+    let app_state = get_tenant_app_state().await;
+    // Use Diesel's query builder with multiple conditions
+    crate::generics::generic_find_one_optional::<
+        <ServiceConfiguration as HasTable>::Table,
+        _,
+        ServiceConfiguration,
+    >(&app_state.db, dsl::name.eq(name))
+    .await
 }
 
 pub async fn insert_config(
@@ -48,20 +44,10 @@ pub async fn insert_config(
         new_value_status: None,
     };
 
-    // Insert to database
-    crate::generics::generic_insert(&app_state.db, config).await?;
-
-    // Create ServiceConfiguration for shard queue (after successful DB insert)
-    let service_config = ServiceConfiguration {
-        id: 0, // We don't need the actual DB ID for IMC, using 0 as placeholder
-        name: name.clone(),
-        value,
-        new_value: None,
-        previous_value: None,
-        new_value_status: None,
-    };
+    let service_config = crate::generics::generic_insert(&app_state.db, config).await?;
 
     // Push to shard queue so IMC gets updated automatically via polling
+    // Store the ServiceConfiguration object directly as JSON value for shard queue
     if let Ok(config_json) = serde_json::to_value(&service_config) {
         let queue_item = ShardQueueItem::new(name.clone(), config_json);
         if let Err(e) = GLOBAL_SHARD_QUEUE_HANDLER.push_to_shard(queue_item).await {

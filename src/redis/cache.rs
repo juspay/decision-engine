@@ -1,4 +1,4 @@
-use crate::utils::StringExt;
+use crate::{logger, utils::StringExt};
 use serde::Deserialize;
 use crate::shard_queue::GLOBAL_SHARD_QUEUE_HANDLER;
 
@@ -66,7 +66,7 @@ where
     }
 
     // Config not found in cache or DB, cache the default value
-    crate::logger::debug!("Config '{}' not found, caching default value", key);
+    logger::debug!("Config '{}' not found, caching default value", key);
     
     // Create ServiceConfiguration with default value
     let default_config = crate::storage::types::ServiceConfiguration {
@@ -82,9 +82,9 @@ where
     if let Ok(config_json) = serde_json::to_value(&default_config) {
         let queue_item = crate::shard_queue::types::ShardQueueItem::new(key.clone(), config_json);
         if let Err(e) = GLOBAL_SHARD_QUEUE_HANDLER.push_to_shard(queue_item).await {
-            crate::logger::warn!("Failed to push default config '{}' to shard queue: {:?}", key, e);
+            logger::warn!("Failed to push default config '{}' to shard queue: {:?}", key, e);
         } else {
-            crate::logger::debug!("Cached default value for config '{}' in IMC", key);
+            logger::debug!("Cached default value for config '{}' in IMC", key);
         }
     }
 
@@ -100,31 +100,27 @@ where
 {
     use crate::shard_queue::find_config_in_mem;
 
-    if let Ok(cached_value) = find_config_in_mem(&key) {
-        crate::logger::debug!("Cache HIT: Found config '{}' in IMC", key);
+    if let Ok(service_config) = find_config_in_mem(&key) {
+        logger::debug!("Cache HIT: Found config '{}' in IMC", key);
 
-        if let Ok(service_config) =
-            serde_json::from_value::<crate::storage::types::ServiceConfiguration>(cached_value)
-        {
-            if let Some(value) = service_config.value {
-                return match decode_fn {
-                    Some(func) => func(value),
-                    None => None,
-                };
-            }
+        if let Some(value) = service_config.value {
+            return match decode_fn {
+                Some(func) => func(value),
+                None => None,
+            };
         }
     }
     crate::logger::debug!("Cache MISS: Config '{}' not found in IMC, checking DB", key);
     
-    if let Ok(Some(config)) = check_database_for_service_config(key.clone()).await {
-        crate::logger::debug!("DB HIT: Found config '{}' in database, pushing to shard queue for caching", key);
+    if let Ok(Some(config)) = crate::types::service_configuration::find_config_by_name(key.clone()).await {
+        logger::debug!("DB HIT: Found config '{}' in database, pushing to shard queue for caching", key);
         
         if let Ok(config_json) = serde_json::to_value(&config) {
             let queue_item = crate::shard_queue::ShardQueueItem::new(key.clone(), config_json);
             if let Err(e) = GLOBAL_SHARD_QUEUE_HANDLER.push_to_shard(queue_item).await {
-                crate::logger::warn!("Failed to push config '{}' to shard queue: {:?}", key, e);
+                logger::warn!("Failed to push config '{}' to shard queue: {:?}", key, e);
             } else {
-                crate::logger::debug!("Pushed config '{}' to shard queue, polling will cache in IMC", key);
+                logger::debug!("Pushed config '{}' to shard queue, polling will cache in IMC", key);
             }
         }
         
@@ -135,50 +131,12 @@ where
             };
         }
     } else {
-        crate::logger::debug!("DB MISS: Config '{}' not found in database", key);
+        logger::debug!("DB MISS: Config '{}' not found in database", key);
     }
 
     None
 }
 
-async fn check_database_for_service_config(
-    name: String,
-) -> Result<Option<crate::storage::types::ServiceConfiguration>, crate::generics::MeshError> {
-    use crate::app::get_tenant_app_state;
-    use diesel::prelude::*;
-
-    let app_state = get_tenant_app_state().await;
-
-    #[cfg(feature = "mysql")]
-    {
-        use crate::storage::schema::service_configuration::dsl;
-        crate::generics::generic_find_one_optional::<
-            crate::storage::schema::service_configuration::table,
-            _,
-            crate::storage::types::ServiceConfiguration,
-        >(&app_state.db, dsl::name.eq(name))
-        .await
-        .map_err(|e| crate::generics::MeshError::from(e))
-    }
-
-    #[cfg(feature = "postgres")]
-    {
-        use crate::storage::schema_pg::service_configuration::dsl;
-        crate::generics::generic_find_one_optional::<
-            crate::storage::schema_pg::service_configuration::table,
-            _,
-            crate::storage::types::ServiceConfiguration,
-        >(&app_state.db, dsl::name.eq(name))
-        .await
-        .map_err(|e| crate::generics::MeshError::from(e))
-    }
-
-    #[cfg(not(any(feature = "mysql", feature = "postgres")))]
-    {
-        // Fallback if no database feature is enabled
-        Err(crate::generics::MeshError::Others)
-    }
-}
 
 pub fn extractValue<A>(value: String) -> Option<A>
 where

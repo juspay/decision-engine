@@ -9,4 +9,4 @@ pub use types::*;
 use once_cell::sync::Lazy;
 
 pub static GLOBAL_SHARD_QUEUE_HANDLER: Lazy<handler::ShardedQueueHandler> = 
-    Lazy::new(|| handler::ShardedQueueHandler::new());
+    Lazy::new(|| handler::ShardedQueueHandler::new(crate::config::ShardQueueConfig::default()));
