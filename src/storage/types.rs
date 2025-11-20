@@ -10,6 +10,7 @@ use diesel::sql_types::Bool;
 use super::schema;
 #[cfg(feature = "postgres")]
 use super::schema_pg;
+use crate::decider::gatewaydecider::utils::mask_secret_option;
 #[cfg(feature = "mysql")]
 use diesel::mysql::Mysql;
 #[cfg(feature = "postgres")]
@@ -22,6 +23,7 @@ use diesel::{
     Queryable, Selectable,
 };
 use error_stack::ResultExt;
+use masking::{PeekInterface, Secret};
 use serde::Serialize;
 use serde::{self, Deserialize};
 use std::io::Write;
@@ -591,7 +593,7 @@ pub struct TokenBinInfo {
     pub last_updated: Option<PrimitiveDateTime>,
 }
 
-#[derive(Debug, Clone, Identifiable, Queryable)]
+#[derive(Debug, Clone, Identifiable, Queryable, Serialize)]
 #[cfg_attr(feature = "mysql", diesel(table_name = schema::txn_card_info))]
 #[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::txn_card_info))]
 pub struct TxnCardInfo {
@@ -606,7 +608,8 @@ pub struct TxnCardInfo {
     pub date_created: Option<PrimitiveDateTime>,
     pub payment_method_type: Option<String>,
     pub payment_method: Option<String>,
-    pub payment_source: Option<String>,
+    #[serde(serialize_with = "mask_secret_option")]
+    pub payment_source: Option<Secret<String>>,
     pub auth_type: Option<String>,
     pub partition_key: Option<PrimitiveDateTime>,
 }

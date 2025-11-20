@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use time::PrimitiveDateTime;
 // use database::beam as B;
 // use chrono::{Local, Utc};
+use crate::decider::gatewaydecider::utils::mask_secret_option;
 use crate::types::txn_details::types::{TransactionLatency, TxnStatus};
+use masking::Secret;
 use std::string::String;
 // use eulerhs::types::MeshError;
 
@@ -106,7 +108,8 @@ pub struct GatewayScoringKeyType {
     pub sourceObject: Option<String>,
 
     #[serde(rename = "paymentSource")]
-    pub paymentSource: Option<String>,
+    #[serde(serialize_with = "mask_secret_option")]
+    pub paymentSource: Option<Secret<String>>,
 
     #[serde(rename = "cardType")]
     pub cardType: Option<String>,
