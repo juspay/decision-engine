@@ -709,7 +709,7 @@ pub async fn metric_tracker_log(stage: &str, flowtype: &str, log_data: MessageFo
     let mut normalized_log_data = match serde_json::to_value(&log_data) {
         Ok(value) => value,
         Err(e) => {
-            crate::logger::warn!(
+            crate::logger::error!(
                 action = "metric_tracking_log_error",
                 "Failed to serialize log_data: {}",
                 e
@@ -718,7 +718,7 @@ pub async fn metric_tracker_log(stage: &str, flowtype: &str, log_data: MessageFo
         }
     };
 
-    crate::logger::warn!(
+    crate::logger::error!(
         action = "metric_tracking_log",
         "{}",
         normalized_log_data.to_string(),

@@ -18,6 +18,7 @@ use crate::logger;
 
 use super::env::get_env_var;
 use super::storage::Storage;
+use std::sync::Mutex;
 use time::format_description::well_known::Iso8601;
 use tracing::{Event, Metadata, Subscriber};
 use tracing_subscriber::{
@@ -342,7 +343,11 @@ where
                 explicit_entries_set.insert("resp_code");
             }
             if !explicit_entries_set.contains("level") {
-                map_serializer.serialize_entry("level", &Value::String("Info".to_string()))?;
+                if metadata.level() == &tracing::Level::ERROR {
+                    map_serializer.serialize_entry("level", &Value::String("Error".to_string()))?;
+                } else {
+                    map_serializer.serialize_entry("level", &Value::String("Info".to_string()))?;
+                }
                 explicit_entries_set.insert("level");
             }
             if !explicit_entries_set.contains("cell_id") {
@@ -350,8 +355,6 @@ where
                 explicit_entries_set.insert("cell_id");
             }
         } else {
-            // DOMAIN category logic.
-            // Serialize keys from the span that match the domain keys array.
             if let Some(span) = span {
                 let extensions = span.extensions();
                 if let Some(visitor) = extensions.get::<Storage<'_>>() {

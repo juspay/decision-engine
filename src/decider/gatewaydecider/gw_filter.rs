@@ -1500,7 +1500,7 @@ pub async fn filterGatewaysForValidationType(
             .map(|g| g.gateway)
             .collect::<Vec<_>>();
 
-        logger::debug!(
+        logger::error!(
             tag = "filterFunctionalGateways",
             action = "filterFunctionalGateways",
             "Functional gateways after filtering after filterGatewaysCardInfo for txn_id {:?}: {:?}",
@@ -1534,7 +1534,7 @@ pub async fn filterGatewaysForValidationType(
 
             let final_gws = if gws.is_empty() { new_gws.clone() } else { gws };
 
-            logger::debug!(
+            logger::error!(
                 tag = "filterFunctionalGateways",
                 action = "filterFunctionalGateways",
                 "Functional gateways after filtering for token repeat Mandate support for txn_id {:?}: {:?}",
@@ -1565,7 +1565,7 @@ pub async fn filterGatewaysForValidationType(
 
             let final_gws = if gws.is_empty() { new_gws.clone() } else { gws };
 
-            logger::debug!(
+            logger::error!(
                 tag = "filterFunctionalGateways",
                 action = "filterFunctionalGateways",
                 "Functional gateways after filtering for Mandate Guest Checkout support for txn_id {:?}: {:?}",
@@ -1681,7 +1681,7 @@ pub async fn filterGatewaysForValidationType(
                 .map(|g| g.gateway)
                 .collect::<Vec<_>>();
 
-            logger::debug!(
+            logger::error!(
                 "nst for filterGatewaysForValidationType for txn_id {:?}: {:?}",
                 txn_detail.txnId.clone(),
                 nst
