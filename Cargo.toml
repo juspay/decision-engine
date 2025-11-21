@@ -30,7 +30,7 @@ once_cell = "1.19.0"
 vaultrs = { version = "0.7.2", optional = true }
 bb8 = "0.8"
 rand_distr = "0.4"
-chrono = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
 cpu-time = "1.0.0"
 jemallocator = "0.5"
 jemalloc-ctl = "0.5"

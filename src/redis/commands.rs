@@ -97,6 +97,19 @@ impl RedisConnectionWrapper {
             .change_context(errors::RedisError::PopListElementsFailed)
     }
 
+    pub async fn get_range_from_list(
+        &self,
+        key: &str,
+        start: i64,
+        end: i64,
+    ) -> Result<Vec<String>, errors::RedisError> {
+        self.conn
+            .pool
+            .lrange(key, start, end)
+            .await
+            .change_context(errors::RedisError::GetFailed)
+    }
+
     pub async fn delete_key(&self, key: &str) -> Result<DelReply, errors::RedisError> {
         self.conn
             .pool
@@ -173,5 +186,81 @@ impl RedisConnectionWrapper {
         trx.exec::<R>(abort_on_error)
             .await
             .change_context(errors::RedisError::UnknownResult)
+    }
+
+    /// Add entry to Redis stream with MAXLEN using raw command
+    /// Example: XADD shard_stream_0 MAXLEN 1000 * key value
+    pub async fn xadd_with_maxlen(
+        &self,
+        stream_key: &str,
+        maxlen: u64,
+        fields: Vec<String>,
+    ) -> Result<String, errors::RedisError> {
+        use fred::interfaces::ClientLike;
+        use fred::types::CustomCommand;
+
+        // Build raw Redis command: XADD stream_key MAXLEN maxlen * field1 value1 field2 value2 ...
+        let mut args = vec![stream_key.to_string(), "MAXLEN".to_string(), maxlen.to_string(), "*".to_string()];
+        args.extend(fields);
+        
+        self.conn
+            .pool
+            .custom(CustomCommand::new("XADD", stream_key, false), args)
+            .await
+            .change_context(errors::RedisError::SetHashFailed)
+    }
+
+    /// Add entry to Redis stream with approximate MAXLEN (more efficient)
+    /// Example: XADD shard_stream_0 MAXLEN ~ 1000 * key value
+    pub async fn xadd_with_approximate_maxlen(
+        &self,
+        stream_key: &str,
+        maxlen: u64,
+        fields: Vec<String>,
+    ) -> Result<String, errors::RedisError> {
+        use fred::interfaces::ClientLike;
+        use fred::types::CustomCommand;
+
+        // Build raw Redis command: XADD stream_key MAXLEN ~ maxlen * field1 value1 field2 value2 ...
+        let mut args = vec![stream_key.to_string(), "MAXLEN".to_string(), "~".to_string(), maxlen.to_string(), "*".to_string()];
+        args.extend(fields);
+        
+        self.conn
+            .pool
+            .custom(CustomCommand::new("XADD", stream_key, false), args)
+            .await
+            .change_context(errors::RedisError::SetHashFailed)
+    }
+
+    /// Read entries from Redis stream using XRANGE
+    /// Example: XRANGE shard_stream_0 1-0+ +
+    pub async fn xrange(
+        &self,
+        stream_key: &str,
+        start: &str,
+        end: &str,
+        count: Option<u64>,
+    ) -> Result<Vec<(String, Vec<(String, String)>)>, errors::RedisError> {
+        use fred::interfaces::StreamsInterface;
+
+        self.conn
+            .pool
+            .xrange(stream_key, start, end, count)
+            .await
+            .change_context(errors::RedisError::GetFailed)
+    }
+
+    /// Get stream length using XLEN
+    pub async fn xlen(&self, stream_key: &str) -> Result<u64, errors::RedisError> {
+        use fred::interfaces::StreamsInterface;
+
+        let len: u64 = self
+            .conn
+            .pool
+            .xlen(stream_key)
+            .await
+            .change_context(errors::RedisError::GetFailed)?;
+
+        Ok(len)
     }
 }

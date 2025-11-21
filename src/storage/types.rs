@@ -525,7 +525,7 @@ pub struct PaymentMethod {
     pub payment_dsl: Option<String>,
 }
 
-#[derive(Debug, Clone, Identifiable, Queryable)]
+#[derive(Debug, Clone, Identifiable, Queryable, Serialize, Deserialize)]
 #[cfg_attr(feature = "mysql", diesel(table_name = schema::service_configuration))]
 #[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::service_configuration))]
 pub struct ServiceConfiguration {

@@ -20,6 +20,45 @@ use std::{
 };
 
 #[derive(Clone, serde::Deserialize, Debug)]
+pub struct ShardQueueConfig {
+    #[serde(default = "default_shard_count")]
+    pub shard_count: u8,
+    #[serde(default = "default_loop_interval_seconds")]
+    pub loop_interval_seconds: u64,
+    #[serde(default = "default_max_items_per_cycle")]
+    pub max_items_per_cycle: u64,
+    #[serde(default = "default_stream_maxlen")]
+    pub stream_maxlen: u64,
+}
+
+fn default_shard_count() -> u8 {
+    10
+}
+
+fn default_loop_interval_seconds() -> u64 {
+    10
+}
+
+fn default_max_items_per_cycle() -> u64 {
+    100
+}
+
+fn default_stream_maxlen() -> u64 {
+    1000
+}
+
+impl Default for ShardQueueConfig {
+    fn default() -> Self {
+        Self {
+            shard_count: default_shard_count(),
+            loop_interval_seconds: default_loop_interval_seconds(),
+            max_items_per_cycle: default_max_items_per_cycle(),
+            stream_maxlen: default_stream_maxlen(),
+        }
+    }
+}
+
+#[derive(Clone, serde::Deserialize, Debug)]
 pub struct GlobalConfig {
     pub server: Server,
     pub metrics: Server,
@@ -41,6 +80,8 @@ pub struct GlobalConfig {
     pub routing_config: Option<TomlConfig>,
     #[serde(default)]
     pub debit_routing_config: network_decider::types::DebitRoutingConfig,
+    #[serde(default)]
+    pub shard_queue: ShardQueueConfig,
 }
 
 #[derive(Clone, Debug)]
