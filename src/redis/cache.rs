@@ -1,6 +1,10 @@
+use crate::logger;
 use crate::types::service_configuration;
 use crate::utils::StringExt;
 use serde::Deserialize;
+
+// Cache TTL configuration
+const CACHE_TTL_SECONDS: i64 = 300; // 5 minutes
 
 // Converted type synonyms
 // Original Haskell type: KVDBName
@@ -62,20 +66,59 @@ pub async fn findByNameFromRedisHelper<A>(
 where
     A: for<'de> Deserialize<'de>,
 {
-    let res = service_configuration::find_config_by_name(key).await;
+    let app_state = crate::app::get_tenant_app_state().await;
 
-    match res {
-        Ok(m_service_config) => match m_service_config {
-            Some(service_config) => match service_config.value {
-                Some(value) => match decode_fn {
-                    Some(func) => func(value),
+    // Try Redis first
+    match app_state.redis_conn.get_key_string(&key).await {
+        Ok(redis_value) => {
+            // Found in Redis, decode and return
+            match decode_fn {
+                Some(func) => func(redis_value),
+                None => extractValue(redis_value),
+            }
+        }
+        Err(_) => {
+            // Redis miss, fallback to database
+            crate::logger::debug!(
+                tag = "redis_cache",
+                action = "miss",
+                "Cache miss for key: {}, falling back to database",
+                key
+            );
+
+            let res = service_configuration::find_config_by_name(key.clone()).await;
+
+            match res {
+                Ok(Some(service_config)) => match service_config.value {
+                    Some(value) => {
+                        // Cache the value in Redis for future use (TTL: 5 minutes)
+                        match app_state
+                            .redis_conn
+                            .setx(&key, &value, CACHE_TTL_SECONDS)
+                            .await
+                        {
+                            Ok(_) => {}
+                            Err(e) => {
+                                crate::logger::warn!(
+                                    tag = "redis_cache_write_failed",
+                                    action = "redis_cache_write_failed",
+                                    "Failed to write cache for key: {}, error: {:?}",
+                                    key,
+                                    e
+                                );
+                            }
+                        }
+
+                        match decode_fn {
+                            Some(func) => func(value),
+                            None => extractValue(value),
+                        }
+                    }
                     None => None,
                 },
-                None => None,
-            },
-            None => None,
-        },
-        Err(_) => None,
+                _ => None,
+            }
+        }
     }
 }
 
