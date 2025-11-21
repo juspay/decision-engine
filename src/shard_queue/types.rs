@@ -20,18 +20,20 @@ impl ShardQueueItem {
 
 #[derive(Debug, Clone)]
 pub struct ShardMetadata {
-    pub last_modified_at: DateTime<Utc>,
+    /// Last processed entry ID from Redis stream (e.g., "1-0")
+    pub last_processed_entry_id: String,
 }
 
 impl ShardMetadata {
     pub fn new() -> Self {
         Self {
-            last_modified_at: Utc::now(),
+            // Start from "0-0" to process all entries from beginning
+            last_processed_entry_id: "0-0".to_string(),
         }
     }
     
-    pub fn update_last_modified(&mut self) {
-        self.last_modified_at = Utc::now();
+    pub fn update_last_processed_entry_id(&mut self, entry_id: String) {
+        self.last_processed_entry_id = entry_id;
     }
 }
 

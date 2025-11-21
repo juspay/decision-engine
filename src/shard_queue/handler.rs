@@ -8,7 +8,6 @@ use std::{
     time::Duration,
 };
 
-use chrono::{DateTime, Utc};
 use once_cell::sync::Lazy;
 use tokio::{sync::mpsc, time};
 
@@ -78,27 +77,31 @@ impl ShardedQueueHandler {
         (hasher.finish() % (self.config.shard_count as u64)) as u8
     }
 
-    /// Push item to appropriate Redis shard queue
+    /// Push item to appropriate Redis shard stream
     pub async fn push_to_shard(&self, item: ShardQueueItem) -> ShardQueueResult<()> {
         let shard_id = self.get_shard_id(&item.key);
-        let redis_key = format!("shard_queue_{}", shard_id);
+        let stream_name = format!("shard_stream_{}", shard_id);
 
         let app_state = get_tenant_app_state().await;
         let redis_conn = app_state.redis_conn.clone();
 
-        // Serialize the entire item (with timestamp) for Redis storage
-        let serialized_item = serde_json::to_string(&item)
+        // Use the service configuration name as the key and value as the stream field
+        // Format: XADD shard_stream_0 MAXLEN 100 * service_config_name service_config_value
+        let serialized_value = serde_json::to_string(&item.value)
             .map_err(|e| ShardQueueError::QueueError(format!("Serialization error: {}", e)))?;
 
-        redis_conn
-            .append_to_list_start(&redis_key.into(), vec![serialized_item])
+        let fields = vec![item.key.clone(), serialized_value];
+        
+        let entry_id = redis_conn
+            .xadd_with_maxlen(&stream_name, self.config.stream_maxlen, fields)
             .await
-            .map_err(|e| ShardQueueError::QueueError(format!("Redis push failed: {:?}", e)))?;
+            .map_err(|e| ShardQueueError::QueueError(format!("Redis stream push failed: {:?}", e)))?;
 
         logger::debug!(
-            "Item pushed to Redis shard queue {}: key={}",
+            "Item pushed to Redis shard stream {}: key={}, entry_id={}",
             shard_id,
-            item.key
+            item.key,
+            entry_id
         );
         Ok(())
     }
@@ -128,100 +131,121 @@ impl ShardedQueueHandler {
         Ok(())
     }
 
-    /// Process a single shard - poll items from Redis and filter by timestamp
+    /// Process a single shard - poll items from Redis stream using entry IDs
     async fn process_shard(&self, shard_id: u8) -> ShardQueueResult<()> {
         let app_state = get_tenant_app_state().await;
         let redis_conn = app_state.redis_conn.clone();
-        let redis_key = format!("shard_queue_{}", shard_id);
+        let stream_name = format!("shard_stream_{}", shard_id);
 
-        let last_modified_at = {
+        let last_processed_entry_id = {
             let metadata = self.shard_metadata.lock().map_err(|e| {
                 ShardQueueError::QueueError(format!("Failed to acquire metadata lock: {}", e))
             })?;
 
             metadata
                 .get(&shard_id)
-                .map(|meta| meta.last_modified_at)
-                .unwrap_or_else(|| chrono::Utc::now()) // Default to now if no metadata
+                .map(|meta| meta.last_processed_entry_id.clone())
+                .unwrap_or_else(|| "0-0".to_string()) // Default to start from beginning
         };
 
-        let max_items_per_cycle = self.config.max_items_per_cycle;
-        let raw_items = redis_conn
-            .get_range_from_list(&redis_key, 0, (max_items_per_cycle - 1) as i64)
-            .await
-            .map_err(|e| ShardQueueError::QueueError(format!("Redis read failed: {:?}", e)))?;
+        // Use XRANGE to get entries after the last processed entry ID
+        // Format: XRANGE shard_stream_0 1234567890123-1 + COUNT max_items_per_cycle
+        let start_range = if last_processed_entry_id == "0-0" {
+            "-".to_string() // Start from beginning of stream
+        } else {
+            // For Redis XRANGE, to start after the last processed ID, we increment the sequence part
+            // Stream IDs are in format: timestamp-sequence
+            if let Some((timestamp, sequence)) = last_processed_entry_id.split_once('-') {
+                if let Ok(seq_num) = sequence.parse::<u64>() {
+                    format!("{}-{}", timestamp, seq_num + 1)
+                } else {
+                    // If we can't parse the sequence, just use the ID as-is and let Redis handle it
+                    last_processed_entry_id.clone()
+                }
+            } else {
+                // If the ID format is unexpected, start from beginning
+                "-".to_string()
+            }
+        };
 
-        if raw_items.is_empty() {
+        let stream_entries = redis_conn
+            .xrange(
+                &stream_name,
+                &start_range,
+                "+", // Read to end
+                Some(self.config.max_items_per_cycle),
+            )
+            .await
+            .map_err(|e| ShardQueueError::QueueError(format!("Redis stream read failed: {:?}", e)))?;
+
+        if stream_entries.is_empty() {
             return Ok(());
         }
 
         logger::debug!(
-            "Polled {} items from Redis shard queue {}",
-            raw_items.len(),
+            "Polled {} entries from Redis shard stream {}",
+            stream_entries.len(),
             shard_id
         );
 
-        // Deserialize and filter items by timestamp (items stay in Redis permanently)
-        let mut new_items = Vec::new();
+        let mut last_entry_id = String::new();
+        let mut processed_count = 0;
 
-        for raw_item in raw_items {
-            match serde_json::from_str::<ShardQueueItem>(&raw_item) {
-                Ok(item) => {
-                    if item.modified_at > last_modified_at {
-                        // This item is newer than last processing time
-                        new_items.push(item);
-                    } else {
-                        // Since items are stored newest first, if this item is not newer,
-                        // all subsequent items will also be older, so we can break early
-                        logger::debug!("Found older item, breaking early from processing loop for shard {}", shard_id);
-                        break;
+        // Process stream entries
+        for (entry_id, fields) in stream_entries {
+            if !fields.is_empty() {
+                // Redis stream fields come as Vec<(field_name, field_value)>
+                // We expect the first field to be the service_config_name and value to be service_config_value
+                let (service_config_name, service_config_value) = &fields[0];
+
+                // Parse the service configuration value as JSON
+                match serde_json::from_str::<serde_json::Value>(service_config_value) {
+                    Ok(parsed_value) => {
+                        // Convert to ServiceConfiguration for IMC storage
+                        match serde_json::from_value::<crate::storage::types::ServiceConfiguration>(parsed_value) {
+                            Ok(service_config) => {
+                                // Store ServiceConfiguration in global registry with 600 second TTL
+                                if let Err(_) = GLOBAL_SHARD_REGISTRY.store(service_config_name.clone(), service_config, Some(600)) {
+                                    logger::error!("Failed to store ServiceConfiguration in registry: {}", service_config_name);
+                                } else {
+                                    logger::debug!("Stored ServiceConfiguration in IMC: {}", service_config_name);
+                                    processed_count += 1;
+                                }
+                            }
+                            Err(e) => {
+                                logger::error!("Failed to deserialize ServiceConfiguration for key {}: {}", service_config_name, e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        logger::error!("Failed to parse JSON value for key {}: {}", service_config_name, e);
                     }
                 }
-                Err(e) => {
-                    logger::error!("Failed to deserialize item from Redis queue: {}", e);
-                    // Continue processing other items even on deserialization error
-                }
+            } else {
+                logger::warn!("Invalid stream entry format for entry {}: no fields found", entry_id);
             }
+
+            last_entry_id = entry_id;
         }
 
-        if new_items.is_empty() {
-            return Ok(());
-        }
+        if processed_count > 0 {
+            logger::debug!(
+                "Processed {} new items from Redis shard stream {} (last_entry_id: {})",
+                processed_count,
+                shard_id,
+                last_entry_id
+            );
 
-        logger::debug!(
-            "Processing {} new items from Redis shard {} (last_modified: {})",
-            new_items.len(),
-            shard_id,
-            last_modified_at
-        );
+            // Update shard metadata with the last processed entry ID
+            {
+                let mut metadata = self.shard_metadata.lock().map_err(|e| {
+                    ShardQueueError::QueueError(format!("Failed to acquire metadata lock: {}", e))
+                })?;
 
-        // Store only new items in IMC using Registry pattern
-        for item in &new_items {
-            // Convert JSON value to ServiceConfiguration before storing in IMC
-            match serde_json::from_value::<crate::storage::types::ServiceConfiguration>(item.value.clone()) {
-                Ok(service_config) => {
-                    // Store ServiceConfiguration in global registry with 600 second TTL
-                    if let Err(_) = GLOBAL_SHARD_REGISTRY.store(item.key.clone(), service_config, Some(600)) {
-                        logger::error!("Failed to store ServiceConfiguration in registry: {}", item.key);
-                    } else {
-                        logger::debug!("Stored ServiceConfiguration in IMC: {}", item.key);
-                    }
+                if let Some(shard_meta) = metadata.get_mut(&shard_id) {
+                    shard_meta.update_last_processed_entry_id(last_entry_id.clone());
+                    logger::debug!("Updated last_processed_entry_id for shard {} to {}", shard_id, last_entry_id);
                 }
-                Err(e) => {
-                    logger::error!("Failed to deserialize ServiceConfiguration for key {}: {}", item.key, e);
-                }
-            }
-        }
-
-        // Update shard metadata to current time after successful processing
-        {
-            let mut metadata = self.shard_metadata.lock().map_err(|e| {
-                ShardQueueError::QueueError(format!("Failed to acquire metadata lock: {}", e))
-            })?;
-
-            if let Some(shard_meta) = metadata.get_mut(&shard_id) {
-                shard_meta.update_last_modified();
-                logger::debug!("Updated last_modified_at for shard {}", shard_id);
             }
         }
 
@@ -246,23 +270,23 @@ impl ShardedQueueHandler {
         Ok(metadata.clone())
     }
 
-    /// Get queue sizes for all Redis-backed shards
+    /// Get stream sizes for all Redis-backed shards
     pub async fn get_queue_sizes(&self) -> ShardQueueResult<HashMap<u8, usize>> {
         let app_state = get_tenant_app_state().await;
         let redis_conn = app_state.redis_conn.clone();
 
         let mut sizes = HashMap::new();
 
-        // Check queue size for each configured shard
+        // Check stream length for each configured shard
         for shard_id in 0..self.config.shard_count {
-            let redis_key = format!("shard_queue_{}", shard_id);
+            let stream_name = format!("shard_stream_{}", shard_id);
 
-            match redis_conn.get_list_length(&redis_key).await {
+            match redis_conn.xlen(&stream_name).await {
                 Ok(size) => {
-                    sizes.insert(shard_id, size);
+                    sizes.insert(shard_id, size as usize);
                 }
                 Err(e) => {
-                    logger::warn!("Failed to get size for shard {}: {:?}", shard_id, e);
+                    logger::warn!("Failed to get size for shard stream {}: {:?}", shard_id, e);
                     sizes.insert(shard_id, 0); // Default to 0 if we can't get the size
                 }
             }

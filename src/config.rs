@@ -27,6 +27,8 @@ pub struct ShardQueueConfig {
     pub loop_interval_seconds: u64,
     #[serde(default = "default_max_items_per_cycle")]
     pub max_items_per_cycle: u64,
+    #[serde(default = "default_stream_maxlen")]
+    pub stream_maxlen: u64,
 }
 
 fn default_shard_count() -> u8 {
@@ -41,12 +43,17 @@ fn default_max_items_per_cycle() -> u64 {
     100
 }
 
+fn default_stream_maxlen() -> u64 {
+    1000
+}
+
 impl Default for ShardQueueConfig {
     fn default() -> Self {
         Self {
             shard_count: default_shard_count(),
             loop_interval_seconds: default_loop_interval_seconds(),
             max_items_per_cycle: default_max_items_per_cycle(),
+            stream_maxlen: default_stream_maxlen(),
         }
     }
 }
