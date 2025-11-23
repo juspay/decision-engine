@@ -1,15 +1,15 @@
 [log.console]
 enabled = true
-level = "DEBUG"
-log_format = "default"
+level = "INFO"
+log_format = "json"
 
 [server]
 host = "127.0.0.1"
-port = 8080
+port = 8082
 
 [metrics]
 host = "127.0.0.1"
-port = 9094
+port = 9090
 
 [limit]
 request_count = 1
@@ -17,9 +17,9 @@ duration = 60
 
 [database]
 username = "root"
-password = "root"
+password = ""
 host = "127.0.0.1"
-port = 3306
+port = 3307
 dbname = "jdb"
 
 [pg_database]
@@ -32,7 +32,7 @@ pg_dbname = "decision_engine_db"
 
 [redis]
 host = "127.0.0.1"
-port = 6379
+port = 6380
 pool_size = 5
 reconnect_max_attempts = 5
 reconnect_delay = 5
