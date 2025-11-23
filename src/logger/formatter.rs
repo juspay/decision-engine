@@ -615,10 +615,7 @@ where
         }
     }
 
+    fn on_enter(&self, _id: &tracing::Id, _ctx: Context<'_, S>) {}
 
-    fn on_enter(&self, _id: &tracing::Id, _ctx: Context<'_, S>) {
-    }
-
-    fn on_close(&self, _id: tracing::Id, _ctx: Context<'_, S>) {
-    }
+    fn on_close(&self, _id: tracing::Id, _ctx: Context<'_, S>) {}
 }
