@@ -449,7 +449,7 @@ pub async fn updateQueue(
 
     match r {
         Ok(result) => {
-            logger::info!(
+            logger::debug!(
                 action = "updateQueue",
                 tag = "updateQueue",
                 "Successfully updated queue in Redis: {:?}",
@@ -651,7 +651,7 @@ pub async fn getProducerKey(
             .await;
 
             let (_, key) = gateway_key.into_iter().next().unwrap();
-            logger::info!(tag = "getProducerKey", "UNIFIED_KEY {}", key);
+            logger::debug!(tag = "getProducerKey", "UNIFIED_KEY {}", key);
             Some(key)
         }
         None => {
@@ -703,7 +703,7 @@ pub fn log_gateway_score_type(
         ),
     };
 
-    logger::info!(
+    logger::debug!(
         action = "GATEWAY_SCORE_UPDATED",
         tag = "GATEWAY_SCORE_UPDATED",
         "Logging gateway score type: {:?}",

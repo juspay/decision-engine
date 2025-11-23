@@ -367,7 +367,7 @@ where
     R: Send + 'static,
 {
     let query = T::table().filter(predicate);
-    logger::info!(
+    logger::debug!(
         action = "generic_filter",
         "Debug Query {:?}",
         debug_query::<Mysql, _>(&query).to_string()

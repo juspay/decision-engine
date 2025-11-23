@@ -154,7 +154,7 @@ impl Storage {
         let timeout_duration = Duration::from_secs(10);
         match time::timeout(timeout_duration, self.pg_pool.get()).await {
             Ok(Ok(conn)) => {
-                logger::info!(
+                logger::debug!(
                     action = "DB_CONNECTION_SUCCESS",
                     "connection to db successful"
                 );

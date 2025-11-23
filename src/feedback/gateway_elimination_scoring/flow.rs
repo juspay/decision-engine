@@ -793,7 +793,7 @@ pub async fn eliminationV2RewardFactor(
 
     match sr1_and_sr2_and_n {
         Some((sr1, sr2, n, m_pmt, m_pm, m_txn_object_type, source)) => {
-            logger::info!(
+            logger::debug!(
                     "CALCULATING_ALPHA:SR1_SR2_N_PMT_PM_TXNOBJECTTYPE_CONFIGSOURCE {} {} {} {} {} {} {:?}",
                     sr1,
                     sr2,
@@ -803,7 +803,7 @@ pub async fn eliminationV2RewardFactor(
                     m_txn_object_type.unwrap_or_else(|| "Nothing".to_string()),
                     source,
                 );
-            logger::info!(
+            logger::debug!(
                 action = "calculateAlpha",
                 tag = "ALPHA_VALUE",
                 alpha_value = calculate_alpha(sr1, sr2, n),
@@ -812,7 +812,7 @@ pub async fn eliminationV2RewardFactor(
             Some(calculate_alpha(sr1, sr2, n))
         }
         None => {
-            logger::info!("ELIMINATION_V2_VALUES_NOT_FOUND:ALPHA:PMT_PM_TXNOBJECTTYPE_SOURCEOBJECT {:?} {:?} {:?} {:?}",
+            logger::debug!("ELIMINATION_V2_VALUES_NOT_FOUND:ALPHA:PMT_PM_TXNOBJECTTYPE_SOURCEOBJECT {:?} {:?} {:?} {:?}",
                     txn_card_info.paymentMethodType,
                     if txn_card_info.paymentMethod.is_empty() { "Nothing".to_string() } else { txn_card_info.paymentMethod.clone() },
                     txn_detail.txnObjectType,

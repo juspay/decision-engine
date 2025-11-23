@@ -83,7 +83,7 @@ pub async fn metrics_server_builder(
     axum::serve(listener, router.into_make_service())
         .with_graceful_shutdown(async move {
             let _ = sigterm.recv().await;
-            tracing::info!("Metrics server shutting down gracefully");
+            tracing::debug!("Metrics server shutting down gracefully");
         })
         .await?;
 
@@ -97,7 +97,7 @@ impl crate::config::GlobalConfig {
     ) -> Result<tokio::net::TcpListener, ConfigurationError> {
         let loc = format!("{}:{}", self.metrics.host, self.metrics.port);
 
-        tracing::info!(
+        tracing::debug!(
             category = "SERVER",
             "{} started [{:?}] [{:?}]",
             server,

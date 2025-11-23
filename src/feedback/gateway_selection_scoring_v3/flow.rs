@@ -69,7 +69,7 @@ pub async fn update_sr_v3_score(
     // let is_merchant_enabled_globally = MC::isMerchantEnabledForPaymentFlows(merchant_acc.id, [PF::SrBasedRouting].to_vec()).await;
     match txn_detail.gateway.clone() {
         None => {
-            logger::info!(
+            logger::debug!(
                 action = "gateway not found",
                 tag = "gateway not found",
                 "gateway not found for this transaction having id"
@@ -103,7 +103,7 @@ pub async fn update_sr_v3_score(
                 let key3d_for_gateway_selection =
                     unified_sr_v3_key.clone().unwrap_or_else(|| "".to_string());
                 if key3d_for_gateway_selection != key_for_gateway_selection {
-                    logger::info!(
+                    logger::debug!(
                         tag = "SR V3 Based threeD Producer Key",
                         action = "SR V3 Based threeD Producer Key",
                         "{:?}",
@@ -137,7 +137,7 @@ pub async fn createKeysIfNotExist(
 ) {
     let is_queue_key_exists = isKeyExistsRedis(key_for_gateway_selection_queue.clone()).await;
     let is_score_key_exists = isKeyExistsRedis(key_for_gateway_selection_score.clone()).await;
-    logger::info!(
+    logger::debug!(
         tag = "createKeysIfNotExist",
         action = "createKeysIfNotExist",
         "Value for isQueueKeyExists is {} and isScoreKeyExists is {}",
@@ -148,7 +148,7 @@ pub async fn createKeysIfNotExist(
         return;
     } else {
         let merchant_bucket_size = getSrV3MerchantBucketSize(txn_detail, txn_card_info).await;
-        logger::info!(
+        logger::debug!(
             tag = "createKeysIfNotExist",
             action = "createKeysIfNotExist",
             "Creating keys with bucket size as {}",
@@ -175,7 +175,7 @@ pub async fn updateScoreAndQueue(
     txn_detail: TxnDetail,
     txn_card_info: TxnCardInfo,
 ) {
-    logger::info!(
+    logger::debug!(
         action = "updateScoreAndQueue",
         tag = "updateScoreAndQueue",
         "Updating sr v3 score and queue"
@@ -255,7 +255,7 @@ pub async fn updateScoreAndQueue(
         value.clone(),
     )
     .await;
-    logger::info!(
+    logger::debug!(
         action = "updateScoreAndQueue",
         tag = "updateScoreAndQueue",
         "Popped Redis Value {}",
@@ -266,7 +266,7 @@ pub async fn updateScoreAndQueue(
             Ok(maybe_popped_status_block) => get_status(maybe_popped_status_block, popped_status),
             Err(_) => popped_status,
         };
-    logger::info!(
+    logger::debug!(
         action = "updateScoreAndQueue",
         tag = "updateScoreAndQueue",
         "Popped Returned Value {}",
@@ -324,7 +324,7 @@ pub async fn getSrV3MerchantBucketSize(txn_detail: TxnDetail, txn_card_info: Txn
         }
         Some(bucket_size) => bucket_size,
     };
-    logger::info!(
+    logger::debug!(
         action = "sr_v3_bucket_size",
         tag = "sr_v3_bucket_size",
         "Bucket Size: {}",

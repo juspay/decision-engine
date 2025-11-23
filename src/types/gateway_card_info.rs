@@ -154,7 +154,7 @@ pub async fn get_enabled_gateway_card_info_for_gateways(
 ) -> Vec<GatewayCardInfo> {
     // Early return if both input lists are empty
     if card_bins.is_empty() && gateways.is_empty() {
-        logger::info!(
+        logger::debug!(
             tag = "get_enabled_gateway_card_info_for_gateways",
             action = "get_enabled_gateway_card_info_for_gateways",
             "card_bins and gateways are empty"
@@ -167,7 +167,7 @@ pub async fn get_enabled_gateway_card_info_for_gateways(
     let gateway_strings: Vec<Option<String>> =
         gateways.clone().into_iter().map(|g| Some(g)).collect();
 
-    logger::info!(
+    logger::debug!(
         tag = "get_enabled_gateway_card_info_for_gateways",
         action = "get_enabled_gateway_card_info_for_gateways",
         "gateway_strings: {:?}, gateways: {:?}, card_bins: {:?}",
@@ -190,7 +190,7 @@ pub async fn get_enabled_gateway_card_info_for_gateways(
     .await
     {
         Ok(db_results) => {
-            logger::info!(
+            logger::debug!(
                 tag = "get_enabled_gateway_card_info_for_gateways",
                 action = "get_enabled_gateway_card_info_for_gateways",
                 "db_results: {:?}",
@@ -202,7 +202,7 @@ pub async fn get_enabled_gateway_card_info_for_gateways(
                 .collect()
         }
         Err(e) => {
-            logger::info!(
+            logger::debug!(
                 tag = "get_enabled_gateway_card_info_for_gateways",
                 action = "get_enabled_gateway_card_info_for_gateways",
                 "Error fetching data from DB: {:?}",

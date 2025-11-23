@@ -184,7 +184,7 @@ pub async fn newGwFilters(
     if gws.is_empty() {
         let txnId = this.get().dpTxnDetail.txnId.clone();
         let merchantId = this.get().dpTxnDetail.merchantId.clone();
-        logger::warn!(
+        logger::debug!(
             tag = "GW_Filtering",
             action = "GW_Filtering",
             "There are no functional gateways for {:?} for merchant: {:?}",
@@ -243,7 +243,7 @@ pub async fn getFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList {
     let is_edcc_applied = this.get().dpEDCCApplied;
     let enforce_gateway_list = this.get().dpEnforceGatewayList.clone();
 
-    logger::info!(
+    logger::debug!(
         tag = "enableGatewayReferenceIdBasedRouting",
         action = "enableGatewayReferenceIdBasedRouting",
         "enableGatewayReferenceIdBasedRouting is enable or not for txn_id : {:?}, enableGatewayReferenceIdBasedRouting: {:?}",
@@ -649,7 +649,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
                     .into_iter()
                     .filter(|gw| motoSupportedGateways.contains(gw))
                     .collect();
-                logger::info!(
+                logger::debug!(
                     tag = "filterFunctionalGateways",
                     action = "filterFunctionalGateways",
                     "Functional gateways after filtering for MOTO cvvLessTxns support for txn_id: {:?}",
@@ -741,7 +741,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
                             Vec::new()
                         }
                     };
-                    logger::info!(
+                    logger::debug!(
                         tag = "filterFunctionalGateways",
                         action = "filterFunctionalGateways",
                         "Functional gateways after filtering for token repeat cvvLessTxns support for txn_id: {:?}",
@@ -777,7 +777,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
                     } else {
                         Vec::new()
                     };
-                    logger::info!(
+                    logger::debug!(
                         tag = "filterFunctionalGateways",
                         action = "filterFunctionalGateways",
                         "Functional gateways after filtering for token repeat cvvLessTxns support for txn_id: {:?}",
@@ -811,7 +811,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
                         .into_iter()
                         .filter(|gw| cvvLessTxnSupportedGateways.contains(gw))
                         .collect();
-                    logger::info!(
+                    logger::debug!(
                         tag = "filterFunctionalGateways",
                         action = "filterFunctionalGateways",
                         "Functional gateways after filtering for cvvLessTxns for txn_id: {:?}",
@@ -884,7 +884,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
     }
 
     let st = getGws(this);
-    logger::info!(
+    logger::debug!(
         tag = "filterFunctionalGateways",
         action = "filterFunctionalGateways",
         "Functional gateways before filtering for MerchantContainer for txn_id: {:?}",
@@ -1119,7 +1119,7 @@ pub async fn filterGatewaysForAuthType(
         )
         .await;
 
-        logger::debug!(
+        logger::info!(
             action = "filterFunctionalGatewaysForAuthType",
             "BIN eligibility check feature flag: {:?}",
             mb_feature
@@ -1203,7 +1203,7 @@ pub async fn filterGatewaysForAuthType(
             )
             .await?;
 
-            logger::debug!(
+            logger::info!(
                 tag = "filterFunctionalGatewaysForAuthType",
                 action = "filterFunctionalGatewaysForAuthType",
                 "Functional gateways after filtering after DISABLE_DECIDER_BIN_ELIGIBILITY_CHECK check: {:?}: {:?}",
@@ -1534,7 +1534,7 @@ pub async fn filterGatewaysForValidationType(
 
             let final_gws = if gws.is_empty() { new_gws.clone() } else { gws };
 
-            logger::error!(
+            logger::info!(
                 tag = "filterFunctionalGateways",
                 action = "filterFunctionalGateways",
                 "Functional gateways after filtering for token repeat Mandate support for txn_id {:?}: {:?}",
@@ -1565,7 +1565,7 @@ pub async fn filterGatewaysForValidationType(
 
             let final_gws = if gws.is_empty() { new_gws.clone() } else { gws };
 
-            logger::error!(
+            logger::info!(
                 tag = "filterFunctionalGateways",
                 action = "filterFunctionalGateways",
                 "Functional gateways after filtering for Mandate Guest Checkout support for txn_id {:?}: {:?}",
@@ -1681,7 +1681,7 @@ pub async fn filterGatewaysForValidationType(
                 .map(|g| g.gateway)
                 .collect::<Vec<_>>();
 
-            logger::error!(
+            logger::info!(
                 "nst for filterGatewaysForValidationType for txn_id {:?}: {:?}",
                 txn_detail.txnId.clone(),
                 nst
@@ -1969,7 +1969,7 @@ pub async fn filterGatewaysCardInfo(
                     .collect::<Vec<_>>(),
             };
 
-            logger::info!(
+            logger::debug!(
                 tag = "filterGatewaysCardInfo",
                 action = "filterGatewaysCardInfo",
                 "merchant_validation_required_gws - {:?}, gci_validation_gws - {:?}, gcis - {:?}, gcis_without_merchant_validation - {:?}, gcis_with_merchant_validation - {:?}, gci_ids - {:?}, mgcis_enabled_gcis - {:?},mgcis_enabled_gci_ids - {:?}, gcis_after_merchant_validation - {:?}, eligible_gateway_card_infos - {:?}",
@@ -2273,7 +2273,7 @@ pub async fn filterGatewaysForEmi(this: &mut DeciderFlow<'_>) -> GatewayList {
                 };
 
                 if gbes_v2_list.is_empty() {
-                    logger::info!(
+                    logger::debug!(
                         tag = "GBESV2 Entry Not Found",
                         action = "GBESV2 Entry Not Found",
                         "GBESV2 Entry Not Found For emiBank - {:?}, gateways - {:?}, scope_ - {:?}, tenure - {:?}",
