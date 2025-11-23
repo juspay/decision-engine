@@ -280,7 +280,7 @@ where
     >: AsQuery + QueryFragment<Mysql> + QueryId + Send + 'static,
 {
     let query = diesel::delete(<T as HasTable>::table().filter(predicate));
-    logger::info!(
+    logger::debug!(
         action = "generic_delete",
         "Debug Query {:?}",
         debug_query::<Mysql, _>(&query).to_string()
@@ -367,7 +367,7 @@ where
     R: Send + 'static,
 {
     let query = T::table().filter(predicate);
-    logger::debug!(
+    logger::info!(
         action = "generic_filter",
         "Debug Query {:?}",
         debug_query::<Mysql, _>(&query).to_string()
