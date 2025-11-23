@@ -1500,7 +1500,7 @@ pub async fn filterGatewaysForValidationType(
             .map(|g| g.gateway)
             .collect::<Vec<_>>();
 
-        logger::error!(
+        logger::info!(
             tag = "filterFunctionalGateways",
             action = "filterFunctionalGateways",
             "Functional gateways after filtering after filterGatewaysCardInfo for txn_id {:?}: {:?}",
