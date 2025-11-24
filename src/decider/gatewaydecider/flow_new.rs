@@ -464,12 +464,13 @@ pub async fn run_decider_flow(
                     //     &currentGatewayScoreMap
                     // ).await?;
 
-                    logger::debug!(
-                        action = "GATEWAY_PRIORITY_MAP",
-                        tag = "GATEWAY_PRIORITY_MAP",
-                        "{:?}",
-                        gatewayPriorityMap
-                    );
+                    if let Some(ref priority_map) = gatewayPriorityMap {
+                        logger::debug!(
+                            action = "GATEWAY_PRIORITY_MAP",
+                            tag = "GATEWAY_PRIORITY_MAP",
+                            gateway_priority_map = %priority_map
+                        );
+                    }
 
                     match decidedGateway {
                         Some(decideGatewayOutput) => {
