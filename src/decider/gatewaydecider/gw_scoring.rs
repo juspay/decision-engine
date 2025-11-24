@@ -1280,9 +1280,20 @@ pub async fn get_global_gateway_score(
                         .iter()
                         .all(|x| x.score < score_threshold);
                 let filtered_merchants: Vec<GlobalScoreLog> = sorted_filtered_merchants
+                    .clone()
                     .into_iter()
                     .map(|gs| mk_gsl(gs, score_threshold, max_count))
                     .collect();
+                logger::info!(
+                    tag = "getGlobalGatewayScore",
+                    action = "getGlobalGatewayScore",
+                    "Filtered merchants for key {:?}: {:?} : {:?} : {:?} : {:?}",
+                    redis_key,
+                    global_gateway_score,
+                    sorted_filtered_merchants,
+                    should_penalize.clone(),
+                    filtered_merchants.clone()
+                );
                 Some((
                     filtered_merchants,
                     if should_penalize {
