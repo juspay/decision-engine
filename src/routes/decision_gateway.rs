@@ -150,10 +150,6 @@ where
             let allocated_after = jemalloc_ctl::stats::allocated::read().unwrap_or(0);
             let bytes_allocated = allocated_after.saturating_sub(allocated_before);
 
-            logger::info!(action = "INFO_LOG_CHECK", "INFO LOG GETTING LOGGED");
-            logger::debug!(action = "DEBUG_LOG_CHECK", "DEBUG LOG GETTING LOGGED");
-            logger::warn!(action = "WARN_LOG_CHECK", "WARN LOG GETTING LOGGED");
-            logger::error!(action = "ERROR_LOG_CHECK", "ERROR LOG GETTING LOGGED");
 
             let final_result = match result {
                 Ok((decided_gateway, filter_list)) => {
