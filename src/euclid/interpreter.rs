@@ -46,7 +46,7 @@ impl InterpreterBackend {
             _ => ctx.get(&comparison.lhs),
         };
         if ctx_value.is_none() {
-            crate::logger::warn!(
+            crate::logger::debug!(
                 missing_context_key = %comparison.lhs,
                 "Context key not found while evaluating condition, skipping rule"
             );

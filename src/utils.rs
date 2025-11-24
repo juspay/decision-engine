@@ -24,7 +24,7 @@ pub mod date_time {
 }
 
 pub fn record_fields_from_header(request: &Request<Body>) -> tracing::Span {
-    let span = tracing::debug_span!(
+    let span = tracing::info_span!(
         "request",
         method = %request.method(),
         uri = %request.uri(),

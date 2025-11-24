@@ -616,17 +616,7 @@ where
         }
     }
 
-    fn on_enter(&self, id: &tracing::Id, ctx: Context<'_, S>) {
-        let span = ctx.span(id).expect("No span");
-        if let Ok(serialized) = self.span_serialize(&span, RecordType::EnterSpan) {
-            let _ = self.flush(serialized);
-        }
-    }
+    fn on_enter(&self, _id: &tracing::Id, _ctx: Context<'_, S>) {}
 
-    fn on_close(&self, id: tracing::Id, ctx: Context<'_, S>) {
-        let span = ctx.span(&id).expect("No span");
-        if let Ok(serialized) = self.span_serialize(&span, RecordType::ExitSpan) {
-            let _ = self.flush(serialized);
-        }
-    }
+    fn on_close(&self, _id: tracing::Id, _ctx: Context<'_, S>) {}
 }

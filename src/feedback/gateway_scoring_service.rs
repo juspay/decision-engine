@@ -273,7 +273,7 @@ pub fn isGwLatencyWithinConfiguredThreshold(
     txn_latency: Option<f64>,
     merchant_latency_threshold: Option<f64>,
 ) -> bool {
-    logger::info!(
+    logger::debug!(
         action = "txn_latency_within_threshold",
         tag = "txn_latency_within_threshold",
         "Latency & Threshold: {:?} {:?}",
@@ -344,7 +344,7 @@ pub async fn get_gateway_scoring_type(
         Some(latency_threshold) => latency_threshold,
     };
 
-    logger::info!(
+    logger::debug!(
         action = "sr_v3_latency_threshold",
         tag = "sr_v3_latency_threshold",
         "Latency Threshold: {} Time Difference: {}",
@@ -515,7 +515,7 @@ pub async fn check_and_update_gateway_score(
     // Logging and score update logic
     if feature_enabled {
         if should_compute_gw_score {
-            logger::info!(
+            logger::debug!(
                 action = "UPDATE_GATEWAY_SCORE_LOCK",
                 tag = "UPDATE_GATEWAY_SCORE_LOCK",
                 "Updating Gateway Score in {} flow with status as {:?} and scoring type as {:?}",
@@ -533,7 +533,7 @@ pub async fn check_and_update_gateway_score(
             .await;
         }
     } else {
-        logger::info!(
+        logger::debug!(
             action = "GW_SCORE_LOCK_FEATURE_NOT_ENABLED",
             tag = "GW_SCORE_LOCK_FEATURE_NOT_ENABLED",
             "Updating Gateway Score in {} flow with status as {:?} and scoring type as {:?}",
@@ -569,7 +569,7 @@ pub async fn update_gateway_score(
 
     //let mer_acc =
     let routing_approach = get_routing_approach(txn_detail.clone());
-    logger::info!(
+    logger::debug!(
         action = "routing_approach_value",
         tag = "routing_approach_value",
         "{:?}",
@@ -639,7 +639,7 @@ pub async fn update_gateway_score(
         && should_isolate_srv3_producer
         && should_update_explore_txn
     {
-        logger::info!(
+        logger::debug!(
             action = "updateGatewayScore",
             tag = "updateGatewayScore",
             "Updating sr v3 score for the txn with scoring type as {:?} and status as {:?}",
@@ -681,7 +681,7 @@ pub async fn update_gateway_score(
             }
             Some(_) => redis_gateway_score_data,
         };
-        logger::info!(tag = "GatewayScoringData", "{:?}", mb_gateway_scoring_data);
+        logger::debug!(tag = "GatewayScoringData", "{:?}", mb_gateway_scoring_data);
         match mb_gateway_scoring_data {
             None => {
                 logger::error!(
@@ -691,7 +691,7 @@ pub async fn update_gateway_score(
                 );
             }
             Some(gateway_scoring_data) => {
-                logger::info!(
+                logger::debug!(
                     action = "Downtime-EmailNotification",
                     tag = "Downtime-EmailNotification",
                     "Proceed to updateKeyScoreForKeysFromConsumer"
@@ -706,7 +706,7 @@ pub async fn update_gateway_score(
                     gateway_reference_id.clone(),
                 )
                 .await;
-                logger::info!(
+                logger::debug!(
                     action = "Downtime-EmailNotification",
                     tag = "Downtime-EmailNotification",
                     "{:?}",
@@ -844,7 +844,7 @@ pub async fn is_update_within_latency_window(
 
                 let gw_score_update_latency =
                     Fbu::get_time_from_txn_created_in_mills(txn_detail.clone());
-                logger::info!(
+                logger::debug!(
                     action = "gwLatencyCheckThreshold",
                     tag = "gwLatencyCheckThreshold",
                     "gwLatencyCheckThreshold: {}",
