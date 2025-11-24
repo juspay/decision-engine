@@ -350,7 +350,7 @@ pub async fn run_decider_flow(
         .or(deciderParams.dpOrder.preferredGateway.clone());
     let gatewayMgaIdMap = get_gateway_to_mga_id_map_f(&allMgas, &functionalGateways);
 
-    logger::warn!(
+    logger::debug!(
         action = "PreferredGateway",
         tag = "PreferredGateway",
         "Preferred gateway provided by merchant for {:?} = {:?}",
@@ -407,7 +407,7 @@ pub async fn run_decider_flow(
                         gateways: vec![],
                     });
 
-                logger::info!(
+                logger::debug!(
                     action = "PreferredGateway",
                     tag = "PreferredGateway",
                     "Preferred gateway {:?} functional/valid for merchant {:?} in txn {:?}",
@@ -460,18 +460,13 @@ pub async fn run_decider_flow(
             logger::info!(
                 tag = "gatewayPriorityList",
                 action = "gatewayPriorityList",
-                "Gateway priority for merchant for {:?} = {:?}",
+                "Gateway priority for merchant for {:?} = {:?}, gwPLogic : {:?}",
                 &deciderParams.dpTxnDetail.txnId,
-                gatewayPriorityList
+                gatewayPriorityList,
+                gwPLogic
             );
 
             let (mut functionalGateways, updatedPriorityLogicOutput) = if gwPLogic.is_enforcement {
-                logger::info!(
-                    tag = "gatewayPriorityList",
-                    action = "Enforcing Priority Logic",
-                    "Enforcing Priority Logic for {:?}",
-                    deciderParams.dpTxnDetail.txnId
-                );
                 let (res, priorityLogicOutput) = filter_functional_gateways_with_enforcement(
                     &mut decider_flow,
                     &functionalGateways,
@@ -617,7 +612,7 @@ pub async fn run_decider_flow(
                     )
                     .await;
 
-                    logger::info!(
+                    logger::debug!(
                         action = "Decided Gateway",
                         tag = "Decided Gateway",
                         "Gateway decided for {:?} = {:?}",
@@ -634,7 +629,7 @@ pub async fn run_decider_flow(
                     //     &currentGatewayScoreMap
                     // ).await?;
 
-                    logger::info!(
+                    logger::debug!(
                         action = "GATEWAY_PRIORITY_MAP",
                         tag = "GATEWAY_PRIORITY_MAP",
                         "{:?}",

@@ -464,7 +464,7 @@ pub async fn run_decider_flow(
                     //     &currentGatewayScoreMap
                     // ).await?;
 
-                    logger::info!(
+                    logger::debug!(
                         action = "GATEWAY_PRIORITY_MAP",
                         tag = "GATEWAY_PRIORITY_MAP",
                         "{:?}",
