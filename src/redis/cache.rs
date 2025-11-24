@@ -150,16 +150,13 @@ where
 }
 
 // Function to find value from Redis/DB and return default if not present
-pub async fn findByNameFromRedisWithDefault<A>(
-    key: String,
-    default_value: A,
-) -> A
+pub async fn findByNameFromRedisWithDefault<A>(key: String, default_value: A) -> A
 where
     A: for<'de> Deserialize<'de> + serde::Serialize + Clone,
 {
     // First try to get the value using the helper function
     let result = findByNameFromRedisHelper(key.clone(), Some(extractValue::<A>)).await;
-    
+
     match result {
         Some(value) => value,
         None => {
@@ -167,10 +164,18 @@ where
             match serde_json::to_string(&default_value) {
                 Ok(default_json) => {
                     // Cache the default value in Redis for future use
-                    let global_app_state = crate::app::APP_STATE.get().expect("GlobalAppState not set");
-                    let prefixed_key = format!("{}{}", global_app_state.global_config.cache.service_config_redis_prefix, key);
+                    let global_app_state =
+                        crate::app::APP_STATE.get().expect("GlobalAppState not set");
+                    let prefixed_key = format!(
+                        "{}{}",
+                        global_app_state
+                            .global_config
+                            .cache
+                            .service_config_redis_prefix,
+                        key
+                    );
                     set_to_redis_cache(&prefixed_key, &default_json, &key).await;
-                    
+
                     logger::debug!(
                         tag = "redis_cache",
                         action = "default_cached",
@@ -188,7 +193,7 @@ where
                     );
                 }
             }
-            
+
             default_value
         }
     }

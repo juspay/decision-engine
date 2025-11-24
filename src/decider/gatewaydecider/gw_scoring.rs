@@ -1003,10 +1003,11 @@ pub async fn update_score_for_outage(decider_flow: &mut DeciderFlow<'_>) -> Gate
     let txn_detail = decider_flow.get().dpTxnDetail.clone();
     let txn_card_info = decider_flow.get().dpTxnCardInfo.clone();
     let merchant = decider_flow.get().dpMerchantAccount.clone();
-   let scheduled_outage_validation_duration = RService::findByNameFromRedisWithDefault(
+    let scheduled_outage_validation_duration = RService::findByNameFromRedisWithDefault(
         C::ScheduledOutageValidationDuration.get_key(),
         86400,
-    ).await;
+    )
+    .await;
 
     let potential_outages = get_scheduled_outage(scheduled_outage_validation_duration).await;
     logger::debug!("updated score for outage {:?}", potential_outages);
@@ -1797,12 +1798,14 @@ pub async fn get_gateway_wise_routing_inputs_for_merchant_sr(
     let default_elimination_threshold = RService::findByNameFromRedisWithDefault(
         C::SrBasedGatewayEliminationThreshold.get_key(),
         C::DEFAULT_SR_BASED_GATEWAY_ELIMINATION_THRESHOLD,
-    ).await;
+    )
+    .await;
     let default_soft_txn_reset_count = RService::findByNameFromRedisWithDefault(
         C::SR_BASED_TXN_RESET_COUNT.get_key(),
         C::GW_DEFAULT_TXN_SOFT_RESET_COUNT,
-    ).await;
-    let is_elimination_v2_enabled = isFeatureEnabled(
+    )
+    .await;
+    let is_elimination_v2_enabled = is_feature_enabled(
         C::EnableEliminationV2.get_key(),
         merchant_acc.merchantId.0.clone(),
         "kv_redis".to_string(),
