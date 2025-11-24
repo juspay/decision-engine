@@ -610,7 +610,8 @@ where
         // Event could have no span.
         let span = ctx.lookup_current();
 
-        if let Ok(formatted) = self.event_serialize(&span.as_ref(), event) {
+        let result: std::io::Result<Vec<u8>> = self.event_serialize(&span.as_ref(), event);
+        if let Ok(formatted) = result {
             let _ = self.flush(formatted);
         }
     }
