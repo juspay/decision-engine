@@ -1279,7 +1279,8 @@ pub async fn get_global_gateway_score(
                     && sorted_filtered_merchants
                         .iter()
                         .all(|x| x.score < score_threshold);
-                let filtered_merchants: Vec<GlobalScoreLog> = sorted_filtered_merchants.clone()
+                let filtered_merchants: Vec<GlobalScoreLog> = sorted_filtered_merchants
+                    .clone()
                     .into_iter()
                     .map(|gs| mk_gsl(gs, score_threshold, max_count))
                     .collect();
