@@ -33,6 +33,7 @@ pub struct GlobalConfig {
     #[cfg(feature = "limit")]
     pub limit: Limit,
     pub redis: RedisSettings,
+    pub cache: Cache,
     pub tenant_secrets: TenantsSecrets,
     pub tls: Option<ServerTls>,
     #[serde(default)]
@@ -104,6 +105,12 @@ pub struct PgDatabase {
     pub pg_port: u16,
     pub pg_dbname: String,
     pub pg_pool_size: Option<usize>,
+}
+
+#[derive(Clone, serde::Deserialize, Debug)]
+pub struct Cache {
+    pub service_config_redis_prefix: String,
+    pub service_config_ttl: i64,
 }
 
 #[derive(serde::Deserialize, Debug, Clone)]

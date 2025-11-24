@@ -3,9 +3,6 @@ use crate::types::service_configuration;
 use crate::utils::StringExt;
 use serde::Deserialize;
 
-// Cache TTL configuration
-const CACHE_TTL_SECONDS: i64 = 300; // 5 minutes
-
 // Converted type synonyms
 // Original Haskell type: KVDBName
 pub type KVDBName = String;
@@ -58,6 +55,41 @@ where
     findByNameFromRedisHelper(key, Some(decode_fn)).await
 }
 
+async fn get_from_redis_cache(prefixed_key: &str) -> Result<String, String> {
+    let app_state = crate::app::get_tenant_app_state().await;
+
+    match app_state.redis_conn.get_key_string(prefixed_key).await {
+        Ok(redis_value) => Ok(redis_value),
+        Err(e) => Err(format!("Redis get failed: {:?}", e)),
+    }
+}
+
+async fn set_to_redis_cache(prefixed_key: &str, value: &str, key: &str) {
+    let app_state = crate::app::get_tenant_app_state().await;
+    let global_app_state = crate::app::APP_STATE.get().expect("GlobalAppState not set");
+
+    match app_state
+        .redis_conn
+        .setx(
+            prefixed_key,
+            value,
+            global_app_state.global_config.cache.service_config_ttl,
+        )
+        .await
+    {
+        Ok(_) => {}
+        Err(e) => {
+            crate::logger::warn!(
+                tag = "redis_cache_write_failed",
+                action = "redis_cache_write_failed",
+                "Failed to write cache for key: {}, error: {:?}",
+                key,
+                e
+            );
+        }
+    }
+}
+
 // Original Haskell function: findByNameFromRedisHelper
 pub async fn findByNameFromRedisHelper<A>(
     key: String,
@@ -66,20 +98,31 @@ pub async fn findByNameFromRedisHelper<A>(
 where
     A: for<'de> Deserialize<'de>,
 {
-    let app_state = crate::app::get_tenant_app_state().await;
+    let global_app_state = crate::app::APP_STATE.get().expect("GlobalAppState not set");
+    let prefixed_key = format!(
+        "{}{}",
+        global_app_state
+            .global_config
+            .cache
+            .service_config_redis_prefix,
+        key
+    );
 
-    // Try Redis first
-    match app_state.redis_conn.get_key_string(&key).await {
+    match get_from_redis_cache(&prefixed_key).await {
         Ok(redis_value) => {
-            // Found in Redis, decode and return
+            logger::debug!(
+                tag = "redis_cache",
+                action = "hit",
+                "Cache hit for key: {}",
+                key
+            );
             match decode_fn {
                 Some(func) => func(redis_value),
                 None => extractValue(redis_value),
             }
         }
         Err(_) => {
-            // Redis miss, fallback to database
-            crate::logger::debug!(
+            logger::debug!(
                 tag = "redis_cache",
                 action = "miss",
                 "Cache miss for key: {}, falling back to database",
@@ -91,23 +134,7 @@ where
             match res {
                 Ok(Some(service_config)) => match service_config.value {
                     Some(value) => {
-                        // Cache the value in Redis for future use (TTL: 5 minutes)
-                        match app_state
-                            .redis_conn
-                            .setx(&key, &value, CACHE_TTL_SECONDS)
-                            .await
-                        {
-                            Ok(_) => {}
-                            Err(e) => {
-                                crate::logger::warn!(
-                                    tag = "redis_cache_write_failed",
-                                    action = "redis_cache_write_failed",
-                                    "Failed to write cache for key: {}, error: {:?}",
-                                    key,
-                                    e
-                                );
-                            }
-                        }
+                        set_to_redis_cache(&prefixed_key, &value, &key).await;
 
                         match decode_fn {
                             Some(func) => func(value),
@@ -118,6 +145,51 @@ where
                 },
                 _ => None,
             }
+        }
+    }
+}
+
+// Function to find value from Redis/DB and return default if not present
+pub async fn findByNameFromRedisWithDefault<A>(
+    key: String,
+    default_value: A,
+) -> A
+where
+    A: for<'de> Deserialize<'de> + serde::Serialize + Clone,
+{
+    // First try to get the value using the helper function
+    let result = findByNameFromRedisHelper(key.clone(), Some(extractValue::<A>)).await;
+    
+    match result {
+        Some(value) => value,
+        None => {
+            // Serialize the default value to JSON string
+            match serde_json::to_string(&default_value) {
+                Ok(default_json) => {
+                    // Cache the default value in Redis for future use
+                    let global_app_state = crate::app::APP_STATE.get().expect("GlobalAppState not set");
+                    let prefixed_key = format!("{}{}", global_app_state.global_config.cache.service_config_redis_prefix, key);
+                    set_to_redis_cache(&prefixed_key, &default_json, &key).await;
+                    
+                    logger::debug!(
+                        tag = "redis_cache",
+                        action = "default_cached",
+                        "Cached default value for key: {}",
+                        key
+                    );
+                }
+                Err(e) => {
+                    logger::warn!(
+                        tag = "redis_cache",
+                        action = "serialize_failed",
+                        "Failed to serialize default value for key: {}, error: {:?}",
+                        key,
+                        e
+                    );
+                }
+            }
+            
+            default_value
         }
     }
 }
