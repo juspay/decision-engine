@@ -86,8 +86,8 @@ pub async fn findByNameFromRedisHelper<A>(
 where
     A: for<'de> Deserialize<'de>,
 {
-    let tenant_app_state = get_tenant_app_state().await;
-    let prefixed_key = tenant_app_state.config.cache_config.add_prefix(&key);
+    let app_state = get_tenant_app_state().await;
+    let prefixed_key = app_state.config.cache_config.add_prefix(&key);
 
     match get_from_memory_cache(&prefixed_key).await {
         Ok(cache_value) => {
@@ -117,7 +117,7 @@ where
                     Some(value) => {
                         // Get TTL from global config
                         let ttl_seconds = Some(
-                            tenant_app_state
+                            app_state
                                 .config
                                 .cache_config
                                 .service_config_ttl as u64,
@@ -152,10 +152,10 @@ where
             match serde_json::to_string(&default_value) {
                 Ok(default_json) => {
                     // Cache the default value in memory for future use
-                    let tenant_app_state = get_tenant_app_state().await;
-                    let prefixed_key = tenant_app_state.config.cache_config.add_prefix(&key);
+                    let app_state = get_tenant_app_state().await;
+                    let prefixed_key = app_state.config.cache_config.add_prefix(&key);
                     let ttl_seconds = Some(
-                        tenant_app_state
+                        app_state
                             .config
                             .cache_config
                             .service_config_ttl as u64,
