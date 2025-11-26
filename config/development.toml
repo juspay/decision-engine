@@ -45,7 +45,7 @@ default_command_timeout = 30
 unresponsive_timeout = 10
 max_feed_count = 200
 
-[cache]
+[cache_config]
 tti = 7200          # i.e. 2 hours
 max_capacity = 5000
 service_config_redis_prefix = "DE_service_config_"

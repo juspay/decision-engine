@@ -33,7 +33,7 @@ pub struct GlobalConfig {
     #[cfg(feature = "limit")]
     pub limit: Limit,
     pub redis: RedisSettings,
-    pub cache: Cache,
+    pub cache_config: CacheConfig,
     pub tenant_secrets: TenantsSecrets,
     pub tls: Option<ServerTls>,
     #[serde(default)]
@@ -108,9 +108,15 @@ pub struct PgDatabase {
 }
 
 #[derive(Clone, serde::Deserialize, Debug)]
-pub struct Cache {
+pub struct CacheConfig {
     pub service_config_redis_prefix: String,
     pub service_config_ttl: i64,
+}
+
+impl CacheConfig {
+    pub fn add_prefix(&self, key: &str) -> String {
+        format!("{}{}", self.service_config_redis_prefix, key)
+    }
 }
 
 #[derive(serde::Deserialize, Debug, Clone)]

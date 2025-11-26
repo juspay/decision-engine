@@ -1,4 +1,5 @@
 use super::mem_cache::GLOBAL_CACHE;
+use crate::app;
 use crate::logger;
 use crate::types::service_configuration;
 use crate::utils::StringExt;
@@ -85,15 +86,8 @@ pub async fn findByNameFromRedisHelper<A>(
 where
     A: for<'de> Deserialize<'de>,
 {
-    let global_app_state = crate::app::APP_STATE.get().expect("GlobalAppState not set");
-    let prefixed_key = format!(
-        "{}{}",
-        global_app_state
-            .global_config
-            .cache
-            .service_config_redis_prefix,
-        key
-    );
+    let global_app_state = app::APP_STATE.get().expect("GlobalAppState not set");
+    let prefixed_key = global_app_state.global_config.cache_config.add_prefix(&key);
 
     match get_from_memory_cache(&prefixed_key).await {
         Ok(cache_value) => {
@@ -122,8 +116,12 @@ where
                 Ok(Some(service_config)) => match service_config.value {
                     Some(value) => {
                         // Get TTL from global config
-                        let ttl_seconds =
-                            Some(global_app_state.global_config.cache.service_config_ttl as u64);
+                        let ttl_seconds = Some(
+                            global_app_state
+                                .global_config
+                                .cache_config
+                                .service_config_ttl as u64,
+                        );
                         set_to_memory_cache(&prefixed_key, &value, ttl_seconds).await;
 
                         match decode_fn {
@@ -154,18 +152,14 @@ where
             match serde_json::to_string(&default_value) {
                 Ok(default_json) => {
                     // Cache the default value in memory for future use
-                    let global_app_state =
-                        crate::app::APP_STATE.get().expect("GlobalAppState not set");
-                    let prefixed_key = format!(
-                        "{}{}",
+                    let global_app_state = app::APP_STATE.get().expect("GlobalAppState not set");
+                    let prefixed_key = global_app_state.global_config.cache_config.add_prefix(&key);
+                    let ttl_seconds = Some(
                         global_app_state
                             .global_config
-                            .cache
-                            .service_config_redis_prefix,
-                        key
+                            .cache_config
+                            .service_config_ttl as u64,
                     );
-                    let ttl_seconds =
-                        Some(global_app_state.global_config.cache.service_config_ttl as u64);
                     set_to_memory_cache(&prefixed_key, &default_json, ttl_seconds).await;
 
                     logger::debug!(

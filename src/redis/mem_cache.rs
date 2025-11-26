@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
+
+// Global in-memory cache instance
+pub static GLOBAL_CACHE: Lazy<Registry> = Lazy::new(|| Registry::new(1000));
 
 #[derive(Debug)]
 pub struct Registry {
@@ -119,9 +122,4 @@ impl Registry {
         data.clear();
         Ok(())
     }
-}
-
-// Global in-memory cache instance
-lazy_static! {
-    pub static ref GLOBAL_CACHE: Registry = Registry::new(10000); // 10k entries max
 }
