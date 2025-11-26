@@ -1475,9 +1475,9 @@ pub async fn filterFunctionalGatewaysForPixFlows(this: &mut DeciderFlow<'_>) -> 
 
     // Check if this is a PIX payment flow
     let payment_flow_list = Utils::get_payment_flow_list_from_txn_detail(&txn_detail);
-    let m_pix_flow_text = payment_flow_list
+    let m_pix_flow_text = C::PIX_PAYMENT_FLOWS
         .iter()
-        .find(|flow| C::PIX_PAYMENT_FLOWS.contains(&flow.as_str()));
+        .find(|&flow| payment_flow_list.contains(&flow.to_string()));
 
     // Try to parse the PIX flow text into a PaymentFlow enum
     let m_pix_payment_flow: Option<PaymentFlow> = m_pix_flow_text
