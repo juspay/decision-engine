@@ -921,6 +921,13 @@ pub async fn get_score_from_redis(bucket_size: i32, redis_key: &RedisKey) -> f64
         .get_key::<i32>(&score_key, "sr_v3_score_key")
         .await
         .unwrap_or(bucket_size);
+    logger::info!(
+        tag = "get_score_from_redis",
+        action = "get_score_from_redis",
+        "Fetched success count {:?} for redis key {:?}",
+        success_count,
+        score_key
+    );
     (success_count as f64 / bucket_size as f64).clamp(0.0, 1.0)
 }
 
@@ -1266,8 +1273,23 @@ pub async fn get_global_gateway_score(
             .get_key(&redis_key, "global_gateway_score_key")
             .await
             .unwrap_or(None);
+        logger::info!(
+            tag = "getGlobalGatewayScore",
+            action = "getGlobalGatewayScore",
+            "Fetched GlobalGatewayScore for key {:?}: {:?}",
+            redis_key,
+            m_value.clone()
+        );
         match m_value {
-            None => None,
+            None => {
+                logger::info!(
+                    tag = "getGlobalGatewayScore",
+                    action = "getGlobalGatewayScore",
+                    "No GlobalGatewayScore found for key {:?}",
+                    redis_key
+                );
+                None
+            },
             Some(global_gateway_score) => {
                 let sorted_filtered_merchants: Vec<GlobalScore> = global_gateway_score
                     .merchants
@@ -1399,6 +1421,13 @@ pub async fn get_global_elimination_gateway_score(
             .get(&gsri.gateway.to_string())
             .cloned()
             .unwrap_or_default();
+        logger::info!(
+            tag = "get_global_elimination_gateway_score",
+            action = "get_global_elimination_gateway_score",
+            "Redis Key for Gateway {:?} : {:?}",
+            gsri,
+            redis_key
+        );
         get_global_gateway_score(
             redis_key,
             gsri.eliminationMaxCountThreshold,
@@ -1406,6 +1435,12 @@ pub async fn get_global_elimination_gateway_score(
         )
         .await
     } else {
+        logger::error!(
+            tag = "get_global_elimination_gateway_score",
+            action = "get_global_elimination_gateway_score",
+            "Elimination Level is None for Gateway {:?}",
+            gsri
+        );
         None
     }
 }

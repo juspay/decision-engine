@@ -70,6 +70,7 @@ use crate::types::merchant as ETM;
 // use prelude::real_to_frac;
 // use data::time::clock::posix as DTP;
 use crate::logger;
+use time::format_description::well_known::Iso8601;
 // Converted data types
 // Original Haskell data type: GatewayScoringType
 #[derive(Debug, Serialize, Clone, Deserialize, PartialEq)]
@@ -686,28 +687,25 @@ pub fn log_gateway_score_type(
         },
     };
 
-    let txn_creation_time = txn_detail
-        .dateCreated
-        .to_string()
-        .replace(" ", "T")
-        .replace(" UTC", "Z");
+    let txn_creation_time = match &time::OffsetDateTime::now_utc().format(&Iso8601::DEFAULT) {
+        Ok(dt) => dt.to_string(),
+        Err(_) => "Invalid format".to_string(),
+    };
 
     let log_data = GatewayScoringTypeLogData {
         dateCreated: txn_creation_time,
         score_type: detailed_gateway_score_type,
     };
 
-    let log_entry = GatewayScoringTypeLog {
-        log_data: serde_json::Value::String(
-            serde_json::to_string(&log_data).unwrap_or_else(|_| "Serialization error".to_string()),
-        ),
-    };
+    let log_json = serde_json::json!({
+        "data": log_data,
+    });
 
-    logger::debug!(
+    logger::info!(
         action = "GATEWAY_SCORE_UPDATED",
         tag = "GATEWAY_SCORE_UPDATED",
-        "Logging gateway score type: {:?}",
-        log_entry
+        "{}",
+        log_json.to_string()
     );
 }
 
