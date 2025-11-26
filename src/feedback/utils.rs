@@ -687,7 +687,6 @@ pub fn log_gateway_score_type(
         },
     };
 
-    // Format dateCreated as ISO 8601 (e.g., 2025-11-25T21:38:29Z)
     let txn_creation_time = match &time::OffsetDateTime::now_utc().format(&Iso8601::DEFAULT) {
         Ok(dt) => dt.to_string(),
         Err(_) => "Invalid format".to_string(),
