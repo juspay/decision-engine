@@ -50,6 +50,7 @@ pub struct TenantConfig {
     pub tenant_secrets: TenantSecrets,
     pub routing_config: Option<TomlConfig>,
     pub debit_routing_config: network_decider::types::DebitRoutingConfig,
+    pub cache_config: CacheConfig,
 }
 
 impl TenantConfig {
@@ -69,6 +70,7 @@ impl TenantConfig {
                 .cloned()
                 .unwrap(),
             debit_routing_config: global_config.debit_routing_config.clone(),
+            cache_config: global_config.cache_config.clone(),
         }
     }
 }

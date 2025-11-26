@@ -1,5 +1,5 @@
 use super::mem_cache::GLOBAL_CACHE;
-use crate::app;
+use crate::app::get_tenant_app_state;
 use crate::logger;
 use crate::types::service_configuration;
 use crate::utils::StringExt;
@@ -86,8 +86,8 @@ pub async fn findByNameFromRedisHelper<A>(
 where
     A: for<'de> Deserialize<'de>,
 {
-    let global_app_state = app::APP_STATE.get().expect("GlobalAppState not set");
-    let prefixed_key = global_app_state.global_config.cache_config.add_prefix(&key);
+    let tenant_app_state = get_tenant_app_state().await;
+    let prefixed_key = tenant_app_state.config.cache_config.add_prefix(&key);
 
     match get_from_memory_cache(&prefixed_key).await {
         Ok(cache_value) => {
@@ -117,8 +117,8 @@ where
                     Some(value) => {
                         // Get TTL from global config
                         let ttl_seconds = Some(
-                            global_app_state
-                                .global_config
+                            tenant_app_state
+                                .config
                                 .cache_config
                                 .service_config_ttl as u64,
                         );
@@ -152,11 +152,11 @@ where
             match serde_json::to_string(&default_value) {
                 Ok(default_json) => {
                     // Cache the default value in memory for future use
-                    let global_app_state = app::APP_STATE.get().expect("GlobalAppState not set");
-                    let prefixed_key = global_app_state.global_config.cache_config.add_prefix(&key);
+                    let tenant_app_state = get_tenant_app_state().await;
+                    let prefixed_key = tenant_app_state.config.cache_config.add_prefix(&key);
                     let ttl_seconds = Some(
-                        global_app_state
-                            .global_config
+                        tenant_app_state
+                            .config
                             .cache_config
                             .service_config_ttl as u64,
                     );
