@@ -953,6 +953,8 @@ pub const CVV_LESS_V2_FLOW: EnabledCvvlessV2EnabledMerchants = EnabledCvvlessV2E
 
 pub const GATEWAYS_WITH_TENURE_BASED_CREDS: [&str; 3] = ["HDFC", "HDFC_CC_EMI", "ICICI"];
 
+pub const PIX_PAYMENT_FLOWS: [&str; 1] = ["PIX_AUTOMATIC_REDIRECT"];
+
 pub struct MerchantConfigEntityLevelLookupCutover;
 impl SC::ServiceConfigKey for MerchantConfigEntityLevelLookupCutover {
     fn get_key(&self) -> String {
