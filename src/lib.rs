@@ -15,6 +15,7 @@ pub mod metrics;
 pub mod middleware;
 pub mod redis;
 pub mod routes;
+pub mod shard_queue;
 pub mod storage;
 pub mod tenant;
 pub mod types;

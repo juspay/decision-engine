@@ -1,6 +1,6 @@
-use crate::types::service_configuration;
-use crate::utils::StringExt;
+use crate::{logger, utils::StringExt};
 use serde::Deserialize;
+use crate::shard_queue::GLOBAL_SHARD_QUEUE_HANDLER;
 
 // Converted type synonyms
 // Original Haskell type: KVDBName
@@ -53,8 +53,44 @@ where
 {
     findByNameFromRedisHelper(key, Some(decode_fn)).await
 }
+pub async fn findByNameFromRedisWithDefault<A>(
+    key: String,
+    default_value: A,
+) -> A
+where
+    A: for<'de> Deserialize<'de> + serde::Serialize + Clone,
+{
+    // First try to get from existing cache/DB
+    if let Some(value) = findByNameFromRedis(key.clone()).await {
+        return value;
+    }
 
-// Original Haskell function: findByNameFromRedisHelper
+    // Config not found in cache or DB, cache the default value
+    logger::debug!("Config '{}' not found, caching default value", key);
+    
+    // Create ServiceConfiguration with default value
+    let default_config = crate::storage::types::ServiceConfiguration {
+        id: 0, // Placeholder ID since we're not storing in DB
+        name: key.clone(),
+        value: Some(serde_json::to_string(&default_value).unwrap_or_else(|_| "null".to_string())),
+        new_value: None,
+        previous_value: None,
+        new_value_status: None,
+    };
+
+    // Push to shard queue for IMC caching
+    if let Ok(config_json) = serde_json::to_value(&default_config) {
+        let queue_item = crate::shard_queue::types::ShardQueueItem::new(key.clone(), config_json);
+        if let Err(e) = GLOBAL_SHARD_QUEUE_HANDLER.push_to_shard(queue_item).await {
+            logger::warn!("Failed to push default config '{}' to shard queue: {:?}", key, e);
+        } else {
+            logger::debug!("Cached default value for config '{}' in IMC", key);
+        }
+    }
+
+    default_value
+}
+
 pub async fn findByNameFromRedisHelper<A>(
     key: String,
     decode_fn: Option<impl Fn(String) -> Option<A>>,
@@ -62,22 +98,45 @@ pub async fn findByNameFromRedisHelper<A>(
 where
     A: for<'de> Deserialize<'de>,
 {
-    let res = service_configuration::find_config_by_name(key).await;
+    use crate::shard_queue::find_config_in_mem;
 
-    match res {
-        Ok(m_service_config) => match m_service_config {
-            Some(service_config) => match service_config.value {
-                Some(value) => match decode_fn {
-                    Some(func) => func(value),
-                    None => None,
-                },
+    if let Ok(service_config) = find_config_in_mem(&key) {
+        logger::debug!("Cache HIT: Found config '{}' in IMC", key);
+
+        if let Some(value) = service_config.value {
+            return match decode_fn {
+                Some(func) => func(value),
                 None => None,
-            },
-            None => None,
-        },
-        Err(_) => None,
+            };
+        }
     }
+    crate::logger::debug!("Cache MISS: Config '{}' not found in IMC, checking DB", key);
+    
+    if let Ok(Some(config)) = crate::types::service_configuration::find_config_by_name(key.clone()).await {
+        logger::debug!("DB HIT: Found config '{}' in database, pushing to shard queue for caching", key);
+        
+        if let Ok(config_json) = serde_json::to_value(&config) {
+            let queue_item = crate::shard_queue::ShardQueueItem::new(key.clone(), config_json);
+            if let Err(e) = GLOBAL_SHARD_QUEUE_HANDLER.push_to_shard(queue_item).await {
+                logger::warn!("Failed to push config '{}' to shard queue: {:?}", key, e);
+            } else {
+                logger::debug!("Pushed config '{}' to shard queue, polling will cache in IMC", key);
+            }
+        }
+        
+        if let Some(value) = config.value {
+            return match decode_fn {
+                Some(func) => func(value),
+                None => None,
+            };
+        }
+    } else {
+        logger::debug!("DB MISS: Config '{}' not found in database", key);
+    }
+
+    None
 }
+
 
 pub fn extractValue<A>(value: String) -> Option<A>
 where

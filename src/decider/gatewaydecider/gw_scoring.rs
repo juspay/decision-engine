@@ -1010,10 +1010,10 @@ pub async fn update_score_for_outage(decider_flow: &mut DeciderFlow<'_>) -> Gate
     let txn_detail = decider_flow.get().dpTxnDetail.clone();
     let txn_card_info = decider_flow.get().dpTxnCardInfo.clone();
     let merchant = decider_flow.get().dpMerchantAccount.clone();
-    let scheduled_outage_validation_duration =
-        RService::findByNameFromRedis(C::ScheduledOutageValidationDuration.get_key())
-            .await
-            .unwrap_or(86400);
+    let scheduled_outage_validation_duration = RService::findByNameFromRedisWithDefault(
+        C::ScheduledOutageValidationDuration.get_key(),
+        86400,
+    ).await;
 
     let potential_outages = get_scheduled_outage(scheduled_outage_validation_duration).await;
     logger::debug!("updated score for outage {:?}", potential_outages);
@@ -1840,21 +1840,20 @@ pub async fn get_gateway_wise_routing_inputs_for_merchant_sr(
     gateway_success_rate_merchant_input: Option<GatewaySuccessRateBasedRoutingInput>,
     default_success_rate_based_routing_input: Option<GatewaySuccessRateBasedRoutingInput>,
 ) -> GatewayWiseSuccessRateBasedRoutingInput {
-    let m_option =
-        RService::findByNameFromRedis(C::SrBasedGatewayEliminationThreshold.get_key()).await;
-    let default_soft_txn_reset_count =
-        RService::findByNameFromRedis(C::SR_BASED_TXN_RESET_COUNT.get_key())
-            .await
-            .unwrap_or(C::GW_DEFAULT_TXN_SOFT_RESET_COUNT);
+    let default_elimination_threshold = RService::findByNameFromRedisWithDefault(
+        C::SrBasedGatewayEliminationThreshold.get_key(),
+        C::DEFAULT_SR_BASED_GATEWAY_ELIMINATION_THRESHOLD,
+    ).await;
+    let default_soft_txn_reset_count = RService::findByNameFromRedisWithDefault(
+        C::SR_BASED_TXN_RESET_COUNT.get_key(),
+        C::GW_DEFAULT_TXN_SOFT_RESET_COUNT,
+    ).await;
     let is_elimination_v2_enabled = is_feature_enabled(
         C::EnableEliminationV2.get_key(),
         merchant_acc.merchantId.0.clone(),
         "kv_redis".to_string(),
     )
     .await;
-
-    let default_elimination_threshold =
-        m_option.unwrap_or(C::DEFAULT_SR_BASED_GATEWAY_ELIMINATION_THRESHOLD);
     let merchant_given_default_threshold = gateway_success_rate_merchant_input
         .clone()
         .map(|input| input.defaultEliminationThreshold);

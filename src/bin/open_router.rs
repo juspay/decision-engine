@@ -36,8 +36,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .expect("Failed while building the metrics server")
     });
 
+    let shard_queue_handle = tokio::spawn(async move {
+        open_router::shard_queue::GLOBAL_SHARD_QUEUE_HANDLER.spawn()
+            .await
+            .expect("Failed while running the shard queue handler")
+    });
+
     // Wait for both servers to complete (they should run indefinitely)
-    tokio::try_join!(main_server_handle, metrics_server_handle)?;
+    tokio::try_join!(main_server_handle, metrics_server_handle, shard_queue_handle)?;
 
     Ok(())
 }
