@@ -729,7 +729,7 @@ impl SC::ServiceConfigKey for GatewaydeciderScoringflow {
     }
 }
 
-pub const PAYMENT_FLOWS_REQUIRED_FOR_GW_FILTERING: [&str; 12] = [
+pub const PAYMENT_FLOWS_REQUIRED_FOR_GW_FILTERING: [&str; 13] = [
     "DOTP",
     "CARD_MOTO",
     "MANDATE_REGISTER",
@@ -742,6 +742,7 @@ pub const PAYMENT_FLOWS_REQUIRED_FOR_GW_FILTERING: [&str; 12] = [
     "CROSS_BORDER_PAYMENT",
     "SINGLE_BLOCK_MULTIPLE_DEBIT",
     "ONE_TIME_MANDATE",
+    "PIX_AUTOMATIC_REDIRECT",
 ];
 
 pub const GET_CARD_BRAND_CACHE_EXPIRY: i32 = 2 * 24 * 60 * 60;

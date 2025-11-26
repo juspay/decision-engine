@@ -1481,7 +1481,7 @@ pub async fn filterFunctionalGatewaysForPixFlows(this: &mut DeciderFlow<'_>) -> 
 
     // Try to parse the PIX flow text into a PaymentFlow enum
     let m_pix_payment_flow: Option<PaymentFlow> = m_pix_flow_text
-        .and_then(|flow_text| text_to_payment_flows(flow_text.clone()).ok());
+        .and_then(|flow_text| text_to_payment_flows(flow_text.to_string()).ok());
 
     match m_pix_payment_flow {
         Some(pix_payment_flow) => {
