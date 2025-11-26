@@ -266,7 +266,7 @@ pub struct GatewayScoringTypeLogData {
 
 #[derive(Debug)]
 pub struct GatewayScoringTypeLog {
-    pub log_data: AValue,
+    pub data: AValue,
 }
 
 impl Serialize for GatewayScoringTypeLog {
@@ -274,9 +274,9 @@ impl Serialize for GatewayScoringTypeLog {
     where
         S: serde::Serializer,
     {
-        let mut state = serializer.serialize_struct("GatewayScoringTypeLog", 1)?;
-        state.serialize_field("data", &self.log_data)?;
-        state.end()
+    let mut state = serializer.serialize_struct("GatewayScoringTypeLog", 1)?;
+    state.serialize_field("data", &self.data)?;
+    state.end()
     }
 }
 
@@ -290,7 +290,7 @@ impl<'de> Deserialize<'de> for GatewayScoringTypeLog {
             &["data"],
             GatewayScoringTypeLogVisitor,
         )?;
-        Ok(Self { log_data: data })
+    Ok(Self { data })
     }
 }
 
