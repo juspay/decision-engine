@@ -295,6 +295,7 @@ pub fn payment_flows_to_text(payment_flow: &PaymentFlow) -> String {
         PaymentFlow::OneTimeMandate => "ONE_TIME_MANDATE".to_string(),
         PaymentFlow::PixAutomaticRedirect => "PIX_AUTOMATIC_REDIRECT".to_string(),
         PaymentFlow::SingleBlockMultipleDebit => "SINGLE_BLOCK_MULTIPLE_DEBIT".to_string(),
+        PaymentFlow::PixAutomaticRedirect => "PIX_AUTOMATIC_REDIRECT".to_string(),
     }
 }
 
@@ -444,6 +445,7 @@ pub fn text_to_payment_flows(text: String) -> Result<PaymentFlow, ApiError> {
         "ONE_TIME_MANDATE" => Ok(PaymentFlow::OneTimeMandate),
         "PIX_AUTOMATIC_REDIRECT" => Ok(PaymentFlow::PixAutomaticRedirect),
         "SINGLE_BLOCK_MULTIPLE_DEBIT" => Ok(PaymentFlow::SingleBlockMultipleDebit),
+        "PIX_AUTOMATIC_REDIRECT" => Ok(PaymentFlow::PixAutomaticRedirect),
         _ => Err(ApiError::ParsingError("Invalid Payment Flow")),
     }
 }

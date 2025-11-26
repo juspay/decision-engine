@@ -140,7 +140,6 @@ pub fn is_pix_flows_enabled(
     check_if_enabled_in_mga(mga, &payment_flow, &acc_details_flag)
 }
 
-
 pub fn is_seamless(mga: &ETM::merchant_gateway_account::MerchantGatewayAccount) -> bool {
     let secret_json = Some(mga.account_details.peek());
     secret_json

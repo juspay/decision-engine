@@ -33,7 +33,7 @@ use crate::types::merchant_gateway_account_sub_info::{self as ETMGASI, SubIdType
 use crate::types::merchant_gateway_payment_method_flow as MGPMF;
 use crate::types::order::Order;
 use crate::types::payment::payment_method::{self as ETP};
-use crate::types::payment_flow::{PaymentFlow, payment_flows_to_text};
+use crate::types::payment_flow::{PaymentFlow, payment_flows_to_text, text_to_payment_flows};
 use std::collections::{HashMap, HashSet};
 // use crate::types::metadata::Meta;
 // use crate::types::pl_ref_id_map::PLRefIdMap;
@@ -1457,6 +1457,7 @@ pub async fn filterFunctionalGatewaysForOTMFlow(this: &mut DeciderFlow<'_>) -> V
 /// Identifies eligible gateways that support PIX flows based on bank codes and payment method compatibility
 pub async fn filterFunctionalGatewaysForPixFlows(this: &mut DeciderFlow<'_>) -> Vec<String> {
     /// Helper function to get the account details flag to be checked for PIX flows
+    /// extend this for other pix flows.
     fn get_acc_details_flag_to_be_checked(pf: &PaymentFlow) -> &str {
         match pf {
             _ => "enablePixAutomaticRedirect",
@@ -1480,7 +1481,7 @@ pub async fn filterFunctionalGatewaysForPixFlows(this: &mut DeciderFlow<'_>) -> 
 
     // Try to parse the PIX flow text into a PaymentFlow enum
     let m_pix_payment_flow: Option<PaymentFlow> = m_pix_flow_text
-        .and_then(|flow_text| serde_json::from_str(&format!("\"{}\"" , flow_text)).ok());
+        .and_then(|flow_text| text_to_payment_flows(flow_text.clone()).ok());
 
     match m_pix_payment_flow {
         Some(pix_payment_flow) => {
@@ -1504,8 +1505,7 @@ pub async fn filterFunctionalGatewaysForPixFlows(this: &mut DeciderFlow<'_>) -> 
             .await;
 
             // Get the account details flag to check for this PIX flow
-            let acc_details_flag_to_be_checked =
-                get_acc_details_flag_to_be_checked(&pix_payment_flow);
+            let acc_details_flag_to_be_checked = get_acc_details_flag_to_be_checked(&pix_payment_flow);
 
             // Filter MGAs that support PIX flows
             let mgas: Vec<_> = enabled_mgas
@@ -1555,9 +1555,6 @@ pub async fn filterFunctionalGatewaysForPixFlows(this: &mut DeciderFlow<'_>) -> 
                     .iter()
                     .map(|entry| to_gateway_payment_method_flow_id(entry.id.clone()))
                     .collect();
-
-                // Get effective amount for max amount filtering
-                let amount = Utils::effective_amount_with_txn_amount(txn_detail.clone()).await;
 
                 // Get merchant gateway payment method flows that match both MGA and GPMF
                 let mgpmf_entries =
