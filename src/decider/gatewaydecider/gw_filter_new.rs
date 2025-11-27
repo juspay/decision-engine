@@ -968,10 +968,19 @@ pub async fn filterGatewaysForValidationType(this: &mut DeciderFlow<'_>) -> () {
     // Handle Card Mandate transactions
     if Utils::is_mandate_transaction(&txn_detail) && Utils::is_card_transaction(&txn_card_info) {
         // Get excluded gateways from Redis
-        let card_mandate_bin_filter_excluded_gateways = findByNameFromRedis(C::CardMandateBinFilterExcludedGateways.get_key())
+        let mut card_mandate_bin_filter_excluded_gateways = findByNameFromRedis(C::CardMandateBinFilterExcludedGateways.get_key())
             .await
             .unwrap_or_else(Vec::new);
-            
+        
+        // Get card brand    
+        let card_brand = Utils::get_card_brand(this).await;
+        // If card brand is RUPAY remove HYPERPG from config list
+        if card_brand.as_deref() == Some("RUPAY") {
+            card_mandate_bin_filter_excluded_gateways
+                .retain(|gw| gw != &ETG::Gateway::HYPERPG);
+        }
+
+
         let bin_wise_filter_excluded_gateways = intersect(&card_mandate_bin_filter_excluded_gateways, &st);
         let bin_list = Utils::get_bin_list(txn_card_info.card_isin.clone());
         
