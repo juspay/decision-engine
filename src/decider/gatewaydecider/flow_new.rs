@@ -970,6 +970,7 @@ fn build_super_router_response(
     first_gateway_result: Option<T::DecidedGateway>,
     super_router_priority_map: Vec<T::SUPERROUTERPRIORITYMAP>,
     hedging_performed: bool,
+    super_router_metadata: T::SUPERROUTERMETADATA,
 ) -> Result<T::DecidedGateway, T::ErrorResponse> {
     logger::debug!(
         "Sorted super_router_priority_map by success_rate: {:?}",
@@ -982,6 +983,7 @@ fn build_super_router_response(
             // Add super_router output to the result with the sorted priority map
             gateway_result.super_router = Some(T::SUPERROUTEROUTPUT {
                 priority_map: super_router_priority_map.clone(),
+                metadata: Some(super_router_metadata),
             });
             gateway_result.gateway_priority_map = None;
             // Update the decided gateway to use the best one from our sorted list
@@ -1047,6 +1049,8 @@ pub async fn runSuperRouterFlow(
         dreq.eligibleGatewayPaymentMethodsList.clone(),
     );
 
+    let super_router_metadata = fetch_super_router_metadata(&sorted_priority_map);
+
     let sorted_priority_map =
         super::sr_cost_routing::sort_by_euclidean_distance_original(&mut sorted_priority_map);
 
@@ -1097,7 +1101,49 @@ pub async fn runSuperRouterFlow(
     .await;
 
     // Build super router response with filtered and sorted data
-    build_super_router_response(first_gateway_result, final_priority_map, hedging_performed)
+    build_super_router_response(first_gateway_result, 
+        final_priority_map, 
+        hedging_performed,
+        super_router_metadata,
+    )
+}
+
+fn fetch_super_router_metadata(
+    super_router_priority_map: &Vec<T::SUPERROUTERPRIORITYMAP>,
+) -> T::SUPERROUTERMETADATA {
+    // find the entry with the highest success rate
+    let sr_entry = super_router_priority_map
+        .iter()
+        .max_by(|a, b| {
+            let success_rate_a = a.success_rate.unwrap_or(0.0);
+            let success_rate_b = b.success_rate.unwrap_or(0.0);
+            success_rate_a.total_cmp(&success_rate_b)
+        });
+
+    // find the entry with the highest saving
+    let lcr_entry = super_router_priority_map
+        .iter()
+        .max_by(|a, b| {
+            let saving_a = a.saving.unwrap_or(0.0);
+            let saving_b = b.saving.unwrap_or(0.0);
+            saving_a.total_cmp(&saving_b)
+        });
+
+    // create metadata with defaults if entries don't exist
+    T::SUPERROUTERMETADATA {
+        sr_gateway: sr_entry
+            .map(|e| e.gateway.clone())
+            .unwrap_or_default(),
+        sr_payment_method: sr_entry 
+            .map(|e| e.payment_method.clone())
+            .unwrap_or_default(),
+        lcr_gateway: lcr_entry
+            .map(|e| e.gateway.clone())
+            .unwrap_or_default(),
+        lcr_payment_method: lcr_entry
+            .map(|e| e.payment_method.clone())
+            .unwrap_or_default(),
+    }
 }
 
 // async fn addMetricsToStream(

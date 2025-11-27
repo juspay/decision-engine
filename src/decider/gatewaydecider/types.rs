@@ -664,8 +664,17 @@ pub struct SUPERROUTERPRIORITYMAP {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct SUPERROUTERMETADATA {
+    pub sr_gateway: String,
+    pub sr_payment_method: String,
+    pub lcr_gateway: String,
+    pub lcr_payment_method: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct SUPERROUTEROUTPUT {
     pub priority_map: Vec<SUPERROUTERPRIORITYMAP>,
+    pub metadata: Option<SUPERROUTERMETADATA>,
 }
 
 // pub type DeciderFlow<R> = for<'a> fn(&'a mut (dyn MonadFlow + 'a)) -> ReaderT<DeciderParams, StateT<DeciderState, &'a mut (dyn MonadFlow + 'a)>, R>;
