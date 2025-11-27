@@ -1,3 +1,6 @@
+use super::mem_cache::GLOBAL_CACHE;
+use crate::app::get_tenant_app_state;
+use crate::logger;
 use crate::types::service_configuration;
 use crate::utils::StringExt;
 use serde::Deserialize;
@@ -5,6 +8,28 @@ use serde::Deserialize;
 // Converted type synonyms
 // Original Haskell type: KVDBName
 pub type KVDBName = String;
+
+async fn get_from_memory_cache(prefixed_key: &str) -> Result<String, String> {
+    match GLOBAL_CACHE.get::<String>(prefixed_key) {
+        Ok(value) => Ok(value),
+        Err(e) => Err(format!("Memory cache get failed: {}", e)),
+    }
+}
+
+async fn set_to_memory_cache(prefixed_key: &str, value: &str, ttl_seconds: Option<u64>) {
+    match GLOBAL_CACHE.store(prefixed_key.to_string(), value.to_string(), ttl_seconds) {
+        Ok(_) => {}
+        Err(e) => {
+            crate::logger::warn!(
+                tag = "memory_cache_write_failed",
+                action = "memory_cache_write_failed",
+                "Failed to write cache for key: {}, error: {:?}",
+                prefixed_key,
+                e
+            );
+        }
+    }
+}
 
 // // Converted data types
 // // Original Haskell data type: Multi
@@ -54,7 +79,6 @@ where
     findByNameFromRedisHelper(key, Some(decode_fn)).await
 }
 
-// Original Haskell function: findByNameFromRedisHelper
 pub async fn findByNameFromRedisHelper<A>(
     key: String,
     decode_fn: Option<impl Fn(String) -> Option<A>>,
@@ -62,20 +86,102 @@ pub async fn findByNameFromRedisHelper<A>(
 where
     A: for<'de> Deserialize<'de>,
 {
-    let res = service_configuration::find_config_by_name(key).await;
+    let app_state = get_tenant_app_state().await;
+    let prefixed_key = app_state.config.cache_config.add_prefix(&key);
 
-    match res {
-        Ok(m_service_config) => match m_service_config {
-            Some(service_config) => match service_config.value {
-                Some(value) => match decode_fn {
-                    Some(func) => func(value),
+    match get_from_memory_cache(&prefixed_key).await {
+        Ok(cache_value) => {
+            logger::debug!(
+                tag = "memory_cache",
+                action = "hit",
+                "Cache hit for key: {}",
+                key
+            );
+            match decode_fn {
+                Some(func) => func(cache_value),
+                None => extractValue(cache_value),
+            }
+        }
+        Err(_) => {
+            logger::debug!(
+                tag = "memory_cache",
+                action = "miss",
+                "Cache miss for key: {}, falling back to database",
+                key
+            );
+
+            let res = service_configuration::find_config_by_name(key.clone()).await;
+
+            match res {
+                Ok(Some(service_config)) => match service_config.value {
+                    Some(value) => {
+                        // Get TTL from global config
+                        let ttl_seconds = Some(
+                            app_state
+                                .config
+                                .cache_config
+                                .service_config_ttl as u64,
+                        );
+                        set_to_memory_cache(&prefixed_key, &value, ttl_seconds).await;
+
+                        match decode_fn {
+                            Some(func) => func(value),
+                            None => extractValue(value),
+                        }
+                    }
                     None => None,
                 },
-                None => None,
-            },
-            None => None,
-        },
-        Err(_) => None,
+                _ => None,
+            }
+        }
+    }
+}
+
+// Function to find value from memory cache/DB and return default if not present
+pub async fn findByNameFromRedisWithDefault<A>(key: String, default_value: A) -> A
+where
+    A: for<'de> Deserialize<'de> + serde::Serialize + Clone,
+{
+    // First try to get the value using the helper function
+    let result = findByNameFromRedisHelper(key.clone(), Some(extractValue::<A>)).await;
+
+    match result {
+        Some(value) => value,
+        None => {
+            // Serialize the default value to JSON string
+            match serde_json::to_string(&default_value) {
+                Ok(default_json) => {
+                    // Cache the default value in memory for future use
+                    let app_state = get_tenant_app_state().await;
+                    let prefixed_key = app_state.config.cache_config.add_prefix(&key);
+                    let ttl_seconds = Some(
+                        app_state
+                            .config
+                            .cache_config
+                            .service_config_ttl as u64,
+                    );
+                    set_to_memory_cache(&prefixed_key, &default_json, ttl_seconds).await;
+
+                    logger::debug!(
+                        tag = "memory_cache",
+                        action = "default_cached",
+                        "Cached default value for key: {}",
+                        key
+                    );
+                }
+                Err(e) => {
+                    logger::warn!(
+                        tag = "memory_cache",
+                        action = "serialize_failed",
+                        "Failed to serialize default value for key: {}, error: {:?}",
+                        key,
+                        e
+                    );
+                }
+            }
+
+            default_value
+        }
     }
 }
 
