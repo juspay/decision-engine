@@ -3011,7 +3011,7 @@ pub async fn perform_super_router_hedging(
     use std::hash::{Hash, Hasher};
     use std::collections::hash_map::DefaultHasher;
     // Developer should configure this variable as per their requirement
-    let hedging_percent = 10.0;
+    let hedging_percent = 5.0;
     let txn_id = decider_params.dpTxnDetail.txnUuid.clone();
 
     // Generate a seed value from txn_id
