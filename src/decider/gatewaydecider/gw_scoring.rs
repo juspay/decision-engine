@@ -1273,6 +1273,7 @@ pub async fn get_global_gateway_score(
             .redis_conn
             .get_key(&redis_key, "global_gateway_score_key")
             .await
+            .inspect_err(|err| logger::error!("get_global_gateway_score get_key_error: {:?}", err))
             .unwrap_or(None);
         logger::info!(
             tag = "getGlobalGatewayScore",
@@ -1290,7 +1291,7 @@ pub async fn get_global_gateway_score(
                     redis_key
                 );
                 None
-            },
+            }
             Some(global_gateway_score) => {
                 let sorted_filtered_merchants: Vec<GlobalScore> = global_gateway_score
                     .merchants
