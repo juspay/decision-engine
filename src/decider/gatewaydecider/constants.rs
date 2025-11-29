@@ -959,3 +959,18 @@ impl SC::ServiceConfigKey for MerchantConfigEntityLevelLookupCutover {
         "MERCHANT_CONFIG_ENTITY_LEVEL_LOOKUP_CUTOVER".to_string()
     }
 }
+
+
+pub struct WHITELISTED_PAYMENT_METHODS_FOR_ENFORCE_GATEWAY_LIST;
+impl SC::ServiceConfigKey for WHITELISTED_PAYMENT_METHODS_FOR_ENFORCE_GATEWAY_LIST {
+    fn get_key(&self) -> String {
+        "WHITELISTED_PAYMENT_METHODS_FOR_ENFORCE_GATEWAY_LIST".to_string()
+    }
+}
+
+pub struct WALLET_PMS_ENABLED_FOR_NETWORK_BASED_ROUTING;
+impl SC::ServiceConfigKey for WALLET_PMS_ENABLED_FOR_NETWORK_BASED_ROUTING {
+    fn get_key(&self) -> String {
+        "WALLET_PMS_ENABLED_FOR_NETWORK_BASED_ROUTING".to_string()
+    }
+}
