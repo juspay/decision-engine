@@ -132,6 +132,14 @@ pub fn is_otm_enabled(mga: &ETM::merchant_gateway_account::MerchantGatewayAccoun
     check_if_enabled_in_mga(mga, "ONE_TIME_MANDATE", "OTM_ENABLED")
 }
 
+pub fn is_pix_flows_enabled(
+    mga: &ETM::merchant_gateway_account::MerchantGatewayAccount,
+    payment_flow: String,
+    acc_details_flag: String,
+) -> bool {
+    check_if_enabled_in_mga(mga, &payment_flow, &acc_details_flag)
+}
+
 pub fn is_seamless(mga: &ETM::merchant_gateway_account::MerchantGatewayAccount) -> bool {
     let secret_json = Some(mga.account_details.peek());
     secret_json
