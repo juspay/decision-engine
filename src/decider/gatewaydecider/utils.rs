@@ -705,7 +705,12 @@ pub async fn get_split_settlement_details(
     }
 }
 
-pub async fn metric_tracker_log(consume_from_router: Option<bool>,stage: &str, flowtype: &str, log_data: MessageFormat) {
+pub async fn metric_tracker_log(
+    consume_from_router: Option<bool>,
+    stage: &str,
+    flowtype: &str,
+    log_data: MessageFormat,
+) {
     let mut normalized_log_data = match serde_json::to_value(&log_data) {
         Ok(value) => value,
         Err(e) => {
@@ -717,7 +722,7 @@ pub async fn metric_tracker_log(consume_from_router: Option<bool>,stage: &str, f
             return;
         }
     };
-    
+
     if consume_from_router == Some(true) {
         crate::logger::info!(
             action = "metric_tracking_log",
@@ -731,7 +736,6 @@ pub async fn metric_tracker_log(consume_from_router: Option<bool>,stage: &str, f
             normalized_log_data.to_string(),
         );
     }
-    
 }
 
 pub fn mask_secret_option<S>(_: &Option<Secret<String>>, serializer: S) -> Result<S::Ok, S::Error>

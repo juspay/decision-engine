@@ -1291,7 +1291,7 @@ pub async fn get_global_gateway_score(
                     redis_key
                 );
                 None
-            },
+            }
             Some(global_gateway_score) => {
                 let sorted_filtered_merchants: Vec<GlobalScore> = global_gateway_score
                     .merchants
