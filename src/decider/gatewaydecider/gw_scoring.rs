@@ -964,6 +964,7 @@ pub async fn reset_and_log_metrics(
         .unwrap_or_default(),
     );
     Utils::metric_tracker_log(
+        decider_flow.get().dpShouldConsumeResult.clone(),
         metric_title.clone().as_str(),
         "GW_SCORING",
         Utils::get_metric_log_format(decider_flow, metric_title.as_str()),
@@ -1657,6 +1658,7 @@ pub async fn update_gateway_score_based_on_global_success_rate(
                         },
                     );
                     Utils::metric_tracker_log(
+                        decider_flow.get().dpShouldConsumeResult.clone(),
                         "GLOBAL_SR_EVALUATION",
                         "GW_SCORING",
                         Utils::get_metric_log_format(decider_flow, "GLOBAL_SR_EVALUATION"),
@@ -2634,6 +2636,7 @@ pub async fn update_gateway_score_based_on_success_rate(
                 );
 
                 Utils::metric_tracker_log(
+                    decider_flow.get().dpShouldConsumeResult.clone(),
                     "SR_EVALUATION",
                     "GW_SCORING",
                     Utils::get_metric_log_format(decider_flow, "SR_EVALUATION"),
