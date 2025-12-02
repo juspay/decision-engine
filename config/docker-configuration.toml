@@ -49,6 +49,10 @@ max_feed_count = 200
 tti = 7200          # i.e. 2 hours
 max_capacity = 5000
 
+[cache_config]
+service_config_redis_prefix = "DE_service_config_"
+service_config_ttl = 300    # 5 minutes
+
 [tenant_secrets]
 public = { schema = "public" }
 
