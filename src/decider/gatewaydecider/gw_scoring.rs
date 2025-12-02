@@ -1276,11 +1276,11 @@ pub async fn get_global_gateway_score(
         //     .inspect_err(|err| logger::error!("get_global_gateway_score get_key_error: {:?}", err))
         //     .unwrap_or(None);
         let m_value: Option<GlobalGatewayScore> = app_state
-                .redis_conn
-                .get_key::<GlobalGatewayScore>(&redis_key, "global_gateway_score_key")
-                .await
-                .inspect_err(|err| logger::error!("get_global_gateway_score get_key_error: {:?}", err))
-                .ok();
+            .redis_conn
+            .get_key::<GlobalGatewayScore>(&redis_key, "global_gateway_score_key")
+            .await
+            .inspect_err(|err| logger::error!("get_global_gateway_score get_key_error: {:?}", err))
+            .ok();
         logger::info!(
             tag = "getGlobalGatewayScore",
             action = "getGlobalGatewayScore",

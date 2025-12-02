@@ -33,7 +33,7 @@ use crate::types::merchant_gateway_account_sub_info::{self as ETMGASI, SubIdType
 use crate::types::merchant_gateway_payment_method_flow as MGPMF;
 use crate::types::order::Order;
 use crate::types::payment::payment_method::{self as ETP};
-use crate::types::payment_flow::{PaymentFlow, payment_flows_to_text, text_to_payment_flows};
+use crate::types::payment_flow::{payment_flows_to_text, text_to_payment_flows, PaymentFlow};
 use std::collections::{HashMap, HashSet};
 // use crate::types::metadata::Meta;
 // use crate::types::pl_ref_id_map::PLRefIdMap;
@@ -576,7 +576,8 @@ pub fn isMgaEligible(
 ) -> bool {
     let payment_flow_list = Utils::get_payment_flow_list_from_txn_detail(&txn_detail);
     let is_otm_flow = payment_flow_list.contains(&"ONE_TIME_MANDATE".to_string());
-    let is_pix_automatic_redirect_flow = payment_flow_list.contains(&"PIX_AUTOMATIC_REDIRECT".to_string());
+    let is_pix_automatic_redirect_flow =
+        payment_flow_list.contains(&"PIX_AUTOMATIC_REDIRECT".to_string());
     validateMga(
         mga,
         txnCI,
@@ -1463,7 +1464,7 @@ pub async fn filterFunctionalGatewaysForPixFlows(this: &mut DeciderFlow<'_>) -> 
             _ => "enablePixAutomaticRedirect",
         }
     }
-    
+
     // Get current functional gateways
     let st = getGws(this);
 
@@ -1480,8 +1481,8 @@ pub async fn filterFunctionalGatewaysForPixFlows(this: &mut DeciderFlow<'_>) -> 
         .find(|&flow| payment_flow_list.contains(&flow.to_string()));
 
     // Try to parse the PIX flow text into a PaymentFlow enum
-    let m_pix_payment_flow: Option<PaymentFlow> = m_pix_flow_text
-        .and_then(|flow_text| text_to_payment_flows(flow_text.to_string()).ok());
+    let m_pix_payment_flow: Option<PaymentFlow> =
+        m_pix_flow_text.and_then(|flow_text| text_to_payment_flows(flow_text.to_string()).ok());
 
     match m_pix_payment_flow {
         Some(pix_payment_flow) => {
@@ -1505,7 +1506,8 @@ pub async fn filterFunctionalGatewaysForPixFlows(this: &mut DeciderFlow<'_>) -> 
             .await;
 
             // Get the account details flag to check for this PIX flow
-            let acc_details_flag_to_be_checked = get_acc_details_flag_to_be_checked(&pix_payment_flow);
+            let acc_details_flag_to_be_checked =
+                get_acc_details_flag_to_be_checked(&pix_payment_flow);
 
             // Filter MGAs that support PIX flows
             let mgas: Vec<_> = enabled_mgas
@@ -1735,7 +1737,8 @@ pub async fn filterGatewaysForValidationType(
         // Check if we should skip processing for one-time mandate flow
         let payment_flow_list = Utils::get_payment_flow_list_from_txn_detail(&txn_detail);
         let is_otm_flow = payment_flow_list.contains(&"ONE_TIME_MANDATE".to_string());
-        let is_pix_automatic_redirect_flow = payment_flow_list.contains(&"PIX_AUTOMATIC_REDIRECT".to_string());
+        let is_pix_automatic_redirect_flow =
+            payment_flow_list.contains(&"PIX_AUTOMATIC_REDIRECT".to_string());
 
         if is_otm_flow || is_pix_automatic_redirect_flow {
             logger::info!(

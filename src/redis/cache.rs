@@ -116,12 +116,8 @@ where
                 Ok(Some(service_config)) => match service_config.value {
                     Some(value) => {
                         // Get TTL from global config
-                        let ttl_seconds = Some(
-                            app_state
-                                .config
-                                .cache_config
-                                .service_config_ttl as u64,
-                        );
+                        let ttl_seconds =
+                            Some(app_state.config.cache_config.service_config_ttl as u64);
                         set_to_memory_cache(&prefixed_key, &value, ttl_seconds).await;
 
                         match decode_fn {
@@ -154,12 +150,7 @@ where
                     // Cache the default value in memory for future use
                     let app_state = get_tenant_app_state().await;
                     let prefixed_key = app_state.config.cache_config.add_prefix(&key);
-                    let ttl_seconds = Some(
-                        app_state
-                            .config
-                            .cache_config
-                            .service_config_ttl as u64,
-                    );
+                    let ttl_seconds = Some(app_state.config.cache_config.service_config_ttl as u64);
                     set_to_memory_cache(&prefixed_key, &default_json, ttl_seconds).await;
 
                     logger::debug!(

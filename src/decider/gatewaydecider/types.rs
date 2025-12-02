@@ -278,9 +278,9 @@ impl Serialize for GatewayScoringTypeLog {
     where
         S: serde::Serializer,
     {
-    let mut state = serializer.serialize_struct("GatewayScoringTypeLog", 1)?;
-    state.serialize_field("data", &self.data)?;
-    state.end()
+        let mut state = serializer.serialize_struct("GatewayScoringTypeLog", 1)?;
+        state.serialize_field("data", &self.data)?;
+        state.end()
     }
 }
 
@@ -294,7 +294,7 @@ impl<'de> Deserialize<'de> for GatewayScoringTypeLog {
             &["data"],
             GatewayScoringTypeLogVisitor,
         )?;
-    Ok(Self { data })
+        Ok(Self { data })
     }
 }
 
