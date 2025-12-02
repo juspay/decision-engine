@@ -1269,12 +1269,18 @@ pub async fn get_global_gateway_score(
 ) -> Option<(Vec<GlobalScoreLog>, f64)> {
     if let (Some(max_count), Some(score_threshold)) = (max_count, score_threshold) {
         let app_state = get_tenant_app_state().await;
+        // let m_value: Option<GlobalGatewayScore> = app_state
+        //     .redis_conn
+        //     .get_key(&redis_key, "global_gateway_score_key")
+        //     .await
+        //     .inspect_err(|err| logger::error!("get_global_gateway_score get_key_error: {:?}", err))
+        //     .unwrap_or(None);
         let m_value: Option<GlobalGatewayScore> = app_state
-            .redis_conn
-            .get_key(&redis_key, "global_gateway_score_key")
-            .await
-            .inspect_err(|err| logger::error!("get_global_gateway_score get_key_error: {:?}", err))
-            .unwrap_or(None);
+                .redis_conn
+                .get_key::<GlobalGatewayScore>(&redis_key, "global_gateway_score_key")
+                .await
+                .inspect_err(|err| logger::error!("get_global_gateway_score get_key_error: {:?}", err))
+                .ok();
         logger::info!(
             tag = "getGlobalGatewayScore",
             action = "getGlobalGatewayScore",
@@ -2388,18 +2394,7 @@ pub async fn update_gateway_score_based_on_success_rate(
     let merchant_acc = decider_flow.get().dpMerchantAccount.clone();
     let txn_detail = decider_flow.get().dpTxnDetail.clone();
     let txn_card_info = decider_flow.get().dpTxnCardInfo.clone();
-    let enable_success_rate_based_gateway_elimination = isPaymentFlowEnabledWithHierarchyCheck(
-        merchant_acc.id.clone(),
-        merchant_acc.tenantAccountId.clone(),
-        ModuleName::MerchantConfig,
-        PaymentFlow::EliminationBasedRouting,
-        crate::types::country::country_iso::text_db_to_country_iso(
-            merchant_acc.country.as_deref().unwrap_or_default(),
-        )
-        .ok(),
-    )
-    .await
-        || elimination_enabled == Some(true);
+    let enable_success_rate_based_gateway_elimination = true;
 
     logger::debug!(
         tag = "updateGatewayScoreBasedOnSuccessRate",
