@@ -713,7 +713,12 @@ pub async fn get_split_settlement_details(
     }
 }
 
-pub async fn metric_tracker_log(stage: &str, flowtype: &str, log_data: MessageFormat) {
+pub async fn metric_tracker_log(
+    consume_from_router: Option<bool>,
+    stage: &str,
+    flowtype: &str,
+    log_data: MessageFormat,
+) {
     let mut normalized_log_data = match serde_json::to_value(&log_data) {
         Ok(value) => value,
         Err(e) => {
@@ -726,11 +731,19 @@ pub async fn metric_tracker_log(stage: &str, flowtype: &str, log_data: MessageFo
         }
     };
 
-    crate::logger::info!(
-        action = "metric_tracking_log",
-        "{}",
-        normalized_log_data.to_string(),
-    );
+    if consume_from_router == Some(true) {
+        crate::logger::info!(
+            action = "metric_tracking_log",
+            "{}",
+            normalized_log_data.to_string(),
+        );
+    } else {
+        crate::logger::info!(
+            action = "metric_tracking_log_diff_check_de",
+            "{}",
+            normalized_log_data.to_string(),
+        );
+    }
 }
 
 pub fn mask_secret_option<S>(_: &Option<Secret<String>>, serializer: S) -> Result<S::Ok, S::Error>
@@ -799,6 +812,7 @@ pub async fn log_gateway_decider_approach(
     let txn_card_info = decider_flow.get().dpTxnCardInfo.clone();
     let x_req_id = decider_flow.logger.get("x-request-id").cloned();
     let txn_creation_time = txn_detail.dateCreated.to_string(); // Assuming dateCreated is a DateTime field
+    let consume_from_router = decider_flow.get().dpShouldConsumeResult;
 
     let mp = types::DeciderApproachLogData {
         decided_gateway: m_decided_gateway,
@@ -814,6 +828,7 @@ pub async fn log_gateway_decider_approach(
     let payment_source_m = txn_card_info.get_payment_source_last();
 
     metric_tracker_log(
+        consume_from_router,
         "GATEWAY_DECIDER_APPROACH",
         "DECIDER",
         MessageFormat {

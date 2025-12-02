@@ -1,7 +1,7 @@
+use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
-use once_cell::sync::Lazy;
 
 // Global in-memory cache instance
 pub static GLOBAL_CACHE: Lazy<Registry> = Lazy::new(|| Registry::new(1000));
@@ -50,7 +50,10 @@ impl Registry {
         T: serde::de::DeserializeOwned,
     {
         {
-            let data = self.data.read().map_err(|e| format!("Read lock error: {}", e))?;
+            let data = self
+                .data
+                .read()
+                .map_err(|e| format!("Read lock error: {}", e))?;
 
             if let Some(entry) = data.get(key) {
                 // Check if entry has expired
@@ -74,7 +77,10 @@ impl Registry {
         }
 
         // If we get here, the entry was expired and we need to remove it
-        let mut data = self.data.write().map_err(|e| format!("Write lock error: {}", e))?;
+        let mut data = self
+            .data
+            .write()
+            .map_err(|e| format!("Write lock error: {}", e))?;
 
         // Double-check the entry is still there and expired
         if let Some(entry) = data.get(key) {
@@ -100,7 +106,10 @@ impl Registry {
     where
         T: serde::Serialize,
     {
-        let mut data = self.data.write().map_err(|e| format!("Write lock error: {}", e))?;
+        let mut data = self
+            .data
+            .write()
+            .map_err(|e| format!("Write lock error: {}", e))?;
 
         // Remove expired entries and enforce max size
         self.cleanup_expired(&mut data);
@@ -112,15 +121,18 @@ impl Registry {
             }
         }
 
-        let json_value = serde_json::to_value(value)
-            .map_err(|e| format!("Serialization error: {}", e))?;
+        let json_value =
+            serde_json::to_value(value).map_err(|e| format!("Serialization error: {}", e))?;
 
         let expires_at = ttl_seconds.map(|ttl| Instant::now() + Duration::from_secs(ttl));
 
-        data.insert(key, CacheEntry {
-            value: json_value,
-            expires_at,
-        });
+        data.insert(
+            key,
+            CacheEntry {
+                value: json_value,
+                expires_at,
+            },
+        );
 
         Ok(())
     }
@@ -137,7 +149,10 @@ impl Registry {
     }
 
     pub fn remove(&self, key: &str) -> Result<(), String> {
-        let mut data = self.data.write().map_err(|e| format!("Write lock error: {}", e))?;
+        let mut data = self
+            .data
+            .write()
+            .map_err(|e| format!("Write lock error: {}", e))?;
         data.remove(key);
         Ok(())
     }
@@ -147,7 +162,10 @@ impl Registry {
     }
 
     pub fn clear(&self) -> Result<(), String> {
-        let mut data = self.data.write().map_err(|e| format!("Write lock error: {}", e))?;
+        let mut data = self
+            .data
+            .write()
+            .map_err(|e| format!("Write lock error: {}", e))?;
         data.clear();
         Ok(())
     }
