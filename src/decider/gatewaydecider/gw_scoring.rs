@@ -2396,7 +2396,18 @@ pub async fn update_gateway_score_based_on_success_rate(
     let merchant_acc = decider_flow.get().dpMerchantAccount.clone();
     let txn_detail = decider_flow.get().dpTxnDetail.clone();
     let txn_card_info = decider_flow.get().dpTxnCardInfo.clone();
-    let enable_success_rate_based_gateway_elimination = true;
+    let enable_success_rate_based_gateway_elimination = isPaymentFlowEnabledWithHierarchyCheck(
+        merchant_acc.id.clone(),
+        merchant_acc.tenantAccountId.clone(),
+        ModuleName::MerchantConfig,
+        PaymentFlow::EliminationBasedRouting,
+        crate::types::country::country_iso::text_db_to_country_iso(
+            merchant_acc.country.as_deref().unwrap_or_default(),
+        )
+        .ok(),
+    )
+    .await
+        || elimination_enabled == Some(true);
 
     logger::debug!(
         tag = "updateGatewayScoreBasedOnSuccessRate",
