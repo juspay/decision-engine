@@ -926,6 +926,7 @@ pub struct DomainDeciderRequest {
     pub priorityLogicOutput: Option<GatewayPriorityLogicOutput>,
     pub priorityLogicScript: Option<String>,
     pub isEdccApplied: Option<bool>,
+    pub isOnUsTxn: Option<bool>,
     pub shouldConsumeResult: Option<bool>,
 }
 
@@ -1088,6 +1089,7 @@ impl DomainDeciderRequestForApiCallV2 {
             priorityLogicOutput: None,
             priorityLogicScript: None,
             isEdccApplied: Some(false),
+            isOnUsTxn: Some(false),
         }
     }
 }
@@ -1296,6 +1298,7 @@ pub struct DeciderParams {
     pub dpPriorityLogicOutput: Option<GatewayPriorityLogicOutput>,
     pub dpPriorityLogicScript: Option<String>,
     pub dpEDCCApplied: Option<bool>,
+    pub dpIsOnUsTxn: Option<bool>,
     pub dpShouldConsumeResult: Option<bool>,
 }
 
