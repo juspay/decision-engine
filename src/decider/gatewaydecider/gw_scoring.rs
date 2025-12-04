@@ -1270,12 +1270,18 @@ pub async fn get_global_gateway_score(
 ) -> Option<(Vec<GlobalScoreLog>, f64)> {
     if let (Some(max_count), Some(score_threshold)) = (max_count, score_threshold) {
         let app_state = get_tenant_app_state().await;
+        // let m_value: Option<GlobalGatewayScore> = app_state
+        //     .redis_conn
+        //     .get_key(&redis_key, "global_gateway_score_key")
+        //     .await
+        //     .inspect_err(|err| logger::error!("get_global_gateway_score get_key_error: {:?}", err))
+        //     .unwrap_or(None);
         let m_value: Option<GlobalGatewayScore> = app_state
             .redis_conn
-            .get_key(&redis_key, "global_gateway_score_key")
+            .get_key::<GlobalGatewayScore>(&redis_key, "global_gateway_score_key")
             .await
             .inspect_err(|err| logger::error!("get_global_gateway_score get_key_error: {:?}", err))
-            .unwrap_or(None);
+            .ok();
         logger::info!(
             tag = "getGlobalGatewayScore",
             action = "getGlobalGatewayScore",

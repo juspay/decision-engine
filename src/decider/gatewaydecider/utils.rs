@@ -842,7 +842,11 @@ pub async fn log_gateway_decider_approach(
             payment_source: payment_source_m.map(Secret::new),
             source_object: txn_detail.sourceObject,
             txn_detail_id: txn_detail.id,
-            stage: "GATEWAY_DECIDER_APPROACH".to_string(),
+            stage: if consume_from_router == Some(true) {
+                "GATEWAY_DECIDER_APPROACH".to_string()
+            } else {
+                "GATEWAY_DECIDER_APPROACH_DIFF_CHECK_DE".to_string()
+            },
             merchant_id: merchant_id_to_text(order_reference.merchantId),
             txn_uuid: txn_detail.txnUuid,
             order_id: order_reference.orderId.0,
