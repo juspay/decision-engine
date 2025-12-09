@@ -145,7 +145,6 @@ impl RedisDataStruct {
     }
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RedisCompEnabledMerchant {
@@ -174,15 +173,18 @@ pub async fn check_redis_comp_merchant_flag(
     mid: String,
 ) -> Option<HashMap<String, RedisCompressionConfig>> {
     let mb_conf = findByNameFromRedis::<RedisCompressionCutover>(
-        "REDIS_COMPRESSION_MERCHANT_CUTOVER".to_string()
-    ).await;
+        "REDIS_COMPRESSION_MERCHANT_CUTOVER".to_string(),
+    )
+    .await;
 
     match mb_conf {
         Some(RedisCompressionCutover::MultiDataStructCutover(ds_map)) => {
             let mut final_map = HashMap::new();
-            
+
             for (data_struct_key, conf) in ds_map.iter() {
-                if let Some(dict_id) = check_merchant_enabled_for_compression(Some(conf.clone()), &mid).await {
+                if let Some(dict_id) =
+                    check_merchant_enabled_for_compression(Some(conf.clone()), &mid).await
+                {
                     let redis_comp_config = RedisCompressionConfig {
                         compEnabled: true,
                         dictId: dict_id,
@@ -193,7 +195,11 @@ pub async fn check_redis_comp_merchant_flag(
             }
 
             if !final_map.is_empty() {
-                logger::info!("Redis compression config set for merchant {}: {:?}", mid, final_map);
+                logger::info!(
+                    "Redis compression config set for merchant {}: {:?}",
+                    mid,
+                    final_map
+                );
                 Some(final_map)
             } else {
                 None
@@ -201,7 +207,9 @@ pub async fn check_redis_comp_merchant_flag(
         }
         Some(RedisCompressionCutover::StringDataStructCutover(conf_map)) => {
             if let Some((_, conf)) = conf_map.iter().next() {
-                if let Some(dict_id) = check_merchant_enabled_for_compression(Some(conf.clone()), &mid).await {
+                if let Some(dict_id) =
+                    check_merchant_enabled_for_compression(Some(conf.clone()), &mid).await
+                {
                     let redis_comp_config = RedisCompressionConfig {
                         compEnabled: true,
                         dictId: dict_id,
@@ -209,8 +217,12 @@ pub async fn check_redis_comp_merchant_flag(
                     };
                     let mut final_map = HashMap::new();
                     final_map.insert("STRING".to_string(), redis_comp_config);
-                    
-                    logger::info!("Redis compression config set for merchant {}: {:?}", mid, final_map);
+
+                    logger::info!(
+                        "Redis compression config set for merchant {}: {:?}",
+                        mid,
+                        final_map
+                    );
                     Some(final_map)
                 } else {
                     None
@@ -241,7 +253,7 @@ async fn check_merchant_enabled_for_compression(
                         // Generate random number for rollout decision
                         let mut rng = rand::thread_rng();
                         let random_int_v: u32 = rng.gen_range(1..=100);
-                        
+
                         if random_int_v <= rollout {
                             Some(conf.global_dict_id.clone())
                         } else {
@@ -272,7 +284,7 @@ fn is_merchant_enabled_after_disable_check(
             let is_disabled = disable_list
                 .iter()
                 .any(|disabled_mid| disabled_mid.to_lowercase() == mid_lower);
-            
+
             if is_disabled {
                 None
             } else {
@@ -283,27 +295,25 @@ fn is_merchant_enabled_after_disable_check(
     }
 }
 
-async fn is_merchant_enabled_explicitly(
-    conf: &RedisCompFeatureConf,
-    mid: &str,
-) -> Option<String> {
+async fn is_merchant_enabled_explicitly(conf: &RedisCompFeatureConf, mid: &str) -> Option<String> {
     let list = &conf.explicit_enabled_merchants;
     let mid_lower = mid.to_lowercase();
-    
+
     // Find the merchant configuration
-    let opt_m_conf = list.iter().find(|m_conf| {
-        m_conf.rc_merchant_id.to_lowercase() == mid_lower
-    });
+    let opt_m_conf = list
+        .iter()
+        .find(|m_conf| m_conf.rc_merchant_id.to_lowercase() == mid_lower);
 
     match opt_m_conf {
         Some(m_conf) => {
             // Generate random number for rollout decision
             let mut rng = rand::thread_rng();
             let random_int_v: u32 = rng.gen_range(1..=100);
-            
+
             if random_int_v <= m_conf.rc_rollout {
                 // Return the enabled dict ID if present, otherwise use the global dict ID
-                m_conf.enabled_dict_id
+                m_conf
+                    .enabled_dict_id
                     .clone()
                     .or_else(|| Some(conf.global_dict_id.clone()))
             } else {

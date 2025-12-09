@@ -1,19 +1,21 @@
 use std::time::Instant;
 
+use crate::decider::gatewaydecider::constants as C;
 use crate::decider::gatewaydecider::{
     flows::decider_full_payload_hs_function,
     types::{DecidedGateway, DomainDeciderRequest, ErrorResponse, UnifiedError},
 };
 use crate::logger;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
+use crate::redis::feature::{
+    check_redis_comp_merchant_flag, RedisCompressionConfig, RedisCompressionCutover,
+};
 use axum::body::to_bytes;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use cpu_time::ProcessTime;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use crate::decider::gatewaydecider::constants as C;
-use crate::redis::feature::{check_redis_comp_merchant_flag,RedisCompressionCutover,RedisCompressionConfig};
 
 impl IntoResponse for DecidedGatewayResponse {
     fn into_response(self) -> axum::http::Response<axum::body::Body> {
@@ -134,10 +136,10 @@ where
     match api_decider_request {
         Ok(payload) => {
             let merchant_id = payload.orderReference.merchantId.clone();
-            let merchant_id_string = crate::types::merchant::id::merchant_id_to_text(merchant_id.clone());
-            let redis_com_enbled : Option<HashMap<String, RedisCompressionConfig>> = check_redis_comp_merchant_flag(
-                merchant_id_string.clone()
-            ).await;
+            let merchant_id_string =
+                crate::types::merchant::id::merchant_id_to_text(merchant_id.clone());
+            let redis_com_enbled: Option<HashMap<String, RedisCompressionConfig>> =
+                check_redis_comp_merchant_flag(merchant_id_string.clone()).await;
 
             let merchant_id_txt = crate::types::merchant::id::merchant_id_to_text(merchant_id);
             tracing::Span::current().record("merchant_id", merchant_id_txt.clone());

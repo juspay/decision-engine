@@ -127,7 +127,6 @@ pub struct compressionFilepath {
     pub zstd_compression_filepath: String,
 }
 
-
 #[derive(serde::Deserialize, Debug, Clone)]
 pub struct TenantSecrets {
     /// schema name for the tenant (defaults to tenant_id)

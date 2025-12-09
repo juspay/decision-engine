@@ -1,5 +1,6 @@
 use crate::app::{get_tenant_app_state, TenantAppState};
 use crate::decider::network_decider;
+use crate::redis::feature::RedisCompressionConfig;
 use crate::types::country::country_iso::CountryISO2;
 use crate::types::currency::Currency;
 use crate::types::money::internal as ETMo;
@@ -17,7 +18,6 @@ use std::option::Option;
 use std::string::String;
 use std::vec::Vec;
 use time::{OffsetDateTime, PrimitiveDateTime};
-use crate::redis::feature::RedisCompressionConfig;
 // use eulerhs::prelude::*;
 // use eulerhs::language::MonadFlow;
 // use juspay::extra::secret::SecretContext;

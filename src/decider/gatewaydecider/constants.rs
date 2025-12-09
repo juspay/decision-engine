@@ -44,7 +44,8 @@ impl SC::ServiceConfigKey for SrV3InputConfigDefault {
 
 pub const SR_V3_DEFAULT_INPUT_CONFIG: SrV3InputConfigDefault = SrV3InputConfigDefault;
 
-pub const REDIS_COMPRESSION_MERCHANT_CUTOVER: RedisCompressionMerchantCutover = RedisCompressionMerchantCutover;
+pub const REDIS_COMPRESSION_MERCHANT_CUTOVER: RedisCompressionMerchantCutover =
+    RedisCompressionMerchantCutover;
 
 pub struct RedisCompressionMerchantCutover;
 impl SC::ServiceConfigKey for RedisCompressionMerchantCutover {

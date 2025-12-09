@@ -4,6 +4,7 @@ use crate::feedback::gateway_scoring_service::{
 };
 use crate::logger;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
+use crate::redis::feature::{check_redis_comp_merchant_flag, RedisCompressionConfig};
 use crate::types::card::txn_card_info::{convert_safe_to_txn_card_info, SafeTxnCardInfo};
 use crate::types::txn_details::types::{
     convert_safe_txn_detail_to_txn_detail, SafeTxnDetail, TransactionLatency,
@@ -12,7 +13,6 @@ use axum::body::to_bytes;
 use cpu_time::ProcessTime;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use crate::redis::feature::{RedisCompressionConfig, check_redis_comp_merchant_flag};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 struct UpdateScoreRequest {
@@ -184,9 +184,8 @@ pub async fn update_score(
             jemalloc_ctl::epoch::advance().unwrap();
             let allocated_before = jemalloc_ctl::stats::allocated::read().unwrap_or(0);
 
-            let redis_com_enbled : Option<HashMap<String, RedisCompressionConfig>> = check_redis_comp_merchant_flag(
-                merchant_id_txt.clone()
-            ).await;
+            let redis_com_enbled: Option<HashMap<String, RedisCompressionConfig>> =
+                check_redis_comp_merchant_flag(merchant_id_txt.clone()).await;
 
             check_and_update_gateway_score(
                 txn_detail,
@@ -195,7 +194,7 @@ pub async fn update_score(
                 enforce_failure,
                 gateway_reference_id,
                 txn_latency,
-                redis_com_enbled
+                redis_com_enbled,
             )
             .await;
 

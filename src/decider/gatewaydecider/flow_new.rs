@@ -22,10 +22,10 @@ use super::utils as Utils;
 // use optics_core::{preview, review};
 use crate::decider::gatewaydecider::constants as C;
 use crate::logger;
+use crate::redis::feature::RedisDataStruct;
 use crate::types::card::txn_card_info::TxnCardInfo;
 use crate::types::merchant as ETM;
 use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
-use crate::redis::feature::RedisDataStruct;
 
 pub async fn decider_full_payload_hs_function(
     dreq_: T::DomainDeciderRequestForApiCallV2,
@@ -106,7 +106,7 @@ pub async fn decider_full_payload_hs_function(
         dpPriorityLogicScript: dreq.priorityLogicScript,
         dpEDCCApplied: dreq.isEdccApplied,
         dpShouldConsumeResult: dreq.shouldConsumeResult,
-        dpRedisCompressionConfig: None
+        dpRedisCompressionConfig: None,
     };
 
     if dreq_.ranking_algorithm == Some(RankingAlgorithm::NtwBasedRouting) {
@@ -537,7 +537,7 @@ pub async fn run_decider_flow(
                 .as_str(),
             C::GATEWAY_SCORE_KEYS_TTL,
             None,
-            RedisDataStruct::STRING
+            RedisDataStruct::STRING,
         )
         .await
         .unwrap_or_default();

@@ -66,8 +66,6 @@ use crate::types::merchant as ETM;
 // use data::aeson as a;
 // use types::merchant as etm;
 
-use fred::types::SetOptions;
-use serde::{Deserialize, Serialize};
 use crate::redis::feature::RedisDataStruct;
 use crate::{
     feedback::{
@@ -77,6 +75,8 @@ use crate::{
     },
     types::txn_details::types::{TransactionLatency, TxnDetail, TxnStatus, TxnStatus as TS},
 };
+use fred::types::SetOptions;
+use serde::{Deserialize, Serialize};
 
 use super::constants::{
     default_sr_v3_latency_threshold_in_secs, SrV3InputConfig, UpdateGatewayScoreLockFlagTtl,
@@ -243,7 +243,9 @@ pub fn txn_failure_states() -> Vec<TxnStatus> {
 pub async fn check_and_send_should_update_gateway_score(
     lock_key: String,
     lock_key_ttl: i32,
-    redis_com_enbled: Option<std::collections::HashMap<String, crate::redis::feature::RedisCompressionConfig>>
+    redis_com_enbled: Option<
+        std::collections::HashMap<String, crate::redis::feature::RedisCompressionConfig>,
+    >,
 ) -> bool {
     let app_state = get_tenant_app_state().await;
     let is_set_either = app_state
@@ -254,7 +256,7 @@ pub async fn check_and_send_should_update_gateway_score(
             lock_key_ttl as i64,
             SetOptions::NX,
             redis_com_enbled,
-            RedisDataStruct::STRING
+            RedisDataStruct::STRING,
         )
         .await;
 
@@ -450,7 +452,7 @@ pub async fn check_and_update_gateway_score_(
                 enforce_failure,
                 api_payload.gateway_reference_id.clone(),
                 api_payload.txn_latency.clone(),
-                None
+                None,
             )
             .await;
 
@@ -487,7 +489,9 @@ pub async fn check_and_update_gateway_score(
     enforce_failure: bool,
     gateway_reference_id: Option<String>,
     txn_latency: Option<TransactionLatency>,
-    redis_com_enbled: Option<std::collections::HashMap<String, crate::redis::feature::RedisCompressionConfig>>,
+    redis_com_enbled: Option<
+        std::collections::HashMap<String, crate::redis::feature::RedisCompressionConfig>,
+    >,
 ) -> () {
     // Get gateway scoring type
     let gateway_scoring_type =
@@ -506,8 +510,12 @@ pub async fn check_and_update_gateway_score(
         .await
         .unwrap_or(300);
 
-    let should_compute_gw_score =
-        check_and_send_should_update_gateway_score(update_score_lock_key, lock_key_ttl, redis_com_enbled.clone()).await;
+    let should_compute_gw_score = check_and_send_should_update_gateway_score(
+        update_score_lock_key,
+        lock_key_ttl,
+        redis_com_enbled.clone(),
+    )
+    .await;
 
     // Check if feature is enabled for merchant
     let feature_enabled = is_feature_enabled(
@@ -534,7 +542,7 @@ pub async fn check_and_update_gateway_score(
                 txn_card_info.clone(),
                 gateway_reference_id.clone(),
                 txn_latency.clone(),
-                redis_com_enbled.clone()
+                redis_com_enbled.clone(),
             )
             .await;
         }
@@ -553,7 +561,7 @@ pub async fn check_and_update_gateway_score(
             txn_card_info.clone(),
             gateway_reference_id.clone(),
             txn_latency.clone(),
-            redis_com_enbled
+            redis_com_enbled,
         )
         .await;
     }
@@ -568,7 +576,9 @@ pub async fn update_gateway_score(
     txn_card_info: TxnCardInfo,
     gateway_reference_id: Option<String>,
     txn_latency: Option<TransactionLatency>,
-    redis_compression_config: Option<std::collections::HashMap<String, crate::redis::feature::RedisCompressionConfig>>
+    redis_compression_config: Option<
+        std::collections::HashMap<String, crate::redis::feature::RedisCompressionConfig>,
+    >,
 ) -> () {
     let mer_acc: MerchantAccount =
         MA::load_merchant_by_merchant_id(MID::merchant_id_to_text(txn_detail.clone().merchantId))
@@ -728,7 +738,7 @@ pub async fn update_gateway_score(
                         mer_acc_p_id,
                         mer_acc.clone(),
                         key,
-                        redis_compression_config.clone()
+                        redis_compression_config.clone(),
                     ));
                 }
             }
