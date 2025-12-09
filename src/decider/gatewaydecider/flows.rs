@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::option::Option;
 use std::string::String;
 use std::vec::Vec;
+use crate::redis::feature::{RedisCompressionConfig, RedisDataStruct};
 // use eulerhs::prelude::*;
 // use eulerhs::language as L;
 // use eulerhs::framework as Framework;
@@ -127,6 +128,7 @@ pub trait ResponseDecider {
 
 pub async fn decider_full_payload_hs_function(
     dreq: T::DomainDeciderRequest,
+    redis_compression_config: Option<HashMap<String, RedisCompressionConfig>>
 ) -> Result<(T::DecidedGateway, Vec<(String, Vec<String>)>), T::ErrorResponse> {
     let merchant_prefs = match ETM::merchant_iframe_preferences::getMerchantIPrefsByMId(
         dreq.txnDetail.merchantId.0.clone(),
@@ -165,7 +167,7 @@ pub async fn decider_full_payload_hs_function(
         Some(card_bin) => Some(card_bin),
         None => match dreq.txnCardInfo.card_isin {
             Some(c_isin) => {
-                let res_bin = Utils::get_card_bin_from_token_bin(6, c_isin.as_str()).await;
+                let res_bin = Utils::get_card_bin_from_token_bin(6, c_isin.as_str(), redis_compression_config.clone()).await;
                 Some(res_bin)
             }
             None => dreq.txnCardInfo.card_isin.clone(),
@@ -199,6 +201,7 @@ pub async fn decider_full_payload_hs_function(
         dpPriorityLogicScript: dreq.priorityLogicScript,
         dpEDCCApplied: dreq.isEdccApplied,
         dpShouldConsumeResult: dreq.shouldConsumeResult,
+        dpRedisCompressionConfig: redis_compression_config.clone(),
     };
     run_decider_flow(decider_params, true).await
 }
@@ -698,6 +701,8 @@ pub async fn run_decider_flow(
                     .unwrap_or_default()
                     .as_str(),
                 C::GATEWAY_SCORE_KEYS_TTL,
+                deciderParams.dpRedisCompressionConfig.clone(),
+                RedisDataStruct::STRING
             )
             .await
             .unwrap_or_default();

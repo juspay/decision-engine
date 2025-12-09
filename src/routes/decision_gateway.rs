@@ -11,6 +11,9 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use cpu_time::ProcessTime;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use crate::decider::gatewaydecider::constants as C;
+use crate::redis::feature::{check_redis_comp_merchant_flag,RedisCompressionCutover,RedisCompressionConfig};
 
 impl IntoResponse for DecidedGatewayResponse {
     fn into_response(self) -> axum::http::Response<axum::body::Body> {
@@ -131,6 +134,11 @@ where
     match api_decider_request {
         Ok(payload) => {
             let merchant_id = payload.orderReference.merchantId.clone();
+            let merchant_id_string = crate::types::merchant::id::merchant_id_to_text(merchant_id.clone());
+            let redis_com_enbled : Option<HashMap<String, RedisCompressionConfig>> = check_redis_comp_merchant_flag(
+                merchant_id_string.clone()
+            ).await;
+
             let merchant_id_txt = crate::types::merchant::id::merchant_id_to_text(merchant_id);
             tracing::Span::current().record("merchant_id", merchant_id_txt.clone());
             tracing::Span::current().record("udf_txn_uuid", payload.txnDetail.txnUuid.clone());
@@ -144,7 +152,7 @@ where
             jemalloc_ctl::epoch::advance().unwrap();
             let allocated_before = jemalloc_ctl::stats::allocated::read().unwrap_or(0);
 
-            let result = decider_full_payload_hs_function(payload.clone()).await;
+            let result = decider_full_payload_hs_function(payload.clone(), redis_com_enbled).await;
 
             jemalloc_ctl::epoch::advance().unwrap();
             let allocated_after = jemalloc_ctl::stats::allocated::read().unwrap_or(0);

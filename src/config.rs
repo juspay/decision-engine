@@ -42,6 +42,7 @@ pub struct GlobalConfig {
     pub routing_config: Option<TomlConfig>,
     #[serde(default)]
     pub debit_routing_config: network_decider::types::DebitRoutingConfig,
+    pub compression_filepath: compressionFilepath,
 }
 
 #[derive(Clone, Debug)]
@@ -120,6 +121,12 @@ impl CacheConfig {
         format!("{}{}", self.service_config_redis_prefix, key)
     }
 }
+
+#[derive(Clone, serde::Deserialize, Debug)]
+pub struct compressionFilepath {
+    pub zstd_compression_filepath: String,
+}
+
 
 #[derive(serde::Deserialize, Debug, Clone)]
 pub struct TenantSecrets {

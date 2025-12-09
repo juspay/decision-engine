@@ -17,6 +17,7 @@ use std::option::Option;
 use std::string::String;
 use std::vec::Vec;
 use time::{OffsetDateTime, PrimitiveDateTime};
+use crate::redis::feature::RedisCompressionConfig;
 // use eulerhs::prelude::*;
 // use eulerhs::language::MonadFlow;
 // use juspay::extra::secret::SecretContext;
@@ -1297,6 +1298,7 @@ pub struct DeciderParams {
     pub dpPriorityLogicScript: Option<String>,
     pub dpEDCCApplied: Option<bool>,
     pub dpShouldConsumeResult: Option<bool>,
+    pub dpRedisCompressionConfig: Option<HashMap<String, RedisCompressionConfig>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

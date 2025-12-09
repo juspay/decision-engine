@@ -11,6 +11,8 @@ use crate::types::txn_details::types::{
 use axum::body::to_bytes;
 use cpu_time::ProcessTime;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use crate::redis::feature::{RedisCompressionConfig, check_redis_comp_merchant_flag};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 struct UpdateScoreRequest {
@@ -182,6 +184,10 @@ pub async fn update_score(
             jemalloc_ctl::epoch::advance().unwrap();
             let allocated_before = jemalloc_ctl::stats::allocated::read().unwrap_or(0);
 
+            let redis_com_enbled : Option<HashMap<String, RedisCompressionConfig>> = check_redis_comp_merchant_flag(
+                merchant_id_txt.clone()
+            ).await;
+
             check_and_update_gateway_score(
                 txn_detail,
                 txn_card_info,
@@ -189,6 +195,7 @@ pub async fn update_score(
                 enforce_failure,
                 gateway_reference_id,
                 txn_latency,
+                redis_com_enbled
             )
             .await;
 

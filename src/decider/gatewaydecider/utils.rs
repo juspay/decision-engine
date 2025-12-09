@@ -5,7 +5,7 @@ use crate::euclid::types::SrDimensionConfig;
 use crate::feedback::gateway_elimination_scoring::flow::{
     eliminationV2RewardFactor, getPenaltyFactor,
 };
-use crate::redis::feature::is_feature_enabled;
+use crate::redis::feature::{is_feature_enabled, RedisCompressionConfig, RedisDataStruct};
 use crate::redis::types::ServiceConfigKey;
 use crate::types::card::card_type::card_type_to_text;
 use crate::types::country::country_iso::CountryISO2;
@@ -878,7 +878,7 @@ pub fn get_true_string(val: Option<String>) -> Option<String> {
     }
 }
 
-pub async fn get_card_bin_from_token_bin(length: usize, token_bin: &str) -> String {
+pub async fn get_card_bin_from_token_bin(length: usize, token_bin: &str, redis_compression_config: Option<HashMap<String, RedisCompressionConfig>>) -> String {
     let key = format!("token_bin_{}", token_bin);
     let app_state = get_tenant_app_state().await;
     // let redis = &decider_flow.state().redis_conn;
@@ -888,7 +888,7 @@ pub async fn get_card_bin_from_token_bin(length: usize, token_bin: &str) -> Stri
             Some(token_bin_info) => {
                 app_state
                     .redis_conn
-                    .set_key(&key, &token_bin_info.cardBin)
+                    .set_key(&key, &token_bin_info.cardBin, redis_compression_config.clone(), RedisDataStruct::STRING)
                     .await;
                 token_bin_info.cardBin.chars().take(length).collect()
             }
@@ -2945,13 +2945,14 @@ pub async fn writeToCacheWithTTL(
     key: String,
     cached_gateway_score: GatewayScore,
     ttl: i64,
+    redis_compression_config: Option<HashMap<String, RedisCompressionConfig>>
 ) -> Result<i32, StorageError> {
     //from CachedGatewayScore comvert encoded_score to a encoded jasson that can be used as a value for redis sextx
     let encoded_score =
         serde_json::to_string(&cached_gateway_score).unwrap_or_else(|_| "".to_string());
 
     let primary_write =
-        addToCacheWithExpiry("kv_redis".to_string(), key.clone(), encoded_score, ttl).await;
+        addToCacheWithExpiry("kv_redis".to_string(), key.clone(), encoded_score, ttl, redis_compression_config).await;
 
     match primary_write {
         Ok(_) => Ok(0),
@@ -2965,9 +2966,10 @@ pub async fn addToCacheWithExpiry(
     key: String,
     value: String,
     ttl: i64,
+    redis_compression_config: Option<HashMap<String, RedisCompressionConfig>>
 ) -> Result<(), StorageError> {
     let app_state = get_tenant_app_state().await;
-    let cached_resp = app_state.redis_conn.setx(&key, &value, ttl).await;
+    let cached_resp = app_state.redis_conn.setx(&key, &value, ttl,redis_compression_config, RedisDataStruct::STRING).await;
     match cached_resp {
         Ok(_) => Ok(()),
         Err(error) => Err(StorageError::InsertError),

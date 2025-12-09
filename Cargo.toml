@@ -8,8 +8,8 @@ rust-version = "1.85.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["middleware","mysql"]
-release = ["middleware", "kms-aws","mysql"]
+default = ["middleware","mysql","zstd"]
+release = ["middleware", "kms-aws","mysql", "zstd"]
 kms-aws = ["dep:aws-config", "dep:aws-sdk-kms"]
 kms-hashicorp-vault = ["dep:vaultrs"]
 limit = []
@@ -36,6 +36,7 @@ jemallocator = "0.5"
 jemalloc-ctl = "0.5"
 prometheus = "0.13"
 lazy_static = "1.4"
+zstd = { version = "0.12", optional = true }
 
 async-bb8-diesel = { git = "https://github.com/jarnura/async-bb8-diesel", rev = "53b4ab901aab7635c8215fd1c2d542c8db443094" }
 redis_interface = { git = "https://github.com/juspay/hyperswitch.git", tag = "2024.09.30.0" }
