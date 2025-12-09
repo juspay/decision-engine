@@ -243,7 +243,7 @@ pub fn txn_failure_states() -> Vec<TxnStatus> {
 pub async fn check_and_send_should_update_gateway_score(
     lock_key: String,
     lock_key_ttl: i32,
-    redis_com_enbled: Option<
+    redis_comp_config: Option<
         std::collections::HashMap<String, crate::redis::feature::RedisCompressionConfig>,
     >,
 ) -> bool {
@@ -255,7 +255,7 @@ pub async fn check_and_send_should_update_gateway_score(
             "true",
             lock_key_ttl as i64,
             SetOptions::NX,
-            redis_com_enbled,
+            redis_comp_config,
             RedisDataStruct::STRING,
         )
         .await;
@@ -489,7 +489,7 @@ pub async fn check_and_update_gateway_score(
     enforce_failure: bool,
     gateway_reference_id: Option<String>,
     txn_latency: Option<TransactionLatency>,
-    redis_com_enbled: Option<
+    redis_comp_config: Option<
         std::collections::HashMap<String, crate::redis::feature::RedisCompressionConfig>,
     >,
 ) -> () {
@@ -513,7 +513,7 @@ pub async fn check_and_update_gateway_score(
     let should_compute_gw_score = check_and_send_should_update_gateway_score(
         update_score_lock_key,
         lock_key_ttl,
-        redis_com_enbled.clone(),
+        redis_comp_config.clone(),
     )
     .await;
 
@@ -542,7 +542,7 @@ pub async fn check_and_update_gateway_score(
                 txn_card_info.clone(),
                 gateway_reference_id.clone(),
                 txn_latency.clone(),
-                redis_com_enbled.clone(),
+                redis_comp_config.clone(),
             )
             .await;
         }
@@ -561,7 +561,7 @@ pub async fn check_and_update_gateway_score(
             txn_card_info.clone(),
             gateway_reference_id.clone(),
             txn_latency.clone(),
-            redis_com_enbled,
+            redis_comp_config,
         )
         .await;
     }

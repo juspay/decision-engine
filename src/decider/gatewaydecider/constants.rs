@@ -973,20 +973,3 @@ impl SC::ServiceConfigKey for MerchantConfigEntityLevelLookupCutover {
     }
 }
 
-pub struct GetGwCardTokens;
-impl SC::ServiceConfigKey for GetGwCardTokens {
-    fn get_key(&self) -> String {
-        "GET_GW_CARD_TOKENS".to_string()
-    }
-}
-
-pub const GET_GW_CARD_TOKENS: GetGwCardTokens = GetGwCardTokens;
-
-pub struct GwCardTokens;
-impl SC::ServiceConfigKey for GwCardTokens {
-    fn get_key(&self) -> String {
-        "GET_GW_CARD_TOKENS".to_string()
-    }
-}
-
-pub const GW_CARD_TOKENS: GwCardTokens = GwCardTokens;

@@ -184,7 +184,7 @@ pub async fn update_score(
             jemalloc_ctl::epoch::advance().unwrap();
             let allocated_before = jemalloc_ctl::stats::allocated::read().unwrap_or(0);
 
-            let redis_com_enbled: Option<HashMap<String, RedisCompressionConfig>> =
+            let redis_comp_config: Option<HashMap<String, RedisCompressionConfig>> =
                 check_redis_comp_merchant_flag(merchant_id_txt.clone()).await;
 
             check_and_update_gateway_score(
@@ -194,7 +194,7 @@ pub async fn update_score(
                 enforce_failure,
                 gateway_reference_id,
                 txn_latency,
-                redis_com_enbled,
+                redis_comp_config,
             )
             .await;
 

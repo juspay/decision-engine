@@ -717,7 +717,7 @@ pub async fn writeToCacheWithTTL(
     ttl: i64,
     redis_compression_config: Option<std::collections::HashMap<String, RedisCompressionConfig>>,
 ) -> Result<i32, StorageError> {
-    //from CachedGatewayScore comvert encoded_score to a encoded jasson that can be used as a value for redis sextx
+    //from CachedGatewayScore convert encoded_score to a encoded json that can be used as a value for redis sextx
     let encoded_score =
         serde_json::to_string(&cached_gateway_score).unwrap_or_else(|_| "".to_string());
 

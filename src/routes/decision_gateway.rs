@@ -138,7 +138,7 @@ where
             let merchant_id = payload.orderReference.merchantId.clone();
             let merchant_id_string =
                 crate::types::merchant::id::merchant_id_to_text(merchant_id.clone());
-            let redis_com_enbled: Option<HashMap<String, RedisCompressionConfig>> =
+            let redis_comp_config: Option<HashMap<String, RedisCompressionConfig>> =
                 check_redis_comp_merchant_flag(merchant_id_string.clone()).await;
 
             let merchant_id_txt = crate::types::merchant::id::merchant_id_to_text(merchant_id);
@@ -154,7 +154,7 @@ where
             jemalloc_ctl::epoch::advance().unwrap();
             let allocated_before = jemalloc_ctl::stats::allocated::read().unwrap_or(0);
 
-            let result = decider_full_payload_hs_function(payload.clone(), redis_com_enbled).await;
+            let result = decider_full_payload_hs_function(payload.clone(), redis_comp_config).await;
 
             jemalloc_ctl::epoch::advance().unwrap();
             let allocated_after = jemalloc_ctl::stats::allocated::read().unwrap_or(0);

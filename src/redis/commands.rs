@@ -64,7 +64,13 @@ impl RedisConnectionWrapper {
 
         // Convert RedisDataStruct enum to string key for HashMap lookup
         let redis_type_key = redis_type.as_str();
-
+        logger::debug!(
+            "REDIS_COMPRESSION - Redis Type Key: {}, JSON Length: {}, redis_compression_config: {:?}, key: {}",
+            redis_type_key,
+            json.len(),
+            redis_compression_config,
+            key
+        );
         // Replicate: mbCompConf <- (HM.lookup redisType =<<) <$> getOptionLocalIO (R._optionsLocal flowRt) RedisCompressionConf
         let final_value = match redis_compression_config
             .as_ref()
