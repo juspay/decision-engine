@@ -127,6 +127,7 @@ pub struct RedisCompressionConfig {
     pub compLevel: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum RedisDataStruct {
     STRING,
     HASHMAP,
@@ -166,8 +167,8 @@ pub struct RedisCompFeatureConf {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum RedisCompressionCutover {
-    StringDataStructCutover(HashMap<String, RedisCompFeatureConf>),
-    MultiDataStructCutover(HashMap<String, RedisCompFeatureConf>),
+    MultiDataStructCutover(HashMap<RedisDataStruct, RedisCompFeatureConf>),
+    StringDataStructCutover(RedisCompFeatureConf),
 }
 
 pub async fn check_redis_comp_merchant_flag(
@@ -191,7 +192,7 @@ pub async fn check_redis_comp_merchant_flag(
                         dictId: dict_id,
                         compLevel: None,
                     };
-                    final_map.insert(data_struct_key.clone(), redis_comp_config);
+                    final_map.insert(data_struct_key.as_str().to_string(), redis_comp_config);
                 }
             }
 
@@ -206,28 +207,24 @@ pub async fn check_redis_comp_merchant_flag(
                 None
             }
         }
-        Some(RedisCompressionCutover::StringDataStructCutover(conf_map)) => {
-            if let Some((_, conf)) = conf_map.iter().next() {
-                if let Some(dict_id) =
-                    check_merchant_enabled_for_compression(Some(conf.clone()), &mid).await
-                {
-                    let redis_comp_config = RedisCompressionConfig {
-                        compEnabled: true,
-                        dictId: dict_id,
-                        compLevel: None,
-                    };
-                    let mut final_map = HashMap::new();
-                    final_map.insert("STRING".to_string(), redis_comp_config);
+        Some(RedisCompressionCutover::StringDataStructCutover(conf)) => {
+            if let Some(dict_id) =
+                check_merchant_enabled_for_compression(Some(conf), &mid).await
+            {
+                let redis_comp_config = RedisCompressionConfig {
+                    compEnabled: true,
+                    dictId: dict_id,
+                    compLevel: None,
+                };
+                let mut final_map = HashMap::new();
+                final_map.insert("STRING".to_string(), redis_comp_config);
 
-                    logger::info!(
-                        "Redis compression config set for merchant {}: {:?}",
-                        mid,
-                        final_map
-                    );
-                    Some(final_map)
-                } else {
-                    None
-                }
+                logger::info!(
+                    "Redis compression config set for merchant {}: {:?}",
+                    mid,
+                    final_map
+                );
+                Some(final_map)
             } else {
                 None
             }
