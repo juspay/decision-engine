@@ -164,6 +164,7 @@ pub struct RedisCompFeatureConf {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum RedisCompressionCutover {
     StringDataStructCutover(HashMap<String, RedisCompFeatureConf>),
     MultiDataStructCutover(HashMap<String, RedisCompFeatureConf>),
