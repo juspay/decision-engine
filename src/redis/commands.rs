@@ -23,17 +23,17 @@ use std::env;
 use std::fs::File;
 use std::io::{Cursor, Read};
 use std::str;
-#[cfg(feature = "zstd")]
+#[cfg(feature = "redisCompression")]
 use zstd::bulk::Compressor;
-#[cfg(feature = "zstd")]
+#[cfg(feature = "redisCompression")]
 use zstd::dict::DecoderDictionary;
-#[cfg(feature = "zstd")]
+#[cfg(feature = "redisCompression")]
 use zstd::dict::EncoderDictionary;
-#[cfg(feature = "zstd")]
+#[cfg(feature = "redisCompression")]
 use zstd::stream::read::Decoder;
-#[cfg(feature = "zstd")]
+#[cfg(feature = "redisCompression")]
 use zstd::stream::write::Encoder;
-#[cfg(feature = "zstd")]
+#[cfg(feature = "redisCompression")]
 use zstd::zstd_safe;
 
 pub struct RedisConnectionWrapper {
@@ -51,7 +51,7 @@ impl RedisConnectionWrapper {
         }
     }
 
-    #[cfg(feature = "zstd")]
+    #[cfg(feature = "redisCompression")]
     fn compress_string_with_config(
         &self,
         value: &str,
@@ -116,7 +116,8 @@ impl RedisConnectionWrapper {
 
         final_value
     }
-
+    
+    #[cfg(feature = "redisCompression")]
     fn compress_with_dict(
         &self,
         json: &[u8],
@@ -169,7 +170,7 @@ impl RedisConnectionWrapper {
         json.to_vec()
     }
 
-    #[cfg(not(feature = "zstd"))]
+    #[cfg(not(feature = "redisCompression"))]
     pub async fn set_key<V>(
         &self,
         key: &str,
@@ -183,7 +184,7 @@ impl RedisConnectionWrapper {
         self.conn.serialize_and_set_key(key, value).await
     }
 
-    #[cfg(feature = "zstd")]
+    #[cfg(feature = "redisCompression")]
     pub async fn set_key(
         &self,
         key: &str,
@@ -215,21 +216,6 @@ impl RedisConnectionWrapper {
         Ok(())
     }
 
-    #[cfg(not(feature = "zstd"))]
-    pub async fn set_key(
-        &self,
-        key: &str,
-        value: &str,
-        redis_compression_config: Option<HashMap<String, RedisCompressionConfig>>,
-        redis_type: RedisDataStruct,
-    ) -> Result<(), errors::RedisError> {
-        self.conn
-            .pool
-            .set(key, value, None, None, false)
-            .await
-            .change_context(errors::RedisError::SetHashFailed)
-    }
-
     pub async fn set_key_with_ttl<V>(
         &self,
         key: &str,
@@ -244,11 +230,11 @@ impl RedisConnectionWrapper {
             .await
     }
 
-    #[cfg(feature = "zstd")]
+    #[cfg(feature = "redisCompression")]
     fn is_zstd_compressed(data: &[u8]) -> bool {
         data.len() >= 4 && &data[..4] == [0x28, 0xB5, 0x2F, 0xFD]
     }
-    #[cfg(feature = "zstd")]
+    #[cfg(feature = "redisCompression")]
     fn extract_dict_id_from_cdata(cdata: &[u8]) -> Option<String> {
         // Haskell magic: "(\181/\253"
         let magic_number: [u8; 4] = [0x28, 0xB5, 0x2F, 0xFD];
@@ -289,7 +275,7 @@ impl RedisConnectionWrapper {
         }
     }
 
-    #[cfg(feature = "zstd")]
+    #[cfg(feature = "redisCompression")]
     fn decode_dict_id(bytes: &[u8]) -> String {
         let val = match bytes.len() {
             1 => bytes[0] as u32,
@@ -320,7 +306,7 @@ impl RedisConnectionWrapper {
         val.to_string()
     }
 
-    #[cfg(feature = "zstd")]
+    #[cfg(feature = "redisCompression")]
     pub async fn get_key<T>(
         &self,
         key: &str,
@@ -378,7 +364,7 @@ impl RedisConnectionWrapper {
         }
     }
 
-    #[cfg(not(feature = "zstd"))]
+    #[cfg(not(feature = "redisCompression"))]
     pub async fn get_key<T>(
         &self,
         key: &str,
@@ -390,12 +376,12 @@ impl RedisConnectionWrapper {
         self.conn.get_and_deserialize_key(key, type_name).await
     }
 
-    #[cfg(feature = "zstd")]
+    #[cfg(feature = "redisCompression")]
     pub async fn get_key_string(&self, key: &str) -> Result<String, errors::RedisError> {
         self.get_key::<String>(key, "").await
     }
 
-    #[cfg(not(feature = "zstd"))]
+    #[cfg(not(feature = "redisCompression"))]
     pub async fn get_key_string(&self, key: &str) -> Result<String, errors::RedisError> {
         self.conn
             .get_key(key)
@@ -471,7 +457,7 @@ impl RedisConnectionWrapper {
             .change_context(errors::RedisError::IncrementHashFieldFailed)
     }
 
-    #[cfg(not(feature = "zstd"))]
+    #[cfg(not(feature = "redisCompression"))]
     pub async fn setXWithOption(
         &self,
         key: &str,
@@ -488,7 +474,7 @@ impl RedisConnectionWrapper {
             .await
             .change_context(errors::RedisError::SetHashFailed)
     }
-    #[cfg(feature = "zstd")]
+    #[cfg(feature = "redisCompression")]
     pub async fn setXWithOption(
         &self,
         key: &str,
@@ -536,7 +522,7 @@ impl RedisConnectionWrapper {
             .await
             .change_context(errors::RedisError::GetFailed)
     }
-    #[cfg(not(feature = "zstd"))]
+    #[cfg(not(feature = "redisCompression"))]
     pub async fn setx(
         &self,
         key: &str,
@@ -551,7 +537,7 @@ impl RedisConnectionWrapper {
             .await
             .change_context(errors::RedisError::SetHashFailed)
     }
-    #[cfg(feature = "zstd")]
+    #[cfg(feature = "redisCompression")]
     pub async fn setx(
         &self,
         key: &str,
