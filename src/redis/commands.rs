@@ -104,7 +104,7 @@ impl RedisConnectionWrapper {
             }
             None => {
                 logger::debug!(
-                    "REDIS_ZSTD_COMPRESS - No compression config for redis type: {}, key: {}",
+                    "R{}, key: {}",
                     redis_type_key,
                     key
                 );
@@ -135,12 +135,6 @@ impl RedisConnectionWrapper {
             comp_conf.dictId
         );
 
-        logger::debug!(
-            "REDIS_ZSTD_COMPRESS - Loading dictionary from: {} for key: {}",
-            dict_file_path,
-            key
-        );
-
         match std::fs::read(&dict_file_path) {
             Ok(dict_bytes) => {
                 let compression_level = comp_conf
@@ -149,54 +143,33 @@ impl RedisConnectionWrapper {
                     .and_then(|s| s.parse::<i32>().ok())
                     .unwrap_or(3);
 
-                logger::debug!(
-                    "REDIS_ZSTD_COMPRESS - Using compression level: {} for key: {}",
-                    compression_level,
-                    key
-                );
-
-                // Use bulk Compressor with dictionary - this matches Haskell's compressUsingDict
                 match Compressor::with_dictionary(compression_level, &dict_bytes) {
                     Ok(mut compressor) => {
                         match compressor.compress(json) {
                             Ok(compressed) => {
                                 logger::debug!(
-                                    "REDIS_ZSTD_COMPRESS - Successfully compressed {} bytes to {} bytes using dictId: {} for key: {}",
-                                    json.len(),
-                                    compressed.len(),
-                                    comp_conf.dictId,
-                                    key
-                                );
-                                
-                            }
-                            Err(e) => {
-                                logger::error!(
-                                    "REDIS_ZSTD_COMPRESS - Compression failed for key: {}, error: {:?}",
+                                    "REDIS_ZSTD_COMPRESS - Successfully compressed data for key: {}, original length: {}, compressed length: {}",
                                     key,
-                                    e
+                                    json.len(),
+                                    compressed.len()
                                 );
+                                return compressed
+                            },
+                            Err(e) => {
+                                logger::error!("Compression failed for key {}: {:?}", key, e);
                             }
                         }
                     }
                     Err(e) => {
-                        logger::error!(
-                            "REDIS_ZSTD_COMPRESS - Failed to create compressor with dictionary for key: {}, error: {:?}",
-                            key,
-                            e
-                        );
+                        logger::error!("Failed to create compressor for key {}: {:?}", key, e);
                     }
                 }
             }
             Err(e) => {
-                logger::error!(
-                    "REDIS_ZSTD_COMPRESS - Failed to read dictionary file: {}, error: {:?}",
-                    dict_file_path,
-                    e
-                );
+                logger::error!("Failed to read dictionary file {} for key {}: {:?}", dict_file_path, key, e);
             }
         }
         
-        // Return uncompressed data if compression failed
         json.to_vec()
     }
 
@@ -397,16 +370,12 @@ impl RedisConnectionWrapper {
                     errors::RedisError::GetFailed
                 })?;
 
-                serde_json::from_slice(&decompressed).map_err(|e| {
-                    logger::error!("Failed to deserialize decompressed data for key {}: {:?}", key, e);
-                    errors::RedisError::GetFailed
-                })
+                serde_json::from_slice(&decompressed)
+                    .change_context(errors::RedisError::GetFailed)
             }
             None => {
-                serde_json::from_slice(&raw_bytes).map_err(|e| {
-                    logger::error!("Failed to deserialize uncompressed data for key {}: {:?}", key, e);
-                    errors::RedisError::GetFailed
-                })
+                serde_json::from_slice(&raw_bytes)
+                    .change_context(errors::RedisError::GetFailed)
             }
         }
     }

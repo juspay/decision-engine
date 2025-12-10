@@ -175,7 +175,7 @@ pub async fn check_redis_comp_merchant_flag(
     mid: String,
 ) -> Option<HashMap<String, RedisCompressionConfig>> {
     let mb_conf = findByNameFromRedis::<RedisCompressionCutover>(
-        "REDIS_COMPRESSION_MERCHANT_CUTOVER".to_string(),
+        "redis_compression_merchant_cutover".to_string(),
     )
     .await;
 

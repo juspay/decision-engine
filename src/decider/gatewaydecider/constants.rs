@@ -44,16 +44,6 @@ impl SC::ServiceConfigKey for SrV3InputConfigDefault {
 
 pub const SR_V3_DEFAULT_INPUT_CONFIG: SrV3InputConfigDefault = SrV3InputConfigDefault;
 
-pub const REDIS_COMPRESSION_MERCHANT_CUTOVER: RedisCompressionMerchantCutover =
-    RedisCompressionMerchantCutover;
-
-pub struct RedisCompressionMerchantCutover;
-impl SC::ServiceConfigKey for RedisCompressionMerchantCutover {
-    fn get_key(&self) -> String {
-        "redis_compression_merchant_cutover".to_string()
-    }
-}
-
 pub const DEFAULT_SR_V3_BASED_BUCKET_SIZE: i32 = 125;
 pub const DEFAULT_SR_V3_BASED_UPPER_RESET_FACTOR: f64 = 3.0;
 pub const DEFAULT_SR_V3_BASED_LOWER_RESET_FACTOR: f64 = 3.0;
