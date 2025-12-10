@@ -962,4 +962,3 @@ impl SC::ServiceConfigKey for MerchantConfigEntityLevelLookupCutover {
         "MERCHANT_CONFIG_ENTITY_LEVEL_LOOKUP_CUTOVER".to_string()
     }
 }
-

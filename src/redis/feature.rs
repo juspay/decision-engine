@@ -208,9 +208,7 @@ pub async fn check_redis_comp_merchant_flag(
             }
         }
         Some(RedisCompressionCutover::StringDataStructCutover(conf)) => {
-            if let Some(dict_id) =
-                check_merchant_enabled_for_compression(Some(conf), &mid).await
-            {
+            if let Some(dict_id) = check_merchant_enabled_for_compression(Some(conf), &mid).await {
                 let redis_comp_config = RedisCompressionConfig {
                     compEnabled: true,
                     dictId: dict_id,

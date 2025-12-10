@@ -24,6 +24,8 @@ use std::fs::File;
 use std::io::{Cursor, Read};
 use std::str;
 #[cfg(feature = "zstd")]
+use zstd::bulk::Compressor;
+#[cfg(feature = "zstd")]
 use zstd::dict::DecoderDictionary;
 #[cfg(feature = "zstd")]
 use zstd::dict::EncoderDictionary;
@@ -33,8 +35,6 @@ use zstd::stream::read::Decoder;
 use zstd::stream::write::Encoder;
 #[cfg(feature = "zstd")]
 use zstd::zstd_safe;
-#[cfg(feature = "zstd")]
-use zstd::bulk::Compressor;
 
 pub struct RedisConnectionWrapper {
     pub conn: RedisConnectionPool,
@@ -44,8 +44,6 @@ pub struct RedisConnectionWrapper {
 const ZSTD_MAGIC_BYTES: &[u8] = &[0x28, 0xB5, 0x2F, 0xFD];
 
 impl RedisConnectionWrapper {
-
-
     pub fn new(redis_conn: RedisConnectionPool, config: GlobalConfig) -> Self {
         Self {
             conn: redis_conn,
@@ -68,14 +66,14 @@ impl RedisConnectionWrapper {
         );
 
         let json = value.as_bytes().to_vec();
- 
+
         let redis_compression_eligible_length = env::var("REDIS_COMPRESSION_ELIGIBLE_LENGTH")
             .ok()
             .and_then(|v| v.parse::<usize>().ok())
             .unwrap_or(200);
 
         let redis_type_key = redis_type.as_str();
-        
+
         logger::debug!(
             "REDIS_ZSTD_COMPRESS - Redis Type Key: {}, JSON Length: {}, redis_compression_config: {:?}, key: {} , eligible_length: {}",
             redis_type_key,
@@ -85,32 +83,29 @@ impl RedisConnectionWrapper {
             redis_compression_eligible_length
         );
 
-        let final_value = match redis_compression_config.and_then(|config| config.get(redis_type_key)) {
-            Some(comp_conf) => {
-                if json.len() > redis_compression_eligible_length && comp_conf.compEnabled {
-                    logger::debug!(
-                        "REDIS_ZSTD_COMPRESS - Compressing data for key: {}, dictId: {}",
-                        key,
-                        comp_conf.dictId
-                    );
-                    self.compress_with_dict(&json, comp_conf, key)
-                } else {
-                    logger::debug!(
-                        "REDIS_ZSTD_COMPRESS - Skipping compression for key: {}",
-                        key
-                    );
+        let final_value =
+            match redis_compression_config.and_then(|config| config.get(redis_type_key)) {
+                Some(comp_conf) => {
+                    if json.len() > redis_compression_eligible_length && comp_conf.compEnabled {
+                        logger::debug!(
+                            "REDIS_ZSTD_COMPRESS - Compressing data for key: {}, dictId: {}",
+                            key,
+                            comp_conf.dictId
+                        );
+                        self.compress_with_dict(&json, comp_conf, key)
+                    } else {
+                        logger::debug!(
+                            "REDIS_ZSTD_COMPRESS - Skipping compression for key: {}",
+                            key
+                        );
+                        json
+                    }
+                }
+                None => {
+                    logger::debug!("R{}, key: {}", redis_type_key, key);
                     json
                 }
-            }
-            None => {
-                logger::debug!(
-                    "R{}, key: {}",
-                    redis_type_key,
-                    key
-                );
-                json
-            }
-        };
+            };
 
         logger::debug!(
             "REDIS_ZSTD_COMPRESS - Compressed/processed key: {}, final value length: {}, is_compressed: {}",
@@ -122,7 +117,6 @@ impl RedisConnectionWrapper {
         final_value
     }
 
-
     fn compress_with_dict(
         &self,
         json: &[u8],
@@ -131,8 +125,7 @@ impl RedisConnectionWrapper {
     ) -> Vec<u8> {
         let dict_file_path = format!(
             "{}/{}.dict",
-            self.config.compression_filepath.zstd_compression_filepath,
-            comp_conf.dictId
+            self.config.compression_filepath.zstd_compression_filepath, comp_conf.dictId
         );
 
         match std::fs::read(&dict_file_path) {
@@ -144,32 +137,35 @@ impl RedisConnectionWrapper {
                     .unwrap_or(3);
 
                 match Compressor::with_dictionary(compression_level, &dict_bytes) {
-                    Ok(mut compressor) => {
-                        match compressor.compress(json) {
-                            Ok(compressed) => {
-                                logger::debug!(
+                    Ok(mut compressor) => match compressor.compress(json) {
+                        Ok(compressed) => {
+                            logger::debug!(
                                     "REDIS_ZSTD_COMPRESS - Successfully compressed data for key: {}, original length: {}, compressed length: {}",
                                     key,
                                     json.len(),
                                     compressed.len()
                                 );
-                                return compressed
-                            },
-                            Err(e) => {
-                                logger::error!("Compression failed for key {}: {:?}", key, e);
-                            }
+                            return compressed;
                         }
-                    }
+                        Err(e) => {
+                            logger::error!("Compression failed for key {}: {:?}", key, e);
+                        }
+                    },
                     Err(e) => {
                         logger::error!("Failed to create compressor for key {}: {:?}", key, e);
                     }
                 }
             }
             Err(e) => {
-                logger::error!("Failed to read dictionary file {} for key {}: {:?}", dict_file_path, key, e);
+                logger::error!(
+                    "Failed to read dictionary file {} for key {}: {:?}",
+                    dict_file_path,
+                    key,
+                    e
+                );
             }
         }
-        
+
         json.to_vec()
     }
 
@@ -247,7 +243,7 @@ impl RedisConnectionWrapper {
             .serialize_and_set_key_with_expiry(key, value, ttl)
             .await
     }
-    
+
     #[cfg(feature = "zstd")]
     fn is_zstd_compressed(data: &[u8]) -> bool {
         data.len() >= 4 && &data[..4] == [0x28, 0xB5, 0x2F, 0xFD]
@@ -292,7 +288,7 @@ impl RedisConnectionWrapper {
             None
         }
     }
-    
+
     #[cfg(feature = "zstd")]
     fn decode_dict_id(bytes: &[u8]) -> String {
         let val = match bytes.len() {
@@ -320,7 +316,7 @@ impl RedisConnectionWrapper {
                 return "0".to_string();
             }
         };
-        
+
         val.to_string()
     }
 
@@ -343,12 +339,16 @@ impl RedisConnectionWrapper {
             Some(dict_id) => {
                 let dict_file_path = format!(
                     "{}/{}.dict",
-                    self.config.compression_filepath.zstd_compression_filepath,
-                    dict_id
+                    self.config.compression_filepath.zstd_compression_filepath, dict_id
                 );
 
                 let mut dict_file = File::open(&dict_file_path).map_err(|e| {
-                    logger::error!("Failed to open dictionary file {} for key {}: {:?}", dict_file_path, key, e);
+                    logger::error!(
+                        "Failed to open dictionary file {} for key {}: {:?}",
+                        dict_file_path,
+                        key,
+                        e
+                    );
                     errors::RedisError::UnknownResult
                 })?;
 
@@ -370,12 +370,10 @@ impl RedisConnectionWrapper {
                     errors::RedisError::GetFailed
                 })?;
 
-                serde_json::from_slice(&decompressed)
-                    .change_context(errors::RedisError::GetFailed)
+                serde_json::from_slice(&decompressed).change_context(errors::RedisError::GetFailed)
             }
             None => {
-                serde_json::from_slice(&raw_bytes)
-                    .change_context(errors::RedisError::GetFailed)
+                serde_json::from_slice(&raw_bytes).change_context(errors::RedisError::GetFailed)
             }
         }
     }
@@ -574,13 +572,7 @@ impl RedisConnectionWrapper {
 
         self.conn
             .pool
-            .set(
-                key,
-                redis_value,
-                Some(Expiration::EX(ttl)),
-                None,
-                false,
-            )
+            .set(key, redis_value, Some(Expiration::EX(ttl)), None, false)
             .await
             .change_context(errors::RedisError::SetHashFailed)?;
 
