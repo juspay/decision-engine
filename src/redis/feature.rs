@@ -126,6 +126,12 @@ pub struct RedisCompressionConfig {
     pub dictId: String,
     pub compLevel: Option<String>,
 }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RedisCompressionConfigCombined {
+    pub redisCompressionConfig: Option<HashMap<String, RedisCompressionConfig>>,
+    pub isRedisCompEnabled: bool,
+
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum RedisDataStruct {

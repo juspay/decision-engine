@@ -47,7 +47,7 @@ use crate::feedback::types::{
 };
 
 use crate::logger;
-
+use crate::redis::feature::RedisCompressionConfigCombined;
 // use eulerhs::language::get_current_date_in_millis;
 // use eulerhs::language as EL;
 
@@ -84,9 +84,7 @@ pub async fn updateKeyScoreForKeysFromConsumer(
     mer_acc_p_id: merchant::id::MerchantPId,
     mer_acc: MerchantAccount,
     gateway_scoring_key: (ScoreKeyType, Option<String>),
-    redis_compression_config: Option<
-        std::collections::HashMap<String, crate::redis::feature::RedisCompressionConfig>,
-    >,
+    redis_compression_config: Option<RedisCompressionConfigCombined>,
 ) -> Option<((ScoreKeyType, String), CachedGatewayScore)> {
     let merchant_id = Merchant::merchant_id_to_text(txn_detail.merchantId.clone());
     let (score_key_type, m_key) = gateway_scoring_key;

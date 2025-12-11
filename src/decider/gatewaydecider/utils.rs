@@ -5,7 +5,7 @@ use crate::euclid::types::SrDimensionConfig;
 use crate::feedback::gateway_elimination_scoring::flow::{
     eliminationV2RewardFactor, getPenaltyFactor,
 };
-use crate::redis::feature::{is_feature_enabled, RedisCompressionConfig, RedisDataStruct};
+use crate::redis::feature::{RedisCompressionConfig, RedisCompressionConfigCombined, RedisDataStruct, is_feature_enabled};
 use crate::redis::types::ServiceConfigKey;
 use crate::types::card::card_type::card_type_to_text;
 use crate::types::country::country_iso::CountryISO2;
@@ -881,7 +881,7 @@ pub fn get_true_string(val: Option<String>) -> Option<String> {
 pub async fn get_card_bin_from_token_bin(
     length: usize,
     token_bin: &str,
-    redis_compression_config: Option<HashMap<String, RedisCompressionConfig>>,
+    redis_compression_config: Option<RedisCompressionConfigCombined>
 ) -> String {
     let key = format!("token_bin_{}", token_bin);
     let app_state = get_tenant_app_state().await;
@@ -2954,7 +2954,7 @@ pub async fn writeToCacheWithTTL(
     key: String,
     cached_gateway_score: GatewayScore,
     ttl: i64,
-    redis_compression_config: Option<HashMap<String, RedisCompressionConfig>>,
+    redis_compression_config: Option<RedisCompressionConfigCombined>,
 ) -> Result<i32, StorageError> {
     //from CachedGatewayScore convert encoded_score to a encoded json that can be used as a value for redis sextx
     let encoded_score =
@@ -2981,7 +2981,7 @@ pub async fn addToCacheWithExpiry(
     key: String,
     value: String,
     ttl: i64,
-    redis_compression_config: Option<HashMap<String, RedisCompressionConfig>>,
+    redis_compression_config: Option<RedisCompressionConfigCombined>,
 ) -> Result<(), StorageError> {
     let app_state = get_tenant_app_state().await;
     let cached_resp = app_state

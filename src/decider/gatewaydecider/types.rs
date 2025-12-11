@@ -1,6 +1,6 @@
 use crate::app::{get_tenant_app_state, TenantAppState};
 use crate::decider::network_decider;
-use crate::redis::feature::RedisCompressionConfig;
+use crate::redis::feature::RedisCompressionConfigCombined;
 use crate::types::country::country_iso::CountryISO2;
 use crate::types::currency::Currency;
 use crate::types::money::internal as ETMo;
@@ -1298,7 +1298,7 @@ pub struct DeciderParams {
     pub dpPriorityLogicScript: Option<String>,
     pub dpEDCCApplied: Option<bool>,
     pub dpShouldConsumeResult: Option<bool>,
-    pub dpRedisCompressionConfig: Option<HashMap<String, RedisCompressionConfig>>,
+    pub dpRedisCompressionConfig: Option<RedisCompressionConfigCombined>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

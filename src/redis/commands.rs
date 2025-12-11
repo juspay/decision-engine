@@ -16,7 +16,7 @@ use std::fmt::Debug;
 
 use crate::config::GlobalConfig;
 use crate::redis::feature;
-use crate::redis::feature::{RedisCompressionConfig, RedisDataStruct};
+use crate::redis::feature::{RedisCompressionConfig, RedisCompressionConfigCombined, RedisDataStruct};
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use std::env;
@@ -47,7 +47,7 @@ impl RedisConnectionWrapper {
         &self,
         value: &str,
         key: &str,
-        redis_compression_config: Option<&HashMap<String, RedisCompressionConfig>>,
+        redis_compression_config: Option<&RedisCompressionConfigCombined>,
         redis_type: RedisDataStruct,
     ) -> Vec<u8> {
         logger::debug!(
@@ -74,29 +74,34 @@ impl RedisConnectionWrapper {
             redis_compression_eligible_length
         );
 
-        let final_value =
-            match redis_compression_config.and_then(|config| config.get(redis_type_key)) {
-                Some(comp_conf) => {
-                    if json.len() > redis_compression_eligible_length && comp_conf.compEnabled {
+        let final_value = match redis_compression_config {
+            Some(config_combined) if config_combined.isRedisCompEnabled => {
+                match config_combined.redisCompressionConfig.as_ref().and_then(|config| config.get(redis_type_key)) {
+                    Some(comp_conf) if json.len() > redis_compression_eligible_length && comp_conf.compEnabled => {
                         logger::debug!(
                             "REDIS_ZSTD_COMPRESS - Compressing data for key: {}, dictId: {}",
                             key,
                             comp_conf.dictId
                         );
                         self.compress_with_dict(&json, comp_conf, key)
-                    } else {
+                    }
+                    _ => {
                         logger::debug!(
-                            "REDIS_ZSTD_COMPRESS - Skipping compression for key: {}",
+                            "REDIS_ZSTD_COMPRESS - Skipping compression for key: {} (length or compEnabled check failed)",
                             key
                         );
                         json
                     }
                 }
-                None => {
-                    logger::debug!("R{}, key: {}", redis_type_key, key);
-                    json
-                }
-            };
+            }
+            _ => {
+                logger::debug!(
+                    "REDIS_ZSTD_COMPRESS - Skipping compression for key: {} (redis compression not enabled or config not present)",
+                    key
+                );
+                json
+            }
+        };
 
         logger::debug!(
             "REDIS_ZSTD_COMPRESS - Compressed/processed key: {}, final value length: {}, is_compressed: {}",
@@ -175,7 +180,7 @@ impl RedisConnectionWrapper {
         &self,
         key: &str,
         value: V,
-        redis_compression_config: Option<HashMap<String, RedisCompressionConfig>>,
+        redis_compression_config: Option<RedisCompressionConfigCombined>,
         redis_type: RedisDataStruct,
     ) -> Result<(), errors::RedisError>
     where
@@ -189,7 +194,7 @@ impl RedisConnectionWrapper {
         &self,
         key: &str,
         value: &str,
-        redis_compression_config: Option<HashMap<String, RedisCompressionConfig>>,
+        redis_compression_config: Option<RedisCompressionConfigCombined>,
         redis_type: RedisDataStruct,
     ) -> Result<(), errors::RedisError> {
         let final_value = self.compress_string_with_config(
@@ -474,7 +479,7 @@ impl RedisConnectionWrapper {
         value: &str,
         ttl: i64,
         option: SetOptions,
-        redis_compression_config: Option<HashMap<String, RedisCompressionConfig>>,
+        redis_compression_config: Option<RedisCompressionConfigCombined>,
         redis_type: RedisDataStruct,
     ) -> Result<bool, errors::RedisError> {
         // implement the redis query to set if it doesn't exist
@@ -491,7 +496,7 @@ impl RedisConnectionWrapper {
         value: &str,
         ttl: i64,
         option: SetOptions,
-        redis_compression_config: Option<HashMap<String, RedisCompressionConfig>>,
+        redis_compression_config: Option<RedisCompressionConfigCombined>,
         redis_type: RedisDataStruct,
     ) -> Result<bool, errors::RedisError> {
         let final_value = self.compress_string_with_config(
@@ -538,7 +543,7 @@ impl RedisConnectionWrapper {
         key: &str,
         value: &str,
         ttl: i64,
-        redis_compression_config: Option<HashMap<String, RedisCompressionConfig>>,
+        redis_compression_config: Option<RedisCompressionConfigCombined>,
         redis_type: RedisDataStruct,
     ) -> Result<(), errors::RedisError> {
         self.conn
@@ -553,7 +558,7 @@ impl RedisConnectionWrapper {
         key: &str,
         value: &str,
         ttl: i64,
-        redis_compression_config: Option<HashMap<String, RedisCompressionConfig>>,
+        redis_compression_config: Option<RedisCompressionConfigCombined>,
         redis_type: RedisDataStruct,
     ) -> Result<(), errors::RedisError> {
         let final_value = self.compress_string_with_config(

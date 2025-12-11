@@ -70,7 +70,7 @@ use crate::types::merchant as ETM;
 // use prelude::real_to_frac;
 // use data::time::clock::posix as DTP;
 use crate::logger;
-use crate::redis::feature::{RedisCompressionConfig, RedisDataStruct};
+use crate::redis::feature::{RedisCompressionConfig, RedisCompressionConfigCombined, RedisDataStruct};
 use time::format_description::well_known::Iso8601;
 // Converted data types
 // Original Haskell data type: GatewayScoringType
@@ -715,7 +715,7 @@ pub async fn writeToCacheWithTTL(
     key: String,
     cached_gateway_score: CachedGatewayScore,
     ttl: i64,
-    redis_compression_config: Option<std::collections::HashMap<String, RedisCompressionConfig>>,
+    redis_compression_config: Option<RedisCompressionConfigCombined>,
 ) -> Result<i32, StorageError> {
     //from CachedGatewayScore convert encoded_score to a encoded json that can be used as a value for redis sextx
     let encoded_score =
@@ -742,7 +742,7 @@ pub async fn addToCacheWithExpiry(
     key: String,
     value: String,
     ttl: i64,
-    redis_compression_config: Option<std::collections::HashMap<String, RedisCompressionConfig>>,
+    redis_compression_config: Option<RedisCompressionConfigCombined>,
 ) -> Result<(), StorageError> {
     let app_state = get_tenant_app_state().await;
     let cached_resp = app_state

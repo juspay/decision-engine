@@ -2,7 +2,7 @@
 // Generated on 2025-03-23 10:24:42
 
 use crate::redis::cache::findByNameFromRedis;
-use crate::redis::feature::is_feature_enabled;
+use crate::redis::feature::{RedisCompressionConfigCombined, is_feature_enabled};
 use masking::PeekInterface;
 // Converted imports
 // use gateway_decider::constants as c::{enable_elimination_v2, gateway_scoring_data, EnableExploreAndExploitOnSrv3, SrV3InputConfig, GatewayScoreFirstDimensionSoftTtl};
@@ -243,9 +243,7 @@ pub fn txn_failure_states() -> Vec<TxnStatus> {
 pub async fn check_and_send_should_update_gateway_score(
     lock_key: String,
     lock_key_ttl: i32,
-    redis_comp_config: Option<
-        std::collections::HashMap<String, crate::redis::feature::RedisCompressionConfig>,
-    >,
+    redis_comp_config: Option<RedisCompressionConfigCombined>,
 ) -> bool {
     let app_state = get_tenant_app_state().await;
     let is_set_either = app_state
@@ -489,9 +487,7 @@ pub async fn check_and_update_gateway_score(
     enforce_failure: bool,
     gateway_reference_id: Option<String>,
     txn_latency: Option<TransactionLatency>,
-    redis_comp_config: Option<
-        std::collections::HashMap<String, crate::redis::feature::RedisCompressionConfig>,
-    >,
+    redis_comp_config: Option<RedisCompressionConfigCombined>,
 ) -> () {
     // Get gateway scoring type
     let gateway_scoring_type =
@@ -576,9 +572,7 @@ pub async fn update_gateway_score(
     txn_card_info: TxnCardInfo,
     gateway_reference_id: Option<String>,
     txn_latency: Option<TransactionLatency>,
-    redis_compression_config: Option<
-        std::collections::HashMap<String, crate::redis::feature::RedisCompressionConfig>,
-    >,
+    redis_compression_config: Option<RedisCompressionConfigCombined>,
 ) -> () {
     let mer_acc: MerchantAccount =
         MA::load_merchant_by_merchant_id(MID::merchant_id_to_text(txn_detail.clone().merchantId))

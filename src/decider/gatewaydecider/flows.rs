@@ -1,6 +1,6 @@
 use super::runner::get_gateway_priority;
 use super::types::UnifiedError;
-use crate::redis::feature::{RedisCompressionConfig, RedisDataStruct};
+use crate::redis::feature:: {RedisCompressionConfigCombined, RedisDataStruct};
 use axum::response::IntoResponse;
 use serde_json::json;
 use serde_json::Value as AValue;
@@ -128,7 +128,7 @@ pub trait ResponseDecider {
 
 pub async fn decider_full_payload_hs_function(
     dreq: T::DomainDeciderRequest,
-    redis_compression_config: Option<HashMap<String, RedisCompressionConfig>>,
+    redis_compression_config: Option<RedisCompressionConfigCombined>,
 ) -> Result<(T::DecidedGateway, Vec<(String, Vec<String>)>), T::ErrorResponse> {
     let merchant_prefs = match ETM::merchant_iframe_preferences::getMerchantIPrefsByMId(
         dreq.txnDetail.merchantId.0.clone(),
@@ -206,7 +206,7 @@ pub async fn decider_full_payload_hs_function(
         dpPriorityLogicScript: dreq.priorityLogicScript,
         dpEDCCApplied: dreq.isEdccApplied,
         dpShouldConsumeResult: dreq.shouldConsumeResult,
-        dpRedisCompressionConfig: redis_compression_config.clone(),
+        dpRedisCompressionConfig: redis_compression_config,
     };
     run_decider_flow(decider_params, true).await
 }
