@@ -14,18 +14,24 @@ use fred::{
 use redis_interface::{errors, types::DelReply, RedisConnectionPool};
 use std::fmt::Debug;
 
+use crate::config::CompressionFilepath;
 use crate::config::GlobalConfig;
 use crate::redis::feature;
-use crate::redis::feature::{RedisCompressionConfig, RedisCompressionConfigCombined, RedisDataStruct};
+use crate::redis::feature::{
+    RedisCompressionConfig, RedisCompressionConfigCombined, RedisDataStruct,
+};
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use std::env;
 use std::fs::File;
 use std::io::{Cursor, Read};
 use std::str;
-use crate::config::CompressionFilepath;
 #[cfg(feature = "redis_compression")]
-use zstd::{bulk::Compressor, dict::{DecoderDictionary, EncoderDictionary}, stream::{read::Decoder, write::Encoder}};
+use zstd::{
+    bulk::Compressor,
+    dict::{DecoderDictionary, EncoderDictionary},
+    stream::{read::Decoder, write::Encoder},
+};
 
 pub struct RedisConnectionWrapper {
     pub conn: RedisConnectionPool,
@@ -35,7 +41,10 @@ pub struct RedisConnectionWrapper {
 const ZSTD_MAGIC_BYTES: &[u8] = &[0x28, 0xB5, 0x2F, 0xFD];
 
 impl RedisConnectionWrapper {
-    pub fn new(redis_conn: RedisConnectionPool, compression_file_path: Option<CompressionFilepath>) -> Self {
+    pub fn new(
+        redis_conn: RedisConnectionPool,
+        compression_file_path: Option<CompressionFilepath>,
+    ) -> Self {
         Self {
             conn: redis_conn,
             compression_file_path,
@@ -76,8 +85,15 @@ impl RedisConnectionWrapper {
 
         let final_value = match redis_compression_config {
             Some(config_combined) if config_combined.isRedisCompEnabled => {
-                match config_combined.redisCompressionConfig.as_ref().and_then(|config| config.get(redis_type_key)) {
-                    Some(comp_conf) if json.len() > redis_compression_eligible_length && comp_conf.compEnabled => {
+                match config_combined
+                    .redisCompressionConfig
+                    .as_ref()
+                    .and_then(|config| config.get(redis_type_key))
+                {
+                    Some(comp_conf)
+                        if json.len() > redis_compression_eligible_length
+                            && comp_conf.compEnabled =>
+                    {
                         logger::debug!(
                             "REDIS_ZSTD_COMPRESS - Compressing data for key: {}, dictId: {}",
                             key,
@@ -112,7 +128,7 @@ impl RedisConnectionWrapper {
 
         final_value
     }
-    
+
     #[cfg(feature = "redis_compression")]
     fn compress_with_dict(
         &self,

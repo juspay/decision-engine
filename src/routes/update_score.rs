@@ -4,7 +4,10 @@ use crate::feedback::gateway_scoring_service::{
 };
 use crate::logger;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
-use crate::redis::feature::{is_feature_enabled,check_redis_comp_merchant_flag, RedisCompressionConfig, RedisCompressionConfigCombined};
+use crate::redis::feature::{
+    check_redis_comp_merchant_flag, is_feature_enabled, RedisCompressionConfig,
+    RedisCompressionConfigCombined,
+};
 use crate::types::card::txn_card_info::{convert_safe_to_txn_card_info, SafeTxnCardInfo};
 use crate::types::txn_details::types::{
     convert_safe_txn_detail_to_txn_detail, SafeTxnDetail, TransactionLatency,
@@ -188,16 +191,16 @@ pub async fn update_score(
                 check_redis_comp_merchant_flag(merchant_id_txt.clone()).await;
 
             let redis_comp_enabled_de = is_feature_enabled(
-                        "REDIS_COMPRESSION_ENABLED_MERCHANT_DE".to_string(),
-                        merchant_id_txt.clone(),
-                        "kv_redis".to_string(),
-                    )
-                    .await;
+                "REDIS_COMPRESSION_ENABLED_MERCHANT_DE".to_string(),
+                merchant_id_txt.clone(),
+                "kv_redis".to_string(),
+            )
+            .await;
 
             let redis_comp_config_final = Some(RedisCompressionConfigCombined {
                 redisCompressionConfig: redis_comp_config,
                 isRedisCompEnabled: redis_comp_enabled_de,
-            }); 
+            });
 
             check_and_update_gateway_score(
                 txn_detail,

@@ -70,7 +70,9 @@ use crate::types::merchant as ETM;
 // use prelude::real_to_frac;
 // use data::time::clock::posix as DTP;
 use crate::logger;
-use crate::redis::feature::{RedisCompressionConfig, RedisCompressionConfigCombined, RedisDataStruct};
+use crate::redis::feature::{
+    RedisCompressionConfig, RedisCompressionConfigCombined, RedisDataStruct,
+};
 use time::format_description::well_known::Iso8601;
 // Converted data types
 // Original Haskell data type: GatewayScoringType

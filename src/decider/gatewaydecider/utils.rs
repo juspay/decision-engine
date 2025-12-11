@@ -5,7 +5,9 @@ use crate::euclid::types::SrDimensionConfig;
 use crate::feedback::gateway_elimination_scoring::flow::{
     eliminationV2RewardFactor, getPenaltyFactor,
 };
-use crate::redis::feature::{RedisCompressionConfig, RedisCompressionConfigCombined, RedisDataStruct, is_feature_enabled};
+use crate::redis::feature::{
+    is_feature_enabled, RedisCompressionConfig, RedisCompressionConfigCombined, RedisDataStruct,
+};
 use crate::redis::types::ServiceConfigKey;
 use crate::types::card::card_type::card_type_to_text;
 use crate::types::country::country_iso::CountryISO2;
@@ -881,7 +883,7 @@ pub fn get_true_string(val: Option<String>) -> Option<String> {
 pub async fn get_card_bin_from_token_bin(
     length: usize,
     token_bin: &str,
-    redis_compression_config: Option<RedisCompressionConfigCombined>
+    redis_compression_config: Option<RedisCompressionConfigCombined>,
 ) -> String {
     let key = format!("token_bin_{}", token_bin);
     let app_state = get_tenant_app_state().await;

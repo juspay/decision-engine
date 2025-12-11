@@ -1,6 +1,6 @@
 use super::runner::get_gateway_priority;
 use super::types::UnifiedError;
-use crate::redis::feature:: {RedisCompressionConfigCombined, RedisDataStruct};
+use crate::redis::feature::{RedisCompressionConfigCombined, RedisDataStruct};
 use axum::response::IntoResponse;
 use serde_json::json;
 use serde_json::Value as AValue;

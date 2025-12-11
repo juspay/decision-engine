@@ -30,7 +30,7 @@ use rand_distr::{Beta, Binomial, Distribution};
 use serde::{Deserialize, Serialize};
 use time::{OffsetDateTime, PrimitiveDateTime};
 // use crate::types::card_brand_routes as ETCBR;
-use crate::redis::feature::{self as M, RedisCompressionConfigCombined, is_feature_enabled};
+use crate::redis::feature::{self as M, is_feature_enabled, RedisCompressionConfigCombined};
 use crate::types::gateway_routing_input as ETGRI;
 // use crate::types::gateway_health as ETGH;
 use crate::types::card as ETCT;

@@ -130,7 +130,6 @@ pub struct RedisCompressionConfig {
 pub struct RedisCompressionConfigCombined {
     pub redisCompressionConfig: Option<HashMap<String, RedisCompressionConfig>>,
     pub isRedisCompEnabled: bool,
-
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
