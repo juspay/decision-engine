@@ -5,8 +5,6 @@ use crate::decider::gatewaydecider::types::*;
 // use gatewaydecider::types::*;
 // use juspay::extra::secret::make_secret;
 use crate::decider::gatewaydecider::utils::{get_mgas, is_emandate_enabled, set_mgas};
-use crate::logger;
-use crate::types::gateway as ETG;
 use crate::types::merchant as ETM;
 use crate::types::merchant::id::MerchantId;
 use crate::types::merchant::merchant_gateway_account::MgaReferenceId;
@@ -19,7 +17,7 @@ pub async fn get_enabled_mgas_by_merchant_id_and_ref_id(
     mid: MerchantId,
     ref_ids: Vec<MgaReferenceId>,
 ) -> Vec<ETM::merchant_gateway_account::MerchantGatewayAccount> {
-    crate::logger::info!(
+    crate::logger::debug!(
         "MGAS: Length : {:?}",
         this.writer.mgas.as_ref().map_or(611, |mgas| mgas.len())
     );
@@ -40,7 +38,7 @@ pub async fn get_enabled_mgas_by_merchant_id_and_ref_id(
             )
             .await;
 
-            crate::logger::info!(
+            crate::logger::debug!(
                 "length of mgas for txnId in main function: {}",
                 d_mgas.len()
             );

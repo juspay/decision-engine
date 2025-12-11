@@ -23,6 +23,7 @@ use crate::storage::schema::merchant_gateway_account_sub_info::dsl;
 use crate::storage::schema_pg::merchant_gateway_account_sub_info::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct MerchantGatewayAccountSubInfo {
@@ -44,9 +45,10 @@ pub fn to_mgasi_pid(id: i64) -> MgasiPId {
     MgasiPId { mgasiPId: id }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum SubInfoType {
-    SPLIT_SETTLEMENT,
+    SplitSettlement,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -57,7 +59,7 @@ pub enum SubIdType {
 
 pub fn text_to_sub_info_type(ctx: String) -> Result<SubInfoType, ApiError> {
     match ctx.as_str() {
-        "SPLIT_SETTLEMENT" => Ok(SubInfoType::SPLIT_SETTLEMENT),
+        "SPLIT_SETTLEMENT" => Ok(SubInfoType::SplitSettlement),
         _ => Err(ApiError::ParsingError("Invalid Sub Info Type")),
     }
 }

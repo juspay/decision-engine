@@ -75,9 +75,9 @@ pub async fn update_gateway_score(
     let update_score_request: Result<UpdateScorePayload, _> = serde_json::from_slice(&body);
     match update_score_request {
         Ok(payload) => {
-            let merchant_id = payload.merchantId.clone();
+            let merchant_id = payload.merchant_id.clone();
             let gateway = payload.gateway.clone();
-            let payment_id = payload.paymentId.clone();
+            let payment_id = payload.payment_id.clone();
             let result = check_and_update_gateway_score_(payload).await;
             match result {
                 Ok(success) => {

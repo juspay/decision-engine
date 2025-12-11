@@ -13,7 +13,6 @@ use time::Time;
 // use db::mesh::internal;
 // use crate::storage::internal::primd_id_to_int;
 // use types::utils::dbconfig::get_euler_db_conf;
-use crate::feedback::types::Milliseconds;
 use crate::types::country::country_iso::CountryISO2;
 use crate::types::currency::Currency;
 use crate::types::merchant::id::MerchantId;
@@ -720,17 +719,18 @@ pub enum ChargeMethod {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ChargeName {
-    BASE,
-    SURCHARGE,
-    TAX_ON_SURCHARGE,
-    OFFER,
-    ADD_ON,
-    GATEWAY_ADJUSTMENT,
+    Base,
+    Surcharge,
+    TaxOnSurcharge,
+    Offer,
+    AddOn,
+    GatewayAdjustment,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TransactionLatency {
     #[serde(rename = "gatewayLatency")]
-    pub gatewayLatency: Option<f64>,
+    pub gateway_latency: Option<f64>,
 }

@@ -11,10 +11,13 @@ port = 3001        # The port where the server should be hosted on
 request_count = 1 # The requests per duration
 duration = 60     # duration to rate limit the delete api (in sec)
 
-
 [cache]
 tti = 7200          # Idle time after a get/insert of a cache entry to free the cache (in secs)
 max_capacity = 5000 # Max capacity of a single table cache
+
+[cache_config]
+service_config_redis_prefix = "DE_service_config_"
+service_config_ttl = 300    # 5 minutes
 
 [database]
 username = "sam"   # username for the database
@@ -63,4 +66,3 @@ private_key = "key.pem"  # path to the private key file (`pem` format)
 client_idle_timeout = 90    # timeout for idle sockets being kept-alive
 pool_max_idle_per_host = 10 # maximum idle connection per host allowed in the pool.
 identity = ""               # identity to be used for client certificate authentication in mtls.
-

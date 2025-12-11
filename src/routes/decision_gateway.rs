@@ -1,9 +1,11 @@
+use std::time::Instant;
+
 use crate::decider::gatewaydecider::{
-    flows::deciderFullPayloadHSFunction,
+    flows::decider_full_payload_hs_function,
     types::{DecidedGateway, DomainDeciderRequest, ErrorResponse, UnifiedError},
 };
+use crate::logger;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
-use crate::{logger, metrics};
 use axum::body::to_bytes;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
@@ -36,6 +38,7 @@ impl IntoResponse for ErrorResponse {
 pub struct DecidedGatewayResponse {
     pub decided_gateway: DecidedGateway,
     pub filter_list: Vec<(String, Vec<String>)>,
+    pub latency: Option<u64>,
 }
 
 #[axum::debug_handler]
@@ -46,7 +49,7 @@ where
     DecidedGatewayResponse: IntoResponse,
     ErrorResponse: IntoResponse,
 {
-    let cpu_start = ProcessTime::now();
+    let cpu_start = Instant::now();
     let timer = API_LATENCY_HISTOGRAM
         .with_label_values(&["decision_gateway"])
         .start_timer();
@@ -134,10 +137,14 @@ where
             tracing::Span::current().record("txn_uuid", payload.txnDetail.txnUuid.clone());
             tracing::Span::current()
                 .record("udf_order_id", payload.orderReference.orderId.0.as_str());
+            tracing::Span::current().record(
+                "is_audit_trail_log",
+                payload.shouldConsumeResult.unwrap_or(false),
+            );
             jemalloc_ctl::epoch::advance().unwrap();
             let allocated_before = jemalloc_ctl::stats::allocated::read().unwrap_or(0);
 
-            let result = deciderFullPayloadHSFunction(payload.clone()).await;
+            let result = decider_full_payload_hs_function(payload.clone()).await;
 
             jemalloc_ctl::epoch::advance().unwrap();
             let allocated_after = jemalloc_ctl::stats::allocated::read().unwrap_or(0);
@@ -145,9 +152,11 @@ where
 
             let final_result = match result {
                 Ok((decided_gateway, filter_list)) => {
+                    let cpu_time = cpu_start.elapsed().as_millis() as u64;
                     let response = DecidedGatewayResponse {
                         decided_gateway,
                         filter_list,
+                        latency: Some(cpu_time),
                     };
 
                     // Serialize response body and headers for logging
@@ -170,7 +179,7 @@ where
                         env =
                             std::env::var("APP_ENV").unwrap_or_else(|_| "development".to_string()),
                         action = "POST",
-                        req_body = String::from_utf8_lossy(&body).to_string(),
+                        req_body = format!("{:?}", payload),
                         req_headers = format!("{:?}", headers),
                         res_body = res_body,
                         res_code = 200,

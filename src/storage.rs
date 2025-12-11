@@ -1,9 +1,11 @@
 use crate::{
     config::Database,
-    config::PgDatabase,
     error::{self, ContainerError},
     logger,
 };
+
+#[cfg(feature = "postgres")]
+use crate::config::PgDatabase;
 
 use crate::generics::StorageResult;
 use bb8::PooledConnection;
@@ -70,9 +72,6 @@ pub type MysqlPool = bb8::Pool<MysqlPooledConn>;
 
 #[cfg(feature = "postgres")]
 type DeadPoolConnType = Object<AsyncPgConnection>;
-
-#[cfg(feature = "mysql")]
-type DeadPoolConnType = Object<AsyncMysqlConnection>;
 
 #[cfg(feature = "postgres")]
 impl Storage {
@@ -155,7 +154,7 @@ impl Storage {
         let timeout_duration = Duration::from_secs(10);
         match time::timeout(timeout_duration, self.pg_pool.get()).await {
             Ok(Ok(conn)) => {
-                logger::info!(
+                logger::debug!(
                     action = "DB_CONNECTION_SUCCESS",
                     "connection to db successful"
                 );

@@ -6,9 +6,9 @@ use crate::types::money::internal as ETMo;
 use crate::types::order::udfs::UDFs;
 use crate::types::transaction::id as ETId;
 use crate::types::txn_details::types::TxnObjectType;
-use masking::Secret;
+use masking::{PeekInterface, Secret};
 use serde::ser::SerializeStruct;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value as AValue;
 use std::collections::HashMap as HMap;
 use std::collections::HashMap;
@@ -23,8 +23,8 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 // use data::reflection::Given;
 // use data::time::{UTCTime, LocalTime};
 // use unsafe_coerce::unsafeCoerce;
+use crate::decider::gatewaydecider::utils::mask_secret_option;
 use crate::types::card as ETCa;
-use crate::types::gateway as ETG;
 use crate::types::merchant as ETM;
 use crate::types::merchant::id::MerchantId;
 use crate::types::order as ETO;
@@ -37,7 +37,6 @@ use crate::types::gateway_routing_input as ETGRI;
 // use eulerhs::language as L;
 // use juspay::extra::parsing as Parsing;
 use crate::types::customer as ETCu;
-use crate::types::payment as ETP;
 use diesel::sql_types;
 use std::fmt;
 
@@ -77,6 +76,7 @@ pub enum DeciderFilterName {
     FilterGatewaysForEMITenureSpecficGatewayCreds,
     FilterFunctionalGatewaysForReversePennyDrop,
     FilterFunctionalGatewaysForOTM,
+    FilterFunctionalGatewaysForPixFlows,
 }
 
 impl fmt::Display for DeciderFilterName {
@@ -159,6 +159,9 @@ impl fmt::Display for DeciderFilterName {
             Self::FilterFunctionalGatewaysForOTM => {
                 write!(f, "FilterFunctionalGatewaysForOTM")
             }
+            Self::FilterFunctionalGatewaysForPixFlows => {
+                write!(f, "FilterFunctionalGatewaysForPixFlows")
+            }
         }
     }
 }
@@ -180,27 +183,30 @@ pub enum DeciderScoringName {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum DetailedGatewayScoringType {
-    ELIMINATION_PENALISE,
-    ELIMINATION_REWARD,
-    SRV2_PENALISE,
-    SRV2_REWARD,
-    SRV3_PENALISE,
-    SRV3_REWARD,
+    EliminationPenalise,
+    EliminationReward,
+    Srv2Penalise,
+    Srv2Reward,
+    Srv3Penalise,
+    Srv3Reward,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum RoutingFlowType {
-    ELIMINATION_FLOW,
-    SRV2_FLOW,
-    SRV3_FLOW,
+    EliminationFlow,
+    Srv2Flow,
+    Srv3Flow,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ScoreUpdateStatus {
-    PENALISED,
-    REWARDED,
-    NOT_INITIATED,
+    Penalised,
+    Rewarded,
+    NotInitiated,
 }
 
 pub type GatewayScoreMap = HMap<String, f64>;
@@ -264,7 +270,7 @@ pub struct GatewayScoringTypeLogData {
 
 #[derive(Debug)]
 pub struct GatewayScoringTypeLog {
-    pub log_data: AValue,
+    pub data: AValue,
 }
 
 impl Serialize for GatewayScoringTypeLog {
@@ -273,7 +279,7 @@ impl Serialize for GatewayScoringTypeLog {
         S: serde::Serializer,
     {
         let mut state = serializer.serialize_struct("GatewayScoringTypeLog", 1)?;
-        state.serialize_field("data", &self.log_data)?;
+        state.serialize_field("data", &self.data)?;
         state.end()
     }
 }
@@ -288,7 +294,7 @@ impl<'de> Deserialize<'de> for GatewayScoringTypeLog {
             &["data"],
             GatewayScoringTypeLogVisitor,
         )?;
-        Ok(Self { log_data: data })
+        Ok(Self { data })
     }
 }
 
@@ -297,7 +303,7 @@ struct GatewayScoringTypeLogVisitor;
 impl<'de> serde::de::Visitor<'de> for GatewayScoringTypeLogVisitor {
     type Value = AValue;
 
-    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str("struct GatewayScoringTypeLog")
     }
 
@@ -401,7 +407,8 @@ pub struct MessageFormat {
     pub log_type: String,
     pub payment_method: String,
     pub payment_method_type: String,
-    pub payment_source: Option<String>,
+    #[serde(serialize_with = "mask_secret_option")]
+    pub payment_source: Option<Secret<String>>,
     pub source_object: Option<String>,
     pub txn_detail_id: ETTD::TxnDetailId,
     pub stage: String,
@@ -414,6 +421,7 @@ pub struct MessageFormat {
     pub x_request_id: Option<String>,
     #[serde(rename = "data")]
     pub log_data: AValue,
+    pub udf_consumed: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -491,7 +499,7 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
             dateCreated: date_created,
             gatewayBeforeDowntimeEvaluation: None,
         },
-        gwDeciderApproach: GatewayDeciderApproach::NONE,
+        gwDeciderApproach: GatewayDeciderApproach::None,
         srElminiationApproachInfo: vec![],
         allMgas: None,
         paymentFlowList: vec![],
@@ -501,7 +509,7 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
         isSrV3MetricEnabled: false,
         isPrimaryGateway: Some(true),
         experiment_tag: None,
-        reset_approach: ResetApproach::NO_RESET,
+        reset_approach: ResetApproach::NoReset,
         routing_dimension: None,
         routing_dimension_level: None,
         isScheduledOutage: false,
@@ -534,7 +542,9 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
             cardSwitchProvider: None,
             currency: None,
             country: None,
-            is_legacy_decider_flow: false,
+            is_legacy_decider_flow: true,
+            udfs: None,
+            udfs_consumed_for_routing: None,
             gatewayReferenceId: None,
         },
     }
@@ -549,7 +559,8 @@ pub struct GatewayScoringData {
     pub cardType: Option<String>,
     pub bankCode: Option<String>,
     pub authType: Option<String>,
-    pub paymentSource: Option<String>,
+    #[serde(serialize_with = "mask_secret_option")]
+    pub paymentSource: Option<Secret<String>>,
     pub isPaymentSourceEnabledForSrRouting: bool,
     pub isAuthLevelEnabledForSrRouting: bool,
     pub isBankLevelEnabledForSrRouting: bool,
@@ -564,12 +575,25 @@ pub struct GatewayScoringData {
     pub country: Option<CountryISO2>,
     pub is_legacy_decider_flow: bool,
     pub gatewayReferenceId: Option<String>,
+    pub udfs: Option<UDFs>,
+    pub udfs_consumed_for_routing: Option<String>,
+}
+
+impl GatewayScoringData {
+    pub fn get_payment_source(&self) -> String {
+        self.paymentSource
+            .as_ref()
+            .map(|s| s.peek().to_string())
+            .unwrap_or_default()
+    }
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct MetricsStreamKeyShard(String, i32);
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct MetricsStreamKey(String);
 
 // # TODO - Implement RedisKey for MetricsStreamKeyShard
@@ -589,67 +613,72 @@ pub struct MetricsStreamKey(String);
 // }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ScoreKeyType {
-    ELIMINATION_GLOBAL_KEY,
-    ELIMINATION_MERCHANT_KEY,
-    OUTAGE_GLOBAL_KEY,
-    OUTAGE_MERCHANT_KEY,
-    SR_V2_KEY,
-    SR_V3_KEY,
+    EliminationGlobalKey,
+    EliminationMerchantKey,
+    OutageGlobalKey,
+    OutageMerchantKey,
+    SrV2Key,
+    SrV3Key,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum GatewayDeciderApproach {
-    SR_SELECTION,
-    SR_SELECTION_V2_ROUTING,
-    SR_SELECTION_V3_ROUTING,
-    PRIORITY_LOGIC,
-    DEFAULT,
-    NONE,
-    MERCHANT_PREFERENCE,
-    PL_ALL_DOWNTIME_ROUTING,
-    PL_DOWNTIME_ROUTING,
-    PL_GLOBAL_DOWNTIME_ROUTING,
-    SR_V2_ALL_DOWNTIME_ROUTING,
-    SR_V2_DOWNTIME_ROUTING,
-    SR_V2_GLOBAL_DOWNTIME_ROUTING,
-    SR_V2_HEDGING,
-    SR_V2_ALL_DOWNTIME_HEDGING,
-    SR_V2_DOWNTIME_HEDGING,
-    SR_V2_GLOBAL_DOWNTIME_HEDGING,
-    SR_V3_ALL_DOWNTIME_ROUTING,
-    SR_V3_DOWNTIME_ROUTING,
-    SR_V3_GLOBAL_DOWNTIME_ROUTING,
-    SR_V3_HEDGING,
-    SR_V3_ALL_DOWNTIME_HEDGING,
-    SR_V3_DOWNTIME_HEDGING,
-    SR_V3_GLOBAL_DOWNTIME_HEDGING,
-    NTW_BASED_ROUTING,
+    SrSelection,
+    SrSelectionV2Routing,
+    SrSelectionV3Routing,
+    PriorityLogic,
+    Default,
+    None,
+    MerchantPreference,
+    PlAllDowntimeRouting,
+    PlDowntimeRouting,
+    PlGlobalDowntimeRouting,
+    SrV2AllDowntimeRouting,
+    SrV2DowntimeRouting,
+    SrV2GlobalDowntimeRouting,
+    SrV2Hedging,
+    SrV2AllDowntimeHedging,
+    SrV2DowntimeHedging,
+    SrV2GlobalDowntimeHedging,
+    SrV3AllDowntimeRouting,
+    SrV3DowntimeRouting,
+    SrV3GlobalDowntimeRouting,
+    SrV3Hedging,
+    SrV3AllDowntimeHedging,
+    SrV3DowntimeHedging,
+    SrV3GlobalDowntimeHedging,
+    NtwBasedRouting,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum DownTime {
-    ALL_DOWNTIME,
-    GLOBAL_DOWNTIME,
-    DOWNTIME,
-    NO_DOWNTIME,
+    AllDowntime,
+    GlobalDowntime,
+    Downtime,
+    NoDowntime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ResetApproach {
-    ELIMINATION_RESET,
-    SRV2_RESET,
-    SRV3_RESET,
-    NO_RESET,
-    SRV2_ELIMINATION_RESET,
-    SRV3_ELIMINATION_RESET,
+    EliminationReset,
+    Srv2Reset,
+    Srv3Reset,
+    NoReset,
+    Srv2EliminationReset,
+    Srv3EliminationReset,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum RankingAlgorithm {
-    SR_BASED_ROUTING,
-    PL_BASED_ROUTING,
-    NTW_BASED_ROUTING,
+    SrBasedRouting,
+    PlBasedRouting,
+    NtwBasedRouting,
 }
 
 // pub type DeciderFlow<R> = for<'a> fn(&'a mut (dyn MonadFlow + 'a)) -> ReaderT<DeciderParams, StateT<DeciderState, &'a mut (dyn MonadFlow + 'a)>, R>;
@@ -864,7 +893,8 @@ pub struct ApiTxnCardInfo {
     pub paymentMethodType: Option<String>,
     pub paymentMethod: Option<String>,
     pub cardGlobalFingerprint: Option<String>,
-    pub paymentSource: Option<String>,
+    #[serde(serialize_with = "mask_secret_option")]
+    pub paymentSource: Option<Secret<String>>,
     pub authType: Option<String>,
     pub partitionKey: Option<PrimitiveDateTime>,
 }
@@ -903,37 +933,64 @@ pub struct DomainDeciderRequest {
 
 // impl Given<SecretContext> for DomainDeciderRequest {}
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DomainDeciderRequestForApiCallV2 {
-    pub paymentInfo: PaymentInfo,
-    pub merchantId: String,
-    pub eligibleGatewayList: Option<Vec<String>>,
-    pub rankingAlgorithm: Option<RankingAlgorithm>,
-    pub eliminationEnabled: Option<bool>,
+    pub payment_info: PaymentInfo,
+    pub merchant_id: String,
+    pub eligible_gateway_list: Option<Vec<String>>,
+    pub ranking_algorithm: Option<RankingAlgorithm>,
+    pub elimination_enabled: Option<bool>,
+}
+
+pub fn deserialize_optional_udfs_to_hashmap<'de, D>(
+    deserializer: D,
+) -> Result<Option<UDFs>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    // First try to deserialize as Option<Vec<Option<String>>>
+    let opt_raw_vec: Option<Vec<Option<String>>> = Option::deserialize(deserializer)?;
+
+    match opt_raw_vec {
+        None => Ok(None),
+        Some(raw_vec) => {
+            // Convert the Vec<Option<String>> to a HashMap<i32, String>
+            let hashmap: HashMap<i32, String> = raw_vec
+                .into_iter()
+                .enumerate()
+                .filter_map(|(index, value)| value.map(|v| (index as i32, v)))
+                .collect();
+
+            Ok(Some(UDFs(hashmap)))
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PaymentInfo {
-    paymentId: String,
+    payment_id: String,
     pub amount: f64,
     currency: Currency,
     country: Option<CountryISO2>,
-    customerId: Option<ETCu::CustomerId>,
+    customer_id: Option<ETCu::CustomerId>,
+    #[serde(default, deserialize_with = "deserialize_optional_udfs_to_hashmap")]
     udfs: Option<UDFs>,
-    preferredGateway: Option<String>,
-    paymentType: TxnObjectType,
+    preferred_gateway: Option<String>,
+    payment_type: TxnObjectType,
     pub metadata: Option<String>,
-    internalMetadata: Option<String>,
-    isEmi: Option<bool>,
-    emiBank: Option<String>,
-    emiTenure: Option<i32>,
-    paymentMethodType: String,
-    paymentMethod: String,
-    paymentSource: Option<String>,
-    authType: Option<ETCa::txn_card_info::AuthType>,
-    cardIssuerBankName: Option<String>,
-    pub cardIsin: Option<String>,
-    cardType: Option<ETCa::card_type::CardType>,
-    cardSwitchProvider: Option<Secret<String>>,
+    internal_metadata: Option<String>,
+    is_emi: Option<bool>,
+    emi_bank: Option<String>,
+    emi_tenure: Option<i32>,
+    payment_method_type: String,
+    payment_method: String,
+    payment_source: Option<String>,
+    auth_type: Option<ETCa::txn_card_info::AuthType>,
+    card_issuer_bank_name: Option<String>,
+    pub card_isin: Option<String>,
+    card_type: Option<ETCa::card_type::CardType>,
+    card_switch_provider: Option<Secret<String>>,
 }
 
 // write a function to transfer DomainDeciderRequestForApiCallV2 to DomainDeciderRequest
@@ -943,64 +1000,64 @@ impl DomainDeciderRequestForApiCallV2 {
         DomainDeciderRequest {
             orderReference: ETO::Order {
                 id: ETO::id::to_order_prim_id(1),
-                amount: ETMo::Money::from_double(self.paymentInfo.amount),
-                currency: self.paymentInfo.currency.clone(),
+                amount: ETMo::Money::from_double(self.payment_info.amount),
+                currency: self.payment_info.currency.clone(),
                 dateCreated: OffsetDateTime::now_utc(),
-                merchantId: ETM::id::to_merchant_id(self.merchantId.clone()),
-                orderId: ETO::id::to_order_id(self.paymentInfo.paymentId.clone()),
+                merchantId: ETM::id::to_merchant_id(self.merchant_id.clone()),
+                orderId: ETO::id::to_order_id(self.payment_info.payment_id.clone()),
                 status: ETO::OrderStatus::Created,
                 description: None,
-                customerId: self.paymentInfo.customerId.clone(),
+                customerId: self.payment_info.customer_id.clone(),
                 udfs: self
-                    .paymentInfo
+                    .payment_info
                     .udfs
                     .clone()
                     .unwrap_or(UDFs(HashMap::new())),
-                preferredGateway: self.paymentInfo.preferredGateway.clone(),
+                preferredGateway: self.payment_info.preferred_gateway.clone(),
                 productId: None,
                 orderType: ETO::OrderType::from_txn_object_type(
-                    self.paymentInfo.paymentType.clone(),
+                    self.payment_info.payment_type.clone(),
                 ),
-                metadata: self.paymentInfo.metadata.clone(),
-                internalMetadata: self.paymentInfo.internalMetadata.clone(),
+                metadata: self.payment_info.metadata.clone(),
+                internalMetadata: self.payment_info.internal_metadata.clone(),
             },
             shouldConsumeResult: None,
             orderMetadata: ETOMV2::OrderMetadataV2 {
                 id: ETOMV2::to_order_metadata_v2_pid(1),
                 date_created: OffsetDateTime::now_utc(),
                 last_updated: OffsetDateTime::now_utc(),
-                metadata: self.paymentInfo.metadata.clone(),
+                metadata: self.payment_info.metadata.clone(),
                 order_reference_id: 1,
                 ip_address: None,
                 partition_key: None,
             },
             txnDetail: ETTD::TxnDetail {
                 id: ETTD::to_txn_detail_id(1),
-                orderId: ETO::id::to_order_id(self.paymentInfo.paymentId.clone()),
+                orderId: ETO::id::to_order_id(self.payment_info.payment_id.clone()),
                 status: ETTD::TxnStatus::Started,
-                txnId: ETId::to_transaction_id(self.paymentInfo.paymentId.clone()),
+                txnId: ETId::to_transaction_id(self.payment_info.payment_id.clone()),
                 txnType: Some("NOT_DEFINED".to_string()),
                 dateCreated: OffsetDateTime::now_utc(),
                 addToLocker: Some(false),
-                merchantId: ETM::id::to_merchant_id(self.merchantId.clone()),
+                merchantId: ETM::id::to_merchant_id(self.merchant_id.clone()),
                 gateway: None,
                 expressCheckout: Some(false),
-                isEmi: Some(self.paymentInfo.isEmi.clone().unwrap_or(false)),
-                emiBank: self.paymentInfo.emiBank.clone(),
-                emiTenure: self.paymentInfo.emiTenure.clone(),
-                txnUuid: self.paymentInfo.paymentId.clone(),
+                isEmi: Some(self.payment_info.is_emi.clone().unwrap_or(false)),
+                emiBank: self.payment_info.emi_bank.clone(),
+                emiTenure: self.payment_info.emi_tenure.clone(),
+                txnUuid: self.payment_info.payment_id.clone(),
                 merchantGatewayAccountId: None,
-                txnAmount: Some(ETMo::Money::from_double(self.paymentInfo.amount)),
-                txnObjectType: Some(self.paymentInfo.paymentType.clone()),
-                sourceObject: Some(self.paymentInfo.paymentMethod.clone()),
+                txnAmount: Some(ETMo::Money::from_double(self.payment_info.amount)),
+                txnObjectType: Some(self.payment_info.payment_type.clone()),
+                sourceObject: Some(self.payment_info.payment_method.clone()),
                 sourceObjectId: None,
-                currency: self.paymentInfo.currency.clone(),
-                country: self.paymentInfo.country.clone(),
-                netAmount: Some(ETMo::Money::from_double(self.paymentInfo.amount)),
+                currency: self.payment_info.currency.clone(),
+                country: self.payment_info.country.clone(),
+                netAmount: Some(ETMo::Money::from_double(self.payment_info.amount)),
                 surchargeAmount: None,
                 taxAmount: None,
-                internalMetadata: self.paymentInfo.internalMetadata.clone().map(Secret::new),
-                metadata: self.paymentInfo.metadata.clone().map(Secret::new),
+                internalMetadata: self.payment_info.internal_metadata.clone().map(Secret::new),
+                metadata: self.payment_info.metadata.clone().map(Secret::new),
                 offerDeductionAmount: None,
                 internalTrackingInfo: None,
                 partitionKey: None,
@@ -1009,20 +1066,20 @@ impl DomainDeciderRequestForApiCallV2 {
             txnOfferDetails: None,
             txnCardInfo: ETCa::txn_card_info::TxnCardInfo {
                 id: ETCa::txn_card_info::to_txn_card_info_pid(1),
-                card_isin: self.paymentInfo.cardIsin.clone(),
-                cardIssuerBankName: self.paymentInfo.cardIssuerBankName.clone(),
-                cardSwitchProvider: self.paymentInfo.cardSwitchProvider.clone(),
-                card_type: self.paymentInfo.cardType.clone(),
+                card_isin: self.payment_info.card_isin.clone(),
+                cardIssuerBankName: self.payment_info.card_issuer_bank_name.clone(),
+                cardSwitchProvider: self.payment_info.card_switch_provider.clone(),
+                card_type: self.payment_info.card_type.clone(),
                 nameOnCard: None,
                 dateCreated: OffsetDateTime::now_utc(),
-                paymentMethodType: self.paymentInfo.paymentMethodType.to_string(),
-                paymentMethod: self.paymentInfo.paymentMethod.clone(),
-                paymentSource: self.paymentInfo.paymentSource.clone(),
-                authType: self.paymentInfo.authType.clone(),
+                paymentMethodType: self.payment_info.payment_method_type.to_string(),
+                paymentMethod: self.payment_info.payment_method.clone(),
+                paymentSource: self.payment_info.payment_source.clone().map(Secret::new),
+                authType: self.payment_info.auth_type.clone(),
                 partitionKey: None,
             },
             merchantAccount: ETM::merchant_account::load_merchant_by_merchant_id(
-                self.merchantId.clone(),
+                self.merchant_id.clone(),
             )
             .await
             .expect("Merchant account not found"),
@@ -1222,6 +1279,7 @@ pub struct DecidedGateway {
     pub is_dynamic_mga_enabled: bool,
     pub gateway_mga_id_map: Option<AValue>,
     pub is_rust_based_decider: bool,
+    pub latency: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Clone, Deserialize)]
@@ -1292,19 +1350,21 @@ pub struct Offer {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum EmiType {
-    NO_COST_EMI,
-    LOW_COST_EMI,
+    NoCostEmi,
+    LowCostEmi,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ValidationType {
-    CARD_MANDATE,
-    EMANDATE,
-    TPV,
-    TPV_MANDATE,
-    REWARD,
-    TPV_EMANDATE,
+    CardMandate,
+    Emandate,
+    Tpv,
+    TpvMandate,
+    Reward,
+    TpvEmandate,
 }
 
 impl fmt::Display for DeciderScoringName {
@@ -1339,12 +1399,12 @@ impl fmt::Display for DeciderScoringName {
 impl fmt::Display for DetailedGatewayScoringType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ELIMINATION_PENALISE => write!(f, "ELIMINATION_PENALISE"),
-            Self::ELIMINATION_REWARD => write!(f, "ELIMINATION_REWARD"),
-            Self::SRV2_PENALISE => write!(f, "SRV2_PENALISE"),
-            Self::SRV2_REWARD => write!(f, "SRV2_REWARD"),
-            Self::SRV3_PENALISE => write!(f, "SRV3_PENALISE"),
-            Self::SRV3_REWARD => write!(f, "SRV3_REWARD"),
+            Self::EliminationPenalise => write!(f, "ELIMINATION_PENALISE"),
+            Self::EliminationReward => write!(f, "ELIMINATION_REWARD"),
+            Self::Srv2Penalise => write!(f, "SRV2_PENALISE"),
+            Self::Srv2Reward => write!(f, "SRV2_REWARD"),
+            Self::Srv3Penalise => write!(f, "SRV3_PENALISE"),
+            Self::Srv3Reward => write!(f, "SRV3_REWARD"),
         }
     }
 }
@@ -1352,9 +1412,9 @@ impl fmt::Display for DetailedGatewayScoringType {
 impl fmt::Display for RoutingFlowType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ELIMINATION_FLOW => write!(f, "ELIMINATION_FLOW"),
-            Self::SRV2_FLOW => write!(f, "SRV2_FLOW"),
-            Self::SRV3_FLOW => write!(f, "SRV3_FLOW"),
+            Self::EliminationFlow => write!(f, "ELIMINATION_FLOW"),
+            Self::Srv2Flow => write!(f, "SRV2_FLOW"),
+            Self::Srv3Flow => write!(f, "SRV3_FLOW"),
         }
     }
 }
@@ -1362,9 +1422,9 @@ impl fmt::Display for RoutingFlowType {
 impl fmt::Display for ScoreUpdateStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::PENALISED => write!(f, "PENALISED"),
-            Self::REWARDED => write!(f, "REWARDED"),
-            Self::NOT_INITIATED => write!(f, "NOT_INITIATED"),
+            Self::Penalised => write!(f, "PENALISED"),
+            Self::Rewarded => write!(f, "REWARDED"),
+            Self::NotInitiated => write!(f, "NOT_INITIATED"),
         }
     }
 }
@@ -1372,12 +1432,12 @@ impl fmt::Display for ScoreUpdateStatus {
 impl fmt::Display for ScoreKeyType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ELIMINATION_GLOBAL_KEY => write!(f, "ELIMINATION_GLOBAL_KEY"),
-            Self::ELIMINATION_MERCHANT_KEY => write!(f, "ELIMINATION_MERCHANT_KEY"),
-            Self::OUTAGE_GLOBAL_KEY => write!(f, "OUTAGE_GLOBAL_KEY"),
-            Self::OUTAGE_MERCHANT_KEY => write!(f, "OUTAGE_MERCHANT_KEY"),
-            Self::SR_V2_KEY => write!(f, "SR_V2_KEY"),
-            Self::SR_V3_KEY => write!(f, "SR_V3_KEY"),
+            Self::EliminationGlobalKey => write!(f, "ELIMINATION_GLOBAL_KEY"),
+            Self::EliminationMerchantKey => write!(f, "ELIMINATION_MERCHANT_KEY"),
+            Self::OutageGlobalKey => write!(f, "OUTAGE_GLOBAL_KEY"),
+            Self::OutageMerchantKey => write!(f, "OUTAGE_MERCHANT_KEY"),
+            Self::SrV2Key => write!(f, "SR_V2_KEY"),
+            Self::SrV3Key => write!(f, "SR_V3_KEY"),
         }
     }
 }
@@ -1385,49 +1445,49 @@ impl fmt::Display for ScoreKeyType {
 impl fmt::Display for GatewayDeciderApproach {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::SR_SELECTION => write!(f, "SR_SELECTION"),
-            Self::SR_SELECTION_V2_ROUTING => write!(f, "SR_SELECTION_V2_ROUTING"),
-            Self::SR_SELECTION_V3_ROUTING => write!(f, "SR_SELECTION_V3_ROUTING"),
-            Self::PRIORITY_LOGIC => write!(f, "PRIORITY_LOGIC"),
-            Self::DEFAULT => write!(f, "DEFAULT"),
-            Self::NONE => write!(f, "NONE"),
-            Self::MERCHANT_PREFERENCE => write!(f, "MERCHANT_PREFERENCE"),
-            Self::PL_ALL_DOWNTIME_ROUTING => write!(f, "PL_ALL_DOWNTIME_ROUTING"),
-            Self::PL_DOWNTIME_ROUTING => write!(f, "PL_DOWNTIME_ROUTING"),
-            Self::PL_GLOBAL_DOWNTIME_ROUTING => {
+            Self::SrSelection => write!(f, "SR_SELECTION"),
+            Self::SrSelectionV2Routing => write!(f, "SR_SELECTION_V2_ROUTING"),
+            Self::SrSelectionV3Routing => write!(f, "SR_SELECTION_V3_ROUTING"),
+            Self::PriorityLogic => write!(f, "PRIORITY_LOGIC"),
+            Self::Default => write!(f, "DEFAULT"),
+            Self::None => write!(f, "NONE"),
+            Self::MerchantPreference => write!(f, "MERCHANT_PREFERENCE"),
+            Self::PlAllDowntimeRouting => write!(f, "PL_ALL_DOWNTIME_ROUTING"),
+            Self::PlDowntimeRouting => write!(f, "PL_DOWNTIME_ROUTING"),
+            Self::PlGlobalDowntimeRouting => {
                 write!(f, "PL_GLOBAL_DOWNTIME_ROUTING")
             }
-            Self::SR_V2_ALL_DOWNTIME_ROUTING => {
+            Self::SrV2AllDowntimeRouting => {
                 write!(f, "SR_V2_ALL_DOWNTIME_ROUTING")
             }
-            Self::SR_V2_DOWNTIME_ROUTING => write!(f, "SR_V2_DOWNTIME_ROUTING"),
-            Self::SR_V2_GLOBAL_DOWNTIME_ROUTING => {
+            Self::SrV2DowntimeRouting => write!(f, "SR_V2_DOWNTIME_ROUTING"),
+            Self::SrV2GlobalDowntimeRouting => {
                 write!(f, "SR_V2_GLOBAL_DOWNTIME_ROUTING")
             }
-            Self::SR_V2_HEDGING => write!(f, "SR_V2_HEDGING"),
-            Self::SR_V2_ALL_DOWNTIME_HEDGING => {
+            Self::SrV2Hedging => write!(f, "SR_V2_HEDGING"),
+            Self::SrV2AllDowntimeHedging => {
                 write!(f, "SR_V2_ALL_DOWNTIME_HEDGING")
             }
-            Self::SR_V2_DOWNTIME_HEDGING => write!(f, "SR_V2_DOWNTIME_HEDGING"),
-            Self::SR_V2_GLOBAL_DOWNTIME_HEDGING => {
+            Self::SrV2DowntimeHedging => write!(f, "SR_V2_DOWNTIME_HEDGING"),
+            Self::SrV2GlobalDowntimeHedging => {
                 write!(f, "SR_V2_GLOBAL_DOWNTIME_HEDGING")
             }
-            Self::SR_V3_ALL_DOWNTIME_ROUTING => {
+            Self::SrV3AllDowntimeRouting => {
                 write!(f, "SR_V3_ALL_DOWNTIME_ROUTING")
             }
-            Self::SR_V3_DOWNTIME_ROUTING => write!(f, "SR_V3_DOWNTIME_ROUTING"),
-            Self::SR_V3_GLOBAL_DOWNTIME_ROUTING => {
+            Self::SrV3DowntimeRouting => write!(f, "SR_V3_DOWNTIME_ROUTING"),
+            Self::SrV3GlobalDowntimeRouting => {
                 write!(f, "SR_V3_GLOBAL_DOWNTIME_ROUTING")
             }
-            Self::SR_V3_HEDGING => write!(f, "SR_V3_HEDGING"),
-            Self::SR_V3_ALL_DOWNTIME_HEDGING => {
+            Self::SrV3Hedging => write!(f, "SR_V3_HEDGING"),
+            Self::SrV3AllDowntimeHedging => {
                 write!(f, "SR_V3_ALL_DOWNTIME_HEDGING")
             }
-            Self::SR_V3_DOWNTIME_HEDGING => write!(f, "SR_V3_DOWNTIME_HEDGING"),
-            Self::SR_V3_GLOBAL_DOWNTIME_HEDGING => {
+            Self::SrV3DowntimeHedging => write!(f, "SR_V3_DOWNTIME_HEDGING"),
+            Self::SrV3GlobalDowntimeHedging => {
                 write!(f, "SR_V3_GLOBAL_DOWNTIME_HEDGING")
             }
-            Self::NTW_BASED_ROUTING => {
+            Self::NtwBasedRouting => {
                 write!(f, "NTW_BASED_ROUTING")
             }
         }
@@ -1437,10 +1497,10 @@ impl fmt::Display for GatewayDeciderApproach {
 impl fmt::Display for DownTime {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ALL_DOWNTIME => write!(f, "ALL_DOWNTIME"),
-            Self::GLOBAL_DOWNTIME => write!(f, "GLOBAL_DOWNTIME"),
-            Self::DOWNTIME => write!(f, "DOWNTIME"),
-            Self::NO_DOWNTIME => write!(f, "NO_DOWNTIME"),
+            Self::AllDowntime => write!(f, "ALL_DOWNTIME"),
+            Self::GlobalDowntime => write!(f, "GLOBAL_DOWNTIME"),
+            Self::Downtime => write!(f, "DOWNTIME"),
+            Self::NoDowntime => write!(f, "NO_DOWNTIME"),
         }
     }
 }
@@ -1448,12 +1508,12 @@ impl fmt::Display for DownTime {
 impl fmt::Display for ResetApproach {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ELIMINATION_RESET => write!(f, "ELIMINATION_RESET"),
-            Self::SRV2_RESET => write!(f, "SRV2_RESET"),
-            Self::SRV3_RESET => write!(f, "SRV3_RESET"),
-            Self::NO_RESET => write!(f, "NO_RESET"),
-            Self::SRV2_ELIMINATION_RESET => write!(f, "SRV2_ELIMINATION_RESET"),
-            Self::SRV3_ELIMINATION_RESET => write!(f, "SRV3_ELIMINATION_RESET"),
+            Self::EliminationReset => write!(f, "ELIMINATION_RESET"),
+            Self::Srv2Reset => write!(f, "SRV2_RESET"),
+            Self::Srv3Reset => write!(f, "SRV3_RESET"),
+            Self::NoReset => write!(f, "NO_RESET"),
+            Self::Srv2EliminationReset => write!(f, "SRV2_ELIMINATION_RESET"),
+            Self::Srv3EliminationReset => write!(f, "SRV3_ELIMINATION_RESET"),
         }
     }
 }
@@ -1461,12 +1521,12 @@ impl fmt::Display for ResetApproach {
 impl fmt::Display for ValidationType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::CARD_MANDATE => write!(f, "CARD_MANDATE"),
-            Self::EMANDATE => write!(f, "EMANDATE"),
-            Self::TPV => write!(f, "TPV"),
-            Self::TPV_MANDATE => write!(f, "TPV_MANDATE"),
-            Self::REWARD => write!(f, "REWARD"),
-            Self::TPV_EMANDATE => write!(f, "TPV_EMANDATE"),
+            Self::CardMandate => write!(f, "CARD_MANDATE"),
+            Self::Emandate => write!(f, "EMANDATE"),
+            Self::Tpv => write!(f, "TPV"),
+            Self::TpvMandate => write!(f, "TPV_MANDATE"),
+            Self::Reward => write!(f, "REWARD"),
+            Self::TpvEmandate => write!(f, "TPV_EMANDATE"),
         }
     }
 }
@@ -1474,8 +1534,8 @@ impl fmt::Display for ValidationType {
 impl fmt::Display for Status {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::SUCCESS => write!(f, "SUCCESS"),
-            Self::FAILURE => write!(f, "FAILURE"),
+            Self::Success => write!(f, "SUCCESS"),
+            Self::Failure => write!(f, "FAILURE"),
         }
     }
 }
@@ -1483,22 +1543,22 @@ impl fmt::Display for Status {
 impl fmt::Display for PriorityLogicFailure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NO_ERROR => write!(f, "NO_ERROR"),
-            Self::CONNECTION_FAILED => write!(f, "CONNECTION_FAILED"),
-            Self::COMPILATION_ERROR => write!(f, "COMPILATION_ERROR"),
-            Self::MEMORY_EXCEEDED => write!(f, "MEMORY_EXCEEDED"),
-            Self::GATEWAY_NAME_PARSE_FAILURE => {
+            Self::NoError => write!(f, "NO_ERROR"),
+            Self::ConnectionFailed => write!(f, "CONNECTION_FAILED"),
+            Self::CompilationError => write!(f, "COMPILATION_ERROR"),
+            Self::MemoryExceeded => write!(f, "MEMORY_EXCEEDED"),
+            Self::GatewayNameParseFailure => {
                 write!(f, "GATEWAY_NAME_PARSE_FAILURE")
             }
-            Self::RESPONSE_CONTENT_TYPE_NOT_SUPPORTED => {
+            Self::ResponseContentTypeNotSupported => {
                 write!(f, "RESPONSE_CONTENT_TYPE_NOT_SUPPORTED")
             }
-            Self::RESPONSE_DECODE_FAILURE => write!(f, "RESPONSE_DECODE_FAILURE"),
-            Self::RESPONSE_PARSE_ERROR => write!(f, "RESPONSE_PARSE_ERROR"),
-            Self::PL_EVALUATION_FAILED => write!(f, "PL_EVALUATION_FAILED"),
-            Self::NULL_AFTER_ENFORCE => write!(f, "NULL_AFTER_ENFORCE"),
-            Self::UNHANDLED_EXCEPTION => write!(f, "UNHANDLED_EXCEPTION"),
-            Self::CODE_TOO_LARGE => write!(f, "CODE_TOO_LARGE"),
+            Self::ResponseDecodeFailure => write!(f, "RESPONSE_DECODE_FAILURE"),
+            Self::ResponseParseError => write!(f, "RESPONSE_PARSE_ERROR"),
+            Self::PlEvaluationFailed => write!(f, "PL_EVALUATION_FAILED"),
+            Self::NullAfterEnforce => write!(f, "NULL_AFTER_ENFORCE"),
+            Self::UnhandledException => write!(f, "UNHANDLED_EXCEPTION"),
+            Self::CodeTooLarge => write!(f, "CODE_TOO_LARGE"),
         }
     }
 }
@@ -1517,8 +1577,8 @@ impl fmt::Display for Dimension {
 impl fmt::Display for EmiType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NO_COST_EMI => write!(f, "NO_COST_EMI"),
-            Self::LOW_COST_EMI => write!(f, "LOW_COST_EMI"),
+            Self::NoCostEmi => write!(f, "NO_COST_EMI"),
+            Self::LowCostEmi => write!(f, "LOW_COST_EMI"),
         }
     }
 }
@@ -1553,57 +1613,58 @@ pub struct ApiDeciderFullRequest {
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GatewayPriorityLogicOutput {
-    pub isEnforcement: bool,
+    pub is_enforcement: bool,
     pub gws: Vec<String>,
-    pub priorityLogicTag: Option<String>,
-    pub gatewayReferenceIds: HMap<String, String>,
-    pub primaryLogic: Option<PriorityLogicData>,
-    pub fallbackLogic: Option<PriorityLogicData>,
+    pub priority_logic_tag: Option<String>,
+    pub gateway_reference_ids: HMap<String, String>,
+    pub primary_logic: Option<PriorityLogicData>,
+    pub fallback_logic: Option<PriorityLogicData>,
 }
 
 impl GatewayPriorityLogicOutput {
     pub fn new(
-        isEnforcement: bool,
+        is_enforcement: bool,
         gws: Vec<String>,
-        priorityLogicTag: Option<String>,
-        gatewayReferenceIds: HMap<String, String>,
-        primaryLogic: Option<PriorityLogicData>,
-        fallbackLogic: Option<PriorityLogicData>,
+        priority_logic_tag: Option<String>,
+        gateway_reference_ids: HMap<String, String>,
+        primary_logic: Option<PriorityLogicData>,
+        fallback_logic: Option<PriorityLogicData>,
     ) -> Self {
         Self {
-            isEnforcement,
+            is_enforcement,
             gws,
-            priorityLogicTag,
-            gatewayReferenceIds,
-            primaryLogic,
-            fallbackLogic,
+            priority_logic_tag,
+            gateway_reference_ids,
+            primary_logic,
+            fallback_logic,
         }
     }
-    pub fn setIsEnforcement(&mut self, isEnforcement: bool) -> &mut Self {
-        self.isEnforcement = isEnforcement;
+    pub fn set_is_enforcement(&mut self, is_enforcement: bool) -> &mut Self {
+        self.is_enforcement = is_enforcement;
         self
     }
-    pub fn setPriorityLogicTag(&mut self, priorityLogicTag: Option<String>) -> &mut Self {
-        self.priorityLogicTag = priorityLogicTag;
+    pub fn set_priority_logic_tag(&mut self, priorityLogicTag: Option<String>) -> &mut Self {
+        self.priority_logic_tag = priorityLogicTag;
         self
     }
-    pub fn setPrimaryLogic(&mut self, primaryLogic: Option<PriorityLogicData>) -> &mut Self {
-        self.primaryLogic = primaryLogic;
+    pub fn set_primary_logic(&mut self, primaryLogic: Option<PriorityLogicData>) -> &mut Self {
+        self.primary_logic = primaryLogic;
         self
     }
-    pub fn setGws(&mut self, setGws: Vec<String>) -> &mut Self {
+    pub fn set_gws(&mut self, setGws: Vec<String>) -> &mut Self {
         self.gws = setGws;
         self
     }
     pub fn build(&self) -> Self {
         Self {
-            isEnforcement: self.isEnforcement,
+            is_enforcement: self.is_enforcement,
             gws: self.gws.clone(),
-            priorityLogicTag: self.priorityLogicTag.clone(),
-            gatewayReferenceIds: self.gatewayReferenceIds.clone(),
-            primaryLogic: self.primaryLogic.clone(),
-            fallbackLogic: self.fallbackLogic.clone(),
+            priority_logic_tag: self.priority_logic_tag.clone(),
+            gateway_reference_ids: self.gateway_reference_ids.clone(),
+            primary_logic: self.primary_logic.clone(),
+            fallback_logic: self.fallback_logic.clone(),
         }
     }
 }
@@ -1616,27 +1677,27 @@ pub struct PriorityLogicData {
 }
 
 #[derive(Debug, PartialEq, Clone, Eq, Serialize, Deserialize)]
-// #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum PriorityLogicFailure {
-    NO_ERROR,
-    CONNECTION_FAILED,
-    COMPILATION_ERROR,
-    MEMORY_EXCEEDED,
-    GATEWAY_NAME_PARSE_FAILURE,
-    RESPONSE_CONTENT_TYPE_NOT_SUPPORTED,
-    RESPONSE_DECODE_FAILURE,
-    RESPONSE_PARSE_ERROR,
-    PL_EVALUATION_FAILED,
-    NULL_AFTER_ENFORCE,
-    UNHANDLED_EXCEPTION,
-    CODE_TOO_LARGE,
+    NoError,
+    ConnectionFailed,
+    CompilationError,
+    MemoryExceeded,
+    GatewayNameParseFailure,
+    ResponseContentTypeNotSupported,
+    ResponseDecodeFailure,
+    ResponseParseError,
+    PlEvaluationFailed,
+    NullAfterEnforce,
+    UnhandledException,
+    CodeTooLarge,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
-// #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum Status {
-    SUCCESS,
-    FAILURE,
+    Success,
+    Failure,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1807,17 +1868,19 @@ pub struct SuccessRate1AndNConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum FilterLevel {
-    TXN_OBJECT_TYPE,
-    PAYMENT_METHOD,
-    PAYMENT_METHOD_TYPE,
+    TxnObjectType,
+    PaymentMethod,
+    PaymentMethodType,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ConfigSource {
-    GLOBAL_DEFAULT,
-    MERCHANT_DEFAULT,
-    SERVICE_CONFIG,
+    GlobalDefault,
+    MerchantDefault,
+    ServiceConfig,
     REDIS,
 }
 

@@ -37,8 +37,7 @@ pub trait ErrorTransform<From> {}
 impl<T, U> From<ContainerError<T>> for ContainerError<U>
 where
     T: error_stack::Context,
-    U: error_stack::Context,
-    for<'a> U: From<&'a T> + Sync + Send,
+    for<'a> U: error_stack::Context + From<&'a T> + Sync + Send,
     Self: ErrorTransform<ContainerError<T>>,
 {
     #[track_caller]

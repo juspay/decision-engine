@@ -18,6 +18,7 @@ use crate::logger;
 
 use super::env::get_env_var;
 use super::storage::Storage;
+use std::sync::Mutex;
 use time::format_description::well_known::Iso8601;
 use tracing::{Event, Metadata, Subscriber};
 use tracing_subscriber::{
@@ -31,7 +32,6 @@ use tracing_subscriber::{
 
 // Implicit keys
 
-const MESSAGE: &str = "message";
 const HOSTNAME: &str = "hostname";
 const PID: &str = "pid";
 const LEVEL: &str = "level";
@@ -91,6 +91,7 @@ impl fmt::Display for RecordType {
 /// `FormattingLayer` relies on the `tracing_bunyan_formatter::JsonStorageLayer` which is storage of entries.
 ///
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct FormattingLayer<W>
 where
     W: for<'a> MakeWriter<'a> + 'static,
@@ -342,7 +343,11 @@ where
                 explicit_entries_set.insert("resp_code");
             }
             if !explicit_entries_set.contains("level") {
-                map_serializer.serialize_entry("level", &Value::String("Info".to_string()))?;
+                if metadata.level() == &tracing::Level::ERROR {
+                    map_serializer.serialize_entry("level", &Value::String("Error".to_string()))?;
+                } else {
+                    map_serializer.serialize_entry("level", &Value::String("Info".to_string()))?;
+                }
                 explicit_entries_set.insert("level");
             }
             if !explicit_entries_set.contains("cell_id") {
@@ -350,8 +355,6 @@ where
                 explicit_entries_set.insert("cell_id");
             }
         } else {
-            // DOMAIN category logic.
-            // Serialize keys from the span that match the domain keys array.
             if let Some(span) = span {
                 let extensions = span.extensions();
                 if let Some(visitor) = extensions.get::<Storage<'_>>() {
@@ -613,17 +616,7 @@ where
         }
     }
 
-    fn on_enter(&self, id: &tracing::Id, ctx: Context<'_, S>) {
-        let span = ctx.span(id).expect("No span");
-        if let Ok(serialized) = self.span_serialize(&span, RecordType::EnterSpan) {
-            let _ = self.flush(serialized);
-        }
-    }
+    fn on_enter(&self, _id: &tracing::Id, _ctx: Context<'_, S>) {}
 
-    fn on_close(&self, id: tracing::Id, ctx: Context<'_, S>) {
-        let span = ctx.span(&id).expect("No span");
-        if let Ok(serialized) = self.span_serialize(&span, RecordType::ExitSpan) {
-            let _ = self.flush(serialized);
-        }
-    }
+    fn on_close(&self, _id: tracing::Id, _ctx: Context<'_, S>) {}
 }

@@ -10,9 +10,10 @@ pub struct MerchantConfigPId(pub String);
 pub struct ConfigName(pub String);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ConfigCategory {
-    PAYMENT_FLOW,
-    GENERAL_CONFIG,
+    PaymentFlow,
+    GeneralConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -49,8 +50,8 @@ pub fn to_merchant_config_pid(id: String) -> MerchantConfigPId {
 
 pub fn config_category_to_text(category: ConfigCategory) -> String {
     match category {
-        ConfigCategory::PAYMENT_FLOW => "PAYMENT_FLOW".to_string(),
-        ConfigCategory::GENERAL_CONFIG => "GENERAL_CONFIG".to_string(),
+        ConfigCategory::PaymentFlow => "PAYMENT_FLOW".to_string(),
+        ConfigCategory::GeneralConfig => "GENERAL_CONFIG".to_string(),
     }
 }
 
@@ -60,8 +61,8 @@ pub fn to_config_name(name: &str) -> ConfigName {
 
 pub fn to_config_category(category: &str) -> Result<ConfigCategory, ApiError> {
     match category {
-        "PAYMENT_FLOW" => Ok(ConfigCategory::PAYMENT_FLOW),
-        "GENERAL_CONFIG" => Ok(ConfigCategory::GENERAL_CONFIG),
+        "PAYMENT_FLOW" => Ok(ConfigCategory::PaymentFlow),
+        "GENERAL_CONFIG" => Ok(ConfigCategory::GeneralConfig),
         _ => Err(ApiError::ParsingError("Invalid ConfigCategory")),
     }
 }
@@ -85,8 +86,8 @@ pub fn config_status_to_text(status: ConfigStatus) -> String {
 impl Display for ConfigCategory {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::PAYMENT_FLOW => write!(f, "PAYMENT_FLOW"),
-            Self::GENERAL_CONFIG => write!(f, "GENERAL_CONFIG"),
+            Self::PaymentFlow => write!(f, "PAYMENT_FLOW"),
+            Self::GeneralConfig => write!(f, "GENERAL_CONFIG"),
         }
     }
 }

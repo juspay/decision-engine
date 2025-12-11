@@ -8,7 +8,6 @@ use diesel::associations::HasTable;
 use diesel::*;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
-use std::error::Error;
 use std::option::Option;
 use std::string::String;
 use std::vec::Vec;

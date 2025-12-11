@@ -18,11 +18,9 @@ use crate::feedback::types::{
     CachedGatewayScore, InternalMetadata, InternalTrackingInfo, MandateTxnInfo, MandateTxnType,
     UpdateScorePayload,
 };
-use crate::storage::types::TxnCardInfo;
 use crate::types::money::internal::Money;
 use crate::types::order as ETO;
 use crate::types::transaction::id as ETId;
-use crate::types::{currency::Currency, txn_details::types::TransactionLatency};
 use fred::prelude::{KeysInterface, ListInterface};
 // use sequelize::{ModelMeta, OrderBy, Set, Where};
 use crate::types::card as ETCa;
@@ -49,7 +47,7 @@ use crate::types::money::internal as ETMo;
 // use data::time::local_time as DTL;
 // use data::time::format as DTF;
 // use juspay::extra::json::decode_json;
-use crate::decider::gatewaydecider::utils::{get_unified_key, get_value};
+use crate::decider::gatewaydecider::utils::get_unified_key;
 // use control::monad::except::{run_except, ExceptT};
 // use data::byte_string::lazy as BSL;
 // use ghc::generics::Generic;
@@ -66,22 +64,21 @@ use crate::types::txn_details::types::{self as ETTD, TxnDetail, TxnObjectType};
 // use crate::control::exception as CE;
 // use juspay::extra::non_empty_text as NE;
 use crate::types::merchant as ETM;
-use crate::types::payment::payment_method as ETP;
 // use types::money::{from_double, Money};
 // use optics::core::{preview, review};
 // use control::category::<<<;
-use super::constants::gatewayScoringData;
-use crate::types::gateway::{gateway_any_to_text, GatewayAny};
 // use prelude::real_to_frac;
 // use data::time::clock::posix as DTP;
 use crate::logger;
+use time::format_description::well_known::Iso8601;
 // Converted data types
 // Original Haskell data type: GatewayScoringType
 #[derive(Debug, Serialize, Clone, Deserialize, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum GatewayScoringType {
-    PENALISE,
-    PENALISE_SRV3,
-    REWARD,
+    Penalise,
+    PenaliseSrv3,
+    Reward,
 }
 
 // Original Haskell data type: JuspayBankCode
@@ -161,25 +158,25 @@ pub fn convertSuccessResponseIdFlip(x: i32) -> ETTD::SuccessResponseId {
     ETTD::SuccessResponseId(x as i64)
 }
 
-pub fn getTxnDetailFromApiPayload(
-    apiPayload: UpdateScorePayload,
+pub fn get_txn_detail_from_api_payload(
+    api_payload: UpdateScorePayload,
     gateway_scoring_data: GatewayScoringData,
 ) -> Result<ETTD::TxnDetail, crate::error::ApiError> {
     let txn_detail = ETTD::TxnDetail {
         id: ETTD::to_txn_detail_id(1),
         dateCreated: gateway_scoring_data.dateCreated,
-        orderId: ETO::id::to_order_id(apiPayload.paymentId.clone()),
-        status: apiPayload.status.clone(),
-        txnId: ETId::to_transaction_id(apiPayload.paymentId.clone()),
+        orderId: ETO::id::to_order_id(api_payload.payment_id.clone()),
+        status: api_payload.status.clone(),
+        txnId: ETId::to_transaction_id(api_payload.payment_id.clone()),
         txnType: Some("NOT_DEFINED".to_string()),
         addToLocker: Some(false),
-        merchantId: ETM::id::to_merchant_id(apiPayload.merchantId.clone()),
-        gateway: Some(apiPayload.gateway),
+        merchantId: ETM::id::to_merchant_id(api_payload.merchant_id.clone()),
+        gateway: Some(api_payload.gateway),
         expressCheckout: Some(false),
         isEmi: Some(false),
         emiBank: None,
         emiTenure: None,
-        txnUuid: apiPayload.paymentId.clone(),
+        txnUuid: api_payload.payment_id.clone(),
         merchantGatewayAccountId: None,
         txnAmount: Some(ETMo::Money::from_double(0.0)),
         txnObjectType: Some(
@@ -213,11 +210,11 @@ pub fn getTxnDetailFromApiPayload(
     Ok(txn_detail)
 }
 
-pub fn getTxnCardInfoFromApiPayload(
-    apiPayload: UpdateScorePayload,
+pub fn get_txn_card_info_from_api_payload(
+    api_payload: UpdateScorePayload,
     gateway_scoring_data: GatewayScoringData,
 ) -> ETCa::txn_card_info::TxnCardInfo {
-    let txnCardInfo = ETCa::txn_card_info::TxnCardInfo {
+    let txn_card_info = ETCa::txn_card_info::TxnCardInfo {
         id: ETCa::txn_card_info::to_txn_card_info_pid(1),
         card_isin: None,
         cardIssuerBankName: None,
@@ -236,7 +233,7 @@ pub fn getTxnCardInfoFromApiPayload(
             }),
         partitionKey: None,
     };
-    txnCardInfo
+    txn_card_info
 }
 // Original Haskell function: convertMerchantIdFlip
 // pub fn convertMerchantIdFlip(s: &str) -> Option<ETM::MerchantId> {
@@ -256,17 +253,17 @@ pub fn getTxnCardInfoFromApiPayload(
 // Original Haskell function: convertTxnObjectTypeFli::
 // pub fn convertTxnObjectTypeFlip(txn_object_type: Option<TxnObjectType>) -> ETTD::TxnObjectType {
 //     match txn_object_type {
-//         Some(TxnObjectType::ORDER_PAYMENT) => ETTD::TxnObjectType::OrderPayment,
-//         Some(TxnObjectType::MANDATE_REGISTER) => ETTD::TxnObjectType::MandateRegister,
-//         Some(TxnObjectType::EMANDATE_REGISTER) => ETTD::TxnObjectType::EmandateRegister,
-//         Some(TxnObjectType::EMANDATE_PAYMENT) => ETTD::TxnObjectType::EmandatePayment,
-//         Some(TxnObjectType::MANDATE_PAYMENT) => ETTD::TxnObjectType::MandatePayment,
-//         Some(TxnObjectType::TPV_PAYMENT) => ETTD::TxnObjectType::TpvPayment,
-//         Some(TxnObjectType::PARTIAL_CAPTURE) => ETTD::TxnObjectType::PartialCapture,
-//         Some(TxnObjectType::TPV_EMANDATE_REGISTER) => ETTD::TxnObjectType::TpvEmandateRegister,
-//         Some(TxnObjectType::TPV_MANDATE_REGISTER) => ETTD::TxnObjectType::TpvMandateRegister,
-//         Some(TxnObjectType::TPV_EMANDATE_PAYMENT) => ETTD::TxnObjectType::TpvEmandatePayment,
-//         Some(TxnObjectType::TPV_MANDATE_PAYMENT) => ETTD::TxnObjectType::TpvMandatePayment,
+//         Some(TxnObjectType::OrderPayment) => ETTD::TxnObjectType::OrderPayment,
+//         Some(TxnObjectType::MandateRegister) => ETTD::TxnObjectType::MandateRegister,
+//         Some(TxnObjectType::EmandateRegister) => ETTD::TxnObjectType::EmandateRegister,
+//         Some(TxnObjectType::EmandatePayment) => ETTD::TxnObjectType::EmandatePayment,
+//         Some(TxnObjectType::MandatePayment) => ETTD::TxnObjectType::MandatePayment,
+//         Some(TxnObjectType::TpvPayment) => ETTD::TxnObjectType::TpvPayment,
+//         Some(TxnObjectType::PartialCapture) => ETTD::TxnObjectType::PartialCapture,
+//         Some(TxnObjectType::TpvEmandateRegister) => ETTD::TxnObjectType::TpvEmandateRegister,
+//         Some(TxnObjectType::TpvMandateRegister) => ETTD::TxnObjectType::TpvMandateRegister,
+//         Some(TxnObjectType::TpvEmandatePayment) => ETTD::TxnObjectType::TpvEmandatePayment,
+//         Some(TxnObjectType::TpvMandatePayment) => ETTD::TxnObjectType::TpvMandatePayment,
 //         _ => ETTD::TxnObjectType::OrderPayment,
 //     }
 // }
@@ -335,17 +332,17 @@ pub fn getTxnCardInfoFromApiPayload(
 // Original Haskell function: textToAuthType
 // pub fn textToAuthType(auth_type: Option<Text>) -> Option<ETCa::AuthType> {
 //     match auth_type.as_deref() {
-//         Some("ATMPIN") => Some(ETCa::AuthType::ATMPIN),
-//         Some("THREE_DS") => Some(ETCa::AuthType::THREE_DS),
-//         Some("THREE_DS_2") => Some(ETCa::AuthType::THREE_DS_2),
-//         Some("OTP") => Some(ETCa::AuthType::OTP),
-//         Some("OBO_OTP") => Some(ETCa::AuthType::OBO_OTP),
-//         Some("VIES") => Some(ETCa::AuthType::VIES),
-//         Some("NO_THREE_DS") => Some(ETCa::AuthType::NO_THREE_DS),
-//         Some("NETWORK_TOKEN") => Some(ETCa::AuthType::NETWORK_TOKEN),
-//         Some("MOTO") => Some(ETCa::AuthType::MOTO),
-//         Some("FIDO") => Some(ETCa::AuthType::FIDO),
-//         Some("CTP") => Some(ETCa::AuthType::CTP),
+//         Some("ATMPIN") => Some(ETCa::AuthType::Atmpin),
+//         Some("THREE_DS") => Some(ETCa::AuthType::ThreeDs),
+//         Some("THREE_DS_2") => Some(ETCa::AuthType::ThreeDs2),
+//         Some("OTP") => Some(ETCa::AuthType::Otp),
+//         Some("OBO_OTP") => Some(ETCa::AuthType::OboOtp),
+//         Some("VIES") => Some(ETCa::AuthType::Vies),
+//         Some("NO_THREE_DS") => Some(ETCa::AuthType::NoThreeDs),
+//         Some("NETWORK_TOKEN") => Some(ETCa::AuthType::NetworkToken),
+//         Some("MOTO") => Some(ETCa::AuthType::Moto),
+//         Some("FIDO") => Some(ETCa::AuthType::Fido),
+//         Some("CTP") => Some(ETCa::AuthType::Ctp),
 //         _ => None,
 //     }
 // }
@@ -367,7 +364,7 @@ pub fn getTxnCardInfoFromApiPayload(
 //         Some(FT::PaymentMethodType::PAPERNACH) => ETP::PaymentMethodType::Papernach,
 //         Some(FT::PaymentMethodType::PAN) => ETP::PaymentMethodType::PAN,
 //         Some(FT::PaymentMethodType::UNKNOWN(ref val)) if val == "ATM_CARD" => ETP::PaymentMethodType::AtmCard,
-//         Some(FT::PaymentMethodType::MERCHANT_CONTAINER) => ETP::PaymentMethodType::MerchantContainer,
+//         Some(FT::PaymentMethodType::MerchantContainer) => ETP::PaymentMethodType::MerchantContainer,
 //         Some(FT::PaymentMethodType::Virtual_Account) => ETP::PaymentMethodType::VirtualAccount,
 //         Some(FT::PaymentMethodType::OTC) => ETP::PaymentMethodType::Otc,
 //         Some(FT::PaymentMethodType::RTP) => ETP::PaymentMethodType::Rtp,
@@ -417,7 +414,6 @@ pub async fn isKeyExistsRedis(key: String) -> bool {
         }
     }
 }
-
 // Original Haskell function: updateQueue
 pub async fn updateQueue(
     redis_name: String,
@@ -454,7 +450,7 @@ pub async fn updateQueue(
 
     match r {
         Ok(result) => {
-            logger::info!(
+            logger::debug!(
                 action = "updateQueue",
                 tag = "updateQueue",
                 "Successfully updated queue in Redis: {:?}",
@@ -622,11 +618,10 @@ pub async fn getProducerKey(
 ) -> Option<String> {
     match redis_gateway_score_data {
         Some(gateway_score_data) => {
-            let is_gri_enabled = if [ScoreKeyType::ELIMINATION_MERCHANT_KEY]
-                .contains(&score_key_type)
+            let is_gri_enabled = if [ScoreKeyType::EliminationMerchantKey].contains(&score_key_type)
             {
                 gateway_score_data.isGriEnabledForElimination
-            } else if [ScoreKeyType::SR_V2_KEY, ScoreKeyType::SR_V3_KEY].contains(&score_key_type) {
+            } else if [ScoreKeyType::SrV2Key, ScoreKeyType::SrV3Key].contains(&score_key_type) {
                 gateway_score_data.isGriEnabledForSrRouting
             } else {
                 false
@@ -649,6 +644,7 @@ pub async fn getProducerKey(
 
             let gateway_key = get_unified_key(
                 gateway_score_data,
+                None,
                 score_key_type,
                 enforce1d,
                 gateway_and_reference_id,
@@ -656,7 +652,7 @@ pub async fn getProducerKey(
             .await;
 
             let (_, key) = gateway_key.into_iter().next().unwrap();
-            logger::info!(tag = "getProducerKey", "UNIFIED_KEY {}", key);
+            logger::debug!(tag = "getProducerKey", "UNIFIED_KEY {}", key);
             Some(key)
         }
         None => {
@@ -671,48 +667,45 @@ pub async fn getProducerKey(
 }
 
 // Original Haskell function: logGatewayScoreType
-pub fn logGatewayScoreType(
+pub fn log_gateway_score_type(
     gateway_score_type: GatewayScoringType,
     routing_flow_type: RoutingFlowType,
     txn_detail: TxnDetail,
 ) {
     let detailed_gateway_score_type = match routing_flow_type {
-        RoutingFlowType::ELIMINATION_FLOW => match gateway_score_type {
-            GatewayScoringType::REWARD => DetailedGatewayScoringType::ELIMINATION_REWARD,
-            _ => DetailedGatewayScoringType::ELIMINATION_PENALISE,
+        RoutingFlowType::EliminationFlow => match gateway_score_type {
+            GatewayScoringType::Reward => DetailedGatewayScoringType::EliminationReward,
+            _ => DetailedGatewayScoringType::EliminationPenalise,
         },
-        RoutingFlowType::SRV2_FLOW => match gateway_score_type {
-            GatewayScoringType::REWARD => DetailedGatewayScoringType::SRV2_REWARD,
-            _ => DetailedGatewayScoringType::SRV2_PENALISE,
+        RoutingFlowType::Srv2Flow => match gateway_score_type {
+            GatewayScoringType::Reward => DetailedGatewayScoringType::Srv2Reward,
+            _ => DetailedGatewayScoringType::Srv2Penalise,
         },
         _ => match gateway_score_type {
-            GatewayScoringType::REWARD => DetailedGatewayScoringType::SRV3_REWARD,
-            _ => DetailedGatewayScoringType::SRV3_PENALISE,
+            GatewayScoringType::Reward => DetailedGatewayScoringType::Srv3Reward,
+            _ => DetailedGatewayScoringType::Srv3Penalise,
         },
     };
 
-    let txn_creation_time = txn_detail
-        .dateCreated
-        .to_string()
-        .replace(" ", "T")
-        .replace(" UTC", "Z");
+    let txn_creation_time = match &time::OffsetDateTime::now_utc().format(&Iso8601::DEFAULT) {
+        Ok(dt) => dt.to_string(),
+        Err(_) => "Invalid format".to_string(),
+    };
 
     let log_data = GatewayScoringTypeLogData {
         dateCreated: txn_creation_time,
         score_type: detailed_gateway_score_type,
     };
 
-    let log_entry = GatewayScoringTypeLog {
-        log_data: serde_json::Value::String(
-            serde_json::to_string(&log_data).unwrap_or_else(|_| "Serialization error".to_string()),
-        ),
-    };
+    let log_json = serde_json::json!({
+        "data": log_data,
+    });
 
     logger::info!(
         action = "GATEWAY_SCORE_UPDATED",
         tag = "GATEWAY_SCORE_UPDATED",
-        "Logging gateway score type: {:?}",
-        log_entry
+        "{}",
+        log_json.to_string()
     );
 }
 
@@ -878,12 +871,12 @@ pub fn getTxnTypeFromInternalMetadata(internal_metadata: Option<Secret<String>>)
                 tag = "APP_DEBUG",
                 "FETCH_TXN_TYPE_FROM_IM_FLOW"
             );
-            (MandateTxnType::DEFAULT)
+            (MandateTxnType::Default)
         }
         Some(internal_metadata) => {
             match serde_json::from_str::<MandateTxnInfo>(internal_metadata.peek()) {
                 Ok(txn_info) => txn_info.mandateTxnInfo.txnType,
-                Err(_) => MandateTxnType::DEFAULT,
+                Err(_) => MandateTxnType::Default,
             }
         }
     }
@@ -898,7 +891,7 @@ pub fn isMandateRegTxn(txn_object_type: TxnObjectType) -> bool {
 pub fn isPennyTxnType(txn_detail: TxnDetail) -> bool {
     let mandate = getTxnTypeFromInternalMetadata(txn_detail.internalMetadata);
     match mandate {
-        MandateTxnType::REGISTER => true,
+        MandateTxnType::Register => true,
         _ => false,
     }
 }
@@ -921,10 +914,10 @@ pub fn isRecurringTxn(txn_object_type: Option<TxnObjectType>) -> bool {
 // }
 
 // Original Haskell function: getTimeFromTxnCreatedInMills
-pub fn getTimeFromTxnCreatedInMills(txn: TxnDetail) -> u128 {
-    let dateCreated = txn.dateCreated.unix_timestamp_nanos() as u128 / 1_000_000;
-    let currentTime = EU::get_current_date_in_millis();
-    currentTime.saturating_sub(dateCreated)
+pub fn get_time_from_txn_created_in_mills(txn: TxnDetail) -> u128 {
+    let date_created = txn.dateCreated.unix_timestamp_nanos() as u128 / 1_000_000;
+    let current_time = EU::get_current_date_in_millis();
+    current_time.saturating_sub(date_created)
 }
 
 // Original Haskell function: dateToMilliSeconds

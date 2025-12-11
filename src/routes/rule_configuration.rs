@@ -232,7 +232,7 @@ pub async fn get_rule_config(
                 serde_json::from_str::<
                     types::gateway_routing_input::GatewaySuccessRateBasedRoutingInput,
                 >(&account.gatewaySuccessRateBasedDeciderInput)
-                .map_err(|_| error::RuleConfigurationError::DeserializationError)
+                .map_err(|_| error::RuleConfigurationError::ConfigurationNotFound)
                 .map(|config| types::routing_configuration::EliminationData {
                     threshold: config.defaultEliminationThreshold,
                     txnLatency: config.txnLatency,
@@ -328,7 +328,7 @@ pub async fn update_rule_config(
 
             let result = types::service_configuration::update_config(name, Some(serialized_config))
                 .await
-                .change_context(error::RuleConfigurationError::StorageError);
+                .change_context(error::RuleConfigurationError::ConfigurationNotFound);
 
             match result {
                 Ok(_) => {
@@ -359,7 +359,7 @@ pub async fn update_rule_config(
                 Some(serialized_config),
             )
             .await
-            .change_context(error::RuleConfigurationError::StorageError);
+            .change_context(error::RuleConfigurationError::ConfigurationNotFound);
 
             match result {
                 Ok(_) => {
@@ -387,7 +387,7 @@ pub async fn update_rule_config(
 
             let result = types::service_configuration::update_config(name, Some(serialized_config))
                 .await
-                .change_context(error::RuleConfigurationError::StorageError);
+                .change_context(error::RuleConfigurationError::ConfigurationNotFound);
 
             match result {
                 Ok(_) => {
@@ -426,7 +426,7 @@ pub async fn delete_rule_config(
     logger::debug!("Received rule delete request: {:?}", payload);
 
     let mid = payload.merchant_id.clone();
-    ETM::merchant_account::load_merchant_by_merchant_id(mid.clone())
+    let merchant_account = ETM::merchant_account::load_merchant_by_merchant_id(mid.clone())
         .await
         .ok_or(error::RuleConfigurationError::MerchantNotFound)?;
 
@@ -436,7 +436,7 @@ pub async fn delete_rule_config(
             let config_name = format!("SR_V3_INPUT_CONFIG_{}", mid);
             let result = types::service_configuration::delete_config(config_name)
                 .await
-                .change_context(error::RuleConfigurationError::StorageError);
+                .change_context(error::RuleConfigurationError::ConfigurationNotFound);
 
             match result {
                 Ok(_) => {
@@ -457,6 +457,16 @@ pub async fn delete_rule_config(
             }
         }
         types::routing_configuration::AlgorithmType::Elimination => {
+            if merchant_account
+                .gatewaySuccessRateBasedDeciderInput
+                .is_empty()
+            {
+                API_REQUEST_COUNTER
+                    .with_label_values(&["elimination_delete_rule_config", "failure"])
+                    .inc();
+                return Err(error::RuleConfigurationError::ConfigurationNotFound.into());
+            }
+
             let result = types::merchant::merchant_account::update_merchant_account(
                 mid.clone(),
                 Some("".to_string()),
@@ -486,7 +496,7 @@ pub async fn delete_rule_config(
             let config_name = format!("DEBIT_ROUTING_CONFIG_{}", mid);
             let result = types::service_configuration::delete_config(config_name)
                 .await
-                .change_context(error::RuleConfigurationError::StorageError);
+                .change_context(error::RuleConfigurationError::ConfigurationNotFound);
 
             match result {
                 Ok(_) => {

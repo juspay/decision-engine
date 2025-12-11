@@ -1,6 +1,5 @@
-use crate::logger::storage::Storage;
 use crate::{
-    decider::gatewaydecider::runner::ResponseBody, error::ApiClientError, logger, storage::consts,
+    decider::gatewaydecider::runner::ResponseBody, error::ApiClientError, storage::consts,
 };
 use axum::{body::Body, extract::Request};
 use error_stack::ResultExt;
@@ -11,7 +10,6 @@ use reqwest::{
     Client,
 };
 use serde::Deserialize;
-use serde_json::Value;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 /// Date-time utilities.
@@ -26,7 +24,7 @@ pub mod date_time {
 }
 
 pub fn record_fields_from_header(request: &Request<Body>) -> tracing::Span {
-    let span = tracing::debug_span!(
+    let span = tracing::info_span!(
         "request",
         method = %request.method(),
         uri = %request.uri(),
@@ -69,7 +67,7 @@ pub fn record_fields_from_header(request: &Request<Body>) -> tracing::Span {
     record_field(consts::X_SESSION_ID, "sdk_session_span");
     record_field(consts::X_CELL_SELECTOR, "cell_selector");
     record_field(consts::X_ART_RECORDING, "is_art_enabled");
-    span.record("is_audit_trail_log", "true");
+    span.record("is_audit_trail_log", "false");
     span.record("schema_version", "V2");
     span.record("tenant_name", "JUSPAY");
     span.record("tenant_id", "JUSPAY");

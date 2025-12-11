@@ -63,7 +63,7 @@ impl TryFrom<DBGatewayBankEmiSupport> for GatewayBankEmiSupport {
     }
 }
 
-pub async fn getGatewayBankEmiSupportDB(
+pub async fn get_gateway_bank_emi_support_db(
     emi_bank: String,
     t_gws: Vec<String>,
     scp: String,
@@ -103,13 +103,13 @@ pub async fn getGatewayBankEmiSupportDB(
     query
 }
 
-pub async fn getGatewayBankEmiSupport(
+pub async fn get_gateway_bank_emi_support(
     emi_bank: String,
     gws: Vec<String>,
     scp: String,
 ) -> Vec<GatewayBankEmiSupport> {
     // Call the DB function and handle results
-    match getGatewayBankEmiSupportDB(emi_bank, gws, scp).await {
+    match get_gateway_bank_emi_support_db(emi_bank, gws, scp).await {
         Ok(db_results) => db_results
             .into_iter()
             .filter_map(|db_record| GatewayBankEmiSupport::try_from(db_record).ok())
@@ -120,7 +120,7 @@ pub async fn getGatewayBankEmiSupport(
 
 // #TOD implement db calls
 
-// pub async fn getGatewayBankEmiSupportDB(
+// pub async fn get_gateway_bank_emi_support_db(
 //     emi_bank: String,
 //     gws: Vec<Gateway>,
 //     scp: String,

@@ -10,6 +10,7 @@ use crate::{
     logger::config::Log,
 };
 use error_stack::ResultExt;
+#[cfg(feature = "kms-hashicorp-vault")]
 use masking::ExposeInterface;
 use redis_interface::RedisSettings;
 use std::{
@@ -32,6 +33,7 @@ pub struct GlobalConfig {
     #[cfg(feature = "limit")]
     pub limit: Limit,
     pub redis: RedisSettings,
+    pub cache_config: CacheConfig,
     pub tenant_secrets: TenantsSecrets,
     pub tls: Option<ServerTls>,
     #[serde(default)]
@@ -48,6 +50,7 @@ pub struct TenantConfig {
     pub tenant_secrets: TenantSecrets,
     pub routing_config: Option<TomlConfig>,
     pub debit_routing_config: network_decider::types::DebitRoutingConfig,
+    pub cache_config: CacheConfig,
 }
 
 impl TenantConfig {
@@ -67,6 +70,7 @@ impl TenantConfig {
                 .cloned()
                 .unwrap(),
             debit_routing_config: global_config.debit_routing_config.clone(),
+            cache_config: global_config.cache_config.clone(),
         }
     }
 }
@@ -105,21 +109,22 @@ pub struct PgDatabase {
     pub pg_pool_size: Option<usize>,
 }
 
+#[derive(Clone, serde::Deserialize, Debug)]
+pub struct CacheConfig {
+    pub service_config_redis_prefix: String,
+    pub service_config_ttl: i64,
+}
+
+impl CacheConfig {
+    pub fn add_prefix(&self, key: &str) -> String {
+        format!("{}{}", self.service_config_redis_prefix, key)
+    }
+}
+
 #[derive(serde::Deserialize, Debug, Clone)]
 pub struct TenantSecrets {
     /// schema name for the tenant (defaults to tenant_id)
     pub schema: String,
-}
-
-fn deserialize_hex<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let deserialized_str: String = serde::Deserialize::deserialize(deserializer)?;
-
-    let deserialized_str = deserialized_str.into_bytes();
-
-    Ok(deserialized_str)
 }
 
 #[derive(serde::Deserialize, Debug, Clone)]

@@ -1,6 +1,8 @@
+use std::time::Instant;
+
 use crate::{
     decider::gatewaydecider::{
-        flow_new::deciderFullPayloadHSFunction,
+        flow_new::decider_full_payload_hs_function,
         types::{DecidedGateway, DomainDeciderRequestForApiCallV2, ErrorResponse, UnifiedError},
     },
     logger, metrics,
@@ -35,6 +37,7 @@ impl IntoResponse for DecidedGateway {
 pub async fn decide_gateway(
     req: axum::http::Request<axum::body::Body>,
 ) -> Result<DecidedGateway, ErrorResponse> {
+    let cpu_start = Instant::now();
     let timer = metrics::API_LATENCY_HISTOGRAM
         .with_label_values(&["decide_gateway"])
         .start_timer();
@@ -77,7 +80,7 @@ pub async fn decide_gateway(
     let api_decider_request: Result<DomainDeciderRequestForApiCallV2, _> =
         serde_json::from_slice(&body);
     let result = match api_decider_request {
-        Ok(payload) => match deciderFullPayloadHSFunction(payload).await {
+        Ok(payload) => match decider_full_payload_hs_function(payload, cpu_start).await {
             Ok(decided_gateway) => {
                 metrics::API_REQUEST_COUNTER
                     .with_label_values(&["decide_gateway", "success"])

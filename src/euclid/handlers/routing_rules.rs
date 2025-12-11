@@ -5,11 +5,11 @@ use crate::storage::schema_pg::routing_algorithm::dsl;
 use crate::{
     error::ApiErrorResponse,
     euclid::{
-        ast::{self, ComparisonType, ConnectorInfo, Output, ValueType},
+        ast::{ComparisonType, ConnectorInfo, Output, ValueType},
         cgraph,
         interpreter::{evaluate_output, InterpreterBackend},
         types::{
-            ActivateRoutingConfigRequest, Context, DataType, JsonifiedRoutingAlgorithm,
+            ActivateRoutingConfigRequest, Context, JsonifiedRoutingAlgorithm,
             RoutingAlgorithmMapperNew, RoutingDictionaryRecord, RoutingEvaluateResponse,
             RoutingRequest, RoutingRule, SrDimensionConfig, StaticRoutingAlgorithm,
             ELIGIBLE_DIMENSIONS,
@@ -30,7 +30,7 @@ use error_stack::ResultExt;
 
 use crate::app::get_tenant_app_state;
 
-use crate::error::{self, ContainerError};
+use crate::error::ContainerError;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
 use serde_json::{json, Value};
 
@@ -48,10 +48,16 @@ pub async fn config_sr_dimentions(
 
     // Validate dimensions against ELIGIBLE_DIMENSIONS
     let invalid_dimensions: Vec<&String> = payload
+        .paymentInfo
         .fields
-        .iter()
-        .filter(|field| !ELIGIBLE_DIMENSIONS.contains(&field.as_str()))
-        .collect();
+        .as_ref()
+        .map(|fields| {
+            fields
+                .iter()
+                .filter(|field| !ELIGIBLE_DIMENSIONS.contains(&field.as_str()))
+                .collect()
+        })
+        .unwrap_or_default();
 
     if !invalid_dimensions.is_empty() {
         metrics::API_REQUEST_COUNTER
@@ -59,21 +65,15 @@ pub async fn config_sr_dimentions(
             .inc();
         timer.observe_duration();
 
-        let invalid_dims_str = invalid_dimensions
-            .iter()
-            .map(|d| format!("'{}'", d))
-            .collect::<Vec<_>>()
-            .join(", ");
-
         logger::error!(
-            "Invalid dimensions found for merchant {}: {}",
+            "Invalid dimensions found for merchant {}: {:?}",
             payload.merchant_id,
-            invalid_dims_str
+            invalid_dimensions.clone()
         );
 
         return Err(EuclidErrors::InvalidSrDimensionConfig(format!(
-            "Invalid dimensions: {}. Valid dimensions are: {}",
-            invalid_dims_str,
+            "Invalid dimensions: {:?}. Valid dimensions are: {}",
+            invalid_dimensions.clone(),
             ELIGIBLE_DIMENSIONS.join(", ")
         ))
         .into());
@@ -120,7 +120,7 @@ pub async fn config_sr_dimentions(
         .with_label_values(&["config_sr_dimentions", "success"])
         .inc();
     timer.observe_duration();
-    logger::info!(
+    logger::debug!(
         "SR Dimension configuration updated successfully for merchant: {}",
         mid
     );
@@ -215,7 +215,7 @@ pub async fn routing_create(
         timestamp,
         timestamp,
     );
-    logger::info!("Response: {response:?}");
+    logger::debug!("Response: {response:?}");
 
     metrics::API_REQUEST_COUNTER
         .with_label_values(&["routing_create", "success"])
@@ -435,7 +435,7 @@ pub async fn routing_evaluate(
                     Ok(mut ir) => {
                         // Check if fallback is enabled
                         if default_output_present && ir.output == program.default_selection {
-                            logger::info!(
+                            logger::debug!(
                                 "Default fallback triggered: Overriding with fallback connector"
                             );
 
@@ -476,7 +476,7 @@ pub async fn routing_evaluate(
         eligible_connectors,
     };
 
-    logger::info!("Response: {response:?}");
+    logger::debug!("Response: {response:?}");
 
     API_REQUEST_COUNTER
         .with_label_values(&["routing_evaluate", "success"])

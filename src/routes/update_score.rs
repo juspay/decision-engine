@@ -2,19 +2,17 @@ use crate::decider::gatewaydecider::types::{ErrorResponse, UnifiedError};
 use crate::feedback::gateway_scoring_service::{
     check_and_update_gateway_score, invalid_request_error,
 };
+use crate::logger;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
-use crate::types::card::txn_card_info::{
-    convert_safe_to_txn_card_info, SafeTxnCardInfo, TxnCardInfo,
-};
+use crate::types::card::txn_card_info::{convert_safe_to_txn_card_info, SafeTxnCardInfo};
 use crate::types::txn_details::types::{
     convert_safe_txn_detail_to_txn_detail, SafeTxnDetail, TransactionLatency,
 };
-use crate::{logger, metrics};
 use axum::body::to_bytes;
 use cpu_time::ProcessTime;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 struct UpdateScoreRequest {
     txn_detail: SafeTxnDetail,
     txn_card_info: SafeTxnCardInfo,
@@ -49,7 +47,7 @@ pub async fn update_score(
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_else(|_| "unknown".to_string());
     let query_params = original_url.splitn(2, '?').nth(1).unwrap_or("").to_string();
-
+    tracing::Span::current().record("is_audit_trail_log", "true");
     // Buffer the body into memory
     let body_bytes = match to_bytes(req.into_body(), usize::MAX).await {
         Ok(bytes) => bytes,
@@ -162,23 +160,24 @@ pub async fn update_score(
             }
 
             // Process the request
-            let txn_detail = match convert_safe_txn_detail_to_txn_detail(payload.txn_detail) {
+            let txn_detail = match convert_safe_txn_detail_to_txn_detail(payload.txn_detail.clone())
+            {
                 Ok(detail) => detail,
                 Err(e) => {
                     return Err(invalid_request_error("transaction details", &e));
                 }
             };
-            let txn_card_info = match convert_safe_to_txn_card_info(payload.txn_card_info) {
+            let txn_card_info = match convert_safe_to_txn_card_info(payload.txn_card_info.clone()) {
                 Ok(card_info) => card_info,
                 Err(e) => {
                     return Err(invalid_request_error("transaction Card Info", &e));
                 }
             };
 
-            let log_message = payload.log_message;
+            let log_message = payload.log_message.clone();
             let enforce_failure = payload.enforce_dynaic_routing_failure.unwrap_or(false);
-            let gateway_reference_id = payload.gateway_reference_id;
-            let txn_latency = payload.txn_latency;
+            let gateway_reference_id = payload.gateway_reference_id.clone();
+            let txn_latency = payload.txn_latency.clone();
 
             jemalloc_ctl::epoch::advance().unwrap();
             let allocated_before = jemalloc_ctl::stats::allocated::read().unwrap_or(0);
@@ -212,7 +211,7 @@ pub async fn update_score(
                 request_time = request_time,
                 env = std::env::var("APP_ENV").unwrap_or_else(|_| "development".to_string()),
                 action = "POST",
-                req_body = req_body,
+                req_body = format!("{:?}", payload.clone()),
                 category = "INCOMING_API",
                 req_headers = format!("{:?}", headers),
                 "Successfully updated score"

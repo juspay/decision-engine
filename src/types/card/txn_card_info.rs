@@ -1,101 +1,89 @@
 use crate::error::ApiError;
 use crate::types::card::card_type::CardType;
-use crate::utils::StringExt;
-use masking::Secret;
+use masking::{PeekInterface, Secret};
 use serde::{Deserialize, Deserializer, Serialize};
 use time::{OffsetDateTime, PrimitiveDateTime};
 // use crate::types::transaction::id::TransactionId;
 // use crate::types::txn_details::types::TxnDetailId;
 // use juspay::extra::parsing::{Step, lift_either, lift_pure, ParsingErrorType};
 // use juspay::extra::secret::{Secret, SecretContext};
+use crate::decider::gatewaydecider::utils::mask_secret_option;
 use std::fmt::Debug;
 use std::option::Option;
 use std::string::String;
 
 #[derive(Debug, PartialEq, Clone, Eq, Serialize, Deserialize, Hash)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum AuthType {
-    #[serde(rename = "ATMPIN")]
-    ATMPIN,
-    #[serde(rename = "THREE_DS")]
-    THREE_DS,
-    #[serde(rename = "THREE_DS_2")]
-    THREE_DS_2,
-    #[serde(rename = "OTP")]
-    OTP,
-    #[serde(rename = "OBO_OTP")]
-    OBO_OTP,
-    #[serde(rename = "VIES")]
-    VIES,
-    #[serde(rename = "NO_THREE_DS")]
-    NO_THREE_DS,
-    #[serde(rename = "NETWORK_TOKEN")]
-    NETWORK_TOKEN,
-    #[serde(rename = "MOTO")]
-    MOTO,
-    #[serde(rename = "FIDO")]
-    FIDO,
-    #[serde(rename = "CTP")]
-    CTP,
+    Atmpin,
+    ThreeDs,
+    ThreeDs2,
+    Otp,
+    OboOtp,
+    Vies,
+    NoThreeDs,
+    NetworkToken,
+    Moto,
+    Fido,
+    Ctp,
 }
 
 impl std::fmt::Display for AuthType {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::ATMPIN => write!(f, "ATMPIN"),
-            Self::THREE_DS => write!(f, "THREE_DS"),
-            Self::THREE_DS_2 => write!(f, "THREE_DS_2"),
-            Self::OTP => write!(f, "OTP"),
-            Self::OBO_OTP => write!(f, "OBO_OTP"),
-            Self::VIES => write!(f, "VIES"),
-            Self::NO_THREE_DS => write!(f, "NO_THREE_DS"),
-            Self::NETWORK_TOKEN => write!(f, "NETWORK_TOKEN"),
-            Self::MOTO => write!(f, "MOTO"),
-            Self::FIDO => write!(f, "FIDO"),
-            Self::CTP => write!(f, "CTP"),
+            Self::Atmpin => write!(f, "ATMPIN"),
+            Self::ThreeDs => write!(f, "THREE_DS"),
+            Self::ThreeDs2 => write!(f, "THREE_DS_2"),
+            Self::Otp => write!(f, "OTP"),
+            Self::OboOtp => write!(f, "OBO_OTP"),
+            Self::Vies => write!(f, "VIES"),
+            Self::NoThreeDs => write!(f, "NO_THREE_DS"),
+            Self::NetworkToken => write!(f, "NETWORK_TOKEN"),
+            Self::Moto => write!(f, "MOTO"),
+            Self::Fido => write!(f, "FIDO"),
+            Self::Ctp => write!(f, "CTP"),
         }
     }
 }
 
 pub fn text_to_auth_type(ctx: &str) -> Result<AuthType, ApiError> {
     match ctx {
-        "ATMPIN" => Ok(AuthType::ATMPIN),
-        "THREE_DS" => Ok(AuthType::THREE_DS),
-        "THREE_DS_2" => Ok(AuthType::THREE_DS_2),
-        "OTP" => Ok(AuthType::OTP),
-        "OBO_OTP" => Ok(AuthType::OBO_OTP),
-        "VIES" => Ok(AuthType::VIES),
-        "NO_THREE_DS" => Ok(AuthType::NO_THREE_DS),
-        "NETWORK_TOKEN" => Ok(AuthType::NETWORK_TOKEN),
-        "MOTO" => Ok(AuthType::MOTO),
-        "FIDO" => Ok(AuthType::FIDO),
-        "CTP" => Ok(AuthType::CTP),
+        "ATMPIN" => Ok(AuthType::Atmpin),
+        "THREE_DS" => Ok(AuthType::ThreeDs),
+        "THREE_DS_2" => Ok(AuthType::ThreeDs2),
+        "OTP" => Ok(AuthType::Otp),
+        "OBO_OTP" => Ok(AuthType::OboOtp),
+        "VIES" => Ok(AuthType::Vies),
+        "NO_THREE_DS" => Ok(AuthType::NoThreeDs),
+        "NETWORK_TOKEN" => Ok(AuthType::NetworkToken),
+        "MOTO" => Ok(AuthType::Moto),
+        "FIDO" => Ok(AuthType::Fido),
+        "CTP" => Ok(AuthType::Ctp),
         _ => Err(ApiError::ParsingError("Invalid Auth Type")),
     }
 }
 pub fn auth_type_to_text(ctx: &AuthType) -> String {
     match ctx {
-        AuthType::ATMPIN => "ATMPIN".to_string(),
-        AuthType::THREE_DS => "THREE_DS".to_string(),
-        AuthType::THREE_DS_2 => "THREE_DS_2".to_string(),
-        AuthType::OTP => "OTP".to_string(),
-        AuthType::OBO_OTP => "OBO_OTP".to_string(),
-        AuthType::VIES => "VIES".to_string(),
-        AuthType::NO_THREE_DS => "NO_THREE_DS".to_string(),
-        AuthType::NETWORK_TOKEN => "NETWORK_TOKEN".to_string(),
-        AuthType::MOTO => "MOTO".to_string(),
-        AuthType::FIDO => "FIDO".to_string(),
-        AuthType::CTP => "CTP".to_string(),
+        AuthType::Atmpin => "ATMPIN".to_string(),
+        AuthType::ThreeDs => "THREE_DS".to_string(),
+        AuthType::ThreeDs2 => "THREE_DS_2".to_string(),
+        AuthType::Otp => "OTP".to_string(),
+        AuthType::OboOtp => "OBO_OTP".to_string(),
+        AuthType::Vies => "VIES".to_string(),
+        AuthType::NoThreeDs => "NO_THREE_DS".to_string(),
+        AuthType::NetworkToken => "NETWORK_TOKEN".to_string(),
+        AuthType::Moto => "MOTO".to_string(),
+        AuthType::Fido => "FIDO".to_string(),
+        AuthType::Ctp => "CTP".to_string(),
     }
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum EMIType {
-    #[serde(rename = "NO_COST_EMI")]
-    NO_COST_EMI,
-    #[serde(rename = "LOW_COST_EMI")]
-    LOW_COST_EMI,
-    #[serde(rename = "STANDARD_EMI")]
-    STANDARD_EMI,
+    NoCostEmi,
+    LowCostEmi,
+    StandardEmi,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -165,12 +153,27 @@ pub struct TxnCardInfo {
     #[serde(rename = "paymentMethod")]
     pub paymentMethod: String,
     #[serde(rename = "paymentSource")]
-    pub paymentSource: Option<String>,
+    #[serde(serialize_with = "mask_secret_option")]
+    pub paymentSource: Option<Secret<String>>,
     #[serde(rename = "authType")]
     pub authType: Option<AuthType>,
     #[serde(rename = "partitionKey")]
     #[serde(deserialize_with = "deserialize_optional_primitive_datetime")]
     pub partitionKey: Option<PrimitiveDateTime>,
+}
+
+impl TxnCardInfo {
+    pub fn get_payment_source_last(&self) -> Option<String> {
+        self.paymentSource.as_ref().and_then(|ps| {
+            // use `expose_secret()` instead of peek()
+            let ps_str = ps.peek();
+            ps_str.split('@').last().map(|s| s.to_string())
+        })
+    }
+
+    pub fn get_payment_source(&self) -> Option<String> {
+        self.paymentSource.clone().map(|s| s.peek().to_string())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -195,7 +198,8 @@ pub struct SafeTxnCardInfo {
     #[serde(rename = "paymentMethod")]
     pub paymentMethod: String,
     #[serde(rename = "paymentSource")]
-    pub paymentSource: Option<String>,
+    #[serde(serialize_with = "mask_secret_option")]
+    pub paymentSource: Option<Secret<String>>,
     #[serde(rename = "authType")]
     pub authType: Option<String>,
     #[serde(rename = "partitionKey")]
