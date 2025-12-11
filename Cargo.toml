@@ -9,7 +9,7 @@ rust-version = "1.85.0"
 
 [features]
 default = ["middleware","mysql"]
-release = ["middleware", "kms-aws","mysql", "redisCompression"]
+release = ["middleware", "kms-aws","mysql", "redis_compression"]
 kms-aws = ["dep:aws-config", "dep:aws-sdk-kms"]
 kms-hashicorp-vault = ["dep:vaultrs"]
 limit = []
@@ -19,7 +19,7 @@ external_key_manager = []
 external_key_manager_mtls = ["external_key_manager", "reqwest/rustls-tls"]
 postgres = []
 mysql = []
-redisCompression = ["dep:zstd"]
+redis_compression = ["dep:zstd"]
 
 [dependencies]
 aws-config = { version = "1.5.5", optional = true }

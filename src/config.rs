@@ -42,7 +42,7 @@ pub struct GlobalConfig {
     pub routing_config: Option<TomlConfig>,
     #[serde(default)]
     pub debit_routing_config: network_decider::types::DebitRoutingConfig,
-    pub compression_filepath: CompressionFilepath,
+    pub compression_filepath: Option<CompressionFilepath>,
 }
 
 #[derive(Clone, Debug)]

@@ -73,7 +73,7 @@ impl TenantAppState {
             db,
             redis_conn: Arc::new(RedisConnectionWrapper::new(
                 redis_conn,
-                global_config.clone(),
+                global_config.compression_filepath.clone(),
             )),
             api_client,
             config: tenant_config,
