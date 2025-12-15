@@ -1,16 +1,22 @@
 use std::time::Instant;
 
+use crate::decider::gatewaydecider::constants as C;
 use crate::decider::gatewaydecider::{
     flows::decider_full_payload_hs_function,
     types::{DecidedGateway, DomainDeciderRequest, ErrorResponse, UnifiedError},
 };
 use crate::logger;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
+use crate::redis::feature::{
+    check_redis_comp_merchant_flag, is_feature_enabled, RedisCompressionConfig,
+    RedisCompressionConfigCombined, RedisCompressionCutover,
+};
 use axum::body::to_bytes;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use cpu_time::ProcessTime;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 impl IntoResponse for DecidedGatewayResponse {
     fn into_response(self) -> axum::http::Response<axum::body::Body> {
@@ -131,6 +137,24 @@ where
     match api_decider_request {
         Ok(payload) => {
             let merchant_id = payload.orderReference.merchantId.clone();
+            let merchant_id_string =
+                crate::types::merchant::id::merchant_id_to_text(merchant_id.clone());
+
+            let redis_comp_config: Option<HashMap<String, RedisCompressionConfig>> =
+                check_redis_comp_merchant_flag(merchant_id_string.clone()).await;
+
+            let redis_comp_enabled_de = is_feature_enabled(
+                "REDIS_COMPRESSION_ENABLED_MERCHANT_DE".to_string(),
+                merchant_id_string.clone(),
+                "kv_redis".to_string(),
+            )
+            .await;
+
+            let redis_comp_config_final = Some(RedisCompressionConfigCombined {
+                redisCompressionConfig: redis_comp_config,
+                isRedisCompEnabled: redis_comp_enabled_de,
+            });
+
             let merchant_id_txt = crate::types::merchant::id::merchant_id_to_text(merchant_id);
             tracing::Span::current().record("merchant_id", merchant_id_txt.clone());
             tracing::Span::current().record("udf_txn_uuid", payload.txnDetail.txnUuid.clone());
@@ -144,7 +168,8 @@ where
             jemalloc_ctl::epoch::advance().unwrap();
             let allocated_before = jemalloc_ctl::stats::allocated::read().unwrap_or(0);
 
-            let result = decider_full_payload_hs_function(payload.clone()).await;
+            let result =
+                decider_full_payload_hs_function(payload.clone(), redis_comp_config_final).await;
 
             jemalloc_ctl::epoch::advance().unwrap();
             let allocated_after = jemalloc_ctl::stats::allocated::read().unwrap_or(0);

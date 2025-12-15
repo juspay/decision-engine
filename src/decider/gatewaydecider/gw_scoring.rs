@@ -30,7 +30,7 @@ use rand_distr::{Beta, Binomial, Distribution};
 use serde::{Deserialize, Serialize};
 use time::{OffsetDateTime, PrimitiveDateTime};
 // use crate::types::card_brand_routes as ETCBR;
-use crate::redis::feature::{self as M, is_feature_enabled};
+use crate::redis::feature::{self as M, is_feature_enabled, RedisCompressionConfigCombined};
 use crate::types::gateway_routing_input as ETGRI;
 // use crate::types::gateway_health as ETGH;
 use crate::types::card as ETCT;
@@ -3009,6 +3009,7 @@ pub async fn trigger_reset_gateway_score(
                     decider_flow,
                     txn_detail.clone(),
                     reset_gateway_input.clone(),
+                    decider_flow.get().dpRedisCompressionConfig.clone(),
                 )
                 .await;
                 reset_gateway_sr_list.push(reset_gateway_input.clone());
@@ -3071,6 +3072,7 @@ pub async fn reset_gateway_score(
     decider_flow: &mut DeciderFlow<'_>,
     txn_detail: ETTD::TxnDetail,
     reset_gateway_input: ResetGatewayInput,
+    redis_compression_config: Option<RedisCompressionConfigCombined>,
 ) {
     let current_timestamp = get_current_date_in_millis();
     match (
@@ -3081,6 +3083,14 @@ pub async fn reset_gateway_score(
         (Some(key), Some(threshold), Some(max_count)) => {
             let penality_factor = Utils::get_penality_factor_(decider_flow).await;
             let score = get_merchant_elimination_gateway_score(key.clone()).await;
+            logger::debug!(
+                tag = "scoringFlow",
+                action = "scoringFlow",
+                "Current Gateway Score for {:?} : key {:?} before reset attempt: {:?}",
+                txn_detail.txnId,
+                key,
+                score
+            );
             let (is_eligible_for_reset, reset_cached_gateway_score) = match score {
                 Some(score) => {
                     let current_score = score.score;
@@ -3141,6 +3151,7 @@ pub async fn reset_gateway_score(
                 key.clone(),
                 reset_cached_gateway_score.clone(),
                 safe_remaining_ttl,
+                redis_compression_config,
             )
             .await;
             match result {

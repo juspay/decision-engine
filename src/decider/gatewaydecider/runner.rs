@@ -509,7 +509,9 @@ pub async fn execute_priority_logic(
     let resolve_bin = match utils::fetch_extended_card_bin(&req.txnCardInfo) {
         Some(card_bin) => Some(card_bin),
         None => match req.txnCardInfo.card_isin {
-            Some(c_isin) => Some(utils::get_card_bin_from_token_bin(6, c_isin.as_str()).await),
+            Some(c_isin) => {
+                Some(utils::get_card_bin_from_token_bin(6, c_isin.as_str(), None).await)
+            }
             None => None,
         },
     };
