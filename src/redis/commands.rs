@@ -225,7 +225,7 @@ impl RedisConnectionWrapper {
 
         self.conn
             .pool
-            .set(key, redis_value, None, None, false)
+            .set::<(), _, _>(key, redis_value, None, None, false)
             .await
             .change_context(errors::RedisError::SetHashFailed)?;
 
@@ -589,7 +589,7 @@ impl RedisConnectionWrapper {
 
         self.conn
             .pool
-            .set(key, redis_value, Some(Expiration::EX(ttl)), None, false)
+            .set::<(), _, _>(key, redis_value, Some(Expiration::EX(ttl)), None, false)
             .await
             .change_context(errors::RedisError::SetHashFailed)?;
 
