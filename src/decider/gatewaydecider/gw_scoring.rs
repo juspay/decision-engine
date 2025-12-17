@@ -2147,8 +2147,8 @@ async fn fetch_default_sr1_and_n_and_mk_result(
     let app_state = get_tenant_app_state().await;
     let redis_conn = &app_state.redis_conn;
 
-    let sr1_key = format!("{}{}", C::sr1KeyPrefix, merchant_id);
-    let n_key = format!("{}{}", C::nKeyPrefix, merchant_id);
+    let sr1_key = format!("{}{}", C::SR1_KEY_PREFIX, merchant_id);
+    let n_key = format!("{}{}", C::N_KEY_PREFIX, merchant_id);
 
     let m_default_sr1 = redis_conn.get_key::<f64>(&sr1_key, "f64").await.ok();
     let m_default_n = redis_conn.get_key::<f64>(&n_key, "f64").await.ok();
@@ -2162,7 +2162,7 @@ async fn fetch_default_sr1_and_n_and_mk_result(
             None,
             None,
             None,
-            ConfigSource::MERCHANT_DEFAULT,
+            ConfigSource::MerchantDefault,
         ))
     } else {
         let sr1_config_key = C::defaultSr1SConfigPrefix(merchant_id.to_string()).get_key();
@@ -2180,7 +2180,7 @@ async fn fetch_default_sr1_and_n_and_mk_result(
                 None,
                 None,
                 None,
-                ConfigSource::GLOBAL_DEFAULT,
+                ConfigSource::GlobalDefault,
             ))
         } else {
             None
@@ -3060,6 +3060,7 @@ pub async fn trigger_reset_gateway_score(
                     decider_flow,
                     txn_detail.clone(),
                     reset_gateway_input.clone(),
+                    gateway_scoring_data.clone(),
                     decider_flow.get().dpRedisCompressionConfig.clone(),
                 )
                 .await;
@@ -3123,6 +3124,7 @@ pub async fn reset_gateway_score(
     decider_flow: &mut DeciderFlow<'_>,
     txn_detail: ETTD::TxnDetail,
     reset_gateway_input: ResetGatewayInput,
+    gateway_scoring_data: GatewayScoringData,
     redis_compression_config: Option<RedisCompressionConfigCombined>,
 ) {
     let current_timestamp = get_current_date_in_millis();
@@ -3330,7 +3332,7 @@ pub async fn filter_using_redis(
     let inputs_vec = inputs.unwrap_or_default();
     filter_using_redis_upto(
         None,
-        FilterLevel::TXN_OBJECT_TYPE,
+        FilterLevel::TxnObjectType,
         merchant_id.clone(),
         pmt.clone(),
         pm.clone(),
@@ -3343,7 +3345,7 @@ pub async fn filter_using_redis(
     .await
     .or(filter_using_redis_upto(
         None,
-        FilterLevel::PAYMENT_METHOD,
+        FilterLevel::PaymentMethod,
         merchant_id.clone(),
         pmt.clone(),
         pm.clone(),
@@ -3356,7 +3358,7 @@ pub async fn filter_using_redis(
     .await)
     .or(filter_using_redis_upto(
         None,
-        FilterLevel::PAYMENT_METHOD_TYPE,
+        FilterLevel::PaymentMethodType,
         merchant_id,
         pmt,
         pm,

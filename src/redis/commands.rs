@@ -8,7 +8,7 @@ use fred::prelude::RedisKey;
 use fred::types::SetOptions;
 use fred::{
     clients::Transaction,
-    interfaces::{KeysInterface, ListInterface, TransactionInterface},
+    interfaces::{HashesInterface, KeysInterface, ListInterface, TransactionInterface},
     types::{Expiration, FromRedis, MultipleValues, RedisValue},
 };
 use redis_interface::{errors, types::DelReply, RedisConnectionPool};
