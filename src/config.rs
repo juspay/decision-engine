@@ -33,6 +33,7 @@ pub struct GlobalConfig {
     #[cfg(feature = "limit")]
     pub limit: Limit,
     pub redis: RedisSettings,
+    pub cache_config: CacheConfig,
     pub tenant_secrets: TenantsSecrets,
     pub tls: Option<ServerTls>,
     #[serde(default)]
@@ -41,6 +42,7 @@ pub struct GlobalConfig {
     pub routing_config: Option<TomlConfig>,
     #[serde(default)]
     pub debit_routing_config: network_decider::types::DebitRoutingConfig,
+    pub compression_filepath: Option<CompressionFilepath>,
 }
 
 #[derive(Clone, Debug)]
@@ -49,6 +51,7 @@ pub struct TenantConfig {
     pub tenant_secrets: TenantSecrets,
     pub routing_config: Option<TomlConfig>,
     pub debit_routing_config: network_decider::types::DebitRoutingConfig,
+    pub cache_config: CacheConfig,
 }
 
 impl TenantConfig {
@@ -68,6 +71,7 @@ impl TenantConfig {
                 .cloned()
                 .unwrap(),
             debit_routing_config: global_config.debit_routing_config.clone(),
+            cache_config: global_config.cache_config.clone(),
         }
     }
 }
@@ -104,6 +108,23 @@ pub struct PgDatabase {
     pub pg_port: u16,
     pub pg_dbname: String,
     pub pg_pool_size: Option<usize>,
+}
+
+#[derive(Clone, serde::Deserialize, Debug)]
+pub struct CacheConfig {
+    pub service_config_redis_prefix: String,
+    pub service_config_ttl: i64,
+}
+
+impl CacheConfig {
+    pub fn add_prefix(&self, key: &str) -> String {
+        format!("{}{}", self.service_config_redis_prefix, key)
+    }
+}
+
+#[derive(Clone, serde::Deserialize, Debug)]
+pub struct CompressionFilepath {
+    pub zstd_compression_filepath: String,
 }
 
 #[derive(serde::Deserialize, Debug, Clone)]

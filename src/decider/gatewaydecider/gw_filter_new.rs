@@ -65,7 +65,7 @@ pub async fn newGwFilters(this: &mut DeciderFlow<'_>) -> (GatewayList, Vec<ETM::
     if gws.is_empty() {
         let txnId = this.get().dpTxnDetail.txnId.clone();
         let merchantId = this.get().dpTxnDetail.merchantId.clone();
-        logger::warn!(
+        logger::debug!(
             tag = "GW_Filtering",
             action = "GW_Filtering",
             "There are no functional gateways for {:?} for merchant: {:?}",
@@ -111,7 +111,7 @@ pub async fn getFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList {
     let is_edcc_applied = this.get().dpEDCCApplied.clone();
     let enforce_gateway_list = this.get().dpEnforceGatewayList.clone();
 
-    logger::info!(
+    logger::debug!(
         tag = "enableGatewayReferenceIdBasedRouting",
         action = "enableGatewayReferenceIdBasedRouting",
         "enableGatewayReferenceIdBasedRouting is enable or not for txn_id : {:?}, enableGatewayReferenceIdBasedRouting: {:?}",
@@ -257,7 +257,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
                 let filtered_gateways: Vec<Gateway> = st.into_iter()  
                     .filter(|gw| motoSupportedGateways.contains(gw))
                     .collect();
-                logger::info!(
+                logger::debug!(
                     tag = "filterFunctionalGateways",
                     action = "filterFunctionalGateways",
                     "Functional gateways after filtering for MOTO cvvLessTxns support for txn_id: {:?}",
@@ -326,7 +326,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
                                 Vec::new()  
                             }  
                         };  
-                        logger::info!(
+                        logger::debug!(
                             tag = "filterFunctionalGateways",
                             action = "filterFunctionalGateways",
                             "Functional gateways after filtering for token repeat cvvLessTxns support for txn_id: {:?}",
@@ -352,7 +352,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
                         } else {
                             Vec::new()
                         };
-                        logger::info!(
+                        logger::debug!(
                             tag = "filterFunctionalGateways",
                             action = "filterFunctionalGateways",
                             "Functional gateways after filtering for token repeat cvvLessTxns support for txn_id: {:?}",
@@ -373,7 +373,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
                         let filtered_gateways: Vec<Gateway> = st.into_iter()
                             .filter(|gw| cvvLessTxnSupportedGateways.contains(gw))
                             .collect();
-                        logger::info!(
+                        logger::debug!(
                             tag = "filterFunctionalGateways",
                             action = "filterFunctionalGateways",
                             "Functional gateways after filtering for cvvLessTxns for txn_id: {:?}",
@@ -426,7 +426,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
     }
 
     let st = getGws(this);
-    logger::info!(
+    logger::debug!(
         tag = "filterFunctionalGateways",
         action = "filterFunctionalGateways",
         "Functional gateways before filtering for MerchantContainer for txn_id: {:?}",
@@ -583,7 +583,7 @@ pub async fn filterGatewaysForEmi(this: &mut DeciderFlow<'_>) -> GatewayList {
                      txn_detail.emiTenure.map(|tenure| tenure as i32)
                  ).await;
                  if gbes_v2s.is_empty() {
-                    logger::info!(
+                    logger::debug!(
                         tag = "GBESV2 Entry Not Found",
                         action = "GBESV2 Entry Not Found",
                         "GBESV2 Entry Not Found For emiBank - {:?}, gateways - {:?}, scope - {:?}, tenure - {:?}",
@@ -968,10 +968,19 @@ pub async fn filterGatewaysForValidationType(this: &mut DeciderFlow<'_>) -> () {
     // Handle Card Mandate transactions
     if Utils::is_mandate_transaction(&txn_detail) && Utils::is_card_transaction(&txn_card_info) {
         // Get excluded gateways from Redis
-        let card_mandate_bin_filter_excluded_gateways = findByNameFromRedis(C::CardMandateBinFilterExcludedGateways.get_key())
+        let mut card_mandate_bin_filter_excluded_gateways = findByNameFromRedis(C::CardMandateBinFilterExcludedGateways.get_key())
             .await
             .unwrap_or_else(Vec::new);
-            
+        
+        // Get card brand    
+        let card_brand = Utils::get_card_brand(this).await;
+        // If card brand is RUPAY remove HYPERPG from config list
+        if card_brand.as_deref() == Some("RUPAY") {
+            card_mandate_bin_filter_excluded_gateways
+                .retain(|gw| gw != &ETG::Gateway::HYPERPG);
+        }
+
+
         let bin_wise_filter_excluded_gateways = intersect(&card_mandate_bin_filter_excluded_gateways, &st);
         let bin_list = Utils::get_bin_list(txn_card_info.card_isin.clone());
         

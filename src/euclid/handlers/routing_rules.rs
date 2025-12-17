@@ -120,7 +120,7 @@ pub async fn config_sr_dimentions(
         .with_label_values(&["config_sr_dimentions", "success"])
         .inc();
     timer.observe_duration();
-    logger::info!(
+    logger::debug!(
         "SR Dimension configuration updated successfully for merchant: {}",
         mid
     );
@@ -215,7 +215,7 @@ pub async fn routing_create(
         timestamp,
         timestamp,
     );
-    logger::info!("Response: {response:?}");
+    logger::debug!("Response: {response:?}");
 
     metrics::API_REQUEST_COUNTER
         .with_label_values(&["routing_create", "success"])
@@ -435,7 +435,7 @@ pub async fn routing_evaluate(
                     Ok(mut ir) => {
                         // Check if fallback is enabled
                         if default_output_present && ir.output == program.default_selection {
-                            logger::info!(
+                            logger::debug!(
                                 "Default fallback triggered: Overriding with fallback connector"
                             );
 
@@ -476,7 +476,7 @@ pub async fn routing_evaluate(
         eligible_connectors,
     };
 
-    logger::info!("Response: {response:?}");
+    logger::debug!("Response: {response:?}");
 
     API_REQUEST_COUNTER
         .with_label_values(&["routing_evaluate", "success"])

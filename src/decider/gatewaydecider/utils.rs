@@ -5,7 +5,9 @@ use crate::euclid::types::SrDimensionConfig;
 use crate::feedback::gateway_elimination_scoring::flow::{
     eliminationV2RewardFactor, getPenaltyFactor,
 };
-use crate::redis::feature::is_feature_enabled;
+use crate::redis::feature::{
+    is_feature_enabled, RedisCompressionConfig, RedisCompressionConfigCombined, RedisDataStruct,
+};
 use crate::redis::types::ServiceConfigKey;
 use crate::types::card::card_type::card_type_to_text;
 use crate::types::country::country_iso::CountryISO2;
@@ -130,6 +132,14 @@ pub fn is_only_subscription(mga: &ETM::merchant_gateway_account::MerchantGateway
 
 pub fn is_otm_enabled(mga: &ETM::merchant_gateway_account::MerchantGatewayAccount) -> bool {
     check_if_enabled_in_mga(mga, "ONE_TIME_MANDATE", "OTM_ENABLED")
+}
+
+pub fn is_pix_flows_enabled(
+    mga: &ETM::merchant_gateway_account::MerchantGatewayAccount,
+    payment_flow: String,
+    acc_details_flag: String,
+) -> bool {
+    check_if_enabled_in_mga(mga, &payment_flow, &acc_details_flag)
 }
 
 pub fn is_seamless(mga: &ETM::merchant_gateway_account::MerchantGatewayAccount) -> bool {
@@ -705,11 +715,16 @@ pub async fn get_split_settlement_details(
     }
 }
 
-pub async fn metric_tracker_log(stage: &str, flowtype: &str, log_data: MessageFormat) {
+pub async fn metric_tracker_log(
+    consume_from_router: Option<bool>,
+    stage: &str,
+    flowtype: &str,
+    log_data: MessageFormat,
+) {
     let mut normalized_log_data = match serde_json::to_value(&log_data) {
         Ok(value) => value,
         Err(e) => {
-            crate::logger::warn!(
+            crate::logger::info!(
                 action = "metric_tracking_log_error",
                 "Failed to serialize log_data: {}",
                 e
@@ -718,11 +733,19 @@ pub async fn metric_tracker_log(stage: &str, flowtype: &str, log_data: MessageFo
         }
     };
 
-    crate::logger::warn!(
-        action = "metric_tracking_log",
-        "{}",
-        normalized_log_data.to_string(),
-    );
+    if consume_from_router == Some(true) {
+        crate::logger::info!(
+            action = "metric_tracking_log",
+            "{}",
+            normalized_log_data.to_string(),
+        );
+    } else {
+        crate::logger::info!(
+            action = "metric_tracking_log_diff_check_de",
+            "{}",
+            normalized_log_data.to_string(),
+        );
+    }
 }
 
 pub fn mask_secret_option<S>(_: &Option<Secret<String>>, serializer: S) -> Result<S::Ok, S::Error>
@@ -791,6 +814,7 @@ pub async fn log_gateway_decider_approach(
     let txn_card_info = decider_flow.get().dpTxnCardInfo.clone();
     let x_req_id = decider_flow.logger.get("x-request-id").cloned();
     let txn_creation_time = txn_detail.dateCreated.to_string(); // Assuming dateCreated is a DateTime field
+    let consume_from_router = decider_flow.get().dpShouldConsumeResult;
 
     let mp = types::DeciderApproachLogData {
         decided_gateway: m_decided_gateway,
@@ -806,6 +830,7 @@ pub async fn log_gateway_decider_approach(
     let payment_source_m = txn_card_info.get_payment_source_last();
 
     metric_tracker_log(
+        consume_from_router,
         "GATEWAY_DECIDER_APPROACH",
         "DECIDER",
         MessageFormat {
@@ -819,7 +844,11 @@ pub async fn log_gateway_decider_approach(
             payment_source: payment_source_m.map(Secret::new),
             source_object: txn_detail.sourceObject,
             txn_detail_id: txn_detail.id,
-            stage: "GATEWAY_DECIDER_APPROACH".to_string(),
+            stage: if consume_from_router == Some(true) {
+                "GATEWAY_DECIDER_APPROACH".to_string()
+            } else {
+                "GATEWAY_DECIDER_APPROACH_DIFF_CHECK_DE".to_string()
+            },
             merchant_id: merchant_id_to_text(order_reference.merchantId),
             txn_uuid: txn_detail.txnUuid,
             order_id: order_reference.orderId.0,
@@ -851,7 +880,11 @@ pub fn get_true_string(val: Option<String>) -> Option<String> {
     }
 }
 
-pub async fn get_card_bin_from_token_bin(length: usize, token_bin: &str) -> String {
+pub async fn get_card_bin_from_token_bin(
+    length: usize,
+    token_bin: &str,
+    redis_compression_config: Option<RedisCompressionConfigCombined>,
+) -> String {
     let key = format!("token_bin_{}", token_bin);
     let app_state = get_tenant_app_state().await;
     // let redis = &decider_flow.state().redis_conn;
@@ -861,7 +894,12 @@ pub async fn get_card_bin_from_token_bin(length: usize, token_bin: &str) -> Stri
             Some(token_bin_info) => {
                 app_state
                     .redis_conn
-                    .set_key(&key, &token_bin_info.cardBin)
+                    .set_key(
+                        &key,
+                        &token_bin_info.cardBin,
+                        redis_compression_config.clone(),
+                        RedisDataStruct::STRING,
+                    )
                     .await;
                 token_bin_info.cardBin.chars().take(length).collect()
             }
@@ -2918,13 +2956,20 @@ pub async fn writeToCacheWithTTL(
     key: String,
     cached_gateway_score: GatewayScore,
     ttl: i64,
+    redis_compression_config: Option<RedisCompressionConfigCombined>,
 ) -> Result<i32, StorageError> {
-    //from CachedGatewayScore comvert encoded_score to a encoded jasson that can be used as a value for redis sextx
+    //from CachedGatewayScore convert encoded_score to a encoded json that can be used as a value for redis sextx
     let encoded_score =
         serde_json::to_string(&cached_gateway_score).unwrap_or_else(|_| "".to_string());
 
-    let primary_write =
-        addToCacheWithExpiry("kv_redis".to_string(), key.clone(), encoded_score, ttl).await;
+    let primary_write = addToCacheWithExpiry(
+        "kv_redis".to_string(),
+        key.clone(),
+        encoded_score,
+        ttl,
+        redis_compression_config,
+    )
+    .await;
 
     match primary_write {
         Ok(_) => Ok(0),
@@ -2938,9 +2983,19 @@ pub async fn addToCacheWithExpiry(
     key: String,
     value: String,
     ttl: i64,
+    redis_compression_config: Option<RedisCompressionConfigCombined>,
 ) -> Result<(), StorageError> {
     let app_state = get_tenant_app_state().await;
-    let cached_resp = app_state.redis_conn.setx(&key, &value, ttl).await;
+    let cached_resp = app_state
+        .redis_conn
+        .setx(
+            &key,
+            &value,
+            ttl,
+            redis_compression_config,
+            RedisDataStruct::STRING,
+        )
+        .await;
     match cached_resp {
         Ok(_) => Ok(()),
         Err(error) => Err(StorageError::InsertError),

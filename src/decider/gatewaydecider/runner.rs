@@ -509,7 +509,9 @@ pub async fn execute_priority_logic(
     let resolve_bin = match utils::fetch_extended_card_bin(&req.txnCardInfo) {
         Some(card_bin) => Some(card_bin),
         None => match req.txnCardInfo.card_isin {
-            Some(c_isin) => Some(utils::get_card_bin_from_token_bin(6, c_isin.as_str()).await),
+            Some(c_isin) => {
+                Some(utils::get_card_bin_from_token_bin(6, c_isin.as_str(), None).await)
+            }
             None => None,
         },
     };
@@ -566,9 +568,16 @@ pub async fn get_gateway_priority(
         let (script, priority_logic_tag) = get_script(macc.clone(), priority_logic_script_m).await;
         let result = evaluate_script(script.clone(), priority_logic_tag.clone()).await;
 
+        logger::info!(
+            tag = "PRIORITY_LOGIC_EXECUTION_RESULT",
+            "MerchantId: {:?} , Result: {:?}",
+            macc.merchantId.clone(),
+            result
+        );
+
         match result {
             EvaluationResult::PLResponse(gws, pl_data, logs, status) => {
-                logger::info!(
+                logger::debug!(
                     tag = "PRIORITY_LOGIC_EXECUTION_",
                     "MerchantId: {:?} , Gateways: {:?}, Logs: {:?}",
                     macc.merchantId.clone(),
@@ -585,7 +594,7 @@ pub async fn get_gateway_priority(
                 }
             }
             EvaluationResult::EvaluationError(priority_logic_data, err) => {
-                logger::info!(
+                logger::debug!(
                     tag = "PRIORITY_LOGIC_EXECUTION_FAILURE",
                     "MerchantId: {:?}, Error: {:?}",
                     macc.merchantId,
@@ -598,7 +607,7 @@ pub async fn get_gateway_priority(
                     match retry_result {
                         EvaluationResult::PLResponse(retry_gws, retry_pl_data, logs, status) => {
                             let tag = format!("PRIORITY_LOGIC_EXECUTION_RETRY_{}", status);
-                            logger::info!(
+                            logger::debug!(
                                 tag = %tag,
                                 "MerchantId: {:?} , Gateways: {:?}, Logs: {:?}",
                                 macc.merchantId,
@@ -615,7 +624,7 @@ pub async fn get_gateway_priority(
                             }
                         }
                         EvaluationResult::EvaluationError(retry_pl_data, err) => {
-                            logger::info!(
+                            logger::debug!(
                                 tag = "PRIORITY_LOGIC_EXECUTION_RETRY_FAILURE",
                                 "MerchantId: {:?} , Error: {:?}",
                                 macc.merchantId,
@@ -664,7 +673,7 @@ pub async fn get_gateway_priority(
             None => default_gateway_priority_logic_output(),
             Some(t) => {
                 if t.is_empty() {
-                    logger::info!(
+                    logger::debug!(
                         tag = "gatewayPriority",
                         "gatewayPriority for merchant: {:?} is empty.",
                         macc.merchantId
@@ -676,7 +685,7 @@ pub async fn get_gateway_priority(
                         .map(|s| s.trim().to_string())
                         .filter(|s| !s.is_empty())
                         .collect::<Vec<_>>();
-                    logger::info!(
+                    logger::debug!(
                         tag = "gatewayPriority",
                         "gatewayPriority for merchant: {:?} listOfGateway: {:?}",
                         macc.merchantId,
@@ -684,7 +693,7 @@ pub async fn get_gateway_priority(
                     );
                     match list_of_gateway.as_slice() {
                         [] => {
-                            logger::info!(
+                            logger::debug!(
                                 tag = "gatewayPriority emptyList",
                                 "Can't get gatewayPriority for merchant: {:?} . Input: {:?}",
                                 macc.merchantId,
@@ -693,7 +702,7 @@ pub async fn get_gateway_priority(
                             default_gateway_priority_logic_output()
                         }
                         res => {
-                            logger::info!(
+                            logger::debug!(
                                 tag = "gatewayPriority decoding",
                                 "Decoded successfully. Input: {:?} output: {:?}",
                                 t,
@@ -827,7 +836,7 @@ async fn get_priority_logic_script_from_tenant_config(
                 Some(tenant_config) => {
                     match (tenant_config.filterDimension, tenant_config.filterGroupId) {
                         (Some(filter_dimension), Some(filter_group_id)) => {
-                            logger::info!(
+                            logger::debug!(
                                 tag = "getPriorityLogicScriptFromTenantConfig",
                                 "Filter dimension found: {:?}",
                                 filter_dimension
@@ -841,7 +850,7 @@ async fn get_priority_logic_script_from_tenant_config(
                             .await
                         }
                         _ => {
-                            logger::info!(
+                            logger::debug!(
                                 tag = "getPriorityLogicScriptFromTenantConfig",
                                 "Filter dimension and filter groupId are not present. Proceeding with default tenant config value."
                             );
@@ -851,7 +860,7 @@ async fn get_priority_logic_script_from_tenant_config(
                 }
                 None => {
                     let tenant_account_id = macc.tenantAccountId.clone().unwrap_or_default();
-                    logger::info!(
+                    logger::debug!(
                         tag = "getPriorityLogicScriptFromTenantConfig",
                         "Tenant Config not found for tenant account id {}",
                         tenant_account_id
@@ -875,7 +884,7 @@ async fn get_pl_by_filter_dimension(
             get_pl_by_merchant_category_code(macc, filter_group_id, config_value).await
         }
         _ => {
-            logger::info!(
+            logger::debug!(
                 tag = "getPLByFilterDimension",
                 "Filter dimension is not supported. Proceeding with default tenant config value."
             );
@@ -898,14 +907,14 @@ async fn get_pl_by_merchant_category_code(
             .await
             {
                 Some(tenant_config_filter) => {
-                    logger::info!(
+                    logger::debug!(
                         tag = "getPLByMerchantCategoryCode",
                         "Proceeding with tenant config filter priority logic."
                     );
                     decode_tenant_pl_config(tenant_config_filter.configValue, macc).await
                 }
                 None => {
-                    logger::info!(
+                    logger::debug!(
                         tag = "getPLByMerchantCategoryCode",
                         "Unable to find tenant config filter for groupId {:?} and dimension value {}",
                         filter_group_id,
@@ -916,7 +925,7 @@ async fn get_pl_by_merchant_category_code(
             }
         }
         None => {
-            logger::info!(
+            logger::debug!(
                 tag = "getPLByMerchantCategoryCode",
                 "Merchant category code is not present for merchantId {:?}",
                 macc.merchantId
@@ -932,7 +941,7 @@ async fn decode_tenant_pl_config(
 ) -> (String, Option<String>) {
     match utils::either_decode_t::<TenantPLConfig>(&config_value) {
         Ok(tenant_pl_config) => {
-            logger::info!(
+            logger::debug!(
                 tag = "decodeTenantPLConfig",
                 "Tenant Priority Logic Config decoded successfully with name: {}",
                 tenant_pl_config.name
@@ -1014,7 +1023,7 @@ pub async fn handle_fallback_logic(
                 .await;
                 match fallback_result {
                     EvaluationResult::PLResponse(gws, pl_data, logs, status) => {
-                        logger::info!(
+                        logger::debug!(
                             tag = "FALLBACK_PRIORITY_LOGIC_EXECUTION_",
                             "MerchantId: {:?} , Gateways: {:?}, Logs: {:?}",
                             macc.merchantId.clone(),
@@ -1032,7 +1041,7 @@ pub async fn handle_fallback_logic(
                         }
                     }
                     EvaluationResult::EvaluationError(priority_logic_data, err) => {
-                        logger::info!(
+                        logger::debug!(
                             tag = "FALLBACK_PRIORITY_LOGIC_EXECUTION_FAILURE",
                             "MerchantId: {:?} , Error: {:?}",
                             macc.merchantId,

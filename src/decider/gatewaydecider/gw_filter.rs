@@ -33,7 +33,7 @@ use crate::types::merchant_gateway_account_sub_info::{self as ETMGASI, SubIdType
 use crate::types::merchant_gateway_payment_method_flow as MGPMF;
 use crate::types::order::Order;
 use crate::types::payment::payment_method::{self as ETP};
-use crate::types::payment_flow::PaymentFlow;
+use crate::types::payment_flow::{payment_flows_to_text, text_to_payment_flows, PaymentFlow};
 use std::collections::{HashMap, HashSet};
 // use crate::types::metadata::Meta;
 // use crate::types::pl_ref_id_map::PLRefIdMap;
@@ -184,7 +184,7 @@ pub async fn newGwFilters(
     if gws.is_empty() {
         let txnId = this.get().dpTxnDetail.txnId.clone();
         let merchantId = this.get().dpTxnDetail.merchantId.clone();
-        logger::warn!(
+        logger::debug!(
             tag = "GW_Filtering",
             action = "GW_Filtering",
             "There are no functional gateways for {:?} for merchant: {:?}",
@@ -222,6 +222,7 @@ pub async fn newGwFilters(
         let _ = filterFunctionalGatewaysForSplitSettlement(this).await;
         let _ = filterFunctionalGatewaysForMerchantRequiredFlow(this).await;
         let _ = filterFunctionalGatewaysForOTMFlow(this).await;
+        let _ = filterFunctionalGatewaysForPixFlows(this).await;
         let _ = filterGatewaysForMGASelectionIntegrity(this).await;
         let funcGateways =
             returnGwListWithLog(this, DeciderFilterName::FinalFunctionalGateways, false);
@@ -244,7 +245,7 @@ pub async fn getFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList {
     let is_on_us_txn = this.get().dpIsOnUsTxn.unwrap_or(false);
     let enforce_gateway_list = this.get().dpEnforceGatewayList.clone();
 
-    logger::info!(
+    logger::debug!(
         tag = "enableGatewayReferenceIdBasedRouting",
         action = "enableGatewayReferenceIdBasedRouting",
         "enableGatewayReferenceIdBasedRouting is enable or not for txn_id : {:?}, enableGatewayReferenceIdBasedRouting: {:?}",
@@ -585,12 +586,15 @@ pub fn isMgaEligible(
 ) -> bool {
     let payment_flow_list = Utils::get_payment_flow_list_from_txn_detail(&txn_detail);
     let is_otm_flow = payment_flow_list.contains(&"ONE_TIME_MANDATE".to_string());
+    let is_pix_automatic_redirect_flow =
+        payment_flow_list.contains(&"PIX_AUTOMATIC_REDIRECT".to_string());
     validateMga(
         mga,
         txnCI,
         mTxnObjType,
         mgaEligibleSeamlessGateways,
         is_otm_flow,
+        is_pix_automatic_redirect_flow,
     )
 }
 
@@ -600,12 +604,13 @@ fn validateMga(
     mTxnObjType: TxnObjectType,
     mgaEligibleSeamlessGateways: &[String],
     is_otm_flow: bool,
+    is_pix_automatic_redirect_flow: bool,
 ) -> bool {
     if mgaEligibleSeamlessGateways.contains(&mga.gateway) && isCardOrNbTxn(txnCI) {
         Utils::is_seamless(mga)
     } else if isMandateRegister(mTxnObjType.clone()) {
         Utils::is_subscription(mga)
-    } else if isEmandateRegister(mTxnObjType) && !is_otm_flow {
+    } else if isEmandateRegister(mTxnObjType) && !is_otm_flow && !is_pix_automatic_redirect_flow {
         Utils::is_emandate_enabled(mga)
     } else {
         !Utils::is_only_subscription(mga)
@@ -659,7 +664,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
                     .into_iter()
                     .filter(|gw| motoSupportedGateways.contains(gw))
                     .collect();
-                logger::info!(
+                logger::debug!(
                     tag = "filterFunctionalGateways",
                     action = "filterFunctionalGateways",
                     "Functional gateways after filtering for MOTO cvvLessTxns support for txn_id: {:?}",
@@ -751,7 +756,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
                             Vec::new()
                         }
                     };
-                    logger::info!(
+                    logger::debug!(
                         tag = "filterFunctionalGateways",
                         action = "filterFunctionalGateways",
                         "Functional gateways after filtering for token repeat cvvLessTxns support for txn_id: {:?}",
@@ -787,7 +792,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
                     } else {
                         Vec::new()
                     };
-                    logger::info!(
+                    logger::debug!(
                         tag = "filterFunctionalGateways",
                         action = "filterFunctionalGateways",
                         "Functional gateways after filtering for token repeat cvvLessTxns support for txn_id: {:?}",
@@ -821,7 +826,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
                         .into_iter()
                         .filter(|gw| cvvLessTxnSupportedGateways.contains(gw))
                         .collect();
-                    logger::info!(
+                    logger::debug!(
                         tag = "filterFunctionalGateways",
                         action = "filterFunctionalGateways",
                         "Functional gateways after filtering for cvvLessTxns for txn_id: {:?}",
@@ -894,7 +899,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
     }
 
     let st = getGws(this);
-    logger::info!(
+    logger::debug!(
         tag = "filterFunctionalGateways",
         action = "filterFunctionalGateways",
         "Functional gateways before filtering for MerchantContainer for txn_id: {:?}",
@@ -1126,7 +1131,7 @@ pub async fn filterGatewaysForAuthType(
         )
         .await;
 
-        logger::debug!(
+        logger::info!(
             action = "filterFunctionalGatewaysForAuthType",
             "BIN eligibility check feature flag: {:?}",
             mb_feature
@@ -1210,7 +1215,7 @@ pub async fn filterGatewaysForAuthType(
             )
             .await?;
 
-            logger::debug!(
+            logger::info!(
                 tag = "filterFunctionalGatewaysForAuthType",
                 action = "filterFunctionalGatewaysForAuthType",
                 "Functional gateways after filtering after DISABLE_DECIDER_BIN_ELIGIBILITY_CHECK check: {:?}: {:?}",
@@ -1456,6 +1461,155 @@ pub async fn filterFunctionalGatewaysForOTMFlow(this: &mut DeciderFlow<'_>) -> V
     )
 }
 
+/// Filters gateways for PIX payment flows (e.g., PIX_AUTOMATIC_REDIRECT)
+/// Identifies eligible gateways that support PIX flows based on bank codes and payment method compatibility
+pub async fn filterFunctionalGatewaysForPixFlows(this: &mut DeciderFlow<'_>) -> Vec<String> {
+    /// Helper function to get the account details flag to be checked for PIX flows
+    /// extend this for other pix flows.
+    fn get_acc_details_flag_to_be_checked(pf: &PaymentFlow) -> &str {
+        match pf {
+            _ => "enablePixAutomaticRedirect",
+        }
+    }
+
+    // Get current functional gateways
+    let st = getGws(this);
+
+    // Get transaction data from context
+    let txn_detail = this.get().dpTxnDetail.clone();
+    let macc = this.get().dpMerchantAccount.clone();
+    let order_reference = this.get().dpOrder.clone();
+    let txn_card_info = this.get().dpTxnCardInfo.clone();
+
+    // Check if this is a PIX payment flow
+    let payment_flow_list = Utils::get_payment_flow_list_from_txn_detail(&txn_detail);
+    let m_pix_flow_text = C::PIX_PAYMENT_FLOWS
+        .iter()
+        .find(|&flow| payment_flow_list.contains(&flow.to_string()));
+
+    // Try to parse the PIX flow text into a PaymentFlow enum
+    let m_pix_payment_flow: Option<PaymentFlow> =
+        m_pix_flow_text.and_then(|flow_text| text_to_payment_flows(flow_text.to_string()).ok());
+
+    match m_pix_payment_flow {
+        Some(pix_payment_flow) => {
+            // Get order metadata and ref IDs
+            let (metadata, pl_ref_id_map) = Utils::get_order_metadata_and_pl_ref_id_map(
+                this,
+                macc.enableGatewayReferenceIdBasedRouting,
+                &order_reference,
+            );
+
+            // Get all possible merchant reference IDs
+            let possible_ref_ids_of_merchant =
+                Utils::get_all_possible_ref_ids(metadata, order_reference.clone(), pl_ref_id_map);
+
+            // Get merchant gateway accounts
+            let enabled_mgas = SETMA::get_enabled_mgas_by_merchant_id_and_ref_id(
+                this,
+                macc.merchantId,
+                possible_ref_ids_of_merchant,
+            )
+            .await;
+
+            // Get the account details flag to check for this PIX flow
+            let acc_details_flag_to_be_checked =
+                get_acc_details_flag_to_be_checked(&pix_payment_flow);
+
+            // Filter MGAs that support PIX flows
+            let mgas: Vec<_> = enabled_mgas
+                .into_iter()
+                .filter(|mga| {
+                    Utils::is_pix_flows_enabled(
+                        mga,
+                        payment_flows_to_text(&pix_payment_flow),
+                        acc_details_flag_to_be_checked.to_string(),
+                    )
+                })
+                .collect();
+
+            // Filter MGAs to only include those with gateways in our allowed list
+            let eligible_mga_post_filtering: Vec<_> = mgas
+                .into_iter()
+                .filter(|mga| st.contains(&mga.gateway))
+                .collect();
+
+            // Extract just the gateway list from filtered MGAs
+            let gw_list: Vec<String> = eligible_mga_post_filtering
+                .iter()
+                .map(|x| x.gateway.clone())
+                .collect();
+
+            // If we have a valid bank code, do additional filtering based on payment method flow
+            if let Some(jbc) = find_bank_code(txn_card_info.paymentMethod.clone()).await {
+                // Find all gateway payment method flows for PIX with this bank code
+                // Note: Using Brazil country code (BRA) for PIX flows
+                let all_gpmf_entries = GPMF::find_all_gpmf_by_country_code_gw_pf_id_pmt_jbcid_db(
+                    crate::types::country::country_iso::CountryISO::BRA,
+                    gw_list,
+                    pix_payment_flow.clone(),
+                    txn_card_info.paymentMethodType.clone(),
+                    jbc.id,
+                )
+                .await
+                .unwrap_or_default();
+
+                // Extract MGA IDs and GPMF IDs for further filtering
+                let mga_ids: Vec<i64> = eligible_mga_post_filtering
+                    .iter()
+                    .map(|mga| mga.id.merchantGwAccId)
+                    .collect();
+
+                let gpmf_ids: Vec<GatewayPaymentMethodFlowId> = all_gpmf_entries
+                    .iter()
+                    .map(|entry| to_gateway_payment_method_flow_id(entry.id.clone()))
+                    .collect();
+
+                // Get merchant gateway payment method flows that match both MGA and GPMF
+                let mgpmf_entries =
+                    MGPMF::get_all_mgpmf_by_mga_id_and_gpmf_ids(mga_ids, gpmf_ids).await;
+
+                // Extract merchant gateway account IDs that have matching payment flows
+                let mgpmf_mga_id_entries: Vec<i64> = mgpmf_entries
+                    .iter()
+                    .map(|entry| entry.merchantGatewayAccountId)
+                    .collect();
+
+                // Final filtering of MGAs to only those with matching payment flows
+                let eligible_mga_post_filtering_pix_flows: Vec<_> = eligible_mga_post_filtering
+                    .into_iter()
+                    .filter(|mga| mgpmf_mga_id_entries.contains(&mga.id.merchantGwAccId))
+                    .collect();
+
+                // Extract final gateway list from filtered MGAs
+                let gw_list_post_pix_flows_filtering: Vec<String> =
+                    eligible_mga_post_filtering_pix_flows
+                        .iter()
+                        .map(|x| x.gateway.clone())
+                        .collect();
+
+                // Update state with final MGA and gateway lists
+                Utils::set_mgas(this, eligible_mga_post_filtering_pix_flows);
+                setGws(this, gw_list_post_pix_flows_filtering);
+            } else {
+                // If no bank code found, keep original gateway list
+                setGws(this, st);
+            }
+        }
+        // If not a PIX flow, keep original gateway list
+        None => {
+            setGws(this, st);
+        }
+    }
+
+    // Return gateway list with logging
+    returnGwListWithLog(
+        this,
+        DeciderFilterName::FilterFunctionalGatewaysForPixFlows,
+        true,
+    )
+}
+
 /// Filters gateways based on transaction validation type (Card Mandate, TPV, E-Mandate)
 pub async fn filterGatewaysForValidationType(
     this: &mut DeciderFlow<'_>,
@@ -1507,7 +1661,7 @@ pub async fn filterGatewaysForValidationType(
             .map(|g| g.gateway)
             .collect::<Vec<_>>();
 
-        logger::debug!(
+        logger::info!(
             tag = "filterFunctionalGateways",
             action = "filterFunctionalGateways",
             "Functional gateways after filtering after filterGatewaysCardInfo for txn_id {:?}: {:?}",
@@ -1541,7 +1695,7 @@ pub async fn filterGatewaysForValidationType(
 
             let final_gws = if gws.is_empty() { new_gws.clone() } else { gws };
 
-            logger::debug!(
+            logger::info!(
                 tag = "filterFunctionalGateways",
                 action = "filterFunctionalGateways",
                 "Functional gateways after filtering for token repeat Mandate support for txn_id {:?}: {:?}",
@@ -1572,7 +1726,7 @@ pub async fn filterGatewaysForValidationType(
 
             let final_gws = if gws.is_empty() { new_gws.clone() } else { gws };
 
-            logger::debug!(
+            logger::info!(
                 tag = "filterFunctionalGateways",
                 action = "filterFunctionalGateways",
                 "Functional gateways after filtering for Mandate Guest Checkout support for txn_id {:?}: {:?}",
@@ -1590,8 +1744,10 @@ pub async fn filterGatewaysForValidationType(
         // Check if we should skip processing for one-time mandate flow
         let payment_flow_list = Utils::get_payment_flow_list_from_txn_detail(&txn_detail);
         let is_otm_flow = payment_flow_list.contains(&"ONE_TIME_MANDATE".to_string());
+        let is_pix_automatic_redirect_flow =
+            payment_flow_list.contains(&"PIX_AUTOMATIC_REDIRECT".to_string());
 
-        if is_otm_flow {
+        if is_otm_flow || is_pix_automatic_redirect_flow {
             logger::info!(
                 "Skipping processing for OTM flow for txn_id {:?}",
                 txn_detail.txnId.clone()
@@ -1688,7 +1844,7 @@ pub async fn filterGatewaysForValidationType(
                 .map(|g| g.gateway)
                 .collect::<Vec<_>>();
 
-            logger::debug!(
+            logger::info!(
                 "nst for filterGatewaysForValidationType for txn_id {:?}: {:?}",
                 txn_detail.txnId.clone(),
                 nst
@@ -1976,7 +2132,7 @@ pub async fn filterGatewaysCardInfo(
                     .collect::<Vec<_>>(),
             };
 
-            logger::info!(
+            logger::debug!(
                 tag = "filterGatewaysCardInfo",
                 action = "filterGatewaysCardInfo",
                 "merchant_validation_required_gws - {:?}, gci_validation_gws - {:?}, gcis - {:?}, gcis_without_merchant_validation - {:?}, gcis_with_merchant_validation - {:?}, gci_ids - {:?}, mgcis_enabled_gcis - {:?},mgcis_enabled_gci_ids - {:?}, gcis_after_merchant_validation - {:?}, eligible_gateway_card_infos - {:?}",
@@ -2280,7 +2436,7 @@ pub async fn filterGatewaysForEmi(this: &mut DeciderFlow<'_>) -> GatewayList {
                 };
 
                 if gbes_v2_list.is_empty() {
-                    logger::info!(
+                    logger::debug!(
                         tag = "GBESV2 Entry Not Found",
                         action = "GBESV2 Entry Not Found",
                         "GBESV2 Entry Not Found For emiBank - {:?}, gateways - {:?}, scope_ - {:?}, tenure - {:?}",

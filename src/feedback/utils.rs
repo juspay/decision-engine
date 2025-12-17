@@ -70,6 +70,10 @@ use crate::types::merchant as ETM;
 // use prelude::real_to_frac;
 // use data::time::clock::posix as DTP;
 use crate::logger;
+use crate::redis::feature::{
+    RedisCompressionConfig, RedisCompressionConfigCombined, RedisDataStruct,
+};
+use time::format_description::well_known::Iso8601;
 // Converted data types
 // Original Haskell data type: GatewayScoringType
 #[derive(Debug, Serialize, Clone, Deserialize, PartialEq)]
@@ -449,7 +453,7 @@ pub async fn updateQueue(
 
     match r {
         Ok(result) => {
-            logger::info!(
+            logger::debug!(
                 action = "updateQueue",
                 tag = "updateQueue",
                 "Successfully updated queue in Redis: {:?}",
@@ -651,7 +655,7 @@ pub async fn getProducerKey(
             .await;
 
             let (_, key) = gateway_key.into_iter().next().unwrap();
-            logger::info!(tag = "getProducerKey", "UNIFIED_KEY {}", key);
+            logger::debug!(tag = "getProducerKey", "UNIFIED_KEY {}", key);
             Some(key)
         }
         None => {
@@ -686,28 +690,25 @@ pub fn log_gateway_score_type(
         },
     };
 
-    let txn_creation_time = txn_detail
-        .dateCreated
-        .to_string()
-        .replace(" ", "T")
-        .replace(" UTC", "Z");
+    let txn_creation_time = match &time::OffsetDateTime::now_utc().format(&Iso8601::DEFAULT) {
+        Ok(dt) => dt.to_string(),
+        Err(_) => "Invalid format".to_string(),
+    };
 
     let log_data = GatewayScoringTypeLogData {
         dateCreated: txn_creation_time,
         score_type: detailed_gateway_score_type,
     };
 
-    let log_entry = GatewayScoringTypeLog {
-        log_data: serde_json::Value::String(
-            serde_json::to_string(&log_data).unwrap_or_else(|_| "Serialization error".to_string()),
-        ),
-    };
+    let log_json = serde_json::json!({
+        "data": log_data,
+    });
 
     logger::info!(
         action = "GATEWAY_SCORE_UPDATED",
         tag = "GATEWAY_SCORE_UPDATED",
-        "Logging gateway score type: {:?}",
-        log_entry
+        "{}",
+        log_json.to_string()
     );
 }
 
@@ -716,13 +717,20 @@ pub async fn writeToCacheWithTTL(
     key: String,
     cached_gateway_score: CachedGatewayScore,
     ttl: i64,
+    redis_compression_config: Option<RedisCompressionConfigCombined>,
 ) -> Result<i32, StorageError> {
-    //from CachedGatewayScore comvert encoded_score to a encoded jasson that can be used as a value for redis sextx
+    //from CachedGatewayScore convert encoded_score to a encoded json that can be used as a value for redis sextx
     let encoded_score =
         serde_json::to_string(&cached_gateway_score).unwrap_or_else(|_| "".to_string());
 
-    let primary_write =
-        addToCacheWithExpiry("kv_redis".to_string(), key.clone(), encoded_score, ttl).await;
+    let primary_write = addToCacheWithExpiry(
+        "kv_redis".to_string(),
+        key.clone(),
+        encoded_score,
+        ttl,
+        redis_compression_config,
+    )
+    .await;
 
     match primary_write {
         Ok(_) => Ok(0),
@@ -736,9 +744,19 @@ pub async fn addToCacheWithExpiry(
     key: String,
     value: String,
     ttl: i64,
+    redis_compression_config: Option<RedisCompressionConfigCombined>,
 ) -> Result<(), StorageError> {
     let app_state = get_tenant_app_state().await;
-    let cached_resp = app_state.redis_conn.setx(&key, &value, ttl).await;
+    let cached_resp = app_state
+        .redis_conn
+        .setx(
+            &key,
+            &value,
+            ttl,
+            redis_compression_config,
+            RedisDataStruct::STRING,
+        )
+        .await;
     match cached_resp {
         Ok(_) => Ok(()),
         Err(error) => Err(StorageError::InsertError),

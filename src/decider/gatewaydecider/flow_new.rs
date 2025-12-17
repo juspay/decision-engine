@@ -22,6 +22,7 @@ use super::utils as Utils;
 // use optics_core::{preview, review};
 use crate::decider::gatewaydecider::constants as C;
 use crate::logger;
+use crate::redis::feature::RedisDataStruct;
 use crate::types::card::txn_card_info::TxnCardInfo;
 use crate::types::merchant as ETM;
 use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
@@ -71,7 +72,7 @@ pub async fn decider_full_payload_hs_function(
         Some(card_bin) => Some(card_bin),
         None => match dreq.txnCardInfo.card_isin {
             Some(c_isin) => {
-                let res_bin = Utils::get_card_bin_from_token_bin(6, c_isin.as_str()).await;
+                let res_bin = Utils::get_card_bin_from_token_bin(6, c_isin.as_str(), None).await;
                 Some(res_bin)
             }
             None => dreq.txnCardInfo.card_isin.clone(),
@@ -106,6 +107,7 @@ pub async fn decider_full_payload_hs_function(
         dpEDCCApplied: dreq.isEdccApplied,
         dpIsOnUsTxn: dreq.isOnUsTxn,
         dpShouldConsumeResult: dreq.shouldConsumeResult,
+        dpRedisCompressionConfig: None,
     };
 
     if dreq_.ranking_algorithm == Some(RankingAlgorithm::NtwBasedRouting) {
@@ -465,12 +467,13 @@ pub async fn run_decider_flow(
                     //     &currentGatewayScoreMap
                     // ).await?;
 
-                    logger::info!(
-                        action = "GATEWAY_PRIORITY_MAP",
-                        tag = "GATEWAY_PRIORITY_MAP",
-                        "{:?}",
-                        gatewayPriorityMap
-                    );
+                    if let Some(ref priority_map) = gatewayPriorityMap {
+                        logger::debug!(
+                            action = "GATEWAY_PRIORITY_MAP",
+                            tag = "GATEWAY_PRIORITY_MAP",
+                            gateway_priority_map = %priority_map
+                        );
+                    }
 
                     match decidedGateway {
                         Some(decideGatewayOutput) => {
@@ -534,6 +537,8 @@ pub async fn run_decider_flow(
                 .unwrap_or_default()
                 .as_str(),
             C::GATEWAY_SCORE_KEYS_TTL,
+            None,
+            RedisDataStruct::STRING,
         )
         .await
         .unwrap_or_default();

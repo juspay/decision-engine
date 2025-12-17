@@ -1,5 +1,6 @@
 use super::runner::get_gateway_priority;
 use super::types::UnifiedError;
+use crate::redis::feature::{RedisCompressionConfigCombined, RedisDataStruct};
 use axum::response::IntoResponse;
 use serde_json::json;
 use serde_json::Value as AValue;
@@ -127,6 +128,7 @@ pub trait ResponseDecider {
 
 pub async fn decider_full_payload_hs_function(
     dreq: T::DomainDeciderRequest,
+    redis_compression_config: Option<RedisCompressionConfigCombined>,
 ) -> Result<(T::DecidedGateway, Vec<(String, Vec<String>)>), T::ErrorResponse> {
     let merchant_prefs = match ETM::merchant_iframe_preferences::getMerchantIPrefsByMId(
         dreq.txnDetail.merchantId.0.clone(),
@@ -165,7 +167,12 @@ pub async fn decider_full_payload_hs_function(
         Some(card_bin) => Some(card_bin),
         None => match dreq.txnCardInfo.card_isin {
             Some(c_isin) => {
-                let res_bin = Utils::get_card_bin_from_token_bin(6, c_isin.as_str()).await;
+                let res_bin = Utils::get_card_bin_from_token_bin(
+                    6,
+                    c_isin.as_str(),
+                    redis_compression_config.clone(),
+                )
+                .await;
                 Some(res_bin)
             }
             None => dreq.txnCardInfo.card_isin.clone(),
@@ -200,6 +207,7 @@ pub async fn decider_full_payload_hs_function(
         dpEDCCApplied: dreq.isEdccApplied,
         dpIsOnUsTxn: dreq.isOnUsTxn,
         dpShouldConsumeResult: dreq.shouldConsumeResult,
+        dpRedisCompressionConfig: redis_compression_config,
     };
     run_decider_flow(decider_params, true).await
 }
@@ -352,7 +360,7 @@ pub async fn run_decider_flow(
         .or(deciderParams.dpOrder.preferredGateway.clone());
     let gatewayMgaIdMap = get_gateway_to_mga_id_map_f(&allMgas, &functionalGateways);
 
-    logger::warn!(
+    logger::debug!(
         action = "PreferredGateway",
         tag = "PreferredGateway",
         "Preferred gateway provided by merchant for {:?} = {:?}",
@@ -409,7 +417,7 @@ pub async fn run_decider_flow(
                         gateways: vec![],
                     });
 
-                logger::info!(
+                logger::debug!(
                     action = "PreferredGateway",
                     tag = "PreferredGateway",
                     "Preferred gateway {:?} functional/valid for merchant {:?} in txn {:?}",
@@ -462,18 +470,13 @@ pub async fn run_decider_flow(
             logger::info!(
                 tag = "gatewayPriorityList",
                 action = "gatewayPriorityList",
-                "Gateway priority for merchant for {:?} = {:?}",
+                "Gateway priority for merchant for {:?} = {:?}, gwPLogic : {:?}",
                 &deciderParams.dpTxnDetail.txnId,
-                gatewayPriorityList
+                gatewayPriorityList,
+                gwPLogic
             );
 
             let (mut functionalGateways, updatedPriorityLogicOutput) = if gwPLogic.is_enforcement {
-                logger::info!(
-                    tag = "gatewayPriorityList",
-                    action = "Enforcing Priority Logic",
-                    "Enforcing Priority Logic for {:?}",
-                    deciderParams.dpTxnDetail.txnId
-                );
                 let (res, priorityLogicOutput) = filter_functional_gateways_with_enforcement(
                     &mut decider_flow,
                     &functionalGateways,
@@ -619,7 +622,7 @@ pub async fn run_decider_flow(
                     )
                     .await;
 
-                    logger::info!(
+                    logger::debug!(
                         action = "Decided Gateway",
                         tag = "Decided Gateway",
                         "Gateway decided for {:?} = {:?}",
@@ -636,12 +639,13 @@ pub async fn run_decider_flow(
                     //     &currentGatewayScoreMap
                     // ).await?;
 
-                    logger::info!(
-                        action = "GATEWAY_PRIORITY_MAP",
-                        tag = "GATEWAY_PRIORITY_MAP",
-                        "{:?}",
-                        gatewayPriorityMap
-                    );
+                    if let Some(ref priority_map) = gatewayPriorityMap {
+                        logger::debug!(
+                            action = "GATEWAY_PRIORITY_MAP",
+                            tag = "GATEWAY_PRIORITY_MAP",
+                            gateway_priority_map = %priority_map
+                        );
+                    }
 
                     match decidedGateway {
                         Some(decideGatewayOutput) => Ok(T::DecidedGateway {
@@ -704,6 +708,8 @@ pub async fn run_decider_flow(
                     .unwrap_or_default()
                     .as_str(),
                 C::GATEWAY_SCORE_KEYS_TTL,
+                deciderParams.dpRedisCompressionConfig.clone(),
+                RedisDataStruct::STRING,
             )
             .await
             .unwrap_or_default();

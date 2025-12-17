@@ -1,5 +1,6 @@
 use crate::app::{get_tenant_app_state, TenantAppState};
 use crate::decider::network_decider;
+use crate::redis::feature::RedisCompressionConfigCombined;
 use crate::types::country::country_iso::CountryISO2;
 use crate::types::currency::Currency;
 use crate::types::money::internal as ETMo;
@@ -76,6 +77,7 @@ pub enum DeciderFilterName {
     FilterGatewaysForEMITenureSpecficGatewayCreds,
     FilterFunctionalGatewaysForReversePennyDrop,
     FilterFunctionalGatewaysForOTM,
+    FilterFunctionalGatewaysForPixFlows,
 }
 
 impl fmt::Display for DeciderFilterName {
@@ -157,6 +159,9 @@ impl fmt::Display for DeciderFilterName {
             }
             Self::FilterFunctionalGatewaysForOTM => {
                 write!(f, "FilterFunctionalGatewaysForOTM")
+            }
+            Self::FilterFunctionalGatewaysForPixFlows => {
+                write!(f, "FilterFunctionalGatewaysForPixFlows")
             }
         }
     }
@@ -266,7 +271,7 @@ pub struct GatewayScoringTypeLogData {
 
 #[derive(Debug)]
 pub struct GatewayScoringTypeLog {
-    pub log_data: AValue,
+    pub data: AValue,
 }
 
 impl Serialize for GatewayScoringTypeLog {
@@ -275,7 +280,7 @@ impl Serialize for GatewayScoringTypeLog {
         S: serde::Serializer,
     {
         let mut state = serializer.serialize_struct("GatewayScoringTypeLog", 1)?;
-        state.serialize_field("data", &self.log_data)?;
+        state.serialize_field("data", &self.data)?;
         state.end()
     }
 }
@@ -290,7 +295,7 @@ impl<'de> Deserialize<'de> for GatewayScoringTypeLog {
             &["data"],
             GatewayScoringTypeLogVisitor,
         )?;
-        Ok(Self { log_data: data })
+        Ok(Self { data })
     }
 }
 
@@ -969,7 +974,7 @@ pub struct PaymentInfo {
     currency: Currency,
     country: Option<CountryISO2>,
     customer_id: Option<ETCu::CustomerId>,
-    #[serde(deserialize_with = "deserialize_optional_udfs_to_hashmap")]
+    #[serde(default, deserialize_with = "deserialize_optional_udfs_to_hashmap")]
     udfs: Option<UDFs>,
     preferred_gateway: Option<String>,
     payment_type: TxnObjectType,
@@ -1296,6 +1301,7 @@ pub struct DeciderParams {
     pub dpEDCCApplied: Option<bool>,
     pub dpIsOnUsTxn: Option<bool>,
     pub dpShouldConsumeResult: Option<bool>,
+    pub dpRedisCompressionConfig: Option<RedisCompressionConfigCombined>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

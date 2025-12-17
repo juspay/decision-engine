@@ -250,7 +250,7 @@ pub async fn getEnabledMgasByMerchantIdAndRefId(
             .filter_map(|db_record| MerchantGatewayAccount::try_from(db_record).ok())
             .collect(),
         Err(err) => {
-            crate::logger::info!("Error in getEnabledMgasByMerchantIdAndRefId: {:?}", err);
+            crate::logger::debug!("Error in getEnabledMgasByMerchantIdAndRefId: {:?}", err);
             Vec::new() // Silently handle any errors by returning empty vec
         }
     }
