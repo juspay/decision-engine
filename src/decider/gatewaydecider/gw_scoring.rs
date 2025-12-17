@@ -1986,7 +1986,7 @@ async fn get_elimination_v2_threshold(
         )
         .await
     {
-        logger::debug!(
+        logger::info!(
             tag="scoringFlow",
             action = "scoringFlow",
             "Calculating Threshold: SR1: {:?} SR2: {:?} N: {:?} N_M_: {:?} PMT: {:?} PM: {:?} TxnObjectType: {:?} SourceObject: {:?}",
@@ -2000,7 +2000,7 @@ async fn get_elimination_v2_threshold(
             txn_detail.sourceObject.as_ref().unwrap_or(&"Nothing".to_string())
         );
 
-        logger::debug!(
+        logger::info!(
             tag = "scoringFlow",
             action = "scoringFlow",
             "Threshold value: {:?}",
@@ -2011,7 +2011,7 @@ async fn get_elimination_v2_threshold(
 
         Some(((sr1_th_weight * sr1) + (sr2_th_weight * sr2)) / 100.0)
     } else {
-        logger::debug!(
+        logger::info!(
             tag="scoringFlow",
             action = "scoringFlow",
             "Elimination V2 values not found: Threshold: PMT: {:?} PM: {:?} TxnObjectType: {:?} SourceObject: {:?}",
