@@ -53,6 +53,9 @@ max_capacity = 5000
 service_config_redis_prefix = "DE_service_config_"
 service_config_ttl = 300    # 5 minutes
 
+[compression_filepath]
+zstd_compression_filepath = "/tmp/extra-paths/redis-zstd-dictionaries/sbx"
+
 [tenant_secrets]
 public = { schema = "public" }
 

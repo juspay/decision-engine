@@ -2,7 +2,7 @@
 // Generated on 2025-03-23 10:24:42
 
 use crate::redis::cache::findByNameFromRedis;
-use crate::redis::feature::is_feature_enabled;
+use crate::redis::feature::{is_feature_enabled, RedisCompressionConfigCombined};
 use masking::PeekInterface;
 // Converted imports
 // use gateway_decider::constants as c::{enable_elimination_v2, gateway_scoring_data, EnableExploreAndExploitOnSrv3, SrV3InputConfig, GatewayScoreFirstDimensionSoftTtl};
@@ -66,9 +66,7 @@ use crate::types::merchant as ETM;
 // use data::aeson as a;
 // use types::merchant as etm;
 
-use fred::types::SetOptions;
-use serde::{Deserialize, Serialize};
-
+use crate::redis::feature::RedisDataStruct;
 use crate::{
     feedback::{
         constants as C,
@@ -77,6 +75,8 @@ use crate::{
     },
     types::txn_details::types::{TransactionLatency, TxnDetail, TxnStatus, TxnStatus as TS},
 };
+use fred::types::SetOptions;
+use serde::{Deserialize, Serialize};
 
 use super::constants::{
     default_sr_v3_latency_threshold_in_secs, SrV3InputConfig, UpdateGatewayScoreLockFlagTtl,
@@ -246,6 +246,7 @@ pub fn txn_failure_states() -> Vec<TxnStatus> {
 pub async fn check_and_send_should_update_gateway_score(
     lock_key: String,
     lock_key_ttl: i32,
+    redis_comp_config: Option<RedisCompressionConfigCombined>,
 ) -> bool {
     let app_state = get_tenant_app_state().await;
     let is_set_either = app_state
@@ -255,6 +256,8 @@ pub async fn check_and_send_should_update_gateway_score(
             "true",
             lock_key_ttl as i64,
             SetOptions::NX,
+            redis_comp_config,
+            RedisDataStruct::STRING,
         )
         .await;
 
@@ -450,6 +453,7 @@ pub async fn check_and_update_gateway_score_(
                 enforce_failure,
                 api_payload.gateway_reference_id.clone(),
                 api_payload.txn_latency.clone(),
+                None,
             )
             .await;
 
@@ -486,6 +490,7 @@ pub async fn check_and_update_gateway_score(
     enforce_failure: bool,
     gateway_reference_id: Option<String>,
     txn_latency: Option<TransactionLatency>,
+    redis_comp_config: Option<RedisCompressionConfigCombined>,
 ) -> () {
     // Get gateway scoring type
     let gateway_scoring_type =
@@ -504,8 +509,12 @@ pub async fn check_and_update_gateway_score(
         .await
         .unwrap_or(300);
 
-    let should_compute_gw_score =
-        check_and_send_should_update_gateway_score(update_score_lock_key, lock_key_ttl).await;
+    let should_compute_gw_score = check_and_send_should_update_gateway_score(
+        update_score_lock_key,
+        lock_key_ttl,
+        redis_comp_config.clone(),
+    )
+    .await;
 
     // Check if feature is enabled for merchant
     let feature_enabled = is_feature_enabled(
@@ -532,6 +541,7 @@ pub async fn check_and_update_gateway_score(
                 txn_card_info.clone(),
                 gateway_reference_id.clone(),
                 txn_latency.clone(),
+                redis_comp_config.clone(),
             )
             .await;
         }
@@ -550,6 +560,7 @@ pub async fn check_and_update_gateway_score(
             txn_card_info.clone(),
             gateway_reference_id.clone(),
             txn_latency.clone(),
+            redis_comp_config,
         )
         .await;
     }
@@ -564,6 +575,7 @@ pub async fn update_gateway_score(
     txn_card_info: TxnCardInfo,
     gateway_reference_id: Option<String>,
     txn_latency: Option<TransactionLatency>,
+    redis_compression_config: Option<RedisCompressionConfigCombined>,
 ) -> () {
     let mer_acc: MerchantAccount =
         MA::load_merchant_by_merchant_id(MID::merchant_id_to_text(txn_detail.clone().merchantId))
@@ -813,6 +825,7 @@ pub async fn update_gateway_score(
                         mer_acc_p_id,
                         mer_acc.clone(),
                         key,
+                        redis_compression_config.clone(),
                     ));
                 }
             }

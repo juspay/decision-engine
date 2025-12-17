@@ -70,6 +70,9 @@ use crate::types::merchant as ETM;
 // use prelude::real_to_frac;
 // use data::time::clock::posix as DTP;
 use crate::logger;
+use crate::redis::feature::{
+    RedisCompressionConfig, RedisCompressionConfigCombined, RedisDataStruct,
+};
 use time::format_description::well_known::Iso8601;
 // Converted data types
 // Original Haskell data type: GatewayScoringType
@@ -714,13 +717,20 @@ pub async fn writeToCacheWithTTL(
     key: String,
     cached_gateway_score: CachedGatewayScore,
     ttl: i64,
+    redis_compression_config: Option<RedisCompressionConfigCombined>,
 ) -> Result<i32, StorageError> {
-    //from CachedGatewayScore comvert encoded_score to a encoded jasson that can be used as a value for redis sextx
+    //from CachedGatewayScore convert encoded_score to a encoded json that can be used as a value for redis sextx
     let encoded_score =
         serde_json::to_string(&cached_gateway_score).unwrap_or_else(|_| "".to_string());
 
-    let primary_write =
-        addToCacheWithExpiry("kv_redis".to_string(), key.clone(), encoded_score, ttl).await;
+    let primary_write = addToCacheWithExpiry(
+        "kv_redis".to_string(),
+        key.clone(),
+        encoded_score,
+        ttl,
+        redis_compression_config,
+    )
+    .await;
 
     match primary_write {
         Ok(_) => Ok(0),
@@ -734,9 +744,19 @@ pub async fn addToCacheWithExpiry(
     key: String,
     value: String,
     ttl: i64,
+    redis_compression_config: Option<RedisCompressionConfigCombined>,
 ) -> Result<(), StorageError> {
     let app_state = get_tenant_app_state().await;
-    let cached_resp = app_state.redis_conn.setx(&key, &value, ttl).await;
+    let cached_resp = app_state
+        .redis_conn
+        .setx(
+            &key,
+            &value,
+            ttl,
+            redis_compression_config,
+            RedisDataStruct::STRING,
+        )
+        .await;
     match cached_resp {
         Ok(_) => Ok(()),
         Err(error) => Err(StorageError::InsertError),
