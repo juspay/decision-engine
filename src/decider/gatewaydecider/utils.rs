@@ -9,6 +9,7 @@ use crate::redis::feature::{
     is_feature_enabled, RedisCompressionConfig, RedisCompressionConfigCombined, RedisDataStruct,
 };
 use crate::redis::types::ServiceConfigKey;
+use crate::storage::schema::gateway_bank_emi_support::gateway;
 use crate::types::card::card_type::card_type_to_text;
 use crate::types::country::country_iso::CountryISO2;
 use crate::types::currency::Currency;
@@ -252,12 +253,12 @@ pub fn get_merchant_wise_si_bin_key(gw: &String) -> String {
 fn get_merchant_gateway_card_info_feature_name(
     auth_type: Option<&ETCa::txn_card_info::AuthType>,
     validation_type: Option<&ValidationType>,
-    gateway: &String,
+    gw: &String,
 ) -> Option<String> {
     let flow = validation_type
         .map(|v| format!("{}", v))
         .or_else(|| auth_type.map(|a| format!("{}", a)))?;
-    Some(format!("MERCHANT_GATEWAY_CARD_INFO_{}_{}", flow, gateway))
+    Some(format!("MERCHANT_GATEWAY_CARD_INFO_{}_{}", flow, gw))
 }
 
 pub fn is_mandate_transaction(txn: &ETTD::TxnDetail) -> bool {
@@ -280,19 +281,19 @@ pub async fn get_merchant_wise_mandate_bin_eligible_gateways(
     let merchant_wise_mandate_supported_gateway: Vec<String> =
         merchant_wise_mandate_bin_enforced_gateways
             .into_iter()
-            .filter(|gateway| mandate_enabled_gateways.contains(gateway))
+            .filter(|gw| mandate_enabled_gateways.contains(gw))
             .collect();
     let mut gws = Vec::new();
-    for gateway in merchant_wise_mandate_supported_gateway {
+    for gw in merchant_wise_mandate_supported_gateway {
         if ETF::get_feature_enabled(
-            &get_merchant_wise_si_bin_key(&gateway),
+            &get_merchant_wise_si_bin_key(&gw),
             &merchant_account.merchantId,
             true,
         )
         .await
         .is_some()
         {
-            gws.push(gateway);
+            gws.push(gw);
         }
     }
     gws
@@ -302,7 +303,7 @@ pub async fn is_merchant_wise_auth_type_check_needed(
     merchant_account: &ETM::merchant_account::MerchantAccount,
     auth_type: Option<&ETCa::txn_card_info::AuthType>,
     validation_type: Option<&ValidationType>,
-    gateway: &String,
+    gw: &String,
 ) -> bool {
     let merchant_wise_auth_type_bin_enforced_gateways: Vec<String> =
         RService::findByNameFromRedis::<Vec<String>>(
@@ -310,9 +311,9 @@ pub async fn is_merchant_wise_auth_type_check_needed(
         )
         .await
         .unwrap_or_default();
-    if merchant_wise_auth_type_bin_enforced_gateways.contains(gateway) {
+    if merchant_wise_auth_type_bin_enforced_gateways.contains(gw) {
         if let Some(feature_key) =
-            get_merchant_gateway_card_info_feature_name(auth_type, validation_type, gateway)
+            get_merchant_gateway_card_info_feature_name(auth_type, validation_type, gw)
         {
             return ETF::get_feature_enabled(&feature_key, &merchant_account.merchantId, true)
                 .await
@@ -1362,6 +1363,48 @@ pub fn get_ref_id_value(
     }
 }
 
+pub async fn get_common_gateway_ref_id(
+    decider_flow: &mut DeciderFlow<'_>,
+) -> (bool, Option<String>) {
+    let order_ref = decider_flow.get().dpOrder.clone();
+    let merchant = decider_flow.get().dpMerchantAccount.clone();
+
+    let (meta, pl_ref_id_map) = get_order_metadata_and_pl_ref_id_map(
+        decider_flow,
+        merchant.enableGatewayReferenceIdBasedRouting,
+        &order_ref,
+    );
+
+    let gateway_list = decider_flow.writer.functionalGateways.clone();
+
+    let ref_ids: Vec<String> = gateway_list
+        .iter()
+        .map(|gw| {
+            let gw_ref_id = get_gateway_reference_id(
+                meta.clone(),
+                gw,
+                order_ref.clone(),
+                pl_ref_id_map.clone(),
+            );
+            match gw_ref_id {
+                None => "NULL".to_string(),
+                Some(ref_id) => ref_id.mga_reference_id,
+            }
+        })
+        .collect();
+
+    if ref_ids.is_empty() {
+        return (false, None);
+    }
+
+    let first_ref_id = &ref_ids[0];
+    if ref_ids.iter().all(|ref_id| ref_id == first_ref_id) {
+        (true, Some(first_ref_id.clone()))
+    } else {
+        (false, None)
+    }
+}
+
 pub fn decider_filter_order(filter_name: &str) -> i32 {
     match filter_name {
         "getFunctionalGateways" => 1,
@@ -1933,6 +1976,8 @@ pub fn get_default_gateway_scoring_data(
     currency: Option<Currency>,
     country: Option<CountryISO2>,
     auth_type: Option<String>,
+    useServiceConfigForGri: bool,
+    gatewayRefId: Option<String>,
     udfs: Option<UDFs>,
     is_legacy_decider_flow: bool,
 ) -> GatewayScoringData {
@@ -1948,8 +1993,16 @@ pub fn get_default_gateway_scoring_data(
         isPaymentSourceEnabledForSrRouting: false,
         isAuthLevelEnabledForSrRouting: false,
         isBankLevelEnabledForSrRouting: false,
-        isGriEnabledForElimination: is_gri_enabled_for_elimination,
-        isGriEnabledForSrRouting: is_gri_enabled_for_sr_routing,
+        isGriEnabledForElimination: if useServiceConfigForGri {
+            is_gri_enabled_for_elimination
+        } else {
+            false
+        },
+        isGriEnabledForSrRouting: if useServiceConfigForGri {
+            is_gri_enabled_for_sr_routing
+        } else {
+            false
+        },
         routingApproach: None,
         dateCreated: date_created,
         eliminationEnabled: false,
@@ -1960,6 +2013,7 @@ pub fn get_default_gateway_scoring_data(
         is_legacy_decider_flow,
         udfs,
         udfs_consumed_for_routing: None,
+        gatewayReferenceId: gatewayRefId,
     }
 }
 
@@ -2005,6 +2059,12 @@ pub async fn get_gateway_scoring_data(
         "kv_redis".to_string(),
     )
     .await;
+    let (useServiceConfigForGri, gatewayRefId) =
+        if is_gri_enabled_for_sr_routing || is_gri_enabled_for_elimination {
+            (get_common_gateway_ref_id(decider_flow).await)
+        } else {
+            (true, None)
+        };
     let mut default_gateway_scoring_data = get_default_gateway_scoring_data(
         merchant_id.clone(),
         order_type,
@@ -2023,6 +2083,8 @@ pub async fn get_gateway_scoring_data(
             .authType
             .as_ref()
             .map(|a| a.to_string()),
+        useServiceConfigForGri,
+        gatewayRefId,
         Some(decider_flow.get().dpOrder.udfs.clone()),
         is_legacy_decider_flow,
     );
@@ -2249,9 +2311,9 @@ pub async fn get_unified_key(
             if gri_sr_v2_cutover {
                 gateway_ref_id_map.iter().fold(
                     GatewayRedisKeyMap::new(),
-                    |mut acc, (gateway, ref_id)| {
+                    |mut acc, (gw, ref_id)| {
                         acc.insert(
-                            gateway.clone(),
+                            gw.clone(),
                             intercalate_without_empty_string(
                                 "_",
                                 &vec![key.clone(), ref_id.as_deref().unwrap_or("").to_string()],
@@ -2274,33 +2336,32 @@ pub async fn get_unified_key(
             if gri_sr_v2_cutover {
                 gateway_ref_id_map.iter().fold(
                     GatewayRedisKeyMap::new(),
-                    |mut acc, (gateway, ref_id)| {
+                    |mut acc, (gw, ref_id)| {
                         let key = intercalate_without_empty_string(
                             "_",
                             &vec![
                                 base_key.clone(),
                                 ref_id.as_deref().unwrap_or("").to_string(),
-                                gateway.to_string(),
+                                gw.to_string(),
                             ],
                         );
-                        acc.insert(gateway.clone(), key);
+                        acc.insert(gw.clone(), key);
                         acc
                     },
                 )
             } else {
-                gateway_ref_id_map.iter().fold(
-                    GatewayRedisKeyMap::new(),
-                    |mut acc, (gateway, _)| {
+                gateway_ref_id_map
+                    .iter()
+                    .fold(GatewayRedisKeyMap::new(), |mut acc, (gw, _)| {
                         acc.insert(
-                            gateway.clone(),
+                            gw.clone(),
                             intercalate_without_empty_string(
                                 "_",
-                                &vec![base_key.clone(), gateway.to_string()],
+                                &vec![base_key.clone(), gw.to_string()],
                             ),
                         );
                         acc
-                    },
-                )
+                    })
             }
         }
         ScoreKeyType::OutageGlobalKey => {
@@ -2692,11 +2753,11 @@ pub async fn get_consumer_key(
             merchant.enableGatewayReferenceIdBasedRouting,
             &order_ref,
         );
-        let gw_ref_ids = gateway_list.iter().fold(HashMap::new(), |acc, gateway| {
+        let gw_ref_ids = gateway_list.iter().fold(HashMap::new(), |acc, gw| {
             let mut map = acc;
             let gwref_id = get_gateway_reference_id(
                 meta.clone(),
-                gateway,
+                gw,
                 order_ref.clone(),
                 pl_ref_id_map.clone(),
             );
@@ -2704,19 +2765,17 @@ pub async fn get_consumer_key(
                 None => "NULL".to_string(),
                 Some(ref_id) => ref_id.mga_reference_id,
             };
-            map.insert(gateway.clone(), Some(val));
+            map.insert(gw.clone(), Some(val));
             map
         });
         set_gw_ref_id(decider_flow, gw_ref_ids.values().next().cloned().flatten());
         logger::debug!("gwRefId {:?}", gw_ref_ids);
         gw_ref_ids
     } else {
-        gateway_list
-            .iter()
-            .fold(HashMap::new(), |mut acc, gateway| {
-                acc.insert(gateway.clone(), None);
-                acc
-            })
+        gateway_list.iter().fold(HashMap::new(), |mut acc, gw| {
+            acc.insert(gw.clone(), None);
+            acc
+        })
     };
     let gateway_redis_key_map = get_unified_key(
         gateway_scoring_data,
@@ -3002,7 +3061,10 @@ pub async fn addToCacheWithExpiry(
     }
 }
 
-pub async fn get_penality_factor_(decider_flow: &mut DeciderFlow<'_>) -> f64 {
+pub async fn get_penality_factor_(
+    decider_flow: &mut DeciderFlow<'_>,
+    gateway_scoring_data: &GatewayScoringData,
+) -> f64 {
     let merchant = decider_flow.get().dpMerchantAccount.clone();
     let txn_detail = decider_flow.get().dpTxnDetail.clone();
     let txn_card_info = decider_flow.get().dpTxnCardInfo.clone();
@@ -3014,8 +3076,15 @@ pub async fn get_penality_factor_(decider_flow: &mut DeciderFlow<'_>) -> f64 {
     )
     .await;
     if is_elimination_v2_enabled {
-        let m_reward_factor =
-            eliminationV2RewardFactor(&merchant_id, &txn_card_info, &txn_detail).await;
+        let griEnabled = gateway_scoring_data.gatewayReferenceId.is_some();
+        let m_reward_factor = eliminationV2RewardFactor(
+            &merchant_id,
+            &txn_card_info,
+            &txn_detail,
+            griEnabled,
+            gateway_scoring_data.gatewayReferenceId.clone(),
+        )
+        .await;
         match m_reward_factor {
             Some(reward_factor) => return 1.0 - reward_factor,
             None => {

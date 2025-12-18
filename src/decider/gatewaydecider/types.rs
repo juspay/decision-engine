@@ -546,6 +546,7 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
             is_legacy_decider_flow: true,
             udfs: None,
             udfs_consumed_for_routing: None,
+            gatewayReferenceId: None,
         },
     }
 }
@@ -574,6 +575,7 @@ pub struct GatewayScoringData {
     pub currency: Option<Currency>,
     pub country: Option<CountryISO2>,
     pub is_legacy_decider_flow: bool,
+    pub gatewayReferenceId: Option<String>,
     pub udfs: Option<UDFs>,
     pub udfs_consumed_for_routing: Option<String>,
 }
@@ -1718,6 +1720,7 @@ pub struct ResetGatewayInput {
     pub key: Option<String>,
     pub hardTtl: u128,
     pub softTtl: f64,
+    pub gatewayReferenceIdEnabled: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1863,6 +1866,7 @@ pub struct SuccessRate1AndNConfig {
     pub paymentMethodType: String,
     pub paymentMethod: Option<String>,
     pub txnObjectType: Option<String>,
+    pub gatewayReferenceId: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1936,4 +1940,20 @@ pub struct SrRoutingDimensions {
     pub currency: Option<String>,
     pub country: Option<String>,
     pub auth_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MetricEntry {
+    pub n_value: f64,
+    pub success_rate: f64,
+    pub sigma_factor: f64,
+    pub average_latency: f64,
+    pub tp99_latency: f64,
+    pub default_success_threshold: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SrMetrics {
+    pub dimension: String,
+    pub value: MetricEntry,
 }
