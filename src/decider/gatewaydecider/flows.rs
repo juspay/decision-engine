@@ -205,6 +205,7 @@ pub async fn decider_full_payload_hs_function(
         dpPriorityLogicOutput: dreq.priorityLogicOutput,
         dpPriorityLogicScript: dreq.priorityLogicScript,
         dpEDCCApplied: dreq.isEdccApplied,
+        dpIsOnUsTxn: dreq.isOnUsTxn,
         dpShouldConsumeResult: dreq.shouldConsumeResult,
         dpRedisCompressionConfig: redis_compression_config,
     };
@@ -270,6 +271,7 @@ fn handle_enforced_gateway(gateway_list: Option<Vec<String>>) -> Option<Vec<Stri
 //         priorityLogicOutput: dreq.priorityLogicOutput,
 //         priorityLogicScript: dreq.priorityLogicScript,
 //         isEdccApplied: dreq.isEdccApplied,
+//         isOnUsTxn: dreq.isOnUsTxn,
 //     };
 //     runGwListFlow(decider_params).await
 // }
