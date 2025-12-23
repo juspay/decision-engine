@@ -84,9 +84,9 @@ impl types::CoBadgedCardRequest {
             .await?;
 
         logger::debug!("Total fees per debit network: {:?}", network_costs);
-        network_costs.sort_by(|(_, fee1), (_, fee2)| fee1.total_cmp(fee2));
 
-        let network_saving_infos = Self::calculate_network_saving_infos(network_costs, amount)?;
+        let network_saving_infos =
+            Self::calculate_network_saving_infos_with_savings_as_absolute_value(&mut network_costs);
 
         Some(types::DebitRoutingOutput {
             co_badged_card_networks_info: network_saving_infos,
@@ -136,6 +136,30 @@ impl types::CoBadgedCardRequest {
         .flatten()
     }
 
+    fn calculate_network_saving_infos_with_savings_as_absolute_value(
+        network_costs: &mut Vec<(gateway_decider_types::NETWORK, f64)>,
+    ) -> Vec<types::NetworkSavingInfo> {
+        // Sort the network costs by fee
+        network_costs.sort_by(|(_, fee1), (_, fee2)| fee1.total_cmp(fee2));
+
+        // Get the most expensive fee
+        let most_expensive_fee = network_costs.last().map(|(_, fee)| *fee).unwrap_or(0.0);
+
+        // Create the network saving info
+        let mut network_saving_infos = Vec::new();
+        for (network, fee) in network_costs {
+            network_saving_infos.push(types::NetworkSavingInfo {
+                network: network.clone(),
+                saving_percentage: most_expensive_fee - *fee,
+            });
+        }
+
+        logger::debug!("Network saving infos: {:?}", network_saving_infos);
+
+        network_saving_infos
+    }
+
+    #[allow(dead_code)]
     fn calculate_savings<F>(
         costs: Vec<(gateway_decider_types::NETWORK, f64)>,
         calc_savings_percentage: F,
@@ -152,7 +176,8 @@ impl types::CoBadgedCardRequest {
             .collect()
     }
 
-    fn calculate_network_saving_infos(
+    #[allow(dead_code)]
+    fn calculate_network_saving_infos_with_savings_as_percentage(
         sorted_network_costs: Vec<(gateway_decider_types::NETWORK, f64)>,
         transaction_amount: f64,
     ) -> Option<Vec<types::NetworkSavingInfo>> {
