@@ -374,14 +374,14 @@ pub fn update_gateway_score_lock(
     txn_uuid: String,
     gateway: String,
 ) -> String {
-    match (gateway_scoring_type) {
-        (GatewayScoringType::Penalise) => {
+    match gateway_scoring_type {
+        GatewayScoringType::Penalise => {
             format!("gateway_scores_lock_PENALISE_{}_{}", txn_uuid, gateway)
         }
-        (GatewayScoringType::PenaliseSrv3) => {
+        GatewayScoringType::PenaliseSrv3 => {
             format!("gateway_scores_lock_PENALISE_SRV3_{}_{}", txn_uuid, gateway)
         }
-        (GatewayScoringType::Reward) => {
+        GatewayScoringType::Reward => {
             format!("gateway_scores_lock_REWARD_{}_{}", txn_uuid, gateway)
         }
         _ => String::new(),
