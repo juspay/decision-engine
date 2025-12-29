@@ -6,4 +6,4 @@ metadata:
     {{- include "decision-engine.labels" . | nindent 4 }}
 data:
   development.toml: |-
-    {{ .Files.Get "../config/development.toml" | nindent 4 }}
+    {{ .Files.Get "config/development.toml" | nindent 4 }}
