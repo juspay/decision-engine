@@ -27,6 +27,10 @@ podAnnotations: {}
 podSecurityContext: {}
   # fsGroup: 2000
 
+initContainers:
+  # Set to false to disable all init containers
+  enabled: true
+
 securityContext: {}
   # capabilities:
   #   drop:
