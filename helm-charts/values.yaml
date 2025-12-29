@@ -8,7 +8,7 @@ image:
   version: "v1.2.0"
 
 # Configure these if your images are in a private registry
-imagePullSecrets: 
+imagePullSecrets:
   # - name: regcred
 nameOverride: ""
 fullnameOverride: ""
@@ -206,3 +206,5 @@ routingConfig:
     enabled: true
     # Path to mount routing config files
     mountPath: "/app"
+
+extraEnvVars: []

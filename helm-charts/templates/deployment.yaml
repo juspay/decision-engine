@@ -63,6 +63,10 @@ spec:
           env:
             - name: GROOVY_RUNNER_HOST
               value: "{{ include "decision-engine.groovyRunnerName" . }}:{{ .Values.groovyRunner.service.port }}"
+          {{- with .Values.extraEnvVars }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
           livenessProbe:
             httpGet:
               path: /health
