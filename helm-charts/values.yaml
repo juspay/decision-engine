@@ -219,4 +219,5 @@ routingConfig:
     # Path to mount routing config files
     mountPath: "/app"
 
+# Additional environment variables to inject into the main container
 extraEnvVars: []
