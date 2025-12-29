@@ -56,12 +56,11 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.version | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
-            - name: http
-              containerPort: {{ .Values.decisionEngine.server.port }}
-              protocol: TCP
-            - name: metrics
-              containerPort: {{ .Values.decisionEngine.metrics.port }}
-              protocol: TCP
+            {{- range .Values.service.ports }}
+            - name: {{ .name }}
+              containerPort: {{ .targetPort }}
+              protocol: {{ .protocol | default "TCP" }}
+            {{- end }}
           env:
             - name: GROOVY_RUNNER_HOST
               value: "{{ include "decision-engine.groovyRunnerName" . }}:{{ .Values.groovyRunner.service.port }}"
