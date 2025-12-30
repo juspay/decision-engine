@@ -8,7 +8,7 @@ image:
   version: "v1.2.0"
 
 # Configure these if your images are in a private registry
-imagePullSecrets: 
+imagePullSecrets:
   # - name: regcred
 nameOverride: ""
 fullnameOverride: ""
@@ -27,6 +27,10 @@ podAnnotations: {}
 podSecurityContext: {}
   # fsGroup: 2000
 
+initContainers:
+  # Set to false to disable all init containers
+  enabled: true
+
 securityContext: {}
   # capabilities:
   #   drop:
@@ -37,7 +41,15 @@ securityContext: {}
 
 service:
   type: ClusterIP
-  port: 8080
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
 
 ingress:
   enabled: false
@@ -206,3 +218,6 @@ routingConfig:
     enabled: true
     # Path to mount routing config files
     mountPath: "/app"
+
+# Additional environment variables to inject into the main container
+extraEnvVars: []
