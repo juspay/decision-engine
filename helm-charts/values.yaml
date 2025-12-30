@@ -221,3 +221,37 @@ routingConfig:
 
 # Additional environment variables to inject into the main container
 extraEnvVars: []
+
+# Istio configuration (optional)
+istio:
+  enabled: false
+  virtualService:
+    enabled: false
+    hosts: []
+    gateways: []
+    # HTTP routing rules - route destination will be automatically set to control center service
+    http: []
+    # Example configuration:
+    # http:
+    #   - name: "control-center-routes"
+    #     match:
+    #       - uri:
+    #           prefix: /
+    #     rewrite:
+    #       uri: "/dashboard"
+    #     weight: 100
+    #     timeout: 30s
+    #     retries:
+    #       attempts: 3
+    #       perTryTimeout: 10s
+  destinationRule:
+    enabled: false
+    trafficPolicy: {}
+    # Example traffic policy:
+    # trafficPolicy:
+    #   loadBalancer:
+    #     simple: ROUND_ROBIN
+    #   connectionPool:
+    #     tcp:
+    #       maxConnections: 50
+    #       connectTimeout: 30s
