@@ -268,6 +268,22 @@ impl Deref for Context {
     }
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct ValidationConstraints {
+    #[serde(default)]
+    pub min: Option<i64>,
+    #[serde(default)]
+    pub max: Option<i64>,
+    #[serde(default)]
+    pub min_length: Option<usize>,
+    #[serde(default)]
+    pub max_length: Option<usize>,
+    #[serde(default)]
+    pub exact_length: Option<usize>,
+    #[serde(default)]
+    pub regex: Option<String>,
+}
+
 /// Represents a key configuration in the TOML file
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct KeyConfig {
@@ -275,6 +291,152 @@ pub struct KeyConfig {
     pub data_type: String,
     #[serde(default)]
     pub values: Option<String>,
+    #[serde(default)]
+    pub min: Option<i64>,
+    #[serde(default)]
+    pub max: Option<i64>,
+    #[serde(default)]
+    pub min_length: Option<usize>,
+    #[serde(default)]
+    pub max_length: Option<usize>,
+    #[serde(default)]
+    pub exact_length: Option<usize>,
+    #[serde(default)]
+    pub regex: Option<String>,
+}
+
+impl KeyConfig {
+    pub fn get_validation_constraints(&self) -> ValidationConstraints {
+        ValidationConstraints {
+            min: self.min,
+            max: self.max,
+            min_length: self.min_length,
+            max_length: self.max_length,
+            exact_length: self.exact_length,
+            regex: self.regex.clone(),
+        }
+    }
+
+    pub fn has_validation_constraints(&self) -> bool {
+        self.min.is_some()
+            || self.max.is_some()
+            || self.min_length.is_some()
+            || self.max_length.is_some()
+            || self.exact_length.is_some()
+            || self.regex.is_some()
+    }
+
+    pub fn build_validation_rules(&self) -> Result<FieldValidationRules, String> {
+        let regex_pattern = match &self.regex {
+            Some(pattern) => Some(
+                regex::Regex::new(pattern)
+                    .map_err(|e| format!("Invalid regex pattern '{}': {}", pattern, e))?,
+            ),
+            None => None,
+        };
+
+        Ok(FieldValidationRules {
+            numeric_range: match (self.min, self.max) {
+                (Some(min), Some(max)) => Some((min, max)),
+                (Some(min), None) => Some((min, i64::MAX)),
+                (None, Some(max)) => Some((i64::MIN, max)),
+                (None, None) => None,
+            },
+            length_range: match (self.min_length, self.max_length) {
+                (Some(min), Some(max)) => Some((min, max)),
+                (Some(min), None) => Some((min, usize::MAX)),
+                (None, Some(max)) => Some((0, max)),
+                (None, None) => None,
+            },
+            exact_length: self.exact_length,
+            regex_pattern,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct FieldValidationRules {
+    pub numeric_range: Option<(i64, i64)>,
+    pub length_range: Option<(usize, usize)>,
+    pub exact_length: Option<usize>,
+    pub regex_pattern: Option<regex::Regex>,
+}
+
+impl FieldValidationRules {
+    pub fn validate_numeric(&self, field: &str, value: i64) -> Result<(), String> {
+        if let Some((min, max)) = self.numeric_range {
+            if value < min {
+                return Err(format!(
+                    "value {} is below minimum {} for field '{}'",
+                    value, min, field
+                ));
+            }
+            if value > max {
+                return Err(format!(
+                    "value {} exceeds maximum {} for field '{}'",
+                    value, max, field
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn validate_string(&self, field: &str, value: &str) -> Result<(), String> {
+        let len = value.len();
+
+        if let Some(exact) = self.exact_length {
+            if len != exact {
+                return Err(format!(
+                    "expected exactly {} characters, got {} for field '{}'",
+                    exact, len, field
+                ));
+            }
+        }
+
+        if let Some((min, max)) = self.length_range {
+            if len < min {
+                return Err(format!(
+                    "length {} is below minimum {} for field '{}'",
+                    len, min, field
+                ));
+            }
+            if len > max {
+                return Err(format!(
+                    "length {} exceeds maximum {} for field '{}'",
+                    len, max, field
+                ));
+            }
+        }
+
+        if let Some(ref pattern) = self.regex_pattern {
+            if !pattern.is_match(value) {
+                return Err(format!(
+                    "value '{}' does not match required pattern for field '{}'",
+                    value, field
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn has_rules(&self) -> bool {
+        self.numeric_range.is_some()
+            || self.length_range.is_some()
+            || self.exact_length.is_some()
+            || self.regex_pattern.is_some()
+    }
+}
+
+impl Default for FieldValidationRules {
+    fn default() -> Self {
+        Self {
+            numeric_range: None,
+            length_range: None,
+            exact_length: None,
+            regex_pattern: None,
+        }
+    }
 }
 
 /// Structure for the [keys] section in the TOML

@@ -9,7 +9,6 @@ use crate::redis::feature::{
     is_feature_enabled, RedisCompressionConfig, RedisCompressionConfigCombined, RedisDataStruct,
 };
 use crate::redis::types::ServiceConfigKey;
-use crate::storage::schema::gateway_bank_emi_support::gateway;
 use crate::types::card::card_type::card_type_to_text;
 use crate::types::country::country_iso::CountryISO2;
 use crate::types::currency::Currency;

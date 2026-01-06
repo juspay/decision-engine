@@ -14,7 +14,7 @@ use crate::{
             RoutingRequest, RoutingRule, SrDimensionConfig, StaticRoutingAlgorithm,
             ELIGIBLE_DIMENSIONS,
         },
-        utils::{generate_random_id, is_valid_enum_value, validate_routing_rule},
+        utils::{generate_random_id, is_valid_enum_value, validate_routing_rule, validate_routing_rule_with_details},
     },
     types::service_configuration::{find_config_by_name, insert_config, update_config},
 };
@@ -145,34 +145,74 @@ pub async fn routing_create(
 
     logger::debug!("Received routing config: {:?}", config);
 
-    if let Err(err) = validate_routing_rule(&config, &state.config.routing_config) {
-        let source = err.get_inner();
-
-        if let EuclidErrors::FailedToValidateRoutingRule = source {
-            if let Some(validation_messages) = err.downcast_ref::<Vec<String>>() {
-                let detailed_error = validation_messages.join("; ");
-                logger::error!("Routing rule validation failed with errors: {detailed_error}");
+    // Use the new structured validation for better error reporting
+    match validate_routing_rule_with_details(&config, &state.config.routing_config) {
+        Ok(validation_result) => {
+            if !validation_result.is_valid {
+                // Log each validation error with structured details
+                for error in &validation_result.errors {
+                    logger::error!(
+                        field = %error.field,
+                        error_type = %error.error_type,
+                        message = %error.message,
+                        expected = ?error.expected,
+                        actual = ?error.actual,
+                        "Field validation error during routing rule creation"
+                    );
+                }
+                
+                // Build structured error response with field-level details
+                let error_details: Vec<serde_json::Value> = validation_result.errors
+                    .iter()
+                    .map(|e| {
+                        let mut detail = serde_json::json!({
+                            "field": e.field,
+                            "error_type": e.error_type,
+                            "message": e.message,
+                        });
+                        if let Some(ref expected) = e.expected {
+                            detail["expected"] = serde_json::json!(expected);
+                        }
+                        if let Some(ref actual) = e.actual {
+                            detail["actual"] = serde_json::json!(actual);
+                        }
+                        detail
+                    })
+                    .collect();
+                
+                let detailed_error = validation_result.to_error_message();
+                logger::error!(
+                    error_count = validation_result.errors.len(),
+                    "Routing rule validation failed with {} errors: {}",
+                    validation_result.errors.len(),
+                    detailed_error
+                );
 
                 metrics::API_REQUEST_COUNTER
                     .with_label_values(&["routing_create", "failure"])
                     .inc();
                 timer.observe_duration();
+                
                 return Err(ContainerError::new_with_status_code_and_payload(
-                    EuclidErrors::FailedToValidateRoutingRule,
+                    EuclidErrors::FieldValidationFailed(detailed_error.clone()),
                     axum::http::StatusCode::BAD_REQUEST,
                     ApiErrorResponse::new(
-                        "INVALID_REQUEST_DATA",
+                        "FIELD_VALIDATION_FAILED",
                         format!("Routing rule validation failed: {}", detailed_error),
-                        None,
+                        Some(serde_json::json!({ "validation_errors": error_details })),
                     ),
                 ));
             }
+            logger::debug!("Routing rule validation passed successfully");
         }
-        metrics::API_REQUEST_COUNTER
-            .with_label_values(&["routing_create", "failure"])
-            .inc();
-        timer.observe_duration();
-        return Err(err.into());
+        Err(err) => {
+            logger::error!(error = ?err, "Failed to validate routing rule configuration");
+            metrics::API_REQUEST_COUNTER
+                .with_label_values(&["routing_create", "failure"])
+                .inc();
+            timer.observe_duration();
+            return Err(err.into());
+        }
     }
 
     let utc_date_time = time::OffsetDateTime::now_utc();
