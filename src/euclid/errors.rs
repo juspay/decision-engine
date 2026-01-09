@@ -43,6 +43,109 @@ pub enum EuclidErrors {
 
     #[error("Invalid Sr Dimension Configuration")]
     InvalidSrDimensionConfig(String),
+
+    #[error("Field value out of range: {0}")]
+    FieldValueOutOfRange(String),
+
+    #[error("Field length invalid: {0}")]
+    FieldLengthInvalid(String),
+
+    #[error("Field pattern mismatch: {0}")]
+    FieldPatternMismatch(String),
+
+    #[error("Field validation failed: {0}")]
+    FieldValidationFailed(String),
+}
+
+pub fn format_validation_error(
+    context: &str,
+    field: &str,
+    error_type: &str,
+    expected: &str,
+    actual: &str,
+) -> String {
+    format!(
+        "{}: Invalid field '{}': expected {}, got {}",
+        context, field, expected, actual
+    )
+}
+
+pub fn field_value_out_of_range(field: &str, value: i64, min: i64, max: i64) -> EuclidErrors {
+    EuclidErrors::FieldValueOutOfRange(format!(
+        "field '{}': value {} is outside valid range [{}, {}]",
+        field, value, min, max
+    ))
+}
+
+pub fn field_length_invalid(field: &str, expected: usize, actual: usize) -> EuclidErrors {
+    EuclidErrors::FieldLengthInvalid(format!(
+        "field '{}': expected {} characters, got {}",
+        field, expected, actual
+    ))
+}
+
+pub fn field_length_out_of_range(
+    field: &str,
+    actual: usize,
+    min: usize,
+    max: usize,
+) -> EuclidErrors {
+    EuclidErrors::FieldLengthInvalid(format!(
+        "field '{}': length {} is outside valid range [{}, {}]",
+        field, actual, min, max
+    ))
+}
+
+pub fn field_pattern_mismatch(field: &str, value: &str, pattern: &str) -> EuclidErrors {
+    EuclidErrors::FieldPatternMismatch(format!(
+        "field '{}': value '{}' does not match pattern '{}'",
+        field, value, pattern
+    ))
+}
+
+pub fn field_validation_failed(field: &str, reason: &str) -> EuclidErrors {
+    EuclidErrors::FieldValidationFailed(format!("field '{}': {}", field, reason))
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ValidationErrorDetails {
+    pub field: String,
+    pub error_type: String,
+    pub message: String,
+    pub expected: Option<String>,
+    pub actual: Option<String>,
+}
+
+impl ValidationErrorDetails {
+    pub fn new(
+        field: impl Into<String>,
+        error_type: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            field: field.into(),
+            error_type: error_type.into(),
+            message: message.into(),
+            expected: None,
+            actual: None,
+        }
+    }
+
+    pub fn with_expected_actual(
+        field: impl Into<String>,
+        error_type: impl Into<String>,
+        message: impl Into<String>,
+        expected: impl Into<String>,
+        actual: impl Into<String>,
+    ) -> Self {
+        Self {
+            field: field.into(),
+            error_type: error_type.into(),
+            message: message.into(),
+            expected: Some(expected.into()),
+            actual: Some(actual.into()),
+        }
+    }
 }
 
 impl axum::response::IntoResponse for EuclidErrors {
@@ -195,15 +298,55 @@ impl axum::response::IntoResponse for EuclidErrors {
             )
                 .into_response(),
 
-                EuclidErrors::InvalidSrDimensionConfig(msg) => (
-                    hyper::StatusCode::BAD_REQUEST,
-                    axum::Json(ApiErrorResponse::new(
-                        error_codes::TE_04,
-                        msg,
-                        None,
-                    )),
-                )
-                    .into_response(),
+            EuclidErrors::InvalidSrDimensionConfig(msg) => (
+                hyper::StatusCode::BAD_REQUEST,
+                axum::Json(ApiErrorResponse::new(
+                    error_codes::TE_04,
+                    msg,
+                    None,
+                )),
+            )
+                .into_response(),
+
+            EuclidErrors::FieldValueOutOfRange(msg) => (
+                hyper::StatusCode::BAD_REQUEST,
+                axum::Json(ApiErrorResponse::new(
+                    error_codes::TE_04,
+                    format!("Field value out of range: {}", msg),
+                    None,
+                )),
+            )
+                .into_response(),
+
+            EuclidErrors::FieldLengthInvalid(msg) => (
+                hyper::StatusCode::BAD_REQUEST,
+                axum::Json(ApiErrorResponse::new(
+                    error_codes::TE_04,
+                    format!("Field length invalid: {}", msg),
+                    None,
+                )),
+            )
+                .into_response(),
+
+            EuclidErrors::FieldPatternMismatch(msg) => (
+                hyper::StatusCode::BAD_REQUEST,
+                axum::Json(ApiErrorResponse::new(
+                    error_codes::TE_04,
+                    format!("Field pattern mismatch: {}", msg),
+                    None,
+                )),
+            )
+                .into_response(),
+
+            EuclidErrors::FieldValidationFailed(msg) => (
+                hyper::StatusCode::BAD_REQUEST,
+                axum::Json(ApiErrorResponse::new(
+                    error_codes::TE_04,
+                    format!("Field validation failed: {}", msg),
+                    None,
+                )),
+            )
+                .into_response(),
         }
     }
 }
