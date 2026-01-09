@@ -306,17 +306,6 @@ pub struct KeyConfig {
 }
 
 impl KeyConfig {
-    pub fn get_validation_constraints(&self) -> ValidationConstraints {
-        ValidationConstraints {
-            min: self.min,
-            max: self.max,
-            min_length: self.min_length,
-            max_length: self.max_length,
-            exact_length: self.exact_length,
-            regex: self.regex.clone(),
-        }
-    }
-
     pub fn has_validation_constraints(&self) -> bool {
         self.min.is_some()
             || self.max.is_some()
@@ -336,18 +325,10 @@ impl KeyConfig {
         };
 
         Ok(FieldValidationRules {
-            numeric_range: match (self.min, self.max) {
-                (Some(min), Some(max)) => Some((min, max)),
-                (Some(min), None) => Some((min, i64::MAX)),
-                (None, Some(max)) => Some((i64::MIN, max)),
-                (None, None) => None,
-            },
-            length_range: match (self.min_length, self.max_length) {
-                (Some(min), Some(max)) => Some((min, max)),
-                (Some(min), None) => Some((min, usize::MAX)),
-                (None, Some(max)) => Some((0, max)),
-                (None, None) => None,
-            },
+            numeric_min: self.min,
+            numeric_max: self.max,
+            length_min: self.min_length,
+            length_max: self.max_length,
             exact_length: self.exact_length,
             regex_pattern,
         })
@@ -356,21 +337,25 @@ impl KeyConfig {
 
 #[derive(Clone, Debug)]
 pub struct FieldValidationRules {
-    pub numeric_range: Option<(i64, i64)>,
-    pub length_range: Option<(usize, usize)>,
+    pub numeric_min: Option<i64>,
+    pub numeric_max: Option<i64>,
+    pub length_min: Option<usize>,
+    pub length_max: Option<usize>,
     pub exact_length: Option<usize>,
     pub regex_pattern: Option<regex::Regex>,
 }
 
 impl FieldValidationRules {
     pub fn validate_numeric(&self, field: &str, value: i64) -> Result<(), String> {
-        if let Some((min, max)) = self.numeric_range {
+        if let Some(min) = self.numeric_min {
             if value < min {
                 return Err(format!(
                     "value {} is below minimum {} for field '{}'",
                     value, min, field
                 ));
             }
+        }
+        if let Some(max) = self.numeric_max {
             if value > max {
                 return Err(format!(
                     "value {} exceeds maximum {} for field '{}'",
@@ -393,13 +378,16 @@ impl FieldValidationRules {
             }
         }
 
-        if let Some((min, max)) = self.length_range {
+        if let Some(min) = self.length_min {
             if len < min {
                 return Err(format!(
                     "length {} is below minimum {} for field '{}'",
                     len, min, field
                 ));
             }
+        }
+
+        if let Some(max) = self.length_max {
             if len > max {
                 return Err(format!(
                     "length {} exceeds maximum {} for field '{}'",
@@ -421,8 +409,10 @@ impl FieldValidationRules {
     }
 
     pub fn has_rules(&self) -> bool {
-        self.numeric_range.is_some()
-            || self.length_range.is_some()
+        self.numeric_min.is_some()
+            || self.numeric_max.is_some()
+            || self.length_min.is_some()
+            || self.length_max.is_some()
             || self.exact_length.is_some()
             || self.regex_pattern.is_some()
     }
@@ -431,8 +421,10 @@ impl FieldValidationRules {
 impl Default for FieldValidationRules {
     fn default() -> Self {
         Self {
-            numeric_range: None,
-            length_range: None,
+            numeric_min: None,
+            numeric_max: None,
+            length_min: None,
+            length_max: None,
             exact_length: None,
             regex_pattern: None,
         }

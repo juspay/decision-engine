@@ -14,7 +14,10 @@ use crate::{
             RoutingRequest, RoutingRule, SrDimensionConfig, StaticRoutingAlgorithm,
             ELIGIBLE_DIMENSIONS,
         },
-        utils::{generate_random_id, is_valid_enum_value, validate_routing_rule, validate_routing_rule_with_details},
+        utils::{
+            generate_random_id, is_valid_enum_value, validate_routing_rule,
+            validate_routing_rule_with_details,
+        },
     },
     types::service_configuration::{find_config_by_name, insert_config, update_config},
 };
@@ -160,9 +163,10 @@ pub async fn routing_create(
                         "Field validation error during routing rule creation"
                     );
                 }
-                
+
                 // Build structured error response with field-level details
-                let error_details: Vec<serde_json::Value> = validation_result.errors
+                let error_details: Vec<serde_json::Value> = validation_result
+                    .errors
                     .iter()
                     .map(|e| {
                         let mut detail = serde_json::json!({
@@ -179,12 +183,11 @@ pub async fn routing_create(
                         detail
                     })
                     .collect();
-                
+
                 let detailed_error = validation_result.to_error_message();
                 logger::error!(
                     error_count = validation_result.errors.len(),
-                    "Routing rule validation failed with {} errors: {}",
-                    validation_result.errors.len(),
+                    "Routing rule validation failed: {}",
                     detailed_error
                 );
 
@@ -192,7 +195,7 @@ pub async fn routing_create(
                     .with_label_values(&["routing_create", "failure"])
                     .inc();
                 timer.observe_duration();
-                
+
                 return Err(ContainerError::new_with_status_code_and_payload(
                     EuclidErrors::FieldValidationFailed(detailed_error.clone()),
                     axum::http::StatusCode::BAD_REQUEST,

@@ -131,7 +131,6 @@ pub fn validate_routing_rule_with_details(
                 crate::logger::debug!("Routing rule validation passed successfully");
                 Ok(ValidationResult::success())
             } else {
-                // Log each validation error with details
                 for error in &validation_errors {
                     crate::logger::warn!(
                         field = %error.field,
@@ -155,7 +154,6 @@ pub fn validate_routing_rule_with_details(
     }
 }
 
-/// Original validation function - maintained for backward compatibility
 pub fn validate_routing_rule(
     rule: &RoutingRule,
     config: &Option<TomlConfig>,
@@ -354,15 +352,25 @@ fn validate_condition_with_details(
             if key_config.has_validation_constraints() {
                 if let Ok(rules) = build_validation_rules(key_config) {
                     if let Err(e) = validate_numeric_range(&condition.lhs, *n as i64, &rules) {
-                        if let Some((min, max)) = rules.numeric_range {
-                            errors.push(ValidationErrorDetails::with_expected_actual(
-                                &condition.lhs,
-                                "value_out_of_range",
-                                format!("{}: {}", context, e),
-                                format!("value between {} and {}", min, max),
-                                n.to_string(),
-                            ));
+                        let mut expected_parts = Vec::new();
+                        if let Some(min) = rules.numeric_min {
+                            expected_parts.push(format!("min: {}", min));
                         }
+                        if let Some(max) = rules.numeric_max {
+                            expected_parts.push(format!("max: {}", max));
+                        }
+                        let expected = if expected_parts.is_empty() {
+                            "valid value".to_string()
+                        } else {
+                            expected_parts.join(", ")
+                        };
+                        errors.push(ValidationErrorDetails::with_expected_actual(
+                            &condition.lhs,
+                            "value_out_of_range",
+                            format!("{}: {}", context, e),
+                            expected,
+                            n.to_string(),
+                        ));
                     }
                 }
             }
@@ -389,15 +397,25 @@ fn validate_condition_with_details(
                 if let Ok(rules) = build_validation_rules(key_config) {
                     for (i, n) in arr.iter().enumerate() {
                         if let Err(e) = validate_numeric_range(&condition.lhs, *n as i64, &rules) {
-                            if let Some((min, max)) = rules.numeric_range {
-                                errors.push(ValidationErrorDetails::with_expected_actual(
-                                    &condition.lhs,
-                                    "value_out_of_range",
-                                    format!("{}: Element {}: {}", context, i + 1, e),
-                                    format!("value between {} and {}", min, max),
-                                    n.to_string(),
-                                ));
+                            let mut expected_parts = Vec::new();
+                            if let Some(min) = rules.numeric_min {
+                                expected_parts.push(format!("min: {}", min));
                             }
+                            if let Some(max) = rules.numeric_max {
+                                expected_parts.push(format!("max: {}", max));
+                            }
+                            let expected = if expected_parts.is_empty() {
+                                "valid value".to_string()
+                            } else {
+                                expected_parts.join(", ")
+                            };
+                            errors.push(ValidationErrorDetails::with_expected_actual(
+                                &condition.lhs,
+                                "value_out_of_range",
+                                format!("{}: Element {}: {}", context, i + 1, e),
+                                expected,
+                                n.to_string(),
+                            ));
                         }
                     }
                 }
@@ -510,12 +528,28 @@ fn build_expected_constraint_string(rules: &FieldValidationRules) -> String {
 
     if let Some(exact) = rules.exact_length {
         parts.push(format!("exactly {} characters", exact));
-    } else if let Some((min, max)) = rules.length_range {
-        parts.push(format!("{}-{} characters", min, max));
+    } else {
+        let mut length_parts = Vec::new();
+        if let Some(min) = rules.length_min {
+            length_parts.push(format!("min: {}", min));
+        }
+        if let Some(max) = rules.length_max {
+            length_parts.push(format!("max: {}", max));
+        }
+        if !length_parts.is_empty() {
+            parts.push(format!("{} characters", length_parts.join(", ")));
+        }
     }
 
-    if let Some((min, max)) = rules.numeric_range {
-        parts.push(format!("value between {} and {}", min, max));
+    let mut numeric_parts = Vec::new();
+    if let Some(min) = rules.numeric_min {
+        numeric_parts.push(format!("min: {}", min));
+    }
+    if let Some(max) = rules.numeric_max {
+        numeric_parts.push(format!("max: {}", max));
+    }
+    if !numeric_parts.is_empty() {
+        parts.push(format!("value {}", numeric_parts.join(", ")));
     }
 
     if rules.regex_pattern.is_some() {
@@ -745,13 +779,15 @@ pub fn validate_numeric_range(
     value: i64,
     rules: &FieldValidationRules,
 ) -> Result<(), String> {
-    if let Some((min, max)) = rules.numeric_range {
+    if let Some(min) = rules.numeric_min {
         if value < min {
             return Err(format!(
                 "Invalid field '{}': value {} is below minimum {}",
                 field, value, min
             ));
         }
+    }
+    if let Some(max) = rules.numeric_max {
         if value > max {
             return Err(format!(
                 "Invalid field '{}': value {} exceeds maximum {}",
@@ -800,10 +836,7 @@ pub fn validate_exact_length(
     if actual_length != expected_length {
         return Err(format!(
             "Invalid field '{}': expected {} characters, got {} ({} characters)",
-            field,
-            expected_length,
-            value,
-            actual_length
+            field, expected_length, value, actual_length
         ));
     }
     Ok(())
@@ -836,8 +869,8 @@ pub fn validate_string_value(
 ) -> Result<(), String> {
     if let Some(exact) = rules.exact_length {
         validate_exact_length(field, value, exact)?;
-    } else if let Some((min, max)) = rules.length_range {
-        validate_string_length(field, value, Some(min), Some(max))?;
+    } else if rules.length_min.is_some() || rules.length_max.is_some() {
+        validate_string_length(field, value, rules.length_min, rules.length_max)?;
     }
 
     validate_regex_pattern(field, value, &rules.regex_pattern)?;
