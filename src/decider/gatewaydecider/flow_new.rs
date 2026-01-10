@@ -105,6 +105,7 @@ pub async fn decider_full_payload_hs_function(
         dpPriorityLogicOutput: dreq.priorityLogicOutput,
         dpPriorityLogicScript: dreq.priorityLogicScript,
         dpEDCCApplied: dreq.isEdccApplied,
+        dpIsOnUsTxn: dreq.isOnUsTxn,
         dpShouldConsumeResult: dreq.shouldConsumeResult,
         dpRedisCompressionConfig: None,
     };
