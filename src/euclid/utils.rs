@@ -1,5 +1,5 @@
-use super::ast::{Comparison, ComparisonType, IfStatement, Rule, ValueType};
-use super::errors::{format_validation_error, EuclidErrors, ValidationErrorDetails};
+use super::ast::{Comparison, ComparisonType, IfStatement, ValueType};
+use super::errors::{EuclidErrors, ValidationErrorDetails};
 use super::types::StaticRoutingAlgorithm;
 use crate::error::ContainerError;
 use crate::euclid::types::{FieldValidationRules, KeyConfig, RoutingRule, TomlConfig};
@@ -123,8 +123,11 @@ pub fn validate_routing_rule_with_details(
         StaticRoutingAlgorithm::Advanced(program) => {
             let mut validation_errors: Vec<ValidationErrorDetails> = Vec::new();
 
+            // Extract and validate all conditions from all rules and statements
             for rule in &program.rules {
-                validate_rule_with_details(rule, &config, &mut validation_errors);
+                for statement in &rule.statements {
+                    validate_conditions_in_statement(statement, &config, &mut validation_errors);
+                }
             }
 
             if validation_errors.is_empty() {
@@ -180,67 +183,40 @@ pub fn get_validation_errors(
     Ok(result.errors)
 }
 
-fn validate_rule(rule: &Rule, config: &TomlConfig, errors: &mut Vec<String>) {
-    for (i, statement) in rule.statements.iter().enumerate() {
-        validate_statement(
-            statement,
-            config,
-            errors,
-            &format!("Rule '{}' Statement {}", rule.name, i + 1),
-        );
-    }
-}
 
-/// Validates a rule and collects structured validation error details
-fn validate_rule_with_details(
-    rule: &Rule,
-    config: &TomlConfig,
-    errors: &mut Vec<ValidationErrorDetails>,
-) {
-    for (i, statement) in rule.statements.iter().enumerate() {
-        let context = format!("Rule '{}'", rule.name);
-        validate_statement_with_details(statement, config, errors, &context);
-    }
-}
-
-/// Validates a statement and collects structured validation error details
-fn validate_statement_with_details(
+/// Recursively validates all conditions in a statement and its nested statements
+fn validate_conditions_in_statement(
     statement: &IfStatement,
     config: &TomlConfig,
     errors: &mut Vec<ValidationErrorDetails>,
-    context: &str,
 ) {
+    // Validate all conditions in this statement
     for condition in &statement.condition {
-        validate_condition_with_details(condition, config, errors, context);
+        validate_field_condition(condition, config, errors);
     }
 
     // Recursively validate nested statements
     if let Some(nested) = &statement.nested {
-        for (i, nested_stmt) in nested.iter().enumerate() {
-            let nested_context = format!("{} -> Nested {}", context, i + 1);
-            validate_statement_with_details(nested_stmt, config, errors, &nested_context);
+        for nested_stmt in nested {
+            validate_conditions_in_statement(nested_stmt, config, errors);
         }
     }
 }
 
-/// Validates a condition and collects structured validation error details
-fn validate_condition_with_details(
+/// Validates a field condition and collects structured validation error details
+fn validate_field_condition(
     condition: &Comparison,
     config: &TomlConfig,
     errors: &mut Vec<ValidationErrorDetails>,
-    context: &str,
 ) {
     let key_exists = config.keys.keys.contains_key(&condition.lhs);
     if !key_exists {
         errors.push(ValidationErrorDetails::new(
             &condition.lhs,
             "unknown_key",
-            format_validation_error(
-                context,
-                &condition.lhs,
-                "unknown_key",
-                "a defined key",
-                "undefined key",
+            format!(
+                "Invalid field '{}' (unknown_key) - expected a defined key, got undefined key",
+                &condition.lhs
             ),
         ));
         return;
@@ -264,12 +240,9 @@ fn validate_condition_with_details(
             errors.push(ValidationErrorDetails::with_expected_actual(
                 &condition.lhs,
                 "invalid_comparison",
-                format_validation_error(
-                    context,
-                    &condition.lhs,
-                    "invalid_comparison",
-                    "Equal or NotEqual",
-                    &format!("{:?}", condition.comparison),
+                format!(
+                    "Invalid field '{}' (invalid_comparison) - expected Equal or NotEqual, got {:?}",
+                    &condition.lhs, condition.comparison
                 ),
                 "Equal or NotEqual",
                 format!("{:?}", condition.comparison),
@@ -280,8 +253,8 @@ fn validate_condition_with_details(
                 &condition.lhs,
                 "comparison_warning",
                 format!(
-                    "{}: Comparison type '{:?}' may not be appropriate for key '{}' of type '{}'",
-                    context, condition.comparison, condition.lhs, key_config.data_type
+                    "Comparison type '{:?}' may not be appropriate for key '{}' of type '{}'",
+                    condition.comparison, condition.lhs, key_config.data_type
                 ),
             ));
         }
@@ -296,12 +269,9 @@ fn validate_condition_with_details(
                 errors.push(ValidationErrorDetails::with_expected_actual(
                     &condition.lhs,
                     "invalid_enum_value",
-                    format_validation_error(
-                        context,
-                        &condition.lhs,
-                        "invalid_enum_value",
-                        &format!("one of {:?}", valid_values),
-                        value,
+                    format!(
+                        "Invalid field '{}' (invalid_enum_value) - expected one of {:?}, got '{}'",
+                        &condition.lhs, valid_values, value
                     ),
                     format!("one of {:?}", valid_values),
                     value.to_string(),
@@ -319,12 +289,9 @@ fn validate_condition_with_details(
                 errors.push(ValidationErrorDetails::with_expected_actual(
                     &condition.lhs,
                     "invalid_enum_values",
-                    format_validation_error(
-                        context,
-                        &condition.lhs,
-                        "invalid_enum_values",
-                        &format!("values from {:?}", valid_values),
-                        &format!("{:?}", invalid),
+                    format!(
+                        "Invalid field '{}' (invalid_enum_values) - expected values from {:?}, got {:?}",
+                        &condition.lhs, valid_values, invalid
                     ),
                     format!("values from {:?}", valid_values),
                     format!("{:?}", invalid),
@@ -335,12 +302,9 @@ fn validate_condition_with_details(
             errors.push(ValidationErrorDetails::with_expected_actual(
                 &condition.lhs,
                 "type_mismatch",
-                format_validation_error(
-                    context,
-                    &condition.lhs,
-                    "type_mismatch",
-                    "enum variant",
-                    &format!("{:?}", condition.value.get_type()),
+                format!(
+                    "Invalid field '{}' (type_mismatch) - expected enum variant, got {:?}",
+                    &condition.lhs, condition.value.get_type()
                 ),
                 "enum variant",
                 format!("{:?}", condition.value.get_type()),
@@ -367,7 +331,7 @@ fn validate_condition_with_details(
                         errors.push(ValidationErrorDetails::with_expected_actual(
                             &condition.lhs,
                             "value_out_of_range",
-                            format!("{}: {}", context, e),
+                            e,
                             expected,
                             n.to_string(),
                         ));
@@ -384,8 +348,8 @@ fn validate_condition_with_details(
                     &condition.lhs,
                     "invalid_comparison",
                     format!(
-                        "{}: Only '==' or '!=' allowed with number arrays for key '{}'",
-                        context, condition.lhs
+                        "Only '==' or '!=' allowed with number arrays for key '{}'",
+                        condition.lhs
                     ),
                     "Equal or NotEqual",
                     format!("{:?}", condition.comparison),
@@ -412,7 +376,7 @@ fn validate_condition_with_details(
                             errors.push(ValidationErrorDetails::with_expected_actual(
                                 &condition.lhs,
                                 "value_out_of_range",
-                                format!("{}: Element {}: {}", context, i + 1, e),
+                                format!("Element {}: {}", i + 1, e),
                                 expected,
                                 n.to_string(),
                             ));
@@ -427,8 +391,8 @@ fn validate_condition_with_details(
                     &condition.lhs,
                     "invalid_comparison",
                     format!(
-                        "{}: Only '==' allowed with number comparison arrays for key '{}'",
-                        context, condition.lhs
+                        "Only '==' allowed with number comparison arrays for key '{}'",
+                        condition.lhs
                     ),
                     "Equal",
                     format!("{:?}", condition.comparison),
@@ -439,12 +403,9 @@ fn validate_condition_with_details(
             errors.push(ValidationErrorDetails::with_expected_actual(
                 &condition.lhs,
                 "type_mismatch",
-                format_validation_error(
-                    context,
-                    &condition.lhs,
-                    "type_mismatch",
-                    "number",
-                    &format!("{:?}", condition.value.get_type()),
+                format!(
+                    "Invalid field '{}' (type_mismatch) - expected number, got {:?}",
+                    &condition.lhs, condition.value.get_type()
                 ),
                 "number",
                 format!("{:?}", condition.value.get_type()),
@@ -460,7 +421,7 @@ fn validate_condition_with_details(
                         errors.push(ValidationErrorDetails::with_expected_actual(
                             &condition.lhs,
                             "length_invalid",
-                            format!("{}: {}", context, e),
+                            e,
                             expected,
                             format!("\"{}\" ({} chars)", m.value, m.value.len()),
                         ));
@@ -472,12 +433,9 @@ fn validate_condition_with_details(
             errors.push(ValidationErrorDetails::with_expected_actual(
                 &condition.lhs,
                 "type_mismatch",
-                format_validation_error(
-                    context,
-                    &condition.lhs,
-                    "type_mismatch",
-                    "metadata variant",
-                    &format!("{:?}", condition.value.get_type()),
+                format!(
+                    "Invalid field '{}' (type_mismatch) - expected metadata variant, got {:?}",
+                    &condition.lhs, condition.value.get_type()
                 ),
                 "metadata variant",
                 format!("{:?}", condition.value.get_type()),
@@ -493,7 +451,7 @@ fn validate_condition_with_details(
                         errors.push(ValidationErrorDetails::with_expected_actual(
                             &condition.lhs,
                             "length_invalid",
-                            format!("{}: {}", context, e),
+                            e,
                             expected,
                             format!("\"{}\" ({} chars)", s, s.len()),
                         ));
@@ -507,12 +465,9 @@ fn validate_condition_with_details(
                 errors.push(ValidationErrorDetails::with_expected_actual(
                     &condition.lhs,
                     "type_mismatch",
-                    format_validation_error(
-                        context,
-                        &condition.lhs,
-                        "type_mismatch",
-                        &key_config.data_type,
-                        &condition.value.get_type().to_string(),
+                    format!(
+                        "Invalid field '{}' (type_mismatch) - expected {}, got {}",
+                        &condition.lhs, key_config.data_type, condition.value.get_type()
                     ),
                     key_config.data_type.clone(),
                     condition.value.get_type().to_string(),
@@ -563,216 +518,6 @@ fn build_expected_constraint_string(rules: &FieldValidationRules) -> String {
     }
 }
 
-fn validate_statement(
-    statement: &IfStatement,
-    config: &TomlConfig,
-    errors: &mut Vec<String>,
-    context: &str,
-) {
-    for condition in &statement.condition {
-        validate_condition(condition, config, errors, context);
-    }
-}
-
-/// validates the comparison operators for different subtle value types present
-/// by throwing required errors for comparisons that can't be performed for a certain value type
-/// for example
-/// can't have greater/less than operations on enum types
-fn validate_condition(
-    condition: &Comparison,
-    config: &TomlConfig,
-    errors: &mut Vec<String>,
-    context: &str,
-) {
-    let key_exists = config.keys.keys.contains_key(&condition.lhs);
-    if !key_exists {
-        errors.push(format!(
-            "{}: Unknown key '{}' in condition",
-            context, condition.lhs
-        ));
-        return;
-    }
-    let key_config = &config.keys.keys[&condition.lhs];
-
-    match (key_config.data_type.as_str(), &condition.comparison) {
-        (
-            "integer",
-            ComparisonType::Equal
-            | ComparisonType::NotEqual
-            | ComparisonType::LessThan
-            | ComparisonType::LessThanEqual
-            | ComparisonType::GreaterThan
-            | ComparisonType::GreaterThanEqual,
-        ) => {}
-        ("enum", ComparisonType::Equal | ComparisonType::NotEqual) => {}
-
-        ("enum", _) => {
-            errors.push(format!(
-                "{}: Invalid comparison type '{:?}' for enum key '{}'",
-                context, condition.comparison, condition.lhs
-            ));
-        }
-        (_, comp) if comp != &ComparisonType::Equal && comp != &ComparisonType::NotEqual => {
-            errors.push(format!(
-                "{}: Comparison type '{:?}' may not be appropriate for key '{}' of type '{}'",
-                context, condition.comparison, condition.lhs, key_config.data_type
-            ));
-        }
-        _ => {}
-    }
-
-    match (key_config.data_type.as_str(), &condition.value) {
-        ("enum", ValueType::EnumVariant(value)) => {
-            if !is_valid_enum_value(config, &condition.lhs, value) {
-                let valid_values = parse_enum_values(key_config);
-                errors.push(format!(
-                    "{}: Invalid enum value '{}' for key '{}'. Valid values are: {:?}",
-                    context, value, condition.lhs, valid_values
-                ));
-            }
-        }
-        ("enum", ValueType::EnumVariantArray(arr)) => {
-            let invalid: Vec<_> = arr
-                .iter()
-                .filter(|v| !is_valid_enum_value(config, &condition.lhs, *v))
-                .cloned()
-                .collect();
-            if !invalid.is_empty() {
-                let valid_values = parse_enum_values(key_config);
-                errors.push(format!(
-                    "{}: Invalid enum values {:?} for key '{}'. Valid values are: {:?}",
-                    context, invalid, condition.lhs, valid_values
-                ));
-            }
-        }
-        ("enum", _) => {
-            errors.push(format!(
-                "{}: Key '{}' is of type 'enum' but value is not an enum variant",
-                context, condition.lhs
-            ));
-        }
-
-        ("integer", ValueType::Number(_)) => {
-            // Number value is valid for integer type
-        }
-        // array of literals – only == / != make sense
-        ("integer", ValueType::NumberArray(_)) => {
-            if !matches!(
-                condition.comparison,
-                ComparisonType::Equal | ComparisonType::NotEqual
-            ) {
-                errors.push(format!(
-                    "{context}: Only '==' or '!=' allowed with number arrays for key '{}'",
-                    condition.lhs
-                ));
-            }
-        }
-        // comparison array – interpreter supports **only `==`**
-        ("integer", ValueType::NumberComparisonArray(_)) => {
-            if condition.comparison != ComparisonType::Equal {
-                errors.push(format!(
-                    "{context}: Only '==' allowed with number comparison arrays for key '{}'",
-                    condition.lhs
-                ));
-            }
-        }
-
-        ("integer", _) => {
-            errors.push(format!(
-                "{}: Key '{}' is of type 'integer' but value is not a number",
-                context, condition.lhs
-            ));
-        }
-
-        ("udf", ValueType::MetadataVariant(m)) => {
-            // Metadata value is valid for udf type
-            // Validate the metadata value against constraints
-            if key_config.has_validation_constraints() {
-                match build_validation_rules(key_config) {
-                    Ok(rules) => {
-                        if let Err(e) = validate_string_value(&condition.lhs, &m.value, &rules) {
-                            errors.push(format!("{}: {}", context, e));
-                        }
-                    }
-                    Err(e) => {
-                        errors.push(format!(
-                            "{}: Failed to build validation rules: {}",
-                            context, e
-                        ));
-                    }
-                }
-            }
-        }
-        ("udf", _) => {
-            errors.push(format!(
-                "{}: Key '{}' is of type 'udf' but value is not a metadata variant",
-                context, condition.lhs
-            ));
-        }
-        ("str_value", ValueType::StrValue(s)) => {
-            // Validate string value against constraints
-            if key_config.has_validation_constraints() {
-                match build_validation_rules(key_config) {
-                    Ok(rules) => {
-                        if let Err(e) = validate_string_value(&condition.lhs, s, &rules) {
-                            errors.push(format!("{}: {}", context, e));
-                        }
-                    }
-                    Err(e) => {
-                        errors.push(format!(
-                            "{}: Failed to build validation rules: {}",
-                            context, e
-                        ));
-                    }
-                }
-            }
-        }
-        _ => {
-            if condition.value.get_type().to_string() != key_config.data_type {
-                errors.push(format!(
-                    "{}: Value type mismatch for key '{}': expected '{}' but got '{}'",
-                    context,
-                    condition.lhs,
-                    key_config.data_type,
-                    condition.value.get_type()
-                ));
-            }
-        }
-    }
-
-    // Additional value-level validation for integer types
-    if key_config.data_type == "integer" && key_config.has_validation_constraints() {
-        match build_validation_rules(key_config) {
-            Ok(rules) => {
-                match &condition.value {
-                    ValueType::Number(n) => {
-                        // Cast u64 to i64 for validation (safe for typical positive values)
-                        if let Err(e) = validate_numeric_range(&condition.lhs, *n as i64, &rules) {
-                            errors.push(format!("{}: {}", context, e));
-                        }
-                    }
-                    ValueType::NumberArray(arr) => {
-                        for (i, n) in arr.iter().enumerate() {
-                            // Cast u64 to i64 for validation
-                            if let Err(e) =
-                                validate_numeric_range(&condition.lhs, *n as i64, &rules)
-                            {
-                                errors.push(format!("{}: Element {}: {}", context, i + 1, e));
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            Err(e) => {
-                errors.push(format!(
-                    "{}: Failed to build validation rules: {}",
-                    context, e
-                ));
-            }
-        }
-    }
-}
 
 pub fn validate_numeric_range(
     field: &str,
