@@ -284,11 +284,38 @@ pub struct ValidationConstraints {
     pub regex: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum KeyDataType {
+    #[serde(rename = "integer")]
+    Integer,
+    #[serde(rename = "enum")]
+    Enum,
+    #[serde(rename = "udf")]
+    Udf,
+    #[serde(rename = "str_value")]
+    StrValue,
+    #[serde(rename = "global_ref")]
+    GlobalRef,
+}
+
+impl KeyDataType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            KeyDataType::Integer => "integer",
+            KeyDataType::Enum => "enum",
+            KeyDataType::Udf => "udf",
+            KeyDataType::StrValue => "str_value",
+            KeyDataType::GlobalRef => "global_ref",
+        }
+    }
+}
+
 /// Represents a key configuration in the TOML file
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct KeyConfig {
     #[serde(rename = "type")]
-    pub data_type: String,
+    pub data_type: KeyDataType,
     #[serde(default)]
     pub values: Option<String>,
     #[serde(default)]

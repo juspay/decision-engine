@@ -9,7 +9,7 @@ use crate::{
         cgraph,
         interpreter::{evaluate_output, InterpreterBackend},
         types::{
-            ActivateRoutingConfigRequest, Context, JsonifiedRoutingAlgorithm,
+            ActivateRoutingConfigRequest, Context, JsonifiedRoutingAlgorithm, KeyDataType,
             RoutingAlgorithmMapperNew, RoutingDictionaryRecord, RoutingEvaluateResponse,
             RoutingRequest, RoutingRule, SrDimensionConfig, StaticRoutingAlgorithm,
             ELIGIBLE_DIMENSIONS,
@@ -148,11 +148,9 @@ pub async fn routing_create(
 
     logger::debug!("Received routing config: {:?}", config);
 
-    // Use the new structured validation for better error reporting
     match validate_routing_rule_with_details(&config, &state.config.routing_config) {
         Ok(validation_result) => {
             if !validation_result.is_valid {
-                // Log each validation error with structured details
                 for error in &validation_result.errors {
                     logger::error!(
                         field = %error.field,
@@ -164,7 +162,6 @@ pub async fn routing_create(
                     );
                 }
 
-                // Build structured error response with field-level details
                 let error_details: Vec<serde_json::Value> = validation_result
                     .errors
                     .iter()
@@ -349,7 +346,7 @@ pub async fn routing_evaluate(
         }
 
         if let Some(key_config) = routing_config.keys.keys.get(key) {
-            if key_config.data_type == "enum" {
+            if key_config.data_type == KeyDataType::Enum {
                 if let Some(Some(ValueType::EnumVariant(value))) = parameters.get(key) {
                     if !is_valid_enum_value(routing_config, key, value) {
                         update_failure_metrics();

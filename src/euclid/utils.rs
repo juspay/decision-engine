@@ -1,6 +1,6 @@
 use super::ast::{Comparison, ComparisonType, IfStatement, ValueType};
 use super::errors::{EuclidErrors, ValidationErrorDetails};
-use super::types::StaticRoutingAlgorithm;
+use super::types::{KeyDataType, StaticRoutingAlgorithm};
 use crate::error::ContainerError;
 use crate::euclid::types::{FieldValidationRules, KeyConfig, RoutingRule, TomlConfig};
 use std::collections::HashMap;
@@ -69,7 +69,7 @@ pub fn parse_enum_values(key_config: &KeyConfig) -> Vec<String> {
 pub fn get_all_enum_definitions(config: &TomlConfig) -> HashMap<String, Vec<String>> {
     let mut result = HashMap::new();
     for (key, key_config) in &config.keys.keys {
-        if key_config.data_type == "enum" {
+        if key_config.data_type == KeyDataType::Enum {
             let values = parse_enum_values(key_config);
             if !values.is_empty() {
                 result.insert(key.clone(), values);
@@ -82,7 +82,7 @@ pub fn get_all_enum_definitions(config: &TomlConfig) -> HashMap<String, Vec<Stri
 /// Helper function to check if a value is valid for a given enum key
 pub fn is_valid_enum_value(config: &TomlConfig, key: &str, value: &str) -> bool {
     if let Some(key_config) = config.keys.keys.get(key) {
-        if key_config.data_type == "enum" {
+        if key_config.data_type == KeyDataType::Enum {
             let valid_values = parse_enum_values(key_config);
             return valid_values.contains(&value.to_string());
         }
@@ -96,9 +96,10 @@ pub fn get_keys_by_type(config: &TomlConfig) -> HashMap<String, Vec<String>> {
     result.insert("enum".to_string(), Vec::new());
     result.insert("integer".to_string(), Vec::new());
     result.insert("udf".to_string(), Vec::new());
-    result.insert("string".to_string(), Vec::new());
+    result.insert("str_value".to_string(), Vec::new());
     for (key, key_config) in &config.keys.keys {
-        if let Some(keys) = result.get_mut(&key_config.data_type) {
+        let type_str = key_config.data_type.as_str().to_string();
+        if let Some(keys) = result.get_mut(&type_str) {
             keys.push(key.clone());
         }
     }
@@ -123,7 +124,6 @@ pub fn validate_routing_rule_with_details(
         StaticRoutingAlgorithm::Advanced(program) => {
             let mut validation_errors: Vec<ValidationErrorDetails> = Vec::new();
 
-            // Extract and validate all conditions from all rules and statements
             for rule in &program.rules {
                 for statement in &rule.statements {
                     validate_conditions_in_statement(statement, &config, &mut validation_errors);
@@ -174,7 +174,6 @@ pub fn validate_routing_rule(
     }
 }
 
-/// Returns validation errors as a list of structured error details
 pub fn get_validation_errors(
     rule: &RoutingRule,
     config: &Option<TomlConfig>,
@@ -183,19 +182,15 @@ pub fn get_validation_errors(
     Ok(result.errors)
 }
 
-
-/// Recursively validates all conditions in a statement and its nested statements
 fn validate_conditions_in_statement(
     statement: &IfStatement,
     config: &TomlConfig,
     errors: &mut Vec<ValidationErrorDetails>,
 ) {
-    // Validate all conditions in this statement
     for condition in &statement.condition {
-        validate_field_condition(condition, config, errors);
+        validate_condition(condition, config, errors);
     }
 
-    // Recursively validate nested statements
     if let Some(nested) = &statement.nested {
         for nested_stmt in nested {
             validate_conditions_in_statement(nested_stmt, config, errors);
@@ -203,8 +198,7 @@ fn validate_conditions_in_statement(
     }
 }
 
-/// Validates a field condition and collects structured validation error details
-fn validate_field_condition(
+fn validate_condition(
     condition: &Comparison,
     config: &TomlConfig,
     errors: &mut Vec<ValidationErrorDetails>,
@@ -224,10 +218,9 @@ fn validate_field_condition(
 
     let key_config = &config.keys.keys[&condition.lhs];
 
-    // Validate comparison type
-    match (key_config.data_type.as_str(), &condition.comparison) {
+    match (&key_config.data_type, &condition.comparison) {
         (
-            "integer",
+            KeyDataType::Integer,
             ComparisonType::Equal
             | ComparisonType::NotEqual
             | ComparisonType::LessThan
@@ -235,8 +228,8 @@ fn validate_field_condition(
             | ComparisonType::GreaterThan
             | ComparisonType::GreaterThanEqual,
         ) => {}
-        ("enum", ComparisonType::Equal | ComparisonType::NotEqual) => {}
-        ("enum", _) => {
+        (KeyDataType::Enum, ComparisonType::Equal | ComparisonType::NotEqual) => {}
+        (KeyDataType::Enum, _) => {
             errors.push(ValidationErrorDetails::with_expected_actual(
                 &condition.lhs,
                 "invalid_comparison",
@@ -253,7 +246,7 @@ fn validate_field_condition(
                 &condition.lhs,
                 "comparison_warning",
                 format!(
-                    "Comparison type '{:?}' may not be appropriate for key '{}' of type '{}'",
+                    "Comparison type '{:?}' may not be appropriate for key '{}' of type '{:?}'",
                     condition.comparison, condition.lhs, key_config.data_type
                 ),
             ));
@@ -261,9 +254,8 @@ fn validate_field_condition(
         _ => {}
     }
 
-    // Validate value type and constraints
-    match (key_config.data_type.as_str(), &condition.value) {
-        ("enum", ValueType::EnumVariant(value)) => {
+    match (&key_config.data_type, &condition.value) {
+        (KeyDataType::Enum, ValueType::EnumVariant(value)) => {
             if !is_valid_enum_value(config, &condition.lhs, value) {
                 let valid_values = parse_enum_values(key_config);
                 errors.push(ValidationErrorDetails::with_expected_actual(
@@ -278,7 +270,7 @@ fn validate_field_condition(
                 ));
             }
         }
-        ("enum", ValueType::EnumVariantArray(arr)) => {
+        (KeyDataType::Enum, ValueType::EnumVariantArray(arr)) => {
             let invalid: Vec<_> = arr
                 .iter()
                 .filter(|v| !is_valid_enum_value(config, &condition.lhs, *v))
@@ -298,21 +290,21 @@ fn validate_field_condition(
                 ));
             }
         }
-        ("enum", _) => {
+        (KeyDataType::Enum, _) => {
             errors.push(ValidationErrorDetails::with_expected_actual(
                 &condition.lhs,
                 "type_mismatch",
                 format!(
                     "Invalid field '{}' (type_mismatch) - expected enum variant, got {:?}",
-                    &condition.lhs, condition.value.get_type()
+                    &condition.lhs,
+                    condition.value.get_type()
                 ),
                 "enum variant",
                 format!("{:?}", condition.value.get_type()),
             ));
         }
 
-        ("integer", ValueType::Number(n)) => {
-            // Validate numeric value against constraints
+        (KeyDataType::Integer, ValueType::Number(n)) => {
             if key_config.has_validation_constraints() {
                 if let Ok(rules) = build_validation_rules(key_config) {
                     if let Err(e) = validate_numeric_range(&condition.lhs, *n as i64, &rules) {
@@ -339,7 +331,7 @@ fn validate_field_condition(
                 }
             }
         }
-        ("integer", ValueType::NumberArray(arr)) => {
+        (KeyDataType::Integer, ValueType::NumberArray(arr)) => {
             if !matches!(
                 condition.comparison,
                 ComparisonType::Equal | ComparisonType::NotEqual
@@ -356,7 +348,6 @@ fn validate_field_condition(
                 ));
             }
 
-            // Validate each number in array against constraints
             if key_config.has_validation_constraints() {
                 if let Ok(rules) = build_validation_rules(key_config) {
                     for (i, n) in arr.iter().enumerate() {
@@ -385,7 +376,7 @@ fn validate_field_condition(
                 }
             }
         }
-        ("integer", ValueType::NumberComparisonArray(_)) => {
+        (KeyDataType::Integer, ValueType::NumberComparisonArray(_)) => {
             if condition.comparison != ComparisonType::Equal {
                 errors.push(ValidationErrorDetails::with_expected_actual(
                     &condition.lhs,
@@ -399,21 +390,21 @@ fn validate_field_condition(
                 ));
             }
         }
-        ("integer", _) => {
+        (KeyDataType::Integer, _) => {
             errors.push(ValidationErrorDetails::with_expected_actual(
                 &condition.lhs,
                 "type_mismatch",
                 format!(
                     "Invalid field '{}' (type_mismatch) - expected number, got {:?}",
-                    &condition.lhs, condition.value.get_type()
+                    &condition.lhs,
+                    condition.value.get_type()
                 ),
                 "number",
                 format!("{:?}", condition.value.get_type()),
             ));
         }
 
-        ("udf", ValueType::MetadataVariant(m)) => {
-            // Validate metadata value against constraints
+        (KeyDataType::Udf, ValueType::MetadataVariant(m)) => {
             if key_config.has_validation_constraints() {
                 if let Ok(rules) = build_validation_rules(key_config) {
                     if let Err(e) = validate_string_value(&condition.lhs, &m.value, &rules) {
@@ -429,21 +420,21 @@ fn validate_field_condition(
                 }
             }
         }
-        ("udf", _) => {
+        (KeyDataType::Udf, _) => {
             errors.push(ValidationErrorDetails::with_expected_actual(
                 &condition.lhs,
                 "type_mismatch",
                 format!(
                     "Invalid field '{}' (type_mismatch) - expected metadata variant, got {:?}",
-                    &condition.lhs, condition.value.get_type()
+                    &condition.lhs,
+                    condition.value.get_type()
                 ),
                 "metadata variant",
                 format!("{:?}", condition.value.get_type()),
             ));
         }
 
-        ("str_value", ValueType::StrValue(s)) => {
-            // Validate string value against constraints
+        (KeyDataType::StrValue, ValueType::StrValue(s)) => {
             if key_config.has_validation_constraints() {
                 if let Ok(rules) = build_validation_rules(key_config) {
                     if let Err(e) = validate_string_value(&condition.lhs, s, &rules) {
@@ -461,15 +452,17 @@ fn validate_field_condition(
         }
 
         _ => {
-            if condition.value.get_type().to_string() != key_config.data_type {
+            if condition.value.get_type().to_string() != key_config.data_type.as_str() {
                 errors.push(ValidationErrorDetails::with_expected_actual(
                     &condition.lhs,
                     "type_mismatch",
                     format!(
                         "Invalid field '{}' (type_mismatch) - expected {}, got {}",
-                        &condition.lhs, key_config.data_type, condition.value.get_type()
+                        &condition.lhs,
+                        key_config.data_type.as_str(),
+                        condition.value.get_type()
                     ),
-                    key_config.data_type.clone(),
+                    key_config.data_type.as_str().to_string(),
                     condition.value.get_type().to_string(),
                 ));
             }
@@ -477,7 +470,6 @@ fn validate_field_condition(
     }
 }
 
-/// Builds a human-readable string describing the expected constraints
 fn build_expected_constraint_string(rules: &FieldValidationRules) -> String {
     let mut parts = Vec::new();
 
@@ -517,7 +509,6 @@ fn build_expected_constraint_string(rules: &FieldValidationRules) -> String {
         parts.join(", ")
     }
 }
-
 
 pub fn validate_numeric_range(
     field: &str,
