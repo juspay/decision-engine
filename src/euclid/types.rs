@@ -268,22 +268,6 @@ impl Deref for Context {
     }
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-pub struct ValidationConstraints {
-    #[serde(default)]
-    pub min: Option<i64>,
-    #[serde(default)]
-    pub max: Option<i64>,
-    #[serde(default)]
-    pub min_length: Option<usize>,
-    #[serde(default)]
-    pub max_length: Option<usize>,
-    #[serde(default)]
-    pub exact_length: Option<usize>,
-    #[serde(default)]
-    pub regex: Option<String>,
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum KeyDataType {
@@ -370,79 +354,6 @@ pub struct FieldValidationRules {
     pub length_max: Option<usize>,
     pub exact_length: Option<usize>,
     pub regex_pattern: Option<regex::Regex>,
-}
-
-impl FieldValidationRules {
-    pub fn validate_numeric(&self, field: &str, value: i64) -> Result<(), String> {
-        if let Some(min) = self.numeric_min {
-            if value < min {
-                return Err(format!(
-                    "value {} is below minimum {} for field '{}'",
-                    value, min, field
-                ));
-            }
-        }
-        if let Some(max) = self.numeric_max {
-            if value > max {
-                return Err(format!(
-                    "value {} exceeds maximum {} for field '{}'",
-                    value, max, field
-                ));
-            }
-        }
-        Ok(())
-    }
-
-    pub fn validate_string(&self, field: &str, value: &str) -> Result<(), String> {
-        let len = value.len();
-
-        if let Some(exact) = self.exact_length {
-            if len != exact {
-                return Err(format!(
-                    "expected exactly {} characters, got {} for field '{}'",
-                    exact, len, field
-                ));
-            }
-        }
-
-        if let Some(min) = self.length_min {
-            if len < min {
-                return Err(format!(
-                    "length {} is below minimum {} for field '{}'",
-                    len, min, field
-                ));
-            }
-        }
-
-        if let Some(max) = self.length_max {
-            if len > max {
-                return Err(format!(
-                    "length {} exceeds maximum {} for field '{}'",
-                    len, max, field
-                ));
-            }
-        }
-
-        if let Some(ref pattern) = self.regex_pattern {
-            if !pattern.is_match(value) {
-                return Err(format!(
-                    "value '{}' does not match required pattern for field '{}'",
-                    value, field
-                ));
-            }
-        }
-
-        Ok(())
-    }
-
-    pub fn has_rules(&self) -> bool {
-        self.numeric_min.is_some()
-            || self.numeric_max.is_some()
-            || self.length_min.is_some()
-            || self.length_max.is_some()
-            || self.exact_length.is_some()
-            || self.regex_pattern.is_some()
-    }
 }
 
 impl Default for FieldValidationRules {

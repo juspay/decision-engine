@@ -14,10 +14,7 @@ use crate::{
             RoutingRequest, RoutingRule, SrDimensionConfig, StaticRoutingAlgorithm,
             ELIGIBLE_DIMENSIONS,
         },
-        utils::{
-            generate_random_id, is_valid_enum_value, validate_routing_rule,
-            validate_routing_rule_with_details,
-        },
+        utils::{generate_random_id, is_valid_enum_value, validate_routing_rule},
     },
     types::service_configuration::{find_config_by_name, insert_config, update_config},
 };
@@ -148,7 +145,7 @@ pub async fn routing_create(
 
     logger::debug!("Received routing config: {:?}", config);
 
-    match validate_routing_rule_with_details(&config, &state.config.routing_config) {
+    match validate_routing_rule(&config, &state.config.routing_config) {
         Ok(validation_result) => {
             if !validation_result.is_valid {
                 for error in &validation_result.errors {

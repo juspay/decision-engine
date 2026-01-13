@@ -1,4 +1,4 @@
-use super::ast::{Comparison, ComparisonType, IfStatement, ValueType};
+use super::ast::{Comparison, ComparisonType, IfStatement, Rule, ValueType};
 use super::errors::{EuclidErrors, ValidationErrorDetails};
 use super::types::{KeyDataType, StaticRoutingAlgorithm};
 use crate::error::ContainerError;
@@ -106,7 +106,7 @@ pub fn get_keys_by_type(config: &TomlConfig) -> HashMap<String, Vec<String>> {
     result
 }
 
-pub fn validate_routing_rule_with_details(
+pub fn validate_routing_rule(
     rule: &RoutingRule,
     config: &Option<TomlConfig>,
 ) -> Result<ValidationResult, ContainerError<EuclidErrors>> {
@@ -125,9 +125,7 @@ pub fn validate_routing_rule_with_details(
             let mut validation_errors: Vec<ValidationErrorDetails> = Vec::new();
 
             for rule in &program.rules {
-                for statement in &rule.statements {
-                    validate_conditions_in_statement(statement, &config, &mut validation_errors);
-                }
+                validate_rule(rule, &config, &mut validation_errors);
             }
 
             if validation_errors.is_empty() {
@@ -157,32 +155,13 @@ pub fn validate_routing_rule_with_details(
     }
 }
 
-pub fn validate_routing_rule(
-    rule: &RoutingRule,
-    config: &Option<TomlConfig>,
-) -> Result<(), ContainerError<EuclidErrors>> {
-    let result = validate_routing_rule_with_details(rule, config)?;
-
-    if result.is_valid {
-        Ok(())
-    } else {
-        Err(EuclidErrors::InvalidRequest(format!(
-            "Routing rule validation failed: {}",
-            result.to_error_message()
-        ))
-        .into())
+fn validate_rule(rule: &Rule, config: &TomlConfig, errors: &mut Vec<ValidationErrorDetails>) {
+    for statement in &rule.statements {
+        validate_statement(statement, config, errors);
     }
 }
 
-pub fn get_validation_errors(
-    rule: &RoutingRule,
-    config: &Option<TomlConfig>,
-) -> Result<Vec<ValidationErrorDetails>, ContainerError<EuclidErrors>> {
-    let result = validate_routing_rule_with_details(rule, config)?;
-    Ok(result.errors)
-}
-
-fn validate_conditions_in_statement(
+fn validate_statement(
     statement: &IfStatement,
     config: &TomlConfig,
     errors: &mut Vec<ValidationErrorDetails>,
@@ -193,7 +172,7 @@ fn validate_conditions_in_statement(
 
     if let Some(nested) = &statement.nested {
         for nested_stmt in nested {
-            validate_conditions_in_statement(nested_stmt, config, errors);
+            validate_statement(nested_stmt, config, errors);
         }
     }
 }
@@ -603,13 +582,25 @@ pub fn validate_string_value(
     value: &str,
     rules: &FieldValidationRules,
 ) -> Result<(), String> {
+    let mut errors = Vec::new();
+
     if let Some(exact) = rules.exact_length {
-        validate_exact_length(field, value, exact)?;
+        if let Err(e) = validate_exact_length(field, value, exact) {
+            errors.push(e);
+        }
     } else if rules.length_min.is_some() || rules.length_max.is_some() {
-        validate_string_length(field, value, rules.length_min, rules.length_max)?;
+        if let Err(e) = validate_string_length(field, value, rules.length_min, rules.length_max) {
+            errors.push(e);
+        }
     }
 
-    validate_regex_pattern(field, value, &rules.regex_pattern)?;
+    if let Err(e) = validate_regex_pattern(field, value, &rules.regex_pattern) {
+        errors.push(e);
+    }
 
-    Ok(())
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; "))
+    }
 }
