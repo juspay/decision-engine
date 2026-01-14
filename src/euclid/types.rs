@@ -303,9 +303,9 @@ pub struct KeyConfig {
     #[serde(default)]
     pub values: Option<String>,
     #[serde(default)]
-    pub min: Option<i64>,
+    pub min_value: Option<i64>,
     #[serde(default)]
-    pub max: Option<i64>,
+    pub max_value: Option<i64>,
     #[serde(default)]
     pub min_length: Option<usize>,
     #[serde(default)]
@@ -318,8 +318,8 @@ pub struct KeyConfig {
 
 impl KeyConfig {
     pub fn has_validation_constraints(&self) -> bool {
-        self.min.is_some()
-            || self.max.is_some()
+        self.min_value.is_some()
+            || self.max_value.is_some()
             || self.min_length.is_some()
             || self.max_length.is_some()
             || self.exact_length.is_some()
@@ -336,10 +336,10 @@ impl KeyConfig {
         };
 
         Ok(FieldValidationRules {
-            numeric_min: self.min,
-            numeric_max: self.max,
-            length_min: self.min_length,
-            length_max: self.max_length,
+            min_value: self.min_value,
+            max_value: self.max_value,
+            min_length: self.min_length,
+            max_length: self.max_length,
             exact_length: self.exact_length,
             regex_pattern,
         })
@@ -348,10 +348,10 @@ impl KeyConfig {
 
 #[derive(Clone, Debug)]
 pub struct FieldValidationRules {
-    pub numeric_min: Option<i64>,
-    pub numeric_max: Option<i64>,
-    pub length_min: Option<usize>,
-    pub length_max: Option<usize>,
+    pub min_value: Option<i64>,
+    pub max_value: Option<i64>,
+    pub min_length: Option<usize>,
+    pub max_length: Option<usize>,
     pub exact_length: Option<usize>,
     pub regex_pattern: Option<regex::Regex>,
 }
@@ -359,10 +359,10 @@ pub struct FieldValidationRules {
 impl Default for FieldValidationRules {
     fn default() -> Self {
         Self {
-            numeric_min: None,
-            numeric_max: None,
-            length_min: None,
-            length_max: None,
+            min_value: None,
+            max_value: None,
+            min_length: None,
+            max_length: None,
             exact_length: None,
             regex_pattern: None,
         }

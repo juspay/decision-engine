@@ -117,10 +117,7 @@ pub fn validate_routing_rule(
     match &rule.algorithm {
         StaticRoutingAlgorithm::Single(_)
         | StaticRoutingAlgorithm::Priority(_)
-        | StaticRoutingAlgorithm::VolumeSplit(_) => {
-            crate::logger::debug!("Validation skipped for non-advanced algorithm types");
-            Ok(ValidationResult::success())
-        }
+        | StaticRoutingAlgorithm::VolumeSplit(_) => Ok(ValidationResult::success()),
         StaticRoutingAlgorithm::Advanced(program) => {
             let mut validation_errors: Vec<ValidationErrorDetails> = Vec::new();
 
@@ -129,7 +126,6 @@ pub fn validate_routing_rule(
             }
 
             if validation_errors.is_empty() {
-                crate::logger::debug!("Routing rule validation passed successfully");
                 Ok(ValidationResult::success())
             } else {
                 for error in &validation_errors {
@@ -170,6 +166,10 @@ fn validate_statement(
     }
 }
 
+/// validates the comparison operators for different subtle value types present
+/// by throwing required errors for comparisons that can't be performed for a certain value type
+/// for example
+/// can't have greater/less than operations on enum types
 fn validate_condition(
     condition: &Comparison,
     config: &TomlConfig,
@@ -181,7 +181,7 @@ fn validate_condition(
             &condition.lhs,
             "unknown_key",
             format!(
-                "Invalid field '{}' (unknown_key) - expected a defined key, got undefined key",
+                "Invalid key '{}': Unknown key in condition",
                 &condition.lhs
             ),
         ));
@@ -206,7 +206,7 @@ fn validate_condition(
                 &condition.lhs,
                 "invalid_comparison",
                 format!(
-                    "Invalid field '{}' (invalid_comparison) - expected Equal or NotEqual, got {:?}",
+                    "Invalid comparison type '{}': expected Equal or NotEqual, got {:?}",
                     &condition.lhs, condition.comparison
                 ),
             ));
@@ -232,7 +232,7 @@ fn validate_condition(
                     &condition.lhs,
                     "invalid_enum_value",
                     format!(
-                        "Invalid field '{}' (invalid_enum_value) - expected one of {:?}, got '{}'",
+                        "Invalid enum value '{}': expected one of {:?}, got '{}'",
                         &condition.lhs, valid_values, value
                     ),
                 ));
@@ -250,7 +250,7 @@ fn validate_condition(
                     &condition.lhs,
                     "invalid_enum_values",
                     format!(
-                        "Invalid field '{}' (invalid_enum_values) - expected values from {:?}, got {:?}",
+                        "Invalid enum values '{}': expected values from {:?}, got {:?}",
                         &condition.lhs, valid_values, invalid
                     ),
                 ));
@@ -261,7 +261,7 @@ fn validate_condition(
                 &condition.lhs,
                 "type_mismatch",
                 format!(
-                    "Invalid field '{}' (type_mismatch) - expected enum variant, got {:?}",
+                    "Invalid enum variant '{}': expected enum variant, got {:?}",
                     &condition.lhs,
                     condition.value.get_type()
                 ),
@@ -273,10 +273,10 @@ fn validate_condition(
                 if let Ok(rules) = build_validation_rules(key_config) {
                     if let Err(e) = validate_numeric_range(&condition.lhs, *n as i64, &rules) {
                         let mut expected_parts = Vec::new();
-                        if let Some(min) = rules.numeric_min {
+                        if let Some(min) = rules.min_value {
                             expected_parts.push(format!("min: {}", min));
                         }
-                        if let Some(max) = rules.numeric_max {
+                        if let Some(max) = rules.max_value {
                             expected_parts.push(format!("max: {}", max));
                         }
                         errors.push(ValidationErrorDetails::new(
@@ -308,10 +308,10 @@ fn validate_condition(
                     for (i, n) in arr.iter().enumerate() {
                         if let Err(e) = validate_numeric_range(&condition.lhs, *n as i64, &rules) {
                             let mut expected_parts = Vec::new();
-                            if let Some(min) = rules.numeric_min {
+                            if let Some(min) = rules.min_value {
                                 expected_parts.push(format!("min: {}", min));
                             }
-                            if let Some(max) = rules.numeric_max {
+                            if let Some(max) = rules.max_value {
                                 expected_parts.push(format!("max: {}", max));
                             }
                             errors.push(ValidationErrorDetails::new(
@@ -341,7 +341,7 @@ fn validate_condition(
                 &condition.lhs,
                 "type_mismatch",
                 format!(
-                    "Invalid field '{}' (type_mismatch) - expected number, got {:?}",
+                    "Invalid key '{}': expected number, got {:?}",
                     &condition.lhs,
                     condition.value.get_type()
                 ),
@@ -366,7 +366,7 @@ fn validate_condition(
                 &condition.lhs,
                 "type_mismatch",
                 format!(
-                    "Invalid field '{}' (type_mismatch) - expected metadata variant, got {:?}",
+                    "Invalid key '{}': expected metadata variant, got {:?}",
                     &condition.lhs,
                     condition.value.get_type()
                 ),
@@ -393,7 +393,7 @@ fn validate_condition(
                     &condition.lhs,
                     "type_mismatch",
                     format!(
-                        "Invalid field '{}' (type_mismatch) - expected {}, got {}",
+                        "Invalid key '{}': expected {}, got {}",
                         &condition.lhs,
                         key_config.data_type.as_str(),
                         condition.value.get_type()
@@ -404,64 +404,24 @@ fn validate_condition(
     }
 }
 
-fn build_expected_constraint_string(rules: &FieldValidationRules) -> String {
-    let mut parts = Vec::new();
-
-    if let Some(exact) = rules.exact_length {
-        parts.push(format!("exactly {} characters", exact));
-    } else {
-        let mut length_parts = Vec::new();
-        if let Some(min) = rules.length_min {
-            length_parts.push(format!("min: {}", min));
-        }
-        if let Some(max) = rules.length_max {
-            length_parts.push(format!("max: {}", max));
-        }
-        if !length_parts.is_empty() {
-            parts.push(format!("{} characters", length_parts.join(", ")));
-        }
-    }
-
-    let mut numeric_parts = Vec::new();
-    if let Some(min) = rules.numeric_min {
-        numeric_parts.push(format!("min: {}", min));
-    }
-    if let Some(max) = rules.numeric_max {
-        numeric_parts.push(format!("max: {}", max));
-    }
-    if !numeric_parts.is_empty() {
-        parts.push(format!("value {}", numeric_parts.join(", ")));
-    }
-
-    if rules.regex_pattern.is_some() {
-        parts.push("matching pattern".to_string());
-    }
-
-    if parts.is_empty() {
-        "valid value".to_string()
-    } else {
-        parts.join(", ")
-    }
-}
-
 pub fn validate_numeric_range(
     field: &str,
     value: i64,
     rules: &FieldValidationRules,
 ) -> Result<(), String> {
-    if let Some(min) = rules.numeric_min {
+    if let Some(min) = rules.min_value {
         if value < min {
             return Err(format!(
-                "Invalid field '{}': value {} is below minimum {}",
-                field, value, min
+                "Invalid field '{}': value is below minimum {}",
+                field, min
             ));
         }
     }
-    if let Some(max) = rules.numeric_max {
+    if let Some(max) = rules.max_value {
         if value > max {
             return Err(format!(
-                "Invalid field '{}': value {} exceeds maximum {}",
-                field, value, max
+                "Invalid field '{}': value exceeds maximum {}",
+                field, max
             ));
         }
     }
@@ -479,8 +439,8 @@ pub fn validate_string_length(
     if let Some(min) = min_length {
         if len < min {
             return Err(format!(
-                "Invalid field '{}': length {} is below minimum {}",
-                field, len, min
+                "Invalid field '{}': length is below minimum {}",
+                field, min
             ));
         }
     }
@@ -488,8 +448,8 @@ pub fn validate_string_length(
     if let Some(max) = max_length {
         if len > max {
             return Err(format!(
-                "Invalid field '{}': length {} exceeds maximum {}",
-                field, len, max
+                "Invalid field '{}': length exceeds maximum {}",
+                field, max
             ));
         }
     }
@@ -543,8 +503,8 @@ pub fn validate_string_value(
         if let Err(e) = validate_exact_length(field, value, exact) {
             errors.push(e);
         }
-    } else if rules.length_min.is_some() || rules.length_max.is_some() {
-        if let Err(e) = validate_string_length(field, value, rules.length_min, rules.length_max) {
+    } else if rules.min_length.is_some() || rules.max_length.is_some() {
+        if let Err(e) = validate_string_length(field, value, rules.min_length, rules.max_length) {
             errors.push(e);
         }
     }
