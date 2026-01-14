@@ -43,6 +43,30 @@ pub enum EuclidErrors {
 
     #[error("Invalid Sr Dimension Configuration")]
     InvalidSrDimensionConfig(String),
+
+    #[error("Field validation failed: {0}")]
+    FieldValidationFailed(String),
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ValidationErrorDetails {
+    pub field: String,
+    pub error_type: String,
+    pub message: String,
+}
+
+impl ValidationErrorDetails {
+    pub fn new(
+        field: impl Into<String>,
+        error_type: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            field: field.into(),
+            error_type: error_type.into(),
+            message: message.into(),
+        }
+    }
 }
 
 impl axum::response::IntoResponse for EuclidErrors {
@@ -195,15 +219,25 @@ impl axum::response::IntoResponse for EuclidErrors {
             )
                 .into_response(),
 
-                EuclidErrors::InvalidSrDimensionConfig(msg) => (
-                    hyper::StatusCode::BAD_REQUEST,
-                    axum::Json(ApiErrorResponse::new(
-                        error_codes::TE_04,
-                        msg,
-                        None,
-                    )),
-                )
-                    .into_response(),
+            EuclidErrors::InvalidSrDimensionConfig(msg) => (
+                hyper::StatusCode::BAD_REQUEST,
+                axum::Json(ApiErrorResponse::new(
+                    error_codes::TE_04,
+                    msg,
+                    None,
+                )),
+            )
+                .into_response(),
+
+            EuclidErrors::FieldValidationFailed(msg) => (
+                hyper::StatusCode::BAD_REQUEST,
+                axum::Json(ApiErrorResponse::new(
+                    error_codes::TE_04,
+                    format!("Field validation failed: {}", msg),
+                    None,
+                )),
+            )
+                .into_response(),
         }
     }
 }
