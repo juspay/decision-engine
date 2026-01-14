@@ -180,10 +180,7 @@ fn validate_condition(
         errors.push(ValidationErrorDetails::new(
             &condition.lhs,
             "unknown_key",
-            format!(
-                "Invalid key '{}': Unknown key in condition",
-                &condition.lhs
-            ),
+            format!("Invalid key '{}': Unknown key in condition", &condition.lhs),
         ));
         return;
     }
@@ -270,7 +267,7 @@ fn validate_condition(
 
         (KeyDataType::Integer, ValueType::Number(n)) => {
             if key_config.has_validation_constraints() {
-                if let Ok(rules) = build_validation_rules(key_config) {
+                if let Ok(rules) = key_config.build_validation_rules() {
                     if let Err(e) = validate_numeric_range(&condition.lhs, *n as i64, &rules) {
                         let mut expected_parts = Vec::new();
                         if let Some(min) = rules.min_value {
@@ -304,7 +301,7 @@ fn validate_condition(
             }
 
             if key_config.has_validation_constraints() {
-                if let Ok(rules) = build_validation_rules(key_config) {
+                if let Ok(rules) = key_config.build_validation_rules() {
                     for (i, n) in arr.iter().enumerate() {
                         if let Err(e) = validate_numeric_range(&condition.lhs, *n as i64, &rules) {
                             let mut expected_parts = Vec::new();
@@ -350,7 +347,7 @@ fn validate_condition(
 
         (KeyDataType::Udf, ValueType::MetadataVariant(m)) => {
             if key_config.has_validation_constraints() {
-                if let Ok(rules) = build_validation_rules(key_config) {
+                if let Ok(rules) = key_config.build_validation_rules() {
                     if let Err(e) = validate_string_value(&condition.lhs, &m.value, &rules) {
                         errors.push(ValidationErrorDetails::new(
                             &condition.lhs,
@@ -375,7 +372,7 @@ fn validate_condition(
 
         (KeyDataType::StrValue, ValueType::StrValue(s)) => {
             if key_config.has_validation_constraints() {
-                if let Ok(rules) = build_validation_rules(key_config) {
+                if let Ok(rules) = key_config.build_validation_rules() {
                     if let Err(e) = validate_string_value(&condition.lhs, s, &rules) {
                         errors.push(ValidationErrorDetails::new(
                             &condition.lhs,
@@ -412,16 +409,16 @@ pub fn validate_numeric_range(
     if let Some(min) = rules.min_value {
         if value < min {
             return Err(format!(
-                "Invalid field '{}': value is below minimum {}",
-                field, min
+                "Invalid field '{}': value {} is below minimum {}",
+                field, value, min
             ));
         }
     }
     if let Some(max) = rules.max_value {
         if value > max {
             return Err(format!(
-                "Invalid field '{}': value exceeds maximum {}",
-                field, max
+                "Invalid field '{}': value {} exceeds maximum {}",
+                field, value, max
             ));
         }
     }
@@ -439,8 +436,8 @@ pub fn validate_string_length(
     if let Some(min) = min_length {
         if len < min {
             return Err(format!(
-                "Invalid field '{}': length is below minimum {}",
-                field, min
+                "Invalid field '{}': length {} is below minimum {}",
+                field, len, min
             ));
         }
     }
@@ -448,8 +445,8 @@ pub fn validate_string_length(
     if let Some(max) = max_length {
         if len > max {
             return Err(format!(
-                "Invalid field '{}': length exceeds maximum {}",
-                field, max
+                "Invalid field '{}': length {} exceeds maximum {}",
+                field, len, max
             ));
         }
     }
@@ -486,10 +483,6 @@ pub fn validate_regex_pattern(
         }
     }
     Ok(())
-}
-
-pub fn build_validation_rules(key_config: &KeyConfig) -> Result<FieldValidationRules, String> {
-    key_config.build_validation_rules()
 }
 
 pub fn validate_string_value(
