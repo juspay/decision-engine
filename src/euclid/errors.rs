@@ -53,8 +53,6 @@ pub struct ValidationErrorDetails {
     pub field: String,
     pub error_type: String,
     pub message: String,
-    pub expected: Option<String>,
-    pub actual: Option<String>,
 }
 
 impl ValidationErrorDetails {
@@ -67,24 +65,6 @@ impl ValidationErrorDetails {
             field: field.into(),
             error_type: error_type.into(),
             message: message.into(),
-            expected: None,
-            actual: None,
-        }
-    }
-
-    pub fn with_expected_actual(
-        field: impl Into<String>,
-        error_type: impl Into<String>,
-        message: impl Into<String>,
-        expected: impl Into<String>,
-        actual: impl Into<String>,
-    ) -> Self {
-        Self {
-            field: field.into(),
-            error_type: error_type.into(),
-            message: message.into(),
-            expected: Some(expected.into()),
-            actual: Some(actual.into()),
         }
     }
 }

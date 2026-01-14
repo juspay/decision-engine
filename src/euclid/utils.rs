@@ -137,18 +137,11 @@ pub fn validate_routing_rule(
                         field = %error.field,
                         error_type = %error.error_type,
                         message = %error.message,
-                        expected = ?error.expected,
-                        actual = ?error.actual,
                         "Field validation error"
                     );
                 }
 
                 let result = ValidationResult::failure(validation_errors);
-                crate::logger::error!(
-                    error_count = result.errors.len(),
-                    summary = ?result.error_summary,
-                    "Routing rule validation failed"
-                );
                 Ok(result)
             }
         }
@@ -209,15 +202,13 @@ fn validate_condition(
         ) => {}
         (KeyDataType::Enum, ComparisonType::Equal | ComparisonType::NotEqual) => {}
         (KeyDataType::Enum, _) => {
-            errors.push(ValidationErrorDetails::with_expected_actual(
+            errors.push(ValidationErrorDetails::new(
                 &condition.lhs,
                 "invalid_comparison",
                 format!(
                     "Invalid field '{}' (invalid_comparison) - expected Equal or NotEqual, got {:?}",
                     &condition.lhs, condition.comparison
                 ),
-                "Equal or NotEqual",
-                format!("{:?}", condition.comparison),
             ));
         }
         (_, comp) if comp != &ComparisonType::Equal && comp != &ComparisonType::NotEqual => {
@@ -237,15 +228,13 @@ fn validate_condition(
         (KeyDataType::Enum, ValueType::EnumVariant(value)) => {
             if !is_valid_enum_value(config, &condition.lhs, value) {
                 let valid_values = parse_enum_values(key_config);
-                errors.push(ValidationErrorDetails::with_expected_actual(
+                errors.push(ValidationErrorDetails::new(
                     &condition.lhs,
                     "invalid_enum_value",
                     format!(
                         "Invalid field '{}' (invalid_enum_value) - expected one of {:?}, got '{}'",
                         &condition.lhs, valid_values, value
                     ),
-                    format!("one of {:?}", valid_values),
-                    value.to_string(),
                 ));
             }
         }
@@ -257,20 +246,18 @@ fn validate_condition(
                 .collect();
             if !invalid.is_empty() {
                 let valid_values = parse_enum_values(key_config);
-                errors.push(ValidationErrorDetails::with_expected_actual(
+                errors.push(ValidationErrorDetails::new(
                     &condition.lhs,
                     "invalid_enum_values",
                     format!(
                         "Invalid field '{}' (invalid_enum_values) - expected values from {:?}, got {:?}",
                         &condition.lhs, valid_values, invalid
                     ),
-                    format!("values from {:?}", valid_values),
-                    format!("{:?}", invalid),
                 ));
             }
         }
         (KeyDataType::Enum, _) => {
-            errors.push(ValidationErrorDetails::with_expected_actual(
+            errors.push(ValidationErrorDetails::new(
                 &condition.lhs,
                 "type_mismatch",
                 format!(
@@ -278,8 +265,6 @@ fn validate_condition(
                     &condition.lhs,
                     condition.value.get_type()
                 ),
-                "enum variant",
-                format!("{:?}", condition.value.get_type()),
             ));
         }
 
@@ -294,17 +279,10 @@ fn validate_condition(
                         if let Some(max) = rules.numeric_max {
                             expected_parts.push(format!("max: {}", max));
                         }
-                        let expected = if expected_parts.is_empty() {
-                            "valid value".to_string()
-                        } else {
-                            expected_parts.join(", ")
-                        };
-                        errors.push(ValidationErrorDetails::with_expected_actual(
+                        errors.push(ValidationErrorDetails::new(
                             &condition.lhs,
                             "value_out_of_range",
                             e,
-                            expected,
-                            n.to_string(),
                         ));
                     }
                 }
@@ -315,15 +293,13 @@ fn validate_condition(
                 condition.comparison,
                 ComparisonType::Equal | ComparisonType::NotEqual
             ) {
-                errors.push(ValidationErrorDetails::with_expected_actual(
+                errors.push(ValidationErrorDetails::new(
                     &condition.lhs,
                     "invalid_comparison",
                     format!(
                         "Only '==' or '!=' allowed with number arrays for key '{}'",
                         condition.lhs
                     ),
-                    "Equal or NotEqual",
-                    format!("{:?}", condition.comparison),
                 ));
             }
 
@@ -338,17 +314,10 @@ fn validate_condition(
                             if let Some(max) = rules.numeric_max {
                                 expected_parts.push(format!("max: {}", max));
                             }
-                            let expected = if expected_parts.is_empty() {
-                                "valid value".to_string()
-                            } else {
-                                expected_parts.join(", ")
-                            };
-                            errors.push(ValidationErrorDetails::with_expected_actual(
+                            errors.push(ValidationErrorDetails::new(
                                 &condition.lhs,
                                 "value_out_of_range",
                                 format!("Element {}: {}", i + 1, e),
-                                expected,
-                                n.to_string(),
                             ));
                         }
                     }
@@ -357,20 +326,18 @@ fn validate_condition(
         }
         (KeyDataType::Integer, ValueType::NumberComparisonArray(_)) => {
             if condition.comparison != ComparisonType::Equal {
-                errors.push(ValidationErrorDetails::with_expected_actual(
+                errors.push(ValidationErrorDetails::new(
                     &condition.lhs,
                     "invalid_comparison",
                     format!(
                         "Only '==' allowed with number comparison arrays for key '{}'",
                         condition.lhs
                     ),
-                    "Equal",
-                    format!("{:?}", condition.comparison),
                 ));
             }
         }
         (KeyDataType::Integer, _) => {
-            errors.push(ValidationErrorDetails::with_expected_actual(
+            errors.push(ValidationErrorDetails::new(
                 &condition.lhs,
                 "type_mismatch",
                 format!(
@@ -378,8 +345,6 @@ fn validate_condition(
                     &condition.lhs,
                     condition.value.get_type()
                 ),
-                "number",
-                format!("{:?}", condition.value.get_type()),
             ));
         }
 
@@ -387,20 +352,17 @@ fn validate_condition(
             if key_config.has_validation_constraints() {
                 if let Ok(rules) = build_validation_rules(key_config) {
                     if let Err(e) = validate_string_value(&condition.lhs, &m.value, &rules) {
-                        let expected = build_expected_constraint_string(&rules);
-                        errors.push(ValidationErrorDetails::with_expected_actual(
+                        errors.push(ValidationErrorDetails::new(
                             &condition.lhs,
                             "length_invalid",
                             e,
-                            expected,
-                            format!("\"{}\" ({} chars)", m.value, m.value.len()),
                         ));
                     }
                 }
             }
         }
         (KeyDataType::Udf, _) => {
-            errors.push(ValidationErrorDetails::with_expected_actual(
+            errors.push(ValidationErrorDetails::new(
                 &condition.lhs,
                 "type_mismatch",
                 format!(
@@ -408,8 +370,6 @@ fn validate_condition(
                     &condition.lhs,
                     condition.value.get_type()
                 ),
-                "metadata variant",
-                format!("{:?}", condition.value.get_type()),
             ));
         }
 
@@ -417,13 +377,10 @@ fn validate_condition(
             if key_config.has_validation_constraints() {
                 if let Ok(rules) = build_validation_rules(key_config) {
                     if let Err(e) = validate_string_value(&condition.lhs, s, &rules) {
-                        let expected = build_expected_constraint_string(&rules);
-                        errors.push(ValidationErrorDetails::with_expected_actual(
+                        errors.push(ValidationErrorDetails::new(
                             &condition.lhs,
                             "length_invalid",
                             e,
-                            expected,
-                            format!("\"{}\" ({} chars)", s, s.len()),
                         ));
                     }
                 }
@@ -432,7 +389,7 @@ fn validate_condition(
 
         _ => {
             if condition.value.get_type().to_string() != key_config.data_type.as_str() {
-                errors.push(ValidationErrorDetails::with_expected_actual(
+                errors.push(ValidationErrorDetails::new(
                     &condition.lhs,
                     "type_mismatch",
                     format!(
@@ -441,8 +398,6 @@ fn validate_condition(
                         key_config.data_type.as_str(),
                         condition.value.get_type()
                     ),
-                    key_config.data_type.as_str().to_string(),
-                    condition.value.get_type().to_string(),
                 ));
             }
         }
@@ -550,8 +505,8 @@ pub fn validate_exact_length(
     let actual_length = value.len();
     if actual_length != expected_length {
         return Err(format!(
-            "Invalid field '{}': expected {} characters, got {} ({} characters)",
-            field, expected_length, value, actual_length
+            "Invalid field '{}': expected {} characters, got {} characters",
+            field, expected_length, actual_length
         ));
     }
     Ok(())

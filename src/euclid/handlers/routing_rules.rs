@@ -153,8 +153,6 @@ pub async fn routing_create(
                         field = %error.field,
                         error_type = %error.error_type,
                         message = %error.message,
-                        expected = ?error.expected,
-                        actual = ?error.actual,
                         "Field validation error during routing rule creation"
                     );
                 }
@@ -163,27 +161,15 @@ pub async fn routing_create(
                     .errors
                     .iter()
                     .map(|e| {
-                        let mut detail = serde_json::json!({
+                        serde_json::json!({
                             "field": e.field,
                             "error_type": e.error_type,
                             "message": e.message,
-                        });
-                        if let Some(ref expected) = e.expected {
-                            detail["expected"] = serde_json::json!(expected);
-                        }
-                        if let Some(ref actual) = e.actual {
-                            detail["actual"] = serde_json::json!(actual);
-                        }
-                        detail
+                        })
                     })
                     .collect();
 
                 let detailed_error = validation_result.to_error_message();
-                logger::error!(
-                    error_count = validation_result.errors.len(),
-                    "Routing rule validation failed: {}",
-                    detailed_error
-                );
 
                 metrics::API_REQUEST_COUNTER
                     .with_label_values(&["routing_create", "failure"])
