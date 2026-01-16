@@ -1,0 +1,193 @@
+# Decision Engine Project Rules
+
+## Code Organization
+
+1. **Module Structure**: The codebase follows a modular structure with clear separation of concerns:
+   - `src/routes/` - API endpoint handlers
+   - `src/decider/` - Core decision logic
+   - `src/feedback/` - Feedback loop processing
+   - `src/euclid/` - Euclid rule engine
+
+2. **Naming Conventions**:
+   - Use snake_case for function and variable names
+   - Use PascalCase for struct and enum names
+   - Use SCREAMING_SNAKE_CASE for constants
+
+3. **File Organization**:
+   - Core functionality goes in dedicated modules
+   - API handlers should be minimal and delegate to domain logic
+   - Common utilities should be placed in `src/utils.rs`
+
+## Critical Implementation Paths
+
+1. **Gateway Decision Path**:
+   ```
+   src/routes/decide_gateway.rs → src/decider/gatewaydecider/flow_new.rs → [Various routing algorithms] → Response
+   ```
+
+2. **Score Update Path**:
+   ```
+   src/routes/update_gateway_score.rs → src/feedback/gateway_scoring_service.rs → Database Update → Cache Invalidation
+   ```
+
+3. **Euclid Rules Path**:
+   ```
+   src/routes/routing/* → src/euclid/handlers/routing_rules.rs → src/euclid/interpreter.rs → Result
+   ```
+
+## Development Workflow
+
+1. **Local Testing**:
+   - Use `make init-local` to set up the environment with local code
+   - Use `make run-local` to run with local code changes
+   - Use curl commands in the documentation to test API endpoints
+
+2. **Configuration Updates**:
+   - Modify files in `routing-config/` directory
+   - Run `make update-config` to apply changes
+   - Test with appropriate API calls
+
+3. **Database Migrations**:
+   - Place new migrations in `migrations/` directory
+   - Follow the existing naming convention: `YYYY-MM-DD-hhmmss_description`
+   - Run `diesel migration generate` to create new migration files
+   - Migrations are automatically applied with `make init`
+
+## Error Handling Patterns
+
+1. **Error Propagation**:
+   - Use `error-stack` crate for error handling
+   - Propagate errors with context using `.change_context()`
+   - Create specific error types in `src/error/`
+
+2. **API Error Responses**:
+   - Return structured error responses with appropriate status codes
+   - Include developer and user-friendly messages
+   - Use `UnifiedError` structure for consistent formatting
+
+## Asynchronous Patterns
+
+1. **Async/Await Usage**:
+   - All I/O operations should be async
+   - Use `tokio::spawn` for background tasks
+   - Ensure proper error handling in async contexts
+
+2. **Connection Pooling**:
+   - Database connections are managed through connection pools
+   - Redis connections use pooling for efficient resource usage
+   - Avoid holding connections for extended periods
+
+## Testing Approaches
+
+1. **Unit Testing**:
+   - Place tests in the same file as the code being tested
+   - Use `#[cfg(test)]` module for test code
+   - Mock external dependencies for isolation
+
+2. **Integration Testing**:
+   - Test APIs with real database and Redis instances
+   - Use Docker for consistent test environments
+   - Seed test data before running tests
+
+## Performance Considerations
+
+1. **Caching Strategy**:
+   - Cache frequently accessed data in Redis
+   - Use appropriate TTL values for cached data
+   - Implement targeted cache invalidation on updates
+
+2. **Database Optimization**:
+   - Use efficient queries with appropriate indexes
+   - Batch related operations when possible
+   - Consider query execution plans for complex queries
+
+3. **Memory Management**:
+   - Be mindful of memory allocation in high-throughput paths
+   - Use references instead of clones when appropriate
+   - Leverage Rust's ownership system for efficient memory use
+
+## Known Challenges
+
+1. **Cold Start Issues**:
+   - New payment methods or gateways have limited historical data
+   - Consider implementing special handling for cold start scenarios
+
+2. **Configuration Complexity**:
+   - Routing configuration can become complex with many rules
+   - Document rule logic thoroughly
+   - Test configuration changes carefully
+
+3. **Cache Invalidation**:
+   - Ensure proper cache invalidation to prevent stale data
+   - Balance between aggressive invalidation and cache efficiency
+
+## Troubleshooting Tips
+
+1. **Log Analysis**:
+   - Check logs for errors and warnings
+   - Use appropriate log levels (debug, info, warn, error)
+   - Include relevant context in log messages
+
+2. **Database Debugging**:
+   - Use database tools to inspect table contents
+   - Check query performance with EXPLAIN
+   - Verify data consistency across related tables
+
+3. **API Testing**:
+   - Use curl or Postman to test API endpoints
+   - Validate request and response formats
+   - Check error responses for helpful messages
+
+### MCP Tool Selection Strategy
+
+- **Filesystem Operations**: For file operations, prefer the filesystem MCP over execute_command:
+  - Use `list_directory` for directory exploration 
+  - Use `read_multiple_files` when examining multiple related files
+  - Use `edit_file` for targeted changes rather than rewriting entire files
+  - Use `search_files` for locating code patterns across the codebase
+
+- **Browser Interactions**: For testing frontend components or web interfaces:
+  - Use `playwright_navigate` for accessing URLs (preferred over puppeteer)
+  - Use `playwright_screenshot` for capturing visual state
+  - Use `playwright_evaluate` for JavaScript DOM interactions
+
+- **API Testing**: For working with HTTP endpoints:
+  - Use `playwright_post`, `playwright_get`, etc. for RESTful operations
+
+- **Information Gathering**: For research and context:
+  - Use `brave_web_search` for general information
+  - Use `fetch_md` or `fetch_html` for specific documentation
+  
+## Tool Usage
+
+1. **Docker**:
+   - Use Docker for consistent development and testing
+   - Leverage Docker Compose for multi-container setups
+   - Use the provided Makefile commands for common operations
+
+2. **Database Tools**:
+   - Use Diesel for database migrations and queries
+   - Leverage the Diesel CLI for migration management
+   - Consider pgAdmin or similar tools for database inspection
+
+3. **Code Quality**:
+   - Use rustfmt for consistent code formatting
+   - Run clippy for static analysis and code improvement suggestions
+   - Address warnings and errors before committing
+
+## Documentation Standards
+
+1. **Code Documentation**:
+   - Document public APIs with doc comments
+   - Include examples where appropriate
+   - Explain complex algorithms and business logic
+
+2. **README Maintenance**:
+   - Keep README.md up to date with current project status
+   - Include clear setup instructions
+   - Document API endpoints and common usage patterns
+
+3. **Architecture Documentation**:
+   - Maintain clear documentation of system architecture
+   - Update diagrams when architecture changes
+   - Document integration points with other systems
