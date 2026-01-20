@@ -3151,6 +3151,7 @@ dependencies = [
  "rand 0.8.5",
  "rand_distr",
  "redis_interface",
+ "regex",
  "reqwest 0.12.15",
  "ring",
  "rustc-hash 2.1.1",

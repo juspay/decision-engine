@@ -9,7 +9,7 @@ use crate::{
         cgraph,
         interpreter::{evaluate_output, InterpreterBackend},
         types::{
-            ActivateRoutingConfigRequest, Context, JsonifiedRoutingAlgorithm,
+            ActivateRoutingConfigRequest, Context, JsonifiedRoutingAlgorithm, KeyDataType,
             RoutingAlgorithmMapperNew, RoutingDictionaryRecord, RoutingEvaluateResponse,
             RoutingRequest, RoutingRule, SrDimensionConfig, StaticRoutingAlgorithm,
             ELIGIBLE_DIMENSIONS,
@@ -145,34 +145,57 @@ pub async fn routing_create(
 
     logger::debug!("Received routing config: {:?}", config);
 
-    if let Err(err) = validate_routing_rule(&config, &state.config.routing_config) {
-        let source = err.get_inner();
+    match validate_routing_rule(&config, &state.config.routing_config) {
+        Ok(validation_result) => {
+            if !validation_result.is_valid {
+                for error in &validation_result.errors {
+                    logger::error!(
+                        field = %error.field,
+                        error_type = %error.error_type,
+                        message = %error.message,
+                        "Field validation error during routing rule creation"
+                    );
+                }
 
-        if let EuclidErrors::FailedToValidateRoutingRule = source {
-            if let Some(validation_messages) = err.downcast_ref::<Vec<String>>() {
-                let detailed_error = validation_messages.join("; ");
-                logger::error!("Routing rule validation failed with errors: {detailed_error}");
+                let error_details: Vec<serde_json::Value> = validation_result
+                    .errors
+                    .iter()
+                    .map(|e| {
+                        serde_json::json!({
+                            "field": e.field,
+                            "error_type": e.error_type,
+                            "message": e.message,
+                        })
+                    })
+                    .collect();
+
+                let detailed_error = validation_result.to_error_message();
 
                 metrics::API_REQUEST_COUNTER
                     .with_label_values(&["routing_create", "failure"])
                     .inc();
                 timer.observe_duration();
+
                 return Err(ContainerError::new_with_status_code_and_payload(
-                    EuclidErrors::FailedToValidateRoutingRule,
+                    EuclidErrors::FieldValidationFailed(detailed_error.clone()),
                     axum::http::StatusCode::BAD_REQUEST,
                     ApiErrorResponse::new(
-                        "INVALID_REQUEST_DATA",
+                        "FIELD_VALIDATION_FAILED",
                         format!("Routing rule validation failed: {}", detailed_error),
-                        None,
+                        Some(serde_json::json!({ "validation_errors": error_details })),
                     ),
                 ));
             }
+            logger::debug!("Routing rule validation passed successfully");
         }
-        metrics::API_REQUEST_COUNTER
-            .with_label_values(&["routing_create", "failure"])
-            .inc();
-        timer.observe_duration();
-        return Err(err.into());
+        Err(err) => {
+            logger::error!(error = ?err, "Failed to validate routing rule configuration");
+            metrics::API_REQUEST_COUNTER
+                .with_label_values(&["routing_create", "failure"])
+                .inc();
+            timer.observe_duration();
+            return Err(err.into());
+        }
     }
 
     let utc_date_time = time::OffsetDateTime::now_utc();
@@ -306,7 +329,7 @@ pub async fn routing_evaluate(
         }
 
         if let Some(key_config) = routing_config.keys.keys.get(key) {
-            if key_config.data_type == "enum" {
+            if key_config.data_type == KeyDataType::Enum {
                 if let Some(Some(ValueType::EnumVariant(value))) = parameters.get(key) {
                     if !is_valid_enum_value(routing_config, key, value) {
                         update_failure_metrics();
