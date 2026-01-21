@@ -268,13 +268,105 @@ impl Deref for Context {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum KeyDataType {
+    #[serde(rename = "integer")]
+    Integer,
+    #[serde(rename = "enum")]
+    Enum,
+    #[serde(rename = "udf")]
+    Udf,
+    #[serde(rename = "str_value")]
+    StrValue,
+    #[serde(rename = "global_ref")]
+    GlobalRef,
+}
+
+impl KeyDataType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            KeyDataType::Integer => "integer",
+            KeyDataType::Enum => "enum",
+            KeyDataType::Udf => "udf",
+            KeyDataType::StrValue => "str_value",
+            KeyDataType::GlobalRef => "global_ref",
+        }
+    }
+}
+
 /// Represents a key configuration in the TOML file
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct KeyConfig {
     #[serde(rename = "type")]
-    pub data_type: String,
+    pub data_type: KeyDataType,
     #[serde(default)]
     pub values: Option<String>,
+    #[serde(default)]
+    pub min_value: Option<i64>,
+    #[serde(default)]
+    pub max_value: Option<i64>,
+    #[serde(default)]
+    pub min_length: Option<usize>,
+    #[serde(default)]
+    pub max_length: Option<usize>,
+    #[serde(default)]
+    pub exact_length: Option<usize>,
+    #[serde(default)]
+    pub regex: Option<String>,
+}
+
+impl KeyConfig {
+    pub fn has_validation_constraints(&self) -> bool {
+        self.min_value.is_some()
+            || self.max_value.is_some()
+            || self.min_length.is_some()
+            || self.max_length.is_some()
+            || self.exact_length.is_some()
+            || self.regex.is_some()
+    }
+
+    pub fn build_validation_rules(&self) -> Result<FieldValidationRules, String> {
+        let regex_pattern = match &self.regex {
+            Some(pattern) => Some(
+                regex::Regex::new(pattern)
+                    .map_err(|e| format!("Invalid regex pattern '{}': {}", pattern, e))?,
+            ),
+            None => None,
+        };
+
+        Ok(FieldValidationRules {
+            min_value: self.min_value,
+            max_value: self.max_value,
+            min_length: self.min_length,
+            max_length: self.max_length,
+            exact_length: self.exact_length,
+            regex_pattern,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct FieldValidationRules {
+    pub min_value: Option<i64>,
+    pub max_value: Option<i64>,
+    pub min_length: Option<usize>,
+    pub max_length: Option<usize>,
+    pub exact_length: Option<usize>,
+    pub regex_pattern: Option<regex::Regex>,
+}
+
+impl Default for FieldValidationRules {
+    fn default() -> Self {
+        Self {
+            min_value: None,
+            max_value: None,
+            min_length: None,
+            max_length: None,
+            exact_length: None,
+            regex_pattern: None,
+        }
+    }
 }
 
 /// Structure for the [keys] section in the TOML

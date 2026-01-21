@@ -8,7 +8,7 @@ image:
   version: "v1.2.0"
 
 # Configure these if your images are in a private registry
-imagePullSecrets: 
+imagePullSecrets:
   # - name: regcred
 nameOverride: ""
 fullnameOverride: ""
@@ -27,6 +27,10 @@ podAnnotations: {}
 podSecurityContext: {}
   # fsGroup: 2000
 
+initContainers:
+  # Set to false to disable all init containers
+  enabled: true
+
 securityContext: {}
   # capabilities:
   #   drop:
@@ -37,7 +41,15 @@ securityContext: {}
 
 service:
   type: ClusterIP
-  port: 8080
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
 
 ingress:
   enabled: false
@@ -206,3 +218,40 @@ routingConfig:
     enabled: true
     # Path to mount routing config files
     mountPath: "/app"
+
+# Additional environment variables to inject into the main container
+extraEnvVars: []
+
+# Istio configuration (optional)
+istio:
+  enabled: false
+  virtualService:
+    enabled: false
+    hosts: []
+    gateways: []
+    # HTTP routing rules - route destination will be automatically set to control center service
+    http: []
+    # Example configuration:
+    # http:
+    #   - name: "control-center-routes"
+    #     match:
+    #       - uri:
+    #           prefix: /
+    #     rewrite:
+    #       uri: "/dashboard"
+    #     weight: 100
+    #     timeout: 30s
+    #     retries:
+    #       attempts: 3
+    #       perTryTimeout: 10s
+  destinationRule:
+    enabled: false
+    trafficPolicy: {}
+    # Example traffic policy:
+    # trafficPolicy:
+    #   loadBalancer:
+    #     simple: ROUND_ROBIN
+    #   connectionPool:
+    #     tcp:
+    #       maxConnections: 50
+    #       connectTimeout: 30s
