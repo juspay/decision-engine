@@ -2648,11 +2648,6 @@ pub async fn filterGatewaysForPaymentMethod(this: &mut DeciderFlow<'_>) -> Vec<S
             (st, eligible_mgas)
         };
 
-        let brand = txn_card_info
-            .cardSwitchProvider
-            .clone()
-            .map(|csp| csp.peek().to_uppercase());
-
         let (_, rem_mgas) = getGatewaysAcceptingPaymentMethod(
             &oref,
             &merchant_acc,
@@ -2661,7 +2656,7 @@ pub async fn filterGatewaysForPaymentMethod(this: &mut DeciderFlow<'_>) -> Vec<S
             &pm,
             proceed_with_all_mgas,
             is_dynamic_mga_enabled,
-            brand,
+            Some(&txn_card_info),
         )
         .await;
 
@@ -2690,7 +2685,7 @@ async fn getGatewaysAcceptingPaymentMethod(
     payment_method: &str,
     proceed_with_all_mgas: bool,
     is_dynamic_mga_enabled: bool,
-    m_network: Option<String>,
+    txn_card_info: Option<&TxnCardInfo>,
 ) -> (GatewayList, Vec<MerchantGatewayAccount>) {
     let filtered_mgas: Vec<_> = eligible_mgas
         .iter()
@@ -2707,8 +2702,12 @@ async fn getGatewaysAcceptingPaymentMethod(
             .into_iter()
             .collect();
 
+    let m_network = txn_card_info
+        .and_then(|tci| tci.cardSwitchProvider.as_ref())
+        .map(|csp| csp.peek().to_uppercase());
+
     let filtered_mgas: Vec<_> = match (
-        wallet_pms_enabled_for_network_based_routing.contains(&payment_method),
+        wallet_pms_enabled_for_network_based_routing.contains(payment_method),
         m_network.as_ref(),
     ) {
         (true, Some(network)) => filtered_mgas
