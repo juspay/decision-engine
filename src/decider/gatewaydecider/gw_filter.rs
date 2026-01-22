@@ -282,16 +282,22 @@ pub async fn getFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList {
     Utils::set_payment_flow_list(this, payment_flow_list);
 
     let whitelisted_pms_for_enforce_gateway_list: HashSet<String> =
-        findByNameFromRedis::<HashSet<String>>(C::WHITELISTED_PAYMENT_METHODS_FOR_ENFORCE_GATEWAY_LIST.get_key())
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .collect();
+        findByNameFromRedis::<HashSet<String>>(
+            C::WHITELISTED_PAYMENT_METHODS_FOR_ENFORCE_GATEWAY_LIST.get_key(),
+        )
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
 
-    let is_whitelisted_pm = whitelisted_pms_for_enforce_gateway_list.contains(&txn_card_info.paymentMethod);
+    let is_whitelisted_pm =
+        whitelisted_pms_for_enforce_gateway_list.contains(&txn_card_info.paymentMethod);
 
     let mgas_ = match (
-        txn_detail.isEmi.unwrap_or(false) || Utils::is_reccuring_payment_transaction(&txn_detail) || is_on_us_txn || is_whitelisted_pm,
+        txn_detail.isEmi.unwrap_or(false)
+            || Utils::is_reccuring_payment_transaction(&txn_detail)
+            || is_on_us_txn
+            || is_whitelisted_pm,
         &enforce_gateway_list,
     ) {
         (false, _) => enabled_gateway_accounts.clone(),
@@ -1028,8 +1034,7 @@ pub async fn filterByCardBrand(
             .cloned()
             .collect(),
 
-        _ => st
-            .to_vec(),
+        _ => st.to_vec(),
     }
 }
 
@@ -2696,11 +2701,13 @@ async fn getGatewaysAcceptingPaymentMethod(
         .collect();
 
     let wallet_pms_enabled_for_network_based_routing: HashSet<String> =
-        findByNameFromRedis::<HashSet<String>>(C::WALLET_PMS_ENABLED_FOR_NETWORK_BASED_ROUTING.get_key())
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .collect();
+        findByNameFromRedis::<HashSet<String>>(
+            C::WALLET_PMS_ENABLED_FOR_NETWORK_BASED_ROUTING.get_key(),
+        )
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
 
     let m_network = txn_card_info
         .and_then(|tci| tci.cardSwitchProvider.as_ref())

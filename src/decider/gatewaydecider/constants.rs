@@ -963,7 +963,6 @@ impl SC::ServiceConfigKey for MerchantConfigEntityLevelLookupCutover {
     }
 }
 
-
 pub struct WHITELISTED_PAYMENT_METHODS_FOR_ENFORCE_GATEWAY_LIST;
 impl SC::ServiceConfigKey for WHITELISTED_PAYMENT_METHODS_FOR_ENFORCE_GATEWAY_LIST {
     fn get_key(&self) -> String {
