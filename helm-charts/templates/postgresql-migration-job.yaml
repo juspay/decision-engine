@@ -1,0 +1,93 @@
+{{- if and .Values.dbMigration.enabled .Values.dbMigration.postgresql.enabled .Values.decisionEngine.usePostgreSQL -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "decision-engine.postgresqlMigrationName" . }}-script
+  labels:
+    {{- include "decision-engine.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pg-migration
+data:
+  up.sql: ""
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "decision-engine.postgresqlMigrationName" . }}
+  labels:
+    {{- include "decision-engine.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pg-migration
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        {{- include "decision-engine.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: pg-migration
+    spec:
+      restartPolicy: OnFailure
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "decision-engine.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: wait-for-postgresql
+          image: busybox:1.28
+          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.postgresqlHost" . }} 5432; do echo waiting for postgresql; sleep 2; done;']
+      containers:
+        - name: migration
+          image: rust:latest
+          imagePullPolicy: {{ .Values.dbMigration.postgresql.image.pullPolicy }}
+          env:
+            - name: PGPASSWORD
+              value: {{ .Values.postgresql.auth.password | quote }}
+            - name: DATABASE_URL
+              value: postgresql://{{ .Values.postgresql.auth.username }}:{{ .Values.postgresql.auth.password }}@{{ include "decision-engine.postgresqlHost" . }}:5432/{{ .Values.postgresql.auth.database }}
+          command:
+            - /bin/sh
+            - -c
+            - |-
+             version={{ .Values.image.version }}
+             database_url = "postgresql://{{ .Values.postgresql.auth.username }}:{{ .Values.postgresql.auth.password }}@{{ include "decision-engine.postgresqlHost" . }}:5432/{{ .Values.postgresql.auth.database}}"
+             echo "INFO: Starting migration process for version: $version"
+             echo "INFO: Using database URL: $database_url"
+
+             DOWNLOAD_URL="https://github.com/juspay/decision-engine/archive/refs/tags/$version.tar.gz"
+
+             echo "INFO: Downloading source code from $DOWNLOAD_URL"
+             # -L: follow redirects
+             # -f: fail script if server returns an error (e.g., 404). Requires "set -e".
+             # -sS: silent mode, but still show errors.
+             curl -LfsS -o decision-engine.tar.gz "$DOWNLOAD_URL"
+
+
+             tar -xzvf decision-engine.tar.gz --transform 's|[^/]*/|decision-engine/|'
+
+             echo "INFO: Changing directory to ./decision-engine"
+             cd decision-engine
+
+             echo "INFO: Contents of ./decision-engine (current directory):"
+             ls -la
+
+             echo "INFO: Installing tools (diesel_cli, just)..."
+             cargo install diesel_cli --no-default-features --features postgres
+             cargo install just
+
+             echo "INFO: Running database migrations using 'just migrate-pg'..."
+             just migrate-pg
+
+             echo "INFO: Migration job completed successfully."
+          volumeMounts:
+            - name: migration-script
+              mountPath: /app/config
+      volumes:
+        - name: migration-script
+          configMap:
+            name: {{ include "decision-engine.postgresqlMigrationName" . }}-script
+{{- end }}

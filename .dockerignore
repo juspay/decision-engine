@@ -1,0 +1,6 @@
+**/target
+**/.DS_Store
+routing-config/venv
+routing-config/output.sql
+dump.rdb
+.vscode

@@ -1,0 +1,6 @@
+[default]
+check-filename = true
+
+[default.extend-words]
+# Database column name in schema - cannot be renamed without migration
+penality = "penality"

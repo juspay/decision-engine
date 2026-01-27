@@ -1,0 +1,18 @@
+# Test values for PostgreSQL migration
+decisionEngine:
+  useMySQL: false
+  usePostgreSQL: true
+  useRedis: true
+
+postgresql:
+  enabled: true
+  auth:
+    username: "db_user"
+    password: "db_pass"
+    database: "decision_engine_db"
+
+# Configure database migration
+dbMigration:
+  enabled: true
+  postgresql:
+    enabled: true

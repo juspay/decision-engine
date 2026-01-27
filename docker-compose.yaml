@@ -1,0 +1,282 @@
+services:
+  open-router:
+    image: ghcr.io/juspay/decision-engine:v1.2.0
+    pull_policy: always
+    platform: linux/amd64
+    container_name: open-router
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      groovy-runner:
+        condition: service_healthy
+      routing-config:
+        condition: service_completed_successfully
+    volumes:
+      - ./config/docker-configuration.toml:/local/config/development.toml
+    networks:
+      - open-router-network
+    environment:
+      - GROOVY_RUNNER_HOST=host.docker.internal:8085
+
+  open-router-local:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      cache_from:
+        - decision-engine-open-router-local:latest
+      labels:
+        - "com.docker.compose.watchfile=Dockerfile"
+        - "com.docker.compose.watchfile=src/"
+        - "com.docker.compose.watchfile=Cargo.toml"
+        - "com.docker.compose.watchfile=Cargo.lock"
+    image: decision-engine-open-router-local:latest
+    platform: linux/amd64
+    container_name: open-router
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      groovy-runner-local:
+        condition: service_healthy
+      routing-config:
+        condition: service_completed_successfully
+    volumes:
+      - ./config/docker-configuration.toml:/local/config/development.toml
+    networks:
+      - open-router-network
+    environment:
+      - GROOVY_RUNNER_HOST=host.docker.internal:8085
+
+  open-router-local-pg:
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
+      cache_from:
+        - decision-engine-open-router-local-pg:latest
+      labels:
+        - "com.docker.compose.watchfile=Dockerfile.postgres"
+        - "com.docker.compose.watchfile=src/"
+        - "com.docker.compose.watchfile=Cargo.toml"
+        - "com.docker.compose.watchfile=Cargo.lock"
+    image: decision-engine-open-router-local-pg:latest
+    platform: linux/amd64
+    container_name: open-router
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+      - "9094:9094"
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      groovy-runner-local:
+        condition: service_healthy
+    volumes:
+      - ./config/docker-configuration.toml:/local/config/development.toml
+    networks:
+      - open-router-network
+    environment:
+      - GROOVY_RUNNER_HOST=host.docker.internal:8085
+
+  open-router-pg:
+    image: ghcr.io/juspay/decision-engine/postgres:v1.2.1
+    pull_policy: always
+    platform: linux/amd64
+    container_name: open-router-pg 
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+      - "9094:9094"
+    depends_on:
+      db-migrator-postgres: 
+        condition: service_completed_successfully
+      groovy-runner-local: 
+        condition: service_healthy
+    volumes:
+      - ./config/docker-configuration.toml:/local/config/development.toml
+    networks:
+      - open-router-network
+    environment:
+      - GROOVY_RUNNER_HOST=host.docker.internal:8085
+
+  prometheus:
+    image: prom/prometheus:latest
+    networks:
+      - open-router-network
+    volumes:
+      - ./config/prometheus.yaml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    networks:
+      - open-router-network
+    restart: unless-stopped
+    environment:
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_BASIC_ENABLED=false
+    volumes:
+      # - ./config/grafana.ini:/etc/grafana/grafana.ini
+      - ./config/grafana-datasource.yaml:/etc/grafana/provisioning/datasources/datasource.yml
+
+  groovy-runner:
+    image: ghcr.io/juspay/open-router/groovy-runner:main
+    pull_policy: always
+    platform: linux/amd64
+    container_name: groovy-runner
+    restart: unless-stopped
+    ports:
+      - "8085:8085"
+    networks:
+      - open-router-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8085/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  groovy-runner-local:
+    build:
+      context: .
+      dockerfile: groovy.Dockerfile
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+      cache_from:
+        - decision-engine-groovy-runner-local:latest
+      labels:
+        - "com.docker.compose.watchfile=groovy.Dockerfile"
+        - "com.docker.compose.watchfile=src/Runner.groovy"
+    platform: linux/amd64
+    container_name: groovy-runner
+    restart: unless-stopped
+    ports:
+      - "8085:8085"
+    networks:
+      - open-router-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8085/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  mysql:
+    image: mysql:8.0
+    container_name: open-router-mysql
+    restart: unless-stopped
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_DATABASE=jdb
+    volumes:
+      - mysql-data:/var/lib/mysql
+    ports:
+      - "3306:3306"
+    networks:
+      - open-router-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+
+  postgresql:  
+    image: postgres:latest  
+    container_name: open-router-postgres  
+    restart: unless-stopped  
+    environment:
+      - POSTGRES_USER=db_user
+      - POSTGRES_PASSWORD=db_pass
+      - POSTGRES_DB=decision_engine_db
+    volumes:  
+      - postgres-data:/var/lib/postgresql/data  
+    ports:  
+      - "5432:5432"
+    networks:
+        - open-router-network
+    healthcheck:
+        test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
+        interval: 5s
+        retries: 3
+        start_period: 5s
+        timeout: 5s
+
+  redis:
+    image: redis:7
+    container_name: open-router-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - open-router-network
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep '^PONG$'"]
+      interval: 5s
+      retries: 5
+      start_period: 5s
+      timeout: 5s
+
+  db-migrator:
+    image: mysql:8.0
+    container_name: db-migrator
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ./migrations:/app/migrations
+    working_dir: /app
+    entrypoint: ["/bin/sh", "-c", "for sql_file in $$(find /app/migrations -name 'up.sql' -type f | sort); do echo \"Running migration: $$sql_file\"; mysql -h mysql -uroot -proot jdb < \"$$sql_file\"; done"]
+    networks:
+      - open-router-network
+  
+  db-migrator-postgres:
+    image: rust:latest
+    container_name: db-migrator 
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    environment:
+      - PGPASSWORD=db_pass
+      - DATABASE_URL=postgresql://db_user:db_pass@postgresql:5432/decision_engine_db
+    volumes:
+      - .:/app
+    working_dir: /app
+    command: "bash -c 'cargo install diesel_cli --no-default-features --features postgres && cargo install just && just migrate-pg'"
+    networks:
+      - open-router-network
+
+  routing-config:
+    image: python:3.10-slim
+    container_name: routing-config
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ./routing-config:/app
+    working_dir: /app
+    command: bash run_setup.sh
+    networks:
+      - open-router-network
+
+networks:
+  open-router-network:
+    driver: bridge
+
+volumes:
+  mysql-data:
+  redis-data:
+  postgres-data:

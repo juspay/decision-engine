@@ -1,0 +1,96 @@
+{{- if .Values.routingConfig.enabled -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "decision-engine.routingConfigName" . }}
+  labels:
+    {{- include "decision-engine.labels" . | nindent 4 }}
+    app.kubernetes.io/component: routing-config
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": hook-succeeded
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        {{- include "decision-engine.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: routing-config
+    spec:
+      restartPolicy: OnFailure
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "decision-engine.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        {{- if .Values.decisionEngine.usePostgreSQL }}
+        - name: wait-for-postgresql
+          image: busybox:1.28
+          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.postgresqlHost" . }} 5432; do echo waiting for postgresql; sleep 2; done;']
+        {{- end }}
+        {{- if .Values.decisionEngine.useMySQL }}
+        - name: wait-for-mysql
+          image: busybox:1.28
+          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.mysqlHost" . }} 3306; do echo waiting for mysql; sleep 2; done;']
+        {{- end }}
+      containers:
+        - name: routing-config
+          image: "{{ .Values.routingConfig.image.repository }}:{{ .Values.routingConfig.image.tag }}"
+          imagePullPolicy: {{ .Values.routingConfig.image.pullPolicy }}
+          command: {{ .Values.routingConfig.command }}
+          {{- if .Values.routingConfig.configVolume.enabled }}
+          volumeMounts:
+            - name: routing-config-volume
+              mountPath: {{ .Values.routingConfig.configVolume.mountPath }}
+          {{- end }}
+          env:
+            {{- if .Values.decisionEngine.usePostgreSQL }}
+            - name: DB_HOST
+              value: {{ include "decision-engine.postgresqlHost" . | quote }}
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_USER
+              value: {{ .Values.postgresql.auth.username | quote }}
+            - name: DB_PASSWORD
+              value: {{ .Values.postgresql.auth.password | quote }}
+            - name: DB_NAME
+              value: {{ .Values.postgresql.auth.database | quote }}
+            - name: DB_TYPE
+              value: "postgresql"
+            {{- end }}
+            {{- if .Values.decisionEngine.useMySQL }}
+            - name: DB_HOST
+              value: {{ include "decision-engine.mysqlHost" . | quote }}
+            - name: DB_PORT
+              value: "3306"
+            - name: DB_USER
+              value: {{ .Values.mysql.auth.username | default "root" | quote }}
+            - name: DB_PASSWORD
+              value: {{ .Values.mysql.auth.password | default "root" | quote }}
+            - name: DB_NAME
+              value: {{ .Values.mysql.auth.database | default "jdb" | quote }}
+            - name: DB_TYPE
+              value: "mysql"
+            {{- end }}
+      {{- if .Values.routingConfig.configVolume.enabled }}
+      volumes:
+        - name: routing-config-volume
+          emptyDir: {}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

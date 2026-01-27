@@ -1,0 +1,114 @@
+
+
+Yopu are a rust transpiler who need to change the below function such that it will be compilable in the current workspace, Make sure it is compatible with the current types and add relevant imports. 
+
+Please comment out logDebugs..
+Please don't rename the function name and the parameters.
+Please don't change any other function names also atleaset.. Can refactor the logic to make it rust compatible..
+
+Please don't change arrays to vectors..  Please 
+PLEASE don't change any function name to snake case..
+
+
+Common Transformations you need are
+
+
+Example :- 
+
+    Input :- unsafe_extract_secret(&mga.account_details)
+
+    Output:- mga.account_details.peek()
+
+    Input :- at == &makeSecret(ETCa::ATMPIN)
+    Output :- *at == AuthTypea::ATMPIN
+    
+    Input0 :- 
+        pub fn getGws() -> DeciderFlow<GatewayList> {  
+            gets(|state| state.functionalGateways.clone())  
+        }
+
+    Output0 :-
+        pub fn getGws(this: &mut DeciderFlow) -> Vec<ETG::Gateway> {  
+            this.writer.functionalGateways.clone()
+        }
+
+    Input1 :- let txnId = asks(|ctx| ctx.dpTxnDetail.txnId.clone());
+
+    Output1 :- this.get().dpTxnDetail.txnId.clone()
+
+    Input2 :- pub fn setGws(gws: GatewayList) -> DeciderFlow<()>
+
+    Output 2:- pub fn setGwsAndMgas(this: &mut DeciderFlow, filteredMgas: Vec<ETM::merchant_gateway_account::MerchantGatewayAccount>) -> ()
+
+    Input3 :-   
+    pub fn returnGwListWithLog(fName: DeciderFilterName, doOrNot: bool) -> DeciderFlow<GatewayList> {  
+        let fgws = getGws();  
+        let txnId = asks(|ctx| ctx.dpTxnDetail.txnId.clone());
+        log_debug("GW_Filtering", format!(  
+            "Functional gateways after {} for {} : {:?}",  
+            fName.to_string(),  
+            ETTD::transactionIdText(txnId),  
+            fgws  
+        ));  
+        if doOrNot {  
+            modify(|state| {  
+                state.debugFilterList.push(DebugFilterEntry {  
+                    name: makeFirstLetterSmall(fName.to_string()),  
+                    gateways: fgws.clone(),  
+                });  
+            });  
+        }  
+        fgws  
+    }
+
+    Output 3:- 
+    pub fn returnGwListWithLog(this: &mut DeciderFlow, fName: DeciderFilterName, doOrNot: bool) -> Vec<ETG::Gateway> {  
+        // Get the current list of functional gateways
+        let fgws = this.writer.functionalGateways.clone();
+        
+        // Get the transaction ID from the context
+        let txn_id = this.get().dpTxnDetail.txnId.clone();
+        
+        // Log the filtered gateways
+        // debug!(
+        //     "GW_Filtering: Functional gateways after {} for {} : {:?}",  
+        //     fName.to_string(),  
+        //     ETTD::transaction_id_text(&txn_id),  
+        //     fgws  
+        // );
+        
+        // If tracking is enabled, add to the debug filter list
+        if doOrNot {  
+            this.writer.debugFilterList.push(DebugFilterEntry {  
+                filterName: makeFirstLetterSmall(fName.to_string()),  
+                gateways: fgws.clone(),  
+            });  
+        }
+        
+        // Return the list of gateways
+        fgws  
+    }
+
+Use m_validation_type.map(|vt| vt == ValidationType::CARD_MANDATE).unwrap_or(false) this kind of syntaxes for equality on Options
+
+Please generate it for the below function
+
+pub async fn filterGatewaysForTxnOfferDetails() -> DeciderFlow<GatewayList> {  
+    let functional_gateways = getGws().await?;  
+    let txn_offer_details = asks(|ctx| ctx.dpTxnOfferDetails).await;  
+    let txn_detail = asks(|ctx| ctx.dpTxnDetail).await;  
+  
+    match txn_offer_details {  
+        Some(txn_offer_details) => {  
+            let filtered_gws = txn_offer_details.iter().fold(functional_gateways.clone(), |gw_list_acc, txn_offer_detail| {  
+                filterByGatewayRule(&txn_detail, gw_list_acc, txn_offer_detail)  
+            }).await;  
+  
+            if functional_gateways.len() != filtered_gws.len() {  
+                setGws(filtered_gws.clone()).await?;  
+            }  
+            returnGwListWithLog("FilterFunctionalGatewaysForTxnOfferDetails", true).await  
+        }  
+        None => returnGwListWithLog("FilterFunctionalGatewaysForTxnOfferDetails", true).await,  
+    }  
+}  

@@ -1,0 +1,190 @@
+[log.console]
+enabled = true
+level = "DEBUG"
+log_format = "default"
+
+[server]
+host = "0.0.0.0"
+port = 8080
+
+[metrics]
+host = "0.0.0.0"
+port = 9094
+
+[limit]
+request_count = 1
+duration = 60
+
+[database]
+username = "root"
+password = "root"
+host = "host.docker.internal"
+port = 3306
+dbname = "jdb"
+
+[pg_database]
+pg_username = "db_user"
+pg_password = "db_pass"
+pg_host = "postgresql"
+pg_port = 5432
+pg_dbname = "decision_engine_db"
+
+
+[redis]
+host = "host.docker.internal"
+port = 6379
+pool_size = 5
+reconnect_max_attempts = 5
+reconnect_delay = 5
+use_legacy_version = false
+stream_read_count = 1
+auto_pipeline = true
+disable_auto_backpressure = false
+max_in_flight_commands = 5000
+default_command_timeout = 30
+unresponsive_timeout = 10
+max_feed_count = 200
+
+[cache]
+tti = 7200          # i.e. 2 hours
+max_capacity = 5000
+
+[tenant_secrets]
+public = { schema = "public" }
+
+[secrets_management]
+secrets_manager = "no_encryption"
+
+[secrets_management.aws_kms]
+key_id = "us-west-2"
+region = "abc"
+
+[api_client]
+client_idle_timeout = 90
+pool_max_idle_per_host = 10
+identity = ""
+
+[routing_config.keys]
+payment_method = { type = "enum", values = "card, bank_debit, bank_transfer" }
+amount = { type = "integer" }
+metadata = { type = "udf" }
+currency = { type = "enum", values = "USD, EUR, GBP, JPY, CAD, AUD" }
+order_udf1 = { type = "global_ref" }
+payment_methodType = { type = "enum", values = "CARD, UPI, NB" }
+payment_cardBrand = { type = "enum", values = "VISA, MASTERCARD, AMEX, RUPAY, DINERS" }
+payment_cardBin = { type = "global_ref" }
+payment_cardType = { type = "enum", values = "CREDIT, DEBIT" }
+payment_cardIssuerCountry = { type = "enum", values = "INDIA, US, UK, SINGAPORE" }
+payment_paymentMethod = { type = "enum", values = "NB_HDFC, NB_ICICI, NB_SBI" }
+payment_paymentSource = { type = "enum", values = "net.one97.paytm, @paytm" }
+txn_isEmi = { type = "enum", values = "true, false" }
+
+[routing_config.default]
+output = ["stripe", "adyen"]
+
+[[routing_config.constraint_graph.nodes]]
+preds = []
+succs = [0]
+
+[routing_config.constraint_graph.nodes.kind]
+kind = "value"
+
+[routing_config.constraint_graph.nodes.kind.data]
+kind = "value"
+
+[routing_config.constraint_graph.nodes.kind.data.data]
+key = "payment_method"
+comparison = "equal"
+
+[routing_config.constraint_graph.nodes.kind.data.data.value]
+type = "enum_variant"
+value = "card"
+
+[[routing_config.constraint_graph.nodes]]
+preds = []
+succs = [1]
+
+[routing_config.constraint_graph.nodes.kind]
+kind = "value"
+
+[routing_config.constraint_graph.nodes.kind.data]
+kind = "value"
+
+[routing_config.constraint_graph.nodes.kind.data.data]
+key = "payment_method"
+comparison = "equal"
+
+[routing_config.constraint_graph.nodes.kind.data.data.value]
+type = "enum_variant"
+value = "bank_debit"
+
+[[routing_config.constraint_graph.nodes]]
+preds = [0]
+succs = []
+
+[routing_config.constraint_graph.nodes.kind]
+kind = "value"
+
+[routing_config.constraint_graph.nodes.kind.data]
+kind = "value"
+
+[routing_config.constraint_graph.nodes.kind.data.data]
+key = "output"
+comparison = "equal"
+
+[routing_config.constraint_graph.nodes.kind.data.data.value]
+type = "enum_variant"
+value = "stripe"
+
+[[routing_config.constraint_graph.nodes]]
+preds = [1]
+succs = []
+
+[routing_config.constraint_graph.nodes.kind]
+kind = "value"
+
+[routing_config.constraint_graph.nodes.kind.data]
+kind = "value"
+
+[routing_config.constraint_graph.nodes.kind.data.data]
+key = "output"
+comparison = "equal"
+
+[routing_config.constraint_graph.nodes.kind.data.data.value]
+type = "enum_variant"
+value = "adyen"
+
+[[routing_config.constraint_graph.edges]]
+strength = "strong"
+relation = "positive"
+pred = 0
+succ = 2
+
+[[routing_config.constraint_graph.edges]]
+strength = "strong"
+relation = "positive"
+pred = 1
+succ = 3
+
+[debit_routing_config]
+fraud_check_fee = 1.0
+
+[debit_routing_config.network_fee]
+visa = { percentage = 0.1375, fixed_amount = 2.0 }
+mastercard = { percentage = 0.15, fixed_amount = 4.0 }
+accel = { percentage = 0.0, fixed_amount = 4.0 }
+nyce = { percentage = 0.10, fixed_amount = 1.5 }
+pulse = { percentage = 0.10, fixed_amount = 3.0 }
+star = { percentage = 0.10, fixed_amount = 1.5 }
+
+[debit_routing_config.interchange_fee]
+regulated = { percentage = 0.05, fixed_amount = 0.21 }
+
+[debit_routing_config.interchange_fee.non_regulated]
+merchant_category_code_0001.visa = { percentage = 1.65, fixed_amount = 15.0 }
+merchant_category_code_0001.mastercard = { percentage = 1.65, fixed_amount = 15.0 }
+merchant_category_code_0001.accel = { percentage = 1.55, fixed_amount = 4.0 }
+merchant_category_code_0001.nyce = { percentage = 1.30, fixed_amount = 21.3125 }
+merchant_category_code_0001.pulse = { percentage = 1.60, fixed_amount = 15.0 }
+merchant_category_code_0001.star = { percentage = 1.63, fixed_amount = 15.0 }
+
