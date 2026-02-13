@@ -27,4 +27,4 @@ scrape_configs:
     # scheme defaults to 'http'.
 
     static_configs:
-      - targets: ["open-router-pg:9094"] # this can be replaced by open-router-local-pg for local setup
+      - targets: ["open-router-pg:9094", "open-router-local:9094"] # this can be replaced by open-router-local-pg for local setup

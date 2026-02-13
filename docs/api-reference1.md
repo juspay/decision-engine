@@ -5,6 +5,7 @@
 ### Sample curl for decide-gateway
 
 #### Request: SR BASED ROUTING
+
 ```bash
 curl --location 'http://localhost:8080/decide-gateway' \
 --header 'Content-Type: application/json' \
@@ -38,7 +39,8 @@ curl --location 'http://localhost:8080/decide-gateway' \
 }'
 ```
 
-#### Response:
+#### Response
+
 ```json
 {
     "decided_gateway": "GatewayA",
@@ -71,7 +73,9 @@ curl --location 'http://localhost:8080/decide-gateway' \
     "gateway_mga_id_map": null
 }
 ```
+
 ##### Routing Approach
+
 This field available in the response for the decide-gateway api call provides visibility into the routing logic applied by the decision engine for a transaction. The possible values are as follows:
 
 - **SR_SELECTION_V3_ROUTING** : Routing is based on the gateway with the highest Success Rate (SR) score for the merchant, evaluated at the dimension on which routing is happening
@@ -87,6 +91,7 @@ This field available in the response for the decide-gateway api call provides vi
 - **SR_V3_ALL_DOWNTIME_HEDGING** :  Routing follows the configured hedging strategy, but all eligible gateways are experiencing downtime. In this scenario, routing proceeds without reprioritization, in accordance with the defined hedging configuration.
 
 #### Request: DEBIT ROUTING
+
 ```bash
 curl --location 'http://localhost:8080/decide-gateway' \
 --header 'Content-Type: application/json' \
@@ -120,7 +125,8 @@ curl --location 'http://localhost:8080/decide-gateway' \
 }'
 ```
 
-#### Response:
+#### Response
+
 ```json
 {
   "decided_gateway": "PAYU",
@@ -153,7 +159,8 @@ curl --location 'http://localhost:8080/decide-gateway' \
 
 ### Sample curl for update-gateway-score
 
-#### Request:
+#### Request
+
 ```bash
 curl --location 'http://localhost:8080/update-gateway-score' \
 --header 'Content-Type: application/json' \
@@ -167,7 +174,8 @@ curl --location 'http://localhost:8080/update-gateway-score' \
 }'
 ```
 
-#### Response:
+#### Response
+
 ```
 Success
 ```
@@ -175,6 +183,7 @@ Success
 ## Config APIs
 
 #### Request: Success Rate Config Create
+
 ```bash
 curl -X POST http://localhost:8080/rule/create \
   -H "Content-Type: application/json" \
@@ -200,7 +209,8 @@ curl -X POST http://localhost:8080/rule/create \
   }'
 ```
 
-#### Response:
+#### Response
+
 ```json
 {
   "Success Rate Configuration created successfully"
@@ -208,6 +218,7 @@ curl -X POST http://localhost:8080/rule/create \
 ```
 
 #### Request: Success Rate Config retrieve
+
 ```bash
 curl -X POST http://localhost:8080/rule/get \
      -H "Content-Type: application/json" \
@@ -217,7 +228,8 @@ curl -X POST http://localhost:8080/rule/get \
          }'
 ```
 
-#### Response:
+#### Response
+
 ```json
 {
    "merchant_id": "test_merchant_123423",
@@ -242,6 +254,7 @@ curl -X POST http://localhost:8080/rule/get \
 ```
 
 #### Request: Success Rate Config update
+
 ```bash
 curl -X POST http://localhost:8080/rule/update \
   -H "Content-Type: application/json" \
@@ -267,7 +280,8 @@ curl -X POST http://localhost:8080/rule/update \
   }'
 ```
 
-#### Response:
+#### Response
+
 ```json
 {
   "Success Rate Configuration updated successfully"
@@ -275,6 +289,7 @@ curl -X POST http://localhost:8080/rule/update \
 ```
 
 #### Request: Success Rate Config delete
+
 ```bash
 curl -X POST http://localhost:8080/rule/delete \
      -H "Content-Type: application/json" \
@@ -284,7 +299,8 @@ curl -X POST http://localhost:8080/rule/delete \
          }'
 ```
 
-#### Response:
+#### Response
+
 ```json
 {
   "Success Rate Configuration deleted successfully"
@@ -292,6 +308,7 @@ curl -X POST http://localhost:8080/rule/delete \
 ```
 
 #### Request: Elimination Config Create
+
 ```bash
 curl -X POST http://localhost:8080/rule/create \
   -H "Content-Type: application/json" \
@@ -306,7 +323,8 @@ curl -X POST http://localhost:8080/rule/create \
   }'
 ```
 
-#### Response:
+#### Response
+
 ```json
 {
   "Elimination Configuration created successfully"
@@ -314,6 +332,7 @@ curl -X POST http://localhost:8080/rule/create \
 ```
 
 #### Request: Elimination Config retrieve
+
 ```bash
 curl -X POST http://localhost:8080/rule/get \
      -H "Content-Type: application/json" \
@@ -323,7 +342,8 @@ curl -X POST http://localhost:8080/rule/get \
          }'
 ```
 
-#### Response:
+#### Response
+
 ```json
 {
     "merchant_id": "test_merchant_123423",
@@ -337,6 +357,7 @@ curl -X POST http://localhost:8080/rule/get \
 ```
 
 #### Request: Elimination Config update
+
 ```bash
 curl -X POST http://localhost:8080/rule/update \
   -H "Content-Type: application/json" \
@@ -351,7 +372,8 @@ curl -X POST http://localhost:8080/rule/update \
   }'
 ```
 
-#### Response:
+#### Response
+
 ```json
 {
   "Elimination Configuration updated successfully"
@@ -359,6 +381,7 @@ curl -X POST http://localhost:8080/rule/update \
 ```
 
 #### Request: Elimination Config delete
+
 ```bash
 curl -X POST http://localhost:8080/rule/delete \
      -H "Content-Type: application/json" \
@@ -368,7 +391,8 @@ curl -X POST http://localhost:8080/rule/delete \
          }'
 ```
 
-#### Response:
+#### Response
+
 ```json
 {
   "Elimination Configuration deleted successfully"
@@ -376,6 +400,7 @@ curl -X POST http://localhost:8080/rule/delete \
 ```
 
 #### Request: Merchant account create
+
 ```bash
 curl --location --request POST 'http://localhost:8080/merchant-account/create' \
 --header 'Content-Type: application/json' \
@@ -384,7 +409,8 @@ curl --location --request POST 'http://localhost:8080/merchant-account/create' \
 }'
 ```
 
-#### Response:
+#### Response
+
 ```json
 {
   "Merchant account created successfully"
@@ -392,11 +418,13 @@ curl --location --request POST 'http://localhost:8080/merchant-account/create' \
 ```
 
 #### Request: Merchant account retrieve
+
 ```bash
 curl -X GET http://localhost:8080/merchant-account/test_merchant_123423            
 ```
 
-#### Response:
+#### Response
+
 ```json
 {
     "merchant_id": "test_merchant_123423",
@@ -405,11 +433,13 @@ curl -X GET http://localhost:8080/merchant-account/test_merchant_123423
 ```
 
 #### Request: Merchant account delete
+
 ```bash
 curl -X DELETE http://localhost:8080/merchant-account/test_merchant_123423  
-```     
+```
 
-#### Response:
+#### Response
+
 ```json
 {
     "Merchant account deleted successfully"
@@ -417,11 +447,13 @@ curl -X DELETE http://localhost:8080/merchant-account/test_merchant_123423
 ```
 
 # Priority Logic V2
+
 ---
 
 **A rule engine to enable merchants to create complex logical expressions based on various payment related [parameters](https://github.com/juspay/decision-engine/blob/main/config/development.toml). These rules are executed on the payment payload to evaluate the gateway to be used.**
 
 ## Table of Contents
+
 1. [API Components](#components)
 2. [API Reference](#PL-api-reference)  
    &nbsp;&nbsp;2.1 [Create](#create)  
@@ -469,13 +501,11 @@ curl -X DELETE http://localhost:8080/merchant-account/test_merchant_123423
 | `algorithm.metadata`         | Algorithm-level metadata (**object**, optional)                                                                |
 | `rules[].metadata`           | Rule-level metadata (**object**, optional)                                                                     |
 
-
 **Tip**: Use multiple `statements[]` blocks for OR logic. Use `nested` inside a `statement` for AND+OR nesting.
 
 ---
 
-
-## <a id="PL-api-reference"></a>2 · API Reference 
+## <a id="PL-api-reference"></a>2 · API Reference
 
 ### <a id="create"></a>2.1 Create Routing Algorithm
 
@@ -562,6 +592,7 @@ curl --location 'http://127.0.0.1:8082/routing/create' \
 ```
 
 **Success Response**
+
 ```json
 {
   "rule_id": "routing_e641380c-6f24-4405-8454-5ae6cbceb7a0",
@@ -588,6 +619,7 @@ curl --location 'http://127.0.0.1:8082/routing/evaluate' \
 ```
 
 **Example Response**
+
 ```json
 {
   "status": "default_selection",
@@ -628,6 +660,7 @@ curl --location 'http://127.0.0.1:8082/routing/activate' \
   "routing_algorithm_id": "routing_8711ce52-33e2-473f-9c8f-91a406acb850"
 }'
 ```
+
 At a given time one algorithm for each transaction_type (`payment`, `payout`, `three_ds_authentication`) can be active for one created_by id.
 HTTP 200 ⇒ algorithm is now active.
 
@@ -914,11 +947,10 @@ The input for evaluation parameter must be one of the mentioned values in array.
 }
 ```
 
-The input for evaluation parameter must be in the specifed thresholds.
+The input for evaluation parameter must be in the specified thresholds.
 </details>
 
 ---
-
 
 ### <a id="priority"></a>3.2 Priority Routing
 
