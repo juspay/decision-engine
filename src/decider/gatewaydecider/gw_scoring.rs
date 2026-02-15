@@ -64,10 +64,9 @@ use crate::types::gateway_outage::{self as ETGO, GatewayOutage};
 // use system_random::internal::StdGen;
 use super::types::{
     transform_gateway_wise_success_rate_based_routing, DebugScoringEntry,
-    DeciderGatewayWiseSuccessRateBasedRoutingInput, Dimension, DownTime,
-    GatewayRedisKeyMap, GatewayScoringData, GlobalSREvaluationScoreLog, LogCurrScore,
-    RankingAlgorithm, RedisKey, ResetApproach, ResetGatewayInput, ScoreKeyType, SrV3InputConfig,
-    SuccessRate1AndNConfig,
+    DeciderGatewayWiseSuccessRateBasedRoutingInput, Dimension, DownTime, GatewayRedisKeyMap,
+    GatewayScoringData, GlobalSREvaluationScoreLog, LogCurrScore, RankingAlgorithm, RedisKey,
+    ResetApproach, ResetGatewayInput, ScoreKeyType, SrV3InputConfig, SuccessRate1AndNConfig,
 };
 use crate::feedback::gateway_elimination_scoring::flow::getTTLForKey;
 use crate::types::payment::payment_method_type_const::*;
