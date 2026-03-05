@@ -37,19 +37,6 @@ mod tests {
             "billing_country".to_string(),
             KeyConfig {
                 data_type: KeyDataType::Enum,
-                values: Some("UnitedStatesOfAmerica,India".to_string()),
-                min_value: None,
-                max_value: None,
-                min_length: None,
-                max_length: None,
-                exact_length: None,
-                regex: None,
-            },
-        );
-        keys.insert(
-            "payment_card_issuer_country".to_string(),
-            KeyConfig {
-                data_type: KeyDataType::Enum,
                 values: Some("US,IN".to_string()),
                 min_value: None,
                 max_value: None,
@@ -59,7 +46,6 @@ mod tests {
                 regex: None,
             },
         );
-
         TomlConfig {
             keys: KeysConfig { keys },
         }
@@ -229,19 +215,6 @@ mod tests {
             "billing_country".to_string(),
             KeyConfig {
                 data_type: KeyDataType::Enum,
-                values: Some("UnitedStatesOfAmerica,Germany".to_string()),
-                min_value: None,
-                max_value: None,
-                min_length: None,
-                max_length: None,
-                exact_length: None,
-                regex: None,
-            },
-        );
-        keys.insert(
-            "payment_card_issuer_country".to_string(),
-            KeyConfig {
-                data_type: KeyDataType::Enum,
                 values: Some("US,DE".to_string()),
                 min_value: None,
                 max_value: None,
@@ -251,7 +224,6 @@ mod tests {
                 regex: None,
             },
         );
-
         TomlConfig {
             keys: KeysConfig { keys },
         }
@@ -312,7 +284,7 @@ mod tests {
         let bundle = build_bundle_for_tests();
         let params = HashMap::from([
             ("payment_method_type".to_string(), enum_value("credit")),
-            ("billing_country".to_string(), enum_value("India")),
+            ("billing_country".to_string(), enum_value("IN")),
         ]);
         let initial = connectors(&["stripe", "adyen"]);
 
@@ -325,7 +297,7 @@ mod tests {
         let bundle = build_bundle_for_tests();
         let params = HashMap::from([(
             "billing_country".to_string(),
-            enum_value("UnitedStatesOfAmerica"),
+            enum_value("US"),
         )]);
         let initial = connectors(&["stripe", "adyen"]);
 
@@ -347,7 +319,7 @@ mod tests {
         let bundle = build_bundle_for_tests();
         let params = HashMap::from([
             ("payment_method_type".to_string(), enum_value("credit")),
-            ("billing_country".to_string(), enum_value("India")),
+            ("billing_country".to_string(), enum_value("IN")),
         ]);
         let initial = connectors(&["stripe", "adyen"]);
 
@@ -360,7 +332,7 @@ mod tests {
         let bundle = build_bundle_for_tests();
         let params = HashMap::from([(
             "billing_country".to_string(),
-            enum_value("UnitedStatesOfAmerica"),
+            enum_value("US"),
         )]);
         let initial = connectors(&["stripe", "adyen"]);
 
@@ -378,7 +350,7 @@ mod tests {
             ("payment_method_type".to_string(), enum_value("credit")),
             (
                 "billing_country".to_string(),
-                enum_value("UnitedStatesOfAmerica"),
+                enum_value("US"),
             ),
         ]);
         let initial = connectors(&["stripe", "adyen"]);
@@ -399,13 +371,13 @@ mod tests {
             ("payment_method_type".to_string(), enum_value("credit")),
             (
                 "billing_country".to_string(),
-                enum_value("UnitedStatesOfAmerica"),
+                enum_value("US"),
             ),
             ("currency".to_string(), enum_value("USD")),
         ]);
         let params_fail_country = HashMap::from([
             ("payment_method_type".to_string(), enum_value("credit")),
-            ("billing_country".to_string(), enum_value("Germany")),
+            ("billing_country".to_string(), enum_value("DE")),
             ("currency".to_string(), enum_value("USD")),
         ]);
 
@@ -438,7 +410,7 @@ mod tests {
             ("payment_method_type".to_string(), enum_value("credit")),
             (
                 "billing_country".to_string(),
-                enum_value("UnitedStatesOfAmerica"),
+                enum_value("US"),
             ),
             ("currency".to_string(), enum_value("USD")),
             ("capture_method".to_string(), enum_value("automatic")),
@@ -467,7 +439,7 @@ mod tests {
             ("payment_method_type".to_string(), enum_value("debit")),
             (
                 "billing_country".to_string(),
-                enum_value("UnitedStatesOfAmerica"),
+                enum_value("US"),
             ),
             ("currency".to_string(), enum_value("USD")),
         ]);
@@ -517,7 +489,7 @@ mod tests {
             ("payment_method_type".to_string(), enum_value("credit")),
             (
                 "billing_country".to_string(),
-                enum_value("UnitedStatesOfAmerica"),
+                enum_value("US"),
             ),
             ("currency".to_string(), enum_value("USD")),
             ("capture_method".to_string(), enum_value("manual")),
@@ -526,7 +498,7 @@ mod tests {
             ("payment_method_type".to_string(), enum_value("credit")),
             (
                 "billing_country".to_string(),
-                enum_value("UnitedStatesOfAmerica"),
+                enum_value("US"),
             ),
             ("currency".to_string(), enum_value("USD")),
             ("capture_method".to_string(), enum_value("automatic")),
@@ -577,11 +549,11 @@ mod tests {
         )
         .expect("bundle should build");
         assert_eq!(
-            bundle.billing_country_to_iso2.get("UnitedStatesOfAmerica"),
+            bundle.billing_country_to_iso2.get("US"),
             Some(&"US".to_string())
         );
         assert_eq!(
-            bundle.billing_country_to_iso2.get("Germany"),
+            bundle.billing_country_to_iso2.get("DE"),
             Some(&"DE".to_string())
         );
     }
@@ -759,7 +731,7 @@ mod tests {
                 name: "priority_card_upi_in_inr_both_pass",
                 connectors: vec!["razorpay", "stripe"],
                 payment_method_type: Some("upi_collect"),
-                billing_country: Some("India"),
+                billing_country: Some("IN"),
                 currency: Some("INR"),
                 expected: vec!["razorpay", "stripe"],
             },
@@ -767,7 +739,7 @@ mod tests {
                 name: "priority_card_upi_us_usd_only_stripe_passes",
                 connectors: vec!["razorpay", "stripe"],
                 payment_method_type: Some("upi_collect"),
-                billing_country: Some("UnitedStatesOfAmerica"),
+                billing_country: Some("US"),
                 currency: Some("USD"),
                 expected: vec!["stripe"],
             },
@@ -775,7 +747,7 @@ mod tests {
                 name: "priority_card_credit_us_usd_both_pass",
                 connectors: vec!["razorpay", "stripe"],
                 payment_method_type: Some("credit"),
-                billing_country: Some("UnitedStatesOfAmerica"),
+                billing_country: Some("US"),
                 currency: Some("USD"),
                 expected: vec!["razorpay", "stripe"],
             },
@@ -783,7 +755,7 @@ mod tests {
                 name: "priority_card_google_pay_us_both_pass",
                 connectors: vec!["razorpay", "stripe"],
                 payment_method_type: Some("google_pay"),
-                billing_country: Some("UnitedStatesOfAmerica"),
+                billing_country: Some("US"),
                 currency: None,
                 expected: vec!["razorpay", "stripe"],
             },
@@ -791,7 +763,7 @@ mod tests {
                 name: "priority_card_google_pay_in_both_fail",
                 connectors: vec!["razorpay", "stripe"],
                 payment_method_type: Some("google_pay"),
-                billing_country: Some("India"),
+                billing_country: Some("IN"),
                 currency: None,
                 expected: vec![],
             },
@@ -815,7 +787,7 @@ mod tests {
                 name: "fallback_razorpay_stripe_upi_in_inr_both_pass",
                 connectors: vec!["razorpay", "stripe"],
                 payment_method_type: Some("upi_collect"),
-                billing_country: Some("India"),
+                billing_country: Some("IN"),
                 currency: Some("INR"),
                 expected: vec!["razorpay", "stripe"],
             },
@@ -823,7 +795,7 @@ mod tests {
                 name: "fallback_razorpay_stripe_upi_us_usd_only_stripe_passes",
                 connectors: vec!["razorpay", "stripe"],
                 payment_method_type: Some("upi_collect"),
-                billing_country: Some("UnitedStatesOfAmerica"),
+                billing_country: Some("US"),
                 currency: Some("USD"),
                 expected: vec!["stripe"],
             },
@@ -831,7 +803,7 @@ mod tests {
                 name: "fallback_stripe_razorpay_upi_us_usd_only_stripe_passes",
                 connectors: vec!["stripe", "razorpay"],
                 payment_method_type: Some("upi_collect"),
-                billing_country: Some("UnitedStatesOfAmerica"),
+                billing_country: Some("US"),
                 currency: Some("USD"),
                 expected: vec!["stripe"],
             },
@@ -839,7 +811,7 @@ mod tests {
                 name: "fallback_razorpay_stripe_credit_us_usd_both_pass",
                 connectors: vec!["razorpay", "stripe"],
                 payment_method_type: Some("credit"),
-                billing_country: Some("UnitedStatesOfAmerica"),
+                billing_country: Some("US"),
                 currency: Some("USD"),
                 expected: vec!["razorpay", "stripe"],
             },
@@ -878,7 +850,7 @@ mod tests {
         println!("Output forms tested: single, priority, volume_split, volume_split_priority");
         let params = params_for_case(
             Some("upi_collect"),
-            Some("UnitedStatesOfAmerica"),
+            Some("US"),
             Some("USD"),
         );
 

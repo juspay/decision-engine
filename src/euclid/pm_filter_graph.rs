@@ -78,7 +78,6 @@ pub fn build_pm_filter_graph_bundle(
             attach_currency_filter_nodes(&mut compiler, filter, rule_node);
             attach_not_available_flow_nodes(&mut compiler, filter, rule_node);
 
-            // output node should pass when at least one PM rule branch matches
             compiler.add_edge(rule_node, output_node, Strength::Normal, Relation::Positive);
         }
     }
@@ -276,40 +275,18 @@ fn build_billing_country_to_iso2_map(
     let Some(billing_country_key_config) = routing_config.keys.keys.get("billing_country") else {
         return map;
     };
-    let Some(issuer_country_key_config) =
-        routing_config.keys.keys.get("payment_card_issuer_country")
-    else {
-        return map;
-    };
 
     let Some(billing_values) = billing_country_key_config.values.as_ref() else {
         return map;
     };
-    let Some(issuer_values) = issuer_country_key_config.values.as_ref() else {
-        return map;
-    };
 
-    let billing_countries = parse_csv_values(billing_values);
-    let issuer_countries = parse_csv_values(issuer_values)
-        .into_iter()
-        .map(|val| val.to_ascii_uppercase())
-        .collect::<Vec<_>>();
-
-    if billing_countries.len() != issuer_countries.len() {
-        logger::warn!(
-            billing_country_count = billing_countries.len(),
-            issuer_country_count = issuer_countries.len(),
-            "billing_country and payment_card_issuer_country lengths are not equal; using zip(min)"
-        );
-    }
-
-    for (billing_country, issuer_country) in billing_countries.into_iter().zip(issuer_countries) {
-        if issuer_country.len() == 2 && issuer_country.chars().all(|c| c.is_ascii_alphabetic()) {
-            map.insert(billing_country.clone(), issuer_country.clone());
-            map.insert(billing_country.to_ascii_lowercase(), issuer_country);
+    for billing_country in parse_csv_values(billing_values) {
+        let iso2 = billing_country.trim().to_ascii_uppercase();
+        if iso2.len() == 2 && iso2.chars().all(|c| c.is_ascii_alphabetic()) {
+            map.insert(billing_country.clone(), iso2.clone());
+            map.insert(billing_country.to_ascii_lowercase(), iso2);
         }
     }
-
     map
 }
 

@@ -128,6 +128,7 @@ pub async fn config_sr_dimentions(
         "SR Dimension configuration updated successfully".to_string(),
     ))
 }
+
 pub async fn routing_create(
     Json(payload): Json<Value>,
 ) -> Result<Json<RoutingDictionaryRecord>, ContainerError<EuclidErrors>> {
@@ -262,12 +263,6 @@ pub async fn routing_evaluate(
     logger::debug!(
         "Received routing evaluation request for ID: {}",
         payload.created_by
-    );
-
-    let config_identifier = format!(
-        "{}_{}",
-        DEFAULT_FALLBACK_IDENTIFIER,
-        payload.created_by.clone()
     );
 
     let update_failure_metrics = || {
@@ -469,7 +464,7 @@ pub async fn routing_evaluate(
                                 ir.evaluated_output =
                                     vec![fallback_connector.first().cloned().unwrap_or_default()];
                             }
-                        }
+                       }
                         (ir.output, ir.evaluated_output, ir.rule_name)
                     }
                     Err(e) => {
@@ -486,8 +481,9 @@ pub async fn routing_evaluate(
     } else {
         None
     };
+
     let connectors_for_eligibility = extract_connectors_for_eligibility(&output);
-    let eligible_connectors = compute_routing_evaluate_eligibility(
+    let eligible_connectors = eligibility_for_output(
         pm_filter_bundle.as_deref(),
         &parameters,
         &connectors_for_eligibility,
@@ -801,7 +797,7 @@ fn format_output(output: &Output) -> Value {
     }
 }
 
-pub(crate) fn compute_routing_evaluate_eligibility(
+pub(crate) fn eligibility_for_output(
     pm_filter_bundle: Option<&pm_filter_graph::PmFilterGraphBundle>,
     parameters: &std::collections::HashMap<String, Option<ValueType>>,
     connectors: &[ConnectorInfo],
