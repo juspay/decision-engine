@@ -5,9 +5,9 @@ use crate::storage::schema_pg::routing_algorithm::dsl;
 use crate::{
     error::ApiErrorResponse,
     euclid::{
-        ast::{ComparisonType, ConnectorInfo, Output, ValueType},
-        cgraph,
+        ast::{ConnectorInfo, Output, ValueType},
         interpreter::{evaluate_output, InterpreterBackend},
+        pm_filter_graph,
         types::{
             ActivateRoutingConfigRequest, Context, JsonifiedRoutingAlgorithm, KeyDataType,
             RoutingAlgorithmMapperNew, RoutingDictionaryRecord, RoutingEvaluateResponse,
@@ -481,12 +481,17 @@ pub async fn routing_evaluate(
             }
         };
 
-    let eligible_connectors = if let Some(ref cfg) = state.config.routing_config {
-        let ctx = cgraph::CheckCtx::from(payload.parameters.clone());
-        perform_eligibility_analysis(&cfg.constraint_graph, ctx, &evaluated_output)
+    let pm_filter_bundle = if pm_filter_graph::has_payment_method_type(&parameters) {
+        state.get_pm_filter_graph_bundle().await
     } else {
-        evaluated_output.clone()
+        None
     };
+    let connectors_for_eligibility = extract_connectors_for_eligibility(&output);
+    let eligible_connectors = compute_routing_evaluate_eligibility(
+        pm_filter_bundle.as_deref(),
+        &parameters,
+        &connectors_for_eligibility,
+    );
 
     let response = RoutingEvaluateResponse {
         status: match rule_name.as_deref() {
@@ -796,24 +801,60 @@ fn format_output(output: &Output) -> Value {
     }
 }
 
-fn perform_eligibility_analysis(
-    constraint_graph: &cgraph::ConstraintGraph,
-    ctx: cgraph::CheckCtx,
-    output: &[ConnectorInfo],
+pub(crate) fn compute_routing_evaluate_eligibility(
+    pm_filter_bundle: Option<&pm_filter_graph::PmFilterGraphBundle>,
+    parameters: &std::collections::HashMap<String, Option<ValueType>>,
+    connectors: &[ConnectorInfo],
 ) -> Vec<ConnectorInfo> {
-    let mut eligible_connectors = Vec::<ConnectorInfo>::with_capacity(output.len());
+    if !pm_filter_graph::has_payment_method_type(parameters) {
+        logger::debug!("Skipping pm_filters eligibility; payment_method_type missing");
+        return connectors.to_vec();
+    }
 
-    for out in output {
-        let clause = cgraph::Clause {
-            key: "output".to_string(),
-            comparison: ComparisonType::Equal,
-            value: ValueType::EnumVariant(out.gateway_name.clone()),
-        };
+    apply_pm_filter_eligibility(pm_filter_bundle, parameters, connectors)
+}
 
-        if let Ok(true) = constraint_graph.check_clause_validity(clause, &ctx) {
-            eligible_connectors.push(out.clone());
+pub(crate) fn apply_pm_filter_eligibility(
+    bundle: Option<&pm_filter_graph::PmFilterGraphBundle>,
+    parameters: &std::collections::HashMap<String, Option<ValueType>>,
+    eligible_connectors: &[ConnectorInfo],
+) -> Vec<ConnectorInfo> {
+    let Some(bundle) = bundle else {
+        logger::debug!("Skipping pm_filters eligibility; graph unavailable");
+        return eligible_connectors.to_vec();
+    };
+
+    pm_filter_graph::filter_eligible_connectors(bundle, parameters, eligible_connectors)
+}
+
+pub(crate) fn extract_connectors_for_eligibility(output: &Output) -> Vec<ConnectorInfo> {
+    let mut connectors = Vec::<ConnectorInfo>::new();
+    let mut push_unique = |connector: &ConnectorInfo| {
+        if !connectors.iter().any(|existing| existing == connector) {
+            connectors.push(connector.clone());
+        }
+    };
+
+    match output {
+        Output::Single(connector) => push_unique(connector),
+        Output::Priority(priority_connectors) => {
+            for connector in priority_connectors {
+                push_unique(connector);
+            }
+        }
+        Output::VolumeSplit(splits) => {
+            for split in splits {
+                push_unique(&split.output);
+            }
+        }
+        Output::VolumeSplitPriority(splits) => {
+            for split in splits {
+                for connector in &split.output {
+                    push_unique(connector);
+                }
+            }
         }
     }
 
-    eligible_connectors
+    connectors
 }

@@ -237,6 +237,12 @@ pub struct ConstraintGraphData {
     edges: Vec<Edge>,
 }
 
+impl ConstraintGraphData {
+    pub fn new(nodes: Vec<Node>, edges: Vec<Edge>) -> Self {
+        Self { nodes, edges }
+    }
+}
+
 impl TryFrom<ConstraintGraphData> for ConstraintGraph {
     type Error = String;
 

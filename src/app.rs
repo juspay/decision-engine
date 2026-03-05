@@ -7,6 +7,7 @@ use axum_server::{tls_rustls::RustlsConfig, Handle};
 use error_stack::ResultExt;
 use std::sync::Arc;
 use tokio::signal::unix::{signal, SignalKind};
+use tokio::sync::OnceCell as TokioOnceCell;
 use tower_http::trace as tower_trace;
 
 use crate::{
@@ -43,6 +44,8 @@ pub struct TenantAppState {
     pub redis_conn: Arc<RedisConnectionWrapper>,
     pub config: config::TenantConfig,
     pub api_client: ApiClient,
+    pub pm_filter_graph_bundle:
+        Arc<TokioOnceCell<Arc<crate::euclid::pm_filter_graph::PmFilterGraphBundle>>>,
 }
 
 #[allow(clippy::expect_used)]
@@ -77,7 +80,44 @@ impl TenantAppState {
             )),
             api_client,
             config: tenant_config,
+            pm_filter_graph_bundle: Arc::new(TokioOnceCell::new()),
         })
+    }
+
+    pub async fn get_pm_filter_graph_bundle(
+        &self,
+    ) -> Option<Arc<crate::euclid::pm_filter_graph::PmFilterGraphBundle>> {
+        self.pm_filter_graph_bundle
+            .get_or_try_init(|| async {
+                let bundle = crate::euclid::pm_filter_graph::build_pm_filter_graph_bundle(
+                    &self.config.pm_filters,
+                    self.config.routing_config.as_ref(),
+                )
+                .map_err(|err| {
+                    logger::error!(
+                        tenant_id = %self.config.tenant_id,
+                        error = %err,
+                        "Failed to build pm_filters constraint graph; failing open"
+                    );
+                    err
+                })?;
+
+                logger::info!(
+                    tenant_id = %self.config.tenant_id,
+                    explicit_connector_count = bundle.explicit_connectors.len(),
+                    has_default_rules = bundle.has_default_rules,
+                    graph_node_count = bundle.node_count,
+                    graph_edge_count = bundle.edge_count,
+                    "pm_filters constraint graph built successfully"
+                );
+
+                Ok::<Arc<crate::euclid::pm_filter_graph::PmFilterGraphBundle>, String>(Arc::new(
+                    bundle,
+                ))
+            })
+            .await
+            .ok()
+            .cloned()
     }
 }
 
