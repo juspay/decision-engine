@@ -13,7 +13,7 @@ mod tests {
                 extract_connectors_for_eligibility,
             },
             pm_filter_graph,
-            types::{DefaultConfig, KeyConfig, KeyDataType, KeysConfig, TomlConfig},
+            types::{KeyConfig, KeyDataType, KeysConfig, TomlConfig},
         },
     };
 
@@ -62,8 +62,6 @@ mod tests {
 
         TomlConfig {
             keys: KeysConfig { keys },
-            default: DefaultConfig { output: vec![] },
-            constraint_graph: crate::euclid::cgraph::ConstraintGraph::default(),
         }
     }
 
@@ -256,8 +254,6 @@ mod tests {
 
         TomlConfig {
             keys: KeysConfig { keys },
-            default: DefaultConfig { output: vec![] },
-            constraint_graph: crate::euclid::cgraph::ConstraintGraph::default(),
         }
     }
 

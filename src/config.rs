@@ -427,9 +427,3 @@ pub struct KeysConfig {
     #[serde(flatten)]
     pub keys: HashMap<String, KeyConfig>,
 }
-
-/// Structure for the [default] section in the TOML
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-pub struct DefaultConfig {
-    pub output: Vec<String>,
-}
