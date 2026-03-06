@@ -54,6 +54,12 @@ helm pull bitnami/postgresql --version ~12.5.5 --untar --untardir charts
 echo "Downloading Redis chart..."
 helm pull bitnami/redis --version ~17.11.3 --untar --untardir charts
 
+# Resolve config symlink for packaging compatibility
+if [ -L config/development.toml ]; then
+  cp --remove-destination "$(readlink -f config/development.toml)" config/development.toml
+  echo "Resolved config symlink for packaging."
+fi
+
 # Build dependencies
 echo "Building dependencies..."
 helm dependency build
