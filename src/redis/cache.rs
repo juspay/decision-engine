@@ -1,7 +1,6 @@
 use super::mem_cache::GLOBAL_CACHE;
 use crate::app::get_tenant_app_state;
 use crate::logger;
-use crate::redis::feature::RedisDataStruct;
 use crate::types::service_configuration;
 use crate::utils::StringExt;
 use serde::Deserialize;
@@ -25,40 +24,6 @@ async fn set_to_memory_cache(prefixed_key: &str, value: &str, ttl_seconds: Optio
                 tag = "memory_cache_write_failed",
                 action = "memory_cache_write_failed",
                 "Failed to write cache for key: {}, error: {:?}",
-                prefixed_key,
-                e
-            );
-        }
-    }
-}
-
-async fn get_from_redis_cache(prefixed_key: &str) -> Result<String, String> {
-    let app_state = get_tenant_app_state().await;
-    match app_state.redis_conn.get_key_string(prefixed_key).await {
-        Ok(value) => Ok(value),
-        Err(e) => Err(format!("Redis cache get failed: {:?}", e)),
-    }
-}
-
-async fn set_to_redis_cache(prefixed_key: &str, value: &str, ttl_seconds: i64) {
-    let app_state = get_tenant_app_state().await;
-    match app_state
-        .redis_conn
-        .setx(
-            prefixed_key,
-            value,
-            ttl_seconds,
-            None,
-            RedisDataStruct::STRING,
-        )
-        .await
-    {
-        Ok(_) => {}
-        Err(e) => {
-            crate::logger::warn!(
-                tag = "redis_cache_write_failed",
-                action = "redis_cache_write_failed",
-                "Failed to write Redis cache for key: {}, error: {:?}",
                 prefixed_key,
                 e
             );
@@ -123,89 +88,48 @@ where
 {
     let app_state = get_tenant_app_state().await;
     let prefixed_key = app_state.config.cache_config.add_prefix(&key);
-    let ttl_seconds = app_state.config.cache_config.service_config_ttl;
-    let ttl_seconds_u64 = Some(ttl_seconds as u64);
 
     match get_from_memory_cache(&prefixed_key).await {
         Ok(cache_value) => {
             logger::debug!(
                 tag = "memory_cache",
                 action = "hit",
-                "Memory cache hit for key: {}",
+                "Cache hit for key: {}",
                 key
             );
-            if cache_value.is_empty() {
-                return None;
-            }
-            return match &decode_fn {
+            match decode_fn {
                 Some(func) => func(cache_value),
                 None => extractValue(cache_value),
-            };
+            }
         }
         Err(_) => {
             logger::debug!(
                 tag = "memory_cache",
                 action = "miss",
-                "Memory cache miss for key: {}, checking Redis",
+                "Cache miss for key: {}, falling back to database",
                 key
             );
-        }
-    }
 
-    match get_from_redis_cache(&prefixed_key).await {
-        Ok(redis_value) => {
-            logger::debug!(
-                tag = "redis_cache",
-                action = "hit",
-                "Redis cache hit for key: {}",
-                key
-            );
-            if redis_value.is_empty() {
-                set_to_memory_cache(&prefixed_key, "", ttl_seconds_u64).await;
-                return None;
+            let res = service_configuration::find_config_by_name(key.clone()).await;
+
+            match res {
+                Ok(Some(service_config)) => match service_config.value {
+                    Some(value) => {
+                        // Get TTL from global config
+                        let ttl_seconds =
+                            Some(app_state.config.cache_config.service_config_ttl as u64);
+                        set_to_memory_cache(&prefixed_key, &value, ttl_seconds).await;
+
+                        match decode_fn {
+                            Some(func) => func(value),
+                            None => extractValue(value),
+                        }
+                    }
+                    None => None,
+                },
+                _ => None,
             }
-
-            set_to_memory_cache(&prefixed_key, &redis_value, ttl_seconds_u64).await;
-            return match &decode_fn {
-                Some(func) => func(redis_value),
-                None => extractValue(redis_value),
-            };
         }
-        Err(_) => {
-            logger::debug!(
-                tag = "redis_cache",
-                action = "miss",
-                "Redis cache miss for key: {}, falling back to database",
-                key
-            );
-        }
-    }
-
-    let res = service_configuration::find_config_by_name(key.clone()).await;
-
-    match res {
-        Ok(Some(service_config)) => match service_config.value {
-            Some(value) => {
-                set_to_redis_cache(&prefixed_key, &value, ttl_seconds).await;
-                set_to_memory_cache(&prefixed_key, &value, ttl_seconds_u64).await;
-
-                match decode_fn {
-                    Some(func) => func(value),
-                    None => extractValue(value),
-                }
-            }
-            None => {
-                set_to_redis_cache(&prefixed_key, "", ttl_seconds).await;
-                set_to_memory_cache(&prefixed_key, "", ttl_seconds_u64).await;
-                None
-            }
-        },
-        Ok(None) => {
-            set_to_redis_cache(&prefixed_key, "", ttl_seconds).await;
-            set_to_memory_cache(&prefixed_key, "", ttl_seconds_u64).await;
-            None
-        }
-        Err(_) => None,
     }
 }
 
@@ -223,17 +147,14 @@ where
             // Serialize the default value to JSON string
             match serde_json::to_string(&default_value) {
                 Ok(default_json) => {
-                    // Cache the default value for future use
+                    // Cache the default value in memory for future use
                     let app_state = get_tenant_app_state().await;
                     let prefixed_key = app_state.config.cache_config.add_prefix(&key);
-                    let ttl_seconds = app_state.config.cache_config.service_config_ttl;
-                    let ttl_seconds_u64 = Some(ttl_seconds as u64);
-
-                    set_to_redis_cache(&prefixed_key, &default_json, ttl_seconds).await;
-                    set_to_memory_cache(&prefixed_key, &default_json, ttl_seconds_u64).await;
+                    let ttl_seconds = Some(app_state.config.cache_config.service_config_ttl as u64);
+                    set_to_memory_cache(&prefixed_key, &default_json, ttl_seconds).await;
 
                     logger::debug!(
-                        tag = "cache",
+                        tag = "memory_cache",
                         action = "default_cached",
                         "Cached default value for key: {}",
                         key
@@ -241,7 +162,7 @@ where
                 }
                 Err(e) => {
                     logger::warn!(
-                        tag = "cache",
+                        tag = "memory_cache",
                         action = "serialize_failed",
                         "Failed to serialize default value for key: {}, error: {:?}",
                         key,
