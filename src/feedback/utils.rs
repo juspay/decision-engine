@@ -891,7 +891,7 @@ pub fn getTxnTypeFromInternalMetadata(internal_metadata: Option<Secret<String>>)
                 tag = "APP_DEBUG",
                 "FETCH_TXN_TYPE_FROM_IM_FLOW"
             );
-            (MandateTxnType::Default)
+            MandateTxnType::Default
         }
         Some(internal_metadata) => {
             match serde_json::from_str::<MandateTxnInfo>(internal_metadata.peek()) {
