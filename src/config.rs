@@ -13,8 +13,9 @@ use error_stack::ResultExt;
 #[cfg(feature = "kms-hashicorp-vault")]
 use masking::ExposeInterface;
 use redis_interface::RedisSettings;
+use serde::Deserialize;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     ops::{Deref, DerefMut},
     path::PathBuf,
 };
@@ -41,6 +42,8 @@ pub struct GlobalConfig {
     #[serde(default)]
     pub routing_config: Option<TomlConfig>,
     #[serde(default)]
+    pub pm_filters: ConnectorFilters,
+    #[serde(default)]
     pub debit_routing_config: network_decider::types::DebitRoutingConfig,
     pub compression_filepath: Option<CompressionFilepath>,
 }
@@ -50,6 +53,7 @@ pub struct TenantConfig {
     pub tenant_id: String,
     pub tenant_secrets: TenantSecrets,
     pub routing_config: Option<TomlConfig>,
+    pub pm_filters: ConnectorFilters,
     pub debit_routing_config: network_decider::types::DebitRoutingConfig,
     pub cache_config: CacheConfig,
 }
@@ -64,6 +68,7 @@ impl TenantConfig {
         Self {
             tenant_id: tenant_id.clone(),
             routing_config: global_config.routing_config.clone(),
+            pm_filters: global_config.pm_filters.clone(),
             #[allow(clippy::unwrap_used)]
             tenant_secrets: global_config
                 .tenant_secrets
@@ -74,6 +79,46 @@ impl TenantConfig {
             cache_config: global_config.cache_config.clone(),
         }
     }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(transparent)]
+pub struct ConnectorFilters(pub HashMap<String, PaymentMethodFilters>);
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(transparent)]
+pub struct PaymentMethodFilters(pub HashMap<String, CurrencyCountryFlowFilter>);
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct CurrencyCountryFlowFilter {
+    #[serde(default, deserialize_with = "deserialize_optional_hashset")]
+    pub country: Option<HashSet<String>>,
+    #[serde(default, deserialize_with = "deserialize_optional_hashset")]
+    pub currency: Option<HashSet<String>>,
+    pub not_available_flows: Option<NotAvailableFlows>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct NotAvailableFlows {
+    pub capture_method: Option<String>,
+}
+
+fn deserialize_optional_hashset<'a, D>(deserializer: D) -> Result<Option<HashSet<String>>, D::Error>
+where
+    D: serde::Deserializer<'a>,
+{
+    let raw = Option::<String>::deserialize(deserializer)?;
+    Ok(raw.map(|value| {
+        value
+            .trim()
+            .split(',')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .map(ToOwned::to_owned)
+            .collect()
+    }))
 }
 
 #[cfg(feature = "limit")]
@@ -381,10 +426,4 @@ pub struct KeyConfig {
 pub struct KeysConfig {
     #[serde(flatten)]
     pub keys: HashMap<String, KeyConfig>,
-}
-
-/// Structure for the [default] section in the TOML
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-pub struct DefaultConfig {
-    pub output: Vec<String>,
 }

@@ -376,27 +376,16 @@ pub struct KeysConfig {
     pub keys: HashMap<String, KeyConfig>,
 }
 
-/// Structure for the [default] section in the TOML
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct DefaultConfig {
-    pub output: Vec<String>,
-}
-
 /// The complete TOML configuration structure
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TomlConfig {
     pub keys: KeysConfig,
-    pub default: DefaultConfig,
-    #[serde(default)]
-    pub constraint_graph: crate::euclid::cgraph::ConstraintGraph,
 }
 
 impl Default for TomlConfig {
     fn default() -> Self {
         Self {
             keys: KeysConfig::default(),
-            default: DefaultConfig::default(),
-            constraint_graph: crate::euclid::cgraph::ConstraintGraph::default(),
         }
     }
 }
@@ -406,11 +395,5 @@ impl Default for KeysConfig {
         Self {
             keys: HashMap::new(),
         }
-    }
-}
-
-impl Default for DefaultConfig {
-    fn default() -> Self {
-        Self { output: Vec::new() }
     }
 }

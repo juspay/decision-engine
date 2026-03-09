@@ -83,93 +83,6 @@ payment_paymentMethod = { type = "enum", values = "NB_HDFC, NB_ICICI, NB_SBI" }
 payment_paymentSource = { type = "enum", values = "net.one97.paytm, @paytm" }
 txn_isEmi = { type = "enum", values = "true, false" }
 
-[routing_config.default]
-output = ["stripe", "adyen"]
-
-[[routing_config.constraint_graph.nodes]]
-preds = []
-succs = [0]
-
-[routing_config.constraint_graph.nodes.kind]
-kind = "value"
-
-[routing_config.constraint_graph.nodes.kind.data]
-kind = "value"
-
-[routing_config.constraint_graph.nodes.kind.data.data]
-key = "payment_method"
-comparison = "equal"
-
-[routing_config.constraint_graph.nodes.kind.data.data.value]
-type = "enum_variant"
-value = "card"
-
-[[routing_config.constraint_graph.nodes]]
-preds = []
-succs = [1]
-
-[routing_config.constraint_graph.nodes.kind]
-kind = "value"
-
-[routing_config.constraint_graph.nodes.kind.data]
-kind = "value"
-
-[routing_config.constraint_graph.nodes.kind.data.data]
-key = "payment_method"
-comparison = "equal"
-
-[routing_config.constraint_graph.nodes.kind.data.data.value]
-type = "enum_variant"
-value = "bank_debit"
-
-[[routing_config.constraint_graph.nodes]]
-preds = [0]
-succs = []
-
-[routing_config.constraint_graph.nodes.kind]
-kind = "value"
-
-[routing_config.constraint_graph.nodes.kind.data]
-kind = "value"
-
-[routing_config.constraint_graph.nodes.kind.data.data]
-key = "output"
-comparison = "equal"
-
-[routing_config.constraint_graph.nodes.kind.data.data.value]
-type = "enum_variant"
-value = "stripe"
-
-[[routing_config.constraint_graph.nodes]]
-preds = [1]
-succs = []
-
-[routing_config.constraint_graph.nodes.kind]
-kind = "value"
-
-[routing_config.constraint_graph.nodes.kind.data]
-kind = "value"
-
-[routing_config.constraint_graph.nodes.kind.data.data]
-key = "output"
-comparison = "equal"
-
-[routing_config.constraint_graph.nodes.kind.data.data.value]
-type = "enum_variant"
-value = "adyen"
-
-[[routing_config.constraint_graph.edges]]
-strength = "strong"
-relation = "positive"
-pred = 0
-succ = 2
-
-[[routing_config.constraint_graph.edges]]
-strength = "strong"
-relation = "positive"
-pred = 1
-succ = 3
-
 [debit_routing_config]
 fraud_check_fee = 1.0
 
@@ -191,4 +104,3 @@ merchant_category_code_0001.accel = { percentage = 1.55, fixed_amount = 4.0 }
 merchant_category_code_0001.nyce = { percentage = 1.30, fixed_amount = 21.3125 }
 merchant_category_code_0001.pulse = { percentage = 1.60, fixed_amount = 15.0 }
 merchant_category_code_0001.star = { percentage = 1.63, fixed_amount = 15.0 }
-

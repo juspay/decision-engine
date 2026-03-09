@@ -237,6 +237,12 @@ pub struct ConstraintGraphData {
     edges: Vec<Edge>,
 }
 
+impl ConstraintGraphData {
+    pub fn new(nodes: Vec<Node>, edges: Vec<Edge>) -> Self {
+        Self { nodes, edges }
+    }
+}
+
 impl TryFrom<ConstraintGraphData> for ConstraintGraph {
     type Error = String;
 
@@ -438,12 +444,12 @@ mod tests {
 
     #[derive(Debug, Serialize, Deserialize)]
     struct Config {
-        routing_config: RoutingConfig,
+        graph_config: GraphConfig,
     }
 
     #[derive(Debug, Serialize, Deserialize)]
-    struct RoutingConfig {
-        constraint_graph: ConstraintGraphData,
+    struct GraphConfig {
+        graph: ConstraintGraphData,
     }
 
     #[test]
@@ -504,8 +510,8 @@ mod tests {
         };
 
         let config = Config {
-            routing_config: RoutingConfig {
-                constraint_graph: graph,
+            graph_config: GraphConfig {
+                graph,
             },
         };
 
