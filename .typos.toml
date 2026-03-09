@@ -1,2 +1,62 @@
 [default]
 check-filename = true
+
+[default.extend-words]
+# Database column name in schema - cannot be renamed without migration
+penality = "penality"
+# HashiCorp Vault configuration - valid product name
+hashi = "hashi"
+Hashi = "Hashi"
+# Enum variant name in types.rs - would require renaming across multiple files
+Specfic = "Specfic"
+# Country codes in network_decider/types.rs
+FO = "FO"
+PN = "PN"
+# Additional typos in upstream code (merchant_config_util.rs comments)
+Catagory = "Catagory"
+ETCC = "ETCC"
+# Variable name typos in upstream code (gateway_scoring_service.rs, utils.rs, flow.rs)
+dimesions = "dimesions"
+# Comment typos in upstream code (utils.rs)
+comvert = "comvert"
+jasson = "jasson"
+sextx = "sextx"
+# Currency/country codes in config (development.toml)
+JOD = "JOD"
+BA = "BA"
+# More typos in upstream code (tenant_config_filter.rs, Runner.groovy, jw.rs)
+valu = "valu"
+enforcment = "enforcment"
+encrypter = "encrypter"
+# Module alias in codebase (use crate::types::order as ETO)
+ETO = "ETO"
+# ISO 3166-1 alpha-3 country codes (standard country codes, not typos)
+LSO = "LSO"
+CAF = "CAF"
+TTO = "TTO"
+THA = "THA"
+SUR = "SUR"
+SOM = "SOM"
+NAM = "NAM"
+# Function name typos in upstream code (routing_rules.rs, app.rs)
+dimentions = "dimentions"
+# Function name typo in upstream code (utils.rs, gw_filter.rs)
+reccuring = "reccuring"
+# Function name typo in upstream code (utils.rs, gw_scoring.rs)
+eligibile = "eligibile"
+# More typos in upstream code found in CI
+ect = "ect"
+Mis = "Mis"
+Inavlid = "Inavlid"
+Yopu = "Yopu"
+mutlithreading = "mutlithreading"
+enforeced = "enforeced"
+THREHOLD = "THREHOLD"
+# Additional typos found in second CI run
+OT = "OT"
+Ist = "Ist"
+IST = "IST"
+VAS = "VAS"
+Vas = "Vas"
+uisng = "uisng"
+consts = "consts"
