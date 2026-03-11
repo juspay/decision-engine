@@ -45,10 +45,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn log_startup_configuration(global_config: &open_router::config::GlobalConfig) {
-    logger::debug!(startup_config = ?global_config);
     logger::info!(
-        "OpenRouter started [{:?}] [{:?}]",
-        global_config.server,
-        global_config.log
+        "Decision engine started [{:?}]",
+        global_config
     );
 }
