@@ -97,12 +97,12 @@ impl crate::config::GlobalConfig {
     ) -> Result<tokio::net::TcpListener, ConfigurationError> {
         let loc = format!("{}:{}", self.metrics.host, self.metrics.port);
 
-        tracing::debug!(
+        tracing::info!(
             category = "SERVER",
-            "{} started [{:?}] [{:?}]",
+            action = "metrics_server_startup",
             server,
-            self.metrics,
-            self.log
+            bind_address = %loc,
+            "Metrics server listening"
         );
 
         Ok(tokio::net::TcpListener::bind(loc).await?)

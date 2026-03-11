@@ -225,6 +225,11 @@ where
         let domain_keys = [
             "message_number",
             "error_category",
+            "error",
+            "error_message",
+            "jp_error_code",
+            "jp_error_message",
+            "source",
             "x-request-id",
             "env",
             "@timestamp",
@@ -251,6 +256,7 @@ where
             "timestamp",
             "sdk_session_span",
             "tag",
+            "startup_config",
         ];
 
         // Read the category from storage (default is "DOMAIN").
@@ -434,6 +440,7 @@ where
                 explicit_entries_set.insert("@timestamp");
             }
         }
+
         if !explicit_entries_set.contains("is_art_enabled") {
             map_serializer.serialize_entry("is_art_enabled", "false")?;
             explicit_entries_set.insert("is_art_enabled");
@@ -570,6 +577,9 @@ where
     let value = storage
         .values
         .get("message")
+        .or_else(|| storage.values.get("error"))
+        .or_else(|| storage.values.get("error_message"))
+        .or_else(|| storage.values.get("jp_error_message"))
         .cloned()
         .unwrap_or(Value::String("null".to_string()));
 
