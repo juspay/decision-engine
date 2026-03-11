@@ -256,7 +256,6 @@ where
             "timestamp",
             "sdk_session_span",
             "tag",
-            "startup_config",
         ];
 
         // Read the category from storage (default is "DOMAIN").
@@ -387,6 +386,13 @@ where
                             explicit_entries_set.insert(*key);
                         }
                     }
+                }
+            }
+
+            if !explicit_entries_set.contains("startup_config") {
+                if let Some(value) = storage.values.get("startup_config") {
+                    map_serializer.serialize_entry("startup_config", value)?;
+                    explicit_entries_set.insert("startup_config");
                 }
             }
 

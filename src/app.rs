@@ -38,16 +38,12 @@ pub async fn get_tenant_app_state() -> Arc<TenantAppState> {
 type Storage = storage::Storage;
 
 async fn ensure_request_id(mut request: Request<Body>, next: Next) -> Response {
-    let request_id = request
+    let header_value = request
         .headers()
         .get(storage::consts::X_REQUEST_ID)
-        .and_then(|value| value.to_str().ok())
-        .filter(|value| !value.is_empty())
-        .map(|value| value.to_owned())
-        .unwrap_or_else(storage::utils::generate_uuid);
-
-    let header_value = HeaderValue::from_str(&request_id)
-        .unwrap_or_else(|_| HeaderValue::from_static("invalid-request-id"));
+        .filter(|value| !value.as_bytes().is_empty())
+        .cloned()
+        .unwrap_or_else(generate_request_id_header_value);
 
     request
         .headers_mut()
@@ -59,6 +55,15 @@ async fn ensure_request_id(mut request: Request<Body>, next: Next) -> Response {
         .insert(storage::consts::X_REQUEST_ID, header_value);
 
     response
+}
+
+fn generate_request_id_header_value() -> HeaderValue {
+    loop {
+        let request_id = storage::utils::generate_uuid();
+        if let Ok(value) = HeaderValue::from_str(&request_id) {
+            return value;
+        }
+    }
 }
 
 ///
