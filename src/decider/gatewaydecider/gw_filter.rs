@@ -3092,9 +3092,10 @@ pub async fn filterGatewaysForUpi(this: &mut DeciderFlow<'_>) -> Vec<String> {
             .collect();
 
     //Convert upi_only_gateways to <HashSet<_>>
-    let upi_only_gateways_hashset = upi_only_gateways.into_iter().collect::<HashSet<_>>();
+    let upi_only_gateways_hashset = upi_only_gateways.clone().into_iter().collect::<HashSet<_>>();
 
     if txn_card_info.paymentMethodType == UPI {
+        let txn_currency = txn_detail.currency.clone();
         let upi_also_gateway: Vec<String> =
             findByNameFromRedis::<Vec<String>>(C::UpiAlsoGateways.get_key())
                 .await
@@ -3107,12 +3108,24 @@ pub async fn filterGatewaysForUpi(this: &mut DeciderFlow<'_>) -> Vec<String> {
             .union(&upi_also_gateway_hashset)
             .cloned()
             .collect::<HashSet<_>>();
-        setGws(
-            this,
-            st.into_iter()
-                .filter(|gateway| upi_support_gateways.contains(gateway))
-                .collect(),
-        );
+        
+        let mut filtered_gws = st.into_iter()
+            .filter(|gateway| upi_support_gateways.contains(gateway))
+            .collect::<Vec<_>>();
+
+        // Filter for non-INR UPI transactions based on supported currencies
+        if txn_currency != Currency::INR {
+            filtered_gws = filter_upi_gateways_for_currency(
+                this,
+                filtered_gws,
+                upi_only_gateways,
+                txn_currency,
+                &txn_card_info,
+            )
+            .await;
+        }
+
+        setGws(this, filtered_gws);
     } else if !SUTC::is_google_pay_txn(txn_card_info) {
         setGws(
             this,
@@ -3129,6 +3142,90 @@ pub async fn filterGatewaysForUpi(this: &mut DeciderFlow<'_>) -> Vec<String> {
         DeciderFilterName::FilterFunctionalGatewaysForUpi,
         true,
     )
+}
+
+async fn filter_upi_gateways_for_currency(
+    this: &mut DeciderFlow<'_>,
+    upi_gateways: Vec<String>,
+    all_upi_gateways: Vec<String>,
+    txn_currency: Currency,
+    txn_card_info: &TxnCardInfo,
+) -> Vec<String> {
+    // Get payment method entry from database
+    let pm_entry = ETP::get_by_name(txn_card_info.paymentMethod.clone()).await;
+
+    match pm_entry {
+        Some(pm) => {
+            // Get all MGAs for the merchant
+            let mgas = Utils::get_mgas(this).unwrap_or_default();
+            
+            // Filter MGAs to only those supporting UPI gateways
+            let upi_gateway_set: HashSet<String> = all_upi_gateways.iter().cloned().collect();
+            let upi_mgas: Vec<_> = mgas
+                .into_iter()
+                .filter(|mga| upi_gateway_set.contains(&mga.gateway))
+                .collect();
+
+            // Filter gateways based on supported currencies
+            let currency_supported_gws: Vec<String> = upi_gateways
+                .iter()
+                .filter(|gw| {
+                    // Find the MGA for this gateway
+                    if let Some(mga) = upi_mgas.iter().find(|mga| &mga.gateway == *gw) {
+                        // Check if the MGA has supported currencies configured
+                        if let Some(ref supported_currencies_str) = mga.supportedCurrencies {
+                            // Parse the supported currencies JSON array
+                            match serde_json::from_str::<Vec<String>>(supported_currencies_str) {
+                                Ok(currency_list) => {
+                                    // Convert currency strings to Currency enum and check if txn_currency is supported
+                                    currency_list.iter().any(|curr_str| {
+                                        Currency::text_to_curr(curr_str)
+                                            .map(|curr| curr == txn_currency)
+                                            .unwrap_or(false)
+                                    })
+                                }
+                                Err(_) => false,
+                            }
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                })
+                .cloned()
+                .collect();
+
+            // Log if gateways were filtered out
+            if currency_supported_gws.len() < upi_gateways.len() {
+                let rejected_gateways: Vec<String> = upi_gateways
+                    .iter()
+                    .filter(|gw| !currency_supported_gws.contains(gw))
+                    .cloned()
+                    .collect();
+
+                logger::info!(
+                    tag = "filterGatewaysForUpi",
+                    action = "filterGatewaysForUpi",
+                    "Filtered out gateways for non-INR UPI transaction. Currency: {:?}, Remaining gateways: {:?}, Rejected gateways: {:?}",
+                    txn_currency,
+                    currency_supported_gws,
+                    rejected_gateways
+                );
+            }
+
+            currency_supported_gws
+        }
+        None => {
+            logger::info!(
+                tag = "filterGatewaysForUpi",
+                action = "filterGatewaysForUpi",
+                "Payment method not found for {}, rejecting all gateways for non-INR UPI transaction",
+                txn_card_info.paymentMethod
+            );
+            Vec::new()
+        }
+    }
 }
 
 pub async fn filterGatewaysForTxnType(this: &mut DeciderFlow<'_>) -> Vec<String> {
