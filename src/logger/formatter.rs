@@ -225,6 +225,11 @@ where
         let domain_keys = [
             "message_number",
             "error_category",
+            "error",
+            "error_message",
+            "jp_error_code",
+            "jp_error_message",
+            "source",
             "x-request-id",
             "env",
             "@timestamp",
@@ -384,6 +389,13 @@ where
                 }
             }
 
+            if !explicit_entries_set.contains("startup_config") {
+                if let Some(value) = storage.values.get("startup_config") {
+                    map_serializer.serialize_entry("startup_config", value)?;
+                    explicit_entries_set.insert("startup_config");
+                }
+            }
+
             // Set additional fields for DOMAIN logs.
             if metadata.level() == &tracing::Level::ERROR {
                 if !explicit_entries_set.contains("category") {
@@ -434,6 +446,7 @@ where
                 explicit_entries_set.insert("@timestamp");
             }
         }
+
         if !explicit_entries_set.contains("is_art_enabled") {
             map_serializer.serialize_entry("is_art_enabled", "false")?;
             explicit_entries_set.insert("is_art_enabled");
@@ -570,6 +583,9 @@ where
     let value = storage
         .values
         .get("message")
+        .or_else(|| storage.values.get("error"))
+        .or_else(|| storage.values.get("error_message"))
+        .or_else(|| storage.values.get("jp_error_message"))
         .cloned()
         .unwrap_or(Value::String("null".to_string()));
 

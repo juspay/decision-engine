@@ -1,13 +1,18 @@
 use crate::redis::commands::RedisConnectionWrapper;
 use axum::{
+    body::Body,
     extract::Request,
+    middleware::{self, Next},
+    response::Response,
     routing::{delete, get, post},
 };
+use axum::http::HeaderValue;
 use axum_server::{tls_rustls::RustlsConfig, Handle};
 use error_stack::ResultExt;
 use std::sync::Arc;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::OnceCell as TokioOnceCell;
+use tower::ServiceBuilder;
 use tower_http::trace as tower_trace;
 
 use crate::{
@@ -31,6 +36,35 @@ pub async fn get_tenant_app_state() -> Arc<TenantAppState> {
 }
 
 type Storage = storage::Storage;
+
+async fn ensure_request_id(mut request: Request<Body>, next: Next) -> Response {
+    let header_value = request
+        .headers()
+        .get(storage::consts::X_REQUEST_ID)
+        .filter(|value| !value.as_bytes().is_empty())
+        .cloned()
+        .unwrap_or_else(generate_request_id_header_value);
+
+    request
+        .headers_mut()
+        .insert(storage::consts::X_REQUEST_ID, header_value.clone());
+
+    let mut response = next.run(request).await;
+    response
+        .headers_mut()
+        .insert(storage::consts::X_REQUEST_ID, header_value);
+
+    response
+}
+
+fn generate_request_id_header_value() -> HeaderValue {
+    loop {
+        let request_id = storage::utils::generate_uuid();
+        if let Ok(value) = HeaderValue::from_str(&request_id) {
+            return value;
+        }
+    }
+}
 
 ///
 /// TenantAppState:
@@ -230,8 +264,10 @@ where
         post(routes::update_gateway_score::update_gateway_score),
     );
 
-    let router = router.layer(
-        tower_trace::TraceLayer::new_for_http()
+    let middleware = ServiceBuilder::new()
+        .layer(middleware::from_fn(ensure_request_id))
+        .layer(
+            tower_trace::TraceLayer::new_for_http()
             .make_span_with(|request: &Request<_>| utils::record_fields_from_header(request))
             .on_request(tower_trace::DefaultOnRequest::new().level(tracing::Level::INFO))
             .on_response(
@@ -244,17 +280,20 @@ where
                     .latency_unit(tower_http::LatencyUnit::Micros)
                     .level(tracing::Level::ERROR),
             ),
-    );
+        );
 
     let router = router
         .nest("/health", routes::health::serve())
+        .layer(middleware)
         .with_state(global_app_state.clone());
 
     logger::info!(
         category = "SERVER",
-        "OpenRouter started [{:?}] [{:?}]",
-        global_app_state.global_config.server,
-        global_app_state.global_config.log
+        action = "main_server_startup",
+        bind_address = %socket_addr,
+        tls_enabled = global_app_state.global_config.tls.is_some(),
+        request_id_header = storage::consts::X_REQUEST_ID,
+        "Main HTTP server listening"
     );
 
     if let Some(tls_config) = &global_app_state.global_config.tls {

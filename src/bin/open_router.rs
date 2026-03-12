@@ -9,7 +9,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _guard = logger::setup(
         &global_config.log,
         open_router::service_name!(),
-        [open_router::service_name!(), "tower_http"],
+        ["tower_http"],
     );
 
     #[allow(clippy::expect_used)]
@@ -20,6 +20,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .fetch_raw_secrets()
         .await
         .expect("Failed to fetch raw application secrets");
+
+    log_startup_configuration(&global_config);
 
     let global_app_state = GlobalAppState::new(global_config.clone()).await;
 
@@ -40,4 +42,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::try_join!(main_server_handle, metrics_server_handle)?;
 
     Ok(())
+}
+
+fn log_startup_configuration(global_config: &open_router::config::GlobalConfig) {
+    logger::info!(
+        "Decision engine started [{:?}]",
+        global_config
+    );
 }
