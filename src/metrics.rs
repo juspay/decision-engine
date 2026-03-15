@@ -30,6 +30,63 @@ lazy_static! {
     ).unwrap();
 }
 
+/// OpenTelemetry push-based metrics instruments that mirror the Prometheus pull metrics.
+pub mod otel {
+    use once_cell::sync::Lazy;
+    use opentelemetry::{global, metrics::Counter, metrics::Histogram, metrics::Meter};
+
+    fn meter() -> Meter {
+        global::meter("decision-engine")
+    }
+
+    pub static API_REQUESTS_TOTAL: Lazy<Counter<u64>> = Lazy::new(|| {
+        meter()
+            .u64_counter("api_requests_total")
+            .with_description("Total count of API requests by endpoint")
+            .build()
+    });
+
+    pub static API_REQUESTS_BY_STATUS: Lazy<Counter<u64>> = Lazy::new(|| {
+        meter()
+            .u64_counter("api_requests_by_status")
+            .with_description("Count of API requests grouped by endpoint and result")
+            .build()
+    });
+
+    pub static API_LATENCY_SECONDS: Lazy<Histogram<f64>> = Lazy::new(|| {
+        meter()
+            .f64_histogram("api_latency_seconds")
+            .with_description("Latency of API calls grouped by endpoint")
+            .build()
+    });
+}
+
+/// Record API metrics to **both** Prometheus (pull) and OTel (push) backends.
+pub fn record_api_metrics(endpoint: &str, status: &str, latency_secs: f64) {
+    // Prometheus
+    API_REQUEST_TOTAL_COUNTER
+        .with_label_values(&[endpoint])
+        .inc();
+    API_REQUEST_COUNTER
+        .with_label_values(&[endpoint, status])
+        .inc();
+    API_LATENCY_HISTOGRAM
+        .with_label_values(&[endpoint])
+        .observe(latency_secs);
+
+    // OTel push metrics
+    let endpoint_attr = opentelemetry::KeyValue::new("endpoint", endpoint.to_owned());
+    otel::API_REQUESTS_TOTAL.add(1, &[endpoint_attr.clone()]);
+    otel::API_REQUESTS_BY_STATUS.add(
+        1,
+        &[
+            endpoint_attr.clone(),
+            opentelemetry::KeyValue::new("status", status.to_owned()),
+        ],
+    );
+    otel::API_LATENCY_SECONDS.record(latency_secs, &[endpoint_attr]);
+}
+
 pub async fn metrics_handler() -> error_stack::Result<String, MetricsError> {
     let mut buffer = Vec::new();
     let encoder = TextEncoder::new();
