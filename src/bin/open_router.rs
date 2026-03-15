@@ -8,6 +8,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let _guard = logger::setup(
         &global_config.log,
+        &global_config.telemetry,
         open_router::service_name!(),
         [open_router::service_name!(), "tower_http"],
     );

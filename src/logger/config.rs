@@ -49,6 +49,63 @@ impl<'de> Deserialize<'de> for Level {
     }
 }
 
+/// OpenTelemetry configuration.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(default)]
+pub struct Telemetry {
+    pub tracing: TelemetryTracing,
+    pub metrics: TelemetryMetrics,
+}
+
+impl Default for Telemetry {
+    fn default() -> Self {
+        Self {
+            tracing: TelemetryTracing::default(),
+            metrics: TelemetryMetrics::default(),
+        }
+    }
+}
+
+/// OpenTelemetry distributed tracing configuration.
+#[derive(Debug, Deserialize, Clone)]
+pub struct TelemetryTracing {
+    pub enabled: bool,
+    pub otlp_endpoint: String,
+    pub service_name: Option<String>,
+    pub sampling_ratio: f64,
+}
+
+impl Default for TelemetryTracing {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            otlp_endpoint: "http://localhost:4317".to_owned(),
+            service_name: None,
+            sampling_ratio: 1.0,
+        }
+    }
+}
+
+/// OpenTelemetry push metrics configuration.
+#[derive(Debug, Deserialize, Clone)]
+pub struct TelemetryMetrics {
+    pub enabled: bool,
+    pub otlp_endpoint: String,
+    pub export_interval_secs: u64,
+    pub export_timeout_secs: u64,
+}
+
+impl Default for TelemetryMetrics {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            otlp_endpoint: "http://localhost:4317".to_owned(),
+            export_interval_secs: 60,
+            export_timeout_secs: 30,
+        }
+    }
+}
+
 /// Telemetry / tracing.
 #[derive(Default, Debug, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
