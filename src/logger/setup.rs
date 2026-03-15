@@ -67,18 +67,16 @@ fn init_tracer_provider(
         Sampler::TraceIdRatioBased(tracing_cfg.sampling_ratio)
     };
 
-    let resolved_name = tracing_cfg
-        .service_name
-        .as_deref()
-        .unwrap_or(service_name);
+    let resolved_name = tracing_cfg.service_name.as_deref().unwrap_or(service_name);
 
     let provider = TracerProvider::builder()
         .with_batch_exporter(exporter, opentelemetry_sdk::runtime::Tokio)
         .with_sampler(sampler)
         .with_id_generator(RandomIdGenerator::default())
-        .with_resource(opentelemetry_sdk::Resource::new(vec![
-            KeyValue::new("service.name", resolved_name.to_owned()),
-        ]))
+        .with_resource(opentelemetry_sdk::Resource::new(vec![KeyValue::new(
+            "service.name",
+            resolved_name.to_owned(),
+        )]))
         .build();
 
     // Register a tracer so the global API works
@@ -101,8 +99,12 @@ fn init_meter_provider(
         .expect("Failed to build OTLP metric exporter");
 
     let reader = PeriodicReader::builder(exporter, opentelemetry_sdk::runtime::Tokio)
-        .with_interval(std::time::Duration::from_secs(metrics_cfg.export_interval_secs))
-        .with_timeout(std::time::Duration::from_secs(metrics_cfg.export_timeout_secs))
+        .with_interval(std::time::Duration::from_secs(
+            metrics_cfg.export_interval_secs,
+        ))
+        .with_timeout(std::time::Duration::from_secs(
+            metrics_cfg.export_timeout_secs,
+        ))
         .build();
 
     let provider = SdkMeterProvider::builder().with_reader(reader).build();
@@ -140,7 +142,10 @@ pub fn setup(
         opentelemetry::global::set_text_map_propagator(
             opentelemetry_sdk::propagation::TraceContextPropagator::new(),
         );
-        Some(init_tracer_provider(&telemetry_config.tracing, service_name))
+        Some(init_tracer_provider(
+            &telemetry_config.tracing,
+            service_name,
+        ))
     } else {
         None
     };

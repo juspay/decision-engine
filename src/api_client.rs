@@ -105,9 +105,8 @@ impl ApiClient {
         // Inject OTel trace context (traceparent/tracestate) into outgoing headers
         // so downstream services can continue the distributed trace.
         opentelemetry::global::get_text_map_propagator(|propagator| {
-            let cx = tracing_opentelemetry::OpenTelemetrySpanExt::context(
-                &tracing::Span::current(),
-            );
+            let cx =
+                tracing_opentelemetry::OpenTelemetrySpanExt::context(&tracing::Span::current());
             propagator.inject_context(&cx, &mut opentelemetry_http::HeaderInjector(&mut headers));
         });
 

@@ -499,12 +499,10 @@ where
             let extensions = span.extensions();
             if let Some(otel_data) = extensions.get::<OtelData>() {
                 if let Some(trace_id) = otel_data.builder.trace_id {
-                    map_serializer
-                        .serialize_entry("trace_id", &trace_id.to_string())?;
+                    map_serializer.serialize_entry("trace_id", &trace_id.to_string())?;
                 }
                 if let Some(span_id) = otel_data.builder.span_id {
-                    map_serializer
-                        .serialize_entry("span_id", &span_id.to_string())?;
+                    map_serializer.serialize_entry("span_id", &span_id.to_string())?;
                 }
             }
         }
