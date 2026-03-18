@@ -1,5 +1,6 @@
 pub mod bank_code;
 pub mod card;
+pub mod hybrid_routing;
 pub mod country;
 pub mod currency;
 pub mod customer;

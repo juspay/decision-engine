@@ -226,6 +226,10 @@ where
         post(routes::decide_gateway::decide_gateway),
     );
     let router = router.route(
+        "/routing/hybrid",
+        post(routes::hybrid_routing::hybrid_routing_evaluate),
+    );
+    let router = router.route(
         "/update-gateway-score",
         post(routes::update_gateway_score::update_gateway_score),
     );
