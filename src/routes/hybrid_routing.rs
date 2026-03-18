@@ -3,13 +3,13 @@ use crate::decider::gatewaydecider::flow_new::decider_full_payload_hs_function;
 use crate::error::ContainerError;
 use crate::euclid::errors::EuclidErrors;
 use crate::euclid::handlers::routing_rules::routing_evaluate;
-use crate::types::hybrid_routing::CombinedRoutingRequest;
+use crate::types::hybrid_routing::HybridRoutingRequest;
 use axum::{Json, response::IntoResponse};
 use std::time::Instant;
 
 #[axum::debug_handler]
 pub async fn hybrid_routing_evaluate(
-    Json(payload): Json<CombinedRoutingRequest>,
+    Json(payload): Json<HybridRoutingRequest>,
 ) -> Result<axum::response::Response, ContainerError<EuclidErrors>> {
     let mut eligible_gateways: Option<Vec<String>> = None;
     let mut static_routing_response = None;

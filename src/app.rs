@@ -226,7 +226,7 @@ where
         post(routes::decide_gateway::decide_gateway),
     );
     let router = router.route(
-        "/routing/v2/evaluate",
+        "/routing/hybrid",
         post(routes::hybrid_routing::hybrid_routing_evaluate),
     );
     let router = router.route(
