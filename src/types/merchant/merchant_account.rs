@@ -35,7 +35,7 @@ pub struct EnableTokenization {
     pub enable_issuer_tokenization: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct MerchantAccount {
     // #[serde(rename = "id")]
     pub id: MerchantPId,
@@ -75,6 +75,39 @@ pub struct MerchantAccount {
     pub priorityLogicConfig: Option<String>,
     // #[serde(rename = "merchantCategoryCode")]
     pub merchantCategoryCode: Option<String>,
+}
+
+impl Debug for MerchantAccount {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MerchantAccount")
+            .field("id", &self.id)
+            .field("merchantId", &self.merchantId)
+            .field("country", &self.country)
+            .field(
+                "gatewayDecidedByHealthEnabled",
+                &self.gatewayDecidedByHealthEnabled,
+            )
+            .field("gatewayPriority", &self.gatewayPriority)
+            .field("gatewayPriorityLogic", &self.gatewayPriorityLogic)
+            .field("useCodeForGatewayPriority", &self.useCodeForGatewayPriority)
+            .field("internalHashKey", &"[REDACTED]")
+            .field("userId", &self.userId)
+            .field("secondaryMerchantAccountId", &"[REDACTED]")
+            .field(
+                "enableGatewayReferenceIdBasedRouting",
+                &self.enableGatewayReferenceIdBasedRouting,
+            )
+            .field(
+                "gatewaySuccessRateBasedDeciderInput",
+                &self.gatewaySuccessRateBasedDeciderInput,
+            )
+            .field("internalMetadata", &"[REDACTED]")
+            .field("installmentEnabled", &self.installmentEnabled)
+            .field("tenantAccountId", &"[REDACTED]")
+            .field("priorityLogicConfig", &self.priorityLogicConfig)
+            .field("merchantCategoryCode", &self.merchantCategoryCode)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
