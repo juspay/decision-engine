@@ -62,7 +62,7 @@ pub async fn update_sr_v3_score(
     gateway_scoring_type: GatewayScoringType,
     txn_detail: TxnDetail,
     txn_card_info: TxnCardInfo,
-    merchant_acc: MerchantAccount,
+    _merchant_acc: MerchantAccount,
     mb_gateway_scoring_data: Option<GatewayScoringData>,
     gateway_reference_id: Option<String>,
 ) {
@@ -75,7 +75,7 @@ pub async fn update_sr_v3_score(
                 "gateway not found for this transaction having id"
             );
         }
-        Some(gateway) => {
+        Some(_gateway) => {
             let unified_sr_v3_key = getProducerKey(
                 txn_detail.clone(),
                 mb_gateway_scoring_data,
@@ -145,7 +145,6 @@ pub async fn createKeysIfNotExist(
         is_score_key_exists
     );
     if is_queue_key_exists && is_score_key_exists {
-        return;
     } else {
         let merchant_bucket_size = getSrV3MerchantBucketSize(txn_detail, txn_card_info).await;
         logger::debug!(
@@ -154,7 +153,7 @@ pub async fn createKeysIfNotExist(
             "Creating keys with bucket size as {}",
             merchant_bucket_size
         );
-        let score_list = vec!["1".to_string(); merchant_bucket_size.clone().try_into().unwrap()];
+        let score_list = vec!["1".to_string(); merchant_bucket_size.try_into().unwrap()];
         let redis = C::kvRedis();
         GU::create_moving_window_and_score(
             redis,
@@ -231,8 +230,8 @@ pub async fn updateScoreAndQueue(
     //         }
     //     }
     // }
-    let current_ist_time = getCurrentIstDateWithFormat("YYYY-MM-DD HH:mm:SS.sss".to_string());
-    let date_created = dateInIST(
+    let _current_ist_time = getCurrentIstDateWithFormat("YYYY-MM-DD HH:mm:SS.sss".to_string());
+    let _date_created = dateInIST(
         txn_detail.clone().dateCreated.to_string(),
         "YYYY-MM-DD HH:mm:SS.sss".to_string(),
     )
@@ -273,7 +272,6 @@ pub async fn updateScoreAndQueue(
         returned_value
     );
     if returned_value == value {
-        return;
     } else {
         updateScore(
             C::kvRedis(),
@@ -292,7 +290,7 @@ pub async fn getSrV3MerchantBucketSize(txn_detail: TxnDetail, txn_card_info: Txn
     .await;
     let pmt = txn_card_info.paymentMethodType;
     let pm = GU::get_payment_method(
-        (&pmt).to_string(),
+        pmt.to_string(),
         txn_card_info.paymentMethod,
         txn_detail.sourceObject.unwrap_or_default(),
     );

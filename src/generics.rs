@@ -86,8 +86,8 @@ where
     InsertStatement<T, <V as Insertable<T>>::Values>:
         AsQuery + ExecuteDsl<MysqlConnection, Mysql> + Send,
 {
-    let mut conn = storage.get_conn().await.map_err(|_| MeshError::Others)?;
-    generic_insert_core::<T, _>(&mut conn, values).await
+    let conn = storage.get_conn().await.map_err(|_| MeshError::Others)?;
+    generic_insert_core::<T, _>(&conn, values).await
 }
 
 #[cfg(feature = "postgres")]
@@ -116,7 +116,7 @@ where
     InsertStatement<T, <V as Insertable<T>>::Values>:
         AsQuery + ExecuteDsl<MysqlConnection, Mysql> + Send,
 {
-    let debug_values = format!("{values:?}");
+    let _debug_values = format!("{values:?}");
     let query = diesel::insert_into(<T as HasTable>::table()).values(values);
     logger::debug!(
         action = "generic_insert",
@@ -342,7 +342,7 @@ where
 {
     let conn = match storage.get_conn().await {
         Ok(conn) => Ok(conn),
-        Err(err) => Err(MeshError::Others),
+        Err(_err) => Err(MeshError::Others),
     }?;
     generic_filter::<T, _, _>(&conn, predicate).await
 }
@@ -355,7 +355,7 @@ where
 {
     let conn = match storage.get_conn().await {
         Ok(conn) => Ok(conn),
-        Err(err) => Err(MeshError::Others),
+        Err(_err) => Err(MeshError::Others),
     }?;
     generic_filter::<T, _, _>(&conn, predicate).await
 }
@@ -456,7 +456,7 @@ where
 {
     let conn = match storage.get_conn().await {
         Ok(conn) => Ok(conn),
-        Err(err) => Err(MeshError::Others),
+        Err(_err) => Err(MeshError::Others),
     }?;
     generic_find_one_core::<T, _, _>(&conn, predicate).await
 }
@@ -469,7 +469,7 @@ where
 {
     let conn = match storage.get_conn().await {
         Ok(conn) => Ok(conn),
-        Err(err) => Err(MeshError::Others),
+        Err(_err) => Err(MeshError::Others),
     }?;
     generic_find_one_core::<T, _, _>(&conn, predicate).await
 }
@@ -532,7 +532,7 @@ where
 {
     let conn = match storage.get_conn().await {
         Ok(conn) => Ok(conn),
-        Err(err) => Err(MeshError::Others),
+        Err(_err) => Err(MeshError::Others),
     }?;
     to_optional(generic_find_by_id_core::<T, _, _>(&conn, id).await)
 }
@@ -551,16 +551,16 @@ where
 {
     let conn = match storage.get_conn().await {
         Ok(conn) => Ok(conn),
-        Err(err) => Err(MeshError::Others),
+        Err(_err) => Err(MeshError::Others),
     }?;
     to_optional(generic_find_by_id_core::<T, _, _>(&conn, id).await)
 }
 
-pub async fn track_database_call<T, Fut, U>(future: Fut, operation: DatabaseOperation) -> U
+pub async fn track_database_call<T, Fut, U>(future: Fut, _operation: DatabaseOperation) -> U
 where
     Fut: std::future::Future<Output = U>,
 {
-    let start = std::time::Instant::now();
+    let _start = std::time::Instant::now();
     let output = future.await;
     output
 }

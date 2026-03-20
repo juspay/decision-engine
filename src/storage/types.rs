@@ -23,7 +23,7 @@ use diesel::{
     Queryable, Selectable,
 };
 use error_stack::ResultExt;
-use masking::{PeekInterface, Secret};
+use masking::Secret;
 use serde::Serialize;
 use serde::{self, Deserialize};
 use std::io::Write;
@@ -69,7 +69,6 @@ pub struct EmiBankCode {
 #[derive(Debug, Clone, Identifiable, Queryable, Serialize, Selectable)]
 #[cfg_attr(feature = "mysql", diesel(table_name = schema::feature))]
 #[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::feature))]
-
 pub struct Feature {
     #[cfg(feature = "mysql")]
     pub id: i64,
@@ -385,10 +384,10 @@ pub struct BitBool(pub bool);
 impl ToSql<Binary, Mysql> for BitBool {
     fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Mysql>) -> diesel::serialize::Result {
         match *self {
-            BitBool(true) => {
+            Self(true) => {
                 out.write_all(&[1u8])?;
             }
-            BitBool(false) => {
+            Self(false) => {
                 out.write_all(&[0u8])?;
             }
         }
@@ -435,10 +434,10 @@ pub struct BitBoolWrite(pub bool);
 impl ToSql<Binary, Mysql> for BitBoolWrite {
     fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Mysql>) -> diesel::serialize::Result {
         match *self {
-            BitBoolWrite(true) => {
+            Self(true) => {
                 out.write_all(&[1u8])?;
             }
-            BitBoolWrite(false) => {
+            Self(false) => {
                 out.write_all(&[0u8])?;
             }
         }

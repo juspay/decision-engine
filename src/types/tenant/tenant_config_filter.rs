@@ -44,7 +44,7 @@ impl TryFrom<DBTenantConfigFilter> for TenantConfigFilter {
     type Error = ApiError;
 
     fn try_from(db_tenant_config_filter: DBTenantConfigFilter) -> Result<Self, ApiError> {
-        Ok(TenantConfigFilter {
+        Ok(Self {
             id: text_to_tenant_config_filter_id(db_tenant_config_filter.id),
             filterGroupId: db_tenant_config_filter.filter_group_id,
             dimensionValue: db_tenant_config_filter.dimension_value,

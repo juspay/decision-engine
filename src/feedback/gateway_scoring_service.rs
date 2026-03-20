@@ -24,7 +24,7 @@ use crate::decider::gatewaydecider::gw_scoring::get_metric_entry_data;
 // use eulerhs::language as el;
 // use eulerhs::types as et;
 // use eulerhs::tenant_redis_layer as rc;
-use crate::app::{get_tenant_app_state, APP_STATE};
+use crate::app::get_tenant_app_state;
 use crate::decider::gatewaydecider::constants::{self as DC, SR_V3_DEFAULT_INPUT_CONFIG};
 use crate::decider::gatewaydecider::types as T;
 use crate::decider::gatewaydecider::types::GatewayScoringData;
@@ -261,10 +261,7 @@ pub async fn check_and_send_should_update_gateway_score(
         )
         .await;
 
-    match is_set_either {
-        Ok(value) => value,
-        Err(_) => false,
-    }
+    is_set_either.unwrap_or(false)
 }
 
 pub fn is_transaction_success(txn_status: TxnStatus) -> bool {
@@ -374,17 +371,16 @@ pub fn update_gateway_score_lock(
     txn_uuid: String,
     gateway: String,
 ) -> String {
-    match (gateway_scoring_type) {
-        (GatewayScoringType::Penalise) => {
+    match gateway_scoring_type {
+        GatewayScoringType::Penalise => {
             format!("gateway_scores_lock_PENALISE_{}_{}", txn_uuid, gateway)
         }
-        (GatewayScoringType::PenaliseSrv3) => {
+        GatewayScoringType::PenaliseSrv3 => {
             format!("gateway_scores_lock_PENALISE_SRV3_{}_{}", txn_uuid, gateway)
         }
-        (GatewayScoringType::Reward) => {
+        GatewayScoringType::Reward => {
             format!("gateway_scores_lock_REWARD_{}_{}", txn_uuid, gateway)
         }
-        _ => String::new(),
     }
 }
 
@@ -564,8 +560,6 @@ pub async fn check_and_update_gateway_score(
         )
         .await;
     }
-
-    ()
 }
 
 // Original Haskell function: updateGatewayScore
@@ -606,11 +600,7 @@ pub async fn update_gateway_score(
     };
 
     //let is_pm_and_pmt_present = Fbu::isTrueString(txn_card_info.paymentMethod) && txn_card_info.paymentMethodType.is_some();
-    let should_update_srv3_gateway_score = if gateway_scoring_type.clone() == GST::Penalise {
-        false
-    } else {
-        true
-    };
+    let should_update_srv3_gateway_score = gateway_scoring_type.clone() != GST::Penalise;
 
     let should_isolate_srv3_producer = if Cutover::is_feature_enabled(
         C::SrV3ProducerIsolation.get_key(),
@@ -619,11 +609,7 @@ pub async fn update_gateway_score(
     )
     .await
     {
-        if is_routing_approach_in_srv3(routing_approach.clone()) {
-            true
-        } else {
-            false
-        }
+        is_routing_approach_in_srv3(routing_approach.clone())
     } else {
         true
     };
@@ -636,11 +622,7 @@ pub async fn update_gateway_score(
     )
     .await
     {
-        if is_routing_approach_in_explore(routing_approach.clone()) {
-            true
-        } else {
-            false
-        }
+        is_routing_approach_in_explore(routing_approach.clone())
     } else {
         true
     };
@@ -762,7 +744,7 @@ pub async fn update_gateway_score(
     }
 
     if should_update_gateway_score && is_update_within_window {
-        let mer_acc_p_id: ETM::id::MerchantPId = mer_acc.id.clone();
+        let mer_acc_p_id: ETM::id::MerchantPId = mer_acc.id;
         let m_pf_mc_config = MerchantConfig::getMerchantConfigEntityLevelLookupConfig().await;
         let mb_gateway_scoring_data = match mb_gateway_scoring_data {
             None => {
@@ -794,7 +776,7 @@ pub async fn update_gateway_score(
                 let key_array = GEF::getAllUnifiedKeys(
                     txn_detail.clone(),
                     txn_card_info.clone(),
-                    mer_acc_p_id.clone(),
+                    mer_acc_p_id,
                     m_pf_mc_config.clone(),
                     mer_acc.clone(),
                     gateway_scoring_data.clone(),
@@ -937,7 +919,7 @@ pub async fn is_update_within_latency_window(
                     gw_wise_latency_threshold
                 );
 
-                /// check if the transaction latency calculated by orchestration is within the configured threshold
+                // check if the transaction latency calculated by orchestration is within the configured threshold
                 let is_gw_latency_within_threshold = isGwLatencyWithinConfiguredThreshold(
                     txn_latency.and_then(|m| m.gateway_latency),
                     GatewaySuccessRateBasedRoutingInput::from_str(
@@ -949,9 +931,9 @@ pub async fn is_update_within_latency_window(
                 // Cutover::findByNameFromRedis(C.gatewayScoreLatencyCheckInMins)
                 //     .await
                 //     .unwrap_or(C.defaultGatewayScoreLatencyCheckInMins);
-                let merchant_id = MID::merchant_id_to_text(txn_detail.merchantId.clone());
+                let _merchant_id = MID::merchant_id_to_text(txn_detail.merchantId.clone());
                 let pmt = txn_card_info.paymentMethodType;
-                let pm = GU::get_payment_method(
+                let _pm = GU::get_payment_method(
                     pmt,
                     txn_card_info.paymentMethod,
                     txn_detail.sourceObject.clone().unwrap_or_default(),
@@ -973,13 +955,8 @@ pub async fn is_update_within_latency_window(
                     "gwLatencyCheckThreshold: {}",
                     gw_latency_check_threshold
                 );
-                if (gw_score_update_latency < (gw_latency_check_threshold * 60000.0) as u128)
+                (gw_score_update_latency < (gw_latency_check_threshold * 60000.0) as u128)
                     && is_gw_latency_within_threshold
-                {
-                    true
-                } else {
-                    false
-                }
             }
         }
     }
@@ -1049,7 +1026,7 @@ fn get_gw_latency_threshold(
 ) -> Option<&GatewayWiseLatencyInput> {
     match merchant_latency_gateway_wise_input {
         None => None,
-        Some(latency_input) => {
+        Some(_latency_input) => {
             // This will be called with specific parameters in the main function
             // For now, return None as the actual filtering happens in the main function
             None
@@ -1064,7 +1041,7 @@ pub fn get_gateway_wise_latency(
     pm: &str,
     gw: &str,
 ) -> f64 {
-    let m_gateway_wise_input =
+    let _m_gateway_wise_input =
         get_gw_latency_threshold(&gateway_latency_threshold.merchant_latency_gateway_wise_input);
 
     // Log the input (similar to EL.logDebugV in Haskell)

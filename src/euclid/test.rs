@@ -295,10 +295,7 @@ mod tests {
     #[test]
     fn routing_evaluate_eligibility_skips_pm_filters_when_payment_method_type_missing() {
         let bundle = build_bundle_for_tests();
-        let params = HashMap::from([(
-            "billing_country".to_string(),
-            enum_value("US"),
-        )]);
+        let params = HashMap::from([("billing_country".to_string(), enum_value("US"))]);
         let initial = connectors(&["stripe", "adyen"]);
 
         let filtered = compute_routing_evaluate_eligibility(Some(&bundle), &params, &initial);
@@ -330,10 +327,7 @@ mod tests {
     #[test]
     fn apply_pm_filter_eligibility_skips_when_payment_method_type_missing() {
         let bundle = build_bundle_for_tests();
-        let params = HashMap::from([(
-            "billing_country".to_string(),
-            enum_value("US"),
-        )]);
+        let params = HashMap::from([("billing_country".to_string(), enum_value("US"))]);
         let initial = connectors(&["stripe", "adyen"]);
 
         let filtered = if pm_filter_graph::has_payment_method_type(&params) {
@@ -348,10 +342,7 @@ mod tests {
     fn apply_pm_filter_eligibility_fails_open_when_bundle_unavailable() {
         let params = HashMap::from([
             ("payment_method_type".to_string(), enum_value("credit")),
-            (
-                "billing_country".to_string(),
-                enum_value("US"),
-            ),
+            ("billing_country".to_string(), enum_value("US")),
         ]);
         let initial = connectors(&["stripe", "adyen"]);
 
@@ -369,10 +360,7 @@ mod tests {
 
         let params_pass = HashMap::from([
             ("payment_method_type".to_string(), enum_value("credit")),
-            (
-                "billing_country".to_string(),
-                enum_value("US"),
-            ),
+            ("billing_country".to_string(), enum_value("US")),
             ("currency".to_string(), enum_value("USD")),
         ]);
         let params_fail_country = HashMap::from([
@@ -408,10 +396,7 @@ mod tests {
 
         let params = HashMap::from([
             ("payment_method_type".to_string(), enum_value("credit")),
-            (
-                "billing_country".to_string(),
-                enum_value("US"),
-            ),
+            ("billing_country".to_string(), enum_value("US")),
             ("currency".to_string(), enum_value("USD")),
             ("capture_method".to_string(), enum_value("automatic")),
         ]);
@@ -437,10 +422,7 @@ mod tests {
 
         let params = HashMap::from([
             ("payment_method_type".to_string(), enum_value("debit")),
-            (
-                "billing_country".to_string(),
-                enum_value("US"),
-            ),
+            ("billing_country".to_string(), enum_value("US")),
             ("currency".to_string(), enum_value("USD")),
         ]);
 
@@ -487,19 +469,13 @@ mod tests {
 
         let params_manual = HashMap::from([
             ("payment_method_type".to_string(), enum_value("credit")),
-            (
-                "billing_country".to_string(),
-                enum_value("US"),
-            ),
+            ("billing_country".to_string(), enum_value("US")),
             ("currency".to_string(), enum_value("USD")),
             ("capture_method".to_string(), enum_value("manual")),
         ]);
         let params_auto = HashMap::from([
             ("payment_method_type".to_string(), enum_value("credit")),
-            (
-                "billing_country".to_string(),
-                enum_value("US"),
-            ),
+            ("billing_country".to_string(), enum_value("US")),
             ("currency".to_string(), enum_value("USD")),
             ("capture_method".to_string(), enum_value("automatic")),
         ]);
@@ -848,11 +824,7 @@ mod tests {
         let bundle = build_priority_matrix_bundle();
         print_priority_test_setup(&bundle);
         println!("Output forms tested: single, priority, volume_split, volume_split_priority");
-        let params = params_for_case(
-            Some("upi_collect"),
-            Some("US"),
-            Some("USD"),
-        );
+        let params = params_for_case(Some("upi_collect"), Some("US"), Some("USD"));
 
         let test_outputs = vec![
             (

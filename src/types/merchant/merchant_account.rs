@@ -135,9 +135,7 @@ impl TryFrom<DBMerchantAccount> for MerchantAccount {
             useCodeForGatewayPriority: value.use_code_for_gateway_priority.0,
             internalHashKey: value.internal_hash_key,
             userId: value.user_id,
-            secondaryMerchantAccountId: value
-                .secondary_merchant_account_id
-                .map(|mid| to_merchant_pid(mid)),
+            secondaryMerchantAccountId: value.secondary_merchant_account_id.map(to_merchant_pid),
             enableGatewayReferenceIdBasedRouting: value
                 .enable_gateway_reference_id_based_routing
                 .map(|f| f.0),
@@ -232,7 +230,7 @@ pub async fn delete_merchant_account(
     let conn = &app_state.db.get_conn().await?;
     // Use Diesel's query builder with multiple conditions
     crate::generics::generic_delete::<<DBMerchantAccount as HasTable>::Table, _>(
-        &conn,
+        conn,
         dsl::merchant_id.eq(merchant_id),
     )
     .await?;
@@ -254,7 +252,7 @@ pub async fn update_merchant_account(
         <DBMerchantAccount as HasTable>::Table,
         MerchantAccountUpdate,
         _,
-    >(&conn, dsl::merchant_id.eq(merchant_id), values)
+    >(conn, dsl::merchant_id.eq(merchant_id), values)
     .await?;
     Ok(())
 }

@@ -238,12 +238,12 @@ pub fn make_payment_info(
             paymentMethodType: txnCardInfo
                 .card_type
                 .as_ref()
-                .map(|ct| card_type_to_text(&ct))
-                .or_else(|| Some(txnCardInfo.paymentMethodType)),
+                .map(card_type_to_text)
+                .or(Some(txnCardInfo.paymentMethodType)),
             paymentMethod: txnCardInfo
                 .cardIssuerBankName
                 .clone()
-                .or_else(|| Some(txnCardInfo.paymentMethod)),
+                .or(Some(txnCardInfo.paymentMethod)),
             paymentSource: txnCardInfo.paymentSource,
             cardIssuer: txnCardInfo.cardIssuerBankName,
             cardType: txnCardInfo.card_type.map(|c| card_type_to_text(&c)),
@@ -576,7 +576,7 @@ pub async fn get_gateway_priority(
         );
 
         match result {
-            EvaluationResult::PLResponse(gws, pl_data, logs, status) => {
+            EvaluationResult::PLResponse(gws, pl_data, logs, _status) => {
                 logger::debug!(
                     tag = "PRIORITY_LOGIC_EXECUTION_",
                     "MerchantId: {:?} , Gateways: {:?}, Logs: {:?}",
@@ -1022,7 +1022,7 @@ pub async fn handle_fallback_logic(
                 )
                 .await;
                 match fallback_result {
-                    EvaluationResult::PLResponse(gws, pl_data, logs, status) => {
+                    EvaluationResult::PLResponse(gws, pl_data, logs, _status) => {
                         logger::debug!(
                             tag = "FALLBACK_PRIORITY_LOGIC_EXECUTION_",
                             "MerchantId: {:?} , Gateways: {:?}, Logs: {:?}",

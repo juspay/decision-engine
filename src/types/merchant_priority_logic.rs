@@ -7,7 +7,6 @@ use crate::storage::types::MerchantPriorityLogic as DBMerchantPriorityLogic;
 use diesel::associations::HasTable;
 use diesel::*;
 use serde::{Deserialize, Serialize};
-use std::convert::TryFrom;
 use std::option::Option;
 use std::string::String;
 use std::vec::Vec;
@@ -104,10 +103,7 @@ pub async fn find_all_priority_logic_by_merchant_pid(mpid: i64) -> Vec<MerchantP
     >(&app_state.db, dsl::merchant_account_id.eq(mpid))
     .await
     {
-        Ok(db_results) => db_results
-            .into_iter()
-            .filter_map(|db_record| MerchantPriorityLogic::try_from(db_record).ok())
-            .collect(),
+        Ok(db_results) => db_results.into_iter().map(From::from).collect(),
         Err(_) => Vec::new(), // Silently handle any errors by returning an empty vector
     }
 }

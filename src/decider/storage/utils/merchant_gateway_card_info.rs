@@ -103,7 +103,7 @@ pub async fn filter_gateways_for_payment_method_and_validation_type(
         &app_state.db,
         m_dsl::gateway_card_info_id
             .eq_any(gci_ids)
-            .and(m_dsl::merchant_account_id.eq(merchant_pid_to_text(merchant_account.id.clone())))
+            .and(m_dsl::merchant_account_id.eq(merchant_pid_to_text(merchant_account.id)))
             .and(m_dsl::disabled.eq(BitBool(false)))
             .and(m_dsl::merchant_gateway_account_id.eq_any(enabled_gateway_accounts_ids)),
     )
@@ -114,8 +114,5 @@ pub async fn filter_gateways_for_payment_method_and_validation_type(
     };
 
     // Step 4: Convert to Domain Types
-    mgci_records
-        .into_iter()
-        .filter_map(|db_record| MerchantGatewayCardInfo::try_from(db_record).ok())
-        .collect()
+    mgci_records.into_iter().map(From::from).collect()
 }

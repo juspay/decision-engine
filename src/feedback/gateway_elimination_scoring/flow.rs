@@ -12,9 +12,6 @@ use crate::{
     },
 };
 
-#[cfg(feature = "mysql")]
-#[warn(unused_imports)]
-use crate::storage::schema::gateway_bank_emi_support::gateway;
 #[cfg(feature = "postgres")]
 use crate::storage::schema_pg::gateway_bank_emi_support::gateway;
 
@@ -82,8 +79,8 @@ pub async fn updateKeyScoreForKeysFromConsumer(
     txn_card_info: TxnCardInfo,
     gateway_scoring_type: GatewayScoreType,
     gateway_scoring_data: GatewayScoringData,
-    mer_acc_p_id: merchant::id::MerchantPId,
-    mer_acc: MerchantAccount,
+    _mer_acc_p_id: merchant::id::MerchantPId,
+    _mer_acc: MerchantAccount,
     gateway_scoring_key: (ScoreKeyType, Option<String>),
     redis_compression_config: Option<RedisCompressionConfigCombined>,
 ) -> Option<((ScoreKeyType, String), CachedGatewayScore)> {
@@ -107,9 +104,7 @@ pub async fn updateKeyScoreForKeysFromConsumer(
                     txn_card_info.clone(),
                 ),
                 Some(cached_gateway_score) => {
-                    if (timestamp.clone() - cached_gateway_score.timestamp.clone())
-                        > (hard_key_ttl.clone()) - 1000
-                    {
+                    if (timestamp - cached_gateway_score.timestamp) > hard_key_ttl - 1000 {
                         logger::debug!(
                             action = "updateKeyScore",
                             tag = "updateKeyScore",
@@ -166,7 +161,7 @@ pub async fn updateKeyScoreForKeysFromConsumer(
                     transactionCount: transaction_count,
                 }
             };
-            let encoded_json = serde_json::to_string(&updated_cached_gateway_score).unwrap();
+            let _encoded_json = serde_json::to_string(&updated_cached_gateway_score).unwrap();
             let elapsed_time =
                 timestamp.saturating_sub(updated_cached_gateway_score.timestamp as u128);
             let remaining_ttl = (hard_key_ttl as u128).saturating_sub(elapsed_time);
@@ -175,7 +170,7 @@ pub async fn updateKeyScoreForKeysFromConsumer(
             } else {
                 remaining_ttl as i64
             };
-            let app_state: std::sync::Arc<crate::app::TenantAppState> =
+            let _app_state: std::sync::Arc<crate::app::TenantAppState> =
                 get_tenant_app_state().await;
             let result = EulerTransforms::writeToCacheWithTTL(
                 key.clone(),
@@ -262,9 +257,9 @@ pub async fn updateKeyScoreForTxnStatus(
                 is_elimination_v2_enabled,
                 is_outage_key,
                 is_elimination_v2_enabled_for_outage,
-                &merchant_id,
-                &txn_card_info,
-                &txn_detail,
+                merchant_id,
+                txn_card_info,
+                txn_detail,
                 current_key_score,
                 &score_key_type,
                 gateway_scoring_data.clone(),
@@ -276,16 +271,16 @@ pub async fn updateKeyScoreForTxnStatus(
                 is_elimination_v2_enabled,
                 is_outage_key,
                 is_elimination_v2_enabled_for_outage,
-                &merchant_id,
-                &txn_card_info,
-                &txn_detail,
+                merchant_id,
+                txn_card_info,
+                txn_detail,
                 current_key_score,
                 &score_key_type,
                 gateway_scoring_data.clone(),
             )
             .await;
         }
-        _ => return current_key_score,
+        _ => current_key_score,
     }
 }
 
@@ -319,7 +314,7 @@ async fn updateScoreWithPenalty(
                     getFailureKeyScore(
                         false,
                         current_key_score,
-                        getPenaltyFactor(score_key_type.clone()).await,
+                        getPenaltyFactor(*score_key_type).await,
                     )
                     .await
                 }
@@ -330,7 +325,7 @@ async fn updateScoreWithPenalty(
             getFailureKeyScore(
                 false,
                 current_key_score,
-                getPenaltyFactor(score_key_type.clone()).await,
+                getPenaltyFactor(*score_key_type).await,
             )
             .await
         }
@@ -366,7 +361,7 @@ async fn updateScoreWithReward(
                 None => getSuccessKeyScore(
                     false,
                     current_key_score,
-                    getRewardFactor(score_key_type.clone()).await,
+                    getRewardFactor(*score_key_type).await,
                 ),
                 Some(factor) => getSuccessKeyScore(true, current_key_score, factor),
             }
@@ -374,7 +369,7 @@ async fn updateScoreWithReward(
         _ => getSuccessKeyScore(
             false,
             current_key_score,
-            getRewardFactor(score_key_type.clone()).await,
+            getRewardFactor(*score_key_type).await,
         ),
     }
 }
@@ -420,11 +415,11 @@ pub async fn getPenaltyFactor(scoreKeyType: ScoreKeyType) -> f64 {
     let penalty_factor = if isKeyOutage(scoreKeyType) {
         findByNameFromRedis(C::OutagePenaltyFactor.get_key())
             .await
-            .unwrap_or_else(|| defaultGWScoringPenaltyFactor())
+            .unwrap_or_else(defaultGWScoringPenaltyFactor)
     } else {
         findByNameFromRedis(C::GatewayPenaltyFactor.get_key())
             .await
-            .unwrap_or_else(|| defaultGWScoringPenaltyFactor())
+            .unwrap_or_else(defaultGWScoringPenaltyFactor)
     };
     penalty_factor
 }
@@ -434,11 +429,11 @@ pub async fn getRewardFactor(scoreKeyType: ScoreKeyType) -> f64 {
     let reward_factor = if isKeyOutage(scoreKeyType) {
         findByNameFromRedis(C::OutageRewardFactor.get_key())
             .await
-            .unwrap_or_else(|| defaultGWScoringRewardFactor())
+            .unwrap_or_else(defaultGWScoringRewardFactor)
     } else {
         findByNameFromRedis(C::OutageRewardFactor.get_key())
             .await
-            .unwrap_or_else(|| defaultGWScoringRewardFactor())
+            .unwrap_or_else(defaultGWScoringRewardFactor)
     };
     reward_factor
 }
@@ -461,11 +456,11 @@ pub async fn getUpdatedMerchantDetailsForGlobalKey(
                 if filtered_merchant_details_array.is_empty() {
                     let arr_max_length = getMerchantArrMaxLength().await;
                     if merchant_details_array.len() as i32 >= arr_max_length {
-                        return Some(merchant_details_array);
+                        Some(merchant_details_array)
                     } else {
                         let merchant_detail =
                             getDefaultMerchantScoringDetailsArray(merchant_id, 1.0, 1, None);
-                        return Some([merchant_details_array, vec![merchant_detail]].concat());
+                        Some([merchant_details_array, vec![merchant_detail]].concat())
                     }
                 } else {
                     let mut results = Vec::new();
@@ -481,17 +476,17 @@ pub async fn getUpdatedMerchantDetailsForGlobalKey(
                         .await;
                         results.push(result);
                     }
-                    return Some(results);
+                    Some(results)
                 }
             }
             None => {
                 let merchant_scoring_details =
                     getDefaultMerchantScoringDetailsArray(merchant_id, 1.0, 1, None);
-                return Some(vec![merchant_scoring_details]);
+                Some(vec![merchant_scoring_details])
             }
         }
     } else {
-        return None;
+        None
     }
 }
 
@@ -532,11 +527,11 @@ pub async fn replaceTransactionCount(
 
 // Original Haskell function: getNewCachedGatewayScore
 pub fn getNewCachedGatewayScore(
-    key: String,
-    gateway_scoring_type: GatewayScoreType,
+    _key: String,
+    _gateway_scoring_type: GatewayScoreType,
     score_key_type: ScoreKeyType,
     txn_detail: TxnDetail,
-    txn_card_info: TxnCardInfo,
+    _txn_card_info: TxnCardInfo,
 ) -> CachedGatewayScore {
     let merchant_id = Merchant::merchant_id_to_text(txn_detail.merchantId);
     let current_date: u128 = CUTILS::get_current_date_in_millis();
@@ -545,7 +540,7 @@ pub fn getNewCachedGatewayScore(
             getDefaultMerchantScoringDetailsArray(merchant_id, 1.0, 0, None);
         CachedGatewayScore {
             score: None,
-            timestamp: current_date.clone(),
+            timestamp: current_date,
             lastResetTimestamp: None,
             merchants: Some(vec![merchant_scoring_details]),
             transactionCount: None,
@@ -553,8 +548,8 @@ pub fn getNewCachedGatewayScore(
     } else {
         CachedGatewayScore {
             score: Some(1.0),
-            timestamp: current_date.clone(),
-            lastResetTimestamp: Some(current_date.clone()),
+            timestamp: current_date,
+            lastResetTimestamp: Some(current_date),
             merchants: None,
             transactionCount: Some(0),
         }
@@ -570,7 +565,7 @@ pub fn getDefaultMerchantScoringDetailsArray(
 ) -> MerchantScoringDetails {
     let current_date = CUTILS::get_current_date_in_millis();
     MerchantScoringDetails {
-        score: score,
+        score,
         merchantId: merchant_id,
         transactionCount: transaction_count,
         lastResetTimestamp: m_last_reset_timestamp.unwrap_or(current_date as i32),
@@ -580,9 +575,9 @@ pub fn getDefaultMerchantScoringDetailsArray(
 // Original Haskell function: getAllUnifiedKeys
 pub async fn getAllUnifiedKeys(
     txn_detail: TxnDetail,
-    txn_card_info: TxnCardInfo,
+    _txn_card_info: TxnCardInfo,
     mer_acc_p_id: Merchant::MerchantPId,
-    m_pf_mc_config: Option<PfMcConfig>,
+    _m_pf_mc_config: Option<PfMcConfig>,
     mer_acc: MerchantAccount,
     gateway_scoring_data: GatewayScoringData,
     gateway_reference_id: Option<String>,
@@ -738,9 +733,9 @@ pub async fn readGatewayScoreFromRedis(key: &str) -> Option<CachedGatewayScore> 
     let app_state = get_tenant_app_state().await;
     app_state
         .redis_conn
-        .get_key::<CachedGatewayScore>(&key, "gateway_score_key")
+        .get_key::<CachedGatewayScore>(key, "gateway_score_key")
         .await
-        .map_or_else(|_| None, Some)
+        .ok()
 }
 
 // pub async fn readFromCacheWithFallback<T>(
@@ -885,7 +880,7 @@ pub fn findMerchantFromMerchantArray(
 pub async fn getMerchantArrMaxLength() -> i32 {
     let max_length = findByNameFromRedis(C::GatewayScoreMerchantArrMaxLength.get_key())
         .await
-        .unwrap_or_else(|| C::defaultMerchantArrMaxLength());
+        .unwrap_or_else(C::defaultMerchantArrMaxLength);
     max_length
 }
 

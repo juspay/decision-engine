@@ -69,9 +69,7 @@ pub async fn getAllTokenBinInfoByTokenBins(token_bins: Vec<String>) -> Vec<Token
             &app_state.db,
             dsl::token_bin.eq_any(token_bins),
         ).await {
-            Ok(db_results) => db_results.into_iter()
-                                        .filter_map(|db_record| TokenBinInfo::try_from(db_record).ok())
-                                        .collect(),
+            Ok(db_results) => db_results.into_iter().map(From::from).collect(),
             Err(_) => Vec::new(), // Silently handle any errors by returning an empty vec
         }
 }

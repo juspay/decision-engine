@@ -161,10 +161,7 @@ pub async fn isMerchantEnabledForPaymentFlows(
     if !is_valid_length {
         logMerConfigLengthMisMatchError(
             payment_flows.iter().map(payment_flows_to_text).collect(),
-            mc_arr
-                .into_iter()
-                .filter_map(|mc| Some(mc.clone()))
-                .collect(),
+            mc_arr.into_iter().collect(),
         );
     }
     is_valid_length && are_all_pfs_enabled
@@ -403,9 +400,9 @@ pub async fn getMerchantConfigValueForPaymentFlow(
 // // Original Haskell function: getMerchantConfigStatusAndvalueForPaymentFlow
 pub async fn getMerchantConfigStatusAndvalueForPaymentFlow(
     merchant_p_id: MerchantPId,
-    merchant_id: MerchantPId,
+    _merchant_id: MerchantPId,
     pf: PaymentFlow,
-    m_pf_mc_config: Option<MerchantConfig>,
+    _m_pf_mc_config: Option<MerchantConfig>,
 ) -> (ConfigStatus, Option<Value>) {
     let m_mer_config: Option<MerchantConfig> = load_merchant_config_by_mpid_category_and_name(
         merchant_p_id,

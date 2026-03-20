@@ -5,18 +5,14 @@ use crate::euclid::types::SrDimensionConfig;
 use crate::feedback::gateway_elimination_scoring::flow::{
     eliminationV2RewardFactor, getPenaltyFactor,
 };
-use crate::redis::feature::{
-    is_feature_enabled, RedisCompressionConfig, RedisCompressionConfigCombined, RedisDataStruct,
-};
+use crate::redis::feature::{is_feature_enabled, RedisCompressionConfigCombined, RedisDataStruct};
 use crate::redis::types::ServiceConfigKey;
-#[cfg(feature = "mysql")]
-use crate::storage::schema::gateway_bank_emi_support::gateway;
 #[cfg(feature = "postgres")]
 use crate::storage::schema_pg::gateway_bank_emi_support::gateway;
 use crate::types::card::card_type::card_type_to_text;
 use crate::types::country::country_iso::CountryISO2;
 use crate::types::currency::Currency;
-use crate::types::merchant::id::{merchant_id_to_text, MerchantId};
+use crate::types::merchant::id::merchant_id_to_text;
 use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
 use crate::types::money::internal::Money;
 use crate::types::payment::payment_method_type_const::*;
@@ -87,7 +83,6 @@ use crate::types::token_bin_info as ETTB;
 // // use control::category::Category;
 // // use juspay::extra::non_empty_text as NET;
 use crate::redis::cache as RService;
-use crate::types::isin_routes as ETIsinR;
 // // use utils::redis as EWRedis;
 // // use db::common::types::payment_flows as PF;
 // // use utils::redis as Redis;
@@ -191,7 +186,7 @@ pub fn get_pl_gw_ref_id_map(decider_flow: &DeciderFlow<'_>) -> HashMap<String, S
 pub fn get_order_metadata_and_pl_ref_id_map(
     decider_flow: &mut DeciderFlow<'_>,
     enable_gateway_reference_id_based_routing: Option<bool>,
-    order: &ETO::Order,
+    _order: &ETO::Order,
 ) -> (HashMap<String, String>, HashMap<String, String>) {
     if enable_gateway_reference_id_based_routing.unwrap_or(false) {
         let order_metadata = get_metadata(decider_flow);
@@ -500,7 +495,7 @@ fn decode_metadata(text: &str) -> HashMap<String, String> {
 
 pub fn get_all_possible_ref_ids(
     metadata: HashMap<String, String>,
-    oref: ETO::Order,
+    _oref: ETO::Order,
     pl_ref_id_map: HashMap<String, String>,
 ) -> Vec<ETM::merchant_gateway_account::MgaReferenceId> {
     let gateway_ref_ids = is_suffix_of_gateway_ref_id(metadata.iter().collect());
@@ -544,7 +539,7 @@ pub async fn get_all_ref_ids(
 pub fn get_gateway_reference_id(
     metadata: HashMap<String, String>,
     gw: &String,
-    oref: ETO::Order,
+    _oref: ETO::Order,
     pl_ref_id_map: HashMap<String, String>,
 ) -> Option<ETM::merchant_gateway_account::MgaReferenceId> {
     let meta_res = pl_ref_id_map
@@ -721,11 +716,11 @@ pub async fn get_split_settlement_details(
 
 pub async fn metric_tracker_log(
     consume_from_router: Option<bool>,
-    stage: &str,
-    flowtype: &str,
+    _stage: &str,
+    _flowtype: &str,
     log_data: MessageFormat,
 ) {
-    let mut normalized_log_data = match serde_json::to_value(&log_data) {
+    let normalized_log_data = match serde_json::to_value(&log_data) {
         Ok(value) => value,
         Err(e) => {
             crate::logger::info!(
@@ -896,7 +891,7 @@ pub async fn get_card_bin_from_token_bin(
         Some(bin) => bin.chars().take(length).collect(),
         None => match get_extended_token_bin_info(token_bin).await {
             Some(token_bin_info) => {
-                app_state
+                let _ = app_state
                     .redis_conn
                     .set_key(
                         &key,
@@ -979,7 +974,7 @@ pub enum EnabledGatewaysForBrand {
 }
 
 pub async fn get_token_supported_gateways(
-    txn_detail: ETTD::TxnDetail,
+    _txn_detail: ETTD::TxnDetail,
     txn_card_info: ETCa::txn_card_info::TxnCardInfo,
     flow: String,
     m_internal_meta: Option<InternalMetadata>,
@@ -1542,15 +1537,15 @@ pub async fn get_experiment_tag(utc_time: OffsetDateTime, dim: &str) -> Option<S
 }
 
 pub async fn create_moving_window_and_score(
-    redis: String,
-    queue_key: String, // Take owned strings
+    _redis: String,
+    queue_key: String,
     score_key: String,
     score: i32,
     score_list: Vec<String>,
 ) {
     // todo!()
     let app_state = get_tenant_app_state().await;
-    let r: Result<Vec<String>, error_stack::Report<redis_interface::errors::RedisError>> =
+    let _r: Result<Vec<String>, error_stack::Report<redis_interface::errors::RedisError>> =
         app_state
             .redis_conn
             .multi(false, |transaction| {
@@ -1558,24 +1553,18 @@ pub async fn create_moving_window_and_score(
                     transaction.del::<(), _>(queue_key.clone()).await?;
                     transaction
                         .lpush::<(), _, _>(
-                            queue_key.as_bytes().clone(),
+                            queue_key.as_bytes(),
                             score_list.iter().map(|s| s.as_bytes()).collect::<Vec<_>>(),
                         )
                         .await?;
                     transaction
-                        .set::<(), _, _>(
-                            score_key.clone(),
-                            score.to_string().clone(),
-                            None,
-                            None,
-                            false,
-                        )
+                        .set::<(), _, _>(score_key.clone(), score.to_string(), None, None, false)
                         .await?;
                     transaction
-                        .expire::<(), _>(queue_key.as_bytes().clone(), 10000000)
+                        .expire::<(), _>(queue_key.as_bytes(), 10000000)
                         .await?;
                     transaction
-                        .expire::<(), _>(score_key.as_bytes().clone(), 10000000)
+                        .expire::<(), _>(score_key.as_bytes(), 10000000)
                         .await?;
                     Ok(())
                 })
@@ -1749,7 +1738,7 @@ fn get_sr_v3_sub_level_input_config(
                         config,
                         Some(pmt.to_string()),
                         Some(pm.to_string()),
-                        &sr_routing_dimesions,
+                        sr_routing_dimesions,
                     ) && is_input_non_null(config)
                 })
                 .or_else(|| {
@@ -1758,7 +1747,7 @@ fn get_sr_v3_sub_level_input_config(
                             config,
                             Some(pmt.to_string()),
                             None,
-                            &sr_routing_dimesions,
+                            sr_routing_dimesions,
                         ) && is_input_non_null(config)
                     })
                 })
@@ -1842,7 +1831,7 @@ pub async fn delete_score_key_if_bucket_size_changes(
                     .delete_key(&[sr_redis_key, "}score".to_string()].concat())
                     .await
                 {
-                    Ok(res) => (),
+                    Ok(_res) => (),
                     Err(err) => {
                         logger::error!(
                             action = "deleteScoreKeyIfBucketSizeChanges",
@@ -1868,7 +1857,7 @@ pub fn intercalate<S: AsRef<str>>(separator: &str, strings: &[S]) -> String {
 
 // Function to check if the bucket size has changed for a specific gateway
 pub async fn check_if_bucket_size_changed(
-    decider_flow: &mut DeciderFlow<'_>,
+    _decider_flow: &mut DeciderFlow<'_>,
     merchant_bucket_size: i32,
     gateway_redis_key: (String, String),
 ) -> bool {
@@ -2011,8 +2000,8 @@ pub fn get_default_gateway_scoring_data(
         eliminationEnabled: false,
         cardIsIn: card_isin,
         cardSwitchProvider: card_switch_provider,
-        currency: currency,
-        country: country,
+        currency,
+        country,
         is_legacy_decider_flow,
         udfs,
         udfs_consumed_for_routing: None,
@@ -2027,7 +2016,7 @@ pub async fn get_gateway_scoring_data(
     merchant: ETM::merchant_account::MerchantAccount,
     is_legacy_decider_flow: bool,
 ) -> GatewayScoringData {
-    let merchant_enabled_for_unification = is_feature_enabled(
+    let _merchant_enabled_for_unification = is_feature_enabled(
         C::MerchantsEnabledForScoreKeysUnification.get_key(),
         merchant_id_to_text(merchant.merchantId.clone()),
         "kv_redis".to_string(),
@@ -2064,7 +2053,7 @@ pub async fn get_gateway_scoring_data(
     .await;
     let (useServiceConfigForGri, gatewayRefId) =
         if is_gri_enabled_for_sr_routing || is_gri_enabled_for_elimination {
-            (get_common_gateway_ref_id(decider_flow).await)
+            get_common_gateway_ref_id(decider_flow).await
         } else {
             (true, None)
         };
@@ -2075,11 +2064,11 @@ pub async fn get_gateway_scoring_data(
         m_source_object,
         is_gri_enabled_for_elimination,
         is_gri_enabled_for_sr_routing,
-        decider_flow.get().dpTxnDetail.dateCreated.clone(),
+        decider_flow.get().dpTxnDetail.dateCreated,
         decider_flow.get().dpTxnCardInfo.card_isin.clone(),
         decider_flow.get().dpTxnCardInfo.cardSwitchProvider.clone(),
         Some(decider_flow.get().dpOrder.currency.clone()),
-        decider_flow.get().dpTxnDetail.country.clone(),
+        decider_flow.get().dpTxnDetail.country,
         decider_flow
             .get()
             .dpTxnCardInfo
@@ -2178,7 +2167,7 @@ pub async fn get_gateway_scoring_data(
             get_experiment_tag(txn_detail.dateCreated, "GRI_BASED_SR_ROUTING").await;
         set_is_experiment_tag(decider_flow, experiment_tag);
     }
-    let key = [C::GATEWAY_SCORING_DATA, &txn_detail.txnUuid.clone()].concat();
+    let _key = [C::GATEWAY_SCORING_DATA, &txn_detail.txnUuid.clone()].concat();
     updated_gateway_scoring_data
 }
 
@@ -2625,8 +2614,7 @@ pub async fn get_unified_sr_key(
         key_components.extend(udf_values);
     }
 
-    let val = intercalate_without_empty_string("_", &key_components);
-    return val;
+    intercalate_without_empty_string("_", &key_components)
 }
 
 async fn get_legacy_unified_sr_key(
@@ -2746,7 +2734,7 @@ pub async fn get_consumer_key(
     gateway_list: GatewayList,
 ) -> GatewayRedisKeyMap {
     let merchant = decider_flow.get().dpMerchantAccount.clone();
-    let txn_detail = decider_flow.get().dpTxnDetail.clone();
+    let _txn_detail = decider_flow.get().dpTxnDetail.clone();
     let gw_ref_id_map = if gateway_scoring_data.isGriEnabledForElimination
         || gateway_scoring_data.isGriEnabledForSrRouting
     {
@@ -2828,7 +2816,7 @@ async fn set_routing_dimension_and_reference(
                     "UPI_PAY" | "PAY" => {
                         let package_list = get_upi_package_list().await;
                         let upi_package = gateway_scoring_data.paymentSource.unwrap_or_default();
-                        let append_package = if package_list.contains(&upi_package.peek()) {
+                        let append_package = if package_list.contains(upi_package.peek()) {
                             upi_package.peek().to_string()
                         } else {
                             "".to_string()
@@ -2873,7 +2861,7 @@ async fn set_routing_dimension_and_reference(
                 let bank_code = gateway_scoring_data
                     .bankCode
                     .unwrap_or("UNKNOWN".to_string());
-                let append_bank_code = if top_bank_list.contains(&bank_code) {
+                let _append_bank_code = if top_bank_list.contains(&bank_code) {
                     bank_code.clone()
                 } else {
                     "".to_string()
@@ -3041,7 +3029,7 @@ pub async fn writeToCacheWithTTL(
 
 // Original Haskell function: addToCacheWithExpiry
 pub async fn addToCacheWithExpiry(
-    redis_name: String,
+    _redis_name: String,
     key: String,
     value: String,
     ttl: i64,
@@ -3060,7 +3048,7 @@ pub async fn addToCacheWithExpiry(
         .await;
     match cached_resp {
         Ok(_) => Ok(()),
-        Err(error) => Err(StorageError::InsertError),
+        Err(_error) => Err(StorageError::InsertError),
     }
 }
 
@@ -3089,13 +3077,11 @@ pub async fn get_penality_factor_(
         )
         .await;
         match m_reward_factor {
-            Some(reward_factor) => return 1.0 - reward_factor,
-            None => {
-                return getPenaltyFactor(ScoreKeyType::EliminationMerchantKey).await;
-            }
+            Some(reward_factor) => 1.0 - reward_factor,
+            None => getPenaltyFactor(ScoreKeyType::EliminationMerchantKey).await,
         }
     } else {
-        return getPenaltyFactor(ScoreKeyType::EliminationMerchantKey).await;
+        getPenaltyFactor(ScoreKeyType::EliminationMerchantKey).await
     }
 }
 

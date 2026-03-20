@@ -167,7 +167,7 @@ impl TxnCardInfo {
         self.paymentSource.as_ref().and_then(|ps| {
             // use `expose_secret()` instead of peek()
             let ps_str = ps.peek();
-            ps_str.split('@').last().map(|s| s.to_string())
+            ps_str.split('@').next_back().map(|s| s.to_string())
         })
     }
 

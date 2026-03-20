@@ -171,7 +171,7 @@ impl From<RoutingAlgorithm> for JsonifiedRoutingAlgorithm {
         let algorithm_data: serde_json::Value =
             serde_json::from_str(&ra.algorithm_data).unwrap_or_else(|_| serde_json::Value::Null);
 
-        JsonifiedRoutingAlgorithm {
+        Self {
             id: ra.id,
             created_by: ra.created_by,
             name: ra.name,
@@ -286,11 +286,11 @@ pub enum KeyDataType {
 impl KeyDataType {
     pub fn as_str(&self) -> &str {
         match self {
-            KeyDataType::Integer => "integer",
-            KeyDataType::Enum => "enum",
-            KeyDataType::Udf => "udf",
-            KeyDataType::StrValue => "str_value",
-            KeyDataType::GlobalRef => "global_ref",
+            Self::Integer => "integer",
+            Self::Enum => "enum",
+            Self::Udf => "udf",
+            Self::StrValue => "str_value",
+            Self::GlobalRef => "global_ref",
         }
     }
 }
@@ -346,7 +346,7 @@ impl KeyConfig {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct FieldValidationRules {
     pub min_value: Option<i64>,
     pub max_value: Option<i64>,
@@ -356,44 +356,15 @@ pub struct FieldValidationRules {
     pub regex_pattern: Option<regex::Regex>,
 }
 
-impl Default for FieldValidationRules {
-    fn default() -> Self {
-        Self {
-            min_value: None,
-            max_value: None,
-            min_length: None,
-            max_length: None,
-            exact_length: None,
-            regex_pattern: None,
-        }
-    }
-}
-
 /// Structure for the [keys] section in the TOML
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
 pub struct KeysConfig {
     #[serde(flatten)]
     pub keys: HashMap<String, KeyConfig>,
 }
 
 /// The complete TOML configuration structure
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
 pub struct TomlConfig {
     pub keys: KeysConfig,
-}
-
-impl Default for TomlConfig {
-    fn default() -> Self {
-        Self {
-            keys: KeysConfig::default(),
-        }
-    }
-}
-
-impl Default for KeysConfig {
-    fn default() -> Self {
-        Self {
-            keys: HashMap::new(),
-        }
-    }
 }

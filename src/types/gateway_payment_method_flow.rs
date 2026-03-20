@@ -112,11 +112,7 @@ impl TryFrom<DBGatewayPaymentMethodFlow> for GatewayPaymentMethodFlowF {
         };
 
         // Convert optional payment method type
-        let payment_method_type = if let Some(pmt) = db.payment_method_type {
-            Some(pmt)
-        } else {
-            None
-        };
+        let payment_method_type = db.payment_method_type;
 
         // Construct the GatewayPaymentMethodFlow instance
         Ok(Self {

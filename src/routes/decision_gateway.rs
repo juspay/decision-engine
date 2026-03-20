@@ -1,6 +1,5 @@
 use std::time::Instant;
 
-use crate::decider::gatewaydecider::constants as C;
 use crate::decider::gatewaydecider::{
     flows::decider_full_payload_hs_function,
     types::{DecidedGateway, DomainDeciderRequest, ErrorResponse, UnifiedError},
@@ -9,12 +8,11 @@ use crate::logger;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
 use crate::redis::feature::{
     check_redis_comp_merchant_flag, is_feature_enabled, RedisCompressionConfig,
-    RedisCompressionConfigCombined, RedisCompressionCutover,
+    RedisCompressionConfigCombined,
 };
 use axum::body::to_bytes;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use cpu_time::ProcessTime;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -74,7 +72,11 @@ where
     let request_time = time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_else(|_| "unknown".to_string());
-    let query_params = original_url.splitn(2, '?').nth(1).unwrap_or("").to_string();
+    let query_params = original_url
+        .split_once('?')
+        .map(|x| x.1)
+        .unwrap_or("")
+        .to_string();
     // Extract request headers as a JSON string
     // let req_headers = serde_json::to_string(&headers).unwrap_or("{}".to_string());
 

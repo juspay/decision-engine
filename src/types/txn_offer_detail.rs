@@ -13,7 +13,7 @@ pub struct TxnOfferDetailId(String);
 
 impl TxnOfferDetailId {
     pub fn new(s: String) -> Result<Self, String> {
-        Ok(TxnOfferDetailId(s))
+        Ok(Self(s))
     }
 }
 
@@ -23,7 +23,7 @@ impl<'de> Deserialize<'de> for TxnOfferDetailId {
         D: de::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        TxnOfferDetailId::new(s).map_err(de::Error::custom)
+        Self::new(s).map_err(de::Error::custom)
     }
 }
 

@@ -75,10 +75,7 @@ pub async fn getOffersDB(
 pub async fn getOffers(txn_id: &TxnDetailId) -> Vec<TxnOffer> {
     // Call the database function and handle results
     match getOffersDB(txn_id).await {
-        Ok(db_results) => db_results
-            .into_iter()
-            .filter_map(|db_record| TxnOffer::try_from(db_record).ok())
-            .collect(),
+        Ok(db_results) => db_results.into_iter().map(From::from).collect(),
         Err(_) => Vec::new(), // Silently handle any errors by returning empty vec
     }
 }

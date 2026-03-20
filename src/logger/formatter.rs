@@ -18,7 +18,6 @@ use crate::logger;
 
 use super::env::get_env_var;
 use super::storage::Storage;
-use std::sync::Mutex;
 use time::format_description::well_known::Iso8601;
 use tracing::{Event, Metadata, Subscriber};
 use tracing_subscriber::{
@@ -168,7 +167,7 @@ where
             Value::String(s) => {
                 // Try parsing string as JSON
                 match serde_json::from_str::<Value>(&s) {
-                    Ok(inner_json) => FormattingLayer::<W>::normalize_json(inner_json),
+                    Ok(inner_json) => Self::normalize_json(inner_json),
                     Err(_) => Value::String(s),
                 }
             }
@@ -372,7 +371,7 @@ where
                 if !explicit_entries_set.contains(*key) {
                     if let Some(value) = storage.values.get(*key) {
                         if key == &"message" {
-                            let normalized_value = get_normalized_message::<W>(&storage);
+                            let normalized_value = get_normalized_message::<W>(storage);
 
                             map_serializer.serialize_entry("message", &normalized_value)?;
                             explicit_entries_set.insert("message");
@@ -423,7 +422,7 @@ where
             }
 
             if !explicit_entries_set.contains("message") {
-                let normalized_value = get_normalized_message::<W>(&storage);
+                let normalized_value = get_normalized_message::<W>(storage);
 
                 map_serializer.serialize_entry("message", &normalized_value)?;
                 explicit_entries_set.insert("message");
@@ -513,10 +512,11 @@ where
     }
 
     /// Serialize entries of span.
+    #[allow(dead_code)]
     fn span_serialize<S>(
         &self,
         span: &SpanRef<'_, S>,
-        ty: RecordType,
+        _ty: RecordType,
     ) -> Result<Vec<u8>, std::io::Error>
     where
         S: Subscriber + for<'a> LookupSpan<'a>,
@@ -524,7 +524,7 @@ where
         let mut buffer = Vec::new();
         let mut serializer = serde_json::Serializer::new(&mut buffer);
         let mut map_serializer = serializer.serialize_map(None)?;
-        let mut storage = Storage::default();
+        let storage = Storage::default();
 
         self.common_serialize(
             &mut map_serializer,

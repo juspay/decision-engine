@@ -61,7 +61,7 @@ pub async fn update_config(
         <ServiceConfiguration as HasTable>::Table,
         ServiceConfigurationUpdate,
         _,
-    >(&conn, dsl::name.eq(name), values)
+    >(conn, dsl::name.eq(name), values)
     .await?;
 
     Ok(())
@@ -77,7 +77,7 @@ pub async fn delete_config(name: String) -> Result<(), crate::generics::MeshErro
         .map_err(|_| crate::generics::MeshError::DatabaseConnectionError)?;
     // Use Diesel's query builder with multiple conditions
     crate::generics::generic_delete::<<ServiceConfiguration as HasTable>::Table, _>(
-        &conn,
+        conn,
         dsl::name.eq(name),
     )
     .await?;

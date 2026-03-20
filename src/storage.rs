@@ -18,18 +18,12 @@ use diesel::MysqlConnection;
 use diesel::PgConnection;
 #[cfg(feature = "mysql")]
 use diesel_async::{
-    pooled_connection::{
-        self,
-        deadpool::{Object, Pool},
-    },
+    pooled_connection::{self, deadpool::Pool},
     AsyncMysqlConnection,
 };
 #[cfg(feature = "postgres")]
 use diesel_async::{
-    pooled_connection::{
-        self,
-        deadpool::{Object, Pool},
-    },
+    pooled_connection::{self, deadpool::Pool},
     AsyncPgConnection,
 };
 
@@ -137,13 +131,13 @@ impl Storage {
         );
         let pool = Pool::builder(config);
 
-        let pool = match database.pool_size {
+        let _pool = match database.pool_size {
             Some(value) => pool.max_size(value),
             None => pool,
         };
 
         let pool = diesel_make_mysql_pool(database, schema, false).await?;
-        return Ok(Self { pg_pool: pool });
+        Ok(Self { pg_pool: pool })
     }
 
     /// Get connection from database pool for accessing data
@@ -217,7 +211,7 @@ pub async fn diesel_make_pg_pool(
 pub async fn diesel_make_mysql_pool(
     database: &Database,
     schema: &str,
-    test_transaction: bool,
+    _test_transaction: bool,
 ) -> error_stack::Result<MysqlPool, error::StorageError> {
     let database_url = format!(
         "mysql://{}:{}@{}:{}/{}?application_name={}&options=-c search_path%3D{}",

@@ -38,7 +38,7 @@ use time::PrimitiveDateTime;
 // use data::list as DL;
 // use ghc::records::extra::HasField;
 use crate::decider::gatewaydecider::types::{
-    DetailedGatewayScoringType, GatewayReferenceIdMap, GatewayScoringData, GatewayScoringTypeLog,
+    DetailedGatewayScoringType, GatewayReferenceIdMap, GatewayScoringData,
     GatewayScoringTypeLogData, RoutingFlowType, ScoreKeyType,
 };
 use crate::types::money::internal as ETMo;
@@ -70,9 +70,7 @@ use crate::types::merchant as ETM;
 // use prelude::real_to_frac;
 // use data::time::clock::posix as DTP;
 use crate::logger;
-use crate::redis::feature::{
-    RedisCompressionConfig, RedisCompressionConfigCombined, RedisDataStruct,
-};
+use crate::redis::feature::{RedisCompressionConfigCombined, RedisDataStruct};
 use time::format_description::well_known::Iso8601;
 // Converted data types
 // Original Haskell data type: GatewayScoringType
@@ -184,7 +182,7 @@ pub fn get_txn_detail_from_api_payload(
         txnAmount: Some(ETMo::Money::from_double(0.0)),
         txnObjectType: Some(
             ETTD::TxnObjectType::from_text(gateway_scoring_data.orderType.clone())
-                .unwrap_or_else(|| ETTD::TxnObjectType::OrderPayment),
+                .unwrap_or(ETTD::TxnObjectType::OrderPayment),
         ),
         sourceObject: Some(gateway_scoring_data.paymentMethod.clone()),
         sourceObjectId: None,
@@ -192,7 +190,7 @@ pub fn get_txn_detail_from_api_payload(
             .currency
             .clone()
             .ok_or(crate::error::ApiError::MissingRequiredField("currency"))?,
-        country: gateway_scoring_data.country.clone(),
+        country: gateway_scoring_data.country,
         surchargeAmount: None,
         taxAmount: None,
         internalMetadata: Some(Secret::new(
@@ -214,10 +212,10 @@ pub fn get_txn_detail_from_api_payload(
 }
 
 pub fn get_txn_card_info_from_api_payload(
-    api_payload: UpdateScorePayload,
+    _api_payload: UpdateScorePayload,
     gateway_scoring_data: GatewayScoringData,
 ) -> ETCa::txn_card_info::TxnCardInfo {
-    let txn_card_info = ETCa::txn_card_info::TxnCardInfo {
+    ETCa::txn_card_info::TxnCardInfo {
         id: ETCa::txn_card_info::to_txn_card_info_pid(1),
         card_isin: None,
         cardIssuerBankName: None,
@@ -235,8 +233,7 @@ pub fn get_txn_card_info_from_api_payload(
                 ETCa::txn_card_info::text_to_auth_type(&auth_type_text).ok()
             }),
         partitionKey: None,
-    };
-    txn_card_info
+    }
 }
 // Original Haskell function: convertMerchantIdFlip
 // pub fn convertMerchantIdFlip(s: &str) -> Option<ETM::MerchantId> {
@@ -378,7 +375,7 @@ pub fn get_txn_card_info_from_api_payload(
 // }
 
 // Original Haskell function: updateScore
-pub async fn updateScore(redis: String, key: String, should_score_increase: bool) -> () {
+pub async fn updateScore(_redis: String, key: String, should_score_increase: bool) -> () {
     let app_state = get_tenant_app_state().await;
     let either_res = if should_score_increase {
         app_state.redis_conn.increment_key(&key).await
@@ -419,13 +416,13 @@ pub async fn isKeyExistsRedis(key: String) -> bool {
 }
 // Original Haskell function: updateQueue
 pub async fn updateQueue(
-    redis_name: String,
+    _redis_name: String,
     queue_key: String,
     score_key: String,
     value: String,
 ) -> Result<Option<String>, error_stack::Report<redis_interface::errors::RedisError>> {
     let app_state = get_tenant_app_state().await;
-    let value_clone = value.clone();
+    let _value_clone = value.clone();
     let r: Result<Vec<String>, error_stack::Report<redis_interface::errors::RedisError>> =
         app_state
             .redis_conn
@@ -673,7 +670,7 @@ pub async fn getProducerKey(
 pub fn log_gateway_score_type(
     gateway_score_type: GatewayScoringType,
     routing_flow_type: RoutingFlowType,
-    txn_detail: TxnDetail,
+    _txn_detail: TxnDetail,
 ) {
     let detailed_gateway_score_type = match routing_flow_type {
         RoutingFlowType::EliminationFlow => match gateway_score_type {
@@ -740,7 +737,7 @@ pub async fn writeToCacheWithTTL(
 
 // Original Haskell function: addToCacheWithExpiry
 pub async fn addToCacheWithExpiry(
-    redis_name: String,
+    _redis_name: String,
     key: String,
     value: String,
     ttl: i64,
@@ -759,7 +756,7 @@ pub async fn addToCacheWithExpiry(
         .await;
     match cached_resp {
         Ok(_) => Ok(()),
-        Err(error) => Err(StorageError::InsertError),
+        Err(_error) => Err(StorageError::InsertError),
     }
 }
 
@@ -771,7 +768,7 @@ pub async fn deleteFromCache(redis_name: String, key: String) -> Result<i32, Sto
 }
 
 // Original Haskell function: delCache
-pub async fn delCache(dbName: String, key: String) -> Result<i32, StorageError> {
+pub async fn delCache(_dbName: String, key: String) -> Result<i32, StorageError> {
     let app_state = get_tenant_app_state().await;
     let data = app_state.redis_conn.conn.delete_key(&key).await;
     // convert data to Result<StorageError, i32>
@@ -891,7 +888,7 @@ pub fn getTxnTypeFromInternalMetadata(internal_metadata: Option<Secret<String>>)
                 tag = "APP_DEBUG",
                 "FETCH_TXN_TYPE_FROM_IM_FLOW"
             );
-            (MandateTxnType::Default)
+            MandateTxnType::Default
         }
         Some(internal_metadata) => {
             match serde_json::from_str::<MandateTxnInfo>(internal_metadata.peek()) {

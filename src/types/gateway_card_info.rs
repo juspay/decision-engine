@@ -115,15 +115,13 @@ impl TryFrom<DBGatewayCardInfo> for GatewayCardInfo {
             gateway: db_gci.gateway,
             cardIssuerBankName: db_gci.card_issuer_bank_name,
             authType: db_gci.auth_type,
-            juspayBankCodeId: db_gci.juspay_bank_code_id.map(|id| to_bank_code_id(id)),
+            juspayBankCodeId: db_gci.juspay_bank_code_id.map(to_bank_code_id),
             disabled: db_gci.disabled.map(|f| f.0),
             validationType: db_gci
                 .validation_type
-                .map(|validation_type| text_to_validation_type(validation_type))
+                .map(text_to_validation_type)
                 .transpose()?,
-            paymentMethodType: db_gci
-                .payment_method_type
-                .map(|payment_method_type| payment_method_type),
+            paymentMethodType: db_gci.payment_method_type,
         })
     }
 }
@@ -164,8 +162,7 @@ pub async fn get_enabled_gateway_card_info_for_gateways(
     let app_state = get_tenant_app_state().await;
 
     // Convert gateways to strings
-    let gateway_strings: Vec<Option<String>> =
-        gateways.clone().into_iter().map(|g| Some(g)).collect();
+    let gateway_strings: Vec<Option<String>> = gateways.clone().into_iter().map(Some).collect();
 
     logger::debug!(
         tag = "get_enabled_gateway_card_info_for_gateways",

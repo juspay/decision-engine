@@ -13,7 +13,6 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value as AValue;
 use std::collections::HashMap as HMap;
 use std::collections::HashMap;
-use std::i64;
 use std::option::Option;
 use std::string::String;
 use std::vec::Vec;
@@ -373,20 +372,15 @@ pub fn transform_gateway_wise_success_rate_based_routing(
 ) -> DeciderGatewayWiseSuccessRateBasedRoutingInput {
     DeciderGatewayWiseSuccessRateBasedRoutingInput {
         gateway: gateway_wise_success_rate_input.gateway.clone(),
-        eliminationThreshold: gateway_wise_success_rate_input.eliminationThreshold.clone(),
-        eliminationMaxCountThreshold: gateway_wise_success_rate_input
-            .eliminationMaxCountThreshold
-            .clone(),
-        selectionMaxCountThreshold: gateway_wise_success_rate_input
-            .selectionMaxCountThreshold
-            .clone(),
-        softTxnResetCount: gateway_wise_success_rate_input.softTxnResetCount.clone(),
+        eliminationThreshold: gateway_wise_success_rate_input.eliminationThreshold,
+        eliminationMaxCountThreshold: gateway_wise_success_rate_input.eliminationMaxCountThreshold,
+        selectionMaxCountThreshold: gateway_wise_success_rate_input.selectionMaxCountThreshold,
+        softTxnResetCount: gateway_wise_success_rate_input.softTxnResetCount,
         gatewayLevelEliminationThreshold: gateway_wise_success_rate_input
-            .gatewayLevelEliminationThreshold
-            .clone(),
+            .gatewayLevelEliminationThreshold,
         eliminationLevel: gateway_wise_success_rate_input.eliminationLevel.clone(),
-        currentScore: gateway_wise_success_rate_input.currentScore.clone(),
-        lastResetTimeStamp: gateway_wise_success_rate_input.lastResetTimeStamp.clone(),
+        currentScore: gateway_wise_success_rate_input.currentScore,
+        lastResetTimeStamp: gateway_wise_success_rate_input.lastResetTimeStamp,
     }
 }
 
@@ -1043,9 +1037,9 @@ impl DomainDeciderRequestForApiCallV2 {
                 merchantId: ETM::id::to_merchant_id(self.merchant_id.clone()),
                 gateway: None,
                 expressCheckout: Some(false),
-                isEmi: Some(self.payment_info.is_emi.clone().unwrap_or(false)),
+                isEmi: Some(self.payment_info.is_emi.unwrap_or(false)),
                 emiBank: self.payment_info.emi_bank.clone(),
-                emiTenure: self.payment_info.emi_tenure.clone(),
+                emiTenure: self.payment_info.emi_tenure,
                 txnUuid: self.payment_info.payment_id.clone(),
                 merchantGatewayAccountId: None,
                 txnAmount: Some(ETMo::Money::from_double(self.payment_info.amount)),
@@ -1053,7 +1047,7 @@ impl DomainDeciderRequestForApiCallV2 {
                 sourceObject: Some(self.payment_info.payment_method.clone()),
                 sourceObjectId: None,
                 currency: self.payment_info.currency.clone(),
-                country: self.payment_info.country.clone(),
+                country: self.payment_info.country,
                 netAmount: Some(ETMo::Money::from_double(self.payment_info.amount)),
                 surchargeAmount: None,
                 taxAmount: None,
@@ -1928,9 +1922,9 @@ pub async fn initial_decider_flow<'a>(
     }
 }
 
-struct Reader<T> {
-    reader: T,
-    tenant_state: TenantAppState,
+pub struct Reader<T> {
+    pub reader: T,
+    pub tenant_state: TenantAppState,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

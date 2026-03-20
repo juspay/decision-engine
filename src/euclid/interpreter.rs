@@ -206,7 +206,7 @@ pub enum RoutingError {
 impl fmt::Display for RoutingError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            RoutingError::VolumeSplitFailed => write!(f, "Volume split calculation failed"),
+            Self::VolumeSplitFailed => write!(f, "Volume split calculation failed"),
         }
     }
 }
