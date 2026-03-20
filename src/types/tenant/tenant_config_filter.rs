@@ -56,7 +56,7 @@ impl TryFrom<DBTenantConfigFilter> for TenantConfigFilter {
 
 pub async fn get_tenant_config_filter_by_group_id_and_dimension_value(
     group_id: String,
-    dimension_valu: String,
+    dimension_value: String,
 ) -> Option<TenantConfigFilter> {
     let app_state = get_tenant_app_state().await;
 
@@ -69,7 +69,7 @@ pub async fn get_tenant_config_filter_by_group_id_and_dimension_value(
         &app_state.db,
         dsl::filter_group_id
             .eq(group_id)
-            .and(dsl::dimension_value.eq(dimension_valu)),
+            .and(dsl::dimension_value.eq(dimension_value)),
     )
     .await
     {

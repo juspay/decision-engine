@@ -809,7 +809,7 @@ impl SC::ServiceConfigKey for SrVolumeCheckEnabledMerchant {
 pub const IS_MERCHANT_ENABLED_FOR_VOLUME_CHECK: SrVolumeCheckEnabledMerchant =
     SrVolumeCheckEnabledMerchant;
 
-pub const DEFAULT_SELECTION_BUCKET_TXN_VOLUME_THREHOLD: i64 = 5;
+pub const DEFAULT_SELECTION_BUCKET_TXN_VOLUME_THRESHOLD: i64 = 5;
 
 pub struct SrSelectionBucketVolumeThreshold;
 impl SC::ServiceConfigKey for SrSelectionBucketVolumeThreshold {

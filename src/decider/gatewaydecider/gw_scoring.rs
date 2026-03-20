@@ -258,7 +258,7 @@ pub async fn scoring_flow(
                     default_sr_v3_input_config
                 );
 
-                let sr_routing_dimesions = SrRoutingDimensions {
+                let sr_routing_dimensions = SrRoutingDimensions {
                     card_network: txn_card_info
                         .cardSwitchProvider
                         .as_ref()
@@ -273,14 +273,14 @@ pub async fn scoring_flow(
                     merchant_sr_v3_input_config.clone(),
                     &pmt_str,
                     pm.clone().as_str(),
-                    &sr_routing_dimesions,
+                    &sr_routing_dimensions,
                 )
                 .or_else(|| {
                     Utils::get_sr_v3_hedging_percent(
                         default_sr_v3_input_config.clone(),
                         &pmt_str,
                         pm.clone().as_str(),
-                        &sr_routing_dimesions,
+                        &sr_routing_dimensions,
                     )
                 })
                 .unwrap_or(C::DEFAULT_SR_V3_BASED_HEDGING_PERCENT);
@@ -501,7 +501,7 @@ pub async fn get_cached_scores_based_on_srv3(
     // Extract the new parameters from txn_card_info
     let txn_card_info = decider_flow.get().dpTxnCardInfo.clone();
 
-    let sr_routing_dimesions = SrRoutingDimensions {
+    let sr_routing_dimensions = SrRoutingDimensions {
         card_network: txn_card_info
             .cardSwitchProvider
             .as_ref()
@@ -521,14 +521,14 @@ pub async fn get_cached_scores_based_on_srv3(
         merchant_srv3_input_config.clone(),
         &pmt_str,
         &pm,
-        &sr_routing_dimesions,
+        &sr_routing_dimensions,
     )
     .or_else(|| {
         Utils::get_sr_v3_bucket_size(
             default_srv3_input_config.clone(),
             &pmt_str,
             &pm,
-            &sr_routing_dimesions,
+            &sr_routing_dimensions,
         )
     })
     .unwrap_or(C::DEFAULT_SR_V3_BASED_BUCKET_SIZE);
@@ -580,14 +580,14 @@ pub async fn get_cached_scores_based_on_srv3(
             merchant_srv3_input_config.clone(),
             &pmt_str,
             &pm,
-            &sr_routing_dimesions,
+            &sr_routing_dimensions,
         )
         .or_else(|| {
             Utils::get_sr_v3_upper_reset_factor(
                 default_srv3_input_config.clone(),
                 &pmt_str,
                 &pm,
-                &sr_routing_dimesions,
+                &sr_routing_dimensions,
             )
         })
         .unwrap_or(C::DEFAULT_SR_V3_BASED_UPPER_RESET_FACTOR);
@@ -595,14 +595,14 @@ pub async fn get_cached_scores_based_on_srv3(
             merchant_srv3_input_config.clone(),
             &pmt_str,
             &pm,
-            &sr_routing_dimesions,
+            &sr_routing_dimensions,
         )
         .or_else(|| {
             Utils::get_sr_v3_lower_reset_factor(
                 default_srv3_input_config.clone(),
                 &pmt_str,
                 &pm,
-                &sr_routing_dimesions,
+                &sr_routing_dimensions,
             )
         })
         .unwrap_or(C::DEFAULT_SR_V3_BASED_LOWER_RESET_FACTOR);
@@ -663,7 +663,7 @@ pub async fn get_cached_scores_based_on_srv3(
                 pmt_str.to_string(),
                 pm.clone(),
                 gw.clone(),
-                sr_routing_dimesions.clone(),
+                sr_routing_dimensions.clone(),
             );
             final_score_map.insert(gw, extra_score);
         }
@@ -792,14 +792,14 @@ pub fn add_extra_score(
     pmt: String,
     pm: String,
     gw: String,
-    sr_routing_dimesions: SrRoutingDimensions,
+    sr_routing_dimensions: SrRoutingDimensions,
 ) -> f64 {
     let gateway_sigma_factor = Utils::get_sr_v3_gateway_sigma_factor(
         merchant_sr_v3_input_config,
         &pmt,
         &pm,
         &gw,
-        &sr_routing_dimesions,
+        &sr_routing_dimensions,
     )
     .or_else(|| {
         Utils::get_sr_v3_gateway_sigma_factor(
@@ -807,7 +807,7 @@ pub fn add_extra_score(
             &pmt,
             &pm,
             &gw,
-            &sr_routing_dimesions,
+            &sr_routing_dimensions,
         )
     })
     .unwrap_or(C::DEFAULT_SR_V3_BASED_GATEWAY_SIGMA_FACTOR);
@@ -1021,7 +1021,7 @@ pub async fn update_score_for_outage(decider_flow: &mut DeciderFlow<'_>) -> Gate
     let out_gws: Vec<_> = potential_outages
         .into_iter()
         .filter(|outage| {
-            check_scheduled_outtage(
+            check_scheduled_outage(
                 &txn_detail,
                 &txn_card_info,
                 &merchant.merchantId,
@@ -1081,7 +1081,7 @@ where
     }
 }
 
-fn check_scheduled_outtage(
+fn check_scheduled_outage(
     txn_detail: &ETTD::TxnDetail,
     txn_card_info: &ETCT::txn_card_info::TxnCardInfo,
     merchant_id: &ETM::id::MerchantId,
@@ -3140,7 +3140,7 @@ pub async fn reset_gateway_score(
                     let _current_score = score.score;
                     let transaction_count = score.transactionCount;
                     let _last_reset_time = score.lastResetTimestamp;
-                    let is_eligible_for_reset_ = Utils::is_reset_eligibile(
+                    let is_eligible_for_reset_ = Utils::is_reset_eligible(
                         Some(reset_gateway_input.clone().softTtl),
                         current_timestamp,
                         threshold,

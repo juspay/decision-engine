@@ -73,7 +73,7 @@ pub enum DeciderFilterName {
     GatewayPriorityList,
     FilterFunctionalGatewaysForMerchantRequiredFlow,
     FilterGatewaysForMGASelectionIntegrity,
-    FilterGatewaysForEMITenureSpecficGatewayCreds,
+    FilterGatewaysForEMITenureSpecificGatewayCreds,
     FilterFunctionalGatewaysForReversePennyDrop,
     FilterFunctionalGatewaysForOTM,
     FilterFunctionalGatewaysForPixFlows,
@@ -150,8 +150,8 @@ impl fmt::Display for DeciderFilterName {
             Self::FilterGatewaysForMGASelectionIntegrity => {
                 write!(f, "FilterGatewaysForMGASelectionIntegrity")
             }
-            Self::FilterGatewaysForEMITenureSpecficGatewayCreds => {
-                write!(f, "FilterGatewaysForEMITenureSpecficGatewayCreds")
+            Self::FilterGatewaysForEMITenureSpecificGatewayCreds => {
+                write!(f, "FilterGatewaysForEMITenureSpecificGatewayCreds")
             }
             Self::FilterFunctionalGatewaysForReversePennyDrop => {
                 write!(f, "FilterFunctionalGatewaysForReversePennyDrop")

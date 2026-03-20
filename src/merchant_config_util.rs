@@ -699,8 +699,8 @@ pub async fn getPaymentFlowInfoFromTenantConfig(
 //     }
 // }
 
-// // Original Haskell function: getConfigValueWithGCCatagory
-// pub fn getConfigValueWithGCCatagory<T>(
+// // Original Haskell function: getConfigValueWithGCCategory
+// pub fn getConfigValueWithGCCategory<T>(
 //     arg1: i64,
 //     arg2: String,
 //     arg3: String,
@@ -712,8 +712,8 @@ pub async fn getPaymentFlowInfoFromTenantConfig(
 //     getConfigValueFromMerchantConfig(MCTypes::GeneralConfig, arg1, arg2, arg3, arg4)
 // }
 
-// // Original Haskell function: getConfigValueWithPFCatagory
-// pub fn getConfigValueWithPFCatagory(
+// // Original Haskell function: getConfigValueWithPFCategory
+// pub fn getConfigValueWithPFCategory(
 //     arg1: i64,
 //     arg2: String,
 //     arg3: String,

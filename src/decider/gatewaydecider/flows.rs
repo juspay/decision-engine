@@ -110,7 +110,7 @@ use crate::types::txn_details::types as ETTD;
 // );
 //             let request = T::transformRequest(req, merchant_acc, resolve_bin);
 // logger::debug!(
-//     tag = "enforeced gateway list",
+//     tag = "enforced gateway list",
 //     "{}",
 //     request.enforceGatewayList.to_string()
 // );
@@ -1210,7 +1210,7 @@ pub async fn getFailureReasonWithFilter(
             "Conflicting configurations found or no functional gateways supporting this transaction"
                 .to_string()
         }
-        "filterGatewaysForEMITenureSpecficGatewayCreds" => {
+        "filterGatewaysForEMITenureSpecificGatewayCreds" => {
             "No functional gateways supporting for emi.".to_string()
         }
         "FilterFunctionalGatewaysForReversePennyDrop" => {

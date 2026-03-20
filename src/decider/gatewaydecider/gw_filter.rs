@@ -281,7 +281,7 @@ pub async fn getFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList {
     Utils::set_payment_flow_list(this, payment_flow_list);
 
     let mgas_ = match (
-        txn_detail.isEmi.unwrap_or(false) || Utils::is_reccuring_payment_transaction(&txn_detail),
+        txn_detail.isEmi.unwrap_or(false) || Utils::is_recurring_payment_transaction(&txn_detail),
         &enforce_gateway_list,
     ) {
         (false, _) => enabled_gateway_accounts.clone(),
@@ -3006,7 +3006,7 @@ pub fn filterForEMITenureSpecificMGAs(this: &mut DeciderFlow<'_>) -> Vec<String>
     // Return the gateway list with logging
     returnGwListWithLog(
         this,
-        DeciderFilterName::FilterGatewaysForEMITenureSpecficGatewayCreds,
+        DeciderFilterName::FilterGatewaysForEMITenureSpecificGatewayCreds,
         true,
     )
 }

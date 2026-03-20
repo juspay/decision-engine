@@ -53,7 +53,7 @@ pub fn to_supported_payment_flows(
 ) -> Result<SupportedPaymentFlows, ApiError> {
     match serde_json::from_str::<SupportedPaymentFlows>(&supported_payment_flows) {
         Ok(res) => Ok(res),
-        Err(_) => Err(ApiError::ParsingError("Inavlid Supported Payment Flowws")),
+        Err(_) => Err(ApiError::ParsingError("Invalid Supported Payment Flows")),
     }
 }
 

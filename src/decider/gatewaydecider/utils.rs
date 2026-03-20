@@ -223,7 +223,7 @@ pub fn is_emandate_payment_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
     )
 }
 
-pub fn is_reccuring_payment_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
+pub fn is_recurring_payment_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
     matches!(
         txn_detail.txnObjectType,
         Some(ETTD::TxnObjectType::EmandatePayment)
@@ -1428,7 +1428,7 @@ pub fn decider_filter_order(filter_name: &str) -> i32 {
         "preferredGateway" => 21,
         "filterEnforcement" => 22,
         "filterFunctionalGatewaysForMerchantRequiredFlow" => 23,
-        "filterGatewaysForEMITenureSpecficGatewayCreds" => 24,
+        "filterGatewaysForEMITenureSpecificGatewayCreds" => 24,
         "filterGatewaysForMGASelectionIntegrity" => 25,
         "FilterFunctionalGatewaysForOTM" => 26,
         _ => 27,
@@ -1590,14 +1590,14 @@ pub fn get_sr_v3_latency_threshold(
     sr_v3_input_config: Option<SrV3InputConfig>,
     pmt: &str,
     pm: &str,
-    sr_routing_dimesions: &SrRoutingDimensions,
+    sr_routing_dimensions: &SrRoutingDimensions,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
         get_sr_v3_sub_level_input_config(
             &config.subLevelInputConfig,
             pmt,
             pm,
-            sr_routing_dimesions,
+            sr_routing_dimensions,
             |x| x.latencyThreshold.is_some(),
         )
         .and_then(|sub_config| sub_config.latencyThreshold)
@@ -1609,14 +1609,14 @@ pub fn get_sr_v3_bucket_size(
     sr_v3_input_config: Option<SrV3InputConfig>,
     pmt: &str,
     pm: &str,
-    sr_routing_dimesions: &SrRoutingDimensions,
+    sr_routing_dimensions: &SrRoutingDimensions,
 ) -> Option<i32> {
     sr_v3_input_config.and_then(|config| {
         get_sr_v3_sub_level_input_config(
             &config.subLevelInputConfig,
             pmt,
             pm,
-            sr_routing_dimesions,
+            sr_routing_dimensions,
             |x| x.bucketSize.is_some(),
         )
         .and_then(|sub_config| sub_config.bucketSize)
@@ -1629,14 +1629,14 @@ pub fn get_sr_v3_hedging_percent(
     sr_v3_input_config: Option<SrV3InputConfig>,
     pmt: &str,
     pm: &str,
-    sr_routing_dimesions: &SrRoutingDimensions,
+    sr_routing_dimensions: &SrRoutingDimensions,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
         get_sr_v3_sub_level_input_config(
             &config.subLevelInputConfig,
             pmt,
             pm,
-            sr_routing_dimesions,
+            sr_routing_dimensions,
             |x| x.hedgingPercent.is_some(),
         )
         .and_then(|sub_config| sub_config.hedgingPercent)
@@ -1649,14 +1649,14 @@ pub fn get_sr_v3_lower_reset_factor(
     sr_v3_input_config: Option<SrV3InputConfig>,
     pmt: &str,
     pm: &str,
-    sr_routing_dimesions: &SrRoutingDimensions,
+    sr_routing_dimensions: &SrRoutingDimensions,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
         get_sr_v3_sub_level_input_config(
             &config.subLevelInputConfig,
             pmt,
             pm,
-            sr_routing_dimesions,
+            sr_routing_dimensions,
             |x| x.lowerResetFactor.is_some(),
         )
         .and_then(|sub_config| sub_config.lowerResetFactor)
@@ -1669,14 +1669,14 @@ pub fn get_sr_v3_upper_reset_factor(
     sr_v3_input_config: Option<SrV3InputConfig>,
     pmt: &str,
     pm: &str,
-    sr_routing_dimesions: &SrRoutingDimensions,
+    sr_routing_dimensions: &SrRoutingDimensions,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
         get_sr_v3_sub_level_input_config(
             &config.subLevelInputConfig,
             pmt,
             pm,
-            sr_routing_dimesions,
+            sr_routing_dimensions,
             |x| x.upperResetFactor.is_some(),
         )
         .and_then(|sub_config| sub_config.upperResetFactor)
@@ -1690,14 +1690,14 @@ pub fn get_sr_v3_gateway_sigma_factor(
     pmt: &str,
     pm: &str,
     gw: &String,
-    sr_routing_dimesions: &SrRoutingDimensions,
+    sr_routing_dimensions: &SrRoutingDimensions,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
         get_sr_v3_sub_level_input_config(
             &config.subLevelInputConfig,
             pmt,
             pm,
-            sr_routing_dimesions,
+            sr_routing_dimensions,
             |x| {
                 x.gatewayExtraScore
                     .as_ref()
@@ -1725,7 +1725,7 @@ fn get_sr_v3_sub_level_input_config(
     sub_level_input_config: &Option<Vec<SrV3SubLevelInputConfig>>,
     pmt: &str,
     pm: &str,
-    sr_routing_dimesions: &SrRoutingDimensions,
+    sr_routing_dimensions: &SrRoutingDimensions,
     is_input_non_null: impl Fn(&SrV3SubLevelInputConfig) -> bool,
 ) -> Option<SrV3SubLevelInputConfig> {
     sub_level_input_config
@@ -1738,7 +1738,7 @@ fn get_sr_v3_sub_level_input_config(
                         config,
                         Some(pmt.to_string()),
                         Some(pm.to_string()),
-                        sr_routing_dimesions,
+                        sr_routing_dimensions,
                     ) && is_input_non_null(config)
                 })
                 .or_else(|| {
@@ -1747,7 +1747,7 @@ fn get_sr_v3_sub_level_input_config(
                             config,
                             Some(pmt.to_string()),
                             None,
-                            sr_routing_dimesions,
+                            sr_routing_dimensions,
                         ) && is_input_non_null(config)
                     })
                 })
@@ -1759,20 +1759,20 @@ fn is_sr_v3_config_match(
     config: &SrV3SubLevelInputConfig,
     pmt: Option<String>,
     pm: Option<String>,
-    sr_routing_dimesions: &SrRoutingDimensions,
+    sr_routing_dimensions: &SrRoutingDimensions,
 ) -> bool {
     let pmt_matches = config.paymentMethodType == pmt;
     let pm_matches = config.paymentMethod.is_none() || config.paymentMethod == pm;
     let card_network_matches =
-        config.cardNetwork.is_none() || config.cardNetwork == sr_routing_dimesions.card_network;
+        config.cardNetwork.is_none() || config.cardNetwork == sr_routing_dimensions.card_network;
     let card_isin_matches =
-        config.cardIsIn.is_none() || config.cardIsIn == sr_routing_dimesions.card_isin;
+        config.cardIsIn.is_none() || config.cardIsIn == sr_routing_dimensions.card_isin;
     let currency_matches =
-        config.currency.is_none() || config.currency == sr_routing_dimesions.currency;
+        config.currency.is_none() || config.currency == sr_routing_dimensions.currency;
     let country_matches =
-        config.country.is_none() || config.country == sr_routing_dimesions.country;
+        config.country.is_none() || config.country == sr_routing_dimensions.country;
     let auth_type_matches =
-        config.authType.is_none() || config.authType == sr_routing_dimesions.auth_type;
+        config.authType.is_none() || config.authType == sr_routing_dimensions.auth_type;
 
     pmt_matches
         && pm_matches
@@ -2982,7 +2982,7 @@ pub fn route_random_traffic_to_explore(
     num < explore_hedging_percent
 }
 
-pub fn is_reset_eligibile(
+pub fn is_reset_eligible(
     soft_ttl: Option<f64>,
     current_time_in_millis: u128,
     threshold: f64,

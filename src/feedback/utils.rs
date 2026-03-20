@@ -512,7 +512,7 @@ pub fn isTrueString(val: Option<String>) -> bool {
 
 // Original Haskell function: dateInIST
 pub fn dateInIST(db_date: String, format: String) -> Option<String> {
-    // Parse input date uisng primitivedatetime
+    // Parse input date using primitivedatetime
     let format_description = match time::format_description::parse(&format) {
         Ok(desc) => desc,
         Err(_) => return None,

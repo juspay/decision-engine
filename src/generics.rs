@@ -153,7 +153,7 @@ where
         .await
         .change_context(MeshError::Others)
 }
-// Returns error incase of entry not found in DB or due to other issues
+// Returns error in case of entry not found in DB or due to other issues
 #[cfg(feature = "mysql")]
 pub async fn generic_update<T, V, P>(
     conn: &MysqlPoolConn,
@@ -206,7 +206,7 @@ where
             Ok(res)
         })
 }
-// Returns 0 incase of entry not found in DB and errors due to other issues
+// Returns 0 in case of entry not found in DB and errors due to other issues
 #[cfg(feature = "mysql")]
 pub async fn generic_update_if_present<T, V, P>(
     conn: &MysqlPoolConn,

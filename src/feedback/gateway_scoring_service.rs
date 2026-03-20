@@ -314,7 +314,7 @@ pub async fn get_gateway_scoring_type(
     );
     // Extract the new parameters from txn_card_info
 
-    let sr_routing_dimesions = SrRoutingDimensions {
+    let sr_routing_dimensions = SrRoutingDimensions {
         card_network: txn_card_info
             .cardSwitchProvider
             .as_ref()
@@ -329,7 +329,7 @@ pub async fn get_gateway_scoring_type(
         merchant_sr_v3_input_config.clone(),
         &pmt,
         &pm,
-        &sr_routing_dimesions,
+        &sr_routing_dimensions,
     );
 
     let time_difference_threshold = match maybe_latency_threshold {
@@ -340,7 +340,7 @@ pub async fn get_gateway_scoring_type(
                 default_sr_v3_input_config,
                 &pmt,
                 &pm,
-                &sr_routing_dimesions,
+                &sr_routing_dimensions,
             );
             maybe_default_latency_threshold.unwrap_or(default_sr_v3_latency_threshold_in_secs())
         }

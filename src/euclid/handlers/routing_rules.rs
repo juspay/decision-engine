@@ -36,14 +36,14 @@ use serde_json::{json, Value};
 
 #[allow(dead_code)]
 const DEFAULT_FALLBACK_IDENTIFIER: &str = "default_fallback_enabled";
-pub async fn config_sr_dimentions(
+pub async fn config_sr_dimensions(
     Json(payload): Json<SrDimensionConfig>,
 ) -> Result<Json<String>, ContainerError<EuclidErrors>> {
     let timer = metrics::API_LATENCY_HISTOGRAM
-        .with_label_values(&["config_sr_dimentions"])
+        .with_label_values(&["config_sr_dimensions"])
         .start_timer();
     metrics::API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["config_sr_dimentions"])
+        .with_label_values(&["config_sr_dimensions"])
         .inc();
     logger::debug!("Received SR Dimension config: {:?}", payload);
 
@@ -62,7 +62,7 @@ pub async fn config_sr_dimentions(
 
     if !invalid_dimensions.is_empty() {
         metrics::API_REQUEST_COUNTER
-            .with_label_values(&["config_sr_dimentions", "failure"])
+            .with_label_values(&["config_sr_dimensions", "failure"])
             .inc();
         timer.observe_duration();
 
@@ -108,7 +108,7 @@ pub async fn config_sr_dimentions(
 
     if let Err(_) = result {
         metrics::API_REQUEST_COUNTER
-            .with_label_values(&["config_sr_dimentions", "failure"])
+            .with_label_values(&["config_sr_dimensions", "failure"])
             .inc();
         timer.observe_duration();
         logger::error!(
@@ -118,7 +118,7 @@ pub async fn config_sr_dimentions(
         return Err(ContainerError::from(EuclidErrors::StorageError));
     }
     metrics::API_REQUEST_COUNTER
-        .with_label_values(&["config_sr_dimentions", "success"])
+        .with_label_values(&["config_sr_dimensions", "success"])
         .inc();
     timer.observe_duration();
     logger::debug!(
