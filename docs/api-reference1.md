@@ -914,7 +914,7 @@ The input for evaluation parameter must be one of the mentioned values in array.
 }
 ```
 
-The input for evaluation parameter must be in the specifed thresholds.
+The input for evaluation parameter must be in the specified thresholds.
 </details>
 
 ---
