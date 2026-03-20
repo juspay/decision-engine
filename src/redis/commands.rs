@@ -32,13 +32,11 @@ use std::env;
 #[cfg(feature = "redis_compression")]
 use std::fs::File;
 #[cfg(feature = "redis_compression")]
-use std::io::Cursor;
+use std::io::{Cursor, Read};
 #[cfg(feature = "redis_compression")]
-use zstd::{
-    bulk::Compressor,
-    dict::{DecoderDictionary, EncoderDictionary},
-    stream::{read::Decoder, write::Encoder},
-};
+use zstd::bulk::Compressor;
+#[cfg(feature = "redis_compression")]
+use zstd::stream::read::Decoder;
 
 pub struct RedisConnectionWrapper {
     pub conn: RedisConnectionPool,
@@ -268,7 +266,7 @@ impl RedisConnectionWrapper {
         // Haskell magic: "(\181/\253"
         let magic_number: [u8; 4] = [0x28, 0xB5, 0x2F, 0xFD];
 
-        if cdata.len() > 9 && &cdata[0..4] == magic_number {
+        if cdata.len() > 9 && cdata[0..4] == magic_number {
             let cdata_wo_magic = &cdata[4..];
 
             let frame_header_w = cdata_wo_magic[0];
