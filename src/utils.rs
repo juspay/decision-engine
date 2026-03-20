@@ -225,7 +225,7 @@ pub async fn call_api(url: &str, body: &serde_json::Value) -> Result<ResponseBod
     }
 }
 
-pub fn generate_random_number(tag: String, range: (f64, f64)) -> f64 {
+pub fn generate_random_number(_tag: String, range: (f64, f64)) -> f64 {
     let (min, max) = range;
 
     // Create a random number generator

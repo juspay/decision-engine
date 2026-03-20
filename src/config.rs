@@ -10,7 +10,7 @@ use crate::{
     logger::config::Log,
 };
 use error_stack::ResultExt;
-#[cfg(feature = "kms-hashicorp-vault")]
+#[cfg(all(feature = "kms-hashicorp-vault", test))]
 use masking::ExposeInterface;
 use redis_interface::RedisSettings;
 use serde::Deserialize;

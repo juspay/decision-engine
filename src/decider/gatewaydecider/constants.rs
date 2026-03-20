@@ -138,7 +138,7 @@ pub fn internalDefaultEliminationV2SuccessRate1AndNPrefix(
 pub const DEFAULT_FIELD_NAME_FOR_SR1_AND_N: &str = "default";
 pub const SR1_KEY_PREFIX: &str = "sr1_";
 pub const N_KEY_PREFIX: &str = "n_";
-pub const aggregateKeyPrefix: &str = "aggregate_data_";
+pub const AGGREGATE_KEY_PREFIX: &str = "aggregate_data_";
 pub const GW_DEFAULT_TXN_SOFT_RESET_COUNT: i64 = 10;
 pub const DEFAULT_GLOBAL_SELECTION_VOLUME_THRESHOLD: i64 = 20;
 
@@ -809,7 +809,7 @@ impl SC::ServiceConfigKey for SrVolumeCheckEnabledMerchant {
 pub const IS_MERCHANT_ENABLED_FOR_VOLUME_CHECK: SrVolumeCheckEnabledMerchant =
     SrVolumeCheckEnabledMerchant;
 
-pub const DEFAULT_SELECTION_BUCKET_TXN_VOLUME_THREHOLD: i64 = 5;
+pub const DEFAULT_SELECTION_BUCKET_TXN_VOLUME_THRESHOLD: i64 = 5;
 
 pub struct SrSelectionBucketVolumeThreshold;
 impl SC::ServiceConfigKey for SrSelectionBucketVolumeThreshold {

@@ -50,7 +50,7 @@ pub async fn find_bank_code(bank_code: String) -> Option<BankCode> {
     .await
     {
         Ok(db_record) => parse_juspay_bank_code(db_record).ok(),
-        Err(e) => None,
+        Err(_e) => None,
     }
 }
 

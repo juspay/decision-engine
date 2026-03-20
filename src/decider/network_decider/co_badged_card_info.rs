@@ -232,7 +232,7 @@ pub fn calculate_interchange_fee(
         &debit_routing.interchange_fee.regulated
     } else {
         logger::debug!("Non regulated bank");
-        debit_routing.get_non_regulated_interchange_fee(&merchant_category_code, network)?
+        debit_routing.get_non_regulated_interchange_fee(merchant_category_code, network)?
     };
 
     let percentage = fee_data.percentage;
@@ -304,8 +304,8 @@ pub fn calculate_total_fees_per_network(
         .map(|network| {
             let interchange_fee = calculate_interchange_fee(
                 &network,
-                &co_badged_cards_info,
-                &merchant_category_code,
+                co_badged_cards_info,
+                merchant_category_code,
                 amount,
                 debit_routing_config,
             )

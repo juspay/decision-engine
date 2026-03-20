@@ -80,7 +80,7 @@ pub async fn update_gateway_score(
             let payment_id = payload.payment_id.clone();
             let result = check_and_update_gateway_score_(payload).await;
             match result {
-                Ok(success) => {
+                Ok(_success) => {
                     API_REQUEST_COUNTER
                         .with_label_values(&["update_gateway_score", "success"])
                         .inc();
@@ -108,7 +108,7 @@ pub async fn update_gateway_score(
                 .with_label_values(&["update_gateway_score", "failure"])
                 .inc();
             timer.observe_duration();
-            return Err(ErrorResponse {
+            Err(ErrorResponse {
                 status: "400".to_string(),
                 error_code: "400".to_string(),
                 error_message: "Error parsing request".to_string(),
@@ -122,7 +122,7 @@ pub async fn update_gateway_score(
                 },
                 priority_logic_output: None,
                 is_dynamic_mga_enabled: false,
-            });
+            })
         }
     }
 }

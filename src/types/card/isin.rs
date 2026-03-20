@@ -1,6 +1,5 @@
-#[macro_use]
-use serde::{Deserialize, Serialize, Serializer};
 use crate::error::ApiError;
+use serde::{Deserialize, Serialize, Serializer};
 use std::convert::TryFrom;
 use std::option::Option;
 use std::string::String;

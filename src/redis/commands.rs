@@ -1,7 +1,6 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use crate::logger;
 use error_stack::Result;
 use error_stack::ResultExt;
 use fred::prelude::RedisKey;
@@ -9,35 +8,42 @@ use fred::types::SetOptions;
 use fred::{
     clients::Transaction,
     interfaces::{HashesInterface, KeysInterface, ListInterface, TransactionInterface},
-    types::{Expiration, FromRedis, MultipleValues, RedisValue},
+    types::{Expiration, FromRedis, MultipleValues},
 };
 use redis_interface::{errors, types::DelReply, RedisConnectionPool};
 use std::fmt::Debug;
+use std::str;
 
 use crate::config::CompressionFilepath;
-use crate::config::GlobalConfig;
-use crate::redis::feature;
+#[cfg(feature = "redis_compression")]
+use crate::logger;
+#[cfg(feature = "redis_compression")]
 use crate::redis::feature::{
     RedisCompressionConfig, RedisCompressionConfigCombined, RedisDataStruct,
 };
-use serde::de::DeserializeOwned;
-use std::collections::HashMap;
-use std::env;
-use std::fs::File;
-use std::io::{Cursor, Read};
-use std::str;
+#[cfg(not(feature = "redis_compression"))]
+use crate::redis::feature::{RedisCompressionConfigCombined, RedisDataStruct};
 #[cfg(feature = "redis_compression")]
-use zstd::{
-    bulk::Compressor,
-    dict::{DecoderDictionary, EncoderDictionary},
-    stream::{read::Decoder, write::Encoder},
-};
+use fred::types::RedisValue;
+#[cfg(feature = "redis_compression")]
+use serde::de::DeserializeOwned;
+#[cfg(feature = "redis_compression")]
+use std::env;
+#[cfg(feature = "redis_compression")]
+use std::fs::File;
+#[cfg(feature = "redis_compression")]
+use std::io::{Cursor, Read};
+#[cfg(feature = "redis_compression")]
+use zstd::bulk::Compressor;
+#[cfg(feature = "redis_compression")]
+use zstd::stream::read::Decoder;
 
 pub struct RedisConnectionWrapper {
     pub conn: RedisConnectionPool,
     pub compression_file_path: Option<CompressionFilepath>,
 }
 
+#[allow(dead_code)]
 const ZSTD_MAGIC_BYTES: &[u8] = &[0x28, 0xB5, 0x2F, 0xFD];
 
 impl RedisConnectionWrapper {
@@ -196,8 +202,8 @@ impl RedisConnectionWrapper {
         &self,
         key: &str,
         value: V,
-        redis_compression_config: Option<RedisCompressionConfigCombined>,
-        redis_type: RedisDataStruct,
+        _redis_compression_config: Option<RedisCompressionConfigCombined>,
+        _redis_type: RedisDataStruct,
     ) -> Result<(), errors::RedisError>
     where
         V: serde::Serialize + Debug,
@@ -253,14 +259,14 @@ impl RedisConnectionWrapper {
 
     #[cfg(feature = "redis_compression")]
     fn is_zstd_compressed(data: &[u8]) -> bool {
-        data.len() >= 4 && &data[..4] == [0x28, 0xB5, 0x2F, 0xFD]
+        data.len() >= 4 && data[..4] == [0x28, 0xB5, 0x2F, 0xFD]
     }
     #[cfg(feature = "redis_compression")]
     fn extract_dict_id_from_cdata(cdata: &[u8]) -> Option<String> {
         // Haskell magic: "(\181/\253"
         let magic_number: [u8; 4] = [0x28, 0xB5, 0x2F, 0xFD];
 
-        if cdata.len() > 9 && &cdata[0..4] == magic_number {
+        if cdata.len() > 9 && cdata[0..4] == magic_number {
             let cdata_wo_magic = &cdata[4..];
 
             let frame_header_w = cdata_wo_magic[0];
@@ -331,7 +337,7 @@ impl RedisConnectionWrapper {
     pub async fn get_key<T>(
         &self,
         key: &str,
-        type_name: &'static str,
+        _type_name: &'static str,
     ) -> Result<T, errors::RedisError>
     where
         T: DeserializeOwned,
@@ -495,10 +501,9 @@ impl RedisConnectionWrapper {
         value: &str,
         ttl: i64,
         option: SetOptions,
-        redis_compression_config: Option<RedisCompressionConfigCombined>,
-        redis_type: RedisDataStruct,
+        _redis_compression_config: Option<RedisCompressionConfigCombined>,
+        _redis_type: RedisDataStruct,
     ) -> Result<bool, errors::RedisError> {
-        // implement the redis query to set if it doesn't exist
         self.conn
             .pool
             .set(key, value, Some(Expiration::EX(ttl)), Some(option), false)
@@ -559,8 +564,8 @@ impl RedisConnectionWrapper {
         key: &str,
         value: &str,
         ttl: i64,
-        redis_compression_config: Option<RedisCompressionConfigCombined>,
-        redis_type: RedisDataStruct,
+        _redis_compression_config: Option<RedisCompressionConfigCombined>,
+        _redis_type: RedisDataStruct,
     ) -> Result<(), errors::RedisError> {
         self.conn
             .pool
@@ -623,7 +628,7 @@ impl RedisConnectionWrapper {
         &self,
         key: &str,
         field: &str,
-        type_name: &'static str,
+        _type_name: &'static str,
     ) -> Result<Option<T>, errors::RedisError>
     where
         T: serde::de::DeserializeOwned,

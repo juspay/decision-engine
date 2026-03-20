@@ -281,7 +281,7 @@ pub async fn getFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList {
     Utils::set_payment_flow_list(this, payment_flow_list);
 
     let mgas_ = match (
-        txn_detail.isEmi.unwrap_or(false) || Utils::is_reccuring_payment_transaction(&txn_detail),
+        txn_detail.isEmi.unwrap_or(false) || Utils::is_recurring_payment_transaction(&txn_detail),
         &enforce_gateway_list,
     ) {
         (false, _) => enabled_gateway_accounts.clone(),
@@ -431,7 +431,7 @@ pub fn filterMGAsByEnforcedPaymentFlows(
         .collect();
 
     // Get context from DeciderFlow
-    let txn_card_info = this.get().dpTxnCardInfo.clone();
+    let _txn_card_info = this.get().dpTxnCardInfo.clone();
     let oref = this.get().dpOrder.clone();
     let macc = this.get().dpMerchantAccount.clone();
     let txn_detail = this.get().dpTxnDetail.clone();
@@ -574,7 +574,7 @@ pub fn isMgaEligible(
     mgaEligibleSeamlessGateways: &[String],
     txn_detail: &TxnDetail,
 ) -> bool {
-    let payment_flow_list = Utils::get_payment_flow_list_from_txn_detail(&txn_detail);
+    let payment_flow_list = Utils::get_payment_flow_list_from_txn_detail(txn_detail);
     let is_otm_flow = payment_flow_list.contains(&"ONE_TIME_MANDATE".to_string());
     let is_pix_automatic_redirect_flow =
         payment_flow_list.contains(&"PIX_AUTOMATIC_REDIRECT".to_string());
@@ -675,7 +675,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
                 .await;
                 if isMerchantEnabledForCvvLessV2Flow {
                     let configResp = isPaymentFlowEnabledWithHierarchyCheck(
-                        mAcc.id.clone(),
+                        mAcc.id,
                         mAcc.tenantAccountId,
                         TC::MerchantConfig,
                         PF::Cvvless,
@@ -966,7 +966,7 @@ pub async fn filterGatewaysForBrand(this: &mut DeciderFlow<'_>) -> Vec<String> {
 /// - Others: filter out AMEX-not-supported and SODEXO-only gateways
 /// - Unknown brand: filter out AMEX-not-supported gateways
 pub async fn filterByCardBrand(
-    this: &mut DeciderFlow<'_>,
+    _this: &mut DeciderFlow<'_>,
     st: &[String],
     card_brand: Option<&str>,
 ) -> Vec<String> {
@@ -1036,7 +1036,7 @@ pub async fn filterGatewaysForAuthType(
     let txn_detail = this.get().dpTxnDetail.clone();
     let txn_card_info = this.get().dpTxnCardInfo.clone();
     let macc = this.get().dpMerchantAccount.clone();
-    let dynamic_mga_enabled = Utils::get_is_merchant_enabled_for_dynamic_mga_selection(this).await;
+    let _dynamic_mga_enabled = Utils::get_is_merchant_enabled_for_dynamic_mga_selection(this).await;
     // Only proceed with filtering if card ISIN is available
     if let Some(ref card_isin) = txn_card_info.card_isin {
         // Filter for OTP authentication type
@@ -1346,12 +1346,12 @@ pub async fn filterFunctionalGatewaysForOTMFlow(this: &mut DeciderFlow<'_>) -> V
     let txn_card_info = this.get().dpTxnCardInfo.clone();
 
     // Get merchant gateway accounts
-    let m_mgas = Utils::get_mgas(this);
+    let _m_mgas = Utils::get_mgas(this);
 
     // Check if this is a One-Time Mandate flow
     let payment_flow_list = Utils::get_payment_flow_list_from_txn_detail(&txn_detail);
     let is_otm_flow = payment_flow_list.contains(&"ONE_TIME_MANDATE".to_string());
-    let internal_tracking_info = txn_detail.internalTrackingInfo.clone();
+    let _internal_tracking_info = txn_detail.internalTrackingInfo.clone();
 
     if is_otm_flow {
         // Get order metadata and ref IDs
@@ -1459,10 +1459,8 @@ pub async fn filterFunctionalGatewaysForOTMFlow(this: &mut DeciderFlow<'_>) -> V
 pub async fn filterFunctionalGatewaysForPixFlows(this: &mut DeciderFlow<'_>) -> Vec<String> {
     /// Helper function to get the account details flag to be checked for PIX flows
     /// extend this for other pix flows.
-    fn get_acc_details_flag_to_be_checked(pf: &PaymentFlow) -> &str {
-        match pf {
-            _ => "enablePixAutomaticRedirect",
-        }
+    fn get_acc_details_flag_to_be_checked(_pf: &PaymentFlow) -> &str {
+        "enablePixAutomaticRedirect"
     }
 
     // Get current functional gateways
@@ -1942,7 +1940,7 @@ where
 /// Determines if a merchant gateway account matches the provided gateway reference ID
 /// Used for gateway reference ID based routing
 pub fn predicate(
-    this: &mut DeciderFlow<'_>,
+    _this: &mut DeciderFlow<'_>,
     mga: ETM::merchant_gateway_account::MerchantGatewayAccount,
     gw: String,
     metadata: HashMap<String, String>,
@@ -2203,7 +2201,7 @@ pub async fn filterGatewaysForTxnOfferDetails(this: &mut DeciderFlow<'_>) -> Vec
 /// Filters gateway list based on gateway routing rules defined in transaction offer details
 /// If force_routing is enabled, only keeps gateways that appear in both the input list and the offer routing rules
 pub async fn filterByGatewayRule(
-    this: &mut DeciderFlow<'_>,
+    _this: &mut DeciderFlow<'_>,
     txn_detail: &TxnDetail,
     gw_list_acc: Vec<String>,
     txn_offer_detail: &ETOD::TxnOfferDetail,
@@ -2669,13 +2667,13 @@ fn is_disjoint(gateways1: &Vec<String>, gateways2: &Vec<String>) -> bool {
 }
 
 async fn getGatewaysAcceptingPaymentMethod(
-    oref: &Order,
-    merchant_acc: &MerchantAccount,
+    _oref: &Order,
+    _merchant_acc: &MerchantAccount,
     eligible_mgas: &[MerchantGatewayAccount],
     gateways: &GatewayList,
     payment_method: &str,
-    proceed_with_all_mgas: bool,
-    is_dynamic_mga_enabled: bool,
+    _proceed_with_all_mgas: bool,
+    _is_dynamic_mga_enabled: bool,
 ) -> (GatewayList, Vec<MerchantGatewayAccount>) {
     let filtered_mgas: Vec<_> = eligible_mgas
         .iter()
@@ -3008,7 +3006,7 @@ pub fn filterForEMITenureSpecificMGAs(this: &mut DeciderFlow<'_>) -> Vec<String>
     // Return the gateway list with logging
     returnGwListWithLog(
         this,
-        DeciderFilterName::FilterGatewaysForEMITenureSpecficGatewayCreds,
+        DeciderFilterName::FilterGatewaysForEMITenureSpecificGatewayCreds,
         true,
     )
 }
@@ -3083,7 +3081,7 @@ pub async fn filterGatewaysForConsumerFinance(this: &mut DeciderFlow<'_>) -> Vec
 pub async fn filterGatewaysForUpi(this: &mut DeciderFlow<'_>) -> Vec<String> {
     let st = getGws(this);
     let txn_card_info = this.get().dpTxnCardInfo.clone();
-    let txn_detail = this.get().dpTxnDetail.clone();
+    let _txn_detail = this.get().dpTxnDetail.clone();
     let upi_only_gateways: Vec<String> =
         findByNameFromRedis::<Vec<String>>(C::UpiOnlyGateways.get_key())
             .await
@@ -3229,10 +3227,10 @@ fn getTxnTypeSupportedGateways(
 }
 
 /// Filters gateways and merchant gateway accounts based on UPI payment flow support
-/// Checks both V2 integration and UPI intent capabilities
+/// Checks both V2 integration and UPI Intent capabilities
 pub fn filterGatewaysForUpiPayBasedOnSupportedFlow(
-    this: &mut DeciderFlow<'_>,
-    gws: Vec<String>,
+    _this: &mut DeciderFlow<'_>,
+    _gws: Vec<String>,
     mgas: Vec<MerchantGatewayAccount>,
     v2_integration_not_supported_gateways: Vec<String>,
     upi_intent_not_supported_gateways: Vec<String>,

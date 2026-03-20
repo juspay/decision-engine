@@ -168,10 +168,7 @@ pub async fn get_all_mgpmf_by_mga_id_and_gpmf_ids(
     )
     .await
     {
-        Ok(db_results) => db_results
-            .into_iter()
-            .filter_map(|db_record| MerchantGatewayPaymentMethodFlow::try_from(db_record).ok())
-            .collect(),
+        Ok(db_results) => db_results.into_iter().map(From::from).collect(),
         Err(_) => Vec::new(), // Silently handle any errors by returning empty vec
     }
 }

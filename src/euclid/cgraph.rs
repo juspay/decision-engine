@@ -40,11 +40,11 @@ pub enum AnalysisTrace {
     },
 
     AllAggregation {
-        unsatisfied: Vec<AnalysisTrace>,
+        unsatisfied: Vec<Self>,
     },
 
     AnyAggregation {
-        unsatisfied: Vec<AnalysisTrace>,
+        unsatisfied: Vec<Self>,
     },
 }
 
@@ -510,9 +510,7 @@ mod tests {
         };
 
         let config = Config {
-            graph_config: GraphConfig {
-                graph,
-            },
+            graph_config: GraphConfig { graph },
         };
 
         let string = toml::to_string(&config).expect("failed toml conversion");

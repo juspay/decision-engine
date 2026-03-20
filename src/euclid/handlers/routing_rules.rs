@@ -34,15 +34,16 @@ use crate::error::ContainerError;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
 use serde_json::{json, Value};
 
+#[allow(dead_code)]
 const DEFAULT_FALLBACK_IDENTIFIER: &str = "default_fallback_enabled";
-pub async fn config_sr_dimentions(
+pub async fn config_sr_dimensions(
     Json(payload): Json<SrDimensionConfig>,
 ) -> Result<Json<String>, ContainerError<EuclidErrors>> {
     let timer = metrics::API_LATENCY_HISTOGRAM
-        .with_label_values(&["config_sr_dimentions"])
+        .with_label_values(&["config_sr_dimensions"])
         .start_timer();
     metrics::API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["config_sr_dimentions"])
+        .with_label_values(&["config_sr_dimensions"])
         .inc();
     logger::debug!("Received SR Dimension config: {:?}", payload);
 
@@ -61,7 +62,7 @@ pub async fn config_sr_dimentions(
 
     if !invalid_dimensions.is_empty() {
         metrics::API_REQUEST_COUNTER
-            .with_label_values(&["config_sr_dimentions", "failure"])
+            .with_label_values(&["config_sr_dimensions", "failure"])
             .inc();
         timer.observe_duration();
 
@@ -107,7 +108,7 @@ pub async fn config_sr_dimentions(
 
     if let Err(_) = result {
         metrics::API_REQUEST_COUNTER
-            .with_label_values(&["config_sr_dimentions", "failure"])
+            .with_label_values(&["config_sr_dimensions", "failure"])
             .inc();
         timer.observe_duration();
         logger::error!(
@@ -117,7 +118,7 @@ pub async fn config_sr_dimentions(
         return Err(ContainerError::from(EuclidErrors::StorageError));
     }
     metrics::API_REQUEST_COUNTER
-        .with_label_values(&["config_sr_dimentions", "success"])
+        .with_label_values(&["config_sr_dimensions", "success"])
         .inc();
     timer.observe_duration();
     logger::debug!(
@@ -195,7 +196,7 @@ pub async fn routing_create(
                 .with_label_values(&["routing_create", "failure"])
                 .inc();
             timer.observe_duration();
-            return Err(err.into());
+            return Err(err);
         }
     }
 
@@ -275,7 +276,7 @@ pub async fn routing_evaluate(
     let default_output_present = payload
         .fallback_output
         .as_ref()
-        .map_or(false, |output| !output.is_empty());
+        .is_some_and(|output| !output.is_empty());
 
     // fetch the active routing_algorithm of the merchant
     let active_routing_algorithm_id = match crate::generics::generic_find_one::<
@@ -354,13 +355,12 @@ pub async fn routing_evaluate(
         RoutingAlgorithm,
     >(&state.db, dsl::id.eq(active_routing_algorithm_id.clone()))
     .await
-    .map_err(|e| {
+    .inspect_err(|&e| {
         logger::error!(
             ?e,
             "Failed to fetch RoutingAlgorithm for ID {:?}",
             active_routing_algorithm_id
         );
-        e
     })
     .change_context(EuclidErrors::StorageError)
     {
@@ -397,7 +397,7 @@ pub async fn routing_evaluate(
                 match evaluate_output(&out_enum).map_err(|_| {
                     EuclidErrors::FailedToEvaluateOutput(format!(
                         "{}",
-                        StaticRoutingAlgorithm::Single(conn.clone()).to_string()
+                        StaticRoutingAlgorithm::Single(conn.clone())
                     ))
                 }) {
                     Ok((_, eval)) => (out_enum, eval, Some("straight_through_rule".into())),
@@ -414,7 +414,7 @@ pub async fn routing_evaluate(
                 match evaluate_output(&out_enum).map_err(|_| {
                     EuclidErrors::FailedToEvaluateOutput(format!(
                         "{}",
-                        StaticRoutingAlgorithm::Priority(connectors.clone()).to_string()
+                        StaticRoutingAlgorithm::Priority(connectors.clone())
                     ))
                 }) {
                     Ok((_, eval)) => (out_enum, eval, Some("priority_rule".into())),
@@ -431,7 +431,7 @@ pub async fn routing_evaluate(
                 match evaluate_output(&out_enum).map_err(|_| {
                     EuclidErrors::FailedToEvaluateOutput(format!(
                         "{}",
-                        StaticRoutingAlgorithm::VolumeSplit(splits.clone()).to_string()
+                        StaticRoutingAlgorithm::VolumeSplit(splits.clone())
                     ))
                 }) {
                     Ok((_, eval)) => (out_enum, eval, Some("volume_split_rule".into())),
@@ -464,7 +464,7 @@ pub async fn routing_evaluate(
                                 ir.evaluated_output =
                                     vec![fallback_connector.first().cloned().unwrap_or_default()];
                             }
-                       }
+                        }
                         (ir.output, ir.evaluated_output, ir.rule_name)
                     }
                     Err(e) => {
@@ -808,6 +808,14 @@ pub(crate) fn eligibility_for_output(
     }
 
     apply_pm_filter_eligibility(pm_filter_bundle, parameters, connectors)
+}
+
+pub fn compute_routing_evaluate_eligibility(
+    pm_filter_bundle: Option<&pm_filter_graph::PmFilterGraphBundle>,
+    parameters: &std::collections::HashMap<String, Option<ValueType>>,
+    connectors: &[ConnectorInfo],
+) -> Vec<ConnectorInfo> {
+    eligibility_for_output(pm_filter_bundle, parameters, connectors)
 }
 
 pub(crate) fn apply_pm_filter_eligibility(

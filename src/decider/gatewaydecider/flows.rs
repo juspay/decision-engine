@@ -110,7 +110,7 @@ use crate::types::txn_details::types as ETTD;
 // );
 //             let request = T::transformRequest(req, merchant_acc, resolve_bin);
 // logger::debug!(
-//     tag = "enforeced gateway list",
+//     tag = "enforced gateway list",
 //     "{}",
 //     request.enforceGatewayList.to_string()
 // );
@@ -339,7 +339,7 @@ pub async fn run_decider_flow(
         deciderParams.dpTxnDetail.clone(),
         deciderParams.dpTxnCardInfo.clone(),
         deciderParams.dpMerchantAccount.clone(),
-        is_legacy_decider_flow.clone(),
+        is_legacy_decider_flow,
     )
     .await;
     let (functionalGateways, allMgas) = GF::newGwFilters(&mut decider_flow).await?;
@@ -370,10 +370,7 @@ pub async fn run_decider_flow(
 
     let dResult = match (
         preferredGateway.clone(),
-        deciderParams
-            .dpMerchantPrefs
-            .dynamicSwitchingEnabled
-            .clone(),
+        deciderParams.dpMerchantPrefs.dynamicSwitchingEnabled,
     ) {
         (Some(pgw), false) => {
             if functionalGateways.contains(&pgw) {
@@ -568,9 +565,9 @@ pub async fn run_decider_flow(
                     Some(updatedPriorityLogicOutput),
                     decider_flow.writer.is_dynamic_mga_enabled,
                 )),
-                gs => {
+                _gs => {
                     let maxScore = Utils::get_max_score_gateway(&currentGatewayScoreMap)
-                        .map(|(gw, score)| score);
+                        .map(|(_gw, score)| score);
                     let decidedGateway = Utils::random_gateway_selection_for_same_score(
                         &currentGatewayScoreMap,
                         maxScore,
@@ -597,8 +594,8 @@ pub async fn run_decider_flow(
 
                     let (
                         srEliminationInfo,
-                        isOptimizedBasedOnSRMetricEnabled,
-                        isSrV3MetricEnabled,
+                        _isOptimizedBasedOnSRMetricEnabled,
+                        _isSrV3MetricEnabled,
                         topGatewayBeforeSRDowntimeEvaluation,
                         isPrimaryGateway,
                         experimentTag,
@@ -711,7 +708,7 @@ pub async fn run_decider_flow(
             )
             .await
             .unwrap_or_default();
-        updated_gateway_scoring_data;
+        drop(updated_gateway_scoring_data);
     }
     match dResult {
         Ok(result) => Ok((
@@ -766,7 +763,7 @@ fn get_gateway_to_mga_id_map_f(
                 allMgas
                     .iter()
                     .find(|mga| mga.gateway == *x)
-                    .map(|mga| mga.id.merchantGwAccId.clone()),
+                    .map(|mga| mga.id.merchantGwAccId),
             )
         })
         .collect::<HashMap<_, _>>())
@@ -960,7 +957,7 @@ pub async fn getFailureReasonWithFilter(
 ) -> String {
     let txn_detail = &decider_flow.get().dpTxnDetail;
     let txn_card_info = &decider_flow.get().dpTxnCardInfo;
-    let macc = &decider_flow.get().dpMerchantAccount;
+    let _macc = &decider_flow.get().dpMerchantAccount;
     let order_reference = &decider_flow.get().dpOrder;
     let m_internal_meta = &decider_flow.writer.internalMetaData;
     let m_card_brand = &decider_flow.writer.cardBrand;
@@ -1213,7 +1210,7 @@ pub async fn getFailureReasonWithFilter(
             "Conflicting configurations found or no functional gateways supporting this transaction"
                 .to_string()
         }
-        "filterGatewaysForEMITenureSpecficGatewayCreds" => {
+        "filterGatewaysForEMITenureSpecificGatewayCreds" => {
             "No functional gateways supporting for emi.".to_string()
         }
         "FilterFunctionalGatewaysForReversePennyDrop" => {

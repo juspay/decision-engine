@@ -51,7 +51,11 @@ pub async fn update_score(
     let request_time = time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_else(|_| "unknown".to_string());
-    let query_params = original_url.splitn(2, '?').nth(1).unwrap_or("").to_string();
+    let query_params = original_url
+        .split_once('?')
+        .map(|x| x.1)
+        .unwrap_or("")
+        .to_string();
     tracing::Span::current().record("is_audit_trail_log", "true");
     // Buffer the body into memory
     let body_bytes = match to_bytes(req.into_body(), usize::MAX).await {
@@ -242,7 +246,7 @@ pub async fn update_score(
                 .with_label_values(&["update_score", "success"])
                 .inc();
             timer.observe_duration();
-            return Ok("Success");
+            Ok("Success")
         }
         Err(e) => {
             let error_response = ErrorResponse {
@@ -289,7 +293,7 @@ pub async fn update_score(
                 .with_label_values(&["update_score", "failure"])
                 .inc();
             timer.observe_duration();
-            return Err(error_response);
+            Err(error_response)
         }
     }
 }

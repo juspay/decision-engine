@@ -375,5 +375,5 @@ pub fn default_update_gateway_score_lock_flag_ttl() -> i32 {
 }
 
 pub fn default_sr_v3_latency_threshold_in_secs() -> f64 {
-    300 as f64
+    300_f64
 }

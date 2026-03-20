@@ -18,7 +18,7 @@ use crate::logger;
 pub struct StorageSubscription;
 
 /// Storage to store key value pairs of spans.
-/// When new entry is crated it stores it in [HashMap] which is owned by `extensions`.
+/// When new entry is created it stores it in [HashMap] which is owned by `extensions`.
 #[derive(Clone, Debug)]
 pub struct Storage<'a> {
     /// Hash map to store values.

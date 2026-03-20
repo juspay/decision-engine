@@ -54,12 +54,12 @@ pub async fn decider_full_payload_hs_function(
     // check if type formation is correct
     let merchant_prefs = ETM::merchant_iframe_preferences::MerchantIframePreferences {
         id: ETM::merchant_iframe_preferences::to_merchant_iframe_prefs_pid(
-            crate::types::merchant::id::merchant_pid_to_text(merchant_account.id.clone()),
+            crate::types::merchant::id::merchant_pid_to_text(merchant_account.id),
         ),
         merchantId: merchant_account.merchantId.clone(),
         dynamicSwitchingEnabled: enforced_gateway_filter
             .as_ref()
-            .map(|list| !(list.len() <= 1))
+            .map(|list| list.len() > 1)
             .unwrap_or(false),
         isinRoutingEnabled: false,
         issuerRoutingEnabled: false,
@@ -157,7 +157,7 @@ pub async fn run_decider_flow(
         deciderParams.dpTxnDetail.clone(),
         deciderParams.dpTxnCardInfo.clone(),
         deciderParams.dpMerchantAccount.clone(),
-        is_legacy_decider_flow.clone(),
+        is_legacy_decider_flow,
     )
     .await;
     let functionalGateways = deciderParams
@@ -184,10 +184,7 @@ pub async fn run_decider_flow(
 
     let dResult = match (
         preferredGateway.clone(),
-        deciderParams
-            .dpMerchantPrefs
-            .dynamicSwitchingEnabled
-            .clone(),
+        deciderParams.dpMerchantPrefs.dynamicSwitchingEnabled,
     ) {
         (Some(pgw), false) => {
             if functionalGateways.contains(&pgw) {
@@ -398,9 +395,9 @@ pub async fn run_decider_flow(
                     Some(updatedPriorityLogicOutput),
                     decider_flow.writer.is_dynamic_mga_enabled,
                 )),
-                gs => {
+                _gs => {
                     let maxScore = Utils::get_max_score_gateway(&currentGatewayScoreMap)
-                        .map(|(gw, score)| score);
+                        .map(|(_gw, score)| score);
                     let decidedGateway = Utils::random_gateway_selection_for_same_score(
                         &currentGatewayScoreMap,
                         maxScore,
@@ -426,8 +423,8 @@ pub async fn run_decider_flow(
 
                     let (
                         srEliminationInfo,
-                        isOptimizedBasedOnSRMetricEnabled,
-                        isSrV3MetricEnabled,
+                        _isOptimizedBasedOnSRMetricEnabled,
+                        _isSrV3MetricEnabled,
                         topGatewayBeforeSRDowntimeEvaluation,
                         isPrimaryGateway,
                         experimentTag,
@@ -541,11 +538,11 @@ pub async fn run_decider_flow(
         )
         .await
         .unwrap_or_default();
-    updated_gateway_scoring_data;
+    drop(updated_gateway_scoring_data);
     match dResult {
         Ok(result) => Ok(result),
         Err((
-            debugFilterList,
+            _debugFilterList,
             _,
             priorityLogicTag,
             finalDeciderApproach,
@@ -571,10 +568,7 @@ pub async fn run_decider_flow(
 }
 
 #[allow(dead_code)]
-fn get_gateway_to_mga_id_map_f(
-    allMgas: &Vec<MerchantGatewayAccount>,
-    gateways: &Vec<String>,
-) -> AValue {
+fn get_gateway_to_mga_id_map_f(allMgas: &[MerchantGatewayAccount], gateways: &[String]) -> AValue {
     json!(gateways
         .iter()
         .map(|x| {
@@ -583,7 +577,7 @@ fn get_gateway_to_mga_id_map_f(
                 allMgas
                     .iter()
                     .find(|mga| mga.gateway == *x)
-                    .map(|mga| mga.id.merchantGwAccId.clone()),
+                    .map(|mga| mga.id.merchantGwAccId),
             )
         })
         .collect::<HashMap<_, _>>())
