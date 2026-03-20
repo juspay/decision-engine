@@ -1,15 +1,18 @@
-use crate::{
-    config::Database,
-    error::{self, ContainerError},
-    logger,
-};
+use crate::error::{self, ContainerError};
 
+#[cfg(feature = "mysql")]
+use crate::config::Database;
 #[cfg(feature = "postgres")]
 use crate::config::PgDatabase;
 
+#[cfg(feature = "mysql")]
+use crate::logger;
+
 use crate::generics::StorageResult;
 use bb8::PooledConnection;
+#[cfg(feature = "mysql")]
 use std::time::Duration;
+#[cfg(feature = "mysql")]
 use tokio::time;
 
 #[cfg(feature = "mysql")]

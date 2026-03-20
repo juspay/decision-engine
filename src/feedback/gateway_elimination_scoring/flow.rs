@@ -12,9 +12,6 @@ use crate::{
     },
 };
 
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::gateway_bank_emi_support::gateway;
-
 use crate::feedback::constants as C;
 
 use crate::decider::gatewaydecider::constants::{EnableEliminationV2, EnableOutageV2};

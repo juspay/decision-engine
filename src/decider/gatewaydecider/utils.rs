@@ -7,8 +7,6 @@ use crate::feedback::gateway_elimination_scoring::flow::{
 };
 use crate::redis::feature::{is_feature_enabled, RedisCompressionConfigCombined, RedisDataStruct};
 use crate::redis::types::ServiceConfigKey;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::gateway_bank_emi_support::gateway;
 use crate::types::card::card_type::card_type_to_text;
 use crate::types::country::country_iso::CountryISO2;
 use crate::types::currency::Currency;

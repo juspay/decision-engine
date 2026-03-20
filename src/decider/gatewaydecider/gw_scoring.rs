@@ -12,8 +12,6 @@ use crate::merchant_config_util::{
     isMerchantEnabledForPaymentFlows, isPaymentFlowEnabledWithHierarchyCheck,
 };
 use crate::redis::types::ServiceConfigKey;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::txn_detail;
 use crate::types::gateway_routing_input::{
     EliminationLevel, EliminationSuccessRateInput, GatewayScore,
     GatewaySuccessRateBasedRoutingInput, GatewayWiseSuccessRateBasedRoutingInput,

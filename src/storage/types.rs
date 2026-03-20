@@ -2,6 +2,7 @@ use crate::decider::gatewaydecider::{self, types};
 use crate::decider::network_decider;
 use crate::error;
 use crate::utils::CustomResult;
+#[cfg(feature = "mysql")]
 use diesel::sql_types::Bit;
 #[cfg(feature = "postgres")]
 use diesel::sql_types::Bool;
@@ -16,6 +17,7 @@ use diesel::mysql::Mysql;
 #[cfg(feature = "postgres")]
 use diesel::pg::Pg;
 use diesel::serialize::{IsNull, Output};
+#[cfg(feature = "mysql")]
 use diesel::sql_types::Binary;
 use diesel::*;
 use diesel::{
