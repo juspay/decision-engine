@@ -141,7 +141,7 @@ where
     <V as Insertable<T>>::Values: CanInsertInSingleQuery<Pg> + QueryFragment<Pg> + 'static,
     InsertStatement<T, <V as Insertable<T>>::Values>: AsQuery + ExecuteDsl<PgConnection, Pg> + Send,
 {
-    let debug_values = format!("{values:?}");
+    let _debug_values = format!("{values:?}");
     let query = diesel::insert_into(<T as HasTable>::table()).values(values);
     logger::debug!(
         action = "generic_insert",

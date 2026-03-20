@@ -65,9 +65,6 @@ pub type MysqlPoolConn = async_bb8_diesel::Connection<diesel::MysqlConnection>;
 pub type MysqlPool = bb8::Pool<MysqlPooledConn>;
 
 #[cfg(feature = "postgres")]
-type DeadPoolConnType = Object<AsyncPgConnection>;
-
-#[cfg(feature = "postgres")]
 impl Storage {
     /// Create a new storage interface from configuration
     pub async fn new(
@@ -89,7 +86,7 @@ impl Storage {
             pooled_connection::AsyncDieselConnectionManager::<AsyncPgConnection>::new(database_url);
         let pool = Pool::builder(config);
 
-        let pool = match database.pg_pool_size {
+        let _pool = match database.pg_pool_size {
             Some(value) => pool.max_size(value),
             None => pool,
         };
@@ -103,7 +100,7 @@ impl Storage {
     {
         match self.pg_pool.get().await {
             Ok(conn) => Ok(conn),
-            Err(err) => Err(crate::generics::MeshError::DatabaseConnectionError),
+            Err(_err) => Err(crate::generics::MeshError::DatabaseConnectionError),
         }
     }
 }
@@ -184,7 +181,7 @@ pub(crate) trait TestInterface {
 pub async fn diesel_make_pg_pool(
     database: &PgDatabase,
     schema: &str,
-    test_transaction: bool,
+    _test_transaction: bool,
 ) -> error_stack::Result<PgPool, error::StorageError> {
     let database_url = format!(
         "postgres://{}:{}@{}:{}/{}?application_name={}&options=-c search_path%3D{}",
