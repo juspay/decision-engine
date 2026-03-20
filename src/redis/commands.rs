@@ -12,11 +12,27 @@ use fred::{
 };
 use redis_interface::{errors, types::DelReply, RedisConnectionPool};
 use std::fmt::Debug;
+use std::str;
 
 use crate::config::CompressionFilepath;
+#[cfg(feature = "redis_compression")]
+use crate::logger;
+#[cfg(feature = "redis_compression")]
+use crate::redis::feature::{
+    RedisCompressionConfig, RedisCompressionConfigCombined, RedisDataStruct,
+};
 #[cfg(not(feature = "redis_compression"))]
 use crate::redis::feature::{RedisCompressionConfigCombined, RedisDataStruct};
-use std::str;
+#[cfg(feature = "redis_compression")]
+use fred::types::RedisValue;
+#[cfg(feature = "redis_compression")]
+use serde::de::DeserializeOwned;
+#[cfg(feature = "redis_compression")]
+use std::env;
+#[cfg(feature = "redis_compression")]
+use std::fs::File;
+#[cfg(feature = "redis_compression")]
+use std::io::Cursor;
 #[cfg(feature = "redis_compression")]
 use zstd::{
     bulk::Compressor,

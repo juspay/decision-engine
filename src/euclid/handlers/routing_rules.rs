@@ -810,6 +810,14 @@ pub(crate) fn eligibility_for_output(
     apply_pm_filter_eligibility(pm_filter_bundle, parameters, connectors)
 }
 
+pub fn compute_routing_evaluate_eligibility(
+    pm_filter_bundle: Option<&pm_filter_graph::PmFilterGraphBundle>,
+    parameters: &std::collections::HashMap<String, Option<ValueType>>,
+    connectors: &[ConnectorInfo],
+) -> Vec<ConnectorInfo> {
+    eligibility_for_output(pm_filter_bundle, parameters, connectors)
+}
+
 pub(crate) fn apply_pm_filter_eligibility(
     bundle: Option<&pm_filter_graph::PmFilterGraphBundle>,
     parameters: &std::collections::HashMap<String, Option<ValueType>>,
