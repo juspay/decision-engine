@@ -410,8 +410,8 @@ impl FromSql<Binary, Mysql> for BitBool {
 impl ToSql<Bool, Pg> for BitBool {
     fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> diesel::serialize::Result {
         match *self {
-            BitBool(true) => out.write_all(&[1])?,
-            BitBool(false) => out.write_all(&[0])?,
+            Self(true) => out.write_all(&[1])?,
+            Self(false) => out.write_all(&[0])?,
         }
         Ok(IsNull::No)
     }
@@ -421,8 +421,8 @@ impl ToSql<Bool, Pg> for BitBool {
 impl FromSql<Bool, Pg> for BitBool {
     fn from_sql(bytes: <Pg as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
         match bytes.as_bytes().first() {
-            Some(&1) => Ok(BitBool(true)),
-            _ => Ok(BitBool(false)),
+            Some(&1) => Ok(Self(true)),
+            _ => Ok(Self(false)),
         }
     }
 }
@@ -461,8 +461,8 @@ impl FromSql<Binary, Mysql> for BitBoolWrite {
 impl ToSql<Bool, Pg> for BitBoolWrite {
     fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> diesel::serialize::Result {
         match *self {
-            BitBoolWrite(true) => out.write_all(&[1])?,
-            BitBoolWrite(false) => out.write_all(&[0])?,
+            Self(true) => out.write_all(&[1])?,
+            Self(false) => out.write_all(&[0])?,
         }
         Ok(IsNull::No)
     }
@@ -473,8 +473,8 @@ impl FromSql<Bool, Pg> for BitBoolWrite {
     fn from_sql(bytes: <Pg as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
         // Should be Pg
         match bytes.as_bytes().first() {
-            Some(&1) => Ok(BitBoolWrite(true)),
-            _ => Ok(BitBoolWrite(false)),
+            Some(&1) => Ok(Self(true)),
+            _ => Ok(Self(false)),
         }
     }
 }

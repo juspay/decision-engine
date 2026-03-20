@@ -13,7 +13,7 @@ macro_rules! impl_to_sql_from_sql_text_mysql {
                 &'b self,
                 out: &mut ::diesel::serialize::Output<'b, '_, ::diesel::mysql::Mysql>,
             ) -> ::diesel::serialize::Result {
-                use ::std::io::Write;
+                use std::io::Write;
                 out.write_all(self.to_string().as_bytes())?;
                 Ok(::diesel::serialize::IsNull::No)
             }
@@ -25,7 +25,7 @@ macro_rules! impl_to_sql_from_sql_text_mysql {
             fn from_sql(
                 value: ::diesel::mysql::MysqlValue<'_>,
             ) -> ::diesel::deserialize::Result<Self> {
-                use ::core::str::FromStr;
+                use core::str::FromStr;
                 let s = ::core::str::from_utf8(value.as_bytes())?;
                 <$type>::from_str(s).map_err(|_| "Unrecognized enum variant".into())
             }
@@ -40,15 +40,15 @@ macro_rules! impl_to_sql_from_sql_text_pg {
                 &'b self,
                 out: &mut ::diesel::serialize::Output<'b, '_, ::diesel::pg::Pg>,
             ) -> ::diesel::serialize::Result {
-                use ::std::io::Write;
+                use std::io::Write;
                 out.write_all(self.to_string().as_bytes())?;
                 Ok(::diesel::serialize::IsNull::No)
             }
         }
 
         impl ::diesel::deserialize::FromSql<::diesel::sql_types::Text, ::diesel::pg::Pg> for $type {
-            fn from_sql(value: ::diesel::pg::PgValue) -> ::diesel::deserialize::Result<Self> {
-                use ::core::str::FromStr;
+            fn from_sql(value: ::diesel::pg::PgValue<'_>) -> ::diesel::deserialize::Result<Self> {
+                use core::str::FromStr;
                 let s = ::core::str::from_utf8(value.as_bytes())?;
                 <$type>::from_str(s).map_err(|_| "Unrecognized enum variant".into())
             }

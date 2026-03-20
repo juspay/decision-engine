@@ -95,7 +95,7 @@ impl Storage {
         };
 
         let pool = diesel_make_pg_pool(database, schema, false).await?;
-        return Ok(Self { pg_pool: pool });
+        Ok(Self { pg_pool: pool })
     }
     pub async fn get_conn(
         &self,

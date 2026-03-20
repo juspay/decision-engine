@@ -259,7 +259,7 @@ impl RedisConnectionWrapper {
 
     #[cfg(feature = "redis_compression")]
     fn is_zstd_compressed(data: &[u8]) -> bool {
-        data.len() >= 4 && &data[..4] == [0x28, 0xB5, 0x2F, 0xFD]
+        data.len() >= 4 && data[..4] == [0x28, 0xB5, 0x2F, 0xFD]
     }
     #[cfg(feature = "redis_compression")]
     fn extract_dict_id_from_cdata(cdata: &[u8]) -> Option<String> {

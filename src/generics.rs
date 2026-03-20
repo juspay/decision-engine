@@ -99,8 +99,8 @@ where
     <V as Insertable<T>>::Values: CanInsertInSingleQuery<Pg> + QueryFragment<Pg> + 'static,
     InsertStatement<T, <V as Insertable<T>>::Values>: AsQuery + ExecuteDsl<PgConnection, Pg> + Send,
 {
-    let mut conn = storage.get_conn().await.map_err(|_| MeshError::Others)?;
-    generic_insert_core::<T, _>(&mut conn, values).await
+    let conn = storage.get_conn().await.map_err(|_| MeshError::Others)?;
+    generic_insert_core::<T, _>(&conn, values).await
 }
 
 #[cfg(feature = "mysql")]
