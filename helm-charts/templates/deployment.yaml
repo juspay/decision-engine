@@ -64,8 +64,14 @@ spec:
           env:
             - name: GROOVY_RUNNER_HOST
               value: "{{ include "decision-engine.groovyRunnerName" . }}:{{ .Values.groovyRunner.service.port }}"
-          {{- with .Values.extraEnvVars }}
-            {{- toYaml . | nindent 12 }}
+          {{- range $name, $value := .Values.extraEnvVars }}
+            - name: {{ $name }}
+            {{- if and (kindIs "map" $value) $value.valueFrom }}
+              valueFrom:
+                {{- toYaml $value.valueFrom | nindent 16 }}
+            {{- else }}
+              value: {{ $value | quote }}
+            {{- end }}
           {{- end }}
 
           livenessProbe:

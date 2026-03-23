@@ -219,8 +219,23 @@ routingConfig:
     # Path to mount routing config files
     mountPath: "/app"
 
-# Additional environment variables to inject into the main container
-extraEnvVars: []
+# Additional environment variables to inject into the main container (map format for proper merging)
+# Supports both simple values and valueFrom references for secrets/configmaps
+extraEnvVars: {}
+  # Simple value example:
+  # MY_VAR: "my-value"
+  # Secret reference example:
+  # DB_PASSWORD:
+  #   valueFrom:
+  #     secretKeyRef:
+  #       name: decision-engine-secrets
+  #       key: LOCKER__PG_DATABASE__PG_PASSWORD
+  # ConfigMap reference example:
+  # APP_CONFIG:
+  #   valueFrom:
+  #     configMapKeyRef:
+  #       name: app-config
+  #       key: config.json
 
 # Istio configuration (optional)
 istio:
