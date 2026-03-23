@@ -219,8 +219,11 @@ routingConfig:
     # Path to mount routing config files
     mountPath: "/app"
 
-# Additional environment variables to inject into the main container
-extraEnvVars: []
+# Additional environment variables to inject into the main container (map format for proper merging)
+extraEnvVars: {}
+  # Example:
+  # MY_VAR: "my-value"
+  # ANOTHER_VAR: "another-value"
 
 # Istio configuration (optional)
 istio:
