@@ -66,7 +66,12 @@ spec:
               value: "{{ include "decision-engine.groovyRunnerName" . }}:{{ .Values.groovyRunner.service.port }}"
           {{- range $name, $value := .Values.extraEnvVars }}
             - name: {{ $name }}
+            {{- if and (kindIs "map" $value) $value.valueFrom }}
+              valueFrom:
+                {{- toYaml $value.valueFrom | nindent 16 }}
+            {{- else }}
               value: {{ $value | quote }}
+            {{- end }}
           {{- end }}
 
           livenessProbe:
