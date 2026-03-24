@@ -1,5 +1,5 @@
-use crate::euclid::types::RoutingRequest;
 use crate::decider::gatewaydecider::types::DomainDeciderRequestForApiCallV2;
+use crate::euclid::types::RoutingRequest;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
