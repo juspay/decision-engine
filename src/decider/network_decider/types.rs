@@ -303,7 +303,7 @@ pub struct CoBadgedCardInfoResponse {
 
 impl From<DebitRoutingRequestData> for CoBadgedCardInfoResponse {
     fn from(co_badged_card_data: DebitRoutingRequestData) -> Self {
-        CoBadgedCardInfoResponse {
+        Self {
             co_badged_card_networks: co_badged_card_data.co_badged_card_networks,
             issuer_country: co_badged_card_data.issuer_country,
             is_regulated: co_badged_card_data.is_regulated,

@@ -252,7 +252,7 @@ where
         )
         .route(
             "/config-sr-dimension",
-            axum::routing::post(crate::euclid::handlers::routing_rules::config_sr_dimentions),
+            axum::routing::post(crate::euclid::handlers::routing_rules::config_sr_dimensions),
         );
     let router = router.route("/update-score", post(routes::update_score::update_score));
     let router = router.route(

@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_in_result)]
+
 use open_router::{logger, tenant::GlobalAppState};
 
 #[allow(clippy::expect_used)]

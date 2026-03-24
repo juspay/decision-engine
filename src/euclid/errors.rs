@@ -72,7 +72,7 @@ impl ValidationErrorDetails {
 impl axum::response::IntoResponse for EuclidErrors {
     fn into_response(self) -> axum::response::Response {
         match self {
-            EuclidErrors::InvalidRuleConfiguration => (
+            Self::InvalidRuleConfiguration => (
                 hyper::StatusCode::BAD_REQUEST,
                 axum::Json(ApiErrorResponse::new(
                     error_codes::TE_04,
@@ -82,7 +82,7 @@ impl axum::response::IntoResponse for EuclidErrors {
             )
                 .into_response(),
 
-            EuclidErrors::InvalidRequestParameter(param) => (
+            Self::InvalidRequestParameter(param) => (
                 hyper::StatusCode::BAD_REQUEST,
                 axum::Json(ApiErrorResponse::new(
                     error_codes::TE_04,
@@ -95,7 +95,7 @@ impl axum::response::IntoResponse for EuclidErrors {
             )
                 .into_response(),
 
-            EuclidErrors::FailedToValidateRoutingRule => (
+            Self::FailedToValidateRoutingRule => (
                 hyper::StatusCode::BAD_REQUEST,
                 axum::Json(ApiErrorResponse::new(
                     error_codes::TE_04,
@@ -105,7 +105,7 @@ impl axum::response::IntoResponse for EuclidErrors {
             )
                 .into_response(),
 
-            EuclidErrors::InvalidRequest(msg) => (
+            Self::InvalidRequest(msg) => (
                 hyper::StatusCode::BAD_REQUEST,
                 axum::Json(ApiErrorResponse::new(
                     error_codes::TE_04,
@@ -118,7 +118,7 @@ impl axum::response::IntoResponse for EuclidErrors {
             )
                 .into_response(),
 
-            EuclidErrors::GlobalRoutingConfigsUnavailable => (
+            Self::GlobalRoutingConfigsUnavailable => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
                 axum::Json(ApiErrorResponse::new(
                     error_codes::TE_04,
@@ -128,7 +128,7 @@ impl axum::response::IntoResponse for EuclidErrors {
             )
                 .into_response(),
 
-            EuclidErrors::StorageError => (
+            Self::StorageError => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
                 axum::Json(ApiErrorResponse::new(
                     error_codes::TE_04,
@@ -138,7 +138,7 @@ impl axum::response::IntoResponse for EuclidErrors {
             )
                 .into_response(),
 
-            EuclidErrors::FailedToParseJsonInput => (
+            Self::FailedToParseJsonInput => (
                 hyper::StatusCode::BAD_REQUEST,
                 axum::Json(ApiErrorResponse::new(
                     error_codes::TE_04,
@@ -148,7 +148,7 @@ impl axum::response::IntoResponse for EuclidErrors {
             )
                 .into_response(),
 
-            EuclidErrors::FailedToSerializeJsonToString => (
+            Self::FailedToSerializeJsonToString => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
                 axum::Json(ApiErrorResponse::new(
                     error_codes::TE_04,
@@ -158,7 +158,7 @@ impl axum::response::IntoResponse for EuclidErrors {
             )
                 .into_response(),
 
-            EuclidErrors::ActiveRoutingAlgorithmNotFound(msg) => (
+            Self::ActiveRoutingAlgorithmNotFound(msg) => (
                 hyper::StatusCode::BAD_REQUEST,
                 axum::Json(ApiErrorResponse::new(
                     error_codes::TE_04,
@@ -171,7 +171,7 @@ impl axum::response::IntoResponse for EuclidErrors {
             )
                 .into_response(),
 
-            EuclidErrors::RoutingAlgorithmNotFound(msg) => (
+            Self::RoutingAlgorithmNotFound(msg) => (
                 hyper::StatusCode::BAD_REQUEST,
                 axum::Json(ApiErrorResponse::new(
                     error_codes::TE_04,
@@ -184,7 +184,7 @@ impl axum::response::IntoResponse for EuclidErrors {
             )
                 .into_response(),
 
-            EuclidErrors::DefaultFallbackNotFound(creator_by) => (
+            Self::DefaultFallbackNotFound(creator_by) => (
                 hyper::StatusCode::BAD_REQUEST,
                 axum::Json(ApiErrorResponse::new(
                     error_codes::TE_04,
@@ -197,7 +197,7 @@ impl axum::response::IntoResponse for EuclidErrors {
             )
                 .into_response(),
 
-            EuclidErrors::FailedToEvaluateOutput(msg) => (
+            Self::FailedToEvaluateOutput(msg) => (
                 hyper::StatusCode::BAD_REQUEST,
                 axum::Json(ApiErrorResponse::new(
                     error_codes::TE_04,
@@ -209,7 +209,7 @@ impl axum::response::IntoResponse for EuclidErrors {
                 )),
             ).into_response(),
 
-            EuclidErrors::RoutingInterpretationFailed => (
+            Self::RoutingInterpretationFailed => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
                 axum::Json(ApiErrorResponse::new(
                     error_codes::TE_04,
@@ -219,7 +219,7 @@ impl axum::response::IntoResponse for EuclidErrors {
             )
                 .into_response(),
 
-            EuclidErrors::InvalidSrDimensionConfig(msg) => (
+            Self::InvalidSrDimensionConfig(msg) => (
                 hyper::StatusCode::BAD_REQUEST,
                 axum::Json(ApiErrorResponse::new(
                     error_codes::TE_04,
@@ -229,7 +229,7 @@ impl axum::response::IntoResponse for EuclidErrors {
             )
                 .into_response(),
 
-            EuclidErrors::FieldValidationFailed(msg) => (
+            Self::FieldValidationFailed(msg) => (
                 hyper::StatusCode::BAD_REQUEST,
                 axum::Json(ApiErrorResponse::new(
                     error_codes::TE_04,

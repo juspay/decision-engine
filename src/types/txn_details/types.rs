@@ -562,7 +562,7 @@ pub fn convert_safe_txn_detail_to_txn_detail(
             .unwrap(),
         dateCreated: safe_detail
             .dateCreated
-            .unwrap_or_else(|| OffsetDateTime::now_utc()),
+            .unwrap_or_else(OffsetDateTime::now_utc),
         orderId: safe_detail.orderId,
         status: TxnStatus::from_text(safe_detail.status).unwrap_or(TxnStatus::Failure),
         txnId: safe_detail.txnId,
@@ -582,9 +582,7 @@ pub fn convert_safe_txn_detail_to_txn_detail(
             }),
         netAmount: safe_detail.netAmount,
         txnAmount: safe_detail.txnAmount,
-        txnObjectType: safe_detail
-            .txnObjectType
-            .and_then(|s| TxnObjectType::from_text(s)),
+        txnObjectType: safe_detail.txnObjectType.and_then(TxnObjectType::from_text),
         sourceObject: safe_detail.sourceObject,
         sourceObjectId: safe_detail.sourceObjectId.map(to_source_object_id),
         currency: safe_detail

@@ -1,2 +1,82 @@
 [default]
 check-filename = true
+
+# Ignore 2-3 letter all-caps identifiers (likely codes/abbreviations)
+# and 2-3 letter lowercase identifiers (likely variable names)
+extend-ignore-identifiers-re = [
+    "^[A-Z]{2,3}$",
+    "^[a-z]{2,3}$",
+]
+
+# Module/type aliases used throughout the codebase
+[default.extend-identifiers]
+HasTable = "HasTable"
+ETO = "ETO"
+ETCC = "ETCC"
+ETM = "ETM"
+ETD = "ETD"
+ETCa = "ETCa"
+ETTD = "ETTD"
+ETOd = "ETOd"
+ETMo = "ETMo"
+TE = "TE"
+ser = "ser"
+
+# ISO 3166-1 alpha-3 country codes
+CAF = "CAF"
+NAM = "NAM"
+SOM = "SOM"
+THA = "THA"
+FO = "FO"
+
+# ISO 4217 currency codes
+ZAR = "ZAR"
+
+# Common abbreviations in code (e.g., ect = extendedCardType)
+ect = "ect"
+
+# CamelCase identifiers (Mis = Mismatch, etc.)
+Mis = "Mis"
+
+# Time zones (IST = Indian Standard Time)
+IST = "IST"
+Ist = "Ist"
+ist = "ist"
+
+# Order Type abbreviation
+OT = "OT"
+
+# Value Added Services (banking term)
+VAS = "VAS"
+Vas = "Vas"
+
+# JWT library API term
+encrypter = "encrypter"
+
+[default.extend-words]
+# Project-specific terms that are valid
+incase = "incase"
+# Database column name (would require migration to fix)
+penality = "penality"
+# HashiCorp (company name)
+hashi = "hashi"
+# CamelCase function name (Mismatch)
+Mis = "Mis"
+# Time zones (Indian Standard Time)
+IST = "IST"
+Ist = "Ist"
+ist = "ist"
+# Order Type abbreviation
+OT = "OT"
+# Value Added Services (banking term)
+VAS = "VAS"
+Vas = "Vas"
+# JWT library API term
+encrypter = "encrypter"
+
+[files]
+extend-exclude = [
+    # Exclude non-source files
+    "*.groovy",
+    "**/Untitled*",
+]

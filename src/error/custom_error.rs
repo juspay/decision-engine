@@ -109,7 +109,7 @@ pub enum RuleConfigurationError {
 impl axum::response::IntoResponse for RuleConfigurationError {
     fn into_response(self) -> axum::response::Response {
         match self {
-            RuleConfigurationError::StorageError => (
+            Self::StorageError => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
                 axum::Json(crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
@@ -118,7 +118,7 @@ impl axum::response::IntoResponse for RuleConfigurationError {
                 )),
             )
                 .into_response(),
-            RuleConfigurationError::DeserializationError => (
+            Self::DeserializationError => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
                 axum::Json(crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
@@ -127,7 +127,7 @@ impl axum::response::IntoResponse for RuleConfigurationError {
                 )),
             )
                 .into_response(),
-            RuleConfigurationError::InvalidRuleConfiguration => (
+            Self::InvalidRuleConfiguration => (
                 hyper::StatusCode::BAD_REQUEST,
                 axum::Json(crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
@@ -136,7 +136,7 @@ impl axum::response::IntoResponse for RuleConfigurationError {
                 )),
             )
                 .into_response(),
-            RuleConfigurationError::MerchantNotFound => (
+            Self::MerchantNotFound => (
                 hyper::StatusCode::NOT_FOUND,
                 axum::Json(crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
@@ -145,7 +145,7 @@ impl axum::response::IntoResponse for RuleConfigurationError {
                 )),
             )
                 .into_response(),
-            RuleConfigurationError::ConfigurationNotFound => (
+            Self::ConfigurationNotFound => (
                 hyper::StatusCode::NOT_FOUND,
                 axum::Json(crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
@@ -154,7 +154,7 @@ impl axum::response::IntoResponse for RuleConfigurationError {
                 )),
             )
                 .into_response(),
-            RuleConfigurationError::ConfigurationAlreadyExists => (
+            Self::ConfigurationAlreadyExists => (
                 hyper::StatusCode::BAD_REQUEST,
                 axum::Json(crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
@@ -186,7 +186,7 @@ pub enum MerchantAccountConfigurationError {
 impl axum::response::IntoResponse for MerchantAccountConfigurationError {
     fn into_response(self) -> axum::response::Response {
         match self {
-            MerchantAccountConfigurationError::StorageError => (
+            Self::StorageError => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
                 axum::Json(crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
@@ -195,7 +195,7 @@ impl axum::response::IntoResponse for MerchantAccountConfigurationError {
                 )),
             )
                 .into_response(),
-            MerchantAccountConfigurationError::InvalidConfiguration => (
+            Self::InvalidConfiguration => (
                 hyper::StatusCode::BAD_REQUEST,
                 axum::Json(crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
@@ -204,7 +204,7 @@ impl axum::response::IntoResponse for MerchantAccountConfigurationError {
                 )),
             )
                 .into_response(),
-            MerchantAccountConfigurationError::MerchantNotFound => (
+            Self::MerchantNotFound => (
                 hyper::StatusCode::NOT_FOUND,
                 axum::Json(crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
@@ -213,7 +213,7 @@ impl axum::response::IntoResponse for MerchantAccountConfigurationError {
                 )),
             )
                 .into_response(),
-            MerchantAccountConfigurationError::MerchantAlreadyExists => (
+            Self::MerchantAlreadyExists => (
                 hyper::StatusCode::BAD_REQUEST,
                 axum::Json(crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
@@ -222,7 +222,7 @@ impl axum::response::IntoResponse for MerchantAccountConfigurationError {
                 )),
             )
                 .into_response(),
-            MerchantAccountConfigurationError::MerchantDeletionFailed => (
+            Self::MerchantDeletionFailed => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
                 axum::Json(crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
@@ -231,7 +231,7 @@ impl axum::response::IntoResponse for MerchantAccountConfigurationError {
                 )),
             )
                 .into_response(),
-            MerchantAccountConfigurationError::MerchantInsertionFailed => (
+            Self::MerchantInsertionFailed => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
                 axum::Json(crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,

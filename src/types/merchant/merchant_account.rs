@@ -35,7 +35,7 @@ pub struct EnableTokenization {
     pub enable_issuer_tokenization: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct MerchantAccount {
     // #[serde(rename = "id")]
     pub id: MerchantPId,
@@ -75,6 +75,39 @@ pub struct MerchantAccount {
     pub priorityLogicConfig: Option<String>,
     // #[serde(rename = "merchantCategoryCode")]
     pub merchantCategoryCode: Option<String>,
+}
+
+impl Debug for MerchantAccount {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MerchantAccount")
+            .field("id", &self.id)
+            .field("merchantId", &self.merchantId)
+            .field("country", &self.country)
+            .field(
+                "gatewayDecidedByHealthEnabled",
+                &self.gatewayDecidedByHealthEnabled,
+            )
+            .field("gatewayPriority", &self.gatewayPriority)
+            .field("gatewayPriorityLogic", &self.gatewayPriorityLogic)
+            .field("useCodeForGatewayPriority", &self.useCodeForGatewayPriority)
+            .field("internalHashKey", &"[REDACTED]")
+            .field("userId", &self.userId)
+            .field("secondaryMerchantAccountId", &"[REDACTED]")
+            .field(
+                "enableGatewayReferenceIdBasedRouting",
+                &self.enableGatewayReferenceIdBasedRouting,
+            )
+            .field(
+                "gatewaySuccessRateBasedDeciderInput",
+                &self.gatewaySuccessRateBasedDeciderInput,
+            )
+            .field("internalMetadata", &"[REDACTED]")
+            .field("installmentEnabled", &self.installmentEnabled)
+            .field("tenantAccountId", &"[REDACTED]")
+            .field("priorityLogicConfig", &self.priorityLogicConfig)
+            .field("merchantCategoryCode", &self.merchantCategoryCode)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -135,9 +168,7 @@ impl TryFrom<DBMerchantAccount> for MerchantAccount {
             useCodeForGatewayPriority: value.use_code_for_gateway_priority.0,
             internalHashKey: value.internal_hash_key,
             userId: value.user_id,
-            secondaryMerchantAccountId: value
-                .secondary_merchant_account_id
-                .map(|mid| to_merchant_pid(mid)),
+            secondaryMerchantAccountId: value.secondary_merchant_account_id.map(to_merchant_pid),
             enableGatewayReferenceIdBasedRouting: value
                 .enable_gateway_reference_id_based_routing
                 .map(|f| f.0),
@@ -232,7 +263,7 @@ pub async fn delete_merchant_account(
     let conn = &app_state.db.get_conn().await?;
     // Use Diesel's query builder with multiple conditions
     crate::generics::generic_delete::<<DBMerchantAccount as HasTable>::Table, _>(
-        &conn,
+        conn,
         dsl::merchant_id.eq(merchant_id),
     )
     .await?;
@@ -254,7 +285,7 @@ pub async fn update_merchant_account(
         <DBMerchantAccount as HasTable>::Table,
         MerchantAccountUpdate,
         _,
-    >(&conn, dsl::merchant_id.eq(merchant_id), values)
+    >(conn, dsl::merchant_id.eq(merchant_id), values)
     .await?;
     Ok(())
 }

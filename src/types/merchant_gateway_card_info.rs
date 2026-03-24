@@ -87,10 +87,7 @@ pub async fn find_all_mgcis_by_macc_and_gci_p_id(
 ) -> Vec<MerchantGatewayCardInfo> {
     // Call the database function and handle results
     match find_all_mgcis_by_macc_and_gci_p_id_db(&m_pid, &gci_ids).await {
-        Ok(db_results) => db_results
-            .into_iter()
-            .filter_map(|db_record| MerchantGatewayCardInfo::try_from(db_record).ok())
-            .collect(),
+        Ok(db_results) => db_results.into_iter().map(From::from).collect(),
         Err(_) => Vec::new(), // Silently handle any errors by returning empty vec
     }
 }

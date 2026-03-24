@@ -13,7 +13,7 @@ pub async fn is_feature_enabled(f_name: String, mid: String, redis_name: String)
 
 // Original Haskell function: isFeatureEnabledWithMaybeDBConf
 pub async fn is_feature_enabled_with_maybe_db_conf(
-    maybe_db_conf: Option<String>,
+    _maybe_db_conf: Option<String>,
     f_name: String,
     mid: String,
     _: String,
@@ -137,16 +137,17 @@ pub enum RedisDataStruct {
     STRING,
     HASHMAP,
     STREAM,
-    STREAM_V2,
+    #[serde(rename = "STREAM_V2")]
+    StreamV2,
 }
 
 impl RedisDataStruct {
     pub fn as_str(&self) -> &'static str {
         match self {
-            RedisDataStruct::STRING => "STRING",
-            RedisDataStruct::HASHMAP => "HASHMAP",
-            RedisDataStruct::STREAM => "STREAM",
-            RedisDataStruct::STREAM_V2 => "STREAM_V2",
+            Self::STRING => "STRING",
+            Self::HASHMAP => "HASHMAP",
+            Self::STREAM => "STREAM",
+            Self::StreamV2 => "STREAM_V2",
         }
     }
 }

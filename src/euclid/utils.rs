@@ -238,7 +238,7 @@ fn validate_condition(
         (KeyDataType::Enum, ValueType::EnumVariantArray(arr)) => {
             let invalid: Vec<_> = arr
                 .iter()
-                .filter(|v| !is_valid_enum_value(config, &condition.lhs, *v))
+                .filter(|v| !is_valid_enum_value(config, &condition.lhs, v))
                 .cloned()
                 .collect();
             if !invalid.is_empty() {

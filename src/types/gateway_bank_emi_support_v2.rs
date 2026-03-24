@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use crate::app::get_tenant_app_state;
 use crate::error::ApiError;
 use crate::storage::types::GatewayBankEmiSupportV2 as DBGatewayBankEmiSupportV2;
-use std::i64;
 use std::string::String;
 use std::vec::Vec;
 // use types::utils::dbconfig::getEulerDbConf;

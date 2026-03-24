@@ -24,7 +24,7 @@ pub enum ConfigStatus {
 
 pub struct TenantConfigValueType {
     pub status: ConfigStatus,
-    pub configValue: Option<Box<TenantConfigValueType>>,
+    pub configValue: Option<Box<Self>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

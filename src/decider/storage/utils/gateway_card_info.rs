@@ -39,7 +39,7 @@ pub async fn get_supported_gateway_card_info_for_bins(
     card_bins: Vec<Option<String>>,
 ) -> Result<Vec<GatewayCardInfo>, ErrorResponse> {
     // Step 1: Query GatewayCardInfo with diesel
-    let gci_records: Vec<DBGatewayCardInfo> = match crate::generics::generic_find_all::<
+    let gci_records: Vec<DBGatewayCardInfo> = crate::generics::generic_find_all::<
         <DBGatewayCardInfo as HasTable>::Table,
         _,
         DBGatewayCardInfo,
@@ -50,10 +50,7 @@ pub async fn get_supported_gateway_card_info_for_bins(
             .and(dsl::disabled.eq(Some(BitBool(false)))),
     )
     .await
-    {
-        Ok(records) => records,
-        Err(_) => Vec::new(),
-    };
+    .unwrap_or_default();
 
     let gcis: Vec<i64> = gci_records.iter().map(|r| r.id).collect();
     if gcis.is_empty() {
@@ -61,7 +58,7 @@ pub async fn get_supported_gateway_card_info_for_bins(
     }
 
     // Step 2: Query MerchantGatewayCardInfo using diesel
-    let mgci_records: Vec<DBMerchantGatewayCardInfo> = match crate::generics::generic_find_all::<
+    let mgci_records: Vec<DBMerchantGatewayCardInfo> = crate::generics::generic_find_all::<
         <DBMerchantGatewayCardInfo as HasTable>::Table,
         _,
         DBMerchantGatewayCardInfo,
@@ -73,10 +70,7 @@ pub async fn get_supported_gateway_card_info_for_bins(
             .and(m_dsl::gateway_card_info_id.eq_any(gcis)),
     )
     .await
-    {
-        Ok(records) => records,
-        Err(_) => Vec::new(),
-    };
+    .unwrap_or_default();
 
     // Step 3: Filter GatewayCardInfo records
     let gcis_filtered: Vec<i64> = mgci_records

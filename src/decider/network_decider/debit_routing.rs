@@ -20,8 +20,7 @@ pub async fn perform_debit_routing(
     if let Some(metadata_value) = decider_request
         .payment_info
         .metadata
-        .map(|metadata_string| gateway_decider_utils::parse_json_from_string(&metadata_string))
-        .flatten()
+        .and_then(|metadata_string| gateway_decider_utils::parse_json_from_string(&metadata_string))
     {
         logger::debug!("Parsed debit routing metadata to json");
         match TryInto::<types::CoBadgedCardRequest>::try_into(metadata_value) {

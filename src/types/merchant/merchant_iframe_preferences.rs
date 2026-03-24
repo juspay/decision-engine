@@ -10,7 +10,6 @@ use crate::types::merchant::id::{to_merchant_id, MerchantId};
 // use juspay::extra::parsing::{Parsed, Step, defaulting, lift_pure, mandated, non_negative, parse_field, project};
 // use eulerhs::extra::combinators::to_domain_all;
 // use eulerhs::language::MonadFlow;
-use std::i64;
 use std::option::Option;
 use std::string::String;
 // use named::Named;
@@ -48,7 +47,7 @@ pub struct MerchantIframePreferences {
 
 impl From<DBMerchantIframePreferences> for MerchantIframePreferences {
     fn from(value: DBMerchantIframePreferences) -> Self {
-        MerchantIframePreferences {
+        Self {
             id: to_merchant_iframe_prefs_pid(value.id),
             merchantId: to_merchant_id(value.merchant_id),
             dynamicSwitchingEnabled: value.dynamic_switching_enabled.unwrap_or(BitBool(false)).0,

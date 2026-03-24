@@ -1538,7 +1538,7 @@ pub fn filterForEMITenureSpecificMGAs(this: &mut DeciderFlow) -> Vec<ETG::Gatewa
     }  
     
     // Return the gateway list with logging
-    returnGwListWithLog(this, DeciderFilterName::FilterGatewaysForEMITenureSpecficGatewayCreds, true)  
+    returnGwListWithLog(this, DeciderFilterName::FilterGatewaysForEMITenureSpecificGatewayCreds, true)  
 }
 
 /// Determines if an optional AValue represents a true value

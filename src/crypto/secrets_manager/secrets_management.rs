@@ -45,7 +45,7 @@ enum SecretsManagerClient {
     #[cfg(feature = "kms-aws")]
     AwsKms(AwsKmsClient),
     #[cfg(feature = "kms-hashicorp-vault")]
-    HashiCorp(HashiCorpVault),
+    HashiCorp(Box<HashiCorpVault>),
     NoEncryption(NoEncryption),
 }
 
@@ -89,7 +89,7 @@ impl SecretsManagementConfig {
             #[cfg(feature = "kms-hashicorp-vault")]
             Self::HashiCorpVault { hashi_corp_vault } => HashiCorpVault::new(hashi_corp_vault)
                 .change_context(SecretsManagementError::ClientCreationFailed)
-                .map(SecretsManagerClient::HashiCorp),
+                .map(|v| SecretsManagerClient::HashiCorp(Box::new(v))),
             Self::NoEncryption => Ok(SecretsManagerClient::NoEncryption(NoEncryption)),
         }
     }

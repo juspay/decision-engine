@@ -25,7 +25,7 @@ where
 //     }
 // }
 
-trait FromStrExt {
+pub trait FromStrExt {
     type Error;
     fn from_str(s: &str) -> Result<Self, Self::Error>
     where
