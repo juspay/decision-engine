@@ -1,8 +1,10 @@
 use crate::decider::gatewaydecider::flow_new::decider_full_payload_hs_function;
+use crate::decider::gatewaydecider::types::DecidedGateway;
 use crate::error::ContainerError;
 use crate::euclid::ast::ConnectorInfo;
 use crate::euclid::errors::EuclidErrors;
 use crate::euclid::handlers::routing_rules::routing_evaluate;
+use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
 use crate::types::hybrid_routing::HybridRoutingRequest;
 use axum::{response::IntoResponse, Json};
 use serde::Serialize;
@@ -13,7 +15,12 @@ fn to_json_value_or_invalid<T: Serialize>(
     context: &str,
 ) -> Result<serde_json::Value, ContainerError<EuclidErrors>> {
     serde_json::to_value(value).map_err(|err| {
-        EuclidErrors::InvalidRequest(format!("Failed to serialize {context}: {err}")).into()
+        crate::logger::error!(
+            serialization_context = context,
+            "Failed to serialize hybrid routing response field: {}",
+            err
+        );
+        EuclidErrors::FailedToSerializeJsonToString.into()
     })
 }
 
@@ -79,6 +86,13 @@ fn parse_dynamic_connector(connector_with_id: &str) -> ConnectorInfo {
     }
 }
 
+#[derive(Serialize)]
+struct DynamicRoutingEnvelope {
+    status: &'static str,
+    decision: Option<DecidedGateway>,
+    fallback_connectors: Option<Vec<ConnectorInfo>>,
+}
+
 /// Stores the normalized client-facing connector field.
 ///
 /// Clients should rely on `evaluated_connectors` for connector consumption
@@ -99,6 +113,13 @@ fn insert_evaluated_connectors(
 pub async fn hybrid_routing_evaluate(
     Json(payload): Json<HybridRoutingRequest>,
 ) -> Result<axum::response::Response, ContainerError<EuclidErrors>> {
+    let timer = API_LATENCY_HISTOGRAM
+        .with_label_values(&["hybrid_routing_evaluate"])
+        .start_timer();
+    API_REQUEST_TOTAL_COUNTER
+        .with_label_values(&["hybrid_routing_evaluate"])
+        .inc();
+
     let HybridRoutingRequest {
         static_routing_request,
         dynamic_routing_request,
@@ -176,40 +197,71 @@ pub async fn hybrid_routing_evaluate(
         (false, Some(Ok(dynamic_ok)), _, _, _) => {
             // Dynamic winner is the first-class output for normalized connector field.
             let dynamic_connector = vec![parse_dynamic_connector(&dynamic_ok.decided_gateway)];
-            insert_serialized(&mut res, "dynamic_routing", &dynamic_ok, "dynamic_routing")
-                .and_then(|_| insert_evaluated_connectors(&mut res, &dynamic_connector))
-                .map(|_| to_logged_success_response(res))
+            let dynamic_payload = DynamicRoutingEnvelope {
+                status: "success",
+                decision: Some(dynamic_ok),
+                fallback_connectors: None,
+            };
+            insert_serialized(
+                &mut res,
+                "dynamic_routing",
+                &dynamic_payload,
+                "dynamic_routing",
+            )
+            .and_then(|_| insert_evaluated_connectors(&mut res, &dynamic_connector))
+            .map(|_| (to_logged_success_response(res), "success"))
         }
         (false, Some(Err(_dynamic_err)), Some(dynamic_fallback), _, _) => {
             // Graceful degradation: when dynamic fails but fallback connectors exist,
             // return fallback connectors instead of hard-failing.
+            let dynamic_payload = DynamicRoutingEnvelope {
+                status: "fallback",
+                decision: None,
+                fallback_connectors: Some(dynamic_fallback.clone()),
+            };
             insert_serialized(
                 &mut res,
                 "dynamic_routing",
-                &dynamic_fallback,
-                "dynamic_routing_fallback",
+                &dynamic_payload,
+                "dynamic_routing",
             )
             .and_then(|_| insert_evaluated_connectors(&mut res, &dynamic_fallback))
-            .map(|_| to_logged_success_response(res))
+            .map(|_| (to_logged_success_response(res), "success"))
         }
         (false, Some(Err(dynamic_err)), None, _, _) => {
             log_serializable_response("dynamic_error_response", &dynamic_err);
-            Ok(dynamic_err.into_response())
+            Ok((dynamic_err.into_response(), "failure"))
         }
         (false, None, _, Some(static_gateways), _) => {
             insert_evaluated_connectors(&mut res, &static_gateways)
-                .map(|_| to_logged_success_response(res))
+                .map(|_| (to_logged_success_response(res), "success"))
         }
         (false, None, Some(dynamic_fallback), None, _) => {
             insert_evaluated_connectors(&mut res, &dynamic_fallback)
-                .map(|_| to_logged_success_response(res))
+                .map(|_| (to_logged_success_response(res), "success"))
         }
         (false, None, _, None, Some(static_err)) => {
             crate::logger::debug!(decision_engine_response_label = "static_error_response", error = ?static_err);
-            Ok(static_err.into_response())
+            Ok((static_err.into_response(), "failure"))
         }
-        (false, None, _, None, None) => Ok(to_logged_success_response(res)),
+        (false, None, _, None, None) => Ok((to_logged_success_response(res), "success")),
     };
 
-    static_insert_result.and(response_result)
+    let final_result = static_insert_result.and(response_result);
+    let api_result = match final_result {
+        Ok((response, metric_status)) => {
+            API_REQUEST_COUNTER
+                .with_label_values(&["hybrid_routing_evaluate", metric_status])
+                .inc();
+            Ok(response)
+        }
+        Err(err) => {
+            API_REQUEST_COUNTER
+                .with_label_values(&["hybrid_routing_evaluate", "failure"])
+                .inc();
+            Err(err)
+        }
+    };
+    timer.observe_duration();
+    api_result
 }
