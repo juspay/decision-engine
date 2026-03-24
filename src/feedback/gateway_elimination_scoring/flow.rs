@@ -161,7 +161,7 @@ pub async fn updateKeyScoreForKeysFromConsumer(
             let _encoded_json = serde_json::to_string(&updated_cached_gateway_score).unwrap();
             let elapsed_time =
                 timestamp.saturating_sub(updated_cached_gateway_score.timestamp as u128);
-            let remaining_ttl = (hard_key_ttl as u128).saturating_sub(elapsed_time);
+            let remaining_ttl = hard_key_ttl.saturating_sub(elapsed_time);
             let safe_remaining_ttl = if remaining_ttl < 1000 {
                 hard_key_ttl as i64
             } else {
