@@ -1,4 +1,5 @@
 use crate::redis::commands::RedisConnectionWrapper;
+use axum::http::HeaderValue;
 use axum::{
     body::Body,
     extract::Request,
@@ -6,7 +7,6 @@ use axum::{
     response::Response,
     routing::{delete, get, post},
 };
-use axum::http::HeaderValue;
 use axum_server::{tls_rustls::RustlsConfig, Handle};
 use error_stack::ResultExt;
 use std::sync::Arc;
@@ -272,18 +272,18 @@ where
         .layer(middleware::from_fn(ensure_request_id))
         .layer(
             tower_trace::TraceLayer::new_for_http()
-            .make_span_with(|request: &Request<_>| utils::record_fields_from_header(request))
-            .on_request(tower_trace::DefaultOnRequest::new().level(tracing::Level::INFO))
-            .on_response(
-                tower_trace::DefaultOnResponse::new()
-                    .level(tracing::Level::INFO)
-                    .latency_unit(tower_http::LatencyUnit::Micros),
-            )
-            .on_failure(
-                tower_trace::DefaultOnFailure::new()
-                    .latency_unit(tower_http::LatencyUnit::Micros)
-                    .level(tracing::Level::ERROR),
-            ),
+                .make_span_with(|request: &Request<_>| utils::record_fields_from_header(request))
+                .on_request(tower_trace::DefaultOnRequest::new().level(tracing::Level::INFO))
+                .on_response(
+                    tower_trace::DefaultOnResponse::new()
+                        .level(tracing::Level::INFO)
+                        .latency_unit(tower_http::LatencyUnit::Micros),
+                )
+                .on_failure(
+                    tower_trace::DefaultOnFailure::new()
+                        .latency_unit(tower_http::LatencyUnit::Micros)
+                        .level(tracing::Level::ERROR),
+                ),
         );
 
     let router = router
