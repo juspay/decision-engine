@@ -1,6 +1,5 @@
 pub mod bank_code;
 pub mod card;
-pub mod hybrid_routing;
 pub mod country;
 pub mod currency;
 pub mod customer;
@@ -14,6 +13,7 @@ pub mod gateway_outage;
 pub mod gateway_payment_flow;
 pub mod gateway_payment_method_flow;
 pub mod gateway_routing_input;
+pub mod hybrid_routing;
 pub mod isin_routes;
 pub mod merchant;
 pub mod merchant_config;
