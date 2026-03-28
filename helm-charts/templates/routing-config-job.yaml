@@ -26,17 +26,21 @@ spec:
       serviceAccountName: {{ include "decision-engine.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if .Values.initContainers.enabled }}
       initContainers:
         {{- if .Values.decisionEngine.usePostgreSQL }}
         - name: wait-for-postgresql
-          image: busybox:1.28
+          image: "{{ .Values.initContainers.busybox.repository }}:{{ .Values.initContainers.busybox.tag }}"
+          imagePullPolicy: {{ .Values.initContainers.busybox.pullPolicy }}
           command: ['sh', '-c', 'until nc -z {{ include "decision-engine.postgresqlHost" . }} 5432; do echo waiting for postgresql; sleep 2; done;']
         {{- end }}
         {{- if .Values.decisionEngine.useMySQL }}
         - name: wait-for-mysql
-          image: busybox:1.28
+          image: "{{ .Values.initContainers.busybox.repository }}:{{ .Values.initContainers.busybox.tag }}"
+          imagePullPolicy: {{ .Values.initContainers.busybox.pullPolicy }}
           command: ['sh', '-c', 'until nc -z {{ include "decision-engine.mysqlHost" . }} 3306; do echo waiting for mysql; sleep 2; done;']
         {{- end }}
+      {{- end }}
       containers:
         - name: routing-config
           image: "{{ .Values.routingConfig.image.repository }}:{{ .Values.routingConfig.image.tag }}"

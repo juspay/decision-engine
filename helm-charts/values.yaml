@@ -30,6 +30,10 @@ podSecurityContext: {}
 initContainers:
   # Set to false to disable all init containers
   enabled: true
+  busybox:
+    repository: public.ecr.aws/docker/library/busybox
+    tag: "1.28"
+    pullPolicy: IfNotPresent
 
 securityContext: {}
   # capabilities:
