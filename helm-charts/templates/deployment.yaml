@@ -31,20 +31,24 @@ spec:
       initContainers:
         {{- if .Values.decisionEngine.usePostgreSQL }}
         - name: wait-for-postgresql
-          image: busybox:1.28
+          image: "{{ .Values.initContainers.busybox.repository }}:{{ .Values.initContainers.busybox.tag }}"
+          imagePullPolicy: {{ .Values.initContainers.busybox.pullPolicy }}
           command: ['sh', '-c', 'until nc -z {{ include "decision-engine.postgresqlHost" . }} 5432; do echo waiting for postgresql; sleep 2; done;']
         {{- end }}
         {{- if .Values.decisionEngine.useRedis }}
         - name: wait-for-redis
-          image: busybox:1.28
+          image: "{{ .Values.initContainers.busybox.repository }}:{{ .Values.initContainers.busybox.tag }}"
+          imagePullPolicy: {{ .Values.initContainers.busybox.pullPolicy }}
           command: ['sh', '-c', 'until nc -z {{ include "decision-engine.redisHost" . }} 6379; do echo waiting for redis; sleep 2; done;']
         {{- end }}
         - name: wait-for-groovy-runner
-          image: busybox:1.28
+          image: "{{ .Values.initContainers.busybox.repository }}:{{ .Values.initContainers.busybox.tag }}"
+          imagePullPolicy: {{ .Values.initContainers.busybox.pullPolicy }}
           command: ['sh', '-c', 'until nc -z {{ include "decision-engine.groovyRunnerName" . }} {{ .Values.groovyRunner.service.port }}; do echo waiting for groovy-runner; sleep 2; done;']
         {{- if .Values.decisionEngine.useMySQL }}
         - name: wait-for-mysql
-          image: busybox:1.28
+          image: "{{ .Values.initContainers.busybox.repository }}:{{ .Values.initContainers.busybox.tag }}"
+          imagePullPolicy: {{ .Values.initContainers.busybox.pullPolicy }}
           command: ['sh', '-c', 'until nc -z {{ include "decision-engine.mysqlHost" . }} 3306; do echo waiting for mysql; sleep 2; done;']
         {{- end }}
       containers:
