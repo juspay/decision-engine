@@ -3,6 +3,17 @@ enabled = true
 level = "DEBUG"
 log_format = "json"
 
+[telemetry.tracing]
+enabled = false
+otlp_endpoint = "http://localhost:4317"
+sampling_ratio = 1.0
+
+[telemetry.metrics]
+enabled = false
+otlp_endpoint = "http://localhost:4317"
+export_interval_secs = 60
+export_timeout_secs = 30
+
 [server]
 host = "127.0.0.1"
 port = 8080
