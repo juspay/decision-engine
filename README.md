@@ -185,31 +185,54 @@ curl http://localhost:8080/health
 
 ### Integration Pattern
 
+Decision Engine integrates seamlessly into your existing payment stack:
+
 ```
+                              REQUEST FLOW ▶
 ┌─────────────┐     ┌─────────────────┐     ┌─────────────────────┐
 │   Your App  │────▶│  Orchestrator   │────▶│   Decision Engine   │
-└─────────────┘     └─────────────────┘     └──────────┬──────────┘
+│             │     │                 │     │                     │
+│ Payment Req │     │ Route to DE     │     │ 1. Check eligibility│
+└─────────────┘     └─────────────────┘     │ 2. Apply rules      │
+                                            │ 3. ML optimization  │
+                                            └──────────┬──────────┘
                                                        │
-       ┌───────────────────────────────────────────────┼───────────────┐
-       │                                               │               │
-       ▼                                               ▼               ▼
-┌─────────────┐                               ┌─────────────┐   ┌─────────────┐
-│ Vault (PCI) │                               │ Gateway A   │   │ Gateway B   │
-│             │                               │ (Stripe)    │   │ (Adyen)     │
-│ Card tokens │                               └─────────────┘   └─────────────┘
-└─────────────┘
+                          ┌────────────────────────────┼────────────────────────┐
+                          │                            │                        │
+                          ▼                            ▼                        ▼
+                   ┌─────────────┐              ┌─────────────┐          ┌─────────────┐
+                   │ Vault (PCI) │              │  Gateway A  │          │  Gateway B  │
+                   │             │◀─────────────│  (Stripe)   │          │  (Adyen)    │
+                   │ Card Tokens │   Token      │             │          │             │
+                   └─────────────┘   Lookup      └──────┬──────┘          └──────┬──────┘
+                                                    │                        │
+                                                    └────────────┬───────────┘
+                                                                 │
+◀ RESPONSE FLOW                                                  │
+┌─────────────┐     ┌─────────────────┐     ┌─────────────────▼───────────┐
+│   Your App  │◀────│  Orchestrator   │◀────│   Gateway Response          │
+│             │     │                 │     │   (success/decline/redirect)│
+│ Final Result│     │ Return to app   │     └─────────────────────────────┘
+└─────────────┘     └─────────────────┘
 ```
 
-**Integration Flow:**
+**Integration Steps:**
 
-| Step | Action | Description |
-|:----:|--------|-------------|
-| 1 | Request | Your app sends payment request via orchestrator |
-| 2 | Route | Decision Engine selects optimal gateway based on rules & ML |
-| 3 | Process | Gateway processes payment with token from vault |
-| 4 | Respond | Result flows back through the same path |
+| Step | Direction | Component | Action |
+|:----:|:---------:|-----------|--------|
+| 1 | → | Your App | Initiates payment request |
+| 2 | → | Orchestrator | Forwards to Decision Engine |
+| 3 | → | Decision Engine | Selects optimal gateway |
+| 4 | → | Vault | Returns card token (PCI-safe) |
+| 5 | → | Gateway | Processes payment |
+| 6 | ← | Gateway | Returns result |
+| 7 | ← | Orchestrator | Routes response back |
+| 8 | ← | Your App | Receives final result |
 
-Decision Engine sits between your orchestrator and gateways, providing intelligent routing while your vault handles PCI-compliant card storage.
+**Key Benefits:**
+- **Zero PCI scope** — Vault handles all card data
+- **Drop-in integration** — Works with any orchestrator
+- **Intelligent fallback** — Auto-switches on gateway failure
 
 ---
 
