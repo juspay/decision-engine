@@ -43,18 +43,18 @@ curl -X POST http://localhost:8080/merchant-account/create \
 curl -X POST http://localhost:8080/decide-gateway \
   -H "Content-Type: application/json" \
   -d '{
-    "merchant_id": "my_merchant",
-    "payment_info": {
-      "payment_id": "pay_001",
+    "merchantId": "my_merchant",
+    "paymentInfo": {
+      "paymentId": "pay_001",
       "amount": 1000.0,
       "currency": "USD",
-      "payment_type": "ORDER_PAYMENT",
-      "payment_method_type": "CARD",
-      "payment_method": "CREDIT"
+      "paymentType": "ORDER_PAYMENT",
+      "paymentMethodType": "CARD",
+      "paymentMethod": "CREDIT"
     },
-    "eligible_gateway_list": ["stripe", "paypal", "adyen"],
-    "ranking_algorithm": "SrBasedRouting",
-    "elimination_enabled": false
+    "eligibleGatewayList": ["stripe", "paypal", "adyen"],
+    "rankingAlgorithm": "SrBasedRouting",
+    "eliminationEnabled": false
   }'
 ```
 
@@ -64,9 +64,9 @@ curl -X POST http://localhost:8080/decide-gateway \
 curl -X POST http://localhost:8080/update-gateway-score \
   -H "Content-Type: application/json" \
   -d '{
-    "merchant_id": "my_merchant",
+    "merchantId": "my_merchant",
     "gateway": "stripe",
-    "payment_id": "pay_001",
+    "paymentId": "pay_001",
     "status": "CHARGED"
   }'
 ```

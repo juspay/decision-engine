@@ -1,6 +1,6 @@
 services:
   postgresql:
-    image: postgres:latest
+    image: postgres:16
     container_name: open-router-postgres
     restart: unless-stopped
     environment:
@@ -52,7 +52,7 @@ services:
       start_period: 10s
 
   db-migrator:
-    image: postgres:latest
+    image: postgres:16
     container_name: open-router-migrator
     depends_on:
       postgresql:
@@ -62,10 +62,10 @@ services:
     volumes:
       - ./migrations:/migrations
     entrypoint: >
-      bash -c "
+      bash -euo pipefail -c "
         for f in $$(find /migrations -name 'up.sql' | sort); do
           echo \"Running $$f\";
-          psql -h postgresql -U db_user -d decision_engine_db -f $$f 2>&1 | grep -v '^$$' || true;
+          psql -h postgresql -U db_user -d decision_engine_db -f $$f;
         done;
         echo 'Migrations done.'
       "
