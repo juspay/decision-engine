@@ -1,0 +1,138 @@
+services:
+  postgresql:
+    image: postgres:latest
+    container_name: open-router-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=db_user
+      - POSTGRES_PASSWORD=db_pass
+      - POSTGRES_DB=decision_engine_db
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - open-router-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
+      interval: 5s
+      retries: 5
+      start_period: 5s
+      timeout: 5s
+
+  redis:
+    image: redis:7
+    container_name: open-router-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - open-router-network
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep '^PONG$'"]
+      interval: 5s
+      retries: 5
+      start_period: 5s
+      timeout: 5s
+
+  groovy-runner:
+    image: ghcr.io/juspay/open-router/groovy-runner:main
+    pull_policy: always
+    platform: linux/amd64
+    container_name: open-router-groovy
+    restart: unless-stopped
+    ports:
+      - "8085:8085"
+    networks:
+      - open-router-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8085/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  db-migrator:
+    image: postgres:latest
+    container_name: open-router-migrator
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    environment:
+      - PGPASSWORD=db_pass
+    volumes:
+      - ./migrations:/migrations
+    entrypoint: >
+      bash -c "
+        for f in $$(find /migrations -name 'up.sql' | sort); do
+          echo \"Running $$f\";
+          psql -h postgresql -U db_user -d decision_engine_db -f $$f 2>&1 | grep -v '^$$' || true;
+        done;
+        echo 'Migrations done.'
+      "
+    networks:
+      - open-router-network
+
+  open-router:
+    image: ghcr.io/juspay/decision-engine/postgres:v1.2.1
+    pull_policy: always
+    platform: linux/amd64
+    container_name: open-router-app
+    restart: unless-stopped
+    # Port 8080 is now served through nginx — no direct host binding needed
+    expose:
+      - "8080"
+    ports:
+      - "9094:9094"
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      groovy-runner:
+        condition: service_healthy
+      db-migrator:
+        condition: service_completed_successfully
+    volumes:
+      - ./config/docker-configuration.toml:/local/config/development.toml
+    environment:
+      - GROOVY_RUNNER_HOST=open-router-groovy:8085
+    networks:
+      - open-router-network
+
+  mintlify-docs:
+    build:
+      context: .
+      dockerfile: Dockerfile.docs
+    container_name: mintlify-docs
+    restart: unless-stopped
+    expose:
+      - "3000"
+    networks:
+      - open-router-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000 > /dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  nginx:
+    image: nginx:alpine
+    container_name: open-router-nginx
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - open-router
+      - mintlify-docs
+    networks:
+      - open-router-network
+
+networks:
+  open-router-network:
+    driver: bridge
+
+volumes:
+  postgres-data:

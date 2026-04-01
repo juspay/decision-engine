@@ -1,0 +1,818 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Decision Engine",
+    "description": "Open-source payment gateway routing service by Juspay. Selects the optimal payment processor for each transaction in real-time using success-rate scoring, rule-based routing, and elimination logic.",
+    "version": "1.2.1",
+    "contact": {
+      "name": "Juspay",
+      "url": "https://github.com/juspay/decision-engine"
+    },
+    "license": {
+      "name": "AGPL-3.0",
+      "url": "https://www.gnu.org/licenses/agpl-3.0.html"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "Local development"
+    }
+  ],
+  "tags": [
+    { "name": "Health", "description": "Service liveness check" },
+    { "name": "Gateway Decision", "description": "Core routing decision APIs" },
+    { "name": "Score Feedback", "description": "Feed transaction outcomes back to improve SR scoring" },
+    { "name": "Merchant Account", "description": "Merchant configuration management" },
+    { "name": "Routing Rules", "description": "Euclid declarative routing rules engine" },
+    { "name": "Rule Configuration", "description": "Service-level SR/elimination config" }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "healthCheck",
+        "tags": ["Health"],
+        "summary": "Health check",
+        "description": "Returns a simple health status. Use this to verify the service is running.",
+        "responses": {
+          "200": {
+            "description": "Service is healthy",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HealthResponse" },
+                "example": { "message": "Health is good" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/decide-gateway": {
+      "post": {
+        "operationId": "decideGateway",
+        "tags": ["Gateway Decision"],
+        "summary": "Decide gateway",
+        "description": "Core routing decision API. Given a payment context and a list of eligible gateways, returns the optimal gateway to route to.\n\nThe engine applies a sequence of filters (currency, card brand, auth type, EMI, etc.) then scores remaining gateways using success rate history, elimination status, and contract obligations.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/DecideGatewayRequest" },
+              "examples": {
+                "sr_routing": {
+                  "summary": "SR-based routing",
+                  "value": {
+                    "merchantId": "test_merchant",
+                    "paymentInfo": {
+                      "paymentId": "pay_001",
+                      "amount": 1000.0,
+                      "currency": "USD",
+                      "country": "US",
+                      "customerId": "cust_123",
+                      "paymentType": "ORDER_PAYMENT",
+                      "paymentMethodType": "CARD",
+                      "paymentMethod": "CREDIT",
+                      "authType": "THREE_DS",
+                      "cardIsin": "411111"
+                    },
+                    "eligibleGatewayList": ["stripe", "paypal", "adyen"],
+                    "rankingAlgorithm": "SrBasedRouting",
+                    "eliminationEnabled": false
+                  }
+                },
+                "debit_routing": {
+                  "summary": "Debit/network-based routing",
+                  "value": {
+                    "merchantId": "test_merchant",
+                    "paymentInfo": {
+                      "paymentId": "pay_002",
+                      "amount": 500.0,
+                      "currency": "USD",
+                      "paymentType": "ORDER_PAYMENT",
+                      "paymentMethodType": "CARD",
+                      "paymentMethod": "DEBIT"
+                    },
+                    "eligibleGatewayList": ["stripe", "braintree"],
+                    "rankingAlgorithm": "NtwBasedRouting",
+                    "eliminationEnabled": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Gateway decision result",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DecidedGateway" },
+                "example": {
+                  "decidedGateway": "stripe",
+                  "routingApproach": "SR_SELECTION_V3_ROUTING",
+                  "gatewayPriorityMap": { "stripe": 0.94, "adyen": 0.87, "paypal": 0.72 },
+                  "routingDimension": "CARD_BRAND",
+                  "routingDimensionLevel": "visa",
+                  "resetApproach": "NoReset",
+                  "isScheduledOutage": false,
+                  "isRustBasedDecider": true,
+                  "latency": 8
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/update-gateway-score": {
+      "post": {
+        "operationId": "updateGatewayScore",
+        "tags": ["Score Feedback"],
+        "summary": "Update gateway score",
+        "description": "Feed a transaction outcome back into the success-rate model. Call this after every transaction so the engine has accurate SR data for future routing decisions.\n\nA `CHARGED` status increases the gateway's SR; failure statuses (`AUTHENTICATION_FAILED`, `AUTHORIZATION_FAILED`, etc.) decrease it.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UpdateGatewayScoreRequest" },
+              "example": {
+                "merchantId": "test_merchant",
+                "gateway": "stripe",
+                "paymentId": "pay_001",
+                "status": "CHARGED",
+                "gatewayReferenceId": "stripe_ref_001",
+                "enforceDynamicRoutingFailure": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Score updated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/UpdateScoreResponse" },
+                "example": { "updatedMerchantId": "test_merchant", "updatedGateway": "stripe" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/merchant-account/create": {
+      "post": {
+        "operationId": "createMerchant",
+        "tags": ["Merchant Account"],
+        "summary": "Create merchant",
+        "description": "Register a new merchant account. The merchant ID is the primary identifier used in all subsequent routing and scoring calls.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateMerchantRequest" },
+              "example": { "merchantId": "my_merchant" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Merchant created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/MerchantAccount" },
+                "example": { "merchantId": "my_merchant", "createdAt": "2026-03-31T00:00:00Z" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/merchant-account/{merchantId}": {
+      "get": {
+        "operationId": "getMerchant",
+        "tags": ["Merchant Account"],
+        "summary": "Get merchant",
+        "description": "Retrieve a merchant account by ID.",
+        "parameters": [
+          {
+            "name": "merchantId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "example": "my_merchant"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Merchant account",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/MerchantAccount" }
+              }
+            }
+          },
+          "404": {
+            "description": "Merchant not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteMerchant",
+        "tags": ["Merchant Account"],
+        "summary": "Delete merchant",
+        "description": "Delete a merchant account and all associated routing configuration.",
+        "parameters": [
+          {
+            "name": "merchantId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "example": "my_merchant"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Merchant deleted",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DeleteResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/routing/create": {
+      "post": {
+        "operationId": "createRoutingRule",
+        "tags": ["Routing Rules"],
+        "summary": "Create routing rule",
+        "description": "Create a new Euclid declarative routing rule for a merchant. Supports `advanced` (full Euclid DSL), `priority` (ordered gateway list), `single` (fixed gateway), and `volume_split` (percentage-based distribution) algorithm types.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateRoutingRuleRequest" },
+              "examples": {
+                "priority": {
+                  "summary": "Priority-based rule",
+                  "value": {
+                    "merchantId": "test_merchant",
+                    "name": "default-priority",
+                    "description": "Route to stripe first, fallback to paypal",
+                    "algorithm": {
+                      "type": "priority",
+                      "data": ["stripe", "paypal", "adyen"]
+                    }
+                  }
+                },
+                "volume_split": {
+                  "summary": "Volume split rule",
+                  "value": {
+                    "merchantId": "test_merchant",
+                    "name": "ab-test-split",
+                    "algorithm": {
+                      "type": "volume_split",
+                      "data": [
+                        { "gateway": "stripe", "split": 70 },
+                        { "gateway": "paypal", "split": 30 }
+                      ]
+                    }
+                  }
+                },
+                "advanced": {
+                  "summary": "Advanced Euclid DSL rule",
+                  "value": {
+                    "merchantId": "test_merchant",
+                    "name": "usd-card-rule",
+                    "algorithm": {
+                      "type": "advanced",
+                      "data": {
+                        "defaultSelection": {
+                          "type": "priority",
+                          "data": ["stripe", "paypal"]
+                        },
+                        "rules": [
+                          {
+                            "name": "high-value-usd",
+                            "connectorSelection": {
+                              "type": "priority",
+                              "data": ["adyen", "stripe"]
+                            },
+                            "statements": [
+                              {
+                                "condition": [
+                                  { "lhs": "payment_currency", "comparison": "equal", "value": { "type": "enum_variant", "value": "USD" }, "metadata": {} },
+                                  { "lhs": "payment_amount", "comparison": "greater_than", "value": { "type": "number", "value": 50000 }, "metadata": {} }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Routing rule created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RoutingRule" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/routing/activate": {
+      "post": {
+        "operationId": "activateRoutingRule",
+        "tags": ["Routing Rules"],
+        "summary": "Activate routing rule",
+        "description": "Activate a routing rule by ID for a merchant. Only one rule can be active at a time — activating a new rule deactivates the previous one.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ActivateRoutingRuleRequest" },
+              "example": {
+                "merchantId": "test_merchant",
+                "id": "rule_abc123"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rule activated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RoutingRule" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/routing/list/{merchantId}": {
+      "post": {
+        "operationId": "listRoutingRules",
+        "tags": ["Routing Rules"],
+        "summary": "List routing rules",
+        "description": "List all routing rules for a merchant.",
+        "parameters": [
+          {
+            "name": "merchantId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "example": "test_merchant"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of routing rules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/RoutingRule" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/routing/list/active/{merchantId}": {
+      "get": {
+        "operationId": "getActiveRoutingRule",
+        "tags": ["Routing Rules"],
+        "summary": "Get active routing rule",
+        "description": "Retrieve the currently active routing rule for a merchant.",
+        "parameters": [
+          {
+            "name": "merchantId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "example": "test_merchant"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Active routing rule",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RoutingRule" }
+              }
+            }
+          },
+          "404": {
+            "description": "No active rule",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/routing/evaluate": {
+      "post": {
+        "operationId": "evaluateRoutingRule",
+        "tags": ["Routing Rules"],
+        "summary": "Evaluate routing rule",
+        "description": "Evaluate the active routing rule for a merchant against a payment context. Returns the ordered list of gateways selected by the rule without consuming SR data.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/EvaluateRoutingRequest" },
+              "example": {
+                "merchantId": "test_merchant",
+                "paymentInfo": {
+                  "paymentId": "pay_001",
+                  "amount": 1000.0,
+                  "currency": "USD",
+                  "paymentType": "ORDER_PAYMENT",
+                  "paymentMethodType": "CARD",
+                  "paymentMethod": "CREDIT"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Evaluation result with ordered gateway list",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rule/create": {
+      "post": {
+        "operationId": "createRuleConfig",
+        "tags": ["Rule Configuration"],
+        "summary": "Create rule config",
+        "description": "Create a service-level configuration for `successRate` or `elimination` scoring. Controls the time window, minimum data thresholds, and other parameters used in SR computation.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RuleConfigRequest" },
+              "examples": {
+                "success_rate": {
+                  "summary": "Success rate config",
+                  "value": {
+                    "type": "successRate",
+                    "merchantId": "test_merchant",
+                    "config": {
+                      "defaultSuccessRate": 0.5,
+                      "minAggregates": 10,
+                      "maxAggregates": 100,
+                      "hedgingEnabled": false
+                    }
+                  }
+                },
+                "elimination": {
+                  "summary": "Elimination config",
+                  "value": {
+                    "type": "elimination",
+                    "merchantId": "test_merchant",
+                    "config": {
+                      "buckets": 5,
+                      "eliminationThreshold": 0.2
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rule config created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RuleConfigResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rule/get": {
+      "post": {
+        "operationId": "getRuleConfig",
+        "tags": ["Rule Configuration"],
+        "summary": "Get rule config",
+        "description": "Retrieve an existing rule configuration by merchant and type.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RuleConfigGetRequest" },
+              "example": {
+                "type": "successRate",
+                "merchantId": "test_merchant"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rule config",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RuleConfigResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rule/update": {
+      "post": {
+        "operationId": "updateRuleConfig",
+        "tags": ["Rule Configuration"],
+        "summary": "Update rule config",
+        "description": "Update an existing rule configuration.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RuleConfigRequest" },
+              "example": {
+                "type": "successRate",
+                "merchantId": "test_merchant",
+                "config": {
+                  "defaultSuccessRate": 0.6,
+                  "minAggregates": 15,
+                  "maxAggregates": 150,
+                  "hedgingEnabled": true
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rule config updated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RuleConfigResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rule/delete": {
+      "post": {
+        "operationId": "deleteRuleConfig",
+        "tags": ["Rule Configuration"],
+        "summary": "Delete rule config",
+        "description": "Delete a rule configuration.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RuleConfigGetRequest" },
+              "example": {
+                "type": "successRate",
+                "merchantId": "test_merchant"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rule config deleted",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DeleteResponse" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "message": { "type": "string", "example": "Health is good" }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": { "type": "string" },
+          "message": { "type": "string" }
+        }
+      },
+      "DeleteResponse": {
+        "type": "object",
+        "properties": {
+          "message": { "type": "string" }
+        }
+      },
+      "PaymentInfo": {
+        "type": "object",
+        "required": ["paymentId", "amount", "currency", "paymentType", "paymentMethodType", "paymentMethod"],
+        "properties": {
+          "paymentId": { "type": "string", "example": "pay_001" },
+          "amount": { "type": "number", "format": "float", "example": 1000.0 },
+          "currency": { "type": "string", "example": "USD" },
+          "country": { "type": "string", "example": "US" },
+          "customerId": { "type": "string", "example": "cust_123" },
+          "paymentType": { "type": "string", "enum": ["ORDER_PAYMENT", "MANDATE_PAYMENT"], "example": "ORDER_PAYMENT" },
+          "paymentMethodType": { "type": "string", "enum": ["CARD", "UPI", "WALLET", "NETBANKING"], "example": "CARD" },
+          "paymentMethod": { "type": "string", "enum": ["CREDIT", "DEBIT"], "example": "CREDIT" },
+          "authType": { "type": "string", "enum": ["THREE_DS", "NO_THREE_DS"], "example": "THREE_DS" },
+          "cardIsin": { "type": "string", "example": "411111" }
+        }
+      },
+      "DecideGatewayRequest": {
+        "type": "object",
+        "required": ["merchantId", "paymentInfo", "eligibleGatewayList", "rankingAlgorithm"],
+        "properties": {
+          "merchantId": { "type": "string", "example": "test_merchant" },
+          "paymentInfo": { "$ref": "#/components/schemas/PaymentInfo" },
+          "eligibleGatewayList": {
+            "type": "array",
+            "items": { "type": "string" },
+            "example": ["stripe", "paypal", "adyen"]
+          },
+          "rankingAlgorithm": {
+            "type": "string",
+            "enum": ["SrBasedRouting", "PlBasedRouting", "NtwBasedRouting"],
+            "example": "SrBasedRouting"
+          },
+          "eliminationEnabled": { "type": "boolean", "default": false }
+        }
+      },
+      "DecidedGateway": {
+        "type": "object",
+        "properties": {
+          "decidedGateway": { "type": "string", "example": "stripe" },
+          "routingApproach": { "type": "string", "example": "SR_SELECTION_V3_ROUTING" },
+          "gatewayPriorityMap": {
+            "type": "object",
+            "additionalProperties": { "type": "number" },
+            "example": { "stripe": 0.94, "adyen": 0.87, "paypal": 0.72 }
+          },
+          "routingDimension": { "type": "string" },
+          "routingDimensionLevel": { "type": "string" },
+          "isScheduledOutage": { "type": "boolean" },
+          "isRustBasedDecider": { "type": "boolean" },
+          "latency": { "type": "number" }
+        }
+      },
+      "UpdateGatewayScoreRequest": {
+        "type": "object",
+        "required": ["merchantId", "gateway", "paymentId", "status"],
+        "properties": {
+          "merchantId": { "type": "string", "example": "test_merchant" },
+          "gateway": { "type": "string", "example": "stripe" },
+          "paymentId": { "type": "string", "example": "pay_001" },
+          "status": {
+            "type": "string",
+            "enum": ["CHARGED", "AUTHENTICATION_FAILED", "AUTHORIZATION_FAILED", "JUSPAY_DECLINED", "FAILURE"],
+            "example": "CHARGED"
+          },
+          "gatewayReferenceId": { "type": "string", "example": "stripe_ref_001" },
+          "enforceDynamicRoutingFailure": { "type": "boolean", "default": false }
+        }
+      },
+      "UpdateScoreResponse": {
+        "type": "object",
+        "properties": {
+          "updatedMerchantId": { "type": "string" },
+          "updatedGateway": { "type": "string" }
+        }
+      },
+      "CreateMerchantRequest": {
+        "type": "object",
+        "required": ["merchantId"],
+        "properties": {
+          "merchantId": { "type": "string", "example": "my_merchant" }
+        }
+      },
+      "MerchantAccount": {
+        "type": "object",
+        "properties": {
+          "merchantId": { "type": "string", "example": "my_merchant" },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "CreateRoutingRuleRequest": {
+        "type": "object",
+        "required": ["merchantId", "name", "algorithm"],
+        "properties": {
+          "merchantId": { "type": "string", "example": "test_merchant" },
+          "name": { "type": "string", "example": "default-priority" },
+          "description": { "type": "string" },
+          "algorithm": { "$ref": "#/components/schemas/RoutingAlgorithm" }
+        }
+      },
+      "RoutingAlgorithm": {
+        "type": "object",
+        "required": ["type", "data"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["priority", "single", "volume_split", "advanced"],
+            "example": "priority"
+          },
+          "data": {
+            "description": "Depends on type: array of gateway strings for `priority`/`single`; array of {gateway, split} for `volume_split`; Euclid DSL object for `advanced`"
+          }
+        }
+      },
+      "ActivateRoutingRuleRequest": {
+        "type": "object",
+        "required": ["merchantId", "id"],
+        "properties": {
+          "merchantId": { "type": "string", "example": "test_merchant" },
+          "id": { "type": "string", "example": "rule_abc123" }
+        }
+      },
+      "RoutingRule": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "example": "rule_abc123" },
+          "merchantId": { "type": "string", "example": "test_merchant" },
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "algorithm": { "$ref": "#/components/schemas/RoutingAlgorithm" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "active": { "type": "boolean" }
+        }
+      },
+      "EvaluateRoutingRequest": {
+        "type": "object",
+        "required": ["merchantId", "paymentInfo"],
+        "properties": {
+          "merchantId": { "type": "string", "example": "test_merchant" },
+          "paymentInfo": { "$ref": "#/components/schemas/PaymentInfo" }
+        }
+      },
+      "RuleConfigRequest": {
+        "type": "object",
+        "required": ["type", "merchantId", "config"],
+        "properties": {
+          "type": { "type": "string", "enum": ["successRate", "elimination"], "example": "successRate" },
+          "merchantId": { "type": "string", "example": "test_merchant" },
+          "config": {
+            "type": "object",
+            "description": "Config fields depend on type. For `successRate`: defaultSuccessRate, minAggregates, maxAggregates, hedgingEnabled. For `elimination`: buckets, eliminationThreshold."
+          }
+        }
+      },
+      "RuleConfigGetRequest": {
+        "type": "object",
+        "required": ["type", "merchantId"],
+        "properties": {
+          "type": { "type": "string", "enum": ["successRate", "elimination"], "example": "successRate" },
+          "merchantId": { "type": "string", "example": "test_merchant" }
+        }
+      },
+      "RuleConfigResponse": {
+        "type": "object",
+        "properties": {
+          "type": { "type": "string" },
+          "merchantId": { "type": "string" },
+          "config": { "type": "object" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,29 @@
+# Local dev overrides — fixes stale image tags
+initContainers:
+  busybox:
+    repository: docker.io/library/busybox
+    tag: "1.36"
+    pullPolicy: IfNotPresent
+
+postgresql:
+  enabled: true
+  auth:
+    username: "db_user"
+    password: "db_pass"
+    database: "decision_engine_db"
+    postgresPassword: "postgres"
+  primary:
+    persistence:
+      enabled: false   # no PVC needed for local dev
+
+redis:
+  enabled: true
+  auth:
+    enabled: false
+  master:
+    persistence:
+      enabled: false
+  replica:
+    replicaCount: 0    # single master is enough locally
+    persistence:
+      enabled: false

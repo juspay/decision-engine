@@ -1,0 +1,368 @@
+{
+  "info": {
+    "name": "Decision Engine",
+    "description": "Postman collection for juspay/decision-engine — a payment gateway routing service.\n\nBase URL: http://localhost:8080\n\nQuick start:\n1. Create a merchant account (Merchant / Create)\n2. Call POST /decide-gateway with a payment payload\n3. Record the outcome via POST /update-gateway-score",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "merchantId",
+      "value": "test_merchant",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            },
+            "description": "Returns {\"message\":\"Health is good\"} when the service is up."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Merchant Account",
+      "item": [
+        {
+          "name": "Create Merchant",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/merchant-account/create",
+              "host": ["{{baseUrl}}"],
+              "path": ["merchant-account", "create"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"merchant_id\": \"{{merchantId}}\",\n  \"gateway_success_rate_based_decider_input\": null\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Register a new merchant. Must be done before calling /decide-gateway."
+          }
+        },
+        {
+          "name": "Get Merchant",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/merchant-account/{{merchantId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["merchant-account", "{{merchantId}}"]
+            },
+            "description": "Fetch a merchant's configuration by merchant_id."
+          }
+        },
+        {
+          "name": "Delete Merchant",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/merchant-account/{{merchantId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["merchant-account", "{{merchantId}}"]
+            },
+            "description": "Delete a merchant account."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Gateway Decision",
+      "item": [
+        {
+          "name": "Decide Gateway (v2 — recommended)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/decide-gateway",
+              "host": ["{{baseUrl}}"],
+              "path": ["decide-gateway"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"merchant_id\": \"{{merchantId}}\",\n  \"payment_info\": {\n    \"payment_id\": \"pay_001\",\n    \"amount\": 1000.0,\n    \"currency\": \"USD\",\n    \"country\": \"US\",\n    \"customer_id\": \"cust_123\",\n    \"payment_type\": \"ORDER_PAYMENT\",\n    \"payment_method_type\": \"CARD\",\n    \"payment_method\": \"CREDIT\",\n    \"auth_type\": \"THREE_DS\",\n    \"card_isin\": \"411111\",\n    \"card_type\": \"CREDIT\",\n    \"card_issuer_bank_name\": \"HDFC\",\n    \"preferred_gateway\": null,\n    \"payment_source\": null,\n    \"is_emi\": false,\n    \"emi_bank\": null,\n    \"emi_tenure\": null,\n    \"metadata\": null,\n    \"internal_metadata\": null,\n    \"udfs\": null\n  },\n  \"eligible_gateway_list\": [\"stripe\", \"paypal\", \"adyen\"],\n  \"ranking_algorithm\": \"SrBasedRouting\",\n  \"elimination_enabled\": false\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Core routing decision API (v2). Returns the best gateway from eligible_gateway_list.\n\nranking_algorithm options: SrBasedRouting | PlBasedRouting | NtwBasedRouting\n\nResponse includes:\n- decided_gateway: the selected gateway name\n- routing_approach: e.g. SR_SELECTION_V3_ROUTING, PRIORITY_LOGIC\n- gateway_priority_map: scores for each eligible gateway\n- routing_dimension: dimension used for SR scoring (e.g. CARD_BRAND, AUTH_TYPE)"
+          }
+        },
+        {
+          "name": "Decision Gateway (v1 — full payload)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/decision_gateway",
+              "host": ["{{baseUrl}}"],
+              "path": ["decision_gateway"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderReference\": {\n    \"orderId\": \"order_001\",\n    \"amount\": 1000.0,\n    \"currency\": \"USD\",\n    \"merchantId\": \"{{merchantId}}\",\n    \"status\": \"NEW\",\n    \"orderType\": \"ORDER_PAYMENT\",\n    \"customerId\": \"cust_123\",\n    \"preferredGateway\": null,\n    \"metadata\": null,\n    \"udfs\": {}\n  },\n  \"txnDetail\": {\n    \"txnId\": \"txn_001\",\n    \"orderId\": \"order_001\",\n    \"merchantId\": \"{{merchantId}}\",\n    \"status\": \"PENDING_VBV\",\n    \"type\": \"ORDER_PAYMENT\",\n    \"txnUuid\": \"pay_001\",\n    \"gateway\": \"stripe\"\n  },\n  \"txnCardInfo\": {\n    \"id\": \"card_001\",\n    \"paymentMethodType\": \"CARD\",\n    \"paymentMethod\": \"CREDIT\",\n    \"authType\": \"THREE_DS\",\n    \"cardIsin\": \"411111\",\n    \"cardType\": \"CREDIT\",\n    \"dateCreated\": \"2026-03-31T00:00:00Z\"\n  },\n  \"merchantAccount\": {\n    \"merchantId\": \"{{merchantId}}\",\n    \"gatewaySuccessRateBasedDeciderInput\": null\n  },\n  \"enforceGatewayList\": [\"stripe\", \"paypal\", \"adyen\"],\n  \"priorityLogicScript\": null,\n  \"priorityLogicOutput\": null\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Legacy full-payload decision endpoint. Prefer /decide-gateway (v2) for new integrations."
+          }
+        },
+        {
+          "name": "Hybrid Routing",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/routing/hybrid",
+              "host": ["{{baseUrl}}"],
+              "path": ["routing", "hybrid"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"static_routing_request\": {\n    \"created_by\": \"{{merchantId}}\",\n    \"fallback_output\": null,\n    \"parameters\": {\n      \"payment_method\": \"card\",\n      \"currency\": \"USD\",\n      \"country\": \"US\"\n    }\n  },\n  \"dynamic_routing_request\": {\n    \"merchant_id\": \"{{merchantId}}\",\n    \"payment_info\": {\n      \"payment_id\": \"pay_001\",\n      \"amount\": 1000.0,\n      \"currency\": \"USD\",\n      \"payment_type\": \"ORDER_PAYMENT\",\n      \"payment_method_type\": \"CARD\",\n      \"payment_method\": \"CREDIT\"\n    },\n    \"eligible_gateway_list\": [\"stripe\", \"paypal\", \"adyen\"],\n    \"ranking_algorithm\": \"SrBasedRouting\",\n    \"elimination_enabled\": false\n  }\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Combines static rule-based routing with dynamic SR-based routing. Returns merged results from both engines."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Score Feedback",
+      "item": [
+        {
+          "name": "Update Gateway Score",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/update-gateway-score",
+              "host": ["{{baseUrl}}"],
+              "path": ["update-gateway-score"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"merchant_id\": \"{{merchantId}}\",\n  \"gateway\": \"stripe\",\n  \"payment_id\": \"pay_001\",\n  \"status\": \"CHARGED\",\n  \"gateway_reference_id\": \"stripe_ref_001\",\n  \"enforce_dynamic_routing_failure\": false,\n  \"txn_latency\": {\n    \"gatewayLatency\": 120.5\n  }\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Feed transaction outcome back to update the success rate model.\n\nstatus options: CHARGED | AUTHENTICATION_FAILED | AUTHORIZATION_FAILED | JUSPAY_DECLINED | AUTO_REFUNDED | COD_INITIATED | STARTED | PENDING_VBV | CAPTURE_FAILED | VOID_FAILED | VOID_INITIATED | CAPTURE_INITIATED\n\nCall this after every transaction to keep SR scores accurate."
+          }
+        },
+        {
+          "name": "Update Score (legacy)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/update-score",
+              "host": ["{{baseUrl}}"],
+              "path": ["update-score"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"txn_detail\": {\n    \"txnId\": \"txn_001\",\n    \"orderId\": \"order_001\",\n    \"merchantId\": \"{{merchantId}}\",\n    \"status\": \"CHARGED\",\n    \"type\": \"ORDER_PAYMENT\",\n    \"txnUuid\": \"pay_001\",\n    \"gateway\": \"stripe\",\n    \"dateCreated\": \"2026-03-31T00:00:00Z\",\n    \"txnAmount\": { \"value\": 1000, \"currency\": \"USD\" },\n    \"txnObjectType\": \"ORDER_PAYMENT\",\n    \"sourceObject\": \"CREDIT\",\n    \"isEmi\": false\n  },\n  \"txn_card_info\": {\n    \"id\": \"card_001\",\n    \"paymentMethodType\": \"CARD\",\n    \"paymentMethod\": \"CREDIT\",\n    \"authType\": \"THREE_DS\",\n    \"cardIsin\": \"411111\",\n    \"cardType\": \"CREDIT\",\n    \"dateCreated\": \"2026-03-31T00:00:00Z\"\n  },\n  \"log_message\": \"Transaction completed\",\n  \"enforce_dynaic_routing_failure\": false,\n  \"txn_latency\": {\n    \"gatewayLatency\": 120.5\n  }\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Legacy score update endpoint using the full txn_detail / txn_card_info structure. Prefer /update-gateway-score for new integrations."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Routing Rules (Euclid)",
+      "item": [
+        {
+          "name": "Create Routing Rule",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/routing/create",
+              "host": ["{{baseUrl}}"],
+              "path": ["routing", "create"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"My Priority Rule\",\n  \"description\": \"Route US card payments: Stripe first, Adyen fallback\",\n  \"created_by\": \"{{merchantId}}\",\n  \"algorithm_for\": \"Payment\",\n  \"algorithm\": {\n    \"type\": \"priority\",\n    \"data\": [\n      { \"connector\": \"stripe\", \"merchant_connector_id\": null },\n      { \"connector\": \"adyen\", \"merchant_connector_id\": null }\n    ]\n  }\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Create a routing rule in the Euclid rules engine.\n\nalgorithm.type options:\n- \"single\": always route to one connector\n- \"priority\": ordered fallback list\n- \"volume_split\": percentage-based split across connectors\n- \"advanced\": conditional AST-based logic\n\nalgorithm_for options: Payment | Payout | ThreeDsAuthentication"
+          }
+        },
+        {
+          "name": "Activate Routing Rule",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/routing/activate",
+              "host": ["{{baseUrl}}"],
+              "path": ["routing", "activate"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"created_by\": \"{{merchantId}}\",\n  \"routing_algorithm_id\": \"<rule_id from /routing/create response>\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Activate a previously created routing rule for a merchant. Only one rule can be active at a time per merchant."
+          }
+        },
+        {
+          "name": "List Routing Rules",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/routing/list/{{merchantId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["routing", "list", "{{merchantId}}"]
+            },
+            "description": "List all routing rules created by a merchant."
+          }
+        },
+        {
+          "name": "Get Active Routing Rule",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/routing/list/active/{{merchantId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["routing", "list", "active", "{{merchantId}}"]
+            },
+            "description": "Get the currently active routing rule for a merchant."
+          }
+        },
+        {
+          "name": "Evaluate Routing Rule",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/routing/evaluate",
+              "host": ["{{baseUrl}}"],
+              "path": ["routing", "evaluate"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"created_by\": \"{{merchantId}}\",\n  \"fallback_output\": [\n    { \"connector\": \"stripe\", \"merchant_connector_id\": null }\n  ],\n  \"parameters\": {\n    \"payment_method\": \"card\",\n    \"currency\": \"USD\",\n    \"country\": \"US\",\n    \"amount\": 1000\n  }\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Test/dry-run the active routing rule for a merchant with given payment parameters. Returns the connector(s) the rule would select."
+          }
+        },
+        {
+          "name": "Configure SR Dimensions",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/config-sr-dimension",
+              "host": ["{{baseUrl}}"],
+              "path": ["config-sr-dimension"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"merchant_id\": \"{{merchantId}}\",\n  \"dimensions\": [\"CARD_BRAND\", \"AUTH_TYPE\", \"CURRENCY\"]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Configure which dimensions to use when computing success rates for a merchant.\n\nPossible dimensions: CARD_BRAND | AUTH_TYPE | CURRENCY | PAYMENT_METHOD | CARD_TYPE | CARD_ISIN | COUNTRY"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Rule Configuration (service config)",
+      "item": [
+        {
+          "name": "Create Rule Config",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/rule/create",
+              "host": ["{{baseUrl}}"],
+              "path": ["rule", "create"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"merchant_id\": \"{{merchantId}}\",\n  \"config\": \"SuccessRate\",\n  \"config_value\": {\n    \"window_size\": 30,\n    \"min_count\": 5,\n    \"threshold\": 0.7\n  }\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Create a service-level rule config (e.g. SR thresholds, elimination settings).\n\nconfig options: SuccessRate | Elimination | DebitRouting"
+          }
+        },
+        {
+          "name": "Get Rule Config",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/rule/get",
+              "host": ["{{baseUrl}}"],
+              "path": ["rule", "get"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"merchant_id\": \"{{merchantId}}\",\n  \"algorithm\": \"SuccessRate\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Retrieve a specific rule config for a merchant.\n\nalgorithm options: SuccessRate | Elimination | DebitRouting"
+          }
+        },
+        {
+          "name": "Update Rule Config",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/rule/update",
+              "host": ["{{baseUrl}}"],
+              "path": ["rule", "update"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"merchant_id\": \"{{merchantId}}\",\n  \"config\": \"SuccessRate\",\n  \"config_value\": {\n    \"window_size\": 60,\n    \"min_count\": 10,\n    \"threshold\": 0.8\n  }\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Update an existing rule config."
+          }
+        },
+        {
+          "name": "Delete Rule Config",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/rule/delete",
+              "host": ["{{baseUrl}}"],
+              "path": ["rule", "delete"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"merchant_id\": \"{{merchantId}}\",\n  \"algorithm\": \"SuccessRate\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Delete a rule config for a merchant."
+          }
+        }
+      ]
+    }
+  ]
+}
