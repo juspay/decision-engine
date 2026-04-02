@@ -154,69 +154,17 @@ curl http://localhost:8080/health
 
 ### High-Level Flow
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     Payment Orchestrator                         │
-│                    (Your existing system)                        │
-└───────────────────────────────┬─────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      ⚡ Decision Engine                           │
-│                                                                  │
-│   ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
-│   │  Eligibility │  │    Rules     │  │   Dynamic Ordering   │  │
-│   │    Check     │  │    Engine    │  │  (ML + Success Rate) │  │
-│   └──────────────┘  └──────────────┘  └──────────────────────┘  │
-│                                                                  │
-│   ┌────────────────────────────────────────────────────────────┐ │
-│   │          🔍 Downtime Detection & Health Monitoring         │ │
-│   └────────────────────────────────────────────────────────────┘ │
-│                                                                  │
-└───────────────────────────────┬─────────────────────────────────┘
-                                │
-          ┌─────────────────────┼─────────────────────┐
-          ▼                     ▼                     ▼
-    ┌───────────┐         ┌───────────┐         ┌───────────┐
-    │ Gateway A │         │ Gateway B │         │ Gateway C │
-    │  (Stripe) │         │  (Adyen)  │         │ (PayPal)  │
-    └───────────┘         └───────────┘         └───────────┘
-```
+<div align="center">
+  <img src="https://cdn.sanity.io/images/9sed75bn/production/fd872ae5b086e7a60011ad9d4d5c7988e1084d03-1999x1167.png" alt="Decision Engine Architecture" width="80%"/>
+</div>
 
 ### Integration Pattern
 
 Decision Engine integrates seamlessly into your existing payment stack:
 
-```
-┌──────────────────────────────────── REQUEST FLOW ▶ ────────────────────────────────────┐
-│                                                                                          │
-│   ┌───────────┐      ┌──────────────┐      ┌────────────────┐      ┌──────────────┐    │
-│   │ Your App  │─────▶│ Orchestrator │─────▶│ Decision Engine│─────▶│ Best Gateway │    │
-│   │           │      │              │      │                │      │  (Stripe/    │    │
-│   │  Payment  │      │   Routes to  │      │ 1. Eligibility │      │   Adyen/...) │    │
-│   │  Request  │      │  Decision    │      │ 2. Rules       │      │              │    │
-│   └───────────┘      │    Engine    │      │ 3. ML Optimize │      │   Process    │    │
-│                      └──────────────┘      └────────────────┘      │   Payment    │    │
-│                                              │                     └──────┬───────┘    │
-│                                              │                            │            │
-│                                              ▼                            │            │
-│                                      ┌──────────────┐                    │            │
-│                                      │ Vault (PCI)  │◀───────────────────┘            │
-│                                      │              │  Token lookup (card-safe)       │
-│                                      └──────────────┘                                 │
-└──────────────────────────────────────────────────────────────────────────────────────────┘
-
-┌──────────────────────────────────── ◀ RESPONSE FLOW ────────────────────────────────────┐
-│                                                                                          │
-│   ┌───────────┐      ┌──────────────┐      ┌────────────────┐      ┌──────────────┐    │
-│   │ Your App  │◀─────│ Orchestrator │◀─────│ Decision Engine│◀─────│   Gateway    │    │
-│   │           │      │              │      │                │      │              │    │
-│   │  Final    │      │   Returns    │      │   Logs &       │      │   Success /  │    │
-│   │  Result   │      │   Result     │      │   Updates      │      │   Decline    │    │
-│   └───────────┘      └──────────────┘      └────────────────┘      └──────────────┘    │
-│                                                                                          │
-└──────────────────────────────────────────────────────────────────────────────────────────┘
-```
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/272ad222-8a91-4bb2-aa3a-e1fc9c28e3da" alt="Integration Pattern" width="70%"/>
+</div>
 
 **Integration Steps:**
 
