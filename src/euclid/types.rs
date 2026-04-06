@@ -59,6 +59,7 @@ pub enum AlgorithmType {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct RoutingRequest {
+    pub payment_id: Option<String>,
     pub created_by: String,
     pub fallback_output: Option<Vec<ConnectorInfo>>,
     pub parameters: HashMap<String, Option<ValueType>>,
@@ -117,6 +118,7 @@ pub const ELIGIBLE_DIMENSIONS: [&str; 5] = [
 ];
 #[derive(Debug, serde::Serialize)]
 pub struct RoutingEvaluateResponse {
+    pub payment_id: Option<String>,
     pub status: String,
     pub output: serde_json::Value,
     pub evaluated_output: Vec<ConnectorInfo>,
