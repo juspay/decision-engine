@@ -262,8 +262,9 @@ pub async fn routing_evaluate(
 
     let state = get_tenant_app_state().await;
     logger::debug!(
-        "Received routing evaluation request for ID: {}",
-        payload.created_by
+        payment_id = ?payload.payment_id,
+        created_by = %payload.created_by,
+        "Received routing evaluation request"
     );
 
     let update_failure_metrics = || {
@@ -490,6 +491,7 @@ pub async fn routing_evaluate(
     );
 
     let response = RoutingEvaluateResponse {
+        payment_id: payload.payment_id.clone(),
         status: match rule_name.as_deref() {
             Some("default_selection") | Some("default_fallback") => "default_selection".into(),
             Some(_) => "success".into(),
