@@ -114,6 +114,9 @@ order_udf1 = { type = "global_ref" }
 payment_payment_method = { type = "enum", values = "NB_HDFC, NB_ICICI, NB_SBI" }
 payment_payment_source = { type = "enum", values = "net.one97.paytm, @paytm" }
 txn_is_emi = { type = "enum", values = "true, false" }
+transaction_initiator = { type = "enum", values = "customer, merchant" }
+network_token = { type = "enum", values = "network_token" }
+card_discovery = { type = "enum", values = "manual, saved_card, click_to_pay" }
 
 [routing_config.default]
 output = []
