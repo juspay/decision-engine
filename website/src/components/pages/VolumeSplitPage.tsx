@@ -8,8 +8,8 @@ import { ErrorMessage } from '../ui/ErrorMessage'
 import { Spinner } from '../ui/Spinner'
 import { useMerchantStore } from '../../store/merchantStore'
 import { apiPost } from '../../lib/api'
-import { RoutingAlgorithm, VolumeSplitItem } from '../../types/api'
-import { Plus, Trash2 } from 'lucide-react'
+import { RoutingAlgorithm } from '../../types/api'
+import { Plus, Trash2, Eye, ChevronDown, ChevronUp } from 'lucide-react'
 
 const COLORS = ['#0069ED', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
 
@@ -25,7 +25,7 @@ export function VolumeSplitPage() {
     () => apiPost(`/routing/list/active/${merchantId}`)
   )
 
-  const activeVol = active?.find(r => r.algorithm.type === 'volume_split')
+  const activeVol = active?.find(r => (r.algorithm_data || r.algorithm)?.type === 'volume_split')
 
   const [gateways, setGateways] = useState<GatewayEntry[]>([
     { id: makeId(), name: '', split: 50 },
@@ -35,6 +35,8 @@ export function VolumeSplitPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [showCurrentConfig, setShowCurrentConfig] = useState(false)
+  const [expandedRuleIds, setExpandedRuleIds] = useState<Set<string>>(new Set())
 
   const total = gateways.reduce((s, g) => s + g.split, 0)
 
@@ -56,9 +58,9 @@ export function VolumeSplitPage() {
     if (total !== 100) return setError(`Splits must sum to 100 (currently ${total})`)
     if (gateways.some(g => !g.name.trim())) return setError('All gateways must have names')
 
-    setSaving(true); setError(null)
+    setSaving(true); setError(null); setSuccess(null)
     try {
-      const res = await apiPost<RoutingAlgorithm>('/routing/create', {
+      await apiPost('/routing/create', {
         name: ruleName,
         description: '',
         created_by: merchantId,
@@ -67,12 +69,17 @@ export function VolumeSplitPage() {
           type: 'volume_split',
           data: gateways.map(g => ({
             split: g.split,
-            connectors: [{ gateway_name: g.name.trim(), gateway_id: null }],
-          } as VolumeSplitItem)),
+            output: { gateway_name: g.name.trim(), gateway_id: null },
+          })),
         },
       })
-      setSuccess(`Rule "${ruleName}" created (ID: ${res.id}). Activate it below.`)
+      setSuccess(`Rule "${ruleName}" created successfully. Find it in the list below to activate.`)
       mutate()
+      setRuleName('')
+      setGateways([
+        { id: makeId(), name: '', split: 50 },
+        { id: makeId(), name: '', split: 50 },
+      ])
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to create rule')
     } finally {
@@ -91,10 +98,22 @@ export function VolumeSplitPage() {
     }
   }
 
+  function toggleRuleExpand(id: string) {
+    setExpandedRuleIds(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(id)) {
+        newSet.delete(id)
+      } else {
+        newSet.add(id)
+      }
+      return newSet
+    })
+  }
+
   // Build pie data from active rule
   const pieData = activeVol
-    ? (activeVol.algorithm.data as VolumeSplitItem[]).map(item => ({
-        name: item.connectors[0]?.gateway_name ?? '?',
+    ? ((activeVol.algorithm_data || activeVol.algorithm).data as { split: number; output: { gateway_name: string; gateway_id: string | null } }[]).map(item => ({
+        name: item.output?.gateway_name ?? '?',
         value: item.split,
       }))
     : []
@@ -106,30 +125,50 @@ export function VolumeSplitPage() {
         <p className="text-gray-500 mt-1 text-sm">Distribute payment traffic across gateways by percentage.</p>
       </div>
 
+      {/* Active Configuration */}
       {activeVol && (
         <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <span className="font-medium text-gray-800">Active Split: {activeVol.name}</span>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-800">Active Volume Split</h2>
+              <p className="text-xs text-gray-500 mt-0.5">{activeVol.name}</p>
+            </div>
+            <div className="flex items-center gap-2">
               <Badge variant="green">Active</Badge>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowCurrentConfig(!showCurrentConfig)}
+              >
+                <Eye size={14} className="mr-1" />
+                {showCurrentConfig ? 'Hide' : 'View'}
+              </Button>
             </div>
           </CardHeader>
-          <CardBody>
-            <ResponsiveContainer width="100%" height={220}>
-              <PieChart>
-                <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={({ name, value }) => `${name}: ${value}%`} labelLine={{ stroke: '#45454f' }}>
-                  {pieData.map((_, i) => (
-                    <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(v) => `${v}%`} contentStyle={{ backgroundColor: '#0d0d12', border: '1px solid #1c1c24', borderRadius: '8px', color: '#e8e8f4' }} />
-                <Legend wrapperStyle={{ color: '#8e8ea0' }} />
-              </PieChart>
-            </ResponsiveContainer>
-          </CardBody>
+          {showCurrentConfig && (
+            <CardBody>
+              <ResponsiveContainer width="100%" height={220}>
+                <PieChart>
+                  <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={({ name, value }) => `${name}: ${value}%`} labelLine={{ stroke: '#45454f' }}>
+                    {pieData.map((_, i) => (
+                      <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(v) => `${v}%`} contentStyle={{ backgroundColor: '#0d0d12', border: '1px solid #1c1c24', borderRadius: '8px', color: '#e8e8f4' }} />
+                  <Legend wrapperStyle={{ color: '#8e8ea0' }} />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="mt-4 text-xs text-gray-600">
+                <p><strong>Rule ID:</strong> {activeVol.id}</p>
+                <p><strong>Created:</strong> {activeVol.created_at ? new Date(activeVol.created_at).toLocaleString() : 'Unknown'}</p>
+              </div>
+            </CardBody>
+          )}
         </Card>
       )}
 
+      {/* Create Rule */}
       <Card>
         <CardHeader>
           <h2 className="font-medium text-gray-800">Create Volume Split Rule</h2>
@@ -191,18 +230,33 @@ export function VolumeSplitPage() {
         </CardBody>
       </Card>
 
-      <ActiveRulesList merchantId={merchantId} onActivate={handleActivate} />
+      <ActiveRulesList 
+        merchantId={merchantId} 
+        onActivate={handleActivate} 
+        expandedRuleIds={expandedRuleIds}
+        onToggleExpand={toggleRuleExpand}
+      />
     </div>
   )
 }
 
-function ActiveRulesList({ merchantId, onActivate }: { merchantId: string; onActivate: (id: string) => void }) {
+function ActiveRulesList({ 
+  merchantId, 
+  onActivate, 
+  expandedRuleIds,
+  onToggleExpand 
+}: { 
+  merchantId: string; 
+  onActivate: (id: string) => void;
+  expandedRuleIds: Set<string>;
+  onToggleExpand: (id: string) => void;
+}) {
   const { data: rules, isLoading } = useSWR<RoutingAlgorithm[]>(
     merchantId ? ['routing-list', merchantId] : null,
     () => apiPost(`/routing/list/${merchantId}`)
   )
 
-  const volRules = rules?.filter(r => r.algorithm.type === 'volume_split') ?? []
+  const volRules = rules?.filter(r => (r.algorithm_data || r.algorithm)?.type === 'volume_split') ?? []
 
   if (!merchantId) return null
   if (isLoading) return <div className="flex justify-center py-4"><Spinner /></div>
@@ -222,19 +276,52 @@ function ActiveRulesList({ merchantId, onActivate }: { merchantId: string; onAct
           </thead>
           <tbody className="divide-y divide-[#1c1c24]">
             {volRules.map(r => {
-              const items = r.algorithm.data as VolumeSplitItem[]
+              const algorithm = r.algorithm_data || r.algorithm
+              const items = algorithm?.data as { split: number; output: { gateway_name: string; gateway_id: string | null } }[] || []
+              const isExpanded = expandedRuleIds.has(r.id)
               return (
-                <tr key={r.id} className="hover:bg-[#0f0f16] transition-colors">
-                  <td className="px-4 py-2 font-medium text-gray-800">{r.name}</td>
-                  <td className="px-4 py-2 text-gray-600 text-xs">
-                    {items.map(i => `${i.connectors[0]?.gateway_name}:${i.split}%`).join(' | ')}
-                  </td>
-                  <td className="px-4 py-2 text-right">
-                    <Button size="sm" variant="secondary" onClick={() => onActivate(r.id)}>
-                      Activate
-                    </Button>
-                  </td>
-                </tr>
+                <>
+                  <tr key={r.id} className="hover:bg-[#0f0f16] transition-colors">
+                    <td className="px-4 py-2 font-medium text-gray-800">{r.name}</td>
+                    <td className="px-4 py-2 text-gray-600 text-xs">
+                      {items.map(i => `${i.output?.gateway_name}:${i.split}%`).join(' | ')}
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => onToggleExpand(r.id)}
+                        >
+                          <Eye size={14} className="mr-1" />
+                          {isExpanded ? 'Hide' : 'View'}
+                        </Button>
+                        <Button size="sm" variant="secondary" onClick={() => onActivate(r.id)}>
+                          Activate
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                  {isExpanded && (
+                    <tr>
+                      <td colSpan={3} className="px-4 py-3 bg-gray-50">
+                        <div className="text-xs text-gray-600 space-y-2">
+                          <p><strong>ID:</strong> {r.id}</p>
+                          <p><strong>Description:</strong> {r.description || 'N/A'}</p>
+                          {r.created_at && (
+                            <p><strong>Created:</strong> {new Date(r.created_at).toLocaleString()}</p>
+                          )}
+                          <div>
+                            <strong>Configuration:</strong>
+                            <pre className="mt-1 p-2 bg-gray-100 rounded text-xs overflow-auto max-h-48">
+                              {JSON.stringify(algorithm, null, 2)}
+                            </pre>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </>
               )
             })}
           </tbody>

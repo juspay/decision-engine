@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import useSWR from 'swr'
 import { Card, CardBody, CardHeader } from '../ui/Card'
@@ -10,14 +11,24 @@ import { CheckCircle, XCircle, AlertCircle } from 'lucide-react'
 function useHealth() {
   const [status, setStatus] = useState<'up' | 'down' | 'loading'>('loading')
   useEffect(() => {
+    console.log(`\n[HEALTH CHECK] ${new Date().toISOString()}`)
+    console.log('Fetching: GET /health')
+    
     fetch('/health')
-      .then((r) => setStatus(r.ok ? 'up' : 'down'))
-      .catch(() => setStatus('down'))
+      .then((r) => {
+        console.log(`[HEALTH CHECK] Response: ${r.status} ${r.statusText}`)
+        setStatus(r.ok ? 'up' : 'down')
+      })
+      .catch((err) => {
+        console.log(`[HEALTH CHECK ERROR] ${err.message}`)
+        setStatus('down')
+      })
   }, [])
   return status
 }
 
 export function OverviewPage() {
+  const navigate = useNavigate()
   const { merchantId } = useMerchantStore()
   const health = useHealth()
 
@@ -30,17 +41,15 @@ export function OverviewPage() {
   const { data: srConfig, error: srError } = useSWR(
     merchantId ? [`/rule/get`, 'successRate', merchantId] : null,
     () =>
-      apiPost('/rule/get', { merchant_id: merchantId, config: { type: 'successRate' } })
-  )
-
-  const { data: elimConfig, error: elimError } = useSWR(
-    merchantId ? [`/rule/get`, 'elimination', merchantId] : null,
-    () =>
-      apiPost('/rule/get', { merchant_id: merchantId, config: { type: 'elimination' } })
+      apiPost('/rule/get', { merchant_id: merchantId, algorithm: 'successRate' })
   )
 
   const activeRouting =
     activeAlgorithms && activeAlgorithms.length > 0 ? activeAlgorithms[0] : null
+
+  const hasRuleBasedRouting = (activeAlgorithms || []).some(a => 
+    (a.algorithm_data || a.algorithm)?.type === 'advanced'
+  )
 
   return (
     <div className="space-y-6">
@@ -78,7 +87,10 @@ export function OverviewPage() {
           </CardBody>
         </Card>
 
-        <Card>
+        <Card 
+          className="cursor-pointer hover:border-brand-300 transition-all"
+          onClick={() => navigate('/routing')}
+        >
           <CardBody>
             <p className="text-xs text-gray-500 mb-1">Active Routing Rule</p>
             {!merchantId ? (
@@ -87,7 +99,7 @@ export function OverviewPage() {
               <div>
                 <Badge variant="green">Active</Badge>
                 <p className="text-sm font-medium mt-1 truncate">{activeRouting.name}</p>
-                <p className="text-xs text-gray-400">{activeRouting.algorithm?.type}</p>
+                <p className="text-xs text-gray-400">{(activeRouting.algorithm_data || activeRouting.algorithm)?.type}</p>
               </div>
             ) : (
               <Badge variant="gray">Not Configured</Badge>
@@ -95,14 +107,17 @@ export function OverviewPage() {
           </CardBody>
         </Card>
 
-        <Card>
+        <Card 
+          className="cursor-pointer hover:border-brand-300 transition-all"
+          onClick={() => navigate('/routing/sr')}
+        >
           <CardBody>
-            <p className="text-xs text-gray-500 mb-1">SR Config</p>
+            <p className="text-xs text-gray-500 mb-1">Auth-Rate Config</p>
             {!merchantId ? (
               <Badge variant="gray">Not set</Badge>
             ) : srError ? (
               <Badge variant="gray">Not Configured</Badge>
-            ) : srConfig ? (
+            ) : srConfig?.config?.data ? (
               <Badge variant="green">Configured</Badge>
             ) : (
               <Badge variant="gray">Not Configured</Badge>
@@ -110,14 +125,15 @@ export function OverviewPage() {
           </CardBody>
         </Card>
 
-        <Card>
+        <Card 
+          className="cursor-pointer hover:border-brand-300 transition-all"
+          onClick={() => navigate('/routing/rules')}
+        >
           <CardBody>
-            <p className="text-xs text-gray-500 mb-1">Elimination Config</p>
+            <p className="text-xs text-gray-500 mb-1">Rule-Based Routing</p>
             {!merchantId ? (
               <Badge variant="gray">Not set</Badge>
-            ) : elimError ? (
-              <Badge variant="gray">Not Configured</Badge>
-            ) : elimConfig ? (
+            ) : hasRuleBasedRouting ? (
               <Badge variant="green">Configured</Badge>
             ) : (
               <Badge variant="gray">Not Configured</Badge>
@@ -128,7 +144,10 @@ export function OverviewPage() {
 
       {/* Active algorithm detail */}
       {activeRouting && (
-        <Card>
+        <Card 
+          className="cursor-pointer hover:border-brand-300 transition-all"
+          onClick={() => navigate('/routing')}
+        >
           <CardHeader>
             <h2 className="text-sm font-semibold text-gray-800">Active Routing Configuration</h2>
           </CardHeader>
@@ -140,7 +159,7 @@ export function OverviewPage() {
               </div>
               <div>
                 <dt className="text-gray-500">Type</dt>
-                <dd className="font-medium capitalize">{activeRouting.algorithm?.type}</dd>
+                <dd className="font-medium capitalize">{(activeRouting.algorithm_data || activeRouting.algorithm)?.type}</dd>
               </div>
               <div>
                 <dt className="text-gray-500">Algorithm For</dt>

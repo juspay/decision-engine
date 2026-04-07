@@ -25,7 +25,16 @@ import { useMerchantStore } from '../../store/merchantStore'
 import { apiPost } from '../../lib/api'
 import { RoutingAlgorithm } from '../../types/api'
 import { ROUTING_KEYS, RoutingKey } from '../../lib/constants'
-import { Plus, Trash2, GripVertical, ChevronDown, ChevronUp } from 'lucide-react'
+import { Plus, Trash2, GripVertical, ChevronDown, ChevronUp, Eye } from 'lucide-react'
+
+const OPERATOR_TO_API: Record<string, string> = {
+  '==': 'equal',
+  '!=': 'not_equal',
+  '>': 'greater_than',
+  '<': 'less_than',
+  '>=': 'greater_than_equal',
+  '<=': 'less_than_equal',
+}
 
 // ---- Types for builder ----
 interface GatewayEntry {
@@ -229,8 +238,8 @@ function ConditionRowEditor({
   const isInt = keyInfo?.type === 'integer'
 
   const operators = isInt
-    ? ['>', '<', '>=', '<=', '==']
-    : ['==', 'is_in']
+    ? ['>', '<', '>=', '<=', '==', '!=']
+    : ['==', '!=']
 
   return (
     <div className="flex items-center gap-2 flex-wrap">
@@ -403,37 +412,40 @@ function RuleBlockEditor({
 
 // ---- Build Euclid payload ----
 function buildAlgorithmData(rules: RuleBlock[], defaultOutput: DefaultOutput) {
-  function buildOutput(type: 'priority' | 'volume_split', pg: GatewayEntry[], vg: VolSplitEntry[]) {
+  function buildOutput(type: 'priority' | 'volume_split', pg: GatewayEntry[], vg: VolSplitEntry[]): Record<string, unknown> {
     if (type === 'priority') {
       return {
-        type: 'priority',
-        data: pg.map((g) => ({ gateway_name: g.name, gateway_id: null })),
+        priority: pg.map((g) => ({ gateway_name: g.name, gateway_id: null })),
       }
     }
     return {
-      type: 'volume_split',
-      data: vg.map((g) => ({
+      volume_split: vg.map((g) => ({
         split: g.split,
-        connectors: [{ gateway_name: g.name, gateway_id: null }],
+        output: { gateway_name: g.name, gateway_id: null },
       })),
     }
   }
 
+  function getRoutingType(type: 'priority' | 'volume_split'): string {
+    return type === 'priority' ? 'priority' : 'volume_split'
+  }
+
   return {
     globals: {},
-    defaultSelection: buildOutput(
+    default_selection: buildOutput(
       defaultOutput.type,
       defaultOutput.priorityGateways,
       defaultOutput.volumeGateways
     ),
     rules: rules.map((r) => ({
       name: r.name,
-      connectorSelection: buildOutput(r.outputType, r.priorityGateways, r.volumeGateways),
+      routing_type: getRoutingType(r.outputType),
+      output: buildOutput(r.outputType, r.priorityGateways, r.volumeGateways),
       statements: [
         {
           condition: r.conditions.map((c) => ({
             lhs: c.lhs,
-            comparison: c.operator,
+            comparison: OPERATOR_TO_API[c.operator] || c.operator,
             value: {
               type: ROUTING_KEYS[c.lhs]?.type === 'integer' ? 'number' : 'enum_variant',
               value: ROUTING_KEYS[c.lhs]?.type === 'integer' ? Number(c.value) : c.value,
@@ -464,6 +476,7 @@ export function EuclidRulesPage() {
   const [activating, setActivating] = useState(false)
   const [activateError, setActivateError] = useState<string | null>(null)
   const [activateSuccess, setActivateSuccess] = useState(false)
+  const [expandedRuleIds, setExpandedRuleIds] = useState<Set<string>>(new Set())
 
   const { data: allAlgorithms, mutate } = useSWR<RoutingAlgorithm[]>(
     merchantId ? `/routing/list/${merchantId}` : null,
@@ -522,6 +535,18 @@ export function EuclidRulesPage() {
     }
   }
 
+  function toggleRuleExpand(id: string) {
+    setExpandedRuleIds(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(id)) {
+        newSet.delete(id)
+      } else {
+        newSet.add(id)
+      }
+      return newSet
+    })
+  }
+
   function addRuleBlock() {
     setRuleBlocks((prev) => [
       ...prev,
@@ -562,30 +587,65 @@ export function EuclidRulesPage() {
                   <tbody>
                     {allAlgorithms.map((algo) => {
                       const isActive = activeIds.has(algo.id)
+                      const isExpanded = expandedRuleIds.has(algo.id)
+                      // Backend returns algorithm_data, map it to algorithm for display
+                      const algorithm = algo.algorithm_data || algo.algorithm
                       return (
-                        <tr key={algo.id} className="border-b border-gray-100 last:border-0">
-                          <td className="px-4 py-3">
-                            <p className="font-medium truncate">{algo.name}</p>
-                            <p className="text-xs text-gray-400 capitalize">{algo.algorithm?.type}</p>
-                          </td>
-                          <td className="px-2 py-3">
-                            <Badge variant={isActive ? 'green' : 'gray'}>
-                              {isActive ? 'Active' : 'Inactive'}
-                            </Badge>
-                          </td>
-                          <td className="px-2 py-3">
-                            {!isActive && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => handleActivate(algo.id)}
-                                disabled={activating}
-                              >
-                                Activate
-                              </Button>
-                            )}
-                          </td>
-                        </tr>
+                        <>
+                          <tr key={algo.id} className="border-b border-gray-100 last:border-0">
+                            <td className="px-4 py-3">
+                              <p className="font-medium truncate">{algo.name}</p>
+                              <p className="text-xs text-gray-400 capitalize">{algorithm?.type}</p>
+                            </td>
+                            <td className="px-2 py-3">
+                              <Badge variant={isActive ? 'green' : 'gray'}>
+                                {isActive ? 'Active' : 'Inactive'}
+                              </Badge>
+                            </td>
+                            <td className="px-2 py-3">
+                              <div className="flex items-center gap-1">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => toggleRuleExpand(algo.id)}
+                                >
+                                  <Eye size={14} className="mr-1" />
+                                  {isExpanded ? 'Hide' : 'View'}
+                                </Button>
+                                {!isActive && (
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => handleActivate(algo.id)}
+                                    disabled={activating}
+                                  >
+                                    Activate
+                                  </Button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                          {isExpanded && (
+                            <tr>
+                              <td colSpan={3} className="px-4 py-3 bg-gray-50">
+                                <div className="text-xs text-gray-600 space-y-2">
+                                  <p><strong>ID:</strong> {algo.id}</p>
+                                  <p><strong>Description:</strong> {algo.description || 'N/A'}</p>
+                                  <p><strong>Algorithm For:</strong> {algo.algorithm_for}</p>
+                                  {algo.created_at && (
+                                    <p><strong>Created:</strong> {new Date(algo.created_at).toLocaleString()}</p>
+                                  )}
+                                  <div>
+                                    <strong>Configuration:</strong>
+                                    <pre className="mt-1 p-2 bg-gray-100 rounded text-xs overflow-auto max-h-48">
+                                      {JSON.stringify(algorithm, null, 2)}
+                                    </pre>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </>
                       )
                     })}
                   </tbody>

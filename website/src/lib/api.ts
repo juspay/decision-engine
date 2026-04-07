@@ -1,18 +1,86 @@
 // All API calls use relative URLs so nginx/vite-proxy can handle routing
 
+const DEBUG_API = true
+
+function logRequest(method: string, path: string, body?: unknown) {
+  if (!DEBUG_API) return
+  console.log('\n' + '='.repeat(80))
+  console.log(`[API REQUEST] ${new Date().toISOString()}`)
+  console.log(`Method: ${method}`)
+  console.log(`Path: ${path}`)
+  if (body !== undefined) {
+    console.log('Body:', JSON.stringify(body, null, 2))
+  }
+  console.log('='.repeat(80))
+}
+
+function logResponse(path: string, status: number, statusText: string, body: string) {
+  if (!DEBUG_API) return
+  console.log('\n' + '-'.repeat(80))
+  console.log(`[API RESPONSE] ${new Date().toISOString()}`)
+  console.log(`Path: ${path}`)
+  console.log(`Status: ${status} ${statusText}`)
+  console.log('Response Body:', body)
+  console.log('-'.repeat(80) + '\n')
+}
+
+function logError(path: string, error: unknown) {
+  if (!DEBUG_API) return
+  console.log('\n' + '!'.repeat(80))
+  console.log(`[API ERROR] ${new Date().toISOString()}`)
+  console.log(`Path: ${path}`)
+  if (error instanceof Error) {
+    console.log('Error:', error.message)
+    console.log('Stack:', error.stack)
+  } else {
+    console.log('Error:', error)
+  }
+  console.log('!'.repeat(80) + '\n')
+}
+
 export async function apiFetch<T>(
   path: string,
   options?: RequestInit
 ): Promise<T> {
-  const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    ...options,
-  })
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`API error ${res.status}: ${text}`)
+  const method = options?.method || 'GET'
+  const body = options?.body ? JSON.parse(options.body as string) : undefined
+  
+  logRequest(method, path, body)
+  
+  try {
+    const res = await fetch(path, {
+      headers: { 'Content-Type': 'application/json', ...options?.headers },
+      ...options,
+    })
+    
+    const responseText = await res.text()
+    let responseBody: string
+    
+    try {
+      const json = JSON.parse(responseText)
+      responseBody = JSON.stringify(json, null, 2)
+    } catch {
+      responseBody = responseText
+    }
+    
+    logResponse(path, res.status, res.statusText, responseBody)
+    
+    if (!res.ok) {
+      const error = new Error(`API error ${res.status}: ${responseText}`)
+      logError(path, error)
+      throw error
+    }
+    
+    // Handle empty response body
+    if (!responseText.trim()) {
+      return undefined as T
+    }
+    
+    return JSON.parse(responseText) as T
+  } catch (error) {
+    logError(path, error)
+    throw error
   }
-  return res.json() as Promise<T>
 }
 
 export async function apiPost<T>(path: string, body?: unknown): Promise<T> {

@@ -19,7 +19,7 @@ export default function App() {
         <Route path="routing/volume" element={<VolumeSplitPage />} />
         <Route path="routing/debit" element={<DebitRoutingPage />} />
         <Route path="decisions" element={<DecisionExplorerPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<Navigate to="." replace />} />
       </Route>
     </Routes>
   )

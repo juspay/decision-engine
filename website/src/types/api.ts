@@ -19,7 +19,7 @@ export interface GatewayConnector {
 
 export interface VolumeSplitItem {
   split: number
-  connectors: GatewayConnector[]
+  output: GatewayConnector
 }
 
 export type RoutingAlgorithmData =
@@ -63,7 +63,14 @@ export interface RoutingAlgorithm {
   created_by: string
   algorithm_for: string
   created_at?: string
-  algorithm: {
+  modified_at?: string
+  // Backend returns algorithm_data, not algorithm
+  algorithm_data?: {
+    type: 'priority' | 'volume_split' | 'single' | 'advanced'
+    data: RoutingAlgorithmData
+  }
+  // For convenience, map algorithm_data to algorithm in the component
+  algorithm?: {
     type: 'priority' | 'volume_split' | 'single' | 'advanced'
     data: RoutingAlgorithmData
   }
