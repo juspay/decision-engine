@@ -203,6 +203,10 @@ where
             axum::routing::post(crate::euclid::handlers::routing_rules::activate_routing_rule),
         )
         .route(
+            "/routing/deactivate",
+            axum::routing::post(crate::euclid::handlers::routing_rules::deactivate_routing_rule),
+        )
+        .route(
             "/routing/list/:created_by",
             axum::routing::post(
                 crate::euclid::handlers::routing_rules::list_all_routing_algorithm_id,

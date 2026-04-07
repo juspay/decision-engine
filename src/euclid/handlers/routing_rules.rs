@@ -9,10 +9,10 @@ use crate::{
         interpreter::{evaluate_output, InterpreterBackend},
         pm_filter_graph,
         types::{
-            ActivateRoutingConfigRequest, Context, JsonifiedRoutingAlgorithm, KeyDataType,
-            RoutingAlgorithmMapperNew, RoutingDictionaryRecord, RoutingEvaluateResponse,
-            RoutingRequest, RoutingRule, SrDimensionConfig, StaticRoutingAlgorithm,
-            ELIGIBLE_DIMENSIONS,
+            ActivateRoutingConfigRequest, Context, DeactivateRoutingConfigRequest,
+            JsonifiedRoutingAlgorithm, KeyDataType, RoutingAlgorithmMapperNew,
+            RoutingDictionaryRecord, RoutingEvaluateResponse, RoutingRequest, RoutingRule,
+            SrDimensionConfig, StaticRoutingAlgorithm, ELIGIBLE_DIMENSIONS,
         },
         utils::{generate_random_id, is_valid_enum_value, validate_routing_rule},
     },
@@ -641,6 +641,114 @@ pub async fn activate_routing_rule(
             timer.observe_duration();
             Err(e.into())
         }
+    }
+}
+
+pub async fn deactivate_routing_rule(
+    Json(payload): Json<DeactivateRoutingConfigRequest>,
+) -> Result<(), ContainerError<EuclidErrors>> {
+    let timer = API_LATENCY_HISTOGRAM
+        .with_label_values(&["deactivate_routing_rule"])
+        .start_timer();
+    API_REQUEST_TOTAL_COUNTER
+        .with_label_values(&["deactivate_routing_rule"])
+        .inc();
+
+    let update_failure_metrics = || {
+        API_REQUEST_COUNTER
+            .with_label_values(&["deactivate_routing_rule", "failure"])
+            .inc();
+    };
+
+    let state = get_tenant_app_state().await;
+    let conn = match state
+        .db
+        .get_conn()
+        .await
+        .map_err(|_| EuclidErrors::StorageError)
+    {
+        Ok(connection) => connection,
+        Err(e) => {
+            update_failure_metrics();
+            timer.observe_duration();
+            return Err(e.into());
+        }
+    };
+
+    // === Step 1: Find algorithm_for from RoutingAlgorithm table ===
+    let algorithm_for = match crate::generics::generic_find_one::<
+        <RoutingAlgorithm as HasTable>::Table,
+        _,
+        RoutingAlgorithm,
+    >(&state.db, dsl::id.eq(payload.routing_algorithm_id.clone()))
+    .await
+    .change_context(EuclidErrors::RoutingAlgorithmNotFound(
+        payload.routing_algorithm_id.clone(),
+    )) {
+        Ok(algorithm) => algorithm.algorithm_for,
+        Err(e) => {
+            update_failure_metrics();
+            timer.observe_duration();
+            return Err(e.into());
+        }
+    };
+
+    // === Step 2: Find the active mapping for (created_by, routing_algorithm_id, algorithm_for) ===
+    let existing_mapping = crate::generics::generic_find_one::<
+        <RoutingAlgorithmMapper as HasTable>::Table,
+        _,
+        RoutingAlgorithmMapper,
+    >(
+        &state.db,
+        mapper_dsl::created_by
+            .eq(payload.created_by.clone())
+            .and(mapper_dsl::routing_algorithm_id.eq(payload.routing_algorithm_id.clone()))
+            .and(mapper_dsl::algorithm_for.eq(algorithm_for.clone())),
+    )
+    .await
+    .ok();
+
+    // === Step 3: Delete the mapping if found (idempotent - return success if not found) ===
+    if let Some(mapping) = existing_mapping {
+        let predicate = mapper_dsl::id.eq(mapping.id);
+
+        match crate::generics::generic_delete::<
+            <RoutingAlgorithmMapper as HasTable>::Table,
+            _,
+        >(&conn, predicate)
+        .await
+        .change_context(EuclidErrors::StorageError)
+        {
+            Ok(_) => {
+                logger::debug!(
+                    "Deactivated routing algorithm {} for merchant {}",
+                    payload.routing_algorithm_id,
+                    payload.created_by
+                );
+                API_REQUEST_COUNTER
+                    .with_label_values(&["deactivate_routing_rule", "success"])
+                    .inc();
+                timer.observe_duration();
+                Ok(())
+            }
+            Err(e) => {
+                update_failure_metrics();
+                timer.observe_duration();
+                Err(e.into())
+            }
+        }
+    } else {
+        // Idempotent: if the mapping doesn't exist, return success
+        logger::debug!(
+            "No active mapping found for routing algorithm {} and merchant {} - already deactivated",
+            payload.routing_algorithm_id,
+            payload.created_by
+        );
+        API_REQUEST_COUNTER
+            .with_label_values(&["deactivate_routing_rule", "success"])
+            .inc();
+        timer.observe_duration();
+        Ok(())
     }
 }
 

@@ -222,6 +222,12 @@ pub struct ActivateRoutingConfigRequest {
     pub routing_algorithm_id: String,
 }
 
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct DeactivateRoutingConfigRequest {
+    pub created_by: String,
+    pub routing_algorithm_id: String,
+}
+
 #[derive(AsChangeset, Debug, serde::Serialize, serde::Deserialize, Queryable, Selectable)]
 #[cfg_attr(feature = "mysql", diesel(table_name = schema::routing_algorithm_mapper))]
 #[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::routing_algorithm_mapper))]
