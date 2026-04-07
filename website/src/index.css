@@ -1,0 +1,82 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background-color: #07070b;
+    color: #e8e8f4;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #28282f; border-radius: 99px; }
+  ::-webkit-scrollbar-thumb:hover { background: #35353e; }
+
+  /* Form elements — global dark override */
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  select,
+  textarea {
+    background-color: #0d0d12 !important;
+    border-color: #222229 !important;
+    color: #e8e8f4 !important;
+  }
+  input::placeholder, textarea::placeholder {
+    color: #35353e !important;
+  }
+  select option {
+    background-color: #14141a;
+    color: #e8e8f4;
+  }
+  input:focus:not([type='checkbox']):not([type='radio']):not([type='range']),
+  select:focus,
+  textarea:focus {
+    border-color: #1668E3 !important;
+    box-shadow: 0 0 0 3px rgba(22, 104, 227, 0.12) !important;
+    outline: none !important;
+  }
+
+  /* Semantic color boxes — make them work on dark backgrounds */
+  .bg-yellow-50  { background-color: rgba(234,179,8,0.06)    !important; }
+  .bg-amber-50   { background-color: rgba(245,158,11,0.06)   !important; }
+  .bg-green-50   { background-color: rgba(16,185,129,0.06)   !important; }
+  .bg-blue-50    { background-color: rgba(59,130,246,0.06)   !important; }
+  .bg-red-50     { background-color: rgba(239,68,68,0.06)    !important; }
+
+  .border-yellow-200 { border-color: rgba(234,179,8,0.2)    !important; }
+  .border-amber-200  { border-color: rgba(245,158,11,0.2)   !important; }
+  .border-green-200  { border-color: rgba(16,185,129,0.2)   !important; }
+  .border-blue-200   { border-color: rgba(59,130,246,0.2)   !important; }
+  .border-red-200    { border-color: rgba(239,68,68,0.2)    !important; }
+
+  .text-yellow-800 { color: #f0c93a !important; }
+  .text-amber-600  { color: #f5a623 !important; }
+  .text-green-700  { color: #34d399 !important; }
+  .text-green-600  { color: #34d399 !important; }
+  .text-blue-700   { color: #60a5fa !important; }
+  .text-red-700    { color: #f87171 !important; }
+  .text-red-500    { color: #f87171 !important; }
+
+  /* Recharts dark tooltip */
+  .recharts-tooltip-wrapper .recharts-default-tooltip {
+    background-color: #12121a !important;
+    border-color: #1c1c26 !important;
+    border-radius: 8px !important;
+  }
+  .recharts-tooltip-label { color: #e8e8f4 !important; }
+  .recharts-tooltip-item  { color: #b0b0c0 !important; }
+
+  /* Range input */
+  input[type='range'] { accent-color: #1668E3; }
+
+  /* Radio/checkbox */
+  input[type='radio'], input[type='checkbox'] {
+    accent-color: #1668E3;
+  }
+}

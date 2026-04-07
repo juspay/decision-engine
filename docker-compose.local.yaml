@@ -124,6 +124,7 @@ services:
       - "8080:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./website/dist:/usr/share/nginx/html/dashboard:ro
     depends_on:
       - open-router
       - mintlify-docs
