@@ -1,82 +1,209 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
-  html, body {
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+
+  html,
+  body {
+    font-family: 'Outfit', 'Inter', system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    background-color: #07070b;
-    color: #e8e8f4;
+    background-color: #000000;
+    color: #ffffff;
+    position: relative;
+    overflow-x: hidden;
   }
 
   /* Scrollbar */
-  ::-webkit-scrollbar { width: 4px; height: 4px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: #28282f; border-radius: 99px; }
-  ::-webkit-scrollbar-thumb:hover { background: #35353e; }
+  ::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
 
-  /* Form elements — global dark override */
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #222222;
+    border-radius: 99px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #333333;
+  }
+
+  /* Form elements — Soft dark pill override */
   input:not([type='checkbox']):not([type='radio']):not([type='range']),
   select,
   textarea {
-    background-color: #0d0d12 !important;
-    border-color: #222229 !important;
-    color: #e8e8f4 !important;
+    background: #0f0f11 !important;
+    border: 1px solid transparent !important;
+    border-radius: 9999px !important;
+    /* Full pill-shape */
+    color: #ffffff !important;
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.9rem;
+    padding-left: 1.25rem !important;
+    padding-right: 1.25rem !important;
+    transition: all 0.2s ease-in-out;
+    box-shadow: none !important;
   }
-  input::placeholder, textarea::placeholder {
-    color: #35353e !important;
+
+  input::placeholder,
+  textarea::placeholder {
+    color: #66666e !important;
+    font-weight: 400;
   }
+
   select option {
-    background-color: #14141a;
-    color: #e8e8f4;
+    background-color: #0f0f11;
+    color: #ffffff;
   }
+
   input:focus:not([type='checkbox']):not([type='radio']):not([type='range']),
   select:focus,
   textarea:focus {
-    border-color: #1668E3 !important;
-    box-shadow: 0 0 0 3px rgba(22, 104, 227, 0.12) !important;
+    background: #151518 !important;
+    border-color: #333338 !important;
+    box-shadow: none !important;
     outline: none !important;
   }
 
-  /* Semantic color boxes — make them work on dark backgrounds */
-  .bg-yellow-50  { background-color: rgba(234,179,8,0.06)    !important; }
-  .bg-amber-50   { background-color: rgba(245,158,11,0.06)   !important; }
-  .bg-green-50   { background-color: rgba(16,185,129,0.06)   !important; }
-  .bg-blue-50    { background-color: rgba(59,130,246,0.06)   !important; }
-  .bg-red-50     { background-color: rgba(239,68,68,0.06)    !important; }
-
-  .border-yellow-200 { border-color: rgba(234,179,8,0.2)    !important; }
-  .border-amber-200  { border-color: rgba(245,158,11,0.2)   !important; }
-  .border-green-200  { border-color: rgba(16,185,129,0.2)   !important; }
-  .border-blue-200   { border-color: rgba(59,130,246,0.2)   !important; }
-  .border-red-200    { border-color: rgba(239,68,68,0.2)    !important; }
-
-  .text-yellow-800 { color: #f0c93a !important; }
-  .text-amber-600  { color: #f5a623 !important; }
-  .text-green-700  { color: #34d399 !important; }
-  .text-green-600  { color: #34d399 !important; }
-  .text-blue-700   { color: #60a5fa !important; }
-  .text-red-700    { color: #f87171 !important; }
-  .text-red-500    { color: #f87171 !important; }
-
-  /* Recharts dark tooltip */
-  .recharts-tooltip-wrapper .recharts-default-tooltip {
-    background-color: #12121a !important;
-    border-color: #1c1c26 !important;
-    border-radius: 8px !important;
+  /* Semantic color boxes — minimalist adaptation */
+  .bg-yellow-50 {
+    background-color: #1a1500 !important;
+    color: #eab308 !important;
+    border-radius: 12px;
   }
-  .recharts-tooltip-label { color: #e8e8f4 !important; }
-  .recharts-tooltip-item  { color: #b0b0c0 !important; }
+
+  .bg-amber-50 {
+    background-color: #1a1000 !important;
+    color: #f59e0b !important;
+    border-radius: 12px;
+  }
+
+  .bg-green-50 {
+    background-color: #001a10 !important;
+    color: #10b981 !important;
+    border-radius: 12px;
+  }
+
+  .bg-blue-50 {
+    background-color: #00122a !important;
+    color: #3b82f6 !important;
+    border-radius: 12px;
+  }
+
+  .bg-red-50 {
+    background-color: #2a0505 !important;
+    color: #ef4444 !important;
+    border-radius: 12px;
+  }
+
+  .text-yellow-800 {
+    color: #fde047 !important;
+  }
+
+  .text-amber-600 {
+    color: #fcd34d !important;
+  }
+
+  .text-green-700 {
+    color: #6ee7b7 !important;
+  }
+
+  .text-green-600 {
+    color: #34d399 !important;
+  }
+
+  .text-blue-700 {
+    color: #93c5fd !important;
+  }
+
+  .text-red-700 {
+    color: #fca5a5 !important;
+  }
+
+  .text-red-500 {
+    color: #f87171 !important;
+  }
+
+  /* Recharts minimalistic tooltip */
+  .recharts-tooltip-wrapper .recharts-default-tooltip {
+    background: #0f0f11 !important;
+    border: 1px solid #1c1c1f !important;
+    border-radius: 16px !important;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.9) !important;
+    padding: 12px 16px !important;
+    font-family: 'Outfit', sans-serif;
+  }
+
+  .recharts-tooltip-label {
+    color: #ffffff !important;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+
+  .recharts-tooltip-item {
+    color: #a1a1aa !important;
+    padding: 2px 0 !important;
+  }
 
   /* Range input */
-  input[type='range'] { accent-color: #1668E3; }
+  input[type='range'] {
+    accent-color: #ffffff;
+  }
 
   /* Radio/checkbox */
-  input[type='radio'], input[type='checkbox'] {
-    accent-color: #1668E3;
+  input[type='radio'],
+  input[type='checkbox'] {
+    accent-color: #ffffff;
+    width: 18px;
+    height: 18px;
+    background-color: #0f0f11;
+    border: 1px solid #222226;
+    border-radius: 50%;
   }
+
+  input[type='checkbox'] {
+    border-radius: 4px;
+  }
+
+  input[type='radio']:checked,
+  input[type='checkbox']:checked {
+    background-color: #ffffff;
+    border-color: #ffffff;
+  }
+}
+
+/* Floating panel utility class */
+.glass-panel {
+  background: #0c0c0e;
+  border: 1px solid #1a1a1d;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.8), 0 0 1px 1px rgba(255, 255, 255, 0.02) inset;
+  border-radius: 20px;
+  position: relative;
+  overflow: hidden;
+}
+
+.glass-panel-hover:hover {
+  background: #111114;
+  border-color: #222226;
+  transition: all 0.2s ease-in-out;
+}
+
+/* Aurora top edge */
+.aurora-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #9b51e0, #4f46e5, #0ea5e9, transparent);
+  opacity: 0.8;
+  z-index: 100;
 }

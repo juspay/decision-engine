@@ -8,8 +8,8 @@ interface CardProps {
 
 export function Card({ children, className = '', onClick }: CardProps) {
   return (
-    <div 
-      className={`bg-[#0d0d12] rounded-xl border border-[#1c1c24] ${className}`}
+    <div
+      className={`glass-panel rounded-[20px] ${onClick ? 'glass-panel-hover cursor-pointer' : ''} ${className}`}
       onClick={onClick}
       role={onClick ? "button" : undefined}
       tabIndex={onClick ? 0 : undefined}
@@ -21,12 +21,12 @@ export function Card({ children, className = '', onClick }: CardProps) {
 
 export function CardHeader({ children, className = '' }: CardProps) {
   return (
-    <div className={`px-5 py-4 border-b border-[#1c1c24] ${className}`}>
+    <div className={`px-6 py-5 border-b border-[#1c1c1f] bg-[#0c0c0e] rounded-t-[20px] ${className}`}>
       {children}
     </div>
   )
 }
 
 export function CardBody({ children, className = '' }: CardProps) {
-  return <div className={`px-5 py-4 ${className}`}>{children}</div>
+  return <div className={`px-6 py-5 ${className}`}>{children}</div>
 }
