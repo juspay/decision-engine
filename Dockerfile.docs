@@ -1,0 +1,11 @@
+FROM node:20-alpine
+
+RUN npm install -g mintlify
+
+WORKDIR /docs
+
+COPY docs/ .
+
+EXPOSE 3000
+
+CMD ["mintlify", "dev", "--port", "3000", "--no-browser"]

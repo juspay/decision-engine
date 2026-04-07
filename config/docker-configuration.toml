@@ -83,6 +83,9 @@ payment_paymentMethod = { type = "enum", values = "NB_HDFC, NB_ICICI, NB_SBI" }
 payment_paymentSource = { type = "enum", values = "net.one97.paytm, @paytm" }
 txn_isEmi = { type = "enum", values = "true, false" }
 
+[routing_config.default]
+output = []
+
 [debit_routing_config]
 fraud_check_fee = 1.0
 

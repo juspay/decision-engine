@@ -1,0 +1,73 @@
+{
+  "$schema": "https://mintlify.com/schema.json",
+  "name": "Decision Engine",
+  "logo": {
+    "dark": "/logo/dark.svg",
+    "light": "/logo/light.svg"
+  },
+  "favicon": "/favicon.svg",
+  "colors": {
+    "primary": "#0069ED",
+    "light": "#4D9CFF",
+    "dark": "#0050B4"
+  },
+  "openapi": ["openapi.json"],
+  "api": {
+    "baseUrl": "http://localhost:8080",
+    "playground": {
+      "mode": "show"
+    }
+  },
+  "navigation": [
+    {
+      "group": "Overview",
+      "pages": ["introduction"]
+    },
+    {
+      "group": "Health",
+      "pages": ["api-reference/endpoint/healthCheck"]
+    },
+    {
+      "group": "Gateway Decision",
+      "pages": [
+        "api-reference/endpoint/decideGateway"
+      ]
+    },
+    {
+      "group": "Score Feedback",
+      "pages": [
+        "api-reference/endpoint/updateGatewayScore"
+      ]
+    },
+    {
+      "group": "Merchant Account",
+      "pages": [
+        "api-reference/endpoint/createMerchant",
+        "api-reference/endpoint/getMerchant",
+        "api-reference/endpoint/deleteMerchant"
+      ]
+    },
+    {
+      "group": "Routing Rules",
+      "pages": [
+        "api-reference/endpoint/createRoutingRule",
+        "api-reference/endpoint/activateRoutingRule",
+        "api-reference/endpoint/listRoutingRules",
+        "api-reference/endpoint/getActiveRoutingRule",
+        "api-reference/endpoint/evaluateRoutingRule"
+      ]
+    },
+    {
+      "group": "Rule Configuration",
+      "pages": [
+        "api-reference/endpoint/createRuleConfig",
+        "api-reference/endpoint/getRuleConfig",
+        "api-reference/endpoint/updateRuleConfig",
+        "api-reference/endpoint/deleteRuleConfig"
+      ]
+    }
+  ],
+  "footerSocials": {
+    "github": "https://github.com/juspay/decision-engine"
+  }
+}
