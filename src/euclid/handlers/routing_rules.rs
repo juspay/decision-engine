@@ -712,10 +712,9 @@ pub async fn deactivate_routing_rule(
     if let Some(mapping) = existing_mapping {
         let predicate = mapper_dsl::id.eq(mapping.id);
 
-        match crate::generics::generic_delete::<
-            <RoutingAlgorithmMapper as HasTable>::Table,
-            _,
-        >(&conn, predicate)
+        match crate::generics::generic_delete::<<RoutingAlgorithmMapper as HasTable>::Table, _>(
+            &conn, predicate,
+        )
         .await
         .change_context(EuclidErrors::StorageError)
         {
