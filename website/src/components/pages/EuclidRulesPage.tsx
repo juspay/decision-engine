@@ -86,9 +86,9 @@ function SortableGatewayItem({
     <div
       ref={setNodeRef}
       style={style}
-      className="flex items-center gap-2 bg-[#111118] border border-[#1c1c24] rounded-lg px-2 py-1.5"
+      className="flex items-center gap-2 bg-slate-100 dark:bg-[#111118] border border-slate-200 dark:border-[#1c1c24] rounded-lg px-2 py-1.5"
     >
-      <span {...attributes} {...listeners} className="cursor-grab text-gray-400">
+      <span {...attributes} {...listeners} className="cursor-grab text-slate-400">
         <GripVertical size={14} />
       </span>
       <span className="text-sm flex-1 font-mono">{name}</span>
@@ -148,7 +148,7 @@ function PriorityEditor({
           onChange={(e) => setNewName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
           placeholder="gateway name"
-          className="border border-gray-300 rounded px-2 py-1 text-sm flex-1 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm flex-1 focus:outline-none focus:ring-1 focus:ring-brand-500"
         />
         <Button type="button" size="sm" variant="secondary" onClick={add}>
           <Plus size={13} /> Add
@@ -213,7 +213,7 @@ function VolumeSplitEditor({
           onChange={(e) => setNewName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
           placeholder="gateway name"
-          className="border border-gray-300 rounded px-2 py-1 text-sm flex-1 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm flex-1 focus:outline-none focus:ring-1 focus:ring-brand-500"
         />
         <Button type="button" size="sm" variant="secondary" onClick={add}>
           <Plus size={13} /> Add
@@ -246,7 +246,7 @@ function ConditionRowEditor({
       <select
         value={row.lhs}
         onChange={(e) => onChange({ ...row, lhs: e.target.value as RoutingKey, value: '', operator: '==' })}
-        className="border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none"
+        className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-xs focus:outline-none"
       >
         {Object.keys(ROUTING_KEYS).map((k) => (
           <option key={k} value={k}>
@@ -257,7 +257,7 @@ function ConditionRowEditor({
       <select
         value={row.operator}
         onChange={(e) => onChange({ ...row, operator: e.target.value })}
-        className="border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none"
+        className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-xs focus:outline-none"
       >
         {operators.map((op) => (
           <option key={op} value={op}>
@@ -269,7 +269,7 @@ function ConditionRowEditor({
         <select
           value={row.value}
           onChange={(e) => onChange({ ...row, value: e.target.value })}
-          className="border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none"
+          className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-xs focus:outline-none"
         >
           <option value="">select...</option>
           {ROUTING_KEYS[row.lhs].values.map((v: string) => (
@@ -284,7 +284,7 @@ function ConditionRowEditor({
           value={row.value}
           onChange={(e) => onChange({ ...row, value: e.target.value })}
           placeholder="value"
-          className="border border-gray-300 rounded px-2 py-1 text-xs w-24 focus:outline-none"
+          className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-xs w-24 focus:outline-none"
         />
       )}
       <button type="button" onClick={onRemove} className="text-red-400 hover:text-red-600">
@@ -322,7 +322,7 @@ function RuleBlockEditor({
   }
 
   return (
-    <div className="border border-[#1c1c24] rounded-xl">
+    <div className="border border-slate-200 dark:border-[#1c1c24] rounded-xl">
       <div
         className="flex items-center justify-between px-4 py-2.5 bg-[#0d0d12] rounded-t-xl cursor-pointer"
         onClick={() => setCollapsed(!collapsed)}
@@ -335,7 +335,7 @@ function RuleBlockEditor({
           }}
           onClick={(e) => e.stopPropagation()}
           placeholder="Rule name"
-          className="bg-transparent text-sm font-medium focus:outline-none border-b border-transparent focus:border-[#28282f] text-gray-900"
+          className="bg-transparent text-sm font-medium focus:outline-none border-b border-transparent focus:border-[#28282f] text-slate-900"
         />
         <div className="flex items-center gap-2">
           <button type="button" onClick={(e) => { e.stopPropagation(); onRemove() }} className="text-red-400 hover:text-red-600">
@@ -348,7 +348,7 @@ function RuleBlockEditor({
         <div className="px-4 py-3 space-y-3">
           {/* Conditions */}
           <div>
-            <p className="text-xs font-medium text-gray-500 mb-2">CONDITIONS</p>
+            <p className="text-xs font-medium text-slate-500 mb-2">CONDITIONS</p>
             <div className="space-y-2">
               {block.conditions.map((cond) => (
                 <ConditionRowEditor
@@ -378,7 +378,7 @@ function RuleBlockEditor({
 
           {/* Output */}
           <div>
-            <p className="text-xs font-medium text-gray-500 mb-2">OUTPUT</p>
+            <p className="text-xs font-medium text-slate-500 mb-2">OUTPUT</p>
             <div className="flex gap-4 mb-3">
               {(['priority', 'volume_split'] as const).map((t) => (
                 <label key={t} className="flex items-center gap-1.5 text-xs cursor-pointer">
@@ -564,8 +564,8 @@ export function EuclidRulesPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold text-gray-900">Rule-Based Routing</h1>
-        <p className="text-sm text-gray-500 mt-1">Create Euclid DSL declarative routing rules</p>
+        <h1 className="text-2xl font-semibold text-slate-900">Rule-Based Routing</h1>
+        <p className="text-sm text-slate-500 mt-1">Create Euclid DSL declarative routing rules</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -573,15 +573,15 @@ export function EuclidRulesPage() {
         <div className="lg:col-span-1 space-y-3">
           <Card>
             <CardHeader>
-              <h2 className="text-sm font-semibold text-gray-800">Existing Rules</h2>
+              <h2 className="text-sm font-semibold text-slate-800">Existing Rules</h2>
             </CardHeader>
             <CardBody className="p-0">
               {!merchantId ? (
-                <p className="px-4 py-3 text-sm text-gray-400">Set merchant ID to load rules.</p>
+                <p className="px-4 py-3 text-sm text-slate-400">Set merchant ID to load rules.</p>
               ) : !allAlgorithms ? (
-                <p className="px-4 py-3 text-sm text-gray-400">Loading...</p>
+                <p className="px-4 py-3 text-sm text-slate-400">Loading...</p>
               ) : allAlgorithms.length === 0 ? (
-                <p className="px-4 py-3 text-sm text-gray-400">No rules yet.</p>
+                <p className="px-4 py-3 text-sm text-slate-400">No rules yet.</p>
               ) : (
                 <table className="w-full text-sm">
                   <tbody>
@@ -592,10 +592,10 @@ export function EuclidRulesPage() {
                       const algorithm = algo.algorithm_data || algo.algorithm
                       return (
                         <>
-                          <tr key={algo.id} className="border-b border-gray-100 last:border-0">
+                          <tr key={algo.id} className="border-b border-slate-100 dark:border-[#222226] last:border-0">
                             <td className="px-4 py-3">
                               <p className="font-medium truncate">{algo.name}</p>
-                              <p className="text-xs text-gray-400 capitalize">{algorithm?.type}</p>
+                              <p className="text-xs text-slate-400 capitalize">{algorithm?.type}</p>
                             </td>
                             <td className="px-2 py-3">
                               <Badge variant={isActive ? 'green' : 'gray'}>
@@ -627,8 +627,8 @@ export function EuclidRulesPage() {
                           </tr>
                           {isExpanded && (
                             <tr>
-                              <td colSpan={3} className="px-4 py-3 bg-gray-50">
-                                <div className="text-xs text-gray-600 space-y-2">
+                              <td colSpan={3} className="px-4 py-3 bg-slate-50 dark:bg-[#151518]">
+                                <div className="text-xs text-slate-600 space-y-2">
                                   <p><strong>ID:</strong> {algo.id}</p>
                                   <p><strong>Description:</strong> {algo.description || 'N/A'}</p>
                                   <p><strong>Algorithm For:</strong> {algo.algorithm_for}</p>
@@ -637,7 +637,7 @@ export function EuclidRulesPage() {
                                   )}
                                   <div>
                                     <strong>Configuration:</strong>
-                                    <pre className="mt-1 p-2 bg-gray-100 rounded text-xs overflow-auto max-h-48">
+                                    <pre className="mt-1 p-2 bg-slate-100 dark:bg-[#0f0f11] border border-transparent dark:border-[#222226] rounded text-xs overflow-auto max-h-48">
                                       {JSON.stringify(algorithm, null, 2)}
                                     </pre>
                                   </div>
@@ -666,33 +666,33 @@ export function EuclidRulesPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <Card>
               <CardHeader>
-                <h2 className="text-sm font-semibold text-gray-800">Rule Builder</h2>
+                <h2 className="text-sm font-semibold text-slate-800">Rule Builder</h2>
               </CardHeader>
               <CardBody className="space-y-4">
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1">Rule Name *</label>
+                    <label className="block text-xs text-slate-500 mb-1">Rule Name *</label>
                     <input
                       value={ruleName}
                       onChange={(e) => setRuleName(e.target.value)}
                       placeholder="my-rule"
-                      className="border border-gray-300 rounded px-2 py-1 text-sm w-full focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm w-full focus:outline-none focus:ring-1 focus:ring-brand-500"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1">Description</label>
+                    <label className="block text-xs text-slate-500 mb-1">Description</label>
                     <input
                       value={ruleDesc}
                       onChange={(e) => setRuleDesc(e.target.value)}
                       placeholder="Optional description"
-                      className="border border-gray-300 rounded px-2 py-1 text-sm w-full focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm w-full focus:outline-none focus:ring-1 focus:ring-brand-500"
                     />
                   </div>
                 </div>
 
                 {/* Rule blocks */}
                 <div className="space-y-3">
-                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Rules</p>
+                  <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Rules</p>
                   {ruleBlocks.map((block) => (
                     <RuleBlockEditor
                       key={block.id}
@@ -713,8 +713,8 @@ export function EuclidRulesPage() {
                 </div>
 
                 {/* Default selection */}
-                <div className="border border-[#1c1c24] rounded-xl px-4 py-3">
-                  <p className="text-xs font-medium text-gray-500 mb-2">DEFAULT SELECTION (Fallback)</p>
+                <div className="border border-slate-200 dark:border-[#1c1c24] rounded-xl px-4 py-3">
+                  <p className="text-xs font-medium text-slate-500 mb-2">DEFAULT SELECTION (Fallback)</p>
                   <div className="flex gap-4 mb-3">
                     {(['priority', 'volume_split'] as const).map((t) => (
                       <label key={t} className="flex items-center gap-1.5 text-xs cursor-pointer">
@@ -780,10 +780,10 @@ export function EuclidRulesPage() {
           {showJson && (
             <Card>
               <CardHeader>
-                <h2 className="text-sm font-semibold text-gray-800">JSON Preview</h2>
+                <h2 className="text-sm font-semibold text-slate-800">JSON Preview</h2>
               </CardHeader>
               <CardBody>
-                <pre className="text-xs text-gray-600 overflow-auto max-h-64 bg-[#07070b] rounded-lg p-4 font-mono border border-[#1c1c24]">
+                <pre className="text-xs text-slate-600 overflow-auto max-h-64 bg-[#07070b] rounded-lg p-4 font-mono border border-slate-200 dark:border-[#1c1c24]">
                   {JSON.stringify(
                     {
                       name: ruleName,

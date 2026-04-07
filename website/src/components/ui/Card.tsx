@@ -21,7 +21,7 @@ export function Card({ children, className = '', onClick }: CardProps) {
 
 export function CardHeader({ children, className = '' }: CardProps) {
   return (
-    <div className={`px-6 py-5 border-b border-[#1c1c1f] bg-[#0c0c0e] rounded-t-[20px] ${className}`}>
+    <div className={`px-6 py-5 border-b border-slate-200 dark:border-[#1c1c1f] bg-slate-50 dark:bg-[#0c0c0e] rounded-t-[20px] ${className}`}>
       {children}
     </div>
   )

@@ -54,8 +54,8 @@ export function OverviewPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold text-gray-900">Overview</h1>
-        <p className="text-sm text-gray-500 mt-1">
+        <h1 className="text-2xl font-semibold text-slate-900">Overview</h1>
+        <p className="text-sm text-slate-500 mt-1">
           Decision Engine routing health and status
         </p>
       </div>
@@ -79,7 +79,7 @@ export function OverviewPage() {
               <div className="w-6 h-6 rounded-full border-2 border-gray-200 border-t-gray-500 animate-spin" />
             )}
             <div>
-              <p className="text-xs text-gray-500">API Health</p>
+              <p className="text-xs text-slate-500">API Health</p>
               <p className="text-sm font-medium">
                 {health === 'up' ? 'Healthy' : health === 'down' ? 'Down' : 'Checking...'}
               </p>
@@ -92,14 +92,14 @@ export function OverviewPage() {
           onClick={() => navigate('/routing')}
         >
           <CardBody>
-            <p className="text-xs text-gray-500 mb-1">Active Routing Rule</p>
+            <p className="text-xs text-slate-500 mb-1">Active Routing Rule</p>
             {!merchantId ? (
               <Badge variant="gray">Not set</Badge>
             ) : activeRouting ? (
               <div>
                 <Badge variant="green">Active</Badge>
                 <p className="text-sm font-medium mt-1 truncate">{activeRouting.name}</p>
-                <p className="text-xs text-gray-400">{(activeRouting.algorithm_data || activeRouting.algorithm)?.type}</p>
+                <p className="text-xs text-slate-400">{(activeRouting.algorithm_data || activeRouting.algorithm)?.type}</p>
               </div>
             ) : (
               <Badge variant="gray">Not Configured</Badge>
@@ -112,7 +112,7 @@ export function OverviewPage() {
           onClick={() => navigate('/routing/sr')}
         >
           <CardBody>
-            <p className="text-xs text-gray-500 mb-1">Auth-Rate Config</p>
+            <p className="text-xs text-slate-500 mb-1">Auth-Rate Config</p>
             {!merchantId ? (
               <Badge variant="gray">Not set</Badge>
             ) : srError ? (
@@ -130,7 +130,7 @@ export function OverviewPage() {
           onClick={() => navigate('/routing/rules')}
         >
           <CardBody>
-            <p className="text-xs text-gray-500 mb-1">Rule-Based Routing</p>
+            <p className="text-xs text-slate-500 mb-1">Rule-Based Routing</p>
             {!merchantId ? (
               <Badge variant="gray">Not set</Badge>
             ) : hasRuleBasedRouting ? (
@@ -149,25 +149,25 @@ export function OverviewPage() {
           onClick={() => navigate('/routing')}
         >
           <CardHeader>
-            <h2 className="text-sm font-semibold text-gray-800">Active Routing Configuration</h2>
+            <h2 className="text-sm font-semibold text-slate-800">Active Routing Configuration</h2>
           </CardHeader>
           <CardBody>
             <dl className="grid grid-cols-2 gap-4 text-sm">
               <div>
-                <dt className="text-gray-500">Name</dt>
+                <dt className="text-slate-500">Name</dt>
                 <dd className="font-medium">{activeRouting.name}</dd>
               </div>
               <div>
-                <dt className="text-gray-500">Type</dt>
+                <dt className="text-slate-500">Type</dt>
                 <dd className="font-medium capitalize">{(activeRouting.algorithm_data || activeRouting.algorithm)?.type}</dd>
               </div>
               <div>
-                <dt className="text-gray-500">Algorithm For</dt>
+                <dt className="text-slate-500">Algorithm For</dt>
                 <dd className="font-medium capitalize">{activeRouting.algorithm_for}</dd>
               </div>
               <div>
-                <dt className="text-gray-500">ID</dt>
-                <dd className="font-mono text-xs text-gray-600">{activeRouting.id}</dd>
+                <dt className="text-slate-500">ID</dt>
+                <dd className="font-mono text-xs text-slate-600">{activeRouting.id}</dd>
               </div>
             </dl>
           </CardBody>

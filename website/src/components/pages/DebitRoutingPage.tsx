@@ -60,8 +60,8 @@ export function DebitRoutingPage() {
   return (
     <div className="space-y-6 max-w-2xl">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Network / Debit Routing</h1>
-        <p className="text-gray-500 mt-1 text-sm">
+        <h1 className="text-2xl font-bold text-slate-900">Network / Debit Routing</h1>
+        <p className="text-slate-500 mt-1 text-sm">
           Configure network-based routing to optimise processing fees for debit card transactions.
           The engine selects the cheapest eligible network (Visa, Mastercard, ACCEL, NYCE, PULSE, STAR).
         </p>
@@ -71,7 +71,7 @@ export function DebitRoutingPage() {
         <CardHeader>
           <div className="flex items-center gap-2">
             <Network size={16} className="text-brand-500" />
-            <h2 className="font-medium text-gray-800">Debit Routing Configuration</h2>
+            <h2 className="font-medium text-slate-800">Debit Routing Configuration</h2>
           </div>
         </CardHeader>
         <CardBody className="space-y-4">
@@ -87,29 +87,29 @@ export function DebitRoutingPage() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
                     Merchant Category Code (MCC)
                   </label>
                   <input
                     value={displayMcc}
                     onChange={e => setMcc(e.target.value)}
                     placeholder="e.g. 5411"
-                    className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
                   />
-                  <p className="text-xs text-gray-400 mt-1">4-digit ISO MCC for your business type</p>
+                  <p className="text-xs text-slate-400 mt-1">4-digit ISO MCC for your business type</p>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
                     Acquirer Country
                   </label>
                   <input
                     value={displayCountry}
                     onChange={e => setCountry(e.target.value)}
                     placeholder="e.g. US"
-                    className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
                   />
-                  <p className="text-xs text-gray-400 mt-1">ISO 3166-1 alpha-2 country code</p>
+                  <p className="text-xs text-slate-400 mt-1">ISO 3166-1 alpha-2 country code</p>
                 </div>
               </div>
 
@@ -126,12 +126,12 @@ export function DebitRoutingPage() {
 
       <Card>
         <CardHeader>
-          <h2 className="font-medium text-gray-800">How Network Routing Works</h2>
+          <h2 className="font-medium text-slate-800">How Network Routing Works</h2>
         </CardHeader>
-        <CardBody className="text-sm text-gray-600 space-y-2">
+        <CardBody className="text-sm text-slate-600 space-y-2">
           <p>For co-badged debit cards (e.g. Visa/NYCE, Mastercard/PULSE), the engine evaluates all eligible networks and routes to the one with the lowest processing fee.</p>
-          <p>Supported networks: {['VISA','MASTERCARD','ACCEL','NYCE','PULSE','STAR'].map(n => <span key={n} className="font-mono text-xs bg-[#111118] border border-[#1c1c24] px-1.5 py-0.5 rounded-md mr-1 text-gray-700">{n}</span>)}</p>
-          <p>Use the <strong className="text-gray-800">Decision Explorer</strong> to test network routing decisions with <code className="text-xs bg-[#111118] border border-[#1c1c24] px-1.5 py-0.5 rounded-md text-brand-500">NtwBasedRouting</code> algorithm.</p>
+          <p>Supported networks: {['VISA','MASTERCARD','ACCEL','NYCE','PULSE','STAR'].map(n => <span key={n} className="font-mono text-xs bg-slate-100 dark:bg-[#111118] border border-slate-200 dark:border-[#1c1c24] px-1.5 py-0.5 rounded-md mr-1 text-slate-700">{n}</span>)}</p>
+          <p>Use the <strong className="text-slate-800">Decision Explorer</strong> to test network routing decisions with <code className="text-xs bg-slate-100 dark:bg-[#111118] border border-slate-200 dark:border-[#1c1c24] px-1.5 py-0.5 rounded-md text-brand-500">NtwBasedRouting</code> algorithm.</p>
         </CardBody>
       </Card>
     </div>

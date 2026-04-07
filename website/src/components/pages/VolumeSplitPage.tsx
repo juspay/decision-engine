@@ -113,16 +113,16 @@ export function VolumeSplitPage() {
   // Build pie data from active rule
   const pieData = activeVol
     ? ((activeVol.algorithm_data || activeVol.algorithm).data as { split: number; output: { gateway_name: string; gateway_id: string | null } }[]).map(item => ({
-        name: item.output?.gateway_name ?? '?',
-        value: item.split,
-      }))
+      name: item.output?.gateway_name ?? '?',
+      value: item.split,
+    }))
     : []
 
   return (
     <div className="space-y-6 max-w-4xl">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Volume Split Routing</h1>
-        <p className="text-gray-500 mt-1 text-sm">Distribute payment traffic across gateways by percentage.</p>
+        <h1 className="text-2xl font-bold text-slate-900">Volume Split Routing</h1>
+        <p className="text-slate-500 mt-1 text-sm">Distribute payment traffic across gateways by percentage.</p>
       </div>
 
       {/* Active Configuration */}
@@ -130,8 +130,8 @@ export function VolumeSplitPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
-              <h2 className="text-sm font-semibold text-gray-800">Active Volume Split</h2>
-              <p className="text-xs text-gray-500 mt-0.5">{activeVol.name}</p>
+              <h2 className="text-sm font-semibold text-slate-800">Active Volume Split</h2>
+              <p className="text-xs text-slate-500 mt-0.5">{activeVol.name}</p>
             </div>
             <div className="flex items-center gap-2">
               <Badge variant="green">Active</Badge>
@@ -159,7 +159,7 @@ export function VolumeSplitPage() {
                   <Legend wrapperStyle={{ color: '#8e8ea0' }} />
                 </PieChart>
               </ResponsiveContainer>
-              <div className="mt-4 text-xs text-gray-600">
+              <div className="mt-4 text-xs text-slate-600">
                 <p><strong>Rule ID:</strong> {activeVol.id}</p>
                 <p><strong>Created:</strong> {activeVol.created_at ? new Date(activeVol.created_at).toLocaleString() : 'Unknown'}</p>
               </div>
@@ -171,21 +171,21 @@ export function VolumeSplitPage() {
       {/* Create Rule */}
       <Card>
         <CardHeader>
-          <h2 className="font-medium text-gray-800">Create Volume Split Rule</h2>
+          <h2 className="font-medium text-slate-800">Create Volume Split Rule</h2>
         </CardHeader>
         <CardBody className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Rule Name</label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Rule Name</label>
             <input
               value={ruleName}
               onChange={e => setRuleName(e.target.value)}
               placeholder="e.g. ab-test-split"
-              className="border border-gray-300 rounded px-3 py-1.5 text-sm w-64 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm w-64 focus:outline-none focus:ring-1 focus:ring-brand-500"
             />
           </div>
 
           <div className="space-y-2">
-            <div className="grid grid-cols-[1fr_100px_32px] gap-2 text-xs font-medium text-gray-500 px-1">
+            <div className="grid grid-cols-[1fr_100px_32px] gap-2 text-xs font-medium text-slate-500 px-1">
               <span>Gateway Name</span>
               <span>Split %</span>
               <span />
@@ -196,7 +196,7 @@ export function VolumeSplitPage() {
                   value={g.name}
                   onChange={e => updateGateway(g.id, 'name', e.target.value)}
                   placeholder="e.g. stripe"
-                  className="border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
                 />
                 <input
                   type="number"
@@ -204,9 +204,9 @@ export function VolumeSplitPage() {
                   max={100}
                   value={g.split}
                   onChange={e => updateGateway(g.id, 'split', Number(e.target.value))}
-                  className="border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
                 />
-                <button onClick={() => removeGateway(g.id)} className="text-gray-400 hover:text-red-500">
+                <button onClick={() => removeGateway(g.id)} className="text-slate-400 hover:text-red-500">
                   <Trash2 size={15} />
                 </button>
               </div>
@@ -230,9 +230,9 @@ export function VolumeSplitPage() {
         </CardBody>
       </Card>
 
-      <ActiveRulesList 
-        merchantId={merchantId} 
-        onActivate={handleActivate} 
+      <ActiveRulesList
+        merchantId={merchantId}
+        onActivate={handleActivate}
         expandedRuleIds={expandedRuleIds}
         onToggleExpand={toggleRuleExpand}
       />
@@ -240,13 +240,13 @@ export function VolumeSplitPage() {
   )
 }
 
-function ActiveRulesList({ 
-  merchantId, 
-  onActivate, 
+function ActiveRulesList({
+  merchantId,
+  onActivate,
   expandedRuleIds,
-  onToggleExpand 
-}: { 
-  merchantId: string; 
+  onToggleExpand
+}: {
+  merchantId: string;
   onActivate: (id: string) => void;
   expandedRuleIds: Set<string>;
   onToggleExpand: (id: string) => void;
@@ -264,10 +264,10 @@ function ActiveRulesList({
 
   return (
     <Card>
-      <CardHeader><h2 className="font-medium text-gray-800">Saved Volume Split Rules</h2></CardHeader>
+      <CardHeader><h2 className="font-medium text-slate-800">Saved Volume Split Rules</h2></CardHeader>
       <CardBody className="p-0">
         <table className="w-full text-sm">
-          <thead className="bg-[#0a0a0f] text-xs text-gray-500 uppercase tracking-wider">
+          <thead className="bg-slate-50 dark:bg-[#0a0a0f] text-xs text-slate-500 uppercase tracking-wider">
             <tr>
               <th className="text-left px-4 py-2">Name</th>
               <th className="text-left px-4 py-2">Split</th>
@@ -281,9 +281,9 @@ function ActiveRulesList({
               const isExpanded = expandedRuleIds.has(r.id)
               return (
                 <>
-                  <tr key={r.id} className="hover:bg-[#0f0f16] transition-colors">
-                    <td className="px-4 py-2 font-medium text-gray-800">{r.name}</td>
-                    <td className="px-4 py-2 text-gray-600 text-xs">
+                  <tr key={r.id} className="hover:bg-slate-100 dark:bg-[#0f0f16] transition-colors">
+                    <td className="px-4 py-2 font-medium text-slate-800">{r.name}</td>
+                    <td className="px-4 py-2 text-slate-600 text-xs">
                       {items.map(i => `${i.output?.gateway_name}:${i.split}%`).join(' | ')}
                     </td>
                     <td className="px-4 py-2 text-right">
@@ -304,8 +304,8 @@ function ActiveRulesList({
                   </tr>
                   {isExpanded && (
                     <tr>
-                      <td colSpan={3} className="px-4 py-3 bg-gray-50">
-                        <div className="text-xs text-gray-600 space-y-2">
+                      <td colSpan={3} className="px-4 py-3 bg-slate-50 dark:bg-[#151518]">
+                        <div className="text-xs text-slate-600 space-y-2">
                           <p><strong>ID:</strong> {r.id}</p>
                           <p><strong>Description:</strong> {r.description || 'N/A'}</p>
                           {r.created_at && (
@@ -313,7 +313,7 @@ function ActiveRulesList({
                           )}
                           <div>
                             <strong>Configuration:</strong>
-                            <pre className="mt-1 p-2 bg-gray-100 rounded text-xs overflow-auto max-h-48">
+                            <pre className="mt-1 p-2 bg-slate-100 dark:bg-[#0f0f11] border border-transparent dark:border-[#222226] rounded text-xs overflow-auto max-h-48">
                               {JSON.stringify(algorithm, null, 2)}
                             </pre>
                           </div>

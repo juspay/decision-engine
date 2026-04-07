@@ -7,13 +7,13 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variantClasses = {
   primary:
-    'bg-white text-black hover:bg-[#e4e4e7] disabled:opacity-50 shadow-sm border border-transparent',
+    'bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 shadow-sm border border-transparent dark:bg-white dark:text-black dark:hover:bg-slate-200',
   secondary:
-    'bg-[#121214] text-[#a1a1aa] border border-[#27272a] hover:bg-[#18181b] hover:text-white disabled:opacity-40',
+    'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 hover:text-slate-900 disabled:opacity-40 shadow-sm dark:bg-[#121214] dark:text-[#a1a1aa] dark:border-[#27272a] dark:hover:bg-[#18181b] dark:hover:text-white',
   ghost:
-    'text-[#a1a1aa] hover:text-white hover:bg-[#121214] disabled:opacity-40',
+    'text-slate-500 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-40 dark:text-[#a1a1aa] dark:hover:text-white dark:hover:bg-[#121214]',
   danger:
-    'bg-[#2a0505] text-red-500 hover:bg-[#380808] border border-[#5c1c1c] disabled:opacity-40',
+    'bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 disabled:opacity-40 dark:bg-[#2a0505] dark:text-red-500 dark:hover:bg-[#380808] dark:border-[#5c1c1c]',
 }
 
 const sizeClasses = {
@@ -29,7 +29,7 @@ export function Button({
 }: ButtonProps) {
   return (
     <button
-      className={`relative inline-flex items-center justify-center gap-2 rounded-full transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-[#3f3f46] focus:border-transparent ${variantClasses[variant]} ${sizeClasses[size]} ${className}`}
+      className={`relative inline-flex items-center justify-center gap-2 rounded-full transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:ring-offset-1 focus:ring-offset-transparent focus:border-transparent ${variantClasses[variant]} ${sizeClasses[size]} ${className}`}
       {...props}
     >
       {props.children}

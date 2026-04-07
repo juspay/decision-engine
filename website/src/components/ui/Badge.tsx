@@ -5,7 +5,7 @@ interface BadgeProps {
 
 const variantClasses: Record<string, string> = {
   green:  'bg-emerald-500/10 text-emerald-400 ring-1 ring-inset ring-emerald-500/20',
-  gray:   'bg-white/5 text-gray-600 ring-1 ring-inset ring-white/8',
+  gray:   'bg-white/5 text-slate-600 ring-1 ring-inset ring-white/8',
   blue:   'bg-blue-500/10 text-blue-400 ring-1 ring-inset ring-blue-500/20',
   red:    'bg-red-500/10 text-red-400 ring-1 ring-inset ring-red-500/20',
   orange: 'bg-orange-500/10 text-orange-400 ring-1 ring-inset ring-orange-500/20',

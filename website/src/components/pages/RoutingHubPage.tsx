@@ -77,8 +77,8 @@ export function RoutingHubPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold text-gray-900">Routing Hub</h1>
-        <p className="text-sm text-gray-500 mt-1">
+        <h1 className="text-2xl font-semibold text-slate-900">Routing Hub</h1>
+        <p className="text-sm text-slate-500 mt-1">
           Click on any routing strategy to configure
         </p>
       </div>
@@ -103,8 +103,8 @@ export function RoutingHubPage() {
                   </Badge>
                 </div>
                 <div>
-                  <h3 className="font-semibold text-gray-900">{card.title}</h3>
-                  <p className="text-sm text-gray-500 mt-1">{card.description}</p>
+                  <h3 className="font-semibold text-slate-900">{card.title}</h3>
+                  <p className="text-sm text-slate-500 mt-1">{card.description}</p>
                 </div>
                 <div className="mt-auto pt-2">
                   <span className="text-sm text-brand-600 font-medium">

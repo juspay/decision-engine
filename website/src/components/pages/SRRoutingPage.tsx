@@ -175,8 +175,8 @@ export function SRRoutingPage() {
   return (
     <div className="space-y-6 max-w-5xl">
       <div>
-        <h1 className="text-2xl font-semibold text-gray-900">Auth-Rate Based Routing</h1>
-        <p className="text-sm text-gray-500 mt-1">
+        <h1 className="text-2xl font-semibold text-slate-900">Auth-Rate Based Routing</h1>
+        <p className="text-sm text-slate-500 mt-1">
           Configure success-rate based gateway routing
         </p>
       </div>
@@ -192,10 +192,10 @@ export function SRRoutingPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
-              <h2 className="text-sm font-semibold text-gray-800">Configuration Status</h2>
-              <p className="text-xs text-gray-500 mt-0.5">
-                {existing?.config?.data 
-                  ? 'Success Rate routing is configured and active' 
+              <h2 className="text-sm font-semibold text-slate-800">Configuration Status</h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {existing?.config?.data
+                  ? 'Success Rate routing is configured and active'
                   : 'No Success Rate configuration found'}
               </p>
             </div>
@@ -204,13 +204,13 @@ export function SRRoutingPage() {
             </Badge>
           </CardHeader>
           {existing?.config?.data && (
-            <CardBody className="border-t border-gray-100">
-              <div className="flex items-center justify-between text-xs text-gray-600">
+            <CardBody className="border-t border-slate-100 dark:border-[#222226]">
+              <div className="flex items-center justify-between text-xs text-slate-600">
                 <div>
-                  <span className="text-gray-500">Last Modified:</span>
+                  <span className="text-slate-500">Last Modified:</span>
                   <span className="ml-1 font-medium">
-                    {existing.modified_at 
-                      ? new Date(existing.modified_at).toLocaleString() 
+                    {existing.modified_at
+                      ? new Date(existing.modified_at).toLocaleString()
                       : 'Unknown'}
                   </span>
                 </div>
@@ -243,12 +243,12 @@ export function SRRoutingPage() {
         <form onSubmit={handleSubmit(onSave)} className="space-y-6">
           <Card>
             <CardHeader>
-              <h2 className="text-sm font-semibold text-gray-800">Success Rate Config</h2>
+              <h2 className="text-sm font-semibold text-slate-800">Success Rate Config</h2>
             </CardHeader>
             <CardBody className="overflow-x-auto p-0">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-left text-xs text-gray-500 border-b border-[#1c1c24] bg-[#0a0a0f]">
+                  <tr className="text-left text-xs text-slate-500 border-b border-slate-200 dark:border-[#1c1c24] bg-slate-50 dark:bg-[#0a0a0f]">
                     <th className="px-4 py-2">Payment Method Type</th>
                     <th className="px-4 py-2">Payment Method</th>
                     <th className="px-4 py-2">Bucket Size</th>
@@ -260,14 +260,14 @@ export function SRRoutingPage() {
                 </thead>
                 <tbody>
                   {/* Default row */}
-                  <tr className="border-b border-[#1c1c24] bg-brand-50/50">
-                    <td className="px-4 py-2 text-gray-500 italic">Default</td>
-                    <td className="px-4 py-2 text-gray-400">—</td>
+                  <tr className="border-b border-slate-200 dark:border-[#1c1c24] bg-brand-50/50 dark:bg-[#151518]">
+                    <td className="px-4 py-2 text-slate-500 italic">Default</td>
+                    <td className="px-4 py-2 text-slate-400">—</td>
                     <td className="px-4 py-2">
                       <input
                         type="number"
                         {...register('defaultBucketSize')}
-                        className="border border-gray-300 rounded px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                        className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500"
                       />
                       {errors.defaultBucketSize && (
                         <p className="text-xs text-red-500 mt-0.5">{errors.defaultBucketSize.message}</p>
@@ -281,7 +281,7 @@ export function SRRoutingPage() {
                         max="1"
                         {...register('defaultSuccessRate')}
                         placeholder="0.5"
-                        className="border border-gray-300 rounded px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                        className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500"
                       />
                     </td>
                     <td className="px-4 py-2">
@@ -290,7 +290,7 @@ export function SRRoutingPage() {
                         step="0.1"
                         {...register('defaultHedgingPercent')}
                         placeholder="null"
-                        className="border border-gray-300 rounded px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                        className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500"
                       />
                     </td>
                     <td className="px-4 py-2">
@@ -298,7 +298,7 @@ export function SRRoutingPage() {
                         type="number"
                         {...register('defaultLatencyThreshold')}
                         placeholder="null"
-                        className="border border-gray-300 rounded px-2 py-1 w-24 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                        className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-24 focus:outline-none focus:ring-1 focus:ring-brand-500"
                       />
                     </td>
                     <td className="px-4 py-2" />
@@ -308,11 +308,11 @@ export function SRRoutingPage() {
                     const methodType = watchedRows?.[idx]?.paymentMethodType || ''
                     const methodOptions = PAYMENT_METHODS[methodType] || []
                     return (
-                      <tr key={field.id} className="border-b border-[#1c1c24] hover:bg-[#0f0f16] transition-colors">
+                      <tr key={field.id} className="border-b border-slate-200 dark:border-[#1c1c24] hover:bg-slate-100 dark:bg-[#0f0f16] transition-colors">
                         <td className="px-4 py-2">
                           <select
                             {...register(`subLevelInputConfig.${idx}.paymentMethodType`)}
-                            className="border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                            className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
                           >
                             {PAYMENT_METHOD_TYPES.map((t) => (
                               <option key={t} value={t}>{t}</option>
@@ -322,7 +322,7 @@ export function SRRoutingPage() {
                         <td className="px-4 py-2">
                           <select
                             {...register(`subLevelInputConfig.${idx}.paymentMethod`)}
-                            className="border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                            className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
                           >
                             {(methodOptions.length ? methodOptions : ['credit', 'debit']).map((m) => (
                               <option key={m} value={m}>{m}</option>
@@ -333,7 +333,7 @@ export function SRRoutingPage() {
                           <input
                             type="number"
                             {...register(`subLevelInputConfig.${idx}.bucketSize`)}
-                            className="border border-gray-300 rounded px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                            className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500"
                           />
                         </td>
                         <td className="px-4 py-2">
@@ -342,7 +342,7 @@ export function SRRoutingPage() {
                             step="0.1"
                             {...register(`subLevelInputConfig.${idx}.hedgingPercent`)}
                             placeholder="null"
-                            className="border border-gray-300 rounded px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                            className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500"
                           />
                         </td>
                         <td className="px-4 py-2">
@@ -350,11 +350,11 @@ export function SRRoutingPage() {
                             type="number"
                             {...register(`subLevelInputConfig.${idx}.latencyThreshold`)}
                             placeholder="null"
-                            className="border border-gray-300 rounded px-2 py-1 w-24 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                            className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-24 focus:outline-none focus:ring-1 focus:ring-brand-500"
                           />
                         </td>
                         <td className="px-4 py-2">
-                          <button type="button" onClick={() => remove(idx)} className="text-gray-400 hover:text-red-500">
+                          <button type="button" onClick={() => remove(idx)} className="text-slate-400 hover:text-red-500">
                             <Trash2 size={14} />
                           </button>
                         </td>
@@ -382,12 +382,12 @@ export function SRRoutingPage() {
               Configuration saved successfully.
             </div>
           )}
-          
+
           {/* View Current Configuration Section */}
           {existing?.config?.data && (
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
-                <h2 className="text-sm font-semibold text-gray-800">Current Active Configuration</h2>
+                <h2 className="text-sm font-semibold text-slate-800">Current Active Configuration</h2>
                 <Button
                   type="button"
                   variant="ghost"
@@ -400,56 +400,56 @@ export function SRRoutingPage() {
               </CardHeader>
               {showCurrentConfig && (
                 <CardBody>
-                  <div className="text-xs text-gray-600 space-y-4">
+                  <div className="text-xs text-slate-600 space-y-4">
                     {/* Default Config */}
-                    <div className="border-b border-gray-200 pb-3">
-                      <h3 className="font-medium text-gray-700 mb-2">Default Settings</h3>
+                    <div className="border-b border-slate-200 dark:border-[#222226] pb-3">
+                      <h3 className="font-medium text-slate-700 mb-2">Default Settings</h3>
                       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                         <div>
-                          <span className="text-gray-500">Bucket Size:</span>
+                          <span className="text-slate-500">Bucket Size:</span>
                           <p className="font-medium">{existing.config.data.defaultBucketSize}</p>
                         </div>
                         <div>
-                          <span className="text-gray-500">Success Rate:</span>
+                          <span className="text-slate-500">Success Rate:</span>
                           <p className="font-medium">{existing.config.data.defaultSuccessRate ?? 'Not set'}</p>
                         </div>
                         <div>
-                          <span className="text-gray-500">Hedging %:</span>
+                          <span className="text-slate-500">Hedging %:</span>
                           <p className="font-medium">{existing.config.data.defaultHedgingPercent ?? 'Not set'}</p>
                         </div>
                         <div>
-                          <span className="text-gray-500">Latency Threshold:</span>
+                          <span className="text-slate-500">Latency Threshold:</span>
                           <p className="font-medium">{existing.config.data.defaultLatencyThreshold ?? 'Not set'} ms</p>
                         </div>
                       </div>
                     </div>
-                    
+
                     {/* Sub-level Configs */}
                     {existing.config.data.subLevelInputConfig && existing.config.data.subLevelInputConfig.length > 0 && (
                       <div>
-                        <h3 className="font-medium text-gray-700 mb-2">Sub-Level Configurations</h3>
+                        <h3 className="font-medium text-slate-700 mb-2">Sub-Level Configurations</h3>
                         <div className="space-y-2">
                           {existing.config.data.subLevelInputConfig.map((config, idx) => (
-                            <div key={idx} className="bg-gray-50 rounded-lg p-3">
+                            <div key={idx} className="bg-slate-50 dark:bg-[#151518] rounded-lg p-3">
                               <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
                                 <div>
-                                  <span className="text-gray-500">Payment Type:</span>
+                                  <span className="text-slate-500">Payment Type:</span>
                                   <p className="font-medium capitalize">{config.paymentMethodType}</p>
                                 </div>
                                 <div>
-                                  <span className="text-gray-500">Payment Method:</span>
+                                  <span className="text-slate-500">Payment Method:</span>
                                   <p className="font-medium">{config.paymentMethod}</p>
                                 </div>
                                 <div>
-                                  <span className="text-gray-500">Bucket Size:</span>
+                                  <span className="text-slate-500">Bucket Size:</span>
                                   <p className="font-medium">{config.bucketSize}</p>
                                 </div>
                                 <div>
-                                  <span className="text-gray-500">Hedging %:</span>
+                                  <span className="text-slate-500">Hedging %:</span>
                                   <p className="font-medium">{config.hedgingPercent ?? 'Default'}</p>
                                 </div>
                                 <div>
-                                  <span className="text-gray-500">Latency Threshold:</span>
+                                  <span className="text-slate-500">Latency Threshold:</span>
                                   <p className="font-medium">{config.latencyThreshold ?? 'Default'} ms</p>
                                 </div>
                               </div>
@@ -458,11 +458,11 @@ export function SRRoutingPage() {
                         </div>
                       </div>
                     )}
-                    
+
                     {/* Raw JSON */}
                     <div className="border-t border-gray-200 pt-3">
-                      <h3 className="font-medium text-gray-700 mb-2">Raw Configuration (JSON)</h3>
-                      <pre className="bg-gray-900 text-gray-100 rounded-lg p-3 text-xs overflow-auto max-h-64">
+                      <h3 className="font-medium text-slate-700 mb-2">Raw Configuration (JSON)</h3>
+                      <pre className="bg-slate-900 dark:bg-[#0f0f11] text-slate-100 border border-transparent dark:border-[#222226] rounded-lg p-3 text-xs overflow-auto max-h-64">
                         {JSON.stringify(existing.config, null, 2)}
                       </pre>
                     </div>
@@ -471,7 +471,7 @@ export function SRRoutingPage() {
               )}
             </Card>
           )}
-          
+
           <Button type="submit" disabled={saving || !merchantId}>
             {saving ? <><Spinner size={14} /> Saving…</> : 'Save Configuration'}
           </Button>
