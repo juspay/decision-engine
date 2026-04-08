@@ -82,7 +82,7 @@ curl -X POST http://localhost:8080/update-gateway-score \
 ## Running locally
 
 ```bash
-docker compose -f docker-compose.local.yaml up -d
+docker compose --profile local up open-router-pg -d
 curl http://localhost:8080/health
 # {"message":"Health is good"}
 ```

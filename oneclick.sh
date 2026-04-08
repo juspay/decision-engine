@@ -7,18 +7,6 @@ cd "$SCRIPT_DIR"
 
 PORTS=(8080 5173)
 
-kill_port_process() {
-    local port=$1
-    local pid
-    pid=$(lsof -t -i :$port 2>/dev/null || true)
-    if [ -n "$pid" ]; then
-        local cmd
-        cmd=$(ps -p $pid -o command= 2>/dev/null || echo "unknown process")
-        echo "  Port $port: PID $pid ($cmd)"
-        echo $pid
-    fi
-}
-
 check_and_kill_ports() {
     local pids_to_kill=()
     local ports_in_use=()
