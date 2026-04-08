@@ -105,16 +105,23 @@ make init-pg-monitor
 
 Includes Prometheus and Grafana.
 
+#### Option D: With Nginx and Docs
+
+```bash
+make init-pg-local
+```
+
+Includes nginx reverse proxy and Mintlify documentation.
+
 | Service | Port |
 |---------|------|
 | Decision Engine API | 8080 |
-| Prometheus | 9090 |
-| Grafana | 3000 |
+| Nginx (API + Dashboard) | 8081 |
 | PostgreSQL | 5432 |
 | Redis | 6379 |
 | Groovy Runner | 8085 |
 
-#### Option D: MySQL Backend
+#### Option E: MySQL Backend
 
 ```bash
 make init
