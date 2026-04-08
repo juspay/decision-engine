@@ -173,6 +173,8 @@ impl TxnFlowType {
             "QR" => Some(Self::Qr),
             "NATIVE" => Some(Self::Native),
             "PAN" => Some(Self::PAN),
+            "CBDC_INTENT" => Some(Self::CbdcIntent),
+            "CBDC_QR" => Some(Self::CbdcQR),
             _ => None,
         }
     }
@@ -198,6 +200,8 @@ impl TxnFlowType {
             Self::Qr => "QR",
             Self::Native => "NATIVE",
             Self::PAN => "PAN",
+            Self::CbdcIntent => "CBDC_INTENT",
+            Self::CbdcQR => "CBDC_QR",
         }
     }
 }
@@ -241,6 +245,10 @@ pub enum TxnFlowType {
     Native,
     #[serde(rename = "PAN")]
     PAN,
+    #[serde(rename = "CBDC_QR")]
+    CbdcQR,
+    #[serde(rename = "CBDC_INTENT")]
+    CbdcIntent,
 }
 
 impl fmt::Display for TxnFlowType {
@@ -268,6 +276,8 @@ impl fmt::Display for TxnFlowType {
                 Self::Qr => "QR",
                 Self::Native => "NATIVE",
                 Self::PAN => "PAN",
+                Self::CbdcIntent => "CBDC_INTENT",
+                Self::CbdcQR => "CBDC_QR",
             }
         )
     }

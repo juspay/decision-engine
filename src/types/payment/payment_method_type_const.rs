@@ -17,4 +17,5 @@ pub const RTP: &str = "RTP";
 pub const CRYPTO: &str = "CRYPTO";
 pub const CARD_QR: &str = "CARD_QR";
 pub const PAN: &str = "PAN";
+pub const CBDC: &str = "CBDC";
 pub const UNKNOWN: &str = "UNKNOWN";
