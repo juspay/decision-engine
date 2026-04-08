@@ -105,6 +105,12 @@ make init-pg-monitor
 
 Includes Prometheus and Grafana.
 
+| Service | Port |
+|---------|------|
+| Decision Engine API | 8080 |
+| Prometheus | 9090 |
+| Grafana | 3000 |
+
 #### Option D: With Nginx and Docs
 
 ```bash
