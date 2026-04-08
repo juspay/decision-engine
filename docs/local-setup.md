@@ -127,10 +127,12 @@ Uses MySQL instead of PostgreSQL.
 For advanced usage, use profiles directly:
 
 ```bash
-docker compose up open-router-pg                    # PostgreSQL setup
-docker compose --profile local up open-router-pg    # With nginx & docs
+docker compose up open-router-pg                    # PostgreSQL setup (API on :8080)
+docker compose --profile local up open-router-pg    # With nginx & docs (API on :8081 via nginx)
 docker compose --profile monitoring up              # With Prometheus & Grafana
 ```
+
+> **Note:** When using the `local` profile, nginx proxies requests on port 8081 to avoid conflict with the direct API port 8080.
 
 #### Stopping Services
 
