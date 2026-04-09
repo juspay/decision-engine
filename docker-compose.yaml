@@ -12,8 +12,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      groovy-runner:
-        condition: service_healthy
       routing-config:
         condition: service_completed_successfully
     volumes:
@@ -44,8 +42,6 @@ services:
       mysql:
         condition: service_healthy
       redis:
-        condition: service_healthy
-      groovy-runner-local:
         condition: service_healthy
       routing-config:
         condition: service_completed_successfully
@@ -79,8 +75,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      groovy-runner-local:
-        condition: service_healthy
     volumes:
       - ./config/docker-configuration.toml:/local/config/development.toml
     networks:
@@ -100,8 +94,6 @@ services:
     depends_on:
       db-migrator-postgres: 
         condition: service_completed_successfully
-      groovy-runner-local: 
-        condition: service_healthy
     volumes:
       - ./config/docker-configuration.toml:/local/config/development.toml
     networks:
@@ -143,6 +135,8 @@ services:
     pull_policy: always
     platform: linux/amd64
     container_name: groovy-runner
+    profiles:
+      - groovy
     restart: unless-stopped
     ports:
       - "8085:8085"
@@ -168,6 +162,8 @@ services:
         - "com.docker.compose.watchfile=src/Runner.groovy"
     platform: linux/amd64
     container_name: groovy-runner
+    profiles:
+      - groovy
     restart: unless-stopped
     ports:
       - "8085:8085"
