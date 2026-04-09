@@ -125,7 +125,6 @@ Includes nginx reverse proxy and Mintlify documentation.
 | Nginx (API + Dashboard) | 8081 |
 | PostgreSQL | 5432 |
 | Redis | 6379 |
-| Groovy Runner | 8085 |
 
 #### Option E: MySQL Backend
 
@@ -140,9 +139,11 @@ Uses MySQL instead of PostgreSQL.
 For advanced usage, use profiles directly:
 
 ```bash
-docker compose up open-router-pg                    # PostgreSQL setup (API on :8080)
-docker compose --profile local up open-router-pg    # With nginx & docs (API on :8081 via nginx)
-docker compose --profile monitoring up              # With Prometheus & Grafana
+docker compose up open-router-pg                           # PostgreSQL setup (API on :8080)
+docker compose --profile local up open-router-pg           # With nginx & docs (API on :8081 via nginx)
+docker compose --profile monitoring up                     # With Prometheus & Grafana
+docker compose --profile groovy up open-router-pg          # With Groovy Runner
+docker compose --profile local --profile groovy up         # With all services
 ```
 
 > **Note:** When using the `local` profile, nginx proxies requests on port 8081 to avoid conflict with the direct API port 8080.
