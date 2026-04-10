@@ -868,7 +868,8 @@ pub(crate) fn extract_connectors_for_eligibility(output: &Output) -> Vec<Connect
 /// GET endpoint to serve routing keys configuration
 /// Returns the routing config with all available keys and their enum values
 /// This allows the dashboard to dynamically fetch valid routing keys
-pub async fn get_routing_config() -> Result<Json<crate::euclid::types::TomlConfig>, ContainerError<EuclidErrors>> {
+pub async fn get_routing_config(
+) -> Result<Json<crate::euclid::types::TomlConfig>, ContainerError<EuclidErrors>> {
     let timer = metrics::API_LATENCY_HISTOGRAM
         .with_label_values(&["get_routing_config"])
         .start_timer();
