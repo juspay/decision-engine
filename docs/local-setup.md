@@ -6,10 +6,14 @@ Complete guide for setting up Decision Engine locally with Docker, Kubernetes (H
 
 - [Prerequisites](#prerequisites)
 - [Quick Start](#quick-start)
+- [Docker Compose Profiles](#docker-compose-profiles)
 - [Setup Modes](#setup-modes)
-  - [1. Docker (Recommended)](#1-docker-recommended)
-  - [2. Kubernetes with Helm](#2-kubernetes-with-helm)
-  - [3. From Source](#3-from-source)
+  - [1. PostgreSQL with Dashboard (Recommended)](#1-postgresql-with-dashboard-recommended)
+  - [2. PostgreSQL Only](#2-postgresql-only)
+  - [3. MySQL with Dashboard](#3-mysql-with-dashboard)
+  - [4. MySQL Only](#4-mysql-only)
+  - [5. With Monitoring](#5-with-monitoring)
+- [Optional Components](#optional-components)
 - [Configuration](#configuration)
 - [Verifying Installation](#verifying-installation)
 - [Troubleshooting](#troubleshooting)
@@ -41,313 +45,178 @@ sudo apt-get install -y pkg-config libssl-dev protobuf-compiler libpq-dev curl g
 brew install pkg-config openssl protobuf postgresql curl git
 ```
 
-### Additional Requirements (From Source)
-
-| Tool | Version | Install Command |
-|------|---------|-----------------|
-| Rust | 1.85+ | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
-| Just | Latest | `cargo install just` |
-| Diesel CLI | Latest | `cargo install diesel_cli --no-default-features --features postgres` |
-
-### Helm Requirements (Kubernetes)
-
-| Tool | Version | Install Command |
-|------|---------|-----------------|
-| kubectl | 1.19+ | See [kubernetes.io](https://kubernetes.io/docs/tasks/tools/) |
-| Helm | 3.2+ | See [helm.sh](https://helm.sh/docs/intro/install/) |
-| Minikube/Kind | Latest | For local K8s cluster |
-
 ---
 
 ## Quick Start
 
-Fastest way to get Decision Engine running:
-
 ```bash
 git clone https://github.com/juspay/decision-engine.git
 cd decision-engine
-make init-pg
+docker compose --profile dashboard-postgres up -d
 ```
 
-Verify: `curl http://localhost:8080/health`
+Access:
+- **API**: http://localhost:8080/health
+- **Dashboard**: http://localhost:8081/dashboard/
+- **Documentation**: http://localhost:8081/introduction
+
+---
+
+## Docker Compose Profiles
+
+Profiles control which services are started. **You must specify at least one profile** - nothing runs by default.
+
+| Profile | Database | Dashboard | Redis | Services Started |
+|---------|----------|-----------|-------|------------------|
+| `postgres` | PostgreSQL | ❌ | ✅ | 4 services |
+| `dashboard-postgres` | PostgreSQL | ✅ | ✅ | 6 services |
+| `mysql` | MySQL | ❌ | ✅ | 5 services |
+| `dashboard-mysql` | MySQL | ✅ | ✅ | 7 services |
+| `monitoring` | N/A | Grafana | N/A | Prometheus + Grafana |
+| `groovy` | N/A | N/A | N/A | Groovy Runner (optional) |
+
+### Combining Profiles
+
+```bash
+# PostgreSQL + Dashboard + Monitoring
+docker compose --profile dashboard-postgres --profile monitoring up -d
+
+# PostgreSQL + Groovy Runner
+docker compose --profile postgres --profile groovy up -d
+
+# MySQL + Dashboard + Monitoring + Groovy
+docker compose --profile dashboard-mysql --profile monitoring --profile groovy up -d
+```
 
 ---
 
 ## Setup Modes
 
-### 1. Docker (Recommended)
+### 1. PostgreSQL with Dashboard (Recommended)
 
-#### Option A: Pre-built Images (Fastest)
-
-```bash
-make init-pg
-```
-
-This pulls pre-built images and starts:
-- PostgreSQL database
-- Redis cache
-- Groovy Runner
-- Decision Engine server
-
-#### Option B: Local Build with PostgreSQL
+Best for local development with web UI and documentation.
 
 ```bash
-make init-local-pg
+docker compose --profile dashboard-postgres up -d
 ```
 
-Builds from local source and runs with PostgreSQL.
+**Services:**
+| Service | Port | Description |
+|---------|------|-------------|
+| Decision Engine API | 8080 | Main REST API |
+| Nginx Proxy | 8081 | Dashboard + Docs proxy |
+| PostgreSQL | 5432 | Primary database |
+| Redis | 6379 | Cache store |
+| Mintlify Docs | 3000 (internal) | Documentation site |
+| DB Migrator | N/A | Runs migrations |
 
-#### Option C: With Monitoring Stack
+**URLs:**
+- API: http://localhost:8080/health
+- Dashboard: http://localhost:8081/dashboard/
+- Docs: http://localhost:8081/introduction
+
+### 2. PostgreSQL Only
+
+Lightweight setup for API-only testing.
 
 ```bash
-make init-pg-monitor
+docker compose --profile postgres up -d
 ```
 
-Includes Prometheus and Grafana.
+**Services:**
+| Service | Port | Description |
+|---------|------|-------------|
+| Decision Engine API | 8080 | Main REST API |
+| PostgreSQL | 5432 | Primary database |
+| Redis | 6379 | Cache store |
+| DB Migrator | N/A | Runs migrations |
 
-| Service | Port |
-|---------|------|
-| Decision Engine API | 8080 |
-| Prometheus | 9090 |
-| Grafana | 3000 |
+**URL:** http://localhost:8080/health
 
-#### Option D: With Nginx and Docs
+### 3. MySQL with Dashboard
+
+Alternative database with full UI stack.
 
 ```bash
-make init-pg-local
+docker compose --profile dashboard-mysql up -d
 ```
 
-Includes nginx reverse proxy and Mintlify documentation.
+**Services:**
+| Service | Port | Description |
+|---------|------|-------------|
+| Decision Engine API | 8080 | Main REST API |
+| Nginx Proxy | 8081 | Dashboard + Docs proxy |
+| MySQL | 3306 | Primary database |
+| Redis | 6379 | Cache store |
+| Mintlify Docs | 3000 (internal) | Documentation site |
+| DB Migrator | N/A | MySQL migrations |
+| Routing Config | N/A | Initial config setup |
 
-| Service | Port |
-|---------|------|
-| Decision Engine API | 8080 |
-| Nginx (API + Dashboard) | 8081 |
-| PostgreSQL | 5432 |
-| Redis | 6379 |
+### 4. MySQL Only
 
-#### Option E: MySQL Backend
+MySQL backend without dashboard.
 
 ```bash
-make init
+docker compose --profile mysql up -d
 ```
 
-Uses MySQL instead of PostgreSQL.
+### 5. With Monitoring
 
-#### Docker Compose Profiles
-
-For advanced usage, use profiles directly:
+Add Prometheus metrics and Grafana dashboards to any profile.
 
 ```bash
-docker compose up open-router-pg                           # PostgreSQL setup (API on :8080)
-docker compose --profile local up open-router-pg           # With nginx & docs (API on :8081 via nginx)
-docker compose --profile monitoring up                     # With Prometheus & Grafana
-docker compose --profile groovy up open-router-pg          # With Groovy Runner
-docker compose --profile local --profile groovy up         # With all services
+# With PostgreSQL dashboard
+docker compose --profile dashboard-postgres --profile monitoring up -d
+
+# With MySQL only
+docker compose --profile mysql --profile monitoring up -d
 ```
 
-> **Note:** When using the `local` profile, nginx proxies requests on port 8081 to avoid conflict with the direct API port 8080.
-
-#### Stopping Services
-
-```bash
-make stop
-# or
-docker compose down
-```
+**Additional Services:**
+| Service | Port | Description |
+|---------|------|-------------|
+| Prometheus | 9090 | Metrics collection |
+| Grafana | 3000 | Visualization dashboards |
 
 ---
 
-### 2. Kubernetes with Helm
+## Optional Components
 
-#### Prerequisites
+### Groovy Runner
 
-1. Running Kubernetes cluster (minikube, kind, or remote)
-2. Helm 3.2+ installed
-3. kubectl configured
-
-#### Option A: Using Install Script
+Enables Groovy scripting support (needed for dynamic routing rules).
 
 ```bash
-cd helm-charts
-./install.sh
+# Add to any profile
+docker compose --profile postgres --profile groovy up -d
 ```
 
-Custom options:
+**Profile:** `groovy` (pre-built image) or `groovy-local` (build from source)
 
-```bash
-./install.sh --name my-decision-engine
-./install.sh --values values-postgresql.yaml
-```
-
-#### Option B: Manual Installation
-
-```bash
-cd helm-charts
-
-helm repo add bitnami https://charts.bitnami.com/bitnami
-helm repo update
-helm dependency build
-
-helm install my-release .
-```
-
-#### Using with External Database
-
-Create `my-values.yaml`:
-
-```yaml
-postgresql:
-  enabled: false
-  hostname: "external-postgres-host"
-  auth:
-    username: "external_user"
-    password: "external_password"
-    database: "external_db"
-
-redis:
-  enabled: false
-  hostname: "external-redis-host"
-```
-
-Install:
-
-```bash
-helm install my-release . -f my-values.yaml
-```
-
-#### Uninstalling
-
-```bash
-helm delete my-release
-```
-
----
-
-### 3. From Source
-
-#### Step 1: Clone Repository
-
-```bash
-git clone https://github.com/juspay/decision-engine.git
-cd decision-engine
-```
-
-#### Step 2: Install Rust
-
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source $HOME/.cargo/env
-```
-
-#### Step 3: Install Dependencies
-
-```bash
-cargo install just
-cargo install diesel_cli --no-default-features --features postgres
-```
-
-#### Step 4: Start Database
-
-Option A - Local PostgreSQL:
-
-```bash
-brew services start postgresql    # macOS
-sudo systemctl start postgresql   # Linux
-```
-
-Option B - Docker:
-
-```bash
-docker run -d --name postgres \
-  -e POSTGRES_USER=db_user \
-  -e POSTGRES_PASSWORD=db_pass \
-  -e POSTGRES_DB=decision_engine_db \
-  -p 5432:5432 \
-  postgres:16
-```
-
-Option C - From docker-compose:
-
-```bash
-docker compose up -d postgresql redis groovy-runner
-```
-
-#### Step 5: Configure Database
-
-Set environment variables:
-
-```bash
-export DB_USER="db_user"
-export DB_PASSWORD="db_pass"
-export DB_HOST="localhost"
-export DB_PORT="5432"
-export DB_NAME="decision_engine_db"
-```
-
-Create database and run migrations:
-
-```bash
-just resurrect    # Drop and recreate database
-just migrate-pg   # Run PostgreSQL migrations
-```
-
-#### Step 6: Configure Application
-
-```bash
-cp config/example.toml config/development.toml
-```
-
-Edit `config/development.toml` with your settings.
-
-#### Step 7: Run Application
-
-```bash
-cargo run --no-default-features --features postgres
-```
-
-Or with release optimizations:
-
-```bash
-cargo run --release --no-default-features --features postgres
-```
+**Port:** 8085
 
 ---
 
 ## Configuration
 
-### Database URLs
+### Environment Variables
 
-The application uses `DATABASE_URL` environment variable or configuration file:
+Set in `docker-compose.yaml` or create `.env` file:
 
 ```bash
+# Database URLs
 export DATABASE_URL="postgresql://db_user:db_pass@localhost:5432/decision_engine_db"
+
+# Groovy Runner (if using)
+export GROOVY_RUNNER_HOST="host.docker.internal:8085"
 ```
 
 ### Configuration Files
 
 | File | Purpose |
 |------|---------|
-| `config/development.toml` | Local development |
-| `config/docker-configuration.toml` | Docker deployments |
-| `helm-charts/values.yaml` | Kubernetes/Helm deployments |
-
-### Key Configuration Options
-
-```toml
-[database]
-url = "postgresql://db_user:db_pass@localhost:5432/decision_engine_db"
-
-[server]
-host = "0.0.0.0"
-port = 8080
-
-[redis]
-url = "redis://localhost:6379"
-
-[groovy_runner]
-host = "localhost:8085"
-```
+| `config/development.toml` | Local development settings |
+| `config/docker-configuration.toml` | Docker deployment settings |
 
 ---
 
@@ -359,182 +228,117 @@ host = "localhost:8085"
 curl http://localhost:8080/health
 ```
 
-Expected response:
-```json
-{"message":"Health is good"}
-```
+Expected: `{"message":"Health is good"}`
 
 ### API Test
 
 ```bash
-curl --location 'http://localhost:8080/decide-gateway' \
---header 'Content-Type: application/json' \
---data '{
+curl -X POST http://localhost:8080/decide-gateway \
+  -H "Content-Type: application/json" \
+  -d '{
     "merchantId": "test_merchant1",
-    "eligibleGatewayList": ["PAYU", "RAZORPAY", "PAYTM_V2"],
-    "rankingAlgorithm": "SR_BASED_ROUTING",
-    "eliminationEnabled": true,
+    "eligibleGatewayList": ["stripe", "adyen"],
     "paymentInfo": {
-        "paymentId": "PAY12345",
-        "amount": 100.50,
-        "currency": "USD",
-        "customerId": "CUST12345",
-        "paymentType": "ORDER_PAYMENT",
-        "paymentMethodType": "UPI",
-        "paymentMethod": "UPI_PAY"
+      "paymentId": "test_123",
+      "amount": 100.50,
+      "currency": "USD"
     }
-}'
+  }'
 ```
 
-### Metrics Check
+### Dashboard Access
 
-```bash
-curl http://localhost:9094/metrics
-```
+Open browser to: http://localhost:8081/dashboard/
 
 ---
 
 ## Troubleshooting
 
-### Common Issues
-
-#### Port Already in Use
+### Port Already in Use
 
 **Error:** `Port 8080 is already in use`
 
 **Solution:**
 ```bash
 lsof -ti:8080 | xargs kill -9
+# or change ports in docker-compose.yaml
 ```
 
-Or change port in configuration.
+### Container Conflicts
 
-#### Database Connection Failed
+**Error:** `container name "X" is already in use`
 
-**Error:** `Connection refused` or `database "decision_engine_db" does not exist`
+**Solution:**
+```bash
+docker compose --profile <profile> down
+docker system prune -f
+docker compose --profile <profile> up -d
+```
+
+### Database Connection Failed
+
+**Error:** `Connection refused` or `database does not exist`
 
 **Solutions:**
 
-1. Verify PostgreSQL is running:
+1. Check database is running:
    ```bash
-   pg_isready -h localhost -p 5432
+   docker ps | grep postgres
    ```
 
-2. Create database manually:
+2. Verify migrations ran:
    ```bash
-   createdb -U db_user decision_engine_db
+   docker logs db-migrator-postgres
    ```
 
-3. Check credentials in `DATABASE_URL`
-
-#### Redis Connection Failed
-
-**Error:** `Could not connect to Redis`
-
-**Solutions:**
-
-1. Start Redis:
+3. Restart with fresh state:
    ```bash
-   redis-server
+   docker compose --profile postgres down -v
+   docker compose --profile postgres up -d
    ```
 
-2. Or via Docker:
-   ```bash
-   docker run -d -p 6379:6379 redis:7
-   ```
+### Dashboard Shows Old Version
 
-#### Diesel CLI Not Found
-
-**Error:** `diesel: command not found`
+The `website/dist` folder contains old build artifacts.
 
 **Solution:**
 ```bash
-cargo install diesel_cli --no-default-features --features postgres
+cd website
+npm install
+npm run build
+cd ..
+docker restart open-router-nginx
 ```
 
-If you see `libpq` errors on macOS:
+### Profile Not Found
+
+**Error:** `service "X" has neither an image nor a build context`
+
+**Cause:** Missing profile flag
+
+**Solution:** Always specify a profile:
 ```bash
-brew install libpq
-export PKG_CONFIG_PATH="/opt/homebrew/opt/libpq/lib/pkgconfig"
-cargo install diesel_cli --no-default-features --features postgres
+# Wrong
+docker compose up -d
+
+# Correct
+docker compose --profile postgres up -d
 ```
 
-#### Protobuf Compiler Missing
+---
 
-**Error:** `protoc: not found`
+## Stopping Services
 
-**Solution:**
 ```bash
-brew install protobuf          # macOS
-sudo apt-get install protobuf-compiler  # Ubuntu/Debian
+# Stop specific profile
+docker compose --profile dashboard-postgres down
+
+# Stop all profiles and remove volumes
+docker compose --profile dashboard-postgres --profile monitoring down -v
+
+# Clean up everything
+docker system prune -af --volumes
 ```
-
-#### OpenSSL Errors
-
-**Error:** `Could not find directory of OpenSSL installation`
-
-**Solution:**
-```bash
-brew install openssl           # macOS
-sudo apt-get install libssl-dev  # Ubuntu/Debian
-```
-
-On macOS with Apple Silicon:
-```bash
-export PKG_CONFIG_PATH="/opt/homebrew/opt/openssl@3/lib/pkgconfig"
-```
-
-#### Docker Platform Errors
-
-**Error:** `no matching manifest for linux/arm64`
-
-**Solution:** Use `--platform linux/amd64`:
-```bash
-docker compose --platform linux/amd64 up
-```
-
-Or enable Rosetta in Docker Desktop (macOS).
-
-#### Groovy Runner Health Check Failing
-
-**Error:** Groovy runner container keeps restarting
-
-**Solutions:**
-
-1. Wait for warm-up (10+ seconds)
-2. Check logs:
-   ```bash
-   docker logs open-router-groovy
-   ```
-3. Verify network connectivity between containers
-
-#### Helm Chart Dependencies
-
-**Error:** `Error: found in requirements.yaml, but missing in charts/`
-
-**Solution:**
-```bash
-cd helm-charts
-helm dependency build
-```
-
-#### Migration Failures
-
-**Error:** `Migration failed: database is locked` or dirty migration
-
-**Solution:**
-```bash
-just resurrect  # Drops and recreates database
-just migrate-pg  # Re-run migrations
-```
-
-### Getting Help
-
-| Resource | Link |
-|----------|------|
-| GitHub Issues | https://github.com/juspay/decision-engine/issues |
-| Slack | [Join Chat](https://join.slack.com/t/hyperswitch-io/shared_invite/zt-2jqxmpsbm-WXUENx022HjNEy~Ark7Orw) |
-| Discussions | https://github.com/juspay/decision-engine/discussions |
 
 ---
 

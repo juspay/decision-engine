@@ -1,71 +1,18 @@
 services:
-  open-router:
-    image: ghcr.io/juspay/decision-engine:v1.3.3
+  # ==========================================
+  # PROFILE: postgres (Basic PostgreSQL + Redis)
+  # ==========================================
+  # ==========================================
+  # PROFILE: postgres (Basic PostgreSQL + Redis)
+  # ==========================================
+  open-router-pg:
+    image: ghcr.io/juspay/decision-engine/postgres:v1.3.3
     pull_policy: always
     platform: linux/amd64
-    container_name: open-router
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
-    depends_on:
-      mysql:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      routing-config:
-        condition: service_completed_successfully
-    volumes:
-      - ./config/docker-configuration.toml:/local/config/development.toml
-    networks:
-      - open-router-network
-    environment:
-      - GROOVY_RUNNER_HOST=host.docker.internal:8085
-
-  open-router-local:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      cache_from:
-        - decision-engine-open-router-local:latest
-      labels:
-        - "com.docker.compose.watchfile=Dockerfile"
-        - "com.docker.compose.watchfile=src/"
-        - "com.docker.compose.watchfile=Cargo.toml"
-        - "com.docker.compose.watchfile=Cargo.lock"
-    image: decision-engine-open-router-local:latest
-    platform: linux/amd64
-    container_name: open-router
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
-    depends_on:
-      mysql:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      routing-config:
-        condition: service_completed_successfully
-    volumes:
-      - ./config/docker-configuration.toml:/local/config/development.toml
-    networks:
-      - open-router-network
-    environment:
-      - GROOVY_RUNNER_HOST=host.docker.internal:8085
-
-  open-router-local-pg:
-    build:
-      context: .
-      dockerfile: Dockerfile.postgres
-      cache_from:
-        - decision-engine-open-router-local-pg:latest
-      labels:
-        - "com.docker.compose.watchfile=Dockerfile.postgres"
-        - "com.docker.compose.watchfile=src/"
-        - "com.docker.compose.watchfile=Cargo.toml"
-        - "com.docker.compose.watchfile=Cargo.lock"
-    image: decision-engine-open-router-local-pg:latest
-    platform: linux/amd64
-    container_name: open-router
+    container_name: open-router-pg
+    profiles:
+      - postgres
+      - dashboard-postgres
     restart: unless-stopped
     ports:
       - "8080:8080"
@@ -75,24 +22,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    volumes:
-      - ./config/docker-configuration.toml:/local/config/development.toml
-    networks:
-      - open-router-network
-    environment:
-      - GROOVY_RUNNER_HOST=host.docker.internal:8085
-
-  open-router-pg:
-    image: ghcr.io/juspay/decision-engine/postgres:v1.3.3
-    pull_policy: always
-    platform: linux/amd64
-    container_name: open-router-pg 
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
-      - "9094:9094"
-    depends_on:
-      db-migrator-postgres: 
+      db-migrator-postgres:
         condition: service_completed_successfully
     volumes:
       - ./config/docker-configuration.toml:/local/config/development.toml
@@ -101,6 +31,77 @@ services:
     environment:
       - GROOVY_RUNNER_HOST=host.docker.internal:8085
 
+  # ==========================================
+  # PROFILE: mysql (Basic MySQL + Redis)
+  # ==========================================
+  open-router:
+    image: ghcr.io/juspay/decision-engine:v1.3.3
+    pull_policy: always
+    platform: linux/amd64
+    container_name: open-router
+    profiles:
+      - mysql
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      routing-config:
+        condition: service_completed_successfully
+    volumes:
+      - ./config/docker-configuration.toml:/local/config/development.toml
+    networks:
+      - open-router-network
+    environment:
+      - GROOVY_RUNNER_HOST=host.docker.internal:8085
+
+  # ==========================================
+  # PROFILE: dashboard-postgres (PG + Redis + Dashboard)
+  # ==========================================
+  nginx:
+    image: nginx:alpine
+    profiles:
+      - dashboard-postgres
+      - dashboard-mysql
+    container_name: open-router-nginx
+    restart: unless-stopped
+    ports:
+      - "8081:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./website/dist:/usr/share/nginx/html/dashboard:ro
+    depends_on:
+      - open-router-pg
+      - mintlify-docs
+    networks:
+      - open-router-network
+
+  mintlify-docs:
+    build:
+      context: .
+      dockerfile: Dockerfile.docs
+    profiles:
+      - dashboard-postgres
+      - dashboard-mysql
+    container_name: mintlify-docs
+    restart: unless-stopped
+    expose:
+      - "3000"
+    networks:
+      - open-router-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000 > /dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  # ==========================================
+  # Supporting Services with Profiles
+  # ==========================================
   prometheus:
     image: prom/prometheus:latest
     profiles:
@@ -127,7 +128,6 @@ services:
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_BASIC_ENABLED=false
     volumes:
-      # - ./config/grafana.ini:/etc/grafana/grafana.ini
       - ./config/grafana-datasource.yaml:/etc/grafana/provisioning/datasources/datasource.yml
 
   groovy-runner:
@@ -161,9 +161,9 @@ services:
         - "com.docker.compose.watchfile=groovy.Dockerfile"
         - "com.docker.compose.watchfile=src/Runner.groovy"
     platform: linux/amd64
-    container_name: groovy-runner
+    container_name: groovy-runner-local
     profiles:
-      - groovy
+      - groovy-local
     restart: unless-stopped
     ports:
       - "8085:8085"
@@ -176,63 +176,86 @@ services:
       retries: 5
       start_period: 10s
 
+  # ==========================================
+  # Core Infrastructure (Pulled when needed)
+  # ==========================================
   mysql:
     image: mysql:8.0
     container_name: open-router-mysql
+    profiles:
+      - mysql
+      - dashboard-mysql
     restart: unless-stopped
     environment:
-      - MYSQL_ROOT_PASSWORD=root
-      - MYSQL_DATABASE=jdb
-    volumes:
-      - mysql-data:/var/lib/mysql
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: jdb
+      MYSQL_USER: db_user
+      MYSQL_PASSWORD: db_pass
     ports:
       - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
     networks:
       - open-router-network
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
-      interval: 5s
-      timeout: 10s
-      retries: 10
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
-  postgresql:  
-    image: postgres:latest  
-    container_name: open-router-postgres  
-    restart: unless-stopped  
+  postgresql:
+    image: postgres:latest
+    container_name: open-router-postgres
+    profiles:
+      - postgres
+      - dashboard-postgres
+    restart: unless-stopped
     environment:
-      - POSTGRES_USER=db_user
-      - POSTGRES_PASSWORD=db_pass
-      - POSTGRES_DB=decision_engine_db
-    volumes:  
-      - postgres-data:/var/lib/postgresql/data  
-    ports:  
+      POSTGRES_USER: db_user
+      POSTGRES_PASSWORD: db_pass
+      POSTGRES_DB: decision_engine_db
+    ports:
       - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
     networks:
-        - open-router-network
+      - open-router-network
     healthcheck:
-        test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
-        interval: 5s
-        retries: 3
-        start_period: 5s
-        timeout: 5s
+      test: ["CMD-SHELL", "pg_isready -U db_user -d decision_engine_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   redis:
-    image: redis:7
+    image: redis:7-alpine
     container_name: open-router-redis
+    profiles:
+      - postgres
+      - dashboard-postgres
+      - mysql
+      - dashboard-mysql
+    restart: unless-stopped
     ports:
       - "6379:6379"
+    volumes:
+      - redis-data:/data
     networks:
       - open-router-network
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli ping | grep '^PONG$'"]
-      interval: 5s
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
       retries: 5
       start_period: 5s
-      timeout: 5s
 
   db-migrator:
     image: mysql:8.0
     container_name: db-migrator
+    profiles:
+      - mysql
+      - dashboard-mysql
     depends_on:
       mysql:
         condition: service_healthy
@@ -242,10 +265,13 @@ services:
     entrypoint: ["/bin/sh", "-c", "for sql_file in $$(find /app/migrations -name 'up.sql' -type f | sort); do echo \"Running migration: $$sql_file\"; mysql -h mysql -uroot -proot jdb < \"$$sql_file\"; done"]
     networks:
       - open-router-network
-  
+
   db-migrator-postgres:
     image: rust:latest
-    container_name: db-migrator 
+    container_name: db-migrator-postgres
+    profiles:
+      - postgres
+      - dashboard-postgres
     depends_on:
       postgresql:
         condition: service_healthy
@@ -262,6 +288,9 @@ services:
   routing-config:
     image: python:3.10-slim
     container_name: routing-config
+    profiles:
+      - mysql
+      - dashboard-mysql
     depends_on:
       mysql:
         condition: service_healthy
@@ -269,42 +298,6 @@ services:
       - ./routing-config:/app
     working_dir: /app
     command: bash run_setup.sh
-    networks:
-      - open-router-network
-
-  mintlify-docs:
-    build:
-      context: .
-      dockerfile: Dockerfile.docs
-    profiles:
-      - local
-    container_name: mintlify-docs
-    restart: unless-stopped
-    expose:
-      - "3000"
-    networks:
-      - open-router-network
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000 > /dev/null 2>&1 || exit 1"]
-      interval: 10s
-      timeout: 10s
-      retries: 10
-      start_period: 60s
-
-  nginx:
-    image: nginx:alpine
-    profiles:
-      - local
-    container_name: open-router-nginx
-    restart: unless-stopped
-    ports:
-      - "8081:80"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./website/dist:/usr/share/nginx/html/dashboard:ro
-    depends_on:
-      - open-router-pg
-      - mintlify-docs
     networks:
       - open-router-network
 

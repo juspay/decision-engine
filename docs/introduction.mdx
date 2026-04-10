@@ -82,7 +82,9 @@ curl -X POST http://localhost:8080/update-gateway-score \
 ## Running locally
 
 ```bash
-docker compose up open-router-pg -d
+docker compose --profile dashboard-postgres up -d
 curl http://localhost:8080/health
 # {"message":"Health is good"}
 ```
+
+**Dashboard**: http://localhost:8081/dashboard/
