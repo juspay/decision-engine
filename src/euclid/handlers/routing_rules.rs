@@ -884,7 +884,7 @@ pub async fn get_routing_config(
         .config
         .routing_config
         .clone()
-        .ok_or_else(|| EuclidErrors::GlobalRoutingConfigsUnavailable)?;
+        .ok_or(EuclidErrors::GlobalRoutingConfigsUnavailable)?;
 
     metrics::API_REQUEST_COUNTER
         .with_label_values(&["get_routing_config", "success"])
