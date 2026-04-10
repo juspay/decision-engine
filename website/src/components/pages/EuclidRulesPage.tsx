@@ -24,7 +24,8 @@ import { ErrorMessage } from '../ui/ErrorMessage'
 import { useMerchantStore } from '../../store/merchantStore'
 import { apiPost } from '../../lib/api'
 import { RoutingAlgorithm } from '../../types/api'
-import { ROUTING_KEYS, RoutingKey } from '../../lib/constants'
+import { useDynamicRoutingConfig, RoutingKeyConfig } from '../../hooks/useDynamicRoutingConfig'
+import { STATIC_ROUTING_KEYS } from '../../lib/constants'
 import { Plus, Trash2, GripVertical, ChevronDown, ChevronUp, Eye } from 'lucide-react'
 
 const OPERATOR_TO_API: Record<string, string> = {
@@ -50,7 +51,7 @@ interface VolSplitEntry {
 
 interface ConditionRow {
   id: string
-  lhs: RoutingKey
+  lhs: string
   operator: string
   value: string
 }
@@ -228,12 +229,14 @@ function ConditionRowEditor({
   row,
   onChange,
   onRemove,
+  routingKeys,
 }: {
   row: ConditionRow
   onChange: (r: ConditionRow) => void
   onRemove: () => void
+  routingKeys: Record<string, RoutingKeyConfig>
 }) {
-  const keyInfo = ROUTING_KEYS[row.lhs]
+  const keyInfo = routingKeys[row.lhs]
   const isEnum = keyInfo?.type === 'enum'
   const isInt = keyInfo?.type === 'integer'
 
@@ -245,10 +248,10 @@ function ConditionRowEditor({
     <div className="flex items-center gap-2 flex-wrap">
       <select
         value={row.lhs}
-        onChange={(e) => onChange({ ...row, lhs: e.target.value as RoutingKey, value: '', operator: '==' })}
+        onChange={(e) => onChange({ ...row, lhs: e.target.value, value: '', operator: '==' })}
         className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-xs focus:outline-none"
       >
-        {Object.keys(ROUTING_KEYS).map((k) => (
+        {Object.keys(routingKeys).map((k) => (
           <option key={k} value={k}>
             {k}
           </option>
@@ -272,7 +275,7 @@ function ConditionRowEditor({
           className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-xs focus:outline-none"
         >
           <option value="">select...</option>
-          {ROUTING_KEYS[row.lhs].values.map((v: string) => (
+          {(routingKeys[row.lhs]?.values || []).map((v: string) => (
             <option key={v} value={v}>
               {v}
             </option>
@@ -299,12 +302,19 @@ function RuleBlockEditor({
   block,
   onChange,
   onRemove,
+  routingKeys,
 }: {
   block: RuleBlock
   onChange: (b: RuleBlock) => void
   onRemove: () => void
+  routingKeys: Record<string, RoutingKeyConfig>
 }) {
   const [collapsed, setCollapsed] = useState(false)
+
+  // Get the first available key from routing keys for defaults
+  const firstKey = Object.keys(routingKeys)[0] || 'payment_method'
+  const firstKeyValues = routingKeys[firstKey]?.values || []
+  const defaultValue = firstKeyValues[0] || ''
 
   function addCondition() {
     onChange({
@@ -313,9 +323,9 @@ function RuleBlockEditor({
         ...block.conditions,
         {
           id: crypto.randomUUID(),
-          lhs: 'payment_method',
+          lhs: firstKey,
           operator: '==',
-          value: 'card',
+          value: defaultValue,
         },
       ],
     })
@@ -354,6 +364,7 @@ function RuleBlockEditor({
                 <ConditionRowEditor
                   key={cond.id}
                   row={cond}
+                  routingKeys={routingKeys}
                   onChange={(updated) =>
                     onChange({
                       ...block,
@@ -411,7 +422,7 @@ function RuleBlockEditor({
 }
 
 // ---- Build Euclid payload ----
-function buildAlgorithmData(rules: RuleBlock[], defaultOutput: DefaultOutput) {
+function buildAlgorithmData(rules: RuleBlock[], defaultOutput: DefaultOutput, routingKeys: Record<string, RoutingKeyConfig>) {
   function buildOutput(type: 'priority' | 'volume_split', pg: GatewayEntry[], vg: VolSplitEntry[]): Record<string, unknown> {
     if (type === 'priority') {
       return {
@@ -447,8 +458,8 @@ function buildAlgorithmData(rules: RuleBlock[], defaultOutput: DefaultOutput) {
             lhs: c.lhs,
             comparison: OPERATOR_TO_API[c.operator] || c.operator,
             value: {
-              type: ROUTING_KEYS[c.lhs]?.type === 'integer' ? 'number' : 'enum_variant',
-              value: ROUTING_KEYS[c.lhs]?.type === 'integer' ? Number(c.value) : c.value,
+              type: routingKeys[c.lhs]?.type === 'integer' ? 'number' : 'enum_variant',
+              value: routingKeys[c.lhs]?.type === 'integer' ? Number(c.value) : c.value,
             },
             metadata: {},
           })),
@@ -461,6 +472,9 @@ function buildAlgorithmData(rules: RuleBlock[], defaultOutput: DefaultOutput) {
 // ---- Main Page ----
 export function EuclidRulesPage() {
   const { merchantId } = useMerchantStore()
+  const { routingKeysConfig } = useDynamicRoutingConfig()
+  // Use dynamic config if available, otherwise fall back to static
+  const routingKeys = Object.keys(routingKeysConfig).length > 0 ? routingKeysConfig : STATIC_ROUTING_KEYS
   const [ruleName, setRuleName] = useState('')
   const [ruleDesc, setRuleDesc] = useState('')
   const [ruleBlocks, setRuleBlocks] = useState<RuleBlock[]>([])
@@ -490,7 +504,7 @@ export function EuclidRulesPage() {
 
   const activeIds = new Set((activeAlgorithms || []).map((a) => a.id))
 
-  const algorithmData = buildAlgorithmData(ruleBlocks, defaultOutput)
+  const algorithmData = buildAlgorithmData(ruleBlocks, defaultOutput, routingKeys)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -697,6 +711,7 @@ export function EuclidRulesPage() {
                     <RuleBlockEditor
                       key={block.id}
                       block={block}
+                      routingKeys={routingKeys}
                       onChange={(updated) =>
                         setRuleBlocks((prev) =>
                           prev.map((b) => (b.id === block.id ? updated : b))
