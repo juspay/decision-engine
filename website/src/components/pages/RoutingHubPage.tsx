@@ -4,7 +4,7 @@ import { Card, CardBody } from '../ui/Card'
 import { Badge } from '../ui/Badge'
 import { useMerchantStore } from '../../store/merchantStore'
 import { apiPost } from '../../lib/api'
-import { RoutingAlgorithm } from '../../types/api'
+import { RoutingAlgorithm, RuleConfig } from '../../types/api'
 import { TrendingUp, Layers, PieChart, CreditCard } from 'lucide-react'
 
 interface RoutingCard {
@@ -26,8 +26,8 @@ export function RoutingHubPage() {
     () => apiPost<RoutingAlgorithm[]>(`/routing/list/active/${merchantId}`)
   )
 
-  const { data: srConfig } = useSWR(
-    merchantId ? [`/rule/get`, 'successRate', merchantId] : null,
+  const { data: srConfig } = useSWR<RuleConfig>(
+    merchantId ? ['/rule/get', 'successRate', merchantId] : null,
     () => apiPost('/rule/get', { merchant_id: merchantId, algorithm: 'successRate' })
   )
 
@@ -39,7 +39,7 @@ export function RoutingHubPage() {
       icon: TrendingUp,
       route: '/routing/sr',
       algorithmType: 'successRate',
-      checkConfigured: () => !!srConfig?.config?.data,
+      checkConfigured: () => !!(srConfig as any)?.config?.data,
     },
     {
       id: 'rules',

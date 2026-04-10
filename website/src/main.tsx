@@ -8,7 +8,7 @@ import './index.css'
 console.log('\n' + '='.repeat(80))
 console.log('[APP STARTUP] Dashboard initializing...')
 console.log(`Timestamp: ${new Date().toISOString()}`)
-console.log(`Environment: ${import.meta.env.MODE}`)
+console.log(`Environment: ${(import.meta as any).env?.MODE ?? 'production'}`)
 console.log(`Base URL: /dashboard`)
 console.log('='.repeat(80) + '\n')
 

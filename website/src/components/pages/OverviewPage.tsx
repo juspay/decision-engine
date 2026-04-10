@@ -5,7 +5,7 @@ import { Card, CardBody, CardHeader } from '../ui/Card'
 import { Badge } from '../ui/Badge'
 import { useMerchantStore } from '../../store/merchantStore'
 import { apiPost } from '../../lib/api'
-import { RoutingAlgorithm } from '../../types/api'
+import { RoutingAlgorithm, RuleConfig } from '../../types/api'
 import { CheckCircle, XCircle, AlertCircle } from 'lucide-react'
 
 function useHealth() {
@@ -38,7 +38,7 @@ export function OverviewPage() {
     { shouldRetryOnError: false }
   )
 
-  const { data: srConfig, error: srError } = useSWR(
+  const { data: srConfig, error: srError } = useSWR<RuleConfig>(
     merchantId ? [`/rule/get`, 'successRate', merchantId] : null,
     () =>
       apiPost('/rule/get', { merchant_id: merchantId, algorithm: 'successRate' })
@@ -117,7 +117,7 @@ export function OverviewPage() {
               <Badge variant="gray">Not set</Badge>
             ) : srError ? (
               <Badge variant="gray">Not Configured</Badge>
-            ) : srConfig?.config?.data ? (
+            ) : srConfig?.data ? (
               <Badge variant="green">Configured</Badge>
             ) : (
               <Badge variant="gray">Not Configured</Badge>

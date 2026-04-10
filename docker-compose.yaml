@@ -205,7 +205,7 @@ services:
       start_period: 30s
 
   postgresql:
-    image: postgres:latest
+    image: postgres:16
     container_name: open-router-postgres
     profiles:
       - postgres
@@ -218,7 +218,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql
     networks:
       - open-router-network
     healthcheck:
@@ -226,7 +226,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 30s
 
   redis:
     image: redis:7-alpine

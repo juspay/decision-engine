@@ -9,7 +9,7 @@ import { Spinner } from '../ui/Spinner'
 import { useMerchantStore } from '../../store/merchantStore'
 import { apiPost } from '../../lib/api'
 import { RoutingAlgorithm } from '../../types/api'
-import { Plus, Trash2, Eye, ChevronDown, ChevronUp } from 'lucide-react'
+import { Plus, Trash2, Eye } from 'lucide-react'
 
 const COLORS = ['#0069ED', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
 
@@ -61,10 +61,12 @@ export function VolumeSplitPage() {
     setSaving(true); setError(null); setSuccess(null)
     try {
       await apiPost('/routing/create', {
+        rule_id: null,
         name: ruleName,
         description: '',
         created_by: merchantId,
         algorithm_for: 'payment',
+        metadata: null,
         algorithm: {
           type: 'volume_split',
           data: gateways.map(g => ({
@@ -111,11 +113,12 @@ export function VolumeSplitPage() {
   }
 
   // Build pie data from active rule
-  const pieData = activeVol
-    ? ((activeVol.algorithm_data || activeVol.algorithm).data as { split: number; output: { gateway_name: string; gateway_id: string | null } }[]).map(item => ({
-      name: item.output?.gateway_name ?? '?',
-      value: item.split,
-    }))
+  const algo = activeVol ? (activeVol.algorithm_data || activeVol.algorithm) : null
+  const pieData = algo && 'data' in algo
+    ? (algo.data as { split: number; output: { gateway_name: string; gateway_id: string | null } }[]).map(item => ({
+        name: item.output?.gateway_name ?? '?',
+        value: item.split,
+      }))
     : []
 
   return (
