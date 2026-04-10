@@ -31,6 +31,9 @@ init-local-pg-monitor:
 init-pg-monitor:
 	docker-compose run --rm db-migrator-postgres && docker-compose up --build -d prometheus && docker-compose up --build -d grafana && docker-compose up --build open-router-pg
 
+init-pg-local:
+	docker-compose run --rm db-migrator-postgres && docker-compose --profile local up open-router-pg
+
 run-local:
 	docker-compose up open-router-local
 

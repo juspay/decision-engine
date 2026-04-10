@@ -1,0 +1,90 @@
+---
+title: "Decision Engine"
+description: "Open-source payment gateway routing service by Juspay"
+---
+
+## What is Decision Engine?
+
+Decision Engine is a real-time payment gateway routing service. Given a payment and a list of eligible gateways, it returns the **optimal gateway** to route to — using live success-rate scoring, rule-based logic, and automatic failure elimination.
+
+## How it works
+
+```
+Your Payment Orchestrator
+        ↓
+POST /decide-gateway  ←── payment context + eligible gateways
+        ↓
+┌─────────────────────────────────────┐
+│  Filter Phase (25+ filters)         │
+│  currency · card brand · auth type  │
+│  EMI · payment method · surcharge   │
+├─────────────────────────────────────┤
+│  Score Phase                        │
+│  success rate v3 · elimination      │
+│  contract scores · outage detection │
+└─────────────────────────────────────┘
+        ↓
+{ "decided_gateway": "stripe", ... }
+```
+
+## Quick start
+
+**1. Create a merchant**
+
+```bash
+curl -X POST http://localhost:8080/merchant-account/create \
+  -H "Content-Type: application/json" \
+  -d '{"merchant_id": "my_merchant"}'
+```
+
+**2. Route a payment**
+
+```bash
+curl -X POST http://localhost:8080/decide-gateway \
+  -H "Content-Type: application/json" \
+  -d '{
+    "merchantId": "my_merchant",
+    "paymentInfo": {
+      "paymentId": "pay_001",
+      "amount": 1000.0,
+      "currency": "USD",
+      "paymentType": "ORDER_PAYMENT",
+      "paymentMethodType": "CARD",
+      "paymentMethod": "CREDIT"
+    },
+    "eligibleGatewayList": ["stripe", "paypal", "adyen"],
+    "rankingAlgorithm": "SrBasedRouting",
+    "eliminationEnabled": false
+  }'
+```
+
+**3. Record the outcome**
+
+```bash
+curl -X POST http://localhost:8080/update-gateway-score \
+  -H "Content-Type: application/json" \
+  -d '{
+    "merchantId": "my_merchant",
+    "gateway": "stripe",
+    "paymentId": "pay_001",
+    "status": "CHARGED"
+  }'
+```
+
+## Routing algorithms
+
+| Algorithm | Description |
+|-----------|-------------|
+| `SrBasedRouting` | Ranks gateways by real-time success rate. Default. |
+| `PlBasedRouting` | Uses merchant-defined priority logic rules |
+| `NtwBasedRouting` | Network-based routing for debit cards |
+
+## Running locally
+
+```bash
+docker compose --profile dashboard-postgres up -d
+curl http://localhost:8080/health
+# {"message":"Health is good"}
+```
+
+**Dashboard**: http://localhost:8081/dashboard/

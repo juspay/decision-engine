@@ -1,0 +1,174 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+
+  html {
+    color-scheme: light;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
+  html,
+  body {
+    font-family: 'Outfit', 'Inter', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    @apply bg-[#f8fafc] text-slate-800 dark:bg-[#000000] dark:text-[#f4f4f5] transition-colors duration-300;
+  }
+
+  /* Fallback text colors for robust contrast when not overridden */
+  p,
+  span,
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply text-slate-800 dark:text-slate-200 transition-colors duration-300;
+  }
+
+  p.text-slate-500,
+  span.text-slate-500,
+  div.text-slate-500 {
+    @apply dark:text-slate-400;
+  }
+
+  p.text-slate-600,
+  span.text-slate-600,
+  div.text-slate-600 {
+    @apply dark:text-slate-300;
+  }
+
+  /* Automatic inversion for tailwind colors in dark mode */
+  .dark .text-slate-900,
+  .dark .text-slate-800 {
+    color: #f1f5f9 !important;
+  }
+
+  .dark .text-slate-700 {
+    color: #e2e8f0 !important;
+  }
+
+  .dark .text-slate-600 {
+    color: #cbd5e1 !important;
+  }
+
+  .dark .text-slate-500 {
+    color: #94a3b8 !important;
+  }
+
+  .dark .text-slate-400 {
+    color: #64748b !important;
+  }
+
+  .dark .text-blue-800,
+  .dark .text-blue-700 {
+    color: #93c5fd !important;
+  }
+
+  .dark .text-blue-600 {
+    color: #60a5fa !important;
+  }
+
+  .dark .text-brand-500 {
+    color: #818cf8 !important;
+  }
+
+  .dark .bg-slate-50 {
+    @apply bg-[#1a1a1d] !important;
+  }
+
+  .dark .bg-slate-100 {
+    @apply bg-[#222226] !important;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-slate-300 dark:bg-[#222222] rounded-full hover:bg-slate-400 dark:hover:bg-[#333333] transition-colors;
+  }
+
+  /* Form elements — Dynamic override */
+  :where(input:not([type='checkbox']):not([type='radio']):not([type='range'])),
+  :where(select),
+  :where(textarea) {
+    @apply bg-white dark:bg-[#0f0f11] border-slate-200 dark:border-transparent text-slate-800 dark:text-white rounded-full px-4 placeholder-slate-400 dark:placeholder-[#66666e] transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:focus:bg-[#151518] dark:focus:border-[#333338];
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05) !important;
+    font-family: 'Outfit', sans-serif;
+  }
+
+  .dark input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  .dark select,
+  .dark textarea {
+    box-shadow: none !important;
+  }
+
+  select option {
+    @apply bg-white dark:bg-[#0f0f11] text-slate-800 dark:text-white;
+  }
+
+  /* Range input */
+  input[type='range'] {
+    @apply accent-brand-500 dark:accent-white;
+  }
+
+  /* Radio/checkbox */
+  input[type='radio'],
+  input[type='checkbox'] {
+    @apply w-4 h-4 bg-white dark:bg-[#0f0f11] border-slate-300 dark:border-[#222226] accent-brand-500 dark:accent-white transition-all duration-200;
+  }
+
+  input[type='radio'] {
+    border-radius: 50%;
+  }
+
+  input[type='checkbox'] {
+    border-radius: 4px;
+  }
+
+  input[type='radio']:checked,
+  input[type='checkbox']:checked {
+    @apply bg-brand-500 dark:bg-white border-brand-500 dark:border-white;
+  }
+}
+
+/* Floating panel utility class */
+.glass-panel {
+  @apply bg-white dark:bg-[#0c0c0e] border border-slate-200 dark:border-[#1a1a1d] shadow-lg dark:shadow-2xl rounded-2xl relative overflow-hidden transition-all duration-300;
+}
+
+.glass-panel-hover:hover {
+  @apply bg-slate-50 dark:bg-[#111114] border-slate-300 dark:border-[#222226];
+}
+
+/* Brand Gradient Text Utility */
+.text-gradient {
+  @apply bg-clip-text text-transparent bg-gradient-to-r from-brand-600 to-purple-500 dark:from-[#9b51e0] dark:via-[#4f46e5] dark:to-[#0ea5e9];
+}
+
+/* Aurora top edge */
+.aurora-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #9b51e0, #4f46e5, #0ea5e9, transparent);
+  opacity: 0.8;
+  z-index: 100;
+}
