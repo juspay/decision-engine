@@ -1,6 +1,6 @@
 FROM node:20-alpine
 
-ARG MINTLIFY_VERSION=4.0.0
+ARG MINTLIFY_VERSION=4.2.504
 RUN npm install -g "mintlify@${MINTLIFY_VERSION}"
 
 WORKDIR /docs

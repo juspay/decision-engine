@@ -1,18 +1,14 @@
 services:
   # ==========================================
-  # PROFILE: postgres (Basic PostgreSQL + Redis)
+  # Decision Engine Runtime (GHCR Images)
   # ==========================================
-  # ==========================================
-  # PROFILE: postgres (Basic PostgreSQL + Redis)
-  # ==========================================
-  open-router-pg:
-    image: ghcr.io/juspay/decision-engine/postgres:v1.3.3
+  open-router-pg-ghcr:
+    image: ghcr.io/juspay/decision-engine/postgres:${DECISION_ENGINE_TAG:-v1.3.4}
     pull_policy: always
     platform: linux/amd64
-    container_name: open-router-pg
     profiles:
-      - postgres
-      - dashboard-postgres
+      - postgres-ghcr
+      - dashboard-postgres-ghcr
     restart: unless-stopped
     ports:
       - "8080:8080"
@@ -27,20 +23,19 @@ services:
     volumes:
       - ./config/docker-configuration.toml:/local/config/development.toml
     networks:
-      - open-router-network
+      open-router-network:
+        aliases:
+          - decision-engine-api
     environment:
       - GROOVY_RUNNER_HOST=host.docker.internal:8085
 
-  # ==========================================
-  # PROFILE: mysql (Basic MySQL + Redis)
-  # ==========================================
-  open-router:
-    image: ghcr.io/juspay/decision-engine:v1.3.3
+  open-router-mysql-ghcr:
+    image: ghcr.io/juspay/decision-engine:${DECISION_ENGINE_TAG:-v1.3.4}
     pull_policy: always
     platform: linux/amd64
-    container_name: open-router
     profiles:
-      - mysql
+      - mysql-ghcr
+      - dashboard-mysql-ghcr
     restart: unless-stopped
     ports:
       - "8080:8080"
@@ -51,22 +46,93 @@ services:
         condition: service_healthy
       routing-config:
         condition: service_completed_successfully
+      db-migrator:
+        condition: service_completed_successfully
     volumes:
       - ./config/docker-configuration.toml:/local/config/development.toml
     networks:
-      - open-router-network
+      open-router-network:
+        aliases:
+          - decision-engine-api
     environment:
       - GROOVY_RUNNER_HOST=host.docker.internal:8085
 
   # ==========================================
-  # PROFILE: dashboard-postgres (PG + Redis + Dashboard)
+  # Decision Engine Runtime (Local Build)
+  # ==========================================
+  open-router-pg-local:
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
+      platforms:
+        - linux/amd64
+    image: decision-engine-pg:local
+    platform: linux/amd64
+    profiles:
+      - postgres-local
+      - dashboard-postgres-local
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+      - "9094:9094"
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      db-migrator-postgres:
+        condition: service_completed_successfully
+    volumes:
+      - ./config/docker-configuration.toml:/local/config/development.toml
+    networks:
+      open-router-network:
+        aliases:
+          - decision-engine-api
+    environment:
+      - GROOVY_RUNNER_HOST=host.docker.internal:8085
+
+  open-router-mysql-local:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      platforms:
+        - linux/amd64
+    image: decision-engine-mysql:local
+    platform: linux/amd64
+    profiles:
+      - mysql-local
+      - dashboard-mysql-local
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      routing-config:
+        condition: service_completed_successfully
+      db-migrator:
+        condition: service_completed_successfully
+    volumes:
+      - ./config/docker-configuration.toml:/local/config/development.toml
+    networks:
+      open-router-network:
+        aliases:
+          - decision-engine-api
+    environment:
+      - GROOVY_RUNNER_HOST=host.docker.internal:8085
+
+  # ==========================================
+  # Dashboard and Docs
   # ==========================================
   nginx:
     image: nginx:alpine
     profiles:
-      - dashboard-postgres
-      - dashboard-mysql
-    container_name: open-router-nginx
+      - dashboard-postgres-ghcr
+      - dashboard-postgres-local
+      - dashboard-mysql-ghcr
+      - dashboard-mysql-local
     restart: unless-stopped
     ports:
       - "8081:80"
@@ -74,8 +140,8 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./website/dist:/usr/share/nginx/html/dashboard:ro
     depends_on:
-      - open-router-pg
-      - mintlify-docs
+      mintlify-docs:
+        condition: service_healthy
     networks:
       - open-router-network
 
@@ -84,9 +150,10 @@ services:
       context: .
       dockerfile: Dockerfile.docs
     profiles:
-      - dashboard-postgres
-      - dashboard-mysql
-    container_name: mintlify-docs
+      - dashboard-postgres-ghcr
+      - dashboard-postgres-local
+      - dashboard-mysql-ghcr
+      - dashboard-mysql-local
     restart: unless-stopped
     expose:
       - "3000"
@@ -100,7 +167,7 @@ services:
       start_period: 60s
 
   # ==========================================
-  # Supporting Services with Profiles
+  # Supporting Services
   # ==========================================
   prometheus:
     image: prom/prometheus:latest
@@ -130,13 +197,12 @@ services:
     volumes:
       - ./config/grafana-datasource.yaml:/etc/grafana/provisioning/datasources/datasource.yml
 
-  groovy-runner:
-    image: ghcr.io/juspay/open-router/groovy-runner:main
+  groovy-runner-ghcr:
+    image: ghcr.io/juspay/decision-engine/groovy-runner:${GROOVY_RUNNER_TAG:-v1.3.4}
     pull_policy: always
     platform: linux/amd64
-    container_name: groovy-runner
     profiles:
-      - groovy
+      - groovy-ghcr
     restart: unless-stopped
     ports:
       - "8085:8085"
@@ -160,8 +226,8 @@ services:
       labels:
         - "com.docker.compose.watchfile=groovy.Dockerfile"
         - "com.docker.compose.watchfile=src/Runner.groovy"
+    image: decision-engine-groovy-runner:local
     platform: linux/amd64
-    container_name: groovy-runner-local
     profiles:
       - groovy-local
     restart: unless-stopped
@@ -177,14 +243,15 @@ services:
       start_period: 10s
 
   # ==========================================
-  # Core Infrastructure (Pulled when needed)
+  # Core Infrastructure
   # ==========================================
   mysql:
     image: mysql:8.0
-    container_name: open-router-mysql
     profiles:
-      - mysql
-      - dashboard-mysql
+      - mysql-ghcr
+      - dashboard-mysql-ghcr
+      - mysql-local
+      - dashboard-mysql-local
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: root
@@ -206,10 +273,11 @@ services:
 
   postgresql:
     image: postgres:16
-    container_name: open-router-postgres
     profiles:
-      - postgres
-      - dashboard-postgres
+      - postgres-ghcr
+      - dashboard-postgres-ghcr
+      - postgres-local
+      - dashboard-postgres-local
     restart: unless-stopped
     environment:
       POSTGRES_USER: db_user
@@ -230,12 +298,15 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: open-router-redis
     profiles:
-      - postgres
-      - dashboard-postgres
-      - mysql
-      - dashboard-mysql
+      - postgres-ghcr
+      - dashboard-postgres-ghcr
+      - postgres-local
+      - dashboard-postgres-local
+      - mysql-ghcr
+      - dashboard-mysql-ghcr
+      - mysql-local
+      - dashboard-mysql-local
     restart: unless-stopped
     ports:
       - "6379:6379"
@@ -252,10 +323,11 @@ services:
 
   db-migrator:
     image: mysql:8.0
-    container_name: db-migrator
     profiles:
-      - mysql
-      - dashboard-mysql
+      - mysql-ghcr
+      - dashboard-mysql-ghcr
+      - mysql-local
+      - dashboard-mysql-local
     depends_on:
       mysql:
         condition: service_healthy
@@ -268,10 +340,11 @@ services:
 
   db-migrator-postgres:
     image: rust:latest
-    container_name: db-migrator-postgres
     profiles:
-      - postgres
-      - dashboard-postgres
+      - postgres-ghcr
+      - dashboard-postgres-ghcr
+      - postgres-local
+      - dashboard-postgres-local
     depends_on:
       postgresql:
         condition: service_healthy
@@ -281,16 +354,17 @@ services:
     volumes:
       - .:/app
     working_dir: /app
-    command: "bash -c 'cargo install diesel_cli --no-default-features --features postgres && cargo install just && just migrate-pg'"
+    command: "bash -c 'cargo install diesel_cli --no-default-features --features postgres && diesel migration run --database-url \"$$DATABASE_URL\" --migration-dir /app/migrations_pg --config-file /app/diesel_pg.toml'"
     networks:
       - open-router-network
 
   routing-config:
     image: python:3.10-slim
-    container_name: routing-config
     profiles:
-      - mysql
-      - dashboard-mysql
+      - mysql-ghcr
+      - dashboard-mysql-ghcr
+      - mysql-local
+      - dashboard-mysql-local
     depends_on:
       mysql:
         condition: service_healthy

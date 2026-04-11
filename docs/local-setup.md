@@ -1,350 +1,249 @@
-# Local Development Setup Guide
+# Local Setup Guide
 
-Complete guide for setting up Decision Engine locally with Docker, Kubernetes (Helm), or from source.
+This is the canonical setup guide for running Decision Engine locally and for on-prem style validation.
 
 ## Table of Contents
 
 - [Prerequisites](#prerequisites)
-- [Quick Start](#quick-start)
+- [Image Strategy](#image-strategy)
+- [Quick Start (Compose)](#quick-start-compose)
 - [Docker Compose Profiles](#docker-compose-profiles)
-- [Setup Modes](#setup-modes)
-  - [1. PostgreSQL with Dashboard (Recommended)](#1-postgresql-with-dashboard-recommended)
-  - [2. PostgreSQL Only](#2-postgresql-only)
-  - [3. MySQL with Dashboard](#3-mysql-with-dashboard)
-  - [4. MySQL Only](#4-mysql-only)
-  - [5. With Monitoring](#5-with-monitoring)
-- [Optional Components](#optional-components)
-- [Configuration](#configuration)
-- [Verifying Installation](#verifying-installation)
+- [Build and Run from CLI (Cargo)](#build-and-run-from-cli-cargo)
+- [Build and Run with Docker (Without Compose)](#build-and-run-with-docker-without-compose)
+- [Helm Chart Deployment](#helm-chart-deployment)
+- [Verification](#verification)
+- [Common Commands](#common-commands)
 - [Troubleshooting](#troubleshooting)
-
----
 
 ## Prerequisites
 
-### Common Requirements
+- Docker 20+
+- Docker Compose v2+
+- Git 2+
 
-| Tool | Version | Purpose |
-|------|---------|---------|
-| Git | 2.0+ | Clone repository |
-| Docker | 20.0+ | Container runtime |
-| Docker Compose | 2.0+ | Multi-container orchestration |
+Optional for source builds:
+- Rust 1.85+
+- `just` (recommended)
+- PostgreSQL/MySQL + Redis if running without Docker Compose
 
-### Platform-Specific Dependencies
+## Image Strategy
 
-#### Ubuntu/Debian
+Decision Engine supports two deployment tracks:
+
+1. `ghcr` track (recommended for on-prem): pulls pinned images from GHCR.
+2. `local` track: builds images from your current local source.
+
+Default pinned tags:
+
+- `DECISION_ENGINE_TAG=v1.3.4`
+- `GROOVY_RUNNER_TAG=v1.3.4`
+
+Override example:
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y pkg-config libssl-dev protobuf-compiler libpq-dev curl git
+export DECISION_ENGINE_TAG=v1.3.5
+export GROOVY_RUNNER_TAG=v1.3.5
 ```
 
-#### macOS
-
-```bash
-brew install pkg-config openssl protobuf postgresql curl git
-```
-
----
-
-## Quick Start
+## Quick Start (Compose)
 
 ```bash
 git clone https://github.com/juspay/decision-engine.git
 cd decision-engine
-docker compose --profile dashboard-postgres up -d
+
+# On-prem style run: GHCR pinned image + PostgreSQL
+docker compose --profile postgres-ghcr up -d
 ```
 
-Access:
-- **API**: http://localhost:8080/health
-- **Dashboard**: http://localhost:8081/dashboard/
-- **Documentation**: http://localhost:8081/introduction
+For dashboard + docs:
 
----
+```bash
+docker compose --profile dashboard-postgres-ghcr up -d
+```
 
 ## Docker Compose Profiles
 
-Profiles control which services are started. **You must specify at least one profile** - nothing runs by default.
+You must pass at least one profile.
 
-| Profile | Database | Dashboard | Redis | Services Started |
-|---------|----------|-----------|-------|------------------|
-| `postgres` | PostgreSQL | ❌ | ✅ | 4 services |
-| `dashboard-postgres` | PostgreSQL | ✅ | ✅ | 6 services |
-| `mysql` | MySQL | ❌ | ✅ | 5 services |
-| `dashboard-mysql` | MySQL | ✅ | ✅ | 7 services |
-| `monitoring` | N/A | Grafana | N/A | Prometheus + Grafana |
-| `groovy` | N/A | N/A | N/A | Groovy Runner (optional) |
+### Core runtime profiles
 
-### Combining Profiles
+| Profile | Image Source | DB | Includes |
+|---|---|---|---|
+| `postgres-ghcr` | GHCR | PostgreSQL | API + PostgreSQL + Redis + PG migrations |
+| `postgres-local` | Local build | PostgreSQL | API + PostgreSQL + Redis + PG migrations |
+| `mysql-ghcr` | GHCR | MySQL | API + MySQL + Redis + MySQL migrations + routing-config |
+| `mysql-local` | Local build | MySQL | API + MySQL + Redis + MySQL migrations + routing-config |
 
-```bash
-# PostgreSQL + Dashboard + Monitoring
-docker compose --profile dashboard-postgres --profile monitoring up -d
+### Dashboard profiles
 
-# PostgreSQL + Groovy Runner
-docker compose --profile postgres --profile groovy up -d
+| Profile | Image Source | DB | Includes |
+|---|---|---|---|
+| `dashboard-postgres-ghcr` | GHCR | PostgreSQL | Core PG stack + Nginx dashboard + Mintlify docs |
+| `dashboard-postgres-local` | Local build | PostgreSQL | Core PG stack + Nginx dashboard + Mintlify docs |
+| `dashboard-mysql-ghcr` | GHCR | MySQL | Core MySQL stack + Nginx dashboard + Mintlify docs |
+| `dashboard-mysql-local` | Local build | MySQL | Core MySQL stack + Nginx dashboard + Mintlify docs |
 
-# MySQL + Dashboard + Monitoring + Groovy
-docker compose --profile dashboard-mysql --profile monitoring --profile groovy up -d
-```
+### Optional profiles
 
----
+| Profile | Description |
+|---|---|
+| `monitoring` | Prometheus + Grafana |
+| `groovy-ghcr` | Groovy runner from GHCR (`GROOVY_RUNNER_TAG`) |
+| `groovy-local` | Groovy runner built from local `groovy.Dockerfile` |
 
-## Setup Modes
-
-### 1. PostgreSQL with Dashboard (Recommended)
-
-Best for local development with web UI and documentation.
+### Common combinations
 
 ```bash
-docker compose --profile dashboard-postgres up -d
+# PostgreSQL (GHCR) + monitoring
+docker compose --profile postgres-ghcr --profile monitoring up -d
+
+# PostgreSQL (local build) + dashboard + docs
+docker compose --profile dashboard-postgres-local up -d --build
+
+# MySQL (GHCR) + dashboard + docs
+docker compose --profile dashboard-mysql-ghcr up -d
 ```
 
-**Services:**
-| Service | Port | Description |
-|---------|------|-------------|
-| Decision Engine API | 8080 | Main REST API |
-| Nginx Proxy | 8081 | Dashboard + Docs proxy |
-| PostgreSQL | 5432 | Primary database |
-| Redis | 6379 | Cache store |
-| Mintlify Docs | 3000 (internal) | Documentation site |
-| DB Migrator | N/A | Runs migrations |
+## Build and Run from CLI (Cargo)
 
-**URLs:**
-- API: http://localhost:8080/health
-- Dashboard: http://localhost:8081/dashboard/
-- Docs: http://localhost:8081/introduction
-
-### 2. PostgreSQL Only
-
-Lightweight setup for API-only testing.
+### PostgreSQL build
 
 ```bash
-docker compose --profile postgres up -d
+cargo build --release --no-default-features --features middleware,kms-aws,postgres
 ```
 
-**Services:**
-| Service | Port | Description |
-|---------|------|-------------|
-| Decision Engine API | 8080 | Main REST API |
-| PostgreSQL | 5432 | Primary database |
-| Redis | 6379 | Cache store |
-| DB Migrator | N/A | Runs migrations |
-
-**URL:** http://localhost:8080/health
-
-### 3. MySQL with Dashboard
-
-Alternative database with full UI stack.
+Run migrations:
 
 ```bash
-docker compose --profile dashboard-mysql up -d
+just migrate-pg
 ```
 
-**Services:**
-| Service | Port | Description |
-|---------|------|-------------|
-| Decision Engine API | 8080 | Main REST API |
-| Nginx Proxy | 8081 | Dashboard + Docs proxy |
-| MySQL | 3306 | Primary database |
-| Redis | 6379 | Cache store |
-| Mintlify Docs | 3000 (internal) | Documentation site |
-| DB Migrator | N/A | MySQL migrations |
-| Routing Config | N/A | Initial config setup |
-
-### 4. MySQL Only
-
-MySQL backend without dashboard.
+Run service:
 
 ```bash
-docker compose --profile mysql up -d
+RUSTFLAGS="-Awarnings" cargo run --no-default-features --features postgres
 ```
 
-### 5. With Monitoring
-
-Add Prometheus metrics and Grafana dashboards to any profile.
+### MySQL build
 
 ```bash
-# With PostgreSQL dashboard
-docker compose --profile dashboard-postgres --profile monitoring up -d
-
-# With MySQL only
-docker compose --profile mysql --profile monitoring up -d
+cargo build --release --features release
 ```
 
-**Additional Services:**
-| Service | Port | Description |
-|---------|------|-------------|
-| Prometheus | 9090 | Metrics collection |
-| Grafana | 3000 | Visualization dashboards |
-
----
-
-## Optional Components
-
-### Groovy Runner
-
-Enables Groovy scripting support (needed for dynamic routing rules).
+Run service:
 
 ```bash
-# Add to any profile
-docker compose --profile postgres --profile groovy up -d
+RUSTFLAGS="-Awarnings" cargo run --features release
 ```
 
-**Profile:** `groovy` (pre-built image) or `groovy-local` (build from source)
+## Build and Run with Docker (Without Compose)
 
-**Port:** 8085
-
----
-
-## Configuration
-
-### Environment Variables
-
-Set in `docker-compose.yaml` or create `.env` file:
+### Build images locally
 
 ```bash
-# Database URLs
-export DATABASE_URL="postgresql://db_user:db_pass@localhost:5432/decision_engine_db"
+# MySQL-target binary image
+docker build --platform=linux/amd64 -t decision-engine-mysql:local -f Dockerfile .
 
-# Groovy Runner (if using)
-export GROOVY_RUNNER_HOST="host.docker.internal:8085"
+# PostgreSQL-target binary image
+docker build --platform=linux/amd64 -t decision-engine-pg:local -f Dockerfile.postgres .
 ```
 
-### Configuration Files
+### Run image
 
-| File | Purpose |
-|------|---------|
-| `config/development.toml` | Local development settings |
-| `config/docker-configuration.toml` | Docker deployment settings |
+```bash
+docker run --platform=linux/amd64 \
+  -v $(pwd)/config/docker-configuration.toml:/local/config/development.toml \
+  -p 8080:8080 \
+  decision-engine-pg:local
+```
 
----
+## Helm Chart Deployment
 
-## Verifying Installation
+Chart location: `helm-charts/`
 
-### Health Check
+### Install with defaults
+
+```bash
+cd helm-charts
+helm dependency build
+helm install my-release .
+```
+
+### Pin GHCR tag explicitly
+
+```bash
+helm install my-release . \
+  --set image.repository=ghcr.io/juspay/decision-engine/postgres \
+  --set image.version=v1.3.4 \
+  --set image.pullPolicy=Always
+```
+
+### Use local/private registry image
+
+```bash
+helm install my-release . \
+  --set image.repository=<your-registry>/decision-engine/postgres \
+  --set image.version=<your-tag> \
+  --set image.pullPolicy=IfNotPresent
+```
+
+## Verification
 
 ```bash
 curl http://localhost:8080/health
 ```
 
-Expected: `{"message":"Health is good"}`
+Expected response:
 
-### API Test
-
-```bash
-curl -X POST http://localhost:8080/decide-gateway \
-  -H "Content-Type: application/json" \
-  -d '{
-    "merchantId": "test_merchant1",
-    "eligibleGatewayList": ["stripe", "adyen"],
-    "paymentInfo": {
-      "paymentId": "test_123",
-      "amount": 100.50,
-      "currency": "USD"
-    }
-  }'
+```json
+{"message":"Health is good"}
 ```
 
-### Dashboard Access
+Dashboard/docs (if dashboard profile is used):
 
-Open browser to: http://localhost:8081/dashboard/
+- Dashboard: `http://localhost:8081/dashboard/`
+- Docs: `http://localhost:8081/introduction`
 
----
+## Common Commands
+
+Make targets are aligned to ghcr/local tracks:
+
+```bash
+# GHCR tracks
+make init-pg-ghcr
+make init-mysql-ghcr
+
+# Local build tracks
+make init-pg-local
+make init-mysql-local
+
+# Run one API service (when infra is ready)
+make run-pg-ghcr
+make run-mysql-local
+
+# Stop everything
+make stop
+```
 
 ## Troubleshooting
 
-### Port Already in Use
+### Port conflicts
 
-**Error:** `Port 8080 is already in use`
-
-**Solution:**
 ```bash
 lsof -ti:8080 | xargs kill -9
-# or change ports in docker-compose.yaml
+lsof -ti:8081 | xargs kill -9
 ```
 
-### Container Conflicts
-
-**Error:** `container name "X" is already in use`
-
-**Solution:**
-```bash
-docker compose --profile <profile> down
-docker system prune -f
-docker compose --profile <profile> up -d
-```
-
-### Database Connection Failed
-
-**Error:** `Connection refused` or `database does not exist`
-
-**Solutions:**
-
-1. Check database is running:
-   ```bash
-   docker ps | grep postgres
-   ```
-
-2. Verify migrations ran:
-   ```bash
-   docker logs db-migrator-postgres
-   ```
-
-3. Restart with fresh state:
-   ```bash
-   docker compose --profile postgres down -v
-   docker compose --profile postgres up -d
-   ```
-
-### Dashboard Shows Old Version
-
-The `website/dist` folder contains old build artifacts.
-
-**Solution:**
-```bash
-cd website
-npm install
-npm run build
-cd ..
-docker restart open-router-nginx
-```
-
-### Profile Not Found
-
-**Error:** `service "X" has neither an image nor a build context`
-
-**Cause:** Missing profile flag
-
-**Solution:** Always specify a profile:
-```bash
-# Wrong
-docker compose up -d
-
-# Correct
-docker compose --profile postgres up -d
-```
-
----
-
-## Stopping Services
+### Recreate stack with clean volumes
 
 ```bash
-# Stop specific profile
-docker compose --profile dashboard-postgres down
-
-# Stop all profiles and remove volumes
-docker compose --profile dashboard-postgres --profile monitoring down -v
-
-# Clean up everything
-docker system prune -af --volumes
+docker compose --profile postgres-ghcr down -v
+docker compose --profile postgres-ghcr up -d
 ```
 
----
+### Verify migration jobs
 
-## Next Steps
-
-- [API Reference](api-reference.md)
-- [Configuration Guide](configuration.md)
-- [MySQL Setup Guide](setup-guide-mysql.md)
-- [PostgreSQL Setup Guide](setup-guide-postgres.md)
+```bash
+docker compose logs db-migrator-postgres
+docker compose logs db-migrator
+```

@@ -60,6 +60,24 @@ Then, to install the chart with the release name `my-release`:
 helm install my-release .
 ```
 
+To pin a specific on-prem image version (for example `v1.3.4`):
+
+```bash
+helm install my-release . \
+  --set image.repository=ghcr.io/juspay/decision-engine/postgres \
+  --set image.version=v1.3.4 \
+  --set image.pullPolicy=Always
+```
+
+To use an internal/private registry:
+
+```bash
+helm install my-release . \
+  --set image.repository=<your-registry>/decision-engine/postgres \
+  --set image.version=<your-tag> \
+  --set image.pullPolicy=IfNotPresent
+```
+
 The command deploys Decision Engine on the Kubernetes cluster with the default configuration. The [Parameters](#parameters) section lists the parameters that can be configured during installation.
 
 ## Uninstalling the Chart
@@ -77,8 +95,8 @@ helm delete my-release
 | Name                | Description                                                                           | Value           |
 |---------------------|---------------------------------------------------------------------------------------|-----------------|
 | `replicaCount`      | Number of Decision Engine replicas                                                    | `1`             |
-| `image.repository`  | Decision Engine image repository                                                      | `decision-engine` |
-| `image.version`         | Decision Engine image tag                                                             | `latest`        |
+| `image.repository`  | Decision Engine image repository                                                      | `ghcr.io/juspay/decision-engine/postgres` |
+| `image.version`         | Decision Engine image tag                                                             | `v1.2.0`        |
 | `image.pullPolicy`  | Decision Engine image pull policy                                                     | `Always`        |
 | `imagePullSecrets`  | Image pull secrets                                                                    | `[]`            |
 | `nameOverride`      | Override the name of the chart                                                        | `""`            |
@@ -136,8 +154,8 @@ helm delete my-release
 | Name                                    | Description                                                | Value           |
 |-----------------------------------------|------------------------------------------------------------|-----------------|
 | `groovyRunner.enabled`                  | Deploy Groovy Runner                                       | `true`          |
-| `groovyRunner.image.repository`         | Groovy Runner image repository                             | `"groovy-runner"` |
-| `groovyRunner.image.version`                | Groovy Runner image tag                                    | `"latest"`      |
+| `groovyRunner.image.repository`         | Groovy Runner image repository                             | `"ghcr.io/juspay/decision-engine/groovy-runner"` |
+| `groovyRunner.image.version`                | Groovy Runner image tag                                    | `"v1.0.0"`      |
 | `groovyRunner.image.pullPolicy`         | Groovy Runner image pull policy                            | `"Always"`      |
 | `groovyRunner.service.port`             | Groovy Runner service port                                 | `8085`          |
 | `groovyRunner.resources`                | Groovy Runner resources                                    | `{}`            |

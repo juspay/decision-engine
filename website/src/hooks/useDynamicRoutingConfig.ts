@@ -2,8 +2,10 @@ import useSWR from 'swr'
 import { fetcher } from '../lib/api'
 
 export interface KeyConfig {
-  data_type: 'Enum' | 'Integer' | 'Udf' | 'StrValue' | 'GlobalRef'
-  values?: string
+  // backend may send either `type` (snake_case) or `data_type` (legacy)
+  type?: 'enum' | 'integer' | 'udf' | 'str_value' | 'global_ref'
+  data_type?: 'Enum' | 'Integer' | 'Udf' | 'StrValue' | 'GlobalRef' | 'enum' | 'integer' | 'udf' | 'str_value' | 'global_ref'
+  values?: string | string[]
   min_value?: number
   max_value?: number
   min_length?: number
@@ -13,8 +15,11 @@ export interface KeyConfig {
 }
 
 export interface RoutingConfig {
-  keys: {
-    keys: Record<string, KeyConfig>
+  // preferred shape from backend: { keys: { payment_method: {...}, ... } }
+  keys?: unknown
+  // backward-compat shape
+  routing_config?: {
+    keys?: unknown
   }
 }
 
@@ -38,18 +43,44 @@ export interface RoutingKeyConfig {
 }
 
 function parseRoutingConfig(config: RoutingConfig | null): ParsedRoutingKey[] {
-  if (!config || !config.keys || !config.keys.keys) {
+  if (!config) {
     return []
   }
 
-  return Object.entries(config.keys.keys).map(([key, keyConfig]) => {
+  const resolveKeys = (source?: unknown): Record<string, KeyConfig> => {
+    if (!source || typeof source !== 'object') return {}
+
+    const nested = (source as { keys?: unknown }).keys
+    if (nested && typeof nested === 'object') {
+      return nested as Record<string, KeyConfig>
+    }
+
+    return source as Record<string, KeyConfig>
+  }
+
+  const keysMap = {
+    ...resolveKeys(config.keys),
+    ...resolveKeys(config.routing_config?.keys),
+  }
+
+  if (Object.keys(keysMap).length === 0) {
+    return []
+  }
+
+  return Object.entries(keysMap).map(([key, keyConfig]) => {
+    const normalizedType = (keyConfig.type || keyConfig.data_type || 'str_value')
+      .toString()
+      .toLowerCase() as ParsedRoutingKey['type']
+
     const parsed: ParsedRoutingKey = {
       key,
-      type: keyConfig.data_type.toLowerCase() as ParsedRoutingKey['type'],
+      type: normalizedType,
     }
 
     if (keyConfig.values) {
-      parsed.values = keyConfig.values.split(',').map(v => v.trim())
+      parsed.values = Array.isArray(keyConfig.values)
+        ? keyConfig.values.map(v => v.trim())
+        : keyConfig.values.split(',').map(v => v.trim())
     }
 
     if (keyConfig.min_value !== undefined) {
