@@ -10,7 +10,23 @@ export interface StaticRoutingKeyConfig {
 export const STATIC_ROUTING_KEYS: Record<string, StaticRoutingKeyConfig> = {
   payment_method: {
     type: 'enum',
-    values: ['card', 'bank_debit', 'bank_transfer'],
+    values: [
+      'card',
+      'card_redirect',
+      'pay_later',
+      'wallet',
+      'bank_redirect',
+      'bank_transfer',
+      'crypto',
+      'bank_debit',
+      'reward',
+      'real_time_payment',
+      'upi',
+      'voucher',
+      'gift_card',
+      'open_banking',
+      'mobile_payment',
+    ],
   },
   amount: { type: 'integer', values: [] },
   currency: {

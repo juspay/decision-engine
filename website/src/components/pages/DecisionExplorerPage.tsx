@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts'
 import { Card, CardBody, CardHeader } from '../ui/Card'
 import { Button } from '../ui/Button'
@@ -9,13 +9,9 @@ import { useMerchantStore } from '../../store/merchantStore'
 import { apiPost } from '../../lib/api'
 import { DecideGatewayResponse, GatewayConnector } from '../../types/api'
 import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
+import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
 import { Play, RefreshCw, ChevronDown, ChevronUp, Activity, Code, Plus, Trash2, PieChart as PieChartIcon } from 'lucide-react'
 
-const PAYMENT_METHOD_TYPES = ['CARD', 'UPI', 'WALLET', 'NETBANKING', 'interac']
-const PAYMENT_METHODS = ['CREDIT', 'DEBIT', 'PREPAID']
-const CURRENCIES = ['USD', 'EUR', 'GBP', 'INR', 'SGD', 'AUD', 'CAD']
-const CARD_BRANDS = ['VISA', 'MASTERCARD', 'AMEX', 'RUPAY', 'DINERS']
-const AUTH_TYPES = ['THREE_DS', 'NO_THREE_DS']
 const ALGORITHMS = ['SR_BASED_ROUTING', 'PL_BASED_ROUTING', 'NTW_BASED_ROUTING']
 
 const ALGORITHM_LABELS: Record<string, string> = {
@@ -80,17 +76,37 @@ function approachColor(approach: string): string {
 
 const COLORS = ['#0069ED', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16']
 
+function toUpperOptions(values: string[] = []): string[] {
+  return values.map(v => v.trim()).filter(Boolean).map(v => v.toUpperCase())
+}
+
+function uniqueUpperOptions(values: string[] = []): string[] {
+  return Array.from(new Set(toUpperOptions(values)))
+}
+
+function mapRoutingTypeToRuleParamType(
+  keyType?: 'enum' | 'integer' | 'udf' | 'str_value' | 'global_ref'
+): RuleEvaluateParams['type'] {
+  if (keyType === 'enum') return 'enum_variant'
+  if (keyType === 'integer') return 'number'
+  if (keyType === 'udf' || keyType === 'global_ref') return 'metadata_variant'
+  return 'str_value'
+}
+
 export function DecisionExplorerPage() {
   const { merchantId } = useMerchantStore()
+  const { routingKeysConfig, isLoading: routingKeysLoading, error: routingKeysError } = useDynamicRoutingConfig()
+  const hasRoutingKeys = Object.keys(routingKeysConfig).length > 0
+  const routingConfigUnavailable = !routingKeysLoading && (!hasRoutingKeys || Boolean(routingKeysError))
   const [activeTab, setActiveTab] = useState<TabType>('single')
 
   const [form, setForm] = useState<FormState>({
     amount: '1000',
-    currency: 'USD',
-    payment_method_type: 'CARD',
-    payment_method: 'CREDIT',
-    card_brand: 'VISA',
-    auth_type: 'THREE_DS',
+    currency: '',
+    payment_method_type: '',
+    payment_method: '',
+    card_brand: '',
+    auth_type: '',
     eligible_gateways: 'stripe, adyen',
     ranking_algorithm: 'SR_BASED_ROUTING',
     elimination_enabled: false,
@@ -103,13 +119,13 @@ export function DecisionExplorerPage() {
   })
 
   const [ruleParams, setRuleParams] = useState<RuleEvaluateParams[]>([
-    { key: 'payment_method_type', type: 'enum_variant', value: 'credit', metadataKey: '' },
-    { key: 'currency', type: 'enum_variant', value: 'USD', metadataKey: '' },
+    { key: 'payment_method_type', type: 'enum_variant', value: '', metadataKey: '' },
+    { key: 'currency', type: 'enum_variant', value: '', metadataKey: '' },
   ])
 
   const [fallbackConnectors, setFallbackConnectors] = useState<GatewayConnector[]>([
-    { gateway_name: 'stripe', gateway_id: 'mca_001' },
-    { gateway_name: 'adyen', gateway_id: 'mca_002' },
+    { gateway_name: 'stripe', gateway_id: 'gateway_001' },
+    { gateway_name: 'adyen', gateway_id: 'gateway_002' },
   ])
 
   const [volumePayments, setVolumePayments] = useState<string>('100')
@@ -125,12 +141,101 @@ export function DecisionExplorerPage() {
   const [responseOpen, setResponseOpen] = useState(false)
   const [volumeResponseOpen, setVolumeResponseOpen] = useState(false)
 
+  const routingKeyNames = useMemo(
+    () => Object.keys(routingKeysConfig).sort(),
+    [routingKeysConfig]
+  )
+
+  const paymentMethodTypeOptions = useMemo(
+    () => toUpperOptions(routingKeysConfig.payment_method?.values || []),
+    [routingKeysConfig]
+  )
+
+  const paymentMethodOptions = useMemo(() => {
+    const methodTypeKey = form.payment_method_type.toLowerCase()
+    return toUpperOptions(routingKeysConfig[methodTypeKey]?.values || [])
+  }, [form.payment_method_type, routingKeysConfig])
+
+  const currencyOptions = useMemo(
+    () => uniqueUpperOptions(routingKeysConfig.currency?.values || []),
+    [routingKeysConfig]
+  )
+
+  const cardBrandOptions = useMemo(
+    () => uniqueUpperOptions(routingKeysConfig.card_network?.values || []),
+    [routingKeysConfig]
+  )
+
+  const authTypeOptions = useMemo(
+    () => uniqueUpperOptions(routingKeysConfig.authentication_type?.values || []),
+    [routingKeysConfig]
+  )
+
+  useEffect(() => {
+    if (routingConfigUnavailable || routingKeysLoading) return
+
+    setForm(prev => {
+      const next = { ...prev }
+
+      if (currencyOptions.length > 0 && !currencyOptions.includes(next.currency)) {
+        next.currency = currencyOptions[0]
+      }
+
+      if (paymentMethodTypeOptions.length > 0 && !paymentMethodTypeOptions.includes(next.payment_method_type)) {
+        next.payment_method_type = paymentMethodTypeOptions[0]
+      }
+
+      const methodsForType = toUpperOptions(
+        routingKeysConfig[next.payment_method_type.toLowerCase()]?.values || []
+      )
+      if (methodsForType.length > 0 && !methodsForType.includes(next.payment_method)) {
+        next.payment_method = methodsForType[0]
+      }
+
+      if (authTypeOptions.length > 0 && !authTypeOptions.includes(next.auth_type)) {
+        next.auth_type = authTypeOptions[0]
+      }
+
+      if (cardBrandOptions.length > 0 && !cardBrandOptions.includes(next.card_brand)) {
+        next.card_brand = cardBrandOptions[0]
+      }
+
+      return next
+    })
+
+    setRuleParams(prev =>
+      prev.map(param => {
+        if (!param.key || !routingKeysConfig[param.key]) return param
+        const keyConfig = routingKeysConfig[param.key]
+        const mappedType = mapRoutingTypeToRuleParamType(keyConfig.type)
+        const enumValues = keyConfig.values || []
+        const nextValue = mappedType === 'enum_variant'
+          ? (enumValues.includes(param.value) ? param.value : (enumValues[0] || ''))
+          : param.value
+        return { ...param, type: mappedType, value: nextValue }
+      })
+    )
+  }, [
+    routingConfigUnavailable,
+    routingKeysLoading,
+    routingKeysConfig,
+    currencyOptions,
+    paymentMethodTypeOptions,
+    authTypeOptions,
+    cardBrandOptions,
+  ])
+
   function set(field: keyof FormState, value: string | boolean) {
     setForm(f => ({ ...f, [field]: value }))
   }
 
   function addRuleParam() {
-    setRuleParams([...ruleParams, { key: '', type: 'enum_variant', value: '', metadataKey: '' }])
+    if (routingKeyNames.length === 0) return
+    const firstKey = routingKeyNames[0]
+    const firstConfig = routingKeysConfig[firstKey]
+    const mappedType = mapRoutingTypeToRuleParamType(firstConfig?.type)
+    const firstValue = mappedType === 'enum_variant' ? (firstConfig?.values?.[0] || '') : ''
+    setRuleParams([...ruleParams, { key: firstKey, type: mappedType, value: firstValue, metadataKey: '' }])
   }
 
   function removeRuleParam(index: number) {
@@ -143,6 +248,15 @@ export function DecisionExplorerPage() {
 
   function updateRuleParamMetadataKey(index: number, value: string) {
     setRuleParams(ruleParams.map((p, i) => i === index ? { ...p, metadataKey: value } : p))
+  }
+
+  function updateRuleParamKey(index: number, key: string) {
+    const keyConfig = routingKeysConfig[key]
+    const mappedType = mapRoutingTypeToRuleParamType(keyConfig?.type)
+    const nextValue = mappedType === 'enum_variant' ? (keyConfig?.values?.[0] || '') : ''
+    setRuleParams(ruleParams.map((p, i) => (
+      i === index ? { ...p, key, type: mappedType, value: nextValue, metadataKey: '' } : p
+    )))
   }
 
   function addFallbackConnector() {
@@ -159,6 +273,7 @@ export function DecisionExplorerPage() {
 
   async function run() {
     if (!merchantId) return setError('Set a merchant ID in the top bar')
+    if (routingConfigUnavailable) return setError('Routing key config unavailable. Fix /config/routing-keys and retry.')
     setLoading(true); setError(null)
     const gateways = form.eligible_gateways.split(',').map(s => s.trim()).filter(Boolean)
     try {
@@ -188,6 +303,7 @@ export function DecisionExplorerPage() {
 
   async function runSimulation() {
     if (!merchantId) return setError('Set a merchant ID in the top bar')
+    if (routingConfigUnavailable) return setError('Routing key config unavailable. Fix /config/routing-keys and retry.')
 
     const total = parseInt(simulationConfig.totalPayments) || 0
     const success = parseInt(simulationConfig.successCount) || 0
@@ -265,6 +381,7 @@ export function DecisionExplorerPage() {
   }
 
   async function runRuleEvaluation() {
+    if (routingConfigUnavailable) return setError('Routing key config unavailable. Fix /config/routing-keys and retry.')
     setLoading(true)
     setError(null)
     setRuleResult(null)
@@ -320,8 +437,8 @@ export function DecisionExplorerPage() {
       const res = await apiPost<RuleEvaluateResponse>('/routing/evaluate', {
         created_by: merchantId || 'test_user',
         fallback_output: [
-          { gateway_name: 'stripe', gateway_id: 'mca_001' },
-          { gateway_name: 'adyen', gateway_id: 'mca_002' },
+          { gateway_name: 'stripe', gateway_id: 'gateway_001' },
+          { gateway_name: 'adyen', gateway_id: 'gateway_002' },
         ],
         parameters: {},
       })
@@ -413,31 +530,46 @@ export function DecisionExplorerPage() {
                 Set a merchant ID in the top bar first.
               </p>
             )}
+            {activeTab !== 'volume' && routingKeysLoading && (
+              <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded px-3 py-2">
+                Loading routing config from backend...
+              </p>
+            )}
+            {activeTab !== 'volume' && routingConfigUnavailable && (
+              <ErrorMessage error="Routing config unavailable from /config/routing-keys. Parameter forms are disabled." />
+            )}
 
             {activeTab === 'rule' ? (
               <>
+                {routingKeysLoading && (
+                  <p className="text-sm text-slate-500">Loading routing keys from backend...</p>
+                )}
+                {routingConfigUnavailable && (
+                  <ErrorMessage error="Routing keys are unavailable from backend (/config/routing-keys). Rule Evaluation is disabled." />
+                )}
                 <div>
                   <label className="block text-xs font-medium text-slate-600 mb-1">Parameters</label>
                   <div className="space-y-2">
                     {ruleParams.map((param, idx) => (
                       <div key={idx} className="space-y-2">
                         <div className="flex gap-2 items-center">
-                          <input
-                            placeholder="Key (e.g. payment_method_type)"
-                            value={param.key}
-                            onChange={e => updateRuleParam(idx, 'key', e.target.value)}
-                            className="flex-1 border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-                          />
                           <select
-                            value={param.type}
-                            onChange={e => updateRuleParam(idx, 'type', e.target.value as RuleEvaluateParams['type'])}
-                            className="w-36 border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                            value={param.key}
+                            onChange={e => updateRuleParamKey(idx, e.target.value)}
+                            disabled={routingConfigUnavailable || routingKeysLoading}
+                            className="flex-1 border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
                           >
-                            <option value="enum_variant">enum_variant</option>
-                            <option value="str_value">str_value</option>
-                            <option value="number">number</option>
-                            <option value="metadata_variant">metadata_variant</option>
+                            {routingKeyNames.length === 0 ? (
+                              <option value="">No keys available</option>
+                            ) : (
+                              routingKeyNames.map(name => <option key={name} value={name}>{name}</option>)
+                            )}
                           </select>
+                          <input
+                            value={param.type}
+                            readOnly
+                            className="w-36 border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                          />
                           <button
                             onClick={() => removeRuleParam(idx)}
                             className="p-1.5 text-slate-400 hover:text-red-500"
@@ -460,6 +592,28 @@ export function DecisionExplorerPage() {
                               className="flex-1 border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
                             />
                           </div>
+                        ) : param.type === 'enum_variant' ? (
+                          <div className="flex gap-2 items-center pl-1">
+                            <select
+                              value={param.value}
+                              onChange={e => updateRuleParam(idx, 'value', e.target.value)}
+                              className="flex-1 border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                            >
+                              {(routingKeysConfig[param.key]?.values || []).map(v => (
+                                <option key={v} value={v}>{v}</option>
+                              ))}
+                            </select>
+                          </div>
+                        ) : param.type === 'number' ? (
+                          <div className="flex gap-2 items-center pl-1">
+                            <input
+                              type="number"
+                              placeholder="Value"
+                              value={param.value}
+                              onChange={e => updateRuleParam(idx, 'value', e.target.value)}
+                              className="flex-1 border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                            />
+                          </div>
                         ) : (
                           <div className="flex gap-2 items-center pl-1">
                             <input
@@ -475,6 +629,7 @@ export function DecisionExplorerPage() {
                   </div>
                   <button
                     onClick={addRuleParam}
+                    disabled={routingConfigUnavailable || routingKeysLoading || routingKeyNames.length === 0}
                     className="mt-2 flex items-center gap-1 text-xs text-brand-500 hover:text-brand-600"
                   >
                     <Plus size={12} /> Add Parameter
@@ -482,18 +637,18 @@ export function DecisionExplorerPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Fallback Connectors</label>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Fallback gateway_name/gateway_id</label>
                   <div className="space-y-2">
                     {fallbackConnectors.map((connector, idx) => (
                       <div key={idx} className="flex gap-2 items-center">
                         <input
-                          placeholder="Gateway Name"
+                          placeholder="gateway_name"
                           value={connector.gateway_name}
                           onChange={e => updateFallbackConnector(idx, 'gateway_name', e.target.value)}
                           className="flex-1 border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
                         />
                         <input
-                          placeholder="Gateway ID"
+                          placeholder="gateway_id"
                           value={connector.gateway_id || ''}
                           onChange={e => updateFallbackConnector(idx, 'gateway_id', e.target.value)}
                           className="flex-1 border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
@@ -511,7 +666,7 @@ export function DecisionExplorerPage() {
                     onClick={addFallbackConnector}
                     className="mt-2 flex items-center gap-1 text-xs text-brand-500 hover:text-brand-600"
                   >
-                    <Plus size={12} /> Add Connector
+                    <Plus size={12} /> Add Gateway
                   </button>
                 </div>
               </>
@@ -525,7 +680,7 @@ export function DecisionExplorerPage() {
                   className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
                 />
                 <p className="text-xs text-slate-500 mt-1">
-                  Enter the total number of payments to visualize how they would be distributed across connectors.
+                  Enter the total number of payments to visualize how they would be distributed across gateways.
                 </p>
               </div>
             ) : (
@@ -539,36 +694,41 @@ export function DecisionExplorerPage() {
                   <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1">Currency</label>
                     <select value={form.currency} onChange={e => set('currency', e.target.value)}
+                      disabled={routingConfigUnavailable || routingKeysLoading}
                       className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
-                      {CURRENCIES.map(c => <option key={c}>{c}</option>)}
+                      {currencyOptions.map(c => <option key={c}>{c}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1">Payment Method Type</label>
                     <select value={form.payment_method_type} onChange={e => set('payment_method_type', e.target.value)}
+                      disabled={routingConfigUnavailable || routingKeysLoading}
                       className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
-                      {PAYMENT_METHOD_TYPES.map(p => <option key={p}>{p}</option>)}
+                      {paymentMethodTypeOptions.map(p => <option key={p}>{p}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1">Payment Method</label>
                     <select value={form.payment_method} onChange={e => set('payment_method', e.target.value)}
+                      disabled={routingConfigUnavailable || routingKeysLoading}
                       className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
-                      {PAYMENT_METHODS.map(p => <option key={p}>{p}</option>)}
+                      {paymentMethodOptions.map(p => <option key={p}>{p}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1">Card Brand</label>
                     <select value={form.card_brand} onChange={e => set('card_brand', e.target.value)}
+                      disabled={routingConfigUnavailable || routingKeysLoading}
                       className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
-                      {CARD_BRANDS.map(b => <option key={b}>{b}</option>)}
+                      {cardBrandOptions.map(b => <option key={b}>{b}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1">Auth Type</label>
                     <select value={form.auth_type} onChange={e => set('auth_type', e.target.value)}
+                      disabled={routingConfigUnavailable || routingKeysLoading}
                       className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
-                      {AUTH_TYPES.map(a => <option key={a}>{a}</option>)}
+                      {authTypeOptions.map(a => <option key={a}>{a}</option>)}
                     </select>
                   </div>
                 </div>
@@ -644,7 +804,7 @@ export function DecisionExplorerPage() {
             <ErrorMessage error={error} />
 
             {activeTab === 'rule' ? (
-              <Button onClick={runRuleEvaluation} disabled={loading} className="w-full justify-center">
+              <Button onClick={runRuleEvaluation} disabled={loading || routingConfigUnavailable} className="w-full justify-center">
                 {loading ? <><Spinner size={14} /> Evaluating…</> : <><Play size={14} /> Evaluate Rules</>}
               </Button>
             ) : activeTab === 'volume' ? (
@@ -652,7 +812,7 @@ export function DecisionExplorerPage() {
                 {loading ? <><Spinner size={14} /> Calculating…</> : <><PieChartIcon size={14} /> Visualize Distribution</>}
               </Button>
             ) : activeTab === 'batch' ? (
-              <Button onClick={runSimulation} disabled={isSimulating || !merchantId} className="w-full justify-center">
+              <Button onClick={runSimulation} disabled={isSimulating || !merchantId || routingConfigUnavailable} className="w-full justify-center">
                 {isSimulating ? (
                   <>
                     <Spinner size={14} />
@@ -665,7 +825,7 @@ export function DecisionExplorerPage() {
                 )}
               </Button>
             ) : (
-              <Button onClick={run} disabled={loading || !merchantId} className="w-full justify-center">
+              <Button onClick={run} disabled={loading || !merchantId || routingConfigUnavailable} className="w-full justify-center">
                 {loading ? <><Spinner size={14} /> Running…</> : <><Play size={14} /> Run Decision</>}
               </Button>
             )}
@@ -794,13 +954,13 @@ export function DecisionExplorerPage() {
 
                 <Card>
                   <CardHeader>
-                    <h3 className="text-sm font-medium text-slate-800">Connector Summary</h3>
+                    <h3 className="text-sm font-medium text-slate-800">Gateway Summary</h3>
                   </CardHeader>
                   <CardBody className="p-0">
                     <table className="w-full text-sm">
                       <thead className="bg-slate-50 dark:bg-[#111114] text-xs text-slate-500">
                         <tr>
-                          <th className="text-left px-4 py-2">Connector</th>
+                          <th className="text-left px-4 py-2">gateway_name</th>
                           <th className="text-right px-4 py-2">Payments</th>
                           <th className="text-right px-4 py-2">Percentage</th>
                         </tr>
@@ -840,7 +1000,7 @@ export function DecisionExplorerPage() {
                       <thead className="bg-slate-50 dark:bg-[#111114] text-xs text-slate-500 sticky top-0">
                         <tr>
                           <th className="text-left px-4 py-2 w-20">#</th>
-                          <th className="text-left px-4 py-2">Connector</th>
+                          <th className="text-left px-4 py-2">gateway_name</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-[#222226]">
@@ -904,7 +1064,7 @@ export function DecisionExplorerPage() {
               <Card>
                 <CardBody className="py-16 text-center">
                   <PieChartIcon size={32} className="text-gray-300 mx-auto mb-3" />
-                  <p className="text-slate-400 text-sm">Enter the number of payments and click "Visualize Distribution" to see how payments are split across connectors.</p>
+                  <p className="text-slate-400 text-sm">Enter the number of payments and click "Visualize Distribution" to see how payments are split across gateways.</p>
                 </CardBody>
               </Card>
             )
@@ -915,24 +1075,25 @@ export function DecisionExplorerPage() {
                   <CardBody>
                     <div className="flex items-start justify-between mb-3">
                       <div>
-                        <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Output Type</p>
-                        <p className="text-2xl font-bold text-slate-900">{ruleResult.output.type}</p>
+                        <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Status</p>
+                        <p className="text-2xl font-bold text-slate-900">{ruleResult.status}</p>
+                        <p className="text-xs text-slate-500 mt-1">output_type: {ruleResult.output.type}</p>
                       </div>
                     </div>
 
                     {ruleResult.output.type === 'single' && ruleResult.output.connector && (
                       <div className="border-t border-slate-200 dark:border-[#1c1c24] pt-3">
-                        <p className="text-xs text-slate-400 mb-1">Selected Gateway</p>
+                        <p className="text-xs text-slate-400 mb-1">Selected gateway_name</p>
                         <p className="text-lg font-semibold">{ruleResult.output.connector.gateway_name}</p>
                         {ruleResult.output.connector.gateway_id && (
-                          <p className="text-xs text-slate-500">ID: {ruleResult.output.connector.gateway_id}</p>
+                          <p className="text-xs text-slate-500">gateway_id: {ruleResult.output.connector.gateway_id}</p>
                         )}
                       </div>
                     )}
 
                     {ruleResult.output.type === 'priority' && ruleResult.output.connectors && (
                       <div className="border-t border-slate-200 dark:border-[#1c1c24] pt-3">
-                        <p className="text-xs text-slate-400 mb-2">Priority List</p>
+                        <p className="text-xs text-slate-400 mb-2">Priority gateway_name list</p>
                         <div className="space-y-1">
                           {ruleResult.output.connectors.map((gw, idx) => (
                             <div key={idx} className="flex items-center gap-2 text-sm">

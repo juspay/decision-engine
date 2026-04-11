@@ -25,7 +25,6 @@ import { useMerchantStore } from '../../store/merchantStore'
 import { apiPost } from '../../lib/api'
 import { RoutingAlgorithm } from '../../types/api'
 import { useDynamicRoutingConfig, RoutingKeyConfig } from '../../hooks/useDynamicRoutingConfig'
-import { STATIC_ROUTING_KEYS } from '../../lib/constants'
 import { Plus, Trash2, GripVertical, ChevronDown, ChevronUp, Eye } from 'lucide-react'
 
 const OPERATOR_TO_API: Record<string, string> = {
@@ -40,12 +39,14 @@ const OPERATOR_TO_API: Record<string, string> = {
 // ---- Types for builder ----
 interface GatewayEntry {
   id: string
-  name: string
+  gatewayName: string
+  gatewayId: string
 }
 
 interface VolSplitEntry {
   id: string
-  name: string
+  gatewayName: string
+  gatewayId: string
   split: number
 }
 
@@ -108,7 +109,8 @@ function PriorityEditor({
   gateways: GatewayEntry[]
   onChange: (gws: GatewayEntry[]) => void
 }) {
-  const [newName, setNewName] = useState('')
+  const [newGatewayName, setNewGatewayName] = useState('')
+  const [newGatewayId, setNewGatewayId] = useState('')
   const sensors = useSensors(
     useSensor(PointerSensor),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -124,9 +126,17 @@ function PriorityEditor({
   }
 
   function add() {
-    if (!newName.trim()) return
-    onChange([...gateways, { id: crypto.randomUUID(), name: newName.trim() }])
-    setNewName('')
+    if (!newGatewayName.trim()) return
+    onChange([
+      ...gateways,
+      {
+        id: crypto.randomUUID(),
+        gatewayName: newGatewayName.trim(),
+        gatewayId: newGatewayId.trim(),
+      },
+    ])
+    setNewGatewayName('')
+    setNewGatewayId('')
   }
 
   return (
@@ -137,7 +147,7 @@ function PriorityEditor({
             <SortableGatewayItem
               key={gw.id}
               id={gw.id}
-              name={`${idx + 1}. ${gw.name}`}
+              name={`${idx + 1}. ${gw.gatewayName}${gw.gatewayId ? ` (${gw.gatewayId})` : ''}`}
               onRemove={() => onChange(gateways.filter((g) => g.id !== gw.id))}
             />
           ))}
@@ -145,10 +155,17 @@ function PriorityEditor({
       </DndContext>
       <div className="flex gap-2">
         <input
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
+          value={newGatewayName}
+          onChange={(e) => setNewGatewayName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
-          placeholder="gateway name"
+          placeholder="gateway_name"
+          className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm flex-1 focus:outline-none focus:ring-1 focus:ring-brand-500"
+        />
+        <input
+          value={newGatewayId}
+          onChange={(e) => setNewGatewayId(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
+          placeholder="gateway_id"
           className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm flex-1 focus:outline-none focus:ring-1 focus:ring-brand-500"
         />
         <Button type="button" size="sm" variant="secondary" onClick={add}>
@@ -167,20 +184,45 @@ function VolumeSplitEditor({
   gateways: VolSplitEntry[]
   onChange: (gws: VolSplitEntry[]) => void
 }) {
-  const [newName, setNewName] = useState('')
+  const [newGatewayName, setNewGatewayName] = useState('')
+  const [newGatewayId, setNewGatewayId] = useState('')
   const total = gateways.reduce((s, g) => s + g.split, 0)
 
   function add() {
-    if (!newName.trim()) return
-    onChange([...gateways, { id: crypto.randomUUID(), name: newName.trim(), split: 0 }])
-    setNewName('')
+    if (!newGatewayName.trim()) return
+    onChange([
+      ...gateways,
+      {
+        id: crypto.randomUUID(),
+        gatewayName: newGatewayName.trim(),
+        gatewayId: newGatewayId.trim(),
+        split: 0,
+      },
+    ])
+    setNewGatewayName('')
+    setNewGatewayId('')
   }
 
   return (
     <div className="space-y-2">
       {gateways.map((gw) => (
         <div key={gw.id} className="flex items-center gap-2">
-          <span className="text-sm font-mono w-24 truncate">{gw.name}</span>
+          <input
+            value={gw.gatewayName}
+            onChange={(e) =>
+              onChange(gateways.map((g) => (g.id === gw.id ? { ...g, gatewayName: e.target.value } : g)))
+            }
+            placeholder="gateway_name"
+            className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-xs w-32 focus:outline-none"
+          />
+          <input
+            value={gw.gatewayId}
+            onChange={(e) =>
+              onChange(gateways.map((g) => (g.id === gw.id ? { ...g, gatewayId: e.target.value } : g)))
+            }
+            placeholder="gateway_id"
+            className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-xs w-28 focus:outline-none"
+          />
           <input
             type="range"
             min={0}
@@ -210,10 +252,17 @@ function VolumeSplitEditor({
       </div>
       <div className="flex gap-2">
         <input
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
+          value={newGatewayName}
+          onChange={(e) => setNewGatewayName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
-          placeholder="gateway name"
+          placeholder="gateway_name"
+          className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm flex-1 focus:outline-none focus:ring-1 focus:ring-brand-500"
+        />
+        <input
+          value={newGatewayId}
+          onChange={(e) => setNewGatewayId(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
+          placeholder="gateway_id"
           className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm flex-1 focus:outline-none focus:ring-1 focus:ring-brand-500"
         />
         <Button type="button" size="sm" variant="secondary" onClick={add}>
@@ -426,13 +475,13 @@ function buildAlgorithmData(rules: RuleBlock[], defaultOutput: DefaultOutput, ro
   function buildOutput(type: 'priority' | 'volume_split', pg: GatewayEntry[], vg: VolSplitEntry[]): Record<string, unknown> {
     if (type === 'priority') {
       return {
-        priority: pg.map((g) => ({ gateway_name: g.name, gateway_id: null })),
+        priority: pg.map((g) => ({ gateway_name: g.gatewayName, gateway_id: g.gatewayId || null })),
       }
     }
     return {
       volume_split: vg.map((g) => ({
         split: g.split,
-        output: { gateway_name: g.name, gateway_id: null },
+        output: { gateway_name: g.gatewayName, gateway_id: g.gatewayId || null },
       })),
     }
   }
@@ -472,9 +521,10 @@ function buildAlgorithmData(rules: RuleBlock[], defaultOutput: DefaultOutput, ro
 // ---- Main Page ----
 export function EuclidRulesPage() {
   const { merchantId } = useMerchantStore()
-  const { routingKeysConfig } = useDynamicRoutingConfig()
-  // Use dynamic config if available, otherwise fall back to static
-  const routingKeys = Object.keys(routingKeysConfig).length > 0 ? routingKeysConfig : STATIC_ROUTING_KEYS
+  const { routingKeysConfig, isLoading: routingKeysLoading, error: routingKeysError } = useDynamicRoutingConfig()
+  const routingKeys = routingKeysConfig
+  const hasRoutingKeys = Object.keys(routingKeys).length > 0
+  const routingKeysUnavailable = !routingKeysLoading && (!hasRoutingKeys || Boolean(routingKeysError))
   const [ruleName, setRuleName] = useState('')
   const [ruleDesc, setRuleDesc] = useState('')
   const [ruleBlocks, setRuleBlocks] = useState<RuleBlock[]>([])
@@ -509,6 +559,10 @@ export function EuclidRulesPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!merchantId) { setSubmitError('Set a Merchant ID first.'); return }
+    if (routingKeysUnavailable) {
+      setSubmitError('Routing key config is unavailable. Ensure backend /config/routing-keys is reachable and valid.')
+      return
+    }
     if (!ruleName.trim()) { setSubmitError('Rule name is required.'); return }
     setSubmitting(true)
     setSubmitError(null)
@@ -707,6 +761,12 @@ export function EuclidRulesPage() {
                 {/* Rule blocks */}
                 <div className="space-y-3">
                   <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Rules</p>
+                  {routingKeysLoading && (
+                    <p className="text-sm text-slate-500">Loading routing keys from backend...</p>
+                  )}
+                  {routingKeysUnavailable && (
+                    <ErrorMessage error="Routing keys are unavailable from backend (/config/routing-keys). Rule Builder is disabled until this is fixed." />
+                  )}
                   {ruleBlocks.map((block) => (
                     <RuleBlockEditor
                       key={block.id}
@@ -722,7 +782,13 @@ export function EuclidRulesPage() {
                       }
                     />
                   ))}
-                  <Button type="button" variant="secondary" size="sm" onClick={addRuleBlock}>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={addRuleBlock}
+                    disabled={routingKeysUnavailable}
+                  >
                     <Plus size={14} /> Add Rule Block
                   </Button>
                 </div>
@@ -775,7 +841,7 @@ export function EuclidRulesPage() {
                   </div>
                 )}
                 <div className="flex gap-3">
-                  <Button type="submit" disabled={submitting}>
+                  <Button type="submit" disabled={submitting || routingKeysUnavailable}>
                     {submitting ? 'Creating...' : 'Create Rule'}
                   </Button>
                   <Button

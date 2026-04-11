@@ -1,176 +1,69 @@
 # Configuration Guide
 
-Dynamo uses TOML configuration files to customize its behavior. This guide explains the available configuration options and how to use them effectively.
+This document explains how to configure Decision Engine for local and on-prem deployments.
 
-## Configuration File Location
+## Primary Config Files
 
-By default, Dynamo looks for configuration files in the following locations:
+- `config/development.toml`: host/source runs
+- `config/docker-configuration.toml`: Docker/Compose runs
+- `helm-charts/config/development.toml`: Kubernetes chart template config
 
-- Development mode: `config/development.toml`
-- Production mode: `config/production.toml`
+## Core Sections
 
-You can also specify a custom configuration file using environment variables.
-
-## Configuration Format
-
-Below is an explanation of the main configuration sections:
-
-### Server Configuration
+### Server
 
 ```toml
 [server]
-host = "127.0.0.1"      # The address to bind the server to
-port = 8000             # The port to listen on
-type = "grpc"           # Server type: "grpc" or "http"
+host = "0.0.0.0"
+port = 8080
 ```
 
-### Metrics Server Configuration
+### Metrics
 
 ```toml
 [metrics]
-host = "127.0.0.1"      # The address to bind the metrics server to
-port = 9000             # The port for the metrics server
+host = "0.0.0.0"
+port = 9090
 ```
 
-### Logging Configuration
-
-```toml
-[log.console]
-enabled = true          # Whether to enable console logging
-level = "DEBUG"         # Log level: DEBUG, INFO, WARN, ERROR
-log_format = "default"  # Log format: "default" or "json"
-```
-
-### Redis Configuration
-
-```toml
-[redis]
-host = "127.0.0.1"
-port = 6379
-pool_size = 5                      # Number of connections to keep open
-reconnect_max_attempts = 5         # Maximum reconnection attempts
-reconnect_delay = 5                # Delay between attempts in milliseconds
-use_legacy_version = false         # Use RESP2 protocol for Redis < 6
-```
-
-### TTL for Keys
-
-```toml
-[ttl_for_keys]
-aggregates = 300                   # Time to live for aggregates keys (seconds)
-current_block = 900                # Time to live for current_block keys (seconds)
-elimination_bucket = 900           # Time to live for elimination buckets (seconds)
-contract_ttl = 900                 # Time to live for contracts (seconds)
-```
-
-### Global Routing Configurations
-
-```toml
-[global_routing_configs.success_rate]
-min_aggregates_size = 5            # Minimum number of buckets for SR calculation
-default_success_rate = 100         # Default SR when insufficient data
-max_aggregates_size = 10           # Maximum number of aggregates to store
-
-[global_routing_configs.success_rate.current_block_threshold]
-duration_in_mins = 10              # Current block duration in minutes
-max_total_count = 5                # Maximum transaction count for current block
-
-[global_routing_configs.elimination_rate]
-bucket_size = 5                    # Capacity of buckets
-bucket_leak_interval_in_secs = 300 # Leak rate of buckets in seconds
-```
-
-### Multi-Tenancy
-
-```toml
-[multi_tenancy]
-enabled = true                     # Enable multi-tenant mode
-```
-
-## Environment Variables
-
-You can override configuration values using environment variables with the prefix `DYNAMO__`:
-
-```bash
-# Override Redis host and port
-export DYNAMO__REDIS__HOST=redis-server
-export DYNAMO__REDIS__PORT=6380
-
-# Override server port
-export DYNAMO__SERVER__PORT=9000
-```
-
-## Configuration Examples
-
-### Development Configuration
+### Logging
 
 ```toml
 [log.console]
 enabled = true
 level = "DEBUG"
 log_format = "default"
-
-[server]
-host = "127.0.0.1"
-port = 8000
-type = "grpc"
-
-[redis]
-host = "127.0.0.1"
-port = 6379
 ```
 
-### Production Configuration
+### Database
+
+Use either MySQL or PostgreSQL as required by your deployment mode.
+
+For Docker Compose profiles, connection details are pre-wired via service names and mounted config.
+For source runs, ensure your database URL in config matches your local DB.
+
+### Redis
 
 ```toml
-[log.console]
-enabled = true
-level = "INFO"
-log_format = "json"
-
-[server]
-host = "0.0.0.0"  # Listen on all interfaces
-port = 8000
-type = "grpc"
-
 [redis]
-host = "redis-server"  # Use service name in production
+host = "127.0.0.1"
 port = 6379
-pool_size = 20
-reconnect_max_attempts = 10
 ```
 
-### High-Availability Configuration
+### Secrets Manager
 
-```toml
-[server]
-host = "0.0.0.0"
-port = 8000
-type = "grpc"
+`secrets_manager` controls encryption/key-management behavior. In local environments this is commonly set to `no_encryption`.
 
-[redis]
-host = "redis-master"
-port = 6379
-pool_size = 30
-reconnect_max_attempts = 15
-reconnect_delay = 2
-```
+## Environment Overrides
 
-## Advanced Configuration
+Use environment variables to override selected runtime values when needed (for example in Helm via `extraEnvVars`).
 
-### Using Multiple Redis Instances
+For deployment-specific examples, see:
 
-While not directly supported in the configuration file, you can set up Redis Sentinel or Redis Cluster for high availability and implement a custom client.
+- [Local Setup Guide](local-setup.md)
+- [Helm Chart README](../helm-charts/README.md)
 
-### Configuring Routing Strategies
+## Related Docs
 
-Each routing strategy has specific configuration parameters:
-
-1. **Success Rate Routing**: Configure weight factors, time windows, and default values
-2. **Elimination Routing**: Configure bucket sizes, leak rates, and thresholds
-3. **Contract Routing**: Configure contract scores, targets, and time scales
-
-## Next Steps
-
-- [Installation Guide](setup-guide.md)
-- [API Reference](api-reference.md)
+- [Local Setup Guide](local-setup.md)
+- [API Reference](api-reference1.md)
