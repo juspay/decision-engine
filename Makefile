@@ -1,8 +1,8 @@
 COMMIT_HASH := $(shell git rev-parse --short HEAD)
 TAG := ghcr.io/juspay/decision-engine:sha_$(COMMIT_HASH)
 
-DECISION_ENGINE_TAG ?= v1.3.4
-GROOVY_RUNNER_TAG ?= v1.3.4
+DECISION_ENGINE_TAG ?= v1.4
+GROOVY_RUNNER_TAG ?= v1.4
 
 docker-build:
 	docker build --platform=linux/amd64 -t $(TAG) .

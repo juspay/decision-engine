@@ -3,7 +3,7 @@ services:
   # Decision Engine Runtime (GHCR Images)
   # ==========================================
   open-router-pg-ghcr:
-    image: ghcr.io/juspay/decision-engine/postgres:${DECISION_ENGINE_TAG:-v1.3.4}
+    image: ghcr.io/juspay/decision-engine/postgres:${DECISION_ENGINE_TAG:-v1.4}
     pull_policy: always
     platform: linux/amd64
     profiles:
@@ -30,7 +30,7 @@ services:
       - GROOVY_RUNNER_HOST=host.docker.internal:8085
 
   open-router-mysql-ghcr:
-    image: ghcr.io/juspay/decision-engine:${DECISION_ENGINE_TAG:-v1.3.4}
+    image: ghcr.io/juspay/decision-engine:${DECISION_ENGINE_TAG:-v1.4}
     pull_policy: always
     platform: linux/amd64
     profiles:
@@ -198,7 +198,7 @@ services:
       - ./config/grafana-datasource.yaml:/etc/grafana/provisioning/datasources/datasource.yml
 
   groovy-runner-ghcr:
-    image: ghcr.io/juspay/decision-engine/groovy-runner:${GROOVY_RUNNER_TAG:-v1.3.4}
+    image: ghcr.io/juspay/decision-engine/groovy-runner:${GROOVY_RUNNER_TAG:-v1.4}
     pull_policy: always
     platform: linux/amd64
     profiles:

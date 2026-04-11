@@ -48,7 +48,7 @@ export function Sidebar() {
 
       {/* Footer */}
       <div className="px-6 py-5 border-t border-slate-200 dark:border-[#151515] bg-slate-50 dark:bg-black transition-colors duration-300">
-        <span className="text-[11px] text-slate-500 dark:text-[#66666e] font-medium tracking-wide">v1.2.1</span>
+        <span className="text-[11px] text-slate-500 dark:text-[#66666e] font-medium tracking-wide">v1.4</span>
       </div>
     </aside>
   )

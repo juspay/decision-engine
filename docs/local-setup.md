@@ -35,14 +35,14 @@ Decision Engine supports two deployment tracks:
 
 Default pinned tags:
 
-- `DECISION_ENGINE_TAG=v1.3.4`
-- `GROOVY_RUNNER_TAG=v1.3.4`
+- `DECISION_ENGINE_TAG=v1.4`
+- `GROOVY_RUNNER_TAG=v1.4`
 
 Override example:
 
 ```bash
-export DECISION_ENGINE_TAG=v1.3.5
-export GROOVY_RUNNER_TAG=v1.3.5
+export DECISION_ENGINE_TAG=v1.4
+export GROOVY_RUNNER_TAG=v1.4
 ```
 
 ## Quick Start (Compose)
@@ -174,7 +174,7 @@ helm install my-release .
 ```bash
 helm install my-release . \
   --set image.repository=ghcr.io/juspay/decision-engine/postgres \
-  --set image.version=v1.3.4 \
+  --set image.version=v1.4 \
   --set image.pullPolicy=Always
 ```
 

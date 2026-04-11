@@ -5,7 +5,7 @@ This page provides MySQL-focused commands. The full end-to-end setup (CLI, Docke
 ## Docker Compose (GHCR track)
 
 ```bash
-export DECISION_ENGINE_TAG=v1.3.4
+export DECISION_ENGINE_TAG=v1.4
 docker compose --profile mysql-ghcr up -d
 ```
 
