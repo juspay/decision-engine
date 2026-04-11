@@ -2,8 +2,16 @@ services:
   # ==========================================
   # Decision Engine Runtime (GHCR Images)
   # ==========================================
+<<<<<<< Updated upstream
   open-router-pg-ghcr:
     image: ghcr.io/juspay/decision-engine/postgres:${DECISION_ENGINE_TAG:-v1.3.4}
+=======
+  # ==========================================
+  # PROFILE: postgres (Basic PostgreSQL + Redis)
+  # ==========================================
+  open-router-pg:
+    image: ghcr.io/juspay/decision-engine/postgres:v1.4
+>>>>>>> Stashed changes
     pull_policy: always
     platform: linux/amd64
     profiles:
@@ -29,8 +37,16 @@ services:
     environment:
       - GROOVY_RUNNER_HOST=host.docker.internal:8085
 
+<<<<<<< Updated upstream
   open-router-mysql-ghcr:
     image: ghcr.io/juspay/decision-engine:${DECISION_ENGINE_TAG:-v1.3.4}
+=======
+  # ==========================================
+  # PROFILE: mysql (Basic MySQL + Redis)
+  # ==========================================
+  open-router:
+    image: ghcr.io/juspay/decision-engine:v1.4
+>>>>>>> Stashed changes
     pull_policy: always
     platform: linux/amd64
     profiles:
