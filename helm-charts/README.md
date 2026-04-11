@@ -60,12 +60,12 @@ Then, to install the chart with the release name `my-release`:
 helm install my-release .
 ```
 
-To pin a specific on-prem image version (for example `v1.3.4`):
+To pin a specific on-prem image version (for example `v1.4`):
 
 ```bash
 helm install my-release . \
   --set image.repository=ghcr.io/juspay/decision-engine/postgres \
-  --set image.version=v1.3.4 \
+  --set image.version=v1.4 \
   --set image.pullPolicy=Always
 ```
 

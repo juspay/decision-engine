@@ -5,7 +5,7 @@ image:
   # Updated to include the registry URL
   repository: ghcr.io/juspay/decision-engine/postgres
   pullPolicy: Always
-  version: "v1.2.0"
+  version: "v1.4"
 
 # Configure these if your images are in a private registry
 imagePullSecrets:
@@ -172,7 +172,7 @@ groovyRunner:
   enabled: true
   image:
     repository: "ghcr.io/juspay/decision-engine/groovy-runner"
-    version: "v1.0.0"
+    version: "v1.4"
     pullPolicy: "Always"
   service:
     port: 8085
