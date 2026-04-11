@@ -96,7 +96,7 @@ helm delete my-release
 |---------------------|---------------------------------------------------------------------------------------|-----------------|
 | `replicaCount`      | Number of Decision Engine replicas                                                    | `1`             |
 | `image.repository`  | Decision Engine image repository                                                      | `ghcr.io/juspay/decision-engine/postgres` |
-| `image.version`         | Decision Engine image tag                                                             | `v1.2.0`        |
+| `image.version`         | Decision Engine image tag                                                             | `v1.4`          |
 | `image.pullPolicy`  | Decision Engine image pull policy                                                     | `Always`        |
 | `imagePullSecrets`  | Image pull secrets                                                                    | `[]`            |
 | `nameOverride`      | Override the name of the chart                                                        | `""`            |
@@ -155,7 +155,7 @@ helm delete my-release
 |-----------------------------------------|------------------------------------------------------------|-----------------|
 | `groovyRunner.enabled`                  | Deploy Groovy Runner                                       | `true`          |
 | `groovyRunner.image.repository`         | Groovy Runner image repository                             | `"ghcr.io/juspay/decision-engine/groovy-runner"` |
-| `groovyRunner.image.version`                | Groovy Runner image tag                                    | `"v1.0.0"`      |
+| `groovyRunner.image.version`                | Groovy Runner image tag                                    | `"v1.4"`      |
 | `groovyRunner.image.pullPolicy`         | Groovy Runner image pull policy                            | `"Always"`      |
 | `groovyRunner.service.port`             | Groovy Runner service port                                 | `8085`          |
 | `groovyRunner.resources`                | Groovy Runner resources                                    | `{}`            |
