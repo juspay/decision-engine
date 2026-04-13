@@ -91,6 +91,23 @@ export default defineConfig({
           })
         },
       },
+      '/config': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq, req) => {
+            console.log(`\n[PROXY] ${new Date().toISOString()}`)
+            console.log(`Forwarding: ${req.method} ${req.url} -> http://localhost:8080${req.url}`)
+          })
+          proxy.on('proxyRes', (proxyRes, req) => {
+            console.log(`[PROXY] Response: ${proxyRes.statusCode} ${proxyRes.statusMessage} for ${req.url}`)
+          })
+          proxy.on('error', (err, req) => {
+            console.log(`\n[PROXY ERROR] ${new Date().toISOString()}`)
+            console.log(`Error forwarding ${req.url}:`, err.message)
+          })
+        },
+      },
       '/health': {
         target: 'http://localhost:8080',
         changeOrigin: true,
