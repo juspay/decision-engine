@@ -1,10 +1,10 @@
 # Contributing to Decision Engine
 
-Thank you for considering contributing to Decision Engine! This document provides guidelines and instructions for contributing.
+Thank you for considering contributing to Decision Engine! This document describes how to report issues, propose changes, and submit pull requests.
 
 ## Code of Conduct
 
-By participating in this project, you agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md).
+Be respectful, constructive, and professional. We follow the spirit of the [Contributor Covenant](https://www.contributor-covenant.org/version/2/1/code_of_conduct/). Unacceptable behaviour can be reported privately to `hyperswitch@juspay.in`.
 
 ## How Can I Contribute?
 
@@ -38,32 +38,29 @@ We welcome feature suggestions! Feature requests should include:
 
 #### Development Environment Setup
 
-For setting up the database, please refer to the following guides:
-- **MySQL Setup**: [docs/setup-guide-mysql.md](docs/setup-guide-mysql.md)
-- **PostgreSQL Setup**: [docs/setup-guide-postgres.md](docs/setup-guide-postgres.md)
+The canonical local setup — CLI, Docker, Compose, and Helm — lives in [docs/local-setup.md](docs/local-setup.md). Database-specific quickstarts:
 
+- **PostgreSQL**: [docs/setup-guide-postgres.md](docs/setup-guide-postgres.md)
+- **MySQL**: [docs/setup-guide-mysql.md](docs/setup-guide-mysql.md)
 
 ```bash
 # Clone your fork
-git clone https://github.com/your-username/decision-engine.git
-cd Decision Engine
+git clone https://github.com/YOUR_USERNAME/decision-engine.git
+cd decision-engine
 
-# Add the upstream repository
-git remote add upstream https://github.com/project-owner/decision-engine.git
+# Track upstream
+git remote add upstream https://github.com/juspay/decision-engine.git
 
 # Create a branch
-git checkout -b feature/your-feature-name
+git checkout -b feat/your-feature-name
 
-# Install development dependencies
+# Recommended dev tooling
 cargo install cargo-watch cargo-insta cargo-audit
 
-# Run tests
+# Run the test suite
 cargo test
 
-# Run specific tests
-cargo test routing_test
-
-# Run with auto-reload for development
+# Auto-reload loop during development
 cargo watch -x run
 ```
 
