@@ -1,37 +1,47 @@
 # PostgreSQL Setup Guide
 
-This page provides PostgreSQL-focused commands. The full end-to-end setup (CLI, Docker, Compose, Helm) is in [local-setup.md](local-setup.md).
+Use this page when the task is explicitly PostgreSQL-specific. For the complete local matrix, use [Local Setup Guide](local-setup.md).
 
-## Docker Compose (GHCR track)
+## Compose Commands
+
+### Published-image track
 
 ```bash
 export DECISION_ENGINE_TAG=v1.4
 docker compose --profile postgres-ghcr up -d
 ```
 
-With dashboard + docs:
+### Published-image track with dashboard + docs
 
 ```bash
 docker compose --profile dashboard-postgres-ghcr up -d
 ```
 
-## Docker Compose (Local build track)
+### Local-build track
 
 ```bash
 docker compose --profile postgres-local up -d --build
 ```
 
-With dashboard + docs:
+### Local-build track with dashboard + docs
 
 ```bash
 docker compose --profile dashboard-postgres-local up -d --build
 ```
 
-## Make targets
+## Make Targets
 
 ```bash
 make init-pg-ghcr
 make init-pg-local
+```
+
+## Source Run
+
+```bash
+cargo build --release --no-default-features --features middleware,kms-aws,postgres
+just migrate-pg
+RUSTFLAGS="-Awarnings" cargo run --no-default-features --features postgres
 ```
 
 ## Verify
@@ -40,8 +50,7 @@ make init-pg-local
 curl http://localhost:8080/health
 ```
 
-Expected response:
+Dashboard profiles also expose:
 
-```json
-{"message":"Health is good"}
-```
+- `http://localhost:8081/dashboard/`
+- `http://localhost:8081/introduction`

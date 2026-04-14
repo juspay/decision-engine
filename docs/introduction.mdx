@@ -1,90 +1,78 @@
 ---
 title: "Decision Engine"
-description: "Open-source payment gateway routing service by Juspay"
+description: "Routing API, local run paths, dashboard, and docs entrypoints"
 ---
 
-## What is Decision Engine?
+## What It Is
 
-Decision Engine is a real-time payment gateway routing service. Given a payment and a list of eligible gateways, it returns the **optimal gateway** to route to — using live success-rate scoring, rule-based logic, and automatic failure elimination.
+Decision Engine is a Rust service that picks a gateway from an eligible list and records transaction outcomes for later routing decisions.
 
-## How it works
+The repository currently ships:
 
-```
-Your Payment Orchestrator
-        ↓
-POST /decide-gateway  ←── payment context + eligible gateways
-        ↓
-┌─────────────────────────────────────┐
-│  Filter Phase (25+ filters)         │
-│  currency · card brand · auth type  │
-│  EMI · payment method · surcharge   │
-├─────────────────────────────────────┤
-│  Score Phase                        │
-│  success rate v3 · elimination      │
-│  contract scores · outage detection │
-└─────────────────────────────────────┘
-        ↓
-{ "decided_gateway": "stripe", ... }
-```
+- the routing API
+- merchant and routing configuration APIs
+- Docker Compose profiles for local bring-up
+- Helm chart assets
+- a React dashboard under `/dashboard/`
+- Mintlify docs served in the dashboard profiles
 
-## Quick start
+## Main API Surface
 
-**1. Create a merchant**
+The main endpoint groups are:
 
-```bash
-curl -X POST http://localhost:8080/merchant-account/create \
-  -H "Content-Type: application/json" \
-  -d '{"merchant_id": "my_merchant"}'
-```
+- `GET /health`
+- `POST /decide-gateway`
+- `POST /update-gateway-score`
+- `POST /merchant-account/create`
+- `GET /merchant-account/{merchantId}`
+- `DELETE /merchant-account/{merchantId}`
+- `POST /routing/*`
+- `POST /rule/*`
 
-**2. Route a payment**
+Use the OpenAPI-backed endpoint pages for request and response schemas.
+
+## Run Locally
+
+For API only:
 
 ```bash
-curl -X POST http://localhost:8080/decide-gateway \
-  -H "Content-Type: application/json" \
-  -d '{
-    "merchantId": "my_merchant",
-    "paymentInfo": {
-      "paymentId": "pay_001",
-      "amount": 1000.0,
-      "currency": "USD",
-      "paymentType": "ORDER_PAYMENT",
-      "paymentMethodType": "CARD",
-      "paymentMethod": "CREDIT"
-    },
-    "eligibleGatewayList": ["stripe", "paypal", "adyen"],
-    "rankingAlgorithm": "SrBasedRouting",
-    "eliminationEnabled": false
-  }'
+docker compose --profile postgres-ghcr up -d
+curl http://localhost:8080/health
 ```
 
-**3. Record the outcome**
-
-```bash
-curl -X POST http://localhost:8080/update-gateway-score \
-  -H "Content-Type: application/json" \
-  -d '{
-    "merchantId": "my_merchant",
-    "gateway": "stripe",
-    "paymentId": "pay_001",
-    "status": "CHARGED"
-  }'
-```
-
-## Routing algorithms
-
-| Algorithm | Description |
-|-----------|-------------|
-| `SrBasedRouting` | Ranks gateways by real-time success rate. Default. |
-| `PlBasedRouting` | Uses merchant-defined priority logic rules |
-| `NtwBasedRouting` | Network-based routing for debit cards |
-
-## Running locally
+For API + dashboard + docs:
 
 ```bash
 docker compose --profile dashboard-postgres-ghcr up -d
-curl http://localhost:8080/health
-# {"message":"Health is good"}
 ```
 
-**Dashboard**: http://localhost:8081/dashboard/
+URLs:
+
+- API: `http://localhost:8080`
+- Dashboard: `http://localhost:8081/dashboard/`
+- Docs: `http://localhost:8081/introduction`
+
+Use [Local Setup](local-setup) for the full Compose, source-build, and Helm matrix.
+
+## Dashboard Routes
+
+When the dashboard profile is running, the React app is available at:
+
+- `/dashboard/`
+- `/dashboard/routing`
+- `/dashboard/routing/sr`
+- `/dashboard/routing/rules`
+- `/dashboard/routing/volume`
+- `/dashboard/routing/debit`
+- `/dashboard/decisions`
+
+Use [Dashboard](dashboard) for route-by-route details.
+
+## Where To Go Next
+
+- [Installation](installation)
+- [Local Setup](local-setup)
+- [Configuration](configuration)
+- [Dashboard](dashboard)
+- [API Overview](api-reference)
+- [API Examples](api-reference1)
