@@ -1,153 +1,26 @@
-info port 3000 is already in use. trying 3001 instead
 ⠋ preparing local preview...
-[2K[1A[2K[1A[2K[Ginfo port 3000 is already in use. trying 3001 instead
-⠙ preparing local preview...
-[2K[1A[2K[1A[2K[Ginfo port 3000 is already in use. trying 3001 instead
+[2K[1A[2K[G⠙ preparing local preview...
+[2K[1A[2K[G⠹ preparing local preview...
+[2K[1A[2K[Gwarning - Error validating OpenAPI file /mint.json: Error: Failed to validate OpenAPI schema:Unknown path: Can’t find supported Swagger/OpenAPI version in specification, version must be a string.
 ⠹ preparing local preview...
-[2K[1A[2K[1A[2K[Ginfo port 3000 is already in use. trying 3001 instead
-⠸ preparing local preview...
-[2K[1A[2K[1A[2K[Ginfo port 3000 is already in use. trying 3001 instead
-⠼ preparing local preview...
-[2K[1A[2K[1A[2K[Ginfo port 3000 is already in use. trying 3001 instead
-⠴ preparing local preview...
-[2K[1A[2K[1A[2K[Gwarning - Error validating OpenAPI file /mint.json: Error: Failed to validate OpenAPI schema:Unknown path: Can’t find supported Swagger/OpenAPI version in specification, version must be a string.
-info port 3000 is already in use. trying 3001 instead
-⠴ preparing local preview...
-[2K[1A[2K[1A[2K[Ginfo port 3000 is already in use. trying 3001 instead
-⠦ preparing local preview...
-[2K[1A[2K[1A[2K[Ginfo port 3000 is already in use. trying 3001 instead
-⠧ preparing local preview...
-[2K[1A[2K[1A[2K[Ginfo port 3000 is already in use. trying 3001 instead
+[2K[1A[2K[G⠸ preparing local preview...
+[2K[1A[2K[G⠼ preparing local preview...
+[2K[1A[2K[Gupdate available - run `mint update` to get the latest version
+
+✓ preview ready
+
+  local   → http://localhost:3000
+  network → http://192.168.1.4:3000
+
+press ctrl+c to exit the preview
+
+[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[G
 update available - run `mint update` to get the latest version
 
 ✓ preview ready
 
-  local   → http://localhost:3001
-  network → http://192.168.1.4:3001
+  local   → http://localhost:3000
+  network → http://192.168.1.4:3000
 
 press ctrl+c to exit the preview
 
-[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[G
-info port 3000 is already in use. trying 3001 instead
-update available - run `mint update` to get the latest version
-
-✓ preview ready
-
-  local   → http://localhost:3001
-  network → http://192.168.1.4:3001
-
-press ctrl+c to exit the preview
-
-[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[Gwarning - Error validating OpenAPI file /mint.json: Error: Failed to validate OpenAPI schema:Unknown path: Can’t find supported Swagger/OpenAPI version in specification, version must be a string.
-info port 3000 is already in use. trying 3001 instead
-update available - run `mint update` to get the latest version
-
-✓ preview ready
-
-  local   → http://localhost:3001
-  network → http://192.168.1.4:3001
-
-press ctrl+c to exit the preview
-
-[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[Gwarning - Error validating OpenAPI file /mint.json: Error: Failed to validate OpenAPI schema:Unknown path: Can’t find supported Swagger/OpenAPI version in specification, version must be a string.
-info port 3000 is already in use. trying 3001 instead
-update available - run `mint update` to get the latest version
-
-✓ preview ready
-
-  local   → http://localhost:3001
-  network → http://192.168.1.4:3001
-
-press ctrl+c to exit the preview
-
-[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[Gwarning - Error validating OpenAPI file /mint.json: Error: Failed to validate OpenAPI schema:Unknown path: Can’t find supported Swagger/OpenAPI version in specification, version must be a string.
-info port 3000 is already in use. trying 3001 instead
-update available - run `mint update` to get the latest version
-
-✓ preview ready
-
-  local   → http://localhost:3001
-  network → http://192.168.1.4:3001
-
-press ctrl+c to exit the preview
-
-[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[Ginfo port 3000 is already in use. trying 3001 instead
-update available - run `mint update` to get the latest version
-
-✓ preview ready
-
-  local   → http://localhost:3001
-  network → http://192.168.1.4:3001
-
-press ctrl+c to exit the preview
-
-± changes
-edited mint.json
-[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[Gwarning - Error validating OpenAPI file /mint.json: Error: Failed to validate OpenAPI schema:Unknown path: Can’t find supported Swagger/OpenAPI version in specification, version must be a string.
-info port 3000 is already in use. trying 3001 instead
-update available - run `mint update` to get the latest version
-
-✓ preview ready
-
-  local   → http://localhost:3001
-  network → http://192.168.1.4:3001
-
-press ctrl+c to exit the preview
-
-± changes
-edited mint.json
-[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[Ginfo port 3000 is already in use. trying 3001 instead
-update available - run `mint update` to get the latest version
-
-✓ preview ready
-
-  local   → http://localhost:3001
-  network → http://192.168.1.4:3001
-
-press ctrl+c to exit the preview
-
-± changes
-edited mint.json
-deleted dual-protocol-layer.md
-[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[Gwarning - Error validating OpenAPI file /mint.json: Error: Failed to validate OpenAPI schema:Unknown path: Can’t find supported Swagger/OpenAPI version in specification, version must be a string.
-info port 3000 is already in use. trying 3001 instead
-update available - run `mint update` to get the latest version
-
-✓ preview ready
-
-  local   → http://localhost:3001
-  network → http://192.168.1.4:3001
-
-press ctrl+c to exit the preview
-
-± changes
-edited mint.json
-deleted dual-protocol-layer.md
-[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[Gwarning - Error validating OpenAPI file /mint.json: Error: Failed to validate OpenAPI schema:Unknown path: Can’t find supported Swagger/OpenAPI version in specification, version must be a string.
-info port 3000 is already in use. trying 3001 instead
-update available - run `mint update` to get the latest version
-
-✓ preview ready
-
-  local   → http://localhost:3001
-  network → http://192.168.1.4:3001
-
-press ctrl+c to exit the preview
-
-± changes
-edited mint.json
-deleted dual-protocol-layer.md
-[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[Ginfo port 3000 is already in use. trying 3001 instead
-update available - run `mint update` to get the latest version
-
-✓ preview ready
-
-  local   → http://localhost:3001
-  network → http://192.168.1.4:3001
-
-press ctrl+c to exit the preview
-
-± changes
-edited mint.json
-deleted dual-protocol-layer.md
-edited mint.json
