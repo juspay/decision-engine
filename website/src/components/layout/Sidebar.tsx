@@ -8,6 +8,8 @@ import {
   BookOpen,
   PieChart,
   Network,
+  BarChart3,
+  Activity,
 } from 'lucide-react'
 
 export function Sidebar() {
@@ -32,6 +34,8 @@ export function Sidebar() {
       <nav className="flex-1 px-4 py-8 space-y-1 overflow-y-auto">
         <SideLink to="/" icon={LayoutDashboard} end>Overview</SideLink>
         <SideLink to="/decisions" icon={Search}>Decision Explorer</SideLink>
+        <SideLink to="/analytics" icon={BarChart3}>Analytics</SideLink>
+        <SideLink to="/audit" icon={Activity}>Payment Audit</SideLink>
 
         <div className="pt-8 pb-3 px-3 flex items-center gap-2">
           <span className="text-[11px] font-bold uppercase tracking-widest text-slate-400 dark:text-[#66666e]">

@@ -605,6 +605,24 @@ pub async fn run_decider_flow(
                         &currentGatewayScoreMap,
                         decider_flow.writer.gwDeciderApproach.clone(),
                     );
+                    if let Some(rule_name) = updatedPriorityLogicOutput.priority_logic_tag.clone() {
+                        crate::analytics::record_rule_hit_event(
+                            Some(crate::types::merchant::id::merchant_id_to_text(
+                                deciderParams.dpMerchantAccount.merchantId.clone(),
+                            )),
+                            rule_name,
+                            decidedGateway.clone(),
+                            Some(format!("{:?}", finalDeciderApproach.clone())),
+                            serde_json::to_string(&serde_json::json!({
+                                "functional_gateways": uniqueFunctionalGateways.clone(),
+                                "experiment_tag": experimentTag.clone(),
+                            }))
+                            .ok(),
+                            Some(deciderParams.dpTxnDetail.txnUuid.clone()),
+                            decider_flow.logger.get("x-request-id").cloned(),
+                            Some("rule_applied".to_string()),
+                        );
+                    }
                     Utils::log_gateway_decider_approach(
                         &mut decider_flow,
                         decidedGateway.clone(),

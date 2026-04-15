@@ -27,6 +27,8 @@
         "local-setup",
         "configuration",
         "dashboard",
+        "analytics",
+        "payment-audit",
         "api-reference",
         "api-reference1",
         "dual-protocol-layer"

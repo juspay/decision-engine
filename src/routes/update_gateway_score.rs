@@ -31,6 +31,11 @@ use axum::extract::Json;
 pub async fn update_gateway_score(
     req: axum::http::Request<axum::body::Body>,
 ) -> Result<Json<UpdateScoreResponse>, ErrorResponse> {
+    let x_request_id = req
+        .headers()
+        .get("x-request-id")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
     let timer = API_LATENCY_HISTOGRAM
         .with_label_values(&["update_gateway_score"])
         .start_timer();
@@ -50,6 +55,18 @@ pub async fn update_gateway_score(
         }
         Err(e) => {
             crate::logger::debug!(tag = "UpdateGatewayScore", "Error: {:?}", e);
+            crate::analytics::record_error_event(
+                "update_gateway_score",
+                None,
+                None,
+                None,
+                None,
+                x_request_id.clone(),
+                "400".to_string(),
+                "Error parsing request".to_string(),
+                Some("request body parse failure".to_string()),
+                Some("request_parse_failed".to_string()),
+            );
             API_REQUEST_COUNTER
                 .with_label_values(&["update_gateway_score", "failure"])
                 .inc();
@@ -96,6 +113,22 @@ pub async fn update_gateway_score(
                     API_REQUEST_COUNTER
                         .with_label_values(&["update_gateway_score", "failure"])
                         .inc();
+                    crate::analytics::record_error_event(
+                        "update_gateway_score",
+                        Some(merchant_id.clone()),
+                        Some(payment_id.clone()),
+                        x_request_id.clone(),
+                        Some(gateway.clone()),
+                        None,
+                        e.error_code.clone(),
+                        e.error_message.clone(),
+                        serde_json::to_string(&serde_json::json!({
+                            "payment_id": payment_id,
+                            "request_id": x_request_id,
+                        }))
+                        .ok(),
+                        Some("score_update_failed".to_string()),
+                    );
                     timer.observe_duration();
                     println!("Error: {:?}", e);
                     Err(e)
@@ -104,6 +137,18 @@ pub async fn update_gateway_score(
         }
         Err(e) => {
             crate::logger::debug!(tag = "UpdateScoreRequest", "Error: {:?}", e);
+            crate::analytics::record_error_event(
+                "update_gateway_score",
+                None,
+                None,
+                None,
+                None,
+                x_request_id.clone(),
+                "400".to_string(),
+                "Error parsing request".to_string(),
+                Some("request body parse failure".to_string()),
+                Some("request_parse_failed".to_string()),
+            );
             API_REQUEST_COUNTER
                 .with_label_values(&["update_gateway_score", "failure"])
                 .inc();

@@ -25,6 +25,7 @@ Rust routing service for selecting a gateway from an eligible list and recording
 - Docker Compose profiles for API-only, dashboard, docs, and monitoring flows
 - Helm chart assets under [`helm-charts/`](helm-charts/)
 - A React dashboard under [`website/`](website/) served at `/dashboard/` in the `dashboard-*` Compose profiles
+- An Analytics surface under `/analytics` in the dashboard
 - Mintlify docs under [`docs/`](docs/) served alongside the dashboard in the `dashboard-*` Compose profiles
 
 ## Start Here
@@ -37,6 +38,7 @@ Rust routing service for selecting a gateway from an eligible list and recording
 | Use ready-made curl flows | [`docs/api-reference1.md`](docs/api-reference1.md) |
 | Inspect request and response schemas | [`docs/openapi.json`](docs/openapi.json) |
 | Bring up the dashboard | [`docs/dashboard.mdx`](docs/dashboard.mdx) |
+| Inspect analytics | [`docs/analytics.mdx`](docs/analytics.mdx) |
 | Inspect Kubernetes/on-prem assets | [`helm-charts/`](helm-charts/) |
 
 ## Quick Start
@@ -78,6 +80,8 @@ For source builds, Helm installs, and MySQL-specific flows, use [`docs/local-set
 | [`docs/local-setup.md`](docs/local-setup.md) | Canonical local, Compose, source-run, and Helm setup guide |
 | [`docs/configuration.md`](docs/configuration.md) | Config files, env overrides, and runtime config model |
 | [`docs/dashboard.mdx`](docs/dashboard.mdx) | Dashboard routes, availability, and serving model |
+| [`docs/analytics.mdx`](docs/analytics.mdx) | Analytics page, data sources, and operator scope |
+| [`docs/payment-audit.mdx`](docs/payment-audit.mdx) | Per-payment audit search and timeline view |
 | [`docs/api-reference.md`](docs/api-reference.md) | API overview grouped by endpoint family |
 | [`docs/api-reference1.md`](docs/api-reference1.md) | Local curl examples and smoke-test flows |
 | [`docs/openapi.json`](docs/openapi.json) | OpenAPI source consumed by the docs site |
@@ -124,6 +128,8 @@ Documented dashboard routes include:
 - `/dashboard/routing/volume`
 - `/dashboard/routing/debit`
 - `/dashboard/decisions`
+- `/dashboard/analytics`
+- `/dashboard/audit`
 
 See [`docs/dashboard.mdx`](docs/dashboard.mdx), [`website/src/App.tsx`](website/src/App.tsx), and [`nginx/nginx.conf`](nginx/nginx.conf).
 
