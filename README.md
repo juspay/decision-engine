@@ -2,6 +2,11 @@
 
 <div align="center">
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/logo/decision-engine-dark.svg">
+  <img src="docs/logo/decision-engine-light.svg" alt="Juspay Decision Engine" width="360"/>
+</picture>
+
 <img src="https://img.shields.io/badge/Rust-1.85%2B-orange?style=for-the-badge&logo=rust&logoColor=white" alt="Rust 1.85+"/>
 <img src="https://img.shields.io/badge/License-AGPL%20v3-blue?style=for-the-badge" alt="AGPL v3"/>
 <img src="https://img.shields.io/badge/PostgreSQL-%26%20MySQL-336791?style=for-the-badge" alt="PostgreSQL and MySQL"/>
