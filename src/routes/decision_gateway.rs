@@ -185,7 +185,6 @@ where
                         filter_list,
                         latency: Some(cpu_time),
                     };
-
                     // Serialize response body and headers for logging
                     let res_body = serde_json::to_string(&response).unwrap_or("{}".to_string());
                     // let res_headers = r#"{"Content-Type": "application/json"}"#;
@@ -223,6 +222,7 @@ where
                 Err(e) => {
                     let latency = start_time.elapsed().as_millis() as u64;
                     let cpu_time = cpu_start.elapsed().as_millis() as u64;
+
                     logger::error!(
                         url = original_url,
                         method = "POST",

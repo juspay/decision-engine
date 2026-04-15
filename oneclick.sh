@@ -79,6 +79,9 @@ trap cleanup SIGINT SIGTERM
 
 check_and_kill_ports
 
+echo "Running Postgres migrations..."
+just migrate-pg
+
 echo "Starting Decision Engine server..."
 cargo run --no-default-features --features postgres &
 SERVER_PID=$!

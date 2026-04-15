@@ -674,7 +674,7 @@ pub async fn update_gateway_score(
             get_metric_entry_data(
                 merchant_id_str,
                 pmt_str,
-                m_source_object,
+                m_source_object.clone(),
                 txn_obj_type_str,
                 card_type_str,
                 false,
@@ -694,7 +694,7 @@ pub async fn update_gateway_score(
             get_metric_entry_data(
                 merchant_id_str,
                 pmt_str,
-                m_source_object,
+                m_source_object.clone(),
                 txn_obj_type_str,
                 card_type_str,
                 gateway_scoring_data.isGriEnabledForElimination,
@@ -710,9 +710,33 @@ pub async fn update_gateway_score(
         gateway_scoring_type.clone(),
         mer_acc.clone(),
         txn_latency.clone(),
-        m_metric_entry,
+        m_metric_entry.clone(),
     )
     .await;
+
+    if let Some(metric_entry) = m_metric_entry.clone() {
+        crate::analytics::record_score_snapshot_event(
+            Some(MID::merchant_id_to_text(txn_detail.clone().merchantId)),
+            Some(txn_card_info.paymentMethodType.to_string()),
+            Some(m_source_object.clone().unwrap_or_default()),
+            txn_detail.gateway.clone().or(gateway_reference_id.clone()),
+            Some(metric_entry.success_rate.into()),
+            Some(metric_entry.sigma_factor.into()),
+            Some(metric_entry.average_latency.into()),
+            Some(metric_entry.tp99_latency.into()),
+            Some(metric_entry.n_value as i64),
+            "update_gateway_score",
+            serde_json::to_string(&serde_json::json!({
+                "routing_approach": format!("{:?}", routing_approach),
+                "gateway_scoring_type": format!("{:?}", gateway_scoring_type),
+                "message": "Gateway score updated successfully",
+            }))
+            .ok(),
+            Some(txn_detail.txnUuid.clone()),
+            None,
+            Some("score_updated".to_string()),
+        );
+    }
 
     if should_update_srv3_gateway_score
         && should_isolate_srv3_producer

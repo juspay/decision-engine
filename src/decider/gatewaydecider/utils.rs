@@ -812,7 +812,6 @@ pub async fn log_gateway_decider_approach(
     let x_req_id = decider_flow.logger.get("x-request-id").cloned();
     let txn_creation_time = txn_detail.dateCreated.to_string(); // Assuming dateCreated is a DateTime field
     let consume_from_router = decider_flow.get().dpShouldConsumeResult;
-
     let mp = types::DeciderApproachLogData {
         decided_gateway: m_decided_gateway,
         routing_approach: gateway_decider_approach,

@@ -3,6 +3,22 @@ title: "Decision Engine"
 description: "Routing API, local run paths, dashboard, and docs entrypoints"
 ---
 
+<div style={{ display: "flex", flexDirection: "column", gap: "12px", marginBottom: "24px" }}>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcSet="/logo/dark.svg" />
+    <img
+      src="/logo/light.svg"
+      alt="Juspay Decision Engine"
+      style={{ width: "100%", maxWidth: "260px", height: "auto" }}
+    />
+  </picture>
+  <p>
+    <strong>Juspay Decision Engine</strong>
+    <br />
+    Routing infrastructure docs for setup, operations, analytics, and API usage.
+  </p>
+</div>
+
 ## What It Is
 
 Decision Engine is a Rust service that picks a gateway from an eligible list and records transaction outcomes for later routing decisions.
@@ -14,6 +30,7 @@ The repository currently ships:
 - Docker Compose profiles for local bring-up
 - Helm chart assets
 - a React dashboard under `/dashboard/`
+- an Analytics surface under `/analytics`
 - Mintlify docs served in the dashboard profiles
 
 ## Main API Surface
@@ -28,6 +45,7 @@ The main endpoint groups are:
 - `DELETE /merchant-account/{merchantId}`
 - `POST /routing/*`
 - `POST /rule/*`
+- `GET /analytics/*`
 
 Use the OpenAPI-backed endpoint pages for request and response schemas.
 
@@ -65,6 +83,7 @@ When the dashboard profile is running, the React app is available at:
 - `/dashboard/routing/volume`
 - `/dashboard/routing/debit`
 - `/dashboard/decisions`
+- `/dashboard/analytics`
 
 Use [Dashboard](dashboard) for route-by-route details.
 
@@ -74,5 +93,6 @@ Use [Dashboard](dashboard) for route-by-route details.
 - [Local Setup](local-setup)
 - [Configuration](configuration)
 - [Dashboard](dashboard)
+- [Analytics](analytics)
 - [API Overview](api-reference)
 - [API Examples](api-reference1)

@@ -271,6 +271,7 @@ where
         "/update-gateway-score",
         post(routes::update_gateway_score::update_gateway_score),
     );
+    let router = router.nest("/analytics", routes::analytics::serve());
 
     let middleware = ServiceBuilder::new()
         .layer(middleware::from_fn(ensure_request_id))

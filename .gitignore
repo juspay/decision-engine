@@ -8,3 +8,5 @@ dump.rdb
 cypress/screenshots
 cypress/videos
 cypress/fixtures
+# Added by code-review-graph
+.code-review-graph/
