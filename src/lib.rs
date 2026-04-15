@@ -24,7 +24,6 @@
 #![allow(clippy::manual_filter_map)]
 #![allow(clippy::single_match)]
 #![allow(clippy::manual_ok_err)]
-
 pub mod analytics;
 pub mod api_client;
 pub mod app;
