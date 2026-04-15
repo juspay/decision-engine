@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 OPENAPI_PATH="$SCRIPT_DIR/docs/openapi.json"
-DOCS_PORT="${DOCS_PORT:-3001}"
+DOCS_PORT="${DOCS_PORT:-3000}"
 DOCS_URL="http://localhost:${DOCS_PORT}"
 DOCS_HOME_URL="${DOCS_URL}/introduction"
 API_REF_URL="${DOCS_URL}/api-reference"
@@ -24,7 +24,7 @@ check_and_kill_ports() {
 
     for port in "${PORTS[@]}"; do
         local pids
-        pids=$(lsof -t -i :$port 2>/dev/null || true)
+        pids=$(lsof -t -iTCP:$port -sTCP:LISTEN 2>/dev/null || true)
         if [ -n "$pids" ]; then
             ports_in_use+=("$port")
             while IFS= read -r pid; do
@@ -59,7 +59,7 @@ check_and_kill_ports() {
 
         for port in "${PORTS[@]}"; do
             local pid
-            pid=$(lsof -t -i :$port 2>/dev/null || true)
+            pid=$(lsof -t -iTCP:$port -sTCP:LISTEN 2>/dev/null || true)
             if [ -n "$pid" ]; then
                 kill -9 $pid 2>/dev/null || true
                 echo "  Force killed PID $pid on port $port"
@@ -166,6 +166,14 @@ npm install --silent
 echo "Starting docs preview..."
 cd "$SCRIPT_DIR/docs"
 rm -f "$DOCS_LOG_PATH"
+if [ "${DOCS_PORT}" != "3000" ]; then
+    echo "Mint preview uses port 3000 in this environment; overriding DOCS_PORT=${DOCS_PORT} to 3000."
+    DOCS_PORT="3000"
+    DOCS_URL="http://localhost:${DOCS_PORT}"
+    DOCS_HOME_URL="${DOCS_URL}/introduction"
+    API_REF_URL="${DOCS_URL}/api-reference"
+    API_EXAMPLES_URL="${DOCS_URL}/api-reference1"
+fi
 PORT="$DOCS_PORT" mint dev --no-open >"$DOCS_LOG_PATH" 2>&1 &
 DOCS_PID=$!
 
