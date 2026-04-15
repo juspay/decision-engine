@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import useSWR from 'swr'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -315,6 +315,11 @@ function MetricCard({ label, value, subtitle }: { label: string; value: string; 
 function InfoButton({ content }: { content: InfoContent }) {
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const [position, setPosition] = useState<{ top: number; left: number; width: number }>({
+    top: 0,
+    left: 0,
+    width: 320,
+  })
 
   useEffect(() => {
     if (!open) return
@@ -327,6 +332,42 @@ function InfoButton({ content }: { content: InfoContent }) {
 
     document.addEventListener('mousedown', handlePointerDown)
     return () => document.removeEventListener('mousedown', handlePointerDown)
+  }, [open])
+
+  useLayoutEffect(() => {
+    if (!open || !containerRef.current) return
+
+    const POPOVER_WIDTH = 320
+    const POPOVER_HEIGHT = 280
+    const VIEWPORT_GUTTER = 16
+    const GAP = 12
+
+    function updatePosition() {
+      if (!containerRef.current) return
+
+      const rect = containerRef.current.getBoundingClientRect()
+      const width = Math.min(POPOVER_WIDTH, window.innerWidth - VIEWPORT_GUTTER * 2)
+      const left = Math.min(
+        Math.max(rect.right - width, VIEWPORT_GUTTER),
+        window.innerWidth - width - VIEWPORT_GUTTER,
+      )
+
+      const showAbove = rect.bottom + GAP + POPOVER_HEIGHT > window.innerHeight - VIEWPORT_GUTTER
+      const top = showAbove
+        ? Math.max(rect.top - POPOVER_HEIGHT - GAP, VIEWPORT_GUTTER)
+        : rect.bottom + GAP
+
+      setPosition({ top, left, width })
+    }
+
+    updatePosition()
+    window.addEventListener('resize', updatePosition)
+    window.addEventListener('scroll', updatePosition, true)
+
+    return () => {
+      window.removeEventListener('resize', updatePosition)
+      window.removeEventListener('scroll', updatePosition, true)
+    }
   }, [open])
 
   return (
@@ -344,7 +385,15 @@ function InfoButton({ content }: { content: InfoContent }) {
         i
       </button>
       {open ? (
-        <div className="absolute right-0 top-10 z-40 w-[320px] rounded-[24px] border border-slate-200 bg-white/95 p-4 shadow-2xl backdrop-blur dark:border-[#1d1d23] dark:bg-[#09090d]/95">
+        <div
+          style={{
+            position: 'fixed',
+            top: position.top,
+            left: position.left,
+            width: position.width,
+          }}
+          className="z-[120] rounded-[24px] border border-slate-200 bg-white/95 p-4 shadow-2xl backdrop-blur dark:border-[#1d1d23] dark:bg-[#09090d]/95"
+        >
           <p className="text-sm font-semibold text-slate-900 dark:text-white">{content.title}</p>
           <div className="mt-3 space-y-3 text-xs leading-6 text-slate-600 dark:text-[#b3b3bd]">
             <div>
