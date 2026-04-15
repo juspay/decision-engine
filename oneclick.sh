@@ -15,15 +15,18 @@ check_and_kill_ports() {
     echo ""
 
     for port in "${PORTS[@]}"; do
-        local pid
-        pid=$(lsof -t -i :$port 2>/dev/null || true)
-        if [ -n "$pid" ]; then
-            local cmd
-            cmd=$(ps -p $pid -o command= 2>/dev/null || echo "unknown process")
+        local pids
+        pids=$(lsof -t -i :$port 2>/dev/null || true)
+        if [ -n "$pids" ]; then
             ports_in_use+=("$port")
-            pids_to_kill+=("$pid")
-            echo "  [!] Port $port is in use by PID $pid"
-            echo "      Command: $cmd"
+            while IFS= read -r pid; do
+                [ -z "$pid" ] && continue
+                local cmd
+                cmd=$(ps -p "$pid" -o command= 2>/dev/null || echo "unknown process")
+                pids_to_kill+=("$pid")
+                echo "  [!] Port $port is in use by PID $pid"
+                echo "      Command: $cmd"
+            done <<< "$pids"
         fi
     done
 
@@ -64,6 +67,7 @@ check_and_kill_ports() {
 }
 
 cleanup() {
+    local exit_code="${1:-0}"
     echo ""
     echo "Stopping services..."
     if [ -n "$SERVER_PID" ]; then
@@ -72,10 +76,36 @@ cleanup() {
     if [ -n "$DASHBOARD_PID" ]; then
         kill $DASHBOARD_PID 2>/dev/null || true
     fi
-    exit 0
+    exit "$exit_code"
 }
 
 trap cleanup SIGINT SIGTERM
+
+wait_for_backend() {
+    local attempts=0
+    local max_attempts=90
+
+    echo "Waiting for Decision Engine API on http://localhost:8080/health..."
+
+    while [ $attempts -lt $max_attempts ]; do
+        if curl -fsS http://localhost:8080/health >/dev/null 2>&1; then
+            echo "Decision Engine API is healthy."
+            echo ""
+            return 0
+        fi
+
+        if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+            echo "Decision Engine server exited before becoming healthy."
+            return 1
+        fi
+
+        attempts=$((attempts + 1))
+        sleep 1
+    done
+
+    echo "Decision Engine API did not become healthy within ${max_attempts}s."
+    return 1
+}
 
 check_and_kill_ports
 
@@ -85,6 +115,10 @@ just migrate-pg
 echo "Starting Decision Engine server..."
 cargo run --no-default-features --features postgres &
 SERVER_PID=$!
+
+if ! wait_for_backend; then
+    cleanup 1
+fi
 
 echo "Installing dashboard dependencies..."
 cd "$SCRIPT_DIR/website"
