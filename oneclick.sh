@@ -5,7 +5,15 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-PORTS=(8080 5173)
+OPENAPI_PATH="$SCRIPT_DIR/docs/openapi.json"
+DOCS_PORT="${DOCS_PORT:-3001}"
+DOCS_URL="http://localhost:${DOCS_PORT}"
+DOCS_HOME_URL="${DOCS_URL}/introduction"
+API_REF_URL="${DOCS_URL}/api-reference"
+API_EXAMPLES_URL="${DOCS_URL}/api-reference1"
+DOCS_LOG_PATH="${SCRIPT_DIR}/.mintlify-dev.log"
+
+PORTS=(8080 5173 "$DOCS_PORT")
 
 check_and_kill_ports() {
     local pids_to_kill=()
@@ -76,6 +84,9 @@ cleanup() {
     if [ -n "$DASHBOARD_PID" ]; then
         kill $DASHBOARD_PID 2>/dev/null || true
     fi
+    if [ -n "$DOCS_PID" ]; then
+        kill $DOCS_PID 2>/dev/null || true
+    fi
     exit "$exit_code"
 }
 
@@ -107,6 +118,34 @@ wait_for_backend() {
     return 1
 }
 
+wait_for_docs() {
+    local attempts=0
+    local max_attempts=120
+
+    echo "Waiting for docs preview on ${DOCS_HOME_URL}..."
+
+    while [ $attempts -lt $max_attempts ]; do
+        if curl -fsS "${DOCS_HOME_URL}" >/dev/null 2>&1; then
+            echo "Docs preview is healthy."
+            echo ""
+            return 0
+        fi
+
+        if ! kill -0 "$DOCS_PID" 2>/dev/null; then
+            echo "Docs preview exited before becoming healthy."
+            echo "Check ${DOCS_LOG_PATH} for details."
+            return 1
+        fi
+
+        attempts=$((attempts + 1))
+        sleep 1
+    done
+
+    echo "Docs preview did not become healthy within ${max_attempts}s."
+    echo "Check ${DOCS_LOG_PATH} for details."
+    return 1
+}
+
 check_and_kill_ports
 
 echo "Running Postgres migrations..."
@@ -124,6 +163,17 @@ echo "Installing dashboard dependencies..."
 cd "$SCRIPT_DIR/website"
 npm install --silent
 
+echo "Starting docs preview..."
+cd "$SCRIPT_DIR/docs"
+rm -f "$DOCS_LOG_PATH"
+PORT="$DOCS_PORT" mint dev --no-open >"$DOCS_LOG_PATH" 2>&1 &
+DOCS_PID=$!
+
+if ! wait_for_docs; then
+    cleanup 1
+fi
+
+cd "$SCRIPT_DIR/website"
 echo "Starting dashboard..."
 npm run dev &
 DASHBOARD_PID=$!
@@ -137,6 +187,10 @@ echo "=========================================="
 echo ""
 echo "  Server:      http://localhost:8080"
 echo "  Dashboard:   http://localhost:5173/dashboard/"
+echo "  Docs:        $DOCS_HOME_URL"
+echo "  API Ref:     $API_REF_URL"
+echo "  API Examples:$API_EXAMPLES_URL"
+echo "  OpenAPI:     $OPENAPI_PATH"
 echo ""
 echo "=========================================="
 echo ""

@@ -3,7 +3,6 @@ import {
   LayoutDashboard,
   GitBranch,
   Search,
-  Zap,
   TrendingUp,
   BookOpen,
   PieChart,
@@ -16,17 +15,18 @@ export function Sidebar() {
   return (
     <aside className="w-64 shrink-0 flex flex-col h-screen bg-white dark:bg-black border-r border-slate-200 dark:border-[#151515] relative z-20 transition-colors duration-300">
       {/* Logo */}
-      <div className="h-20 px-6 flex items-center gap-3.5 border-b border-slate-200 dark:border-[#151515] transition-colors duration-300">
-        <div className="w-9 h-9 bg-brand-500 dark:bg-black border border-brand-600 dark:border-[#2a2a2e] rounded-xl flex items-center justify-center shadow-sm">
-          <Zap size={18} className="text-white" strokeWidth={2} />
-        </div>
-        <div>
-          <p className="text-[16px] font-bold tracking-widest text-slate-900 dark:text-white leading-tight uppercase">
-            Decision
-          </p>
-          <p className="text-[10px] uppercase text-brand-600 dark:text-[#66666e] tracking-wider leading-tight font-semibold">
-            Engine
-          </p>
+      <div className="min-h-20 px-6 py-5 flex flex-col justify-center gap-2 border-b border-slate-200 dark:border-[#151515] transition-colors duration-300">
+        <div className="flex items-center">
+          <img
+            src="/dashboard/logo/decision-engine-light.svg"
+            alt="Juspay Decision Engine"
+            className="h-11 w-auto dark:hidden"
+          />
+          <img
+            src="/dashboard/logo/decision-engine-dark.svg"
+            alt="Juspay Decision Engine"
+            className="hidden h-11 w-auto dark:block"
+          />
         </div>
       </div>
 
