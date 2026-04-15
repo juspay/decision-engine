@@ -1,6 +1,5 @@
 use crate::analytics::{AnalyticsResult, RoutingEventData};
 use axum::extract::Request;
-use axum::response::Response;
 use serde_json::Value;
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -203,14 +202,13 @@ fn extract_ip_address(request: &Request) -> Option<String> {
             s.split(',')
                 .next()
                 .map(|ip| ip.trim().to_string())
-                .unwrap_or_else(|| String::new())
+                .unwrap_or_else(String::new)
         })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::http::{HeaderMap, HeaderValue, Method, Uri};
 
     #[test]
     fn test_routing_event_creation() {

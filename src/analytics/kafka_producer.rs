@@ -36,7 +36,7 @@ impl KafkaProducer {
             self.config.brokers
         );
 
-        let producer = Producer::from_hosts(self.config.brokers.clone())
+        Producer::from_hosts(self.config.brokers.clone())
             .with_ack_timeout(Duration::from_secs(5))
             .with_required_acks(RequiredAcks::One)
             .create()

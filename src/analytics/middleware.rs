@@ -25,10 +25,6 @@ pub async fn analytics_middleware(
 
     let start_time = Instant::now();
 
-    // Extract request information
-    let method = request.method().to_string();
-    let endpoint = path.to_string();
-
     // Extract merchant ID from request headers or body (simplified for now)
     let merchant_id = extract_merchant_id(&request).unwrap_or("public".to_string());
 
@@ -149,17 +145,15 @@ mod tests {
 
     #[test]
     fn test_extract_merchant_id_from_header() {
-        use axum::http::{HeaderMap, HeaderValue};
-
-        let mut headers = HeaderMap::new();
-        headers.insert("x-merchant-id", HeaderValue::from_static("merchant-123"));
-
         let request = Request::builder()
             .uri("/routing/evaluate")
+            .header("x-merchant-id", "merchant-123")
             .body(Body::empty())
             .unwrap();
 
-        // Note: This test would need to be adjusted to work with the actual request structure
-        // For now, it's a placeholder to show the testing approach
+        assert_eq!(
+            extract_merchant_id(&request).as_deref(),
+            Some("merchant-123")
+        );
     }
 }
