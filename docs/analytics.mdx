@@ -1,0 +1,89 @@
+---
+title: "Analytics"
+description: "Routing metrics, score snapshots, and operational summaries"
+---
+
+## What It Shows
+
+Analytics is the operator-facing view for understanding how routing is behaving in practice.
+
+The page is split into these sections:
+
+- Overview
+- Gateway Scoring
+- Decisions
+- Routing Stats
+- Logs / Summaries
+
+For single-payment inspection, use the separate Payment Audit surface documented in [`payment-audit`](payment-audit).
+
+## Data Sources
+
+The first release uses the sources already present in the repository:
+
+- Redis for live SR and latency snapshots
+- Prometheus for live counters and error-rate tiles
+- Postgres for stored analytics events, snapshots, and summaries
+
+ClickHouse is intentionally not required for the first release. If the volume or retention profile grows beyond Postgres, it can be added later as a write sink.
+
+## Scope
+
+Analytics supports two views:
+
+- current merchant
+- all merchants
+
+The current-merchant view uses the merchant selected in the top bar. The all-merchants view aggregates across the stored analytics events.
+
+Connector success-rate history is sourced from stored `score_snapshot` analytics events, not directly from Redis. Redis remains the live source for current score state. In the merchant-scoped view, the connector SR chart can be narrowed by:
+
+- `payment_method_type`
+- `payment_method`
+- connector
+
+In all-merchants mode, the chart intentionally stays connector-only so operators get a global SR trend without per-method slicing.
+
+## Generating Demo Data
+
+To populate the Analytics page through the real decision and score APIs, use the seed script.
+
+First apply the Postgres migration that creates `analytics_event`:
+
+```bash
+just migrate-pg
+```
+
+Then generate demo traffic:
+
+```bash
+bash scripts/seed-analytics-demo.sh
+```
+
+What the script does:
+
+- creates or reuses six merchants by default
+- generates live `POST /decide-gateway` and `POST /update-gateway-score` traffic for shared connectors like `stripe`, `adyen`, and `paypal`
+- adds extra connectors such as `checkout` and `braintree` for some merchants
+- mixes multiple `payment_method_type` and `payment_method` combinations in the historical score snapshots so the connector SR filters are meaningful
+- backfills payment-audit and analytics rows at multiple points in time, including around `today 10:00`, `today 12:00`, and recent `now` windows
+- mixes successful and failed payment outcomes
+- triggers a couple of intentional bad requests so the error summary cards are populated
+
+Useful overrides:
+
+```bash
+MERCHANT_IDS_CSV=merchant_space,merchant_nova bash scripts/seed-analytics-demo.sh
+LIVE_PAYMENTS_PER_CONNECTOR=3 bash scripts/seed-analytics-demo.sh
+RESET_SEED_ROWS=false bash scripts/seed-analytics-demo.sh
+```
+
+After the script finishes, open `/dashboard/analytics` or `/dashboard/audit` and select one of the seeded merchants in the merchant picker.
+
+## Related Files
+
+- `website/src/components/pages/AnalyticsPage.tsx`
+- `website/src/components/layout/Sidebar.tsx`
+- `src/routes/analytics.rs`
+- `src/analytics/`
+- `src/metrics.rs`
