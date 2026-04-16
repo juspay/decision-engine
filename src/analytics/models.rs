@@ -5,10 +5,17 @@ pub struct AnalyticsQuery {
     pub merchant_id: Option<String>,
     pub scope: AnalyticsScope,
     pub range: AnalyticsRange,
+    pub start_ms: Option<i64>,
+    pub end_ms: Option<i64>,
     pub page: usize,
     pub page_size: usize,
     pub payment_method_type: Option<String>,
     pub payment_method: Option<String>,
+    pub card_network: Option<String>,
+    pub card_is_in: Option<String>,
+    pub currency: Option<String>,
+    pub country: Option<String>,
+    pub auth_type: Option<String>,
     pub gateways: Vec<String>,
 }
 
@@ -82,9 +89,16 @@ pub struct AnalyticsOverviewResponse {
     pub scope: String,
     pub merchant_id: Option<String>,
     pub kpis: Vec<AnalyticsKpi>,
+    pub route_hits: Vec<AnalyticsRouteHit>,
     pub top_scores: Vec<GatewayScoreSnapshot>,
     pub top_errors: Vec<AnalyticsErrorSummary>,
     pub top_rules: Vec<AnalyticsRuleHit>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalyticsRouteHit {
+    pub route: String,
+    pub count: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -160,9 +174,22 @@ pub struct AnalyticsRoutingStatsResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoutingFilterOptions {
-    pub payment_method_types: Vec<String>,
-    pub payment_methods: Vec<String>,
+    pub dimensions: Vec<RoutingFilterDimension>,
+    pub missing_dimensions: Vec<RoutingFilterDimensionHint>,
     pub gateways: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoutingFilterDimension {
+    pub key: String,
+    pub label: String,
+    pub values: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoutingFilterDimensionHint {
+    pub key: String,
+    pub label: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

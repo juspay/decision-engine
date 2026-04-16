@@ -1,11 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import useSWR from 'swr'
-import { useNavigate } from 'react-router-dom'
 import {
   Area,
   AreaChart,
-  Bar,
-  BarChart,
   CartesianGrid,
   Legend,
   Line,
@@ -18,14 +15,10 @@ import {
 import { useMerchantStore } from '../../store/merchantStore'
 import { fetcher } from '../../lib/api'
 import {
-  AnalyticsDecisionResponse,
-  AnalyticsGatewayScoresResponse,
-  AnalyticsLogSummariesResponse,
   AnalyticsOverviewResponse,
   AnalyticsRange,
+  AnalyticsRangeValue,
   AnalyticsRoutingStatsResponse,
-  AnalyticsScope,
-  GatewayScoreSeriesPoint,
   RoutingFilterOptions,
 } from '../../types/api'
 import { Button } from '../ui/Button'
@@ -34,12 +27,16 @@ import { Badge } from '../ui/Badge'
 import { Spinner } from '../ui/Spinner'
 import { ErrorMessage } from '../ui/ErrorMessage'
 
-type Section = 'overview' | 'scores' | 'decisions' | 'routing' | 'logs'
+type TimeWindow = {
+  start_ms: number
+  end_ms: number
+}
+
 type RoutingFilters = {
-  paymentMethodType: string
-  paymentMethod: string
+  dimensions: Record<string, string>
   gateways: string[]
 }
+
 type InfoContent = {
   title: string
   purpose: string
@@ -47,19 +44,18 @@ type InfoContent = {
   source: string
 }
 
-const SECTION_LABELS: Record<Section, string> = {
-  overview: 'Overview',
-  scores: 'Gateway Scoring',
-  decisions: 'Decisions',
-  routing: 'Routing Stats',
-  logs: 'Logs / Summaries',
-}
+const PRESET_OPTIONS: { value: AnalyticsRangeValue; label: string }[] = [
+  { value: '15m', label: 'Last 15 mins' },
+  { value: '1h', label: 'Last 1 hour' },
+  { value: '24h', label: 'Last 1 day' },
+  { value: 'custom', label: 'Custom window' },
+]
 
-const RANGE_OPTIONS: AnalyticsRange[] = ['15m', '1h', '24h']
+const CHART_COLORS = ['#0069ED', '#14b8a6', '#f97316', '#e11d48', '#8b5cf6', '#22c55e']
 const CHART_TOOLTIP_STYLE = {
   backgroundColor: '#0d0d12',
   border: '1px solid #1c1c24',
-  borderRadius: '12px',
+  borderRadius: '14px',
   color: '#e8e8f4',
   boxShadow: '0 16px 40px rgba(0, 0, 0, 0.35)',
 }
@@ -77,111 +73,35 @@ const CHART_TOOLTIP_WRAPPER_STYLE = {
 }
 
 const EMPTY_ROUTING_FILTERS: RoutingFilters = {
-  paymentMethodType: '',
-  paymentMethod: '',
+  dimensions: {},
   gateways: [],
 }
+const MAX_VISIBLE_DIMENSIONS = 3
 
-const CARD_INFO: Record<string, InfoContent> = {
-  topScores: {
-    title: 'Top score snapshots',
-    purpose: 'Use this to answer which connector currently looks strongest for a merchant and payment slice without going to Redis or raw tables.',
-    calculation: 'Each row is the latest recorded `score_snapshot` for a unique merchant, payment method type, payment method, and connector combination. The sparkline is the stored time-ordered score history for that same slice.',
-    source: 'Rendered from persisted `analytics_event` score snapshots in Postgres. Those snapshots are produced from the Redis-backed gateway scoring flow, but this window itself reads the stored analytics history.',
+const CARD_INFO: Record<'hits' | 'share' | 'sr', InfoContent> = {
+  hits: {
+    title: 'API call counts',
+    purpose: 'Use these cards to see how much traffic each major decision-engine API handled in the selected window.',
+    calculation: 'Each request records one lightweight API-call event. The cards count those recorded calls for `/decide_gateway`, `/update_gateway`, and `/rule_evaluate`.',
+    source: 'Counts come from analytics rows persisted in `analytics_event` in Postgres.',
   },
-  recentErrors: {
-    title: 'Recent errors',
-    purpose: 'Use this to see whether routing, score updates, or audit capture are failing in a repeatable pattern.',
-    calculation: 'Rows are grouped by route, error code, and error message. Count is the number of matching structured error events in the selected window, and last seen is the newest timestamp among them.',
-    source: 'Reads grouped `error` events from the `analytics_event` history in Postgres.',
-  },
-  gatewayScoring: {
-    title: 'Gateway scoring',
-    purpose: 'Use this when you need the exact score inputs that explain why one connector beat another at decision time.',
-    calculation: 'The table shows the latest `score_snapshot` per merchant, payment method type, payment method, and connector. Score, sigma, average latency, TP99 latency, and transaction count are taken directly from the captured snapshot payload.',
-    source: 'Reads persisted `score_snapshot` rows from `analytics_event` in Postgres. Those rows are emitted from the gateway scoring service, which itself uses Redis-backed scoring state.',
-  },
-  decisionThroughput: {
-    title: 'Decision throughput by routing approach',
-    purpose: 'Use this to see how much routing traffic is being served and which approach is taking that traffic right now.',
-    calculation: 'Each chart point is the number of `decision` events in a time bucket grouped by `routing_approach`. The tiles above it are computed from the same event set: total decisions and failures divided by total decisions for error rate.',
-    source: 'Reads persisted `decision` events from `analytics_event` in Postgres. The page complements, but does not directly read, the in-process Prometheus counters.',
-  },
-  gatewayShare: {
+  share: {
     title: 'Gateway share over time',
-    purpose: 'Use this to see whether traffic shifted sharply toward one connector or away from another.',
-    calculation: 'Each stacked bar counts `decision` events per time bucket grouped by chosen connector. Taller share for a connector means more payments were routed there in that period.',
-    source: 'Reads persisted `decision` events from `analytics_event` in Postgres.',
+    purpose: 'Use this to see when traffic shifted from one connector to another for the selected merchant.',
+    calculation: 'Decision events are bucketed by time and grouped by chosen connector. The chart shows how many decisions each gateway captured in each bucket.',
+    source: 'Reads persisted `decision` rows from `analytics_event` in Postgres.',
   },
-  topRules: {
-    title: 'Top priority logic hits',
-    purpose: 'Use this to see which rules are actively steering routing so rule-driven behaviour is obvious without querying storage directly.',
-    calculation: 'Every `rule_hit` event increments the count for its rule name. The list is then sorted by descending hit count for the selected window.',
-    source: 'Reads persisted `rule_hit` events from `analytics_event` in Postgres.',
-  },
-  connectorTrend: {
+  sr: {
     title: 'Connector success rate over time',
-    purpose: 'Use this to explain why a connector won routing at a given time, for example why Stripe was picked because its recorded score or SR trend was higher then.',
-    calculation: 'Built from stored `score_snapshot` history. Snapshot points are bucketed by time and connector, and multiple points in the same bucket are averaged. Merchant scope applies payment method filters before bucketing. Global mode intentionally collapses to connector-only trends.',
-    source: 'Reads persisted `score_snapshot` events from `analytics_event` in Postgres. Live scoring still comes from Redis-backed scoring flows; this window shows the stored historical trail.',
-  },
-  errorSummaries: {
-    title: 'Error summaries',
-    purpose: 'Use this to prioritise the noisiest operational failures first instead of reading raw logs line by line.',
-    calculation: 'Structured `error` events are grouped by route, code, and message. Count shows recurrence and the rows are ordered by frequency in the selected window.',
-    source: 'Reads grouped `error` events from `analytics_event` in Postgres.',
-  },
-  recentSamples: {
-    title: 'Recent samples',
-    purpose: 'Use this as the fastest jump point into audit for a real payment, request, or failure sample.',
-    calculation: 'Rows are recent structured analytics events ordered by timestamp. Each card shows the route, latest status or error, and any captured request or payment identifiers that can deep-link into the audit page.',
-    source: 'Reads recent events across `decision`, `score_snapshot`, `rule_hit`, and `error` from `analytics_event` in Postgres.',
+    purpose: 'Use this to explain why a connector won routing at a given time, based on the recorded historical score trail.',
+    calculation: 'Stored `score_snapshot` events are bucketed over the selected window and averaged per connector. The line values are displayed as percentages.',
+    source: 'Reads persisted `score_snapshot` rows from `analytics_event` in Postgres. The current score state originates from Redis-backed scoring flows.',
   },
 }
 
-const KPI_INFO: InfoContent[] = [
-  {
-    title: 'Decisions',
-    purpose: 'Use this to understand real routed volume in the selected merchant or window.',
-    calculation: 'Every persisted `decision` event counts once. Labels such as Decisions / 1h or Decisions / 24h reflect the active time window only.',
-    source: 'Computed from `decision` rows in `analytics_event` in Postgres.',
-  },
-  {
-    title: 'Score snapshots',
-    purpose: 'Use this to understand how much score history exists for explaining connector movement.',
-    calculation: 'Every persisted `score_snapshot` event counts once.',
-    source: 'Computed from `score_snapshot` rows in `analytics_event` in Postgres.',
-  },
-  {
-    title: 'Rule hits',
-    purpose: 'Use this to gauge how much explicit routing logic is influencing traffic.',
-    calculation: 'Every persisted `rule_hit` event counts once.',
-    source: 'Computed from `rule_hit` rows in `analytics_event` in Postgres.',
-  },
-  {
-    title: 'Errors',
-    purpose: 'Use this to see how many structured failures were captured in the selected window.',
-    calculation: 'Every persisted `error` event counts once.',
-    source: 'Computed from `error` rows in `analytics_event` in Postgres.',
-  },
-  {
-    title: 'Error rate',
-    purpose: 'Use this to understand what percentage of recorded routing decisions failed, not just the raw number of failures.',
-    calculation: 'Computed as failed `decision` events divided by all `decision` events in the selected window, then converted to a percentage.',
-    source: 'Computed from `decision` rows and their `status` values in `analytics_event` in Postgres.',
-  },
-]
-
-function queryString(params: Record<string, string | number | string[] | undefined>) {
+function queryString(params: Record<string, string | number | undefined>) {
   const search = new URLSearchParams()
   Object.entries(params).forEach(([key, value]) => {
-    if (Array.isArray(value)) {
-      if (value.length) {
-        search.set(key, value.join(','))
-      }
-      return
-    }
-
     if (value !== undefined && value !== '') {
       search.set(key, String(value))
     }
@@ -191,44 +111,37 @@ function queryString(params: Record<string, string | number | string[] | undefin
 
 function buildAnalyticsUrl(
   path: string,
-  scope: AnalyticsScope,
-  range: AnalyticsRange,
-  merchantId: string | undefined,
-  page = 1,
-  pageSize = 10,
-  extraParams: Record<string, string | number | string[] | undefined> = {},
+  range: AnalyticsRangeValue,
+  merchantId: string,
+  customWindow?: TimeWindow,
+  routingFilters?: RoutingFilters,
 ) {
-  const params: Record<string, string | number | string[] | undefined> = {
-    scope,
-    range,
-    page,
-    page_size: pageSize,
-    ...extraParams,
+  const params: Record<string, string | number | undefined> = {
+    scope: 'current',
+    range: range === 'custom' ? '1h' : range,
+    start_ms: customWindow?.start_ms,
+    end_ms: customWindow?.end_ms,
+    merchant_id: merchantId,
+    gateway: routingFilters?.gateways.length ? routingFilters.gateways.join(',') : undefined,
   }
-  if (scope === 'current' && merchantId) {
-    params.merchant_id = merchantId
-  }
+
+  Object.entries(routingFilters?.dimensions || {}).forEach(([key, value]) => {
+    if (value) {
+      params[key] = value
+    }
+  })
+
   const qs = queryString(params)
   return qs ? `${path}?${qs}` : path
-}
-
-function selectClassName(disabled = false) {
-  return `h-10 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-[#27272a] dark:bg-[#121214] dark:text-[#e5e7eb] ${disabled ? 'cursor-not-allowed opacity-50' : ''}`
-}
-
-function filterBadgeClass(active: boolean) {
-  return active
-    ? 'border-brand-500/40 bg-brand-500/10 text-brand-700 dark:text-brand-200'
-    : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900 dark:border-[#27272a] dark:bg-[#121214] dark:text-[#a1a1aa] dark:hover:border-[#3a3a44] dark:hover:text-white'
 }
 
 function formatNumber(value: number | string | undefined, digits = 2) {
   if (value === undefined || value === null || Number.isNaN(Number(value))) {
     return '0'
   }
-  const numberValue = Number(value)
-  if (Number.isInteger(numberValue)) return numberValue.toString()
-  return numberValue.toFixed(digits)
+  const numericValue = Number(value)
+  if (Number.isInteger(numericValue)) return numericValue.toString()
+  return numericValue.toFixed(digits)
 }
 
 function toPercent(value: number) {
@@ -243,13 +156,6 @@ function formatPercent(value: number | string | undefined, digits = 1) {
   return `${formatNumber(toPercent(Number(value)), digits)}%`
 }
 
-function formatDateTime(ms: number) {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  }).format(new Date(ms))
-}
-
 function formatBucket(ms: number) {
   return new Intl.DateTimeFormat(undefined, {
     hour: '2-digit',
@@ -257,59 +163,52 @@ function formatBucket(ms: number) {
   }).format(new Date(ms))
 }
 
-function humanizeAuditRoute(route?: string | null) {
-  if (!route) return 'Unknown route'
-  if (route === 'decision_gateway' || route === 'decide_gateway') return 'Decide Gateway'
-  return route
-    .replace(/[_-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase()
-    .replace(/\b\w/g, (char) => char.toUpperCase())
+function formatDateTime(ms: number) {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(ms))
 }
 
-function makeScoreKey(point: Pick<GatewayScoreSeriesPoint, 'merchant_id' | 'payment_method_type' | 'payment_method' | 'gateway'>) {
-  return [point.merchant_id, point.payment_method_type, point.payment_method, point.gateway].join('|')
+function presetWindow(range: AnalyticsRange) {
+  const now = Date.now()
+  const duration =
+    range === '15m'
+      ? 15 * 60 * 1000
+      : range === '1h'
+        ? 60 * 60 * 1000
+        : 24 * 60 * 60 * 1000
+
+  return {
+    start_ms: now - duration,
+    end_ms: now,
+  }
 }
 
-function sectionButtonClass(active: boolean) {
-  return active ? 'bg-brand-600 text-white' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 dark:bg-[#121214] dark:text-[#a1a1aa] dark:border-[#27272a]'
+function toDateTimeInputValue(timestampMs: number) {
+  const date = new Date(timestampMs)
+  const pad = (value: number) => value.toString().padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
+    date.getHours(),
+  )}:${pad(date.getMinutes())}`
 }
 
-function infoMatchForMetric(label: string): InfoContent | null {
-  const normalized = label.toLowerCase()
-  if (normalized.startsWith('decisions /')) return KPI_INFO[0]
-  if (normalized === 'decisions') return KPI_INFO[0]
-  if (normalized === 'score snapshots') return KPI_INFO[1]
-  if (normalized === 'rule hits') return KPI_INFO[2]
-  if (normalized === 'errors') return KPI_INFO[3]
-  if (normalized === 'error rate') return KPI_INFO[4]
-  return null
+function fromDateTimeInputValue(value: string) {
+  const timestamp = new Date(value).getTime()
+  return Number.isFinite(timestamp) ? timestamp : null
 }
 
 function EmptyState({ title, body }: { title: string; body: string }) {
   return (
-    <div className="rounded-2xl border border-dashed border-slate-200 dark:border-[#222227] bg-white/60 dark:bg-[#0b0b0d] px-6 py-12 text-center">
+    <div className="rounded-[24px] border border-dashed border-slate-200 bg-white/60 px-6 py-12 text-center dark:border-[#222227] dark:bg-[#0b0b0d]">
       <p className="text-sm font-semibold text-slate-900 dark:text-white">{title}</p>
       <p className="mt-2 text-sm text-slate-500 dark:text-[#8a8a93]">{body}</p>
     </div>
   )
 }
 
-function MetricCard({ label, value, subtitle }: { label: string; value: string; subtitle?: string | null }) {
-  const info = infoMatchForMetric(label)
-  return (
-    <Card>
-      <CardBody>
-        <div className="flex items-start justify-between gap-3">
-          <p className="text-xs uppercase tracking-[0.16em] text-slate-500">{label}</p>
-          {info ? <InfoButton content={info} /> : null}
-        </div>
-        <p className="mt-2 text-3xl font-semibold text-slate-900 dark:text-white">{value}</p>
-        {subtitle && <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">{subtitle}</p>}
-      </CardBody>
-    </Card>
-  )
+function controlClassName() {
+  return 'h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 shadow-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-[#27272a] dark:bg-[#121214] dark:text-[#e5e7eb]'
 }
 
 function InfoButton({ content }: { content: InfoContent }) {
@@ -351,7 +250,6 @@ function InfoButton({ content }: { content: InfoContent }) {
         Math.max(rect.right - width, VIEWPORT_GUTTER),
         window.innerWidth - width - VIEWPORT_GUTTER,
       )
-
       const showAbove = rect.bottom + GAP + POPOVER_HEIGHT > window.innerHeight - VIEWPORT_GUTTER
       const top = showAbove
         ? Math.max(rect.top - POPOVER_HEIGHT - GAP, VIEWPORT_GUTTER)
@@ -415,112 +313,150 @@ function InfoButton({ content }: { content: InfoContent }) {
   )
 }
 
-function Sparkline({ points }: { points: { bucket_ms: number; value: number }[] }) {
-  if (points.length === 0) {
-    return <span className="text-xs text-slate-400">No history</span>
-  }
-
+function HitsCard({
+  label,
+  value,
+  subtitle,
+}: {
+  label: string
+  value: number
+  subtitle: string
+}) {
   return (
-    <ResponsiveContainer width="100%" height={48}>
-      <LineChart data={points}>
-        <Line type="monotone" dataKey="value" stroke="#0069ED" strokeWidth={2} dot={false} />
-        <Tooltip
-          formatter={(value: unknown) => formatNumber(value as number, 3)}
-          labelFormatter={(label: unknown) => formatBucket(Number(label))}
-          contentStyle={CHART_TOOLTIP_STYLE}
-          labelStyle={CHART_TOOLTIP_LABEL_STYLE}
-          itemStyle={CHART_TOOLTIP_ITEM_STYLE}
-          wrapperStyle={CHART_TOOLTIP_WRAPPER_STYLE}
-        />
-      </LineChart>
-    </ResponsiveContainer>
+    <Card className="h-full overflow-hidden">
+      <CardBody className="flex h-full min-h-[150px] flex-col justify-between">
+        <div className="space-y-2">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+            Endpoint hits
+          </p>
+          <p className="text-lg font-semibold text-slate-900 dark:text-white">{label}</p>
+        </div>
+        <div className="flex items-end justify-between gap-4">
+          <p className="text-5xl font-semibold tracking-tight text-slate-950 dark:text-white">
+            {formatNumber(value, 0)}
+          </p>
+          <Badge variant="blue">{subtitle}</Badge>
+        </div>
+      </CardBody>
+    </Card>
   )
+}
+
+function analyticsRouteLabel(route: string) {
+  if (route === '/decide_gateway') return 'Decide Gateway'
+  if (route === '/update_gateway') return 'Update Gateway'
+  if (route === '/rule_evaluate') return 'Rule Evaluate'
+  return route
 }
 
 export function AnalyticsPage() {
   const { merchantId } = useMerchantStore()
-  const navigate = useNavigate()
-  const [scope, setScope] = useState<AnalyticsScope>('current')
-  const [range, setRange] = useState<AnalyticsRange>('1h')
-  const [section, setSection] = useState<Section>('overview')
-  const [page, setPage] = useState(1)
+  const [range, setRange] = useState<AnalyticsRangeValue>('1h')
   const [routingFilters, setRoutingFilters] = useState<RoutingFilters>(EMPTY_ROUTING_FILTERS)
-  const pageSize = 10
-  const globalConnectorOnly = scope === 'all'
+  const [showAllFilters, setShowAllFilters] = useState(false)
+  const [customStart, setCustomStart] = useState(() =>
+    toDateTimeInputValue(Date.now() - 2 * 60 * 60 * 1000),
+  )
+  const [customEnd, setCustomEnd] = useState(() => toDateTimeInputValue(Date.now()))
 
-  const canQueryCurrent = scope === 'all' || Boolean(merchantId)
-  const effectiveMerchantId = scope === 'current' ? merchantId || undefined : undefined
+  const canQueryCurrent = Boolean(merchantId)
 
-  const overviewUrl = canQueryCurrent && !globalConnectorOnly
-    ? buildAnalyticsUrl('/analytics/overview', scope, range, effectiveMerchantId)
-    : null
-  const scoresUrl = canQueryCurrent && !globalConnectorOnly
-    ? buildAnalyticsUrl('/analytics/gateway-scores', scope, range, effectiveMerchantId)
-    : null
-  const decisionsUrl = canQueryCurrent && !globalConnectorOnly
-    ? buildAnalyticsUrl('/analytics/decisions', scope, range, effectiveMerchantId)
-    : null
-  const routingUrl = canQueryCurrent
-    ? buildAnalyticsUrl('/analytics/routing-stats', scope, range, effectiveMerchantId, 1, 10, {
-      payment_method_type: scope === 'current' ? routingFilters.paymentMethodType || undefined : undefined,
-      payment_method: scope === 'current' ? routingFilters.paymentMethod || undefined : undefined,
-      gateway: routingFilters.gateways,
-    })
-    : null
-  const logsUrl = canQueryCurrent && !globalConnectorOnly
-    ? buildAnalyticsUrl('/analytics/log-summaries', scope, range, effectiveMerchantId, page, pageSize)
-    : null
-
-  const overview = useSWR<AnalyticsOverviewResponse>(overviewUrl, fetcher, {
-    refreshInterval: 8000,
-    revalidateOnFocus: true,
-  })
-  const scores = useSWR<AnalyticsGatewayScoresResponse>(scoresUrl, fetcher, {
-    refreshInterval: 8000,
-    revalidateOnFocus: true,
-  })
-  const decisions = useSWR<AnalyticsDecisionResponse>(decisionsUrl, fetcher, {
-    refreshInterval: 8000,
-    revalidateOnFocus: true,
-  })
-  const routing = useSWR<AnalyticsRoutingStatsResponse>(routingUrl, fetcher, {
-    refreshInterval: 12000,
-    revalidateOnFocus: true,
-  })
-  const logs = useSWR<AnalyticsLogSummariesResponse>(logsUrl, fetcher, {
-    refreshInterval: 12000,
-    revalidateOnFocus: true,
-  })
-
-  useEffect(() => {
-    if (scope === 'all') {
-      setSection('routing')
-      setRoutingFilters((current) => ({
-        ...current,
-        paymentMethodType: '',
-        paymentMethod: '',
-      }))
+  const customWindow = useMemo(() => {
+    if (range !== 'custom') return undefined
+    const start_ms = fromDateTimeInputValue(customStart)
+    const end_ms = fromDateTimeInputValue(customEnd)
+    if (start_ms === null || end_ms === null || end_ms <= start_ms) {
+      return undefined
     }
-  }, [scope])
+    return { start_ms, end_ms }
+  }, [customEnd, customStart, range])
+
+  const overviewUrl =
+    canQueryCurrent && merchantId && (range !== 'custom' || customWindow)
+      ? buildAnalyticsUrl('/analytics/overview', range, merchantId, customWindow)
+      : null
+  const routingUrl =
+    canQueryCurrent && merchantId && (range !== 'custom' || customWindow)
+      ? buildAnalyticsUrl('/analytics/routing-stats', range, merchantId, customWindow)
+      : null
+  const filteredRoutingUrl =
+    canQueryCurrent && merchantId && (range !== 'custom' || customWindow)
+      ? buildAnalyticsUrl('/analytics/routing-stats', range, merchantId, customWindow, routingFilters)
+      : null
+
+  const overviewSwrOptions = {
+    refreshInterval: 10000,
+    revalidateOnFocus: true,
+    revalidateIfStale: false,
+  } as const
+  const routingSwrOptions = {
+    refreshInterval: 12000,
+    revalidateOnFocus: true,
+    revalidateIfStale: false,
+  } as const
+  const filteredRoutingSwrOptions = {
+    ...routingSwrOptions,
+    keepPreviousData: true,
+  } as const
+
+  const overview = useSWR<AnalyticsOverviewResponse>(overviewUrl, fetcher, overviewSwrOptions)
+  const routing = useSWR<AnalyticsRoutingStatsResponse>(routingUrl, fetcher, routingSwrOptions)
+  const filteredRouting = useSWR<AnalyticsRoutingStatsResponse>(
+    filteredRoutingUrl,
+    fetcher,
+    filteredRoutingSwrOptions,
+  )
+
+  const loading =
+    (!overview.data && overview.isLoading) ||
+    (!routing.data && routing.isLoading) ||
+    (!filteredRouting.data && filteredRouting.isLoading)
+  const error =
+    overview.error?.message ||
+    routing.error?.message ||
+    filteredRouting.error?.message ||
+    null
+
+  const availableFilters: RoutingFilterOptions = {
+    dimensions:
+      routing.data?.available_filters?.dimensions ||
+      filteredRouting.data?.available_filters?.dimensions ||
+      [],
+    missing_dimensions:
+      routing.data?.available_filters?.missing_dimensions ||
+      filteredRouting.data?.available_filters?.missing_dimensions ||
+      [],
+    gateways:
+      routing.data?.available_filters?.gateways ||
+      filteredRouting.data?.available_filters?.gateways ||
+      [],
+  }
+  const availableFilterMap = useMemo(
+    () =>
+      new Map(
+        availableFilters.dimensions.map((dimension) => [dimension.key, dimension] as const),
+      ),
+    [availableFilters.dimensions],
+  )
 
   useEffect(() => {
-    const options: RoutingFilterOptions | undefined = routing.data?.available_filters
-    if (!options) return
-
     setRoutingFilters((current) => {
-      const nextPaymentMethodType = scope === 'current' && (current.paymentMethodType ? options.payment_method_types.includes(current.paymentMethodType) : true)
-        ? current.paymentMethodType
-        : ''
-
-      const nextPaymentMethod = scope === 'current' && (current.paymentMethod ? options.payment_methods.includes(current.paymentMethod) : true)
-        ? current.paymentMethod
-        : ''
-
-      const nextGateways = current.gateways.filter((gateway) => options.gateways.includes(gateway))
+      const nextDimensions = Object.fromEntries(
+        Object.entries(current.dimensions).filter(([key, value]) => {
+          if (!value) return false
+          const dimension = availableFilterMap.get(key)
+          return dimension ? dimension.values.includes(value) : false
+        }),
+      )
+      const nextGateways = current.gateways.filter((gateway) =>
+        availableFilters.gateways.includes(gateway),
+      )
 
       if (
-        nextPaymentMethodType === current.paymentMethodType &&
-        nextPaymentMethod === current.paymentMethod &&
+        Object.keys(nextDimensions).length === Object.keys(current.dimensions).length &&
+        Object.entries(nextDimensions).every(
+          ([key, value]) => current.dimensions[key] === value,
+        ) &&
         nextGateways.length === current.gateways.length &&
         nextGateways.every((gateway, index) => gateway === current.gateways[index])
       ) {
@@ -528,105 +464,151 @@ export function AnalyticsPage() {
       }
 
       return {
-        paymentMethodType: nextPaymentMethodType,
-        paymentMethod: nextPaymentMethod,
+        dimensions: nextDimensions,
         gateways: nextGateways,
       }
     })
-  }, [routing.data?.available_filters, scope])
+  }, [availableFilterMap, availableFilters.gateways])
 
-  const loading = [overview, scores, decisions, routing, logs].some((item) => item.isLoading)
-  const error = overview.error?.message || scores.error?.message || decisions.error?.message || routing.error?.message || logs.error?.message || null
-
-  const scoreSeriesByKey = useMemo(() => {
-    const grouped = new Map<string, { bucket_ms: number; value: number }[]>()
-    for (const point of scores.data?.series || []) {
-      const key = makeScoreKey(point)
-      const entry = grouped.get(key) || []
-      entry.push({ bucket_ms: point.bucket_ms, value: point.score_value })
-      grouped.set(key, entry)
+  useEffect(() => {
+    if (availableFilters.dimensions.length <= MAX_VISIBLE_DIMENSIONS && showAllFilters) {
+      setShowAllFilters(false)
     }
-    return grouped
-  }, [scores.data])
+  }, [availableFilters.dimensions.length, showAllFilters])
 
-  const decisionChartRows = useMemo(() => {
-    const buckets = new Map<number, Record<string, number>>()
-    for (const point of decisions.data?.series || []) {
-      const row = buckets.get(point.bucket_ms) || { bucket_ms: point.bucket_ms }
-      row[point.routing_approach] = point.count
-      buckets.set(point.bucket_ms, row)
+  const activeWindowLabel = useMemo(() => {
+    if (range !== 'custom') {
+      return PRESET_OPTIONS.find((option) => option.value === range)?.label || 'Selected window'
     }
-    return Array.from(buckets.values()).sort((left, right) => left.bucket_ms - right.bucket_ms)
-  }, [decisions.data])
+    if (!customWindow) return 'Custom window'
+    return `${formatDateTime(customWindow.start_ms)} to ${formatDateTime(customWindow.end_ms)}`
+  }, [customWindow, range])
 
-  const routingChartRows = useMemo(() => {
+  const routeHits = useMemo(() => {
+    const fallback = [
+      { route: '/decide_gateway', count: 0 },
+      { route: '/update_gateway', count: 0 },
+      { route: '/rule_evaluate', count: 0 },
+    ]
+    if (!overview.data?.route_hits?.length) return fallback
+    return fallback.map((item) => ({
+      ...item,
+      count: overview.data?.route_hits.find((row) => row.route === item.route)?.count || 0,
+    }))
+  }, [overview.data])
+
+  const gatewayShareData = useMemo(() => {
+    const gateways = Array.from(new Set((routing.data?.gateway_share || []).map((point) => point.gateway))).slice(0, 6)
     const buckets = new Map<number, Record<string, number>>()
+
     for (const point of routing.data?.gateway_share || []) {
+      if (!gateways.includes(point.gateway)) continue
       const row = buckets.get(point.bucket_ms) || { bucket_ms: point.bucket_ms }
       row[point.gateway] = point.count
       buckets.set(point.bucket_ms, row)
     }
-    return Array.from(buckets.values()).sort((left, right) => left.bucket_ms - right.bucket_ms)
-  }, [routing.data])
 
-  const srTrendRows = useMemo(() => {
-    const gateways = Array.from(new Set((routing.data?.sr_trend || []).map((point) => point.gateway))).slice(0, 5)
-    const buckets = new Map<number, Record<string, number>>()
-    for (const point of routing.data?.sr_trend || []) {
-      if (!gateways.includes(point.gateway)) continue
-      const row = buckets.get(point.bucket_ms) || { bucket_ms: point.bucket_ms }
-      row[point.gateway] = toPercent(point.score_value)
-      buckets.set(point.bucket_ms, row)
-    }
     return {
       gateways,
       rows: Array.from(buckets.values()).sort((left, right) => left.bucket_ms - right.bucket_ms),
     }
   }, [routing.data])
 
-  const connectorTrendSummary = useMemo(() => {
-    if (!srTrendRows.rows.length) return []
-    const latestRow = srTrendRows.rows[srTrendRows.rows.length - 1]
-    return srTrendRows.gateways
+  const connectorTrendData = useMemo(() => {
+    const gateways = Array.from(new Set((filteredRouting.data?.sr_trend || []).map((point) => point.gateway))).slice(0, 6)
+    const buckets = new Map<number, Record<string, number>>()
+
+    for (const point of filteredRouting.data?.sr_trend || []) {
+      if (!gateways.includes(point.gateway)) continue
+      const row = buckets.get(point.bucket_ms) || { bucket_ms: point.bucket_ms }
+      row[point.gateway] = toPercent(point.score_value)
+      buckets.set(point.bucket_ms, row)
+    }
+
+    return {
+      gateways,
+      rows: Array.from(buckets.values()).sort((left, right) => left.bucket_ms - right.bucket_ms),
+    }
+  }, [filteredRouting.data])
+
+  const latestConnectorSummary = useMemo(() => {
+    if (!connectorTrendData.rows.length) return []
+    const latestRow = connectorTrendData.rows[connectorTrendData.rows.length - 1]
+    return connectorTrendData.gateways
       .map((gateway) => ({
         gateway,
         value: typeof latestRow[gateway] === 'number' ? latestRow[gateway] : null,
       }))
       .filter((item): item is { gateway: string; value: number } => item.value !== null)
-  }, [srTrendRows])
+  }, [connectorTrendData])
 
-  const availableRoutingFilters = routing.data?.available_filters || {
-    payment_method_types: [],
-    payment_methods: [],
-    gateways: [],
+  const connectorTrendDomain = useMemo(() => {
+    const values = connectorTrendData.rows.flatMap((row) =>
+      connectorTrendData.gateways
+        .map((gateway) => row[gateway])
+        .filter((value): value is number => typeof value === 'number'),
+    )
+
+    if (!values.length) return [0, 100] as const
+
+    const min = Math.min(...values)
+    const max = Math.max(...values)
+    const padding = min === max ? 5 : Math.max(2, (max - min) * 0.35)
+
+    return [
+      Math.max(0, Math.floor(min - padding)),
+      Math.min(100, Math.ceil(max + padding)),
+    ] as const
+  }, [connectorTrendData])
+
+  const activeFilterSummary = useMemo(() => {
+    const parts = availableFilters.dimensions.flatMap((dimension) => {
+      const value = routingFilters.dimensions[dimension.key]
+      return value ? [`${dimension.label}: ${value}`] : []
+    })
+    if (routingFilters.gateways.length) parts.push(routingFilters.gateways.join(', '))
+    return parts.length ? parts.join(' / ') : 'All routing dimensions'
+  }, [availableFilters.dimensions, routingFilters])
+
+  const visibleDimensions = useMemo(() => {
+    if (showAllFilters || availableFilters.dimensions.length <= MAX_VISIBLE_DIMENSIONS) {
+      return availableFilters.dimensions
+    }
+    return availableFilters.dimensions.slice(0, MAX_VISIBLE_DIMENSIONS)
+  }, [availableFilters.dimensions, showAllFilters])
+
+  const hasExtraDimensions = availableFilters.dimensions.length > MAX_VISIBLE_DIMENSIONS
+  const hiddenDimensionCount = hasExtraDimensions
+    ? availableFilters.dimensions.length - MAX_VISIBLE_DIMENSIONS
+    : 0
+
+  const activeFilterChips = useMemo(() => {
+    const dimensionChips = availableFilters.dimensions.flatMap((dimension) => {
+      const value = routingFilters.dimensions[dimension.key]
+      return value
+        ? [{ key: `dimension:${dimension.key}`, label: `${dimension.label}: ${value}` }]
+        : []
+    })
+    const gatewayChips = routingFilters.gateways.map((gateway) => ({
+      key: `gateway:${gateway}`,
+      label: `Connector: ${gateway}`,
+    }))
+    return [...dimensionChips, ...gatewayChips]
+  }, [availableFilters.dimensions, routingFilters])
+
+  function handleRangeChange(value: AnalyticsRangeValue) {
+    setRange(value)
+    if (value !== 'custom') {
+      const preset = presetWindow(value)
+      setCustomStart(toDateTimeInputValue(preset.start_ms))
+      setCustomEnd(toDateTimeInputValue(preset.end_ms))
+    }
   }
 
-  const activeRoutingFilterBadges = useMemo(() => {
-    const badges: string[] = []
-    if (scope === 'current' && routingFilters.paymentMethodType) {
-      badges.push(routingFilters.paymentMethodType)
-    }
-    if (scope === 'current' && routingFilters.paymentMethod) {
-      badges.push(routingFilters.paymentMethod)
-    }
-    if (routingFilters.gateways.length) {
-      badges.push(...routingFilters.gateways)
-    }
-    return badges
-  }, [routingFilters, scope])
-
-  const routingSubtitle = useMemo(() => {
-    if (scope === 'all') {
-      return 'Global success rate trend by connector across all merchants.'
-    }
-    if (!activeRoutingFilterBadges.length) {
-      return 'Success rate trend by connector for the selected merchant.'
-    }
-    return `Success rate trend by connector filtered by ${activeRoutingFilterBadges.join(' / ')}.`
-  }, [activeRoutingFilterBadges, scope])
-
-  function updateRoutingFilter<K extends keyof RoutingFilters>(key: K, value: RoutingFilters[K]) {
-    setRoutingFilters((current) => ({ ...current, [key]: value }))
+  function refreshAll() {
+    overview.mutate()
+    routing.mutate()
+    filteredRouting.mutate()
   }
 
   function toggleGatewayFilter(gateway: string) {
@@ -645,22 +627,30 @@ export function AnalyticsPage() {
     setRoutingFilters(EMPTY_ROUTING_FILTERS)
   }
 
-  function refreshAll() {
-    overview.mutate()
-    scores.mutate()
-    decisions.mutate()
-    routing.mutate()
-    logs.mutate()
+  function removeRoutingFilterChip(chipKey: string) {
+    if (chipKey.startsWith('dimension:')) {
+      updateDimensionFilter(chipKey.replace('dimension:', ''), '')
+      return
+    }
+    if (chipKey.startsWith('gateway:')) {
+      toggleGatewayFilter(chipKey.replace('gateway:', ''))
+    }
   }
 
-  function openAudit(extraParams: Record<string, string | undefined>) {
-    const search = queryString({
-      scope,
-      range,
-      merchant_id: scope === 'current' ? effectiveMerchantId : undefined,
-      ...extraParams,
+  function updateDimensionFilter(dimensionKey: string, value: string) {
+    setRoutingFilters((current) => {
+      const nextDimensions = { ...current.dimensions }
+      if (value) {
+        nextDimensions[dimensionKey] = value
+      } else {
+        delete nextDimensions[dimensionKey]
+      }
+
+      return {
+        ...current,
+        dimensions: nextDimensions,
+      }
     })
-    navigate(search ? `/audit?${search}` : '/audit')
   }
 
   if (!canQueryCurrent) {
@@ -669,12 +659,12 @@ export function AnalyticsPage() {
         <div>
           <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Analytics</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-[#8a8a93]">
-            Set a Merchant ID in the top bar, or switch to the all-merchants view.
+            Set a merchant in the top bar to load merchant-scoped analytics.
           </p>
         </div>
         <EmptyState
-          title="Select a merchant to load analytics"
-          body="The current-scope view is tied to the selected merchant. You can also use the all-merchants toggle for an operator-wide view."
+          title="Select a merchant first"
+          body="The analytics surface is merchant-scoped. Use the merchant selector in the top bar to load data."
         />
       </div>
     )
@@ -683,584 +673,372 @@ export function AnalyticsPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Analytics</h1>
-          <p className="mt-1 text-sm text-slate-500 dark:text-[#8a8a93]">
-            Live routing metrics, score snapshots, rule hits, and operational summaries.
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Analytics</h1>
+            <Badge variant="green">{merchantId || 'Current merchant'}</Badge>
+          </div>
+          <p className="text-sm text-slate-500 dark:text-[#8a8a93]">
+            One working surface for route volume, connector share, and historical connector success rate.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" variant={scope === 'current' ? 'primary' : 'secondary'} onClick={() => setScope('current')}>
-            Merchant
-          </Button>
-          <Button size="sm" variant={scope === 'all' ? 'primary' : 'secondary'} onClick={() => setScope('all')}>
-            All merchants
-          </Button>
           <Button size="sm" variant="ghost" onClick={refreshAll}>
             Refresh
           </Button>
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {(globalConnectorOnly ? (['routing'] as Section[]) : (Object.keys(SECTION_LABELS) as Section[])).map((value) => (
-          <Button
-            key={value}
-            size="sm"
-            className={sectionButtonClass(section === value)}
-            variant="secondary"
-            onClick={() => setSection(value)}
-          >
-            {SECTION_LABELS[value]}
-          </Button>
-        ))}
-      </div>
+      <Card className="overflow-visible">
+        <CardBody className="flex flex-wrap items-end gap-4">
+          <label className="min-w-[220px] flex-1 space-y-2">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+              Time window
+            </span>
+            <select
+              value={range}
+              onChange={(event) => handleRangeChange(event.target.value as AnalyticsRangeValue)}
+              className={controlClassName()}
+            >
+              {PRESET_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
 
-      <div className="flex flex-wrap items-center gap-2">
-        {RANGE_OPTIONS.map((value) => (
-          <Button
-            key={value}
-            size="sm"
-            className={sectionButtonClass(range === value)}
-            variant="secondary"
-            onClick={() => setRange(value)}
-          >
-            {value}
-          </Button>
-        ))}
-        <Badge variant={scope === 'all' ? 'blue' : 'green'}>
-          {scope === 'all' ? 'All merchants' : merchantId || 'Current merchant'}
-        </Badge>
-      </div>
+          {range === 'custom' ? (
+            <>
+              <label className="min-w-[220px] flex-1 space-y-2">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                  Start time
+                </span>
+                <input
+                  type="datetime-local"
+                  value={customStart}
+                  onChange={(event) => setCustomStart(event.target.value)}
+                  className={controlClassName()}
+                />
+              </label>
+
+              <label className="min-w-[220px] flex-1 space-y-2">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                  End time
+                </span>
+                <input
+                  type="datetime-local"
+                  value={customEnd}
+                  onChange={(event) => setCustomEnd(event.target.value)}
+                  className={controlClassName()}
+                />
+              </label>
+            </>
+          ) : null}
+
+          <div className="min-w-[220px] flex-1 rounded-[24px] border border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-[#1d1d23] dark:bg-[#0c0c0e]">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+              Active window
+            </p>
+            <p className="mt-1 text-sm font-medium text-slate-900 dark:text-white">{activeWindowLabel}</p>
+            {range === 'custom' && !customWindow ? (
+              <p className="mt-1 text-xs text-red-500">Choose an end time after the start time.</p>
+            ) : null}
+          </div>
+        </CardBody>
+      </Card>
 
       <ErrorMessage error={error} />
 
-      {loading && (
+      {loading ? (
         <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-[#8a8a93]">
           <Spinner size={16} />
           Loading analytics…
         </div>
-      )}
+      ) : null}
 
-      {!globalConnectorOnly ? (
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {(overview.data?.kpis || [
-          { label: 'Decisions', value: '0', subtitle: 'Waiting for data' },
-          { label: 'Score snapshots', value: '0', subtitle: 'Waiting for data' },
-          { label: 'Rule hits', value: '0', subtitle: 'Waiting for data' },
-          { label: 'Errors', value: '0', subtitle: 'Waiting for data' },
-        ]).map((kpi) => (
-          <MetricCard key={kpi.label} label={kpi.label} value={kpi.value} subtitle={kpi.subtitle} />
-        ))}
-      </section>
-      ) : (
-      <Card>
-        <CardBody className="flex flex-wrap items-start justify-between gap-3">
+      <section className="space-y-4">
+        <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-sm font-semibold text-slate-900 dark:text-white">Global connector performance</p>
-            <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-              All-merchants mode is restricted to connector-level success-rate summaries only.
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white">API calls</h2>
+            <p className="mt-1 text-sm text-slate-500 dark:text-[#8a8a93]">
+              Counts for the three routing surfaces most operators watch first.
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <Badge variant="blue">Connector-only global view</Badge>
-            <InfoButton content={CARD_INFO.connectorTrend} />
+          <InfoButton content={CARD_INFO.hits} />
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-3">
+          {routeHits.map((item) => (
+            <HitsCard
+              key={item.route}
+              label={analyticsRouteLabel(item.route)}
+              value={item.count}
+              subtitle={range === 'custom' ? 'Custom window' : activeWindowLabel}
+            />
+          ))}
+        </div>
+      </section>
+
+      <Card className="overflow-visible">
+        <CardHeader>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Gateway share over time</h2>
+              <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                How decision volume moved across connectors inside the selected merchant window.
+              </p>
+            </div>
+            <InfoButton content={CARD_INFO.share} />
           </div>
+        </CardHeader>
+        <CardBody>
+          {gatewayShareData.rows.length ? (
+            <div className="h-80">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={gatewayShareData.rows}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="bucket_ms" tickFormatter={formatBucket} tick={{ fontSize: 11 }} />
+                  <YAxis tick={{ fontSize: 11 }} />
+                  <Tooltip
+                    labelFormatter={(label) => formatDateTime(Number(label))}
+                    contentStyle={CHART_TOOLTIP_STYLE}
+                    labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                    itemStyle={CHART_TOOLTIP_ITEM_STYLE}
+                    wrapperStyle={CHART_TOOLTIP_WRAPPER_STYLE}
+                  />
+                  <Legend />
+                  {gatewayShareData.gateways.map((gateway, index) => (
+                    <Area
+                      key={gateway}
+                      type="monotone"
+                      dataKey={gateway}
+                      stackId="1"
+                      stroke={CHART_COLORS[index % CHART_COLORS.length]}
+                      fill={CHART_COLORS[index % CHART_COLORS.length]}
+                      fillOpacity={0.24}
+                      name={gateway}
+                    />
+                  ))}
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <EmptyState
+              title="No gateway share history yet"
+              body="Send real decide-gateway traffic in the selected window to populate connector share."
+            />
+          )}
         </CardBody>
       </Card>
-      )}
 
-      {section === 'overview' && (
-        <div className="grid gap-4 xl:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <div className="flex items-start justify-between gap-3">
-                <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Top score snapshots</h2>
-                <InfoButton content={CARD_INFO.topScores} />
-              </div>
-            </CardHeader>
-            <CardBody className="space-y-3">
-              {overview.data?.top_scores?.length ? overview.data.top_scores.slice(0, 5).map((snapshot) => {
-                const key = [snapshot.merchant_id, snapshot.payment_method_type, snapshot.payment_method, snapshot.gateway].join('|')
-                const spark = scoreSeriesByKey.get(key) || []
-                return (
-                  <div key={key} className="rounded-2xl border border-slate-200 dark:border-[#1d1d23] p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900 dark:text-white">{snapshot.gateway}</p>
-                        <p className="text-xs text-slate-500 dark:text-[#8a8a93]">
-                          {snapshot.merchant_id} · {snapshot.payment_method_type} · {snapshot.payment_method}
-                        </p>
-                      </div>
-                      <Badge variant="blue">{formatNumber(snapshot.score_value, 3)}</Badge>
-                    </div>
-                    <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-500 dark:text-[#8a8a93] md:grid-cols-4">
-                      <span>sigma {formatNumber(snapshot.sigma_factor, 3)}</span>
-                      <span>avg {formatNumber(snapshot.average_latency, 2)}</span>
-                      <span>tp99 {formatNumber(snapshot.tp99_latency, 2)}</span>
-                      <span>count {formatNumber(snapshot.transaction_count, 0)}</span>
-                    </div>
-                    <div className="mt-3">
-                      <Sparkline points={spark} />
-                    </div>
-                  </div>
-                )
-              }) : (
-                <EmptyState title="No score snapshots yet" body="Score events will appear here after the first routing or score update cycle." />
-              )}
-            </CardBody>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <div className="flex items-start justify-between gap-3">
-                <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Recent errors</h2>
-                <InfoButton content={CARD_INFO.recentErrors} />
-              </div>
-            </CardHeader>
-            <CardBody className="space-y-3">
-              {overview.data?.top_errors?.length ? overview.data.top_errors.slice(0, 5).map((errorRow) => (
-                <button
-                  key={`${errorRow.route}-${errorRow.error_code}-${errorRow.error_message}`}
-                  type="button"
-                  onClick={() => openAudit({
-                    route: errorRow.route,
-                    error_code: errorRow.error_code,
-                    event_type: 'error',
-                    status: 'failure',
-                  })}
-                  className="w-full rounded-2xl border border-slate-200 p-4 text-left transition hover:border-slate-300 dark:border-[#1d1d23] dark:hover:border-[#2a2a33]"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-900 dark:text-white">{errorRow.error_code}</p>
-                      <p className="text-xs text-slate-500 dark:text-[#8a8a93]">{humanizeAuditRoute(errorRow.route)}</p>
-                    </div>
-                    <Badge variant="red">{errorRow.count}</Badge>
-                  </div>
-                  <p className="mt-2 text-xs text-slate-500 dark:text-[#8a8a93]">{errorRow.error_message}</p>
-                  <p className="mt-2 text-[11px] text-slate-400 dark:text-[#66666e]">
-                    Last seen {formatDateTime(errorRow.last_seen_ms)}
-                  </p>
-                </button>
-              )) : (
-                <EmptyState title="No errors captured" body="Structured failure summaries will appear here when requests fail." />
-              )}
-            </CardBody>
-          </Card>
-        </div>
-      )}
-
-      {section === 'scores' && (
-        <Card>
-          <CardHeader>
-            <div className="flex items-start justify-between gap-3">
-              <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Gateway scoring</h2>
-              <InfoButton content={CARD_INFO.gatewayScoring} />
+      <Card className="overflow-visible">
+        <CardHeader>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-800 dark:text-white">
+                Connector success rate over time
+              </h2>
+              <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                Historical connector score trend for the selected merchant window.
+              </p>
+              <p className="mt-2 text-xs font-medium text-slate-600 dark:text-[#b3b3bd]">
+                Active filters: {activeFilterSummary}
+              </p>
             </div>
-          </CardHeader>
-          <CardBody>
-            {scores.data?.snapshots?.length ? (
-              <div className="space-y-4">
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-left text-sm">
-                    <thead className="text-xs uppercase tracking-wide text-slate-500 dark:text-[#8a8a93]">
-                      <tr>
-                        <th className="py-3 pr-4">Merchant</th>
-                        <th className="py-3 pr-4">PMT</th>
-                        <th className="py-3 pr-4">Gateway</th>
-                        <th className="py-3 pr-4">Score</th>
-                        <th className="py-3 pr-4">Sigma</th>
-                        <th className="py-3 pr-4">Avg latency</th>
-                        <th className="py-3 pr-4">TP99</th>
-                        <th className="py-3 pr-4">Updated</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200 dark:divide-[#1d1d23]">
-                      {scores.data.snapshots.map((snapshot) => {
-                        const key = [snapshot.merchant_id, snapshot.payment_method_type, snapshot.payment_method, snapshot.gateway].join('|')
-                        const spark = scoreSeriesByKey.get(key) || []
-                        return (
-                          <tr key={key} className="align-top">
-                            <td className="py-3 pr-4 font-medium text-slate-900 dark:text-white">{snapshot.merchant_id}</td>
-                            <td className="py-3 pr-4 text-slate-500 dark:text-[#8a8a93]">{snapshot.payment_method_type}</td>
-                            <td className="py-3 pr-4 font-medium text-slate-900 dark:text-white">{snapshot.gateway}</td>
-                            <td className="py-3 pr-4"><Badge variant="blue">{formatNumber(snapshot.score_value, 3)}</Badge></td>
-                            <td className="py-3 pr-4 text-slate-600 dark:text-[#a6a6b0]">{formatNumber(snapshot.sigma_factor, 3)}</td>
-                            <td className="py-3 pr-4 text-slate-600 dark:text-[#a6a6b0]">{formatNumber(snapshot.average_latency, 2)}</td>
-                            <td className="py-3 pr-4 text-slate-600 dark:text-[#a6a6b0]">{formatNumber(snapshot.tp99_latency, 2)}</td>
-                            <td className="py-3 pr-4 text-slate-500 dark:text-[#8a8a93]">
-                              <div className="w-40">
-                                <Sparkline points={spark} />
-                              </div>
-                              <div className="mt-1 text-[11px]">{formatDateTime(snapshot.last_updated_ms)}</div>
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            ) : (
-              <EmptyState title="No gateway scores yet" body="Once score updates are recorded, the live snapshot table and sparklines will populate here." />
-            )}
-          </CardBody>
-        </Card>
-      )}
-
-      {section === 'decisions' && (
-        <div className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {decisions.data?.tiles?.map((tile) => (
-              <MetricCard key={tile.label} label={tile.label} value={tile.value} subtitle={tile.subtitle} />
-            )) || null}
+            <InfoButton content={CARD_INFO.sr} />
           </div>
-
-          <Card className="overflow-visible">
-            <CardHeader>
-              <div className="flex items-start justify-between gap-3">
-                <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Decision throughput by routing approach</h2>
-                <InfoButton content={CARD_INFO.decisionThroughput} />
+        </CardHeader>
+        <CardBody className="space-y-4">
+          <div className="rounded-[24px] border border-slate-200 bg-slate-50/80 p-4 dark:border-[#1d1d23] dark:bg-[#0c0c0e]">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                  Connector filters
+                </p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                  Narrow the success-rate line chart by the routing dimensions present for this merchant.
+                </p>
               </div>
-            </CardHeader>
-            <CardBody>
-              {decisionChartRows.length ? (
-                <div className="h-80">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={decisionChartRows}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                      <XAxis dataKey="bucket_ms" tickFormatter={formatBucket} tick={{ fontSize: 11 }} />
-                      <YAxis tick={{ fontSize: 11 }} />
-                      <Tooltip
-                        labelFormatter={(label) => formatDateTime(Number(label))}
-                        contentStyle={CHART_TOOLTIP_STYLE}
-                        labelStyle={CHART_TOOLTIP_LABEL_STYLE}
-                        itemStyle={CHART_TOOLTIP_ITEM_STYLE}
-                        wrapperStyle={CHART_TOOLTIP_WRAPPER_STYLE}
-                      />
-                      <Legend />
-                      {(decisions.data?.approaches || []).slice(0, 5).map((approach, index) => (
-                        <Area
-                          key={approach.rule_name}
-                          type="monotone"
-                          dataKey={approach.rule_name}
-                          stackId="1"
-                          stroke={['#0069ED', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'][index % 5]}
-                          fill={['#0069ED', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'][index % 5]}
-                          fillOpacity={0.25}
-                        />
-                      ))}
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              ) : (
-                <EmptyState title="No decision history yet" body="Decision events will populate this chart as routing traffic flows through the service." />
-              )}
-            </CardBody>
-          </Card>
-        </div>
-      )}
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={clearRoutingFilters}
+                disabled={
+                  !Object.values(routingFilters.dimensions).some(Boolean) &&
+                  !routingFilters.gateways.length
+                }
+              >
+                Clear filters
+              </Button>
+            </div>
 
-      {section === 'routing' && (
-        <div className="grid gap-4 xl:grid-cols-2">
-          {!globalConnectorOnly ? (
-          <>
-          <Card className="overflow-visible">
-            <CardHeader>
-              <div className="flex items-start justify-between gap-3">
-                <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Gateway share over time</h2>
-                <InfoButton content={CARD_INFO.gatewayShare} />
-              </div>
-            </CardHeader>
-            <CardBody>
-              {routingChartRows.length ? (
-                <div className="h-80">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={routingChartRows}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                      <XAxis dataKey="bucket_ms" tickFormatter={formatBucket} tick={{ fontSize: 11 }} />
-                      <YAxis tick={{ fontSize: 11 }} />
-                      <Tooltip
-                        labelFormatter={(label) => formatDateTime(Number(label))}
-                        contentStyle={CHART_TOOLTIP_STYLE}
-                        labelStyle={CHART_TOOLTIP_LABEL_STYLE}
-                        itemStyle={CHART_TOOLTIP_ITEM_STYLE}
-                        wrapperStyle={CHART_TOOLTIP_WRAPPER_STYLE}
-                      />
-                      <Legend />
-                      {(routing.data?.gateway_share || []).reduce<string[]>((acc, point) => {
-                        if (!acc.includes(point.gateway)) acc.push(point.gateway)
-                        return acc
-                      }, []).slice(0, 5).map((gateway, index) => (
-                        <Bar key={gateway} dataKey={gateway} stackId="1" fill={['#0069ED', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'][index % 5]} />
-                      ))}
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              ) : (
-                <EmptyState title="No routing share data" body="Decision events will drive this chart once traffic is flowing." />
-              )}
-            </CardBody>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <div className="flex items-start justify-between gap-3">
-                <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Top priority logic hits</h2>
-                <InfoButton content={CARD_INFO.topRules} />
-              </div>
-            </CardHeader>
-            <CardBody className="space-y-3">
-              {routing.data?.top_rules?.length ? routing.data.top_rules.map((rule) => (
-                <div key={rule.rule_name} className="flex items-center justify-between rounded-2xl border border-slate-200 dark:border-[#1d1d23] px-4 py-3">
-                  <span className="text-sm font-medium text-slate-900 dark:text-white">{rule.rule_name}</span>
-                  <Badge variant="purple">{rule.count}</Badge>
-                </div>
-              )) : (
-                <EmptyState title="No rule hits yet" body="Priority-logic hits will show here once routing is exercised." />
-              )}
-            </CardBody>
-          </Card>
-          </>
-          ) : null}
-
-          <Card className={`${globalConnectorOnly ? 'xl:col-span-2' : 'xl:col-span-2'} overflow-visible`}>
-            <CardHeader>
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-sm font-semibold text-slate-800 dark:text-white">
-                    {globalConnectorOnly ? 'Global connector success rate' : 'Connector success rate over time'}
-                  </h2>
-                  <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                    {routingSubtitle}
-                  </p>
-                </div>
-                <InfoButton content={CARD_INFO.connectorTrend} />
-              </div>
-            </CardHeader>
-            <CardBody>
-              <div className="mb-5 rounded-[24px] border border-slate-200 bg-slate-50/80 p-4 dark:border-[#1d1d23] dark:bg-[#0c0c0e]">
-                <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <label className="space-y-2">
-                      <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8a8a93]">
-                        Payment method type
+            {availableFilters.dimensions.length ? (
+              <div className="mt-4 space-y-3">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {visibleDimensions.map((dimension) => (
+                    <label key={dimension.key} className="space-y-2">
+                      <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                        {dimension.label}
                       </span>
                       <select
-                        value={scope === 'current' ? routingFilters.paymentMethodType : ''}
-                        onChange={(event) => updateRoutingFilter('paymentMethodType', event.target.value)}
-                        disabled={scope === 'all' || !availableRoutingFilters.payment_method_types.length}
-                        className={selectClassName(scope === 'all' || !availableRoutingFilters.payment_method_types.length)}
+                        value={routingFilters.dimensions[dimension.key] || ''}
+                        onChange={(event) => updateDimensionFilter(dimension.key, event.target.value)}
+                        className={controlClassName()}
+                        disabled={!dimension.values.length}
                       >
-                        <option value="">All payment method types</option>
-                        {availableRoutingFilters.payment_method_types.map((value) => (
-                          <option key={value} value={value}>{value}</option>
+                        <option value="">All {dimension.label.toLowerCase()}</option>
+                        {dimension.values.map((value) => (
+                          <option key={value} value={value}>
+                            {value}
+                          </option>
                         ))}
                       </select>
                     </label>
-
-                    <label className="space-y-2">
-                      <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8a8a93]">
-                        Payment method
-                      </span>
-                      <select
-                        value={scope === 'current' ? routingFilters.paymentMethod : ''}
-                        onChange={(event) => updateRoutingFilter('paymentMethod', event.target.value)}
-                        disabled={scope === 'all' || !availableRoutingFilters.payment_methods.length}
-                        className={selectClassName(scope === 'all' || !availableRoutingFilters.payment_methods.length)}
-                      >
-                        <option value="">All payment methods</option>
-                        {availableRoutingFilters.payment_methods.map((value) => (
-                          <option key={value} value={value}>{value}</option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-
-                  <div className="space-y-2">
-                    <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8a8a93]">
-                      Connectors
-                    </span>
-                    <div className="flex min-h-10 flex-wrap gap-2 rounded-2xl border border-slate-200 bg-white p-2 dark:border-[#27272a] dark:bg-[#121214]">
-                      {availableRoutingFilters.gateways.length ? availableRoutingFilters.gateways.map((gateway) => (
-                        <button
-                          key={gateway}
-                          type="button"
-                          onClick={() => toggleGatewayFilter(gateway)}
-                          className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${filterBadgeClass(routingFilters.gateways.includes(gateway))}`}
-                        >
-                          {gateway}
-                        </button>
-                      )) : (
-                        <span className="px-2 py-1 text-xs text-slate-500 dark:text-[#8a8a93]">No connector options in this window</span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex items-end">
-                    <Button size="sm" variant="secondary" onClick={clearRoutingFilters}>
-                      Clear filters
+                  ))}
+                </div>
+                {hasExtraDimensions ? (
+                  <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white/70 px-4 py-3 dark:border-[#1d1d23] dark:bg-[#09090b]">
+                    <p className="text-xs text-slate-500 dark:text-[#8a8a93]">
+                      {showAllFilters
+                        ? 'Showing all routing dimensions available for this merchant.'
+                        : `${hiddenDimensionCount} more routing dimension${hiddenDimensionCount === 1 ? '' : 's'} available for this merchant.`}
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => setShowAllFilters((value) => !value)}
+                    >
+                      {showAllFilters ? 'Show fewer filters' : 'More filters'}
                     </Button>
                   </div>
-                </div>
-
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {activeRoutingFilterBadges.length ? activeRoutingFilterBadges.map((value) => (
-                    <Badge key={value} variant="blue">{value}</Badge>
-                  )) : (
-                    <Badge variant="gray">No narrowing filters</Badge>
-                  )}
-                </div>
-
-                {scope === 'all' ? (
-                  <p className="mt-3 text-xs text-slate-500 dark:text-[#8a8a93]">
-                    Global mode shows only connector-wise score badges and connector-wise success-rate trends. Merchant-level metrics, logs, and audits are hidden.
-                  </p>
                 ) : null}
               </div>
+            ) : availableFilters.missing_dimensions.length ? (
+              <EmptyState
+                title="No populated routing dimensions in this window"
+                body="The merchant has score history, but none of the dynamic routing dimensions have values recorded in the selected time window yet."
+              />
+            ) : null}
 
-              {srTrendRows.rows.length ? (
-                <div className="space-y-4">
-                  {connectorTrendSummary.length ? (
-                    <div className="flex flex-wrap gap-2">
-                      {connectorTrendSummary.map((item) => (
-                        <Badge key={item.gateway} variant="blue">
-                          {item.gateway}: {formatPercent(item.value)}
-                        </Badge>
-                      ))}
-                    </div>
-                  ) : null}
-
-                  <div className="h-80">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={srTrendRows.rows}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                        <XAxis dataKey="bucket_ms" tickFormatter={formatBucket} tick={{ fontSize: 11 }} />
-                        <YAxis tick={{ fontSize: 11 }} tickFormatter={(value) => `${formatNumber(Number(value), 0)}%`} />
-                        <Tooltip
-                          labelFormatter={(label) => formatDateTime(Number(label))}
-                          formatter={(value: unknown, name: string | number) => [formatPercent(value as number), String(name)]}
-                          contentStyle={CHART_TOOLTIP_STYLE}
-                          labelStyle={CHART_TOOLTIP_LABEL_STYLE}
-                          itemStyle={CHART_TOOLTIP_ITEM_STYLE}
-                          wrapperStyle={CHART_TOOLTIP_WRAPPER_STYLE}
-                        />
-                        <Legend />
-                        {srTrendRows.gateways.map((gateway, index) => (
-                          <Line
-                            key={gateway}
-                            type="monotone"
-                            dataKey={gateway}
-                            stroke={['#0069ED', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'][index % 5]}
-                            strokeWidth={2}
-                            dot={false}
-                            name={gateway}
-                          />
-                        ))}
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              ) : (
-                <EmptyState title="No connector score history for this filter set yet" body="Generate traffic or widen the time range to populate the connector success-rate trend." />
-              )}
-            </CardBody>
-          </Card>
-        </div>
-      )}
-
-      {section === 'logs' && (
-        <div className="grid gap-4 xl:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <div className="flex items-start justify-between gap-3">
-                <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Error summaries</h2>
-                <InfoButton content={CARD_INFO.errorSummaries} />
+            {availableFilters.missing_dimensions.length ? (
+              <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-white/70 px-4 py-3 dark:border-[#1d1d23] dark:bg-[#09090b]">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                  No values in this window yet
+                </p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                  {availableFilters.missing_dimensions.map((dimension) => dimension.label).join(', ')}
+                </p>
               </div>
-            </CardHeader>
-            <CardBody className="space-y-3">
-              {logs.data?.errors?.length ? logs.data.errors.map((item) => (
-                <button
-                  key={`${item.route}-${item.error_code}-${item.error_message}`}
-                  type="button"
-                  onClick={() => openAudit({
-                    route: item.route,
-                    error_code: item.error_code,
-                    event_type: 'error',
-                    status: 'failure',
-                  })}
-                  className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-left transition hover:border-slate-300 dark:border-[#1d1d23] dark:hover:border-[#2a2a33]"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-900 dark:text-white">{item.error_code}</p>
-                      <p className="text-xs text-slate-500 dark:text-[#8a8a93]">{humanizeAuditRoute(item.route)}</p>
-                    </div>
-                    <Badge variant="red">{item.count}</Badge>
-                  </div>
-                  <p className="mt-2 text-xs text-slate-500 dark:text-[#8a8a93]">{item.error_message}</p>
-                </button>
-              )) : (
-                <EmptyState title="No log summaries yet" body="Structured error summaries will appear once requests fail." />
-              )}
-            </CardBody>
-          </Card>
+            ) : null}
 
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Recent samples</h2>
-                  <InfoButton content={CARD_INFO.recentSamples} />
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button size="sm" variant="secondary" onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={page <= 1}>
-                    Prev
-                  </Button>
-                  <Button size="sm" variant="secondary" onClick={() => setPage((value) => value + 1)}>
-                    Next
-                  </Button>
+            {activeFilterChips.length ? (
+              <div className="mt-4 space-y-2">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                  Active filters
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {activeFilterChips.map((chip) => (
+                    <button
+                      key={chip.key}
+                      type="button"
+                      onClick={() => removeRoutingFilterChip(chip.key)}
+                      className="inline-flex items-center gap-2 rounded-full border border-brand-500/30 bg-brand-500/10 px-3 py-1.5 text-xs font-semibold text-brand-700 transition hover:bg-brand-500/15 dark:text-brand-200"
+                    >
+                      <span>{chip.label}</span>
+                      <span aria-hidden="true">×</span>
+                    </button>
+                  ))}
                 </div>
               </div>
-            </CardHeader>
-            <CardBody className="space-y-3">
-              {logs.data?.samples?.length ? logs.data.samples.map((sample) => (
-                <button
-                  key={`${sample.route}-${sample.created_at_ms}-${sample.error_code || 'ok'}`}
-                  type="button"
-                  onClick={() => openAudit({
-                    payment_id: sample.payment_id || undefined,
-                    request_id: sample.request_id || undefined,
-                    gateway: sample.gateway || undefined,
-                    route: sample.route,
-                    status: sample.status || undefined,
-                    event_type: sample.event_type || undefined,
-                    error_code: sample.error_code || undefined,
-                  })}
-                  className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-left transition hover:border-slate-300 dark:border-[#1d1d23] dark:hover:border-[#2a2a33]"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-900 dark:text-white">{humanizeAuditRoute(sample.route)}</p>
-                      <p className="text-xs text-slate-500 dark:text-[#8a8a93]">
-                        {sample.merchant_id || 'all merchants'} · {formatDateTime(sample.created_at_ms)}
-                      </p>
-                    </div>
-                    {sample.error_code ? <Badge variant="red">{sample.error_code}</Badge> : <Badge variant="green">{sample.status || 'ok'}</Badge>}
-                  </div>
-                  <p className="mt-2 text-xs text-slate-500 dark:text-[#8a8a93]">
-                    {sample.error_message || sample.routing_approach || sample.gateway || 'No additional detail'}
+            ) : null}
+
+            <div className="mt-4 space-y-2">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                Connectors
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {availableFilters.gateways.length ? (
+                  availableFilters.gateways.map((gateway) => {
+                    const active = routingFilters.gateways.includes(gateway)
+                    return (
+                      <button
+                        key={gateway}
+                        type="button"
+                        onClick={() => toggleGatewayFilter(gateway)}
+                        className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                          active
+                            ? 'border-brand-500/50 bg-brand-500/10 text-brand-700 dark:text-brand-200'
+                            : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900 dark:border-[#27272a] dark:bg-[#121214] dark:text-[#a1a1aa] dark:hover:text-white'
+                        }`}
+                      >
+                        {gateway}
+                      </button>
+                    )
+                  })
+                ) : (
+                  <p className="text-xs text-slate-500 dark:text-[#8a8a93]">
+                    No connector history yet for the selected window.
                   </p>
-                </button>
-              )) : (
-                <EmptyState title="No samples yet" body="Recent structured samples will appear here after the first failures or snapshots." />
-              )}
-            </CardBody>
-          </Card>
-        </div>
-      )}
+                )}
+              </div>
+            </div>
+          </div>
+
+          {latestConnectorSummary.length ? (
+            <div className="flex flex-wrap gap-2">
+              {latestConnectorSummary.map((item) => (
+                <Badge key={item.gateway} variant="blue">
+                  {item.gateway}: {formatPercent(item.value)}
+                </Badge>
+              ))}
+            </div>
+          ) : null}
+
+          {connectorTrendData.rows.length ? (
+            <div className="h-80">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={connectorTrendData.rows}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="bucket_ms" tickFormatter={formatBucket} tick={{ fontSize: 11 }} />
+                  <YAxis
+                    domain={connectorTrendDomain as [number, number]}
+                    tick={{ fontSize: 11 }}
+                    tickFormatter={(value) => `${formatNumber(Number(value), 0)}%`}
+                  />
+                  <Tooltip
+                    labelFormatter={(label) => formatDateTime(Number(label))}
+                    formatter={(value: unknown, name: string | number) => [formatPercent(value as number), String(name)]}
+                    contentStyle={CHART_TOOLTIP_STYLE}
+                    labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                    itemStyle={CHART_TOOLTIP_ITEM_STYLE}
+                    wrapperStyle={CHART_TOOLTIP_WRAPPER_STYLE}
+                  />
+                  <Legend />
+                  {connectorTrendData.gateways.map((gateway, index) => (
+                    <Line
+                      key={gateway}
+                      type="monotone"
+                      dataKey={gateway}
+                      stroke={CHART_COLORS[index % CHART_COLORS.length]}
+                      strokeWidth={3}
+                      dot={{ r: 3, strokeWidth: 1, fill: CHART_COLORS[index % CHART_COLORS.length] }}
+                      activeDot={{ r: 5 }}
+                      name={gateway}
+                    />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <EmptyState
+              title="No connector score history yet"
+              body="Send decide-gateway and update-gateway-score traffic in the selected window to populate connector history."
+            />
+          )}
+        </CardBody>
+      </Card>
     </div>
   )
 }

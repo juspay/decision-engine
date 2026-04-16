@@ -146,15 +146,23 @@ export interface SRDimensionRequest {
 
 export type AnalyticsScope = 'current' | 'all'
 export type AnalyticsRange = '15m' | '1h' | '24h'
+export type AnalyticsRangeValue = AnalyticsRange | 'custom'
 
 export interface AnalyticsQuery {
   merchant_id?: string
   scope?: AnalyticsScope
   range?: AnalyticsRange
+  start_ms?: number
+  end_ms?: number
   page?: number
   page_size?: number
   payment_method_type?: string
   payment_method?: string
+  card_network?: string
+  card_is_in?: string
+  currency?: string
+  country?: string
+  auth_type?: string
   gateway?: string
 }
 
@@ -191,16 +199,22 @@ export interface AnalyticsOverviewResponse {
   scope: AnalyticsScope
   merchant_id?: string | null
   kpis: AnalyticsKpi[]
+  route_hits: AnalyticsRouteHit[]
   top_scores: GatewayScoreSnapshot[]
   top_errors: AnalyticsErrorSummary[]
   top_rules: AnalyticsRuleHit[]
+}
+
+export interface AnalyticsRouteHit {
+  route: string
+  count: number
 }
 
 export interface AnalyticsGatewayScoresResponse {
   generated_at_ms: number
   scope: AnalyticsScope
   merchant_id?: string | null
-  range: AnalyticsRange
+  range: AnalyticsRangeValue
   snapshots: GatewayScoreSnapshot[]
   series: GatewayScoreSeriesPoint[]
 }
@@ -215,7 +229,7 @@ export interface AnalyticsDecisionResponse {
   generated_at_ms: number
   scope: AnalyticsScope
   merchant_id?: string | null
-  range: AnalyticsRange
+  range: AnalyticsRangeValue
   tiles: AnalyticsKpi[]
   series: AnalyticsDecisionPoint[]
   approaches: AnalyticsRuleHit[]
@@ -231,7 +245,7 @@ export interface AnalyticsRoutingStatsResponse {
   generated_at_ms: number
   scope: AnalyticsScope
   merchant_id?: string | null
-  range: AnalyticsRange
+  range: AnalyticsRangeValue
   gateway_share: AnalyticsGatewaySharePoint[]
   top_rules: AnalyticsRuleHit[]
   sr_trend: GatewayScoreSeriesPoint[]
@@ -239,9 +253,20 @@ export interface AnalyticsRoutingStatsResponse {
 }
 
 export interface RoutingFilterOptions {
-  payment_method_types: string[]
-  payment_methods: string[]
+  dimensions: RoutingFilterDimension[]
+  missing_dimensions: RoutingFilterDimensionHint[]
   gateways: string[]
+}
+
+export interface RoutingFilterDimension {
+  key: string
+  label: string
+  values: string[]
+}
+
+export interface RoutingFilterDimensionHint {
+  key: string
+  label: string
 }
 
 export interface AnalyticsErrorSummary {

@@ -243,136 +243,157 @@ export function SRRoutingPage() {
         <form onSubmit={handleSubmit(onSave)} className="space-y-6">
           <Card>
             <CardHeader>
-              <h2 className="text-sm font-semibold text-slate-800">Success Rate Config</h2>
+              <div>
+                <h2 className="text-sm font-semibold text-slate-800">Default Success Rate Config</h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Base settings used when there is no payment-method-specific override.
+                </p>
+              </div>
+            </CardHeader>
+            <CardBody className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <label className="space-y-1">
+                <span className="text-xs text-slate-500">Bucket Size</span>
+                <input
+                  type="number"
+                  {...register('defaultBucketSize')}
+                  className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 w-full focus:outline-none focus:ring-1 focus:ring-brand-500"
+                />
+                {errors.defaultBucketSize && (
+                  <p className="text-xs text-red-500">{errors.defaultBucketSize.message}</p>
+                )}
+              </label>
+
+              <label className="space-y-1">
+                <span className="text-xs text-slate-500">Success Rate</span>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  max="1"
+                  {...register('defaultSuccessRate')}
+                  placeholder="0.5"
+                  className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 w-full focus:outline-none focus:ring-1 focus:ring-brand-500"
+                />
+              </label>
+
+              <label className="space-y-1">
+                <span className="text-xs text-slate-500">Hedging %</span>
+                <input
+                  type="number"
+                  step="0.1"
+                  {...register('defaultHedgingPercent')}
+                  placeholder="null"
+                  className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 w-full focus:outline-none focus:ring-1 focus:ring-brand-500"
+                />
+              </label>
+
+              <label className="space-y-1">
+                <span className="text-xs text-slate-500">Latency Threshold (ms)</span>
+                <input
+                  type="number"
+                  {...register('defaultLatencyThreshold')}
+                  placeholder="null"
+                  className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 w-full focus:outline-none focus:ring-1 focus:ring-brand-500"
+                />
+              </label>
+            </CardBody>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-slate-800">Sub-Level Overrides</h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Optional overrides for specific payment method type and method combinations.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => append({ paymentMethodType: 'card', paymentMethod: 'credit', bucketSize: 20, hedgingPercent: null, latencyThreshold: null })}
+              >
+                <Plus size={14} /> Add Level
+              </Button>
             </CardHeader>
             <CardBody className="overflow-x-auto p-0">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-xs text-slate-500 border-b border-slate-200 dark:border-[#1c1c24] bg-slate-50 dark:bg-[#0a0a0f]">
-                    <th className="px-4 py-2">Payment Method Type</th>
-                    <th className="px-4 py-2">Payment Method</th>
-                    <th className="px-4 py-2">Bucket Size</th>
-                    <th className="px-4 py-2">Success Rate</th>
-                    <th className="px-4 py-2">Hedging %</th>
-                    <th className="px-4 py-2">Latency Threshold (ms)</th>
-                    <th className="px-4 py-2" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {/* Default row */}
-                  <tr className="border-b border-slate-200 dark:border-[#1c1c24] bg-brand-50/50 dark:bg-[#151518]">
-                    <td className="px-4 py-2 text-slate-500 italic">Default</td>
-                    <td className="px-4 py-2 text-slate-400">—</td>
-                    <td className="px-4 py-2">
-                      <input
-                        type="number"
-                        {...register('defaultBucketSize')}
-                        className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                      />
-                      {errors.defaultBucketSize && (
-                        <p className="text-xs text-red-500 mt-0.5">{errors.defaultBucketSize.message}</p>
-                      )}
-                    </td>
-                    <td className="px-4 py-2">
-                      <input
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        max="1"
-                        {...register('defaultSuccessRate')}
-                        placeholder="0.5"
-                        className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                      />
-                    </td>
-                    <td className="px-4 py-2">
-                      <input
-                        type="number"
-                        step="0.1"
-                        {...register('defaultHedgingPercent')}
-                        placeholder="null"
-                        className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                      />
-                    </td>
-                    <td className="px-4 py-2">
-                      <input
-                        type="number"
-                        {...register('defaultLatencyThreshold')}
-                        placeholder="null"
-                        className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-24 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                      />
-                    </td>
-                    <td className="px-4 py-2" />
-                  </tr>
-
-                  {fields.map((field, idx) => {
-                    const methodType = watchedRows?.[idx]?.paymentMethodType || ''
-                    const methodOptions = PAYMENT_METHODS[methodType] || []
-                    return (
-                      <tr key={field.id} className="border-b border-slate-200 dark:border-[#1c1c24] hover:bg-slate-100 dark:bg-[#0f0f16] transition-colors">
-                        <td className="px-4 py-2">
-                          <select
-                            {...register(`subLevelInputConfig.${idx}.paymentMethodType`)}
-                            className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-                          >
-                            {PAYMENT_METHOD_TYPES.map((t) => (
-                              <option key={t} value={t}>{t}</option>
-                            ))}
-                          </select>
-                        </td>
-                        <td className="px-4 py-2">
-                          <select
-                            {...register(`subLevelInputConfig.${idx}.paymentMethod`)}
-                            className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-                          >
-                            {(methodOptions.length ? methodOptions : ['credit', 'debit']).map((m) => (
-                              <option key={m} value={m}>{m}</option>
-                            ))}
-                          </select>
-                        </td>
-                        <td className="px-4 py-2">
-                          <input
-                            type="number"
-                            {...register(`subLevelInputConfig.${idx}.bucketSize`)}
-                            className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                          />
-                        </td>
-                        <td className="px-4 py-2">
-                          <input
-                            type="number"
-                            step="0.1"
-                            {...register(`subLevelInputConfig.${idx}.hedgingPercent`)}
-                            placeholder="null"
-                            className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                          />
-                        </td>
-                        <td className="px-4 py-2">
-                          <input
-                            type="number"
-                            {...register(`subLevelInputConfig.${idx}.latencyThreshold`)}
-                            placeholder="null"
-                            className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-24 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                          />
-                        </td>
-                        <td className="px-4 py-2">
-                          <button type="button" onClick={() => remove(idx)} className="text-slate-400 hover:text-red-500">
-                            <Trash2 size={14} />
-                          </button>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-              <div className="px-4 py-3">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => append({ paymentMethodType: 'card', paymentMethod: 'credit', bucketSize: 20, hedgingPercent: null, latencyThreshold: null })}
-                >
-                  <Plus size={14} /> Add Level
-                </Button>
-              </div>
+              {fields.length ? (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs text-slate-500 border-b border-slate-200 dark:border-[#1c1c24] bg-slate-50 dark:bg-[#0a0a0f]">
+                      <th className="px-4 py-2">Payment Method Type</th>
+                      <th className="px-4 py-2">Payment Method</th>
+                      <th className="px-4 py-2">Bucket Size</th>
+                      <th className="px-4 py-2">Hedging %</th>
+                      <th className="px-4 py-2">Latency Threshold (ms)</th>
+                      <th className="px-4 py-2" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {fields.map((field, idx) => {
+                      const methodType = watchedRows?.[idx]?.paymentMethodType || ''
+                      const methodOptions = PAYMENT_METHODS[methodType] || []
+                      return (
+                        <tr key={field.id} className="border-b border-slate-200 dark:border-[#1c1c24] hover:bg-slate-100 dark:bg-[#0f0f16] transition-colors">
+                          <td className="px-4 py-2">
+                            <select
+                              {...register(`subLevelInputConfig.${idx}.paymentMethodType`)}
+                              className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                            >
+                              {PAYMENT_METHOD_TYPES.map((t) => (
+                                <option key={t} value={t}>{t}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="px-4 py-2">
+                            <select
+                              {...register(`subLevelInputConfig.${idx}.paymentMethod`)}
+                              className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                            >
+                              {(methodOptions.length ? methodOptions : ['credit', 'debit']).map((m) => (
+                                <option key={m} value={m}>{m}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="px-4 py-2">
+                            <input
+                              type="number"
+                              {...register(`subLevelInputConfig.${idx}.bucketSize`)}
+                              className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                            />
+                          </td>
+                          <td className="px-4 py-2">
+                            <input
+                              type="number"
+                              step="0.1"
+                              {...register(`subLevelInputConfig.${idx}.hedgingPercent`)}
+                              placeholder="null"
+                              className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                            />
+                          </td>
+                          <td className="px-4 py-2">
+                            <input
+                              type="number"
+                              {...register(`subLevelInputConfig.${idx}.latencyThreshold`)}
+                              placeholder="null"
+                              className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-24 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                            />
+                          </td>
+                          <td className="px-4 py-2">
+                            <button type="button" onClick={() => remove(idx)} className="text-slate-400 hover:text-red-500">
+                              <Trash2 size={14} />
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="px-4 py-8 text-sm text-slate-500">
+                  No sub-level overrides configured. The default row above is the only active configuration.
+                </div>
+              )}
             </CardBody>
           </Card>
 

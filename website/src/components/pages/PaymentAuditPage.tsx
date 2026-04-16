@@ -5,7 +5,6 @@ import { useMerchantStore } from '../../store/merchantStore'
 import { fetcher } from '../../lib/api'
 import {
   AnalyticsRange,
-  AnalyticsScope,
   PaymentAuditEvent,
   PaymentAuditResponse,
 } from '../../types/api'
@@ -16,8 +15,17 @@ import { Spinner } from '../ui/Spinner'
 import { ErrorMessage } from '../ui/ErrorMessage'
 
 const RANGE_OPTIONS: AnalyticsRange[] = ['15m', '1h', '24h']
-const STATUS_OPTIONS = ['', 'success', 'failure', 'snapshot', 'hit']
-const EVENT_TYPE_OPTIONS = ['', 'decision', 'score_snapshot', 'rule_hit', 'error']
+const STATUS_OPTIONS = [
+  { value: '', label: 'Any status' },
+  { value: 'success', label: 'Success' },
+  { value: 'failure', label: 'Failure' },
+]
+const ROUTE_OPTIONS = [
+  { value: '', label: 'Any route' },
+  { value: 'decide_gateway', label: 'Decide Gateway' },
+  { value: 'update_gateway_score', label: 'Update Gateway' },
+  { value: 'routing_evaluate', label: 'Rule Evaluate' },
+]
 const INSPECTOR_TABS = ['summary', 'input', 'response', 'raw'] as const
 
 type AuditFilters = {
@@ -42,6 +50,20 @@ const EMPTY_FILTERS: AuditFilters = {
   errorCode: '',
 }
 
+function normalizeAuditFilters(filters: AuditFilters): AuditFilters {
+  const paymentId = filters.paymentId.trim()
+  const requestId = paymentId ? '' : filters.requestId.trim()
+  return {
+    paymentId,
+    requestId,
+    gateway: filters.gateway.trim(),
+    route: filters.route,
+    status: filters.status,
+    eventType: filters.eventType,
+    errorCode: filters.errorCode.trim(),
+  }
+}
+
 function queryString(params: Record<string, string | number | undefined>) {
   const search = new URLSearchParams()
   Object.entries(params).forEach(([key, value]) => {
@@ -53,35 +75,29 @@ function queryString(params: Record<string, string | number | undefined>) {
 }
 
 function buildAuditUrl(
-  scope: AnalyticsScope,
   range: AnalyticsRange,
-  merchantId: string | undefined,
+  merchantId: string,
   page: number,
   pageSize: number,
   filters: AuditFilters,
 ) {
+  const normalizedFilters = normalizeAuditFilters(filters)
   const params: Record<string, string | number | undefined> = {
-    scope,
+    scope: 'current',
     range,
     page,
     page_size: pageSize,
-    payment_id: filters.paymentId || undefined,
-    request_id: filters.requestId || undefined,
-    gateway: filters.gateway || undefined,
-    route: filters.route || undefined,
-    status: filters.status || undefined,
-    event_type: filters.eventType || undefined,
-    error_code: filters.errorCode || undefined,
-  }
-  if (scope === 'current' && merchantId) {
-    params.merchant_id = merchantId
+    merchant_id: merchantId,
+    payment_id: normalizedFilters.paymentId || undefined,
+    request_id: normalizedFilters.requestId || undefined,
+    gateway: normalizedFilters.gateway || undefined,
+    route: normalizedFilters.route || undefined,
+    status: normalizedFilters.status || undefined,
+    event_type: normalizedFilters.eventType || undefined,
+    error_code: normalizedFilters.errorCode || undefined,
   }
   const qs = queryString(params)
   return qs ? `/analytics/payment-audit?${qs}` : '/analytics/payment-audit'
-}
-
-function parseScope(_value: string | null): AnalyticsScope {
-  return 'current'
 }
 
 function parseRange(value: string | null): AnalyticsRange {
@@ -90,7 +106,7 @@ function parseRange(value: string | null): AnalyticsRange {
 }
 
 function parseFilters(searchParams: URLSearchParams): AuditFilters {
-  return {
+  return normalizeAuditFilters({
     paymentId: searchParams.get('payment_id') || '',
     requestId: searchParams.get('request_id') || '',
     gateway: searchParams.get('gateway') || '',
@@ -98,7 +114,7 @@ function parseFilters(searchParams: URLSearchParams): AuditFilters {
     status: searchParams.get('status') || '',
     eventType: searchParams.get('event_type') || '',
     errorCode: searchParams.get('error_code') || '',
-  }
+  })
 }
 
 function formatDateTime(ms: number) {
@@ -132,41 +148,75 @@ function humanizeAuditValue(value?: string | null) {
 function routeLabel(route?: string | null) {
   if (!route) return 'Unknown route'
   if (route === 'decision_gateway' || route === 'decide_gateway') return 'Decide Gateway'
+  if (route === 'update_gateway_score') return 'Update Gateway'
+  if (route === 'routing_evaluate') return 'Rule Evaluate'
   return humanizeAuditValue(route)
+}
+
+function eventTypeLabel(eventType?: string | null) {
+  if (!eventType) return 'Unknown event'
+  if (eventType === 'decision') return 'Decide Gateway'
+  if (eventType === 'gateway_update') return 'Update Gateway'
+  if (eventType === 'rule_hit') return 'Rule Evaluate'
+  if (eventType === 'error') return 'Errors'
+  return humanizeAuditValue(eventType)
 }
 
 function stageLabel(event: PaymentAuditEvent) {
   if (event.event_stage === 'gateway_decided') return 'Decide Gateway'
+  if (event.event_stage === 'score_updated') return 'Update Gateway'
+  if (event.event_stage === 'rule_applied') return 'Rule Evaluate'
+  if (event.event_type === 'error') return 'Errors'
   return humanizeAuditValue(event.event_stage || event.event_type)
 }
 
 function eventPhase(event: PaymentAuditEvent) {
   if (event.event_type === 'decision' || event.event_stage === 'gateway_decided') return 'Decide Gateway'
-  if (event.event_type === 'rule_hit' || event.event_stage === 'rule_applied') return 'Rule Applied'
-  if (event.event_type === 'score_snapshot' || event.event_stage === 'score_updated') return 'Update Gateway Score'
-  return 'Final Outcome'
+  if (event.event_type === 'rule_hit' || event.event_stage === 'rule_applied') return 'Rule Evaluate'
+  if (event.event_type === 'gateway_update' || event.event_stage === 'score_updated') return 'Update Gateway'
+  return 'Errors'
 }
 
 function badgeVariantForEvent(event: PaymentAuditEvent): 'blue' | 'green' | 'purple' | 'red' | 'orange' | 'gray' {
-  if (event.event_type === 'error' || event.status === 'failure') return 'red'
+  const normalizedStatus = (event.status || '').toUpperCase()
+  if (
+    event.event_type === 'error' ||
+    normalizedStatus === 'FAILURE' ||
+    normalizedStatus.includes('FAILED') ||
+    normalizedStatus.includes('DECLINED')
+  ) return 'red'
   if (event.event_type === 'rule_hit') return 'purple'
-  if (event.event_type === 'score_snapshot') return 'green'
+  if (
+    normalizedStatus === 'CHARGED' ||
+    normalizedStatus === 'AUTHORIZED' ||
+    normalizedStatus === 'SUCCESS'
+  ) return 'green'
+  if (event.event_type === 'gateway_update') return 'green'
   if (event.event_type === 'decision') return 'blue'
   return 'orange'
 }
 
 function summaryBadgeVariant(status?: string | null): 'blue' | 'green' | 'purple' | 'red' | 'orange' | 'gray' {
-  if (status === 'failure') return 'red'
-  if (status === 'success') return 'green'
-  if (status === 'snapshot') return 'blue'
-  if (status === 'hit') return 'purple'
+  const normalizedStatus = (status || '').toUpperCase()
+  if (
+    normalizedStatus === 'FAILURE' ||
+    normalizedStatus.includes('FAILED') ||
+    normalizedStatus.includes('DECLINED')
+  ) return 'red'
+  if (
+    normalizedStatus === 'SUCCESS' ||
+    normalizedStatus === 'CHARGED' ||
+    normalizedStatus === 'AUTHORIZED'
+  ) return 'green'
+  if (normalizedStatus === 'HIT') return 'purple'
   return 'gray'
 }
 
 function phaseBadgeVariant(phase: string): 'blue' | 'green' | 'purple' | 'red' | 'orange' | 'gray' {
   if (phase === 'Decide Gateway') return 'blue'
-  if (phase === 'Rule Applied') return 'purple'
-  if (phase === 'Update Gateway Score') return 'green'
+  if (phase === 'Rule Evaluate') return 'purple'
+  if (phase === 'Update Gateway') return 'green'
+  if (phase === 'Errors') return 'red'
   return 'orange'
 }
 
@@ -322,7 +372,7 @@ function buildInspectorModel(event: PaymentAuditEvent | null) {
   )
 
   return {
-    summaryRows,
+        summaryRows,
     requestPayload: isRecord(requestPayload) && !Object.keys(requestPayload).length ? null : requestPayload,
     responsePayload: isRecord(responsePayload) && !Object.keys(responsePayload).length ? null : responsePayload,
     scoreContext,
@@ -339,13 +389,11 @@ export function PaymentAuditPage() {
   const { merchantId } = useMerchantStore()
   const [searchParams, setSearchParams] = useSearchParams()
 
-  const initialScope = parseScope(searchParams.get('scope'))
   const initialRange = parseRange(searchParams.get('range'))
   const initialFilters = parseFilters(searchParams)
   const initialPage = Math.max(1, Number(searchParams.get('page') || '1'))
   const initialSelectedKey = searchParams.get('selected') || ''
 
-  const [scope, setScope] = useState<AnalyticsScope>(initialScope)
   const [range, setRange] = useState<AnalyticsRange>(initialRange)
   const [filters, setFilters] = useState<AuditFilters>(initialFilters)
   const [appliedFilters, setAppliedFilters] = useState<AuditFilters>(initialFilters)
@@ -355,11 +403,10 @@ export function PaymentAuditPage() {
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('summary')
   const pageSize = 12
 
-  const canQueryCurrent = scope === 'all' || Boolean(merchantId)
-  const effectiveMerchantId = scope === 'current' ? merchantId || undefined : undefined
+  const canQueryCurrent = Boolean(merchantId)
 
-  const searchUrl = canQueryCurrent
-    ? buildAuditUrl(scope, range, effectiveMerchantId, page, pageSize, appliedFilters)
+  const searchUrl = canQueryCurrent && merchantId
+    ? buildAuditUrl(range, merchantId, page, pageSize, appliedFilters)
     : null
 
   const auditSearch = useSWR<PaymentAuditResponse>(searchUrl, fetcher, {
@@ -385,9 +432,10 @@ export function PaymentAuditPage() {
 
   const detailFilters = useMemo<AuditFilters | null>(() => {
     if (!selectedSummary) return null
+    const paymentId = selectedSummary.payment_id || ''
     return {
-      paymentId: selectedSummary.payment_id || '',
-      requestId: selectedSummary.request_id || '',
+      paymentId,
+      requestId: paymentId ? '' : (selectedSummary.request_id || ''),
       gateway: '',
       route: '',
       status: '',
@@ -396,8 +444,8 @@ export function PaymentAuditPage() {
     }
   }, [selectedSummary])
 
-  const detailUrl = canQueryCurrent && detailFilters
-    ? buildAuditUrl(scope, range, effectiveMerchantId, 1, 50, detailFilters)
+  const detailUrl = canQueryCurrent && merchantId && detailFilters
+    ? buildAuditUrl(range, merchantId, 1, 50, detailFilters)
     : null
 
   const auditDetail = useSWR<PaymentAuditResponse>(detailUrl, fetcher, {
@@ -443,33 +491,34 @@ export function PaymentAuditPage() {
   const activeGateways = selectedSummary?.gateways?.length || 0
   const latestSeen = selectedSummary ? formatRelative(selectedSummary.last_seen_ms) : 'No activity'
 
-  function syncSearch(nextScope: AnalyticsScope, nextRange: AnalyticsRange, nextPage: number, nextFilters: AuditFilters, nextSelectedKey?: string) {
+  function syncSearch(nextRange: AnalyticsRange, nextPage: number, nextFilters: AuditFilters, nextSelectedKey?: string) {
+    const normalizedFilters = normalizeAuditFilters(nextFilters)
     const nextQuery = queryString({
-      scope: nextScope,
       range: nextRange,
-      merchant_id: nextScope === 'current' ? effectiveMerchantId : undefined,
       page: nextPage > 1 ? nextPage : undefined,
-      payment_id: nextFilters.paymentId || undefined,
-      request_id: nextFilters.requestId || undefined,
-      gateway: nextFilters.gateway || undefined,
-      route: nextFilters.route || undefined,
-      status: nextFilters.status || undefined,
-      event_type: nextFilters.eventType || undefined,
-      error_code: nextFilters.errorCode || undefined,
+      payment_id: normalizedFilters.paymentId || undefined,
+      request_id: normalizedFilters.requestId || undefined,
+      gateway: normalizedFilters.gateway || undefined,
+      route: normalizedFilters.route || undefined,
+      status: normalizedFilters.status || undefined,
+      event_type: normalizedFilters.eventType || undefined,
+      error_code: normalizedFilters.errorCode || undefined,
       selected: nextSelectedKey || undefined,
     })
     setSearchParams(nextQuery)
   }
 
   function updateFilter(field: keyof AuditFilters, value: string) {
-    setFilters((current) => ({ ...current, [field]: value }))
+    setFilters((current) => normalizeAuditFilters({ ...current, [field]: value }))
   }
 
   function applyFilters() {
     const nextPage = 1
+    const normalizedFilters = normalizeAuditFilters(filters)
     setPage(nextPage)
-    setAppliedFilters(filters)
-    syncSearch(scope, range, nextPage, filters)
+    setFilters(normalizedFilters)
+    setAppliedFilters(normalizedFilters)
+    syncSearch(range, nextPage, normalizedFilters)
   }
 
   function clearFilters() {
@@ -477,7 +526,7 @@ export function PaymentAuditPage() {
     setPage(nextPage)
     setFilters(EMPTY_FILTERS)
     setAppliedFilters(EMPTY_FILTERS)
-    syncSearch(scope, range, nextPage, EMPTY_FILTERS)
+    syncSearch(range, nextPage, EMPTY_FILTERS)
   }
 
   function refreshAll() {
@@ -485,24 +534,16 @@ export function PaymentAuditPage() {
     auditDetail.mutate()
   }
 
-  function updateScope(nextScope: AnalyticsScope) {
-    if (nextScope === 'all') return
-    const nextPage = 1
-    setScope(nextScope)
-    setPage(nextPage)
-    syncSearch(nextScope, range, nextPage, appliedFilters, selectedKey)
-  }
-
   function updateRange(nextRange: AnalyticsRange) {
     const nextPage = 1
     setRange(nextRange)
     setPage(nextPage)
-    syncSearch(scope, nextRange, nextPage, appliedFilters, selectedKey)
+    syncSearch(nextRange, nextPage, appliedFilters, selectedKey)
   }
 
   function selectSummary(lookupKey: string) {
     setSelectedKey(lookupKey)
-    syncSearch(scope, range, page, appliedFilters, lookupKey)
+    syncSearch(range, page, appliedFilters, lookupKey)
   }
 
   async function copyValue(value: string | null | undefined) {
@@ -516,9 +557,10 @@ export function PaymentAuditPage() {
 
   function openRelatedEvents() {
     if (!selectedEvent) return
+    const paymentId = selectedEvent.payment_id || ''
     const nextFilters: AuditFilters = {
-      paymentId: selectedEvent.payment_id || '',
-      requestId: selectedEvent.request_id || '',
+      paymentId,
+      requestId: paymentId ? '' : (selectedEvent.request_id || ''),
       gateway: selectedEvent.gateway || '',
       route: '',
       status: '',
@@ -528,21 +570,21 @@ export function PaymentAuditPage() {
     setFilters(nextFilters)
     setAppliedFilters(nextFilters)
     setPage(1)
-    syncSearch(scope, range, 1, nextFilters, selectedKey)
+    syncSearch(range, 1, nextFilters, selectedKey)
   }
 
   if (!canQueryCurrent) {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Payment Audit</h1>
+          <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Decision Audit</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-[#8a8a93]">
-            Search a payment and inspect every routing step, score update, rule hit, and failure in one timeline.
+            Search a payment and inspect gateway decisions, gateway updates, rule evaluations, and errors in one transaction trail.
           </p>
         </div>
         <EmptyState
           title="Select a merchant to start auditing payments"
-          body="Use the merchant selector in the top bar, or switch to all merchants if you want an operator-wide search."
+          body="Use the merchant selector in the top bar to load the decision trail for a merchant."
         />
       </div>
     )
@@ -552,15 +594,12 @@ export function PaymentAuditPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Payment Audit</h1>
+          <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Decision Audit</h1>
           <p className="mt-1 max-w-3xl text-sm text-slate-500 dark:text-[#8a8a93]">
-            Search by payment or request, then inspect the full sequence of gateway decision, rule application, score updates, and failures with the exact event payload captured at each step.
+            Search by payment or request, then inspect the full sequence of gateway decisions, gateway updates, rule evaluations, and errors with the exact payload captured at each step.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" variant={scope === 'current' ? 'primary' : 'secondary'} onClick={() => updateScope('current')}>
-            Merchant
-          </Button>
           <Button size="sm" variant="ghost" onClick={refreshAll}>
             Refresh
           </Button>
@@ -578,17 +617,15 @@ export function PaymentAuditPage() {
             {value}
           </Button>
         ))}
-        <Badge variant={scope === 'all' ? 'blue' : 'green'}>
-          {scope === 'all' ? 'All merchants' : merchantId || 'Current merchant'}
-        </Badge>
+        <Badge variant="green">{merchantId || 'Current merchant'}</Badge>
       </div>
 
       <Card>
         <CardHeader>
           <div>
-            <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Search Audit Trail</h2>
+            <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Search Decision Trail</h2>
             <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-              Use payment or request IDs when you have them. Error code, gateway, route, status, and event type narrow operational noise quickly.
+              Use payment or request IDs when you have them. Error code, gateway, route, and status narrow operational noise quickly.
             </p>
           </div>
         </CardHeader>
@@ -597,19 +634,18 @@ export function PaymentAuditPage() {
             <input className={controlClassName()} value={filters.paymentId} onChange={(event) => updateFilter('paymentId', event.target.value)} placeholder="Payment ID" />
             <input className={controlClassName()} value={filters.requestId} onChange={(event) => updateFilter('requestId', event.target.value)} placeholder="Request ID" />
             <input className={controlClassName()} value={filters.gateway} onChange={(event) => updateFilter('gateway', event.target.value)} placeholder="Gateway" />
-            <input className={controlClassName()} value={filters.route} onChange={(event) => updateFilter('route', event.target.value)} placeholder="Route" />
-            <input className={controlClassName()} value={filters.errorCode} onChange={(event) => updateFilter('errorCode', event.target.value)} placeholder="Error code" />
-            <select className={controlClassName()} value={filters.status} onChange={(event) => updateFilter('status', event.target.value)}>
-              {STATUS_OPTIONS.map((value) => (
-                <option key={value || 'all'} value={value}>
-                  {value || 'Any status'}
+            <select className={controlClassName()} value={filters.route} onChange={(event) => updateFilter('route', event.target.value)}>
+              {ROUTE_OPTIONS.map((option) => (
+                <option key={option.value || 'all'} value={option.value}>
+                  {option.label}
                 </option>
               ))}
             </select>
-            <select className={controlClassName()} value={filters.eventType} onChange={(event) => updateFilter('eventType', event.target.value)}>
-              {EVENT_TYPE_OPTIONS.map((value) => (
-                <option key={value || 'all'} value={value}>
-                  {value || 'Any event type'}
+            <input className={controlClassName()} value={filters.errorCode} onChange={(event) => updateFilter('errorCode', event.target.value)} placeholder="Error code" />
+            <select className={controlClassName()} value={filters.status} onChange={(event) => updateFilter('status', event.target.value)}>
+              {STATUS_OPTIONS.map((option) => (
+                <option key={option.value || 'all'} value={option.value}>
+                  {option.label}
                 </option>
               ))}
             </select>
@@ -626,7 +662,7 @@ export function PaymentAuditPage() {
       {loading && (
         <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-[#8a8a93]">
           <Spinner size={16} />
-          Loading payment audit data…
+          Loading decision audit data…
         </div>
       )}
 
@@ -646,7 +682,7 @@ export function PaymentAuditPage() {
                 <Button size="sm" variant="secondary" disabled={page <= 1} onClick={() => {
                   const nextPage = Math.max(1, page - 1)
                   setPage(nextPage)
-                  syncSearch(scope, range, nextPage, appliedFilters, selectedKey)
+                  syncSearch(range, nextPage, appliedFilters, selectedKey)
                 }}>
                   Prev
                 </Button>
@@ -657,7 +693,7 @@ export function PaymentAuditPage() {
                   onClick={() => {
                     const nextPage = page + 1
                     setPage(nextPage)
-                    syncSearch(scope, range, nextPage, appliedFilters, selectedKey)
+                    syncSearch(range, nextPage, appliedFilters, selectedKey)
                   }}
                 >
                   Next
@@ -685,7 +721,9 @@ export function PaymentAuditPage() {
                       {row.merchant_id || 'unknown merchant'} · {formatDateTime(row.last_seen_ms)}
                     </p>
                   </div>
-                  <Badge variant={summaryBadgeVariant(row.latest_status)}>{row.latest_status || 'unknown'}</Badge>
+                  <Badge variant={summaryBadgeVariant(row.latest_status)}>
+                    {humanizeAuditValue(row.latest_status) || 'Unknown'}
+                  </Badge>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {row.latest_stage ? <Badge variant="blue">{row.latest_stage}</Badge> : null}
@@ -720,7 +758,11 @@ export function PaymentAuditPage() {
                 <div className="flex flex-wrap gap-2">
                   {selectedSummary?.latest_gateway ? <Badge variant="green">{selectedSummary.latest_gateway}</Badge> : null}
                   {selectedSummary?.latest_stage ? <Badge variant="blue">{selectedSummary.latest_stage}</Badge> : null}
-                  {selectedSummary?.latest_status ? <Badge variant={summaryBadgeVariant(selectedSummary.latest_status)}>{selectedSummary.latest_status}</Badge> : null}
+                  {selectedSummary?.latest_status ? (
+                    <Badge variant={summaryBadgeVariant(selectedSummary.latest_status)}>
+                      {humanizeAuditValue(selectedSummary.latest_status)}
+                    </Badge>
+                  ) : null}
                 </div>
               </div>
             </CardHeader>
@@ -768,8 +810,12 @@ export function PaymentAuditPage() {
                                   </p>
                                 </div>
                                 <div className="flex flex-wrap gap-2">
-                                  <Badge variant={badgeVariantForEvent(event)}>{event.event_type}</Badge>
-                                  {event.status ? <Badge variant={summaryBadgeVariant(event.status)}>{event.status}</Badge> : null}
+                                  <Badge variant={badgeVariantForEvent(event)}>{eventTypeLabel(event.event_type)}</Badge>
+                                  {event.status ? (
+                                    <Badge variant={summaryBadgeVariant(event.status)}>
+                                      {humanizeAuditValue(event.status)}
+                                    </Badge>
+                                  ) : null}
                                   {event.gateway ? <Badge variant="green">{event.gateway}</Badge> : null}
                                 </div>
                               </div>
@@ -797,8 +843,8 @@ export function PaymentAuditPage() {
                 </div>
               ) : (
                 <EmptyState
-                  title="No timeline selected yet"
-                  body="Pick a payment from the left column to see the full routing and scoring sequence."
+                title="No timeline selected yet"
+                  body="Pick a payment from the left column to see the full transaction trail."
                 />
               )}
             </CardBody>
@@ -898,7 +944,7 @@ export function PaymentAuditPage() {
               ) : (
                 <EmptyState
                   title="No event selected"
-                  body="Pick a timeline step to see the request, response, scoring details, and raw payload."
+                  body="Pick a timeline step to see the request, response, transaction context, and raw payload."
                 />
               )}
             </CardBody>

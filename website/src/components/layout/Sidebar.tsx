@@ -35,7 +35,7 @@ export function Sidebar() {
         <SideLink to="/" icon={LayoutDashboard} end>Overview</SideLink>
         <SideLink to="/decisions" icon={Search}>Decision Explorer</SideLink>
         <SideLink to="/analytics" icon={BarChart3}>Analytics</SideLink>
-        <SideLink to="/audit" icon={Activity}>Payment Audit</SideLink>
+        <SideLink to="/audit" icon={Activity}>Decision Audit</SideLink>
 
         <div className="pt-8 pb-3 px-3 flex items-center gap-2">
           <span className="text-[11px] font-bold uppercase tracking-widest text-slate-400 dark:text-[#66666e]">
@@ -45,7 +45,7 @@ export function Sidebar() {
 
         <SideLink to="/routing" icon={GitBranch} end>Routing Hub</SideLink>
         <SideLink to="/routing/sr" icon={TrendingUp} indent>Auth-Rate Based</SideLink>
-        <SideLink to="/routing/rules" icon={BookOpen} indent>Rule-Based (Euclid)</SideLink>
+        <SideLink to="/routing/rules" icon={BookOpen} indent>Rule-Based</SideLink>
         <SideLink to="/routing/volume" icon={PieChart} indent>Volume Split</SideLink>
         <SideLink to="/routing/debit" icon={Network} indent>Debit Routing</SideLink>
       </nav>

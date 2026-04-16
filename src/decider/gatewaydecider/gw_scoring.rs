@@ -906,8 +906,38 @@ pub async fn reset_gateway_for_sr_v3(
 }
 
 pub async fn get_score_from_redis(bucket_size: i32, redis_key: &RedisKey) -> f64 {
+    let queue_key = format!("{}{}", redis_key, "_}queue");
     let score_key = format!("{}{}", redis_key, "_}score");
     let app_state = get_tenant_app_state().await;
+    let bucket_size = bucket_size.max(1);
+    let queue_window = app_state
+        .redis_conn
+        .get_list_range(&queue_key, 0, i64::from(bucket_size - 1))
+        .await
+        .ok()
+        .filter(|values| !values.is_empty());
+
+    if let Some(values) = queue_window {
+        let parsed_scores: Vec<f64> = values
+            .iter()
+            .filter_map(|value| value.parse::<f64>().ok())
+            .collect();
+
+        if !parsed_scores.is_empty() {
+            let success_count: f64 = parsed_scores.iter().sum();
+            let score = (success_count / parsed_scores.len() as f64).clamp(0.0, 1.0);
+            logger::info!(
+                tag = "get_score_from_redis",
+                action = "get_score_from_redis",
+                "Derived sr_v3 score {:?} from queue {:?} using {:?} samples",
+                score,
+                queue_key,
+                parsed_scores.len()
+            );
+            return score;
+        }
+    }
+
     let success_count = app_state
         .redis_conn
         .get_key::<i32>(&score_key, "sr_v3_score_key")
