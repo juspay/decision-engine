@@ -292,6 +292,7 @@ where
 
     let router = router
         .nest("/health", routes::health::serve())
+        .nest("/analytics", routes::analytics::serve())
         .layer(middleware)
         .with_state(global_app_state.clone());
 
