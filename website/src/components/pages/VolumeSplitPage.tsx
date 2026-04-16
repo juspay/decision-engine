@@ -10,10 +10,12 @@ import { useMerchantStore } from '../../store/merchantStore'
 import { apiPost } from '../../lib/api'
 import { RoutingAlgorithm } from '../../types/api'
 import { Plus, Trash2, Eye } from 'lucide-react'
+import { validateVolumeSplitRule } from '../../features/routing/volumeSplit/schema'
+import { toVolumeSplitCreatePayload } from '../../features/routing/volumeSplit/payload'
+import { toVolumeSplitRuleDetailsState } from '../../features/routing/volumeSplit/state'
+import { VolumeSplitGatewayFormEntry } from '../../features/routing/volumeSplit/types'
 
 const COLORS = ['#0069ED', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
-
-interface GatewayEntry { id: string; name: string; split: number }
 
 function makeId() { return Math.random().toString(36).slice(2) }
 
@@ -27,9 +29,9 @@ export function VolumeSplitPage() {
 
   const activeVol = active?.find(r => (r.algorithm_data || r.algorithm)?.type === 'volume_split')
 
-  const [gateways, setGateways] = useState<GatewayEntry[]>([
-    { id: makeId(), name: '', split: 50 },
-    { id: makeId(), name: '', split: 50 },
+  const [gateways, setGateways] = useState<VolumeSplitGatewayFormEntry[]>([
+    { id: makeId(), gatewayName: '', gatewayId: '', split: 50 },
+    { id: makeId(), gatewayName: '', gatewayId: '', split: 50 },
   ])
   const [ruleName, setRuleName] = useState('')
   const [saving, setSaving] = useState(false)
@@ -40,12 +42,12 @@ export function VolumeSplitPage() {
 
   const total = gateways.reduce((s, g) => s + g.split, 0)
 
-  function updateGateway(id: string, field: 'name' | 'split', val: string | number) {
+  function updateGateway(id: string, field: 'gatewayName' | 'gatewayId' | 'split', val: string | number) {
     setGateways(gs => gs.map(g => g.id === id ? { ...g, [field]: val } : g))
   }
 
   function addGateway() {
-    setGateways(gs => [...gs, { id: makeId(), name: '', split: 0 }])
+    setGateways(gs => [...gs, { id: makeId(), gatewayName: '', gatewayId: '', split: 0 }])
   }
 
   function removeGateway(id: string) {
@@ -54,33 +56,19 @@ export function VolumeSplitPage() {
 
   async function handleCreate() {
     if (!merchantId) return setError('Set a merchant ID first')
-    if (!ruleName.trim()) return setError('Enter a rule name')
-    if (total !== 100) return setError(`Splits must sum to 100 (currently ${total})`)
-    if (gateways.some(g => !g.name.trim())) return setError('All gateways must have names')
+    const validationError = validateVolumeSplitRule({ ruleName, gateways })
+    if (validationError) return setError(validationError)
 
     setSaving(true); setError(null); setSuccess(null)
     try {
-      await apiPost('/routing/create', {
-        rule_id: null,
-        name: ruleName,
-        description: '',
-        created_by: merchantId,
-        algorithm_for: 'payment',
-        metadata: null,
-        algorithm: {
-          type: 'volume_split',
-          data: gateways.map(g => ({
-            split: g.split,
-            output: { gateway_name: g.name.trim(), gateway_id: null },
-          })),
-        },
-      })
+      const payload = toVolumeSplitCreatePayload({ ruleName, gateways }, merchantId)
+      await apiPost('/routing/create', payload)
       setSuccess(`Rule "${ruleName}" created successfully. Find it in the list below to activate.`)
       mutate()
       setRuleName('')
       setGateways([
-        { id: makeId(), name: '', split: 50 },
-        { id: makeId(), name: '', split: 50 },
+        { id: makeId(), gatewayName: '', gatewayId: '', split: 50 },
+        { id: makeId(), gatewayName: '', gatewayId: '', split: 50 },
       ])
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to create rule')
@@ -116,7 +104,7 @@ export function VolumeSplitPage() {
   const algo = activeVol ? (activeVol.algorithm_data || activeVol.algorithm) : null
   const pieData = algo && 'data' in algo
     ? (algo.data as { split: number; output: { gateway_name: string; gateway_id: string | null } }[]).map(item => ({
-        name: item.output?.gateway_name ?? '?',
+        name: `${item.output?.gateway_name ?? '?'}${item.output?.gateway_id ? ` (${item.output.gateway_id})` : ''}`,
         value: item.split,
       }))
     : []
@@ -188,17 +176,24 @@ export function VolumeSplitPage() {
           </div>
 
           <div className="space-y-2">
-            <div className="grid grid-cols-[1fr_100px_32px] gap-2 text-xs font-medium text-slate-500 px-1">
+            <div className="grid grid-cols-[1fr_1fr_100px_32px] gap-2 text-xs font-medium text-slate-500 px-1">
               <span>Gateway Name</span>
+              <span>Gateway ID</span>
               <span>Split %</span>
               <span />
             </div>
             {gateways.map(g => (
-              <div key={g.id} className="grid grid-cols-[1fr_100px_32px] gap-2 items-center">
+              <div key={g.id} className="grid grid-cols-[1fr_1fr_100px_32px] gap-2 items-center">
                 <input
-                  value={g.name}
-                  onChange={e => updateGateway(g.id, 'name', e.target.value)}
+                  value={g.gatewayName}
+                  onChange={e => updateGateway(g.id, 'gatewayName', e.target.value)}
                   placeholder="e.g. stripe"
+                  className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                />
+                <input
+                  value={g.gatewayId}
+                  onChange={e => updateGateway(g.id, 'gatewayId', e.target.value)}
+                  placeholder="optional gateway_id"
                   className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
                 />
                 <input
@@ -279,15 +274,16 @@ function ActiveRulesList({
           </thead>
           <tbody className="divide-y divide-[#1c1c24]">
             {volRules.map(r => {
+              const details = toVolumeSplitRuleDetailsState(r)
+              const itemText = details?.gateways.map(i => `${i.gatewayName}${i.gatewayId ? `(${i.gatewayId})` : ''}:${i.split}%`).join(' | ') || ''
               const algorithm = r.algorithm_data || r.algorithm
-              const items = algorithm?.data as { split: number; output: { gateway_name: string; gateway_id: string | null } }[] || []
               const isExpanded = expandedRuleIds.has(r.id)
               return (
                 <>
                   <tr key={r.id} className="hover:bg-slate-100 dark:bg-[#0f0f16] transition-colors">
                     <td className="px-4 py-2 font-medium text-slate-800">{r.name}</td>
                     <td className="px-4 py-2 text-slate-600 text-xs">
-                      {items.map(i => `${i.output?.gateway_name}:${i.split}%`).join(' | ')}
+                      {itemText}
                     </td>
                     <td className="px-4 py-2 text-right">
                       <div className="flex items-center justify-end gap-2">
