@@ -8,6 +8,7 @@ import {
   BookOpen,
   PieChart,
   Network,
+  ScrollText,
 } from 'lucide-react'
 
 export function Sidebar() {
@@ -44,6 +45,14 @@ export function Sidebar() {
         <SideLink to="/routing/rules" icon={BookOpen} indent>Rule-Based (Euclid)</SideLink>
         <SideLink to="/routing/volume" icon={PieChart} indent>Volume Split</SideLink>
         <SideLink to="/routing/debit" icon={Network} indent>Debit Routing</SideLink>
+
+        <div className="pt-8 pb-3 px-3 flex items-center gap-2">
+          <span className="text-[11px] font-bold uppercase tracking-widest text-slate-400 dark:text-[#66666e]">
+            Observability
+          </span>
+        </div>
+
+        <SideLink to="/audit" icon={ScrollText}>Audit Log</SideLink>
       </nav>
 
       {/* Footer */}

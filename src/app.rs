@@ -271,9 +271,19 @@ where
         "/update-gateway-score",
         post(routes::update_gateway_score::update_gateway_score),
     );
+    let router = router
+        .route("/audit/stats", get(routes::audit::audit_stats))
+        .route("/audit/requests", get(routes::audit::audit_requests))
+        .route(
+            "/audit/request/:id",
+            get(routes::audit::audit_request_by_id),
+        );
 
     let middleware = ServiceBuilder::new()
         .layer(middleware::from_fn(ensure_request_id))
+        .layer(middleware::from_fn(
+            crate::middleware::audit::audit_middleware,
+        ))
         .layer(
             tower_trace::TraceLayer::new_for_http()
                 .make_span_with(|request: &Request<_>| utils::record_fields_from_header(request))

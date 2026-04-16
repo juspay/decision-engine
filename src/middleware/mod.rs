@@ -1,3 +1,5 @@
+pub mod audit;
+
 use crate::custom_extractors::TenantStateResolver;
 use crate::error::{self, ContainerError};
 use axum::body::Body;
