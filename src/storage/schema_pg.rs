@@ -37,6 +37,16 @@ diesel::table! {
         request_id -> Nullable<Varchar>,
         #[max_length = 128]
         event_stage -> Nullable<Varchar>,
+        #[max_length = 255]
+        card_network -> Nullable<Varchar>,
+        #[max_length = 255]
+        card_is_in -> Nullable<Varchar>,
+        #[max_length = 64]
+        currency -> Nullable<Varchar>,
+        #[max_length = 64]
+        country -> Nullable<Varchar>,
+        #[max_length = 64]
+        auth_type -> Nullable<Varchar>,
     }
 }
 

@@ -266,6 +266,12 @@ pub async fn routing_evaluate(
         created_by = %payload.created_by,
         "Received routing evaluation request"
     );
+    crate::analytics::record_request_hit_event(
+        "routing_evaluate",
+        Some(payload.created_by.clone()),
+        payload.payment_id.clone(),
+        None,
+    );
 
     let update_failure_metrics = || {
         API_REQUEST_COUNTER

@@ -633,7 +633,7 @@ export function EuclidRulesPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold text-slate-900">Rule-Based Routing</h1>
-        <p className="text-sm text-slate-500 mt-1">Create Euclid DSL declarative routing rules</p>
+        <p className="text-sm text-slate-500 mt-1">Create declarative routing rules</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -651,73 +651,67 @@ export function EuclidRulesPage() {
               ) : allAlgorithms.length === 0 ? (
                 <p className="px-4 py-3 text-sm text-slate-400">No rules yet.</p>
               ) : (
-                <table className="w-full text-sm">
-                  <tbody>
-                    {allAlgorithms.map((algo) => {
-                      const isActive = activeIds.has(algo.id)
-                      const isExpanded = expandedRuleIds.has(algo.id)
-                      // Backend returns algorithm_data, map it to algorithm for display
-                      const algorithm = algo.algorithm_data || algo.algorithm
-                      return (
-                        <>
-                          <tr key={algo.id} className="border-b border-slate-100 dark:border-[#222226] last:border-0">
-                            <td className="px-4 py-3">
-                              <p className="font-medium truncate">{algo.name}</p>
-                              <p className="text-xs text-slate-400 capitalize">{algorithm?.type}</p>
-                            </td>
-                            <td className="px-2 py-3">
-                              <Badge variant={isActive ? 'green' : 'gray'}>
-                                {isActive ? 'Active' : 'Inactive'}
-                              </Badge>
-                            </td>
-                            <td className="px-2 py-3">
-                              <div className="flex items-center gap-1">
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => toggleRuleExpand(algo.id)}
-                                >
-                                  <Eye size={14} className="mr-1" />
-                                  {isExpanded ? 'Hide' : 'View'}
-                                </Button>
-                                {!isActive && (
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    onClick={() => handleActivate(algo.id)}
-                                    disabled={activating}
-                                  >
-                                    Activate
-                                  </Button>
-                                )}
+                <div className="divide-y divide-slate-100 dark:divide-[#222226]">
+                  {allAlgorithms.map((algo) => {
+                    const isActive = activeIds.has(algo.id)
+                    const isExpanded = expandedRuleIds.has(algo.id)
+                    const algorithm = algo.algorithm_data || algo.algorithm
+
+                    return (
+                      <div key={algo.id}>
+                        <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate font-medium">{algo.name}</p>
+                            <p className="text-xs text-slate-400 capitalize">{algorithm?.type}</p>
+                          </div>
+
+                          <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+                            <Badge variant={isActive ? 'green' : 'gray'}>
+                              {isActive ? 'Active' : 'Inactive'}
+                            </Badge>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => toggleRuleExpand(algo.id)}
+                            >
+                              <Eye size={14} className="mr-1" />
+                              {isExpanded ? 'Hide' : 'View'}
+                            </Button>
+                            {!isActive && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => handleActivate(algo.id)}
+                                disabled={activating}
+                              >
+                                Activate
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+
+                        {isExpanded && (
+                          <div className="bg-slate-50 px-4 py-3 dark:bg-[#151518]">
+                            <div className="space-y-2 text-xs text-slate-600">
+                              <p><strong>ID:</strong> {algo.id}</p>
+                              <p><strong>Description:</strong> {algo.description || 'N/A'}</p>
+                              <p><strong>Algorithm For:</strong> {algo.algorithm_for}</p>
+                              {algo.created_at && (
+                                <p><strong>Created:</strong> {new Date(algo.created_at).toLocaleString()}</p>
+                              )}
+                              <div>
+                                <strong>Configuration:</strong>
+                                <pre className="mt-1 max-h-48 overflow-auto rounded border border-transparent bg-slate-100 p-2 text-xs dark:border-[#222226] dark:bg-[#0f0f11]">
+                                  {JSON.stringify(algorithm, null, 2)}
+                                </pre>
                               </div>
-                            </td>
-                          </tr>
-                          {isExpanded && (
-                            <tr>
-                              <td colSpan={3} className="px-4 py-3 bg-slate-50 dark:bg-[#151518]">
-                                <div className="text-xs text-slate-600 space-y-2">
-                                  <p><strong>ID:</strong> {algo.id}</p>
-                                  <p><strong>Description:</strong> {algo.description || 'N/A'}</p>
-                                  <p><strong>Algorithm For:</strong> {algo.algorithm_for}</p>
-                                  {algo.created_at && (
-                                    <p><strong>Created:</strong> {new Date(algo.created_at).toLocaleString()}</p>
-                                  )}
-                                  <div>
-                                    <strong>Configuration:</strong>
-                                    <pre className="mt-1 p-2 bg-slate-100 dark:bg-[#0f0f11] border border-transparent dark:border-[#222226] rounded text-xs overflow-auto max-h-48">
-                                      {JSON.stringify(algorithm, null, 2)}
-                                    </pre>
-                                  </div>
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </>
-                      )
-                    })}
-                  </tbody>
-                </table>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
               )}
             </CardBody>
           </Card>

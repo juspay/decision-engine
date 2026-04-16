@@ -434,6 +434,19 @@ impl RedisConnectionWrapper {
             .change_context(errors::RedisError::GetListLengthFailed)
     }
 
+    pub async fn get_list_range(
+        &self,
+        key: &str,
+        start: i64,
+        stop: i64,
+    ) -> Result<Vec<String>, errors::RedisError> {
+        self.conn
+            .pool
+            .lrange(key, start, stop)
+            .await
+            .change_context(errors::RedisError::GetListLengthFailed)
+    }
+
     pub async fn append_to_list_start<V>(
         &self,
         key: &RedisKey,

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import useSWR from 'swr'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts'
 import { Card, CardBody, CardHeader } from '../ui/Card'
 import { Button } from '../ui/Button'
@@ -6,11 +7,11 @@ import { Badge } from '../ui/Badge'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { Spinner } from '../ui/Spinner'
 import { useMerchantStore } from '../../store/merchantStore'
-import { apiPost } from '../../lib/api'
-import { DecideGatewayResponse, GatewayConnector } from '../../types/api'
+import { apiPost, fetcher } from '../../lib/api'
+import { DecideGatewayResponse, GatewayConnector, PaymentAuditEvent, PaymentAuditResponse } from '../../types/api'
 import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
 import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
-import { Play, RefreshCw, ChevronDown, ChevronUp, Activity, Code, Plus, Trash2, PieChart as PieChartIcon } from 'lucide-react'
+import { Play, RefreshCw, ChevronDown, ChevronUp, Activity, Code, Plus, Trash2, PieChart as PieChartIcon, X } from 'lucide-react'
 
 const ALGORITHMS = ['SR_BASED_ROUTING', 'PL_BASED_ROUTING', 'NTW_BASED_ROUTING']
 
@@ -47,6 +48,8 @@ interface SimulationResult {
   timestamp: string
 }
 
+type AuditInspectorTab = 'summary' | 'input' | 'response' | 'raw'
+
 interface RuleEvaluateParams {
   key: string
   type: 'enum_variant' | 'str_value' | 'number' | 'metadata_variant'
@@ -76,12 +79,69 @@ function approachColor(approach: string): string {
 
 const COLORS = ['#0069ED', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16']
 
+type VolumePaymentEntry = {
+  connector: string
+  colorIdx: number
+}
+
 function toUpperOptions(values: string[] = []): string[] {
   return values.map(v => v.trim()).filter(Boolean).map(v => v.toUpperCase())
 }
 
 function uniqueUpperOptions(values: string[] = []): string[] {
   return Array.from(new Set(toUpperOptions(values)))
+}
+
+function mulberry32(seed: number) {
+  return function random() {
+    let t = seed += 0x6D2B79F5
+    t = Math.imul(t ^ (t >>> 15), t | 1)
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+function buildVolumePaymentLog(
+  distribution: Array<{ name: string; count: number; percentage: number }>,
+  totalPayments: number,
+): VolumePaymentEntry[] {
+  const total = Math.max(0, totalPayments)
+  if (!distribution.length || total === 0) return []
+
+  const payments: VolumePaymentEntry[] = []
+
+  distribution.forEach((item, idx) => {
+    for (let count = 0; count < item.count; count += 1) {
+      payments.push({ connector: item.name, colorIdx: idx })
+    }
+  })
+
+  const rankedConnectors = distribution
+    .map((item, idx) => ({ connector: item.name, colorIdx: idx, percentage: item.percentage }))
+    .sort((a, b) => b.percentage - a.percentage)
+
+  while (payments.length < total) {
+    const filler = rankedConnectors[payments.length % rankedConnectors.length]
+    payments.push({ connector: filler.connector, colorIdx: filler.colorIdx })
+  }
+
+  if (payments.length > total) {
+    payments.length = total
+  }
+
+  const seed = distribution.reduce((acc, item, idx) => {
+    const connectorScore = Array.from(item.name).reduce((sum, char) => sum + char.charCodeAt(0), 0)
+    return acc + connectorScore + idx * 31 + item.count * 17 + Math.round(item.percentage * 10)
+  }, total * 13)
+
+  const random = mulberry32(seed)
+  const shuffled = [...payments]
+  for (let idx = shuffled.length - 1; idx > 0; idx -= 1) {
+    const swapIndex = Math.floor(random() * (idx + 1))
+    ;[shuffled[idx], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[idx]]
+  }
+
+  return shuffled
 }
 
 function mapRoutingTypeToRuleParamType(
@@ -91,6 +151,284 @@ function mapRoutingTypeToRuleParamType(
   if (keyType === 'integer') return 'number'
   if (keyType === 'udf' || keyType === 'global_ref') return 'metadata_variant'
   return 'str_value'
+}
+
+function queryString(params: Record<string, string | number | undefined>) {
+  const search = new URLSearchParams()
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== '') {
+      search.set(key, String(value))
+    }
+  })
+  return search.toString()
+}
+
+function formatDateTime(ms: number) {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(ms))
+}
+
+function humanizeAuditValue(value?: string | null) {
+  if (!value) return ''
+  const normalized = value
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+
+  return normalized.replace(/\b\w/g, (char) => char.toUpperCase())
+}
+
+function routeLabel(route?: string | null) {
+  if (!route) return 'Unknown route'
+  if (route === 'decision_gateway' || route === 'decide_gateway') return 'Decide Gateway'
+  if (route === 'update_gateway_score') return 'Update Gateway'
+  if (route === 'routing_evaluate') return 'Rule Evaluate'
+  return humanizeAuditValue(route)
+}
+
+function eventTypeLabel(eventType?: string | null) {
+  if (!eventType) return 'Unknown event'
+  if (eventType === 'decision') return 'Decide Gateway'
+  if (eventType === 'gateway_update') return 'Update Gateway'
+  if (eventType === 'rule_hit') return 'Rule Evaluate'
+  if (eventType === 'error') return 'Errors'
+  return humanizeAuditValue(eventType)
+}
+
+function stageLabel(event: PaymentAuditEvent) {
+  if (event.event_stage === 'gateway_decided') return 'Decide Gateway'
+  if (event.event_stage === 'score_updated') return 'Update Gateway'
+  if (event.event_stage === 'rule_applied') return 'Rule Evaluate'
+  if (event.event_type === 'error') return 'Errors'
+  return humanizeAuditValue(event.event_stage || event.event_type)
+}
+
+function eventPhase(event: PaymentAuditEvent) {
+  if (event.event_type === 'decision' || event.event_stage === 'gateway_decided') return 'Decide Gateway'
+  if (event.event_type === 'rule_hit' || event.event_stage === 'rule_applied') return 'Rule Evaluate'
+  if (event.event_type === 'gateway_update' || event.event_stage === 'score_updated') return 'Update Gateway'
+  return 'Errors'
+}
+
+function badgeVariantForEvent(event: PaymentAuditEvent): 'blue' | 'green' | 'purple' | 'red' | 'orange' | 'gray' {
+  const normalizedStatus = (event.status || '').toUpperCase()
+  if (
+    event.event_type === 'error' ||
+    normalizedStatus === 'FAILURE' ||
+    normalizedStatus.includes('FAILED') ||
+    normalizedStatus.includes('DECLINED')
+  ) return 'red'
+  if (event.event_type === 'rule_hit') return 'purple'
+  if (
+    normalizedStatus === 'CHARGED' ||
+    normalizedStatus === 'AUTHORIZED' ||
+    normalizedStatus === 'SUCCESS'
+  ) return 'green'
+  if (event.event_type === 'gateway_update') return 'green'
+  if (event.event_type === 'decision') return 'blue'
+  return 'orange'
+}
+
+function summaryBadgeVariant(status?: string | null): 'blue' | 'green' | 'purple' | 'red' | 'orange' | 'gray' {
+  const normalizedStatus = (status || '').toUpperCase()
+  if (
+    normalizedStatus === 'FAILURE' ||
+    normalizedStatus.includes('FAILED') ||
+    normalizedStatus.includes('DECLINED')
+  ) return 'red'
+  if (
+    normalizedStatus === 'SUCCESS' ||
+    normalizedStatus === 'CHARGED' ||
+    normalizedStatus === 'AUTHORIZED'
+  ) return 'green'
+  return 'gray'
+}
+
+function phaseBadgeVariant(phase: string): 'blue' | 'green' | 'purple' | 'red' | 'orange' | 'gray' {
+  if (phase === 'Decide Gateway') return 'blue'
+  if (phase === 'Rule Evaluate') return 'purple'
+  if (phase === 'Update Gateway') return 'green'
+  if (phase === 'Errors') return 'red'
+  return 'gray'
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function cleanRecord(record: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(record).filter(([, value]) => value !== undefined && value !== null && value !== ''),
+  )
+}
+
+function stringifyValue(value: unknown) {
+  if (typeof value === 'string') return value
+  return JSON.stringify(value, null, 2)
+}
+
+function buildAuditUrl(merchantId: string, paymentId: string) {
+  const qs = queryString({
+    scope: 'current',
+    range: '24h',
+    page: 1,
+    page_size: 25,
+    merchant_id: merchantId,
+    payment_id: paymentId,
+  })
+  return `/analytics/payment-audit?${qs}`
+}
+
+function buildInspectorModel(event: PaymentAuditEvent | null) {
+  if (!event) return null
+
+  const details = isRecord(event.details_json) ? event.details_json : {}
+  const explicitResponse =
+    details.response ??
+    details.response_payload ??
+    details.result ??
+    details.output ??
+    null
+  const requestPayload =
+    details.request ??
+    details.request_payload ??
+    details.input ??
+    details.payload ??
+    cleanRecord({
+      payment_id: event.payment_id,
+      request_id: event.request_id,
+      payment_method_type: event.payment_method_type,
+      payment_method: event.payment_method,
+      gateway: event.gateway,
+    })
+  const responsePayload =
+    explicitResponse ??
+    cleanRecord({
+      event_type: event.event_type,
+      status: event.status,
+      error_code: event.error_code,
+      error_message: event.error_message,
+      score_value: event.score_value,
+      sigma_factor: event.sigma_factor,
+      average_latency: event.average_latency,
+      tp99_latency: event.tp99_latency,
+      transaction_count: event.transaction_count,
+      rule_name: event.rule_name,
+      routing_approach: event.routing_approach,
+    })
+  const responseRecord = isRecord(explicitResponse) ? explicitResponse : null
+  const decidedGatewayRecord = isRecord(responseRecord?.['decided_gateway']) ? responseRecord['decided_gateway'] : null
+  const scoreContext =
+    details.score_context ??
+    (decidedGatewayRecord ? decidedGatewayRecord['gateway_priority_map'] : null) ??
+    (responseRecord ? responseRecord['gateway_priority_map'] : null) ??
+    null
+  const selectionReason = details.selection_reason ?? null
+
+  const summaryRows = [
+    { label: 'Phase', value: eventPhase(event) },
+    { label: 'Stage', value: stageLabel(event) },
+    { label: 'Route', value: routeLabel(event.route) },
+    { label: 'Timestamp', value: formatDateTime(event.created_at_ms) },
+    ...(event.merchant_id ? [{ label: 'Merchant', value: event.merchant_id }] : []),
+    ...(event.payment_id ? [{ label: 'Payment ID', value: event.payment_id }] : []),
+    ...(event.request_id ? [{ label: 'Request ID', value: event.request_id }] : []),
+    ...(event.gateway ? [{ label: 'Gateway', value: event.gateway }] : []),
+    ...(event.status ? [{ label: 'Status', value: humanizeAuditValue(event.status) }] : []),
+  ]
+
+  const signalRecord = cleanRecord(
+    Object.fromEntries(
+      Object.entries(details).filter(([key]) => ![
+        'request',
+        'request_payload',
+        'input',
+        'payload',
+        'response',
+        'response_payload',
+        'result',
+        'output',
+        'score_context',
+        'selection_reason',
+      ].includes(key)),
+    ),
+  )
+
+  return {
+    summaryRows,
+    requestPayload: isRecord(requestPayload) && !Object.keys(requestPayload).length ? null : requestPayload,
+    responsePayload: isRecord(responsePayload) && !Object.keys(responsePayload).length ? null : responsePayload,
+    scoreContext,
+    selectionReason,
+    signalRecord: Object.keys(signalRecord).length ? signalRecord : null,
+    rawEvent: {
+      ...event,
+      details_json: event.details_json,
+    },
+  }
+}
+
+function sectionButtonClass(active: boolean) {
+  return active
+    ? 'bg-brand-600 text-white'
+    : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 dark:bg-[#121214] dark:text-[#a1a1aa] dark:border-[#27272a]'
+}
+
+function EmptyAuditState({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="rounded-[22px] border border-dashed border-slate-200 bg-slate-50/80 px-6 py-12 text-center dark:border-[#1f1f26] dark:bg-[#0b0b0f]">
+      <p className="text-sm font-semibold text-slate-900 dark:text-white">{title}</p>
+      <p className="mt-2 text-sm text-slate-500 dark:text-[#8a8a93]">{body}</p>
+    </div>
+  )
+}
+
+function InspectorKeyValueGrid({ rows }: { rows: Array<{ label: string; value: string }> }) {
+  if (!rows.length) return null
+
+  return (
+    <div className="grid gap-3 md:grid-cols-2">
+      {rows.map((row) => (
+        <div
+          key={`${row.label}-${row.value}`}
+          className="rounded-[20px] border border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-[#1d1d23] dark:bg-[#0b0b10]"
+        >
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8a8a93]">
+            {row.label}
+          </p>
+          <p className="mt-2 break-words text-sm text-slate-900 dark:text-white">{row.value}</p>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function InspectorJsonPanel({
+  title,
+  value,
+  emptyMessage,
+}: {
+  title: string
+  value: unknown
+  emptyMessage: string
+}) {
+  return (
+    <div className="space-y-3">
+      <div>
+        <h3 className="text-sm font-semibold text-slate-900 dark:text-white">{title}</h3>
+      </div>
+      {value ? (
+        <pre className="overflow-x-auto rounded-[22px] bg-slate-950 px-4 py-4 text-xs leading-6 text-slate-200">
+          {stringifyValue(value)}
+        </pre>
+      ) : (
+        <EmptyAuditState title={`No ${title.toLowerCase()} captured`} body={emptyMessage} />
+      )}
+    </div>
+  )
 }
 
 export function DecisionExplorerPage() {
@@ -140,6 +478,9 @@ export function DecisionExplorerPage() {
   const [filterOpen, setFilterOpen] = useState(false)
   const [responseOpen, setResponseOpen] = useState(false)
   const [volumeResponseOpen, setVolumeResponseOpen] = useState(false)
+  const [selectedAuditPaymentId, setSelectedAuditPaymentId] = useState<string | null>(null)
+  const [selectedAuditEventId, setSelectedAuditEventId] = useState<number | null>(null)
+  const [auditInspectorTab, setAuditInspectorTab] = useState<AuditInspectorTab>('summary')
 
   const routingKeyNames = useMemo(
     () => Object.keys(routingKeysConfig).sort(),
@@ -170,6 +511,15 @@ export function DecisionExplorerPage() {
     () => uniqueUpperOptions(routingKeysConfig.authentication_type?.values || []),
     [routingKeysConfig]
   )
+
+  const auditUrl = merchantId && selectedAuditPaymentId
+    ? buildAuditUrl(merchantId, selectedAuditPaymentId)
+    : null
+
+  const auditDetail = useSWR<PaymentAuditResponse>(auditUrl, fetcher, {
+    refreshInterval: selectedAuditPaymentId ? 12000 : 0,
+    revalidateOnFocus: true,
+  })
 
   useEffect(() => {
     if (routingConfigUnavailable || routingKeysLoading) return
@@ -224,6 +574,27 @@ export function DecisionExplorerPage() {
     authTypeOptions,
     cardBrandOptions,
   ])
+
+  useEffect(() => {
+    if (!selectedAuditPaymentId) return
+
+    const previousOverflow = document.body.style.overflow
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setSelectedAuditPaymentId(null)
+        setSelectedAuditEventId(null)
+        setAuditInspectorTab('summary')
+      }
+    }
+
+    document.body.style.overflow = 'hidden'
+    window.addEventListener('keydown', onKeyDown)
+
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [selectedAuditPaymentId])
 
   function set(field: keyof FormState, value: string | boolean) {
     setForm(f => ({ ...f, [field]: value }))
@@ -478,6 +849,59 @@ export function DecisionExplorerPage() {
   }, {} as Record<string, { total: number; success: number; failure: number }>)
 
   const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
+  const simulatedVolumePayments = useMemo(
+    () => buildVolumePaymentLog(volumeDistribution, parseInt(volumePayments) || 0),
+    [volumeDistribution, volumePayments],
+  )
+
+  const auditSummary = useMemo(() => {
+    const results = auditDetail.data?.results || []
+    return results.find((row) => row.payment_id === selectedAuditPaymentId) || results[0] || null
+  }, [auditDetail.data?.results, selectedAuditPaymentId])
+
+  const selectedAuditEvent = useMemo(() => {
+    const timeline = auditDetail.data?.timeline || []
+    return timeline.find((event) => event.id === selectedAuditEventId) || timeline[0] || null
+  }, [auditDetail.data?.timeline, selectedAuditEventId])
+
+  useEffect(() => {
+    if (selectedAuditEvent?.id) {
+      setSelectedAuditEventId(selectedAuditEvent.id)
+      return
+    }
+    const first = auditDetail.data?.timeline?.[0]
+    if (first?.id) {
+      setSelectedAuditEventId(first.id)
+    }
+  }, [auditDetail.data?.timeline, selectedAuditEvent?.id])
+
+  const groupedAuditTimeline = useMemo(() => {
+    const groups: Array<{ phase: string; events: PaymentAuditEvent[] }> = []
+    for (const event of auditDetail.data?.timeline || []) {
+      const phase = eventPhase(event)
+      const current = groups[groups.length - 1]
+      if (!current || current.phase !== phase) {
+        groups.push({ phase, events: [event] })
+      } else {
+        current.events.push(event)
+      }
+    }
+    return groups
+  }, [auditDetail.data?.timeline])
+
+  const auditInspectorModel = useMemo(() => buildInspectorModel(selectedAuditEvent), [selectedAuditEvent])
+
+  function openAuditModal(paymentId: string) {
+    setSelectedAuditPaymentId(paymentId)
+    setSelectedAuditEventId(null)
+    setAuditInspectorTab('summary')
+  }
+
+  function closeAuditModal() {
+    setSelectedAuditPaymentId(null)
+    setSelectedAuditEventId(null)
+    setAuditInspectorTab('summary')
+  }
 
   return (
     <div className="space-y-6">
@@ -993,7 +1417,12 @@ export function DecisionExplorerPage() {
 
                 <Card>
                   <CardHeader>
-                    <h3 className="text-sm font-medium text-slate-800">Payment Log</h3>
+                    <div>
+                      <h3 className="text-sm font-medium text-slate-800">Payment Log</h3>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Simulated sequence based on the configured split, shown in shuffled order instead of connector blocks.
+                      </p>
+                    </div>
                   </CardHeader>
                   <CardBody className="p-0 max-h-80 overflow-auto">
                     <table className="w-full text-sm">
@@ -1004,35 +1433,20 @@ export function DecisionExplorerPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-[#222226]">
-                        {Array.from({ length: parseInt(volumePayments) || 0 }).map((_, idx) => {
-                          let cumulative = 0
-                          let connector = volumeDistribution[0]?.name || ''
-                          let colorIdx = 0
-
-                          for (let i = 0; i < volumeDistribution.length; i++) {
-                            cumulative += volumeDistribution[i].count
-                            if (idx < cumulative) {
-                              connector = volumeDistribution[i].name
-                              colorIdx = i
-                              break
-                            }
-                          }
-
-                          return (
-                            <tr key={idx} className="hover:bg-slate-50 dark:bg-[#111114]">
-                              <td className="px-4 py-1.5 text-slate-500 font-mono text-xs">{idx + 1}</td>
-                              <td className="px-4 py-1.5">
-                                <div className="flex items-center gap-2">
-                                  <div
-                                    className="w-2 h-2 rounded"
-                                    style={{ backgroundColor: COLORS[colorIdx % COLORS.length] }}
-                                  />
-                                  <span className="font-medium">{connector}</span>
-                                </div>
-                              </td>
-                            </tr>
-                          )
-                        })}
+                        {simulatedVolumePayments.map((entry, idx) => (
+                          <tr key={`${entry.connector}-${idx}`} className="hover:bg-slate-50 dark:bg-[#111114]">
+                            <td className="px-4 py-1.5 text-slate-500 font-mono text-xs">{idx + 1}</td>
+                            <td className="px-4 py-1.5">
+                              <div className="flex items-center gap-2">
+                                <div
+                                  className="w-2 h-2 rounded"
+                                  style={{ backgroundColor: COLORS[entry.colorIdx % COLORS.length] }}
+                                />
+                                <span className="font-medium">{entry.connector}</span>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
                   </CardBody>
@@ -1202,7 +1616,26 @@ export function DecisionExplorerPage() {
                         {simulationResults.map((res, idx) => (
                           <tr key={res.paymentId} className="hover:bg-slate-100 dark:bg-[#0f0f16]">
                             <td className="px-3 py-2 text-slate-500">{idx + 1}</td>
-                            <td className="px-3 py-2 font-mono text-xs">{res.paymentId.slice(-8)}</td>
+                            <td className="px-3 py-2">
+                              <button
+                                type="button"
+                                title={res.paymentId}
+                                onClick={() => openAuditModal(res.paymentId)}
+                                className="group flex items-start gap-3 text-left"
+                              >
+                                <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-brand-500/10 text-[11px] font-semibold uppercase tracking-[0.16em] text-brand-600 dark:text-brand-300">
+                                  {idx + 1}
+                                </span>
+                                <span className="min-w-0">
+                                  <span className="block truncate font-mono text-xs font-semibold text-slate-900 transition group-hover:text-brand-600 dark:text-white">
+                                    {res.paymentId}
+                                  </span>
+                                  <span className="mt-1 block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 transition group-hover:text-brand-500">
+                                    View audit
+                                  </span>
+                                </span>
+                              </button>
+                            </td>
                             <td className="px-3 py-2 font-medium">{res.decidedGateway}</td>
                             <td className="px-3 py-2">
                               <Badge variant={res.status === 'CHARGED' ? 'green' : 'red'}>
@@ -1367,6 +1800,234 @@ export function DecisionExplorerPage() {
           )}
         </div>
       </div>
+
+      {selectedAuditPaymentId && (
+        <div className="fixed bottom-0 left-64 right-0 top-[76px] z-[130] p-8">
+          <button
+            type="button"
+            aria-label="Close payment audit"
+            className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm"
+            onClick={closeAuditModal}
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="decision-explorer-audit-title"
+            className="relative mx-auto flex h-full w-full max-w-7xl flex-col overflow-hidden rounded-[30px] border border-slate-200 bg-white shadow-2xl dark:border-[#1c1c23] dark:bg-[#09090d]"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 bg-slate-50/90 px-6 py-5 dark:border-[#1c1c23] dark:bg-[#0b0b10]">
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-[#8a8a93]">
+                  Batch Simulation Audit
+                </p>
+                <h2
+                  id="decision-explorer-audit-title"
+                  className="mt-2 truncate text-2xl font-semibold text-slate-900 dark:text-white"
+                >
+                  {selectedAuditPaymentId}
+                </h2>
+                <p className="mt-2 max-w-3xl text-sm text-slate-500 dark:text-[#8a8a93]">
+                  Inspect the exact decision trail for this simulated payment, including request payloads, API responses, score context, and the final transaction outcome.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {auditSummary?.latest_gateway ? <Badge variant="green">{auditSummary.latest_gateway}</Badge> : null}
+                {auditSummary?.latest_status ? (
+                  <Badge variant={summaryBadgeVariant(auditSummary.latest_status)}>
+                    {humanizeAuditValue(auditSummary.latest_status)}
+                  </Badge>
+                ) : null}
+                {auditSummary?.event_count ? <Badge variant="gray">{auditSummary.event_count} events</Badge> : null}
+                <Button size="sm" variant="secondary" onClick={() => auditDetail.mutate()}>
+                  <RefreshCw size={12} />
+                  Refresh
+                </Button>
+                <Button size="sm" variant="ghost" onClick={closeAuditModal}>
+                  <X size={14} />
+                  Close
+                </Button>
+              </div>
+            </div>
+
+            <div className="grid min-h-0 flex-1 gap-0 xl:grid-cols-[340px_minmax(0,1fr)]">
+              <div className="flex min-h-0 flex-col border-b border-slate-200 bg-slate-50/70 xl:border-b-0 xl:border-r dark:border-[#1c1c23] dark:bg-[#08080b]">
+                <div className="border-b border-slate-200 px-6 py-4 dark:border-[#1c1c23]">
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Audit Timeline</h3>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                    Choose a step to inspect its request, response, and scoring context.
+                  </p>
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+                  {auditDetail.isLoading && !auditDetail.data ? (
+                    <div className="flex items-center gap-2 px-2 text-sm text-slate-500 dark:text-[#8a8a93]">
+                      <Spinner size={16} />
+                      Loading payment audit…
+                    </div>
+                  ) : auditDetail.error ? (
+                    <ErrorMessage error={auditDetail.error.message} />
+                  ) : groupedAuditTimeline.length ? (
+                    <div className="space-y-4">
+                      {groupedAuditTimeline.map((group) => (
+                        <section key={group.phase} className="space-y-2">
+                          <div className="px-2">
+                            <Badge variant={phaseBadgeVariant(group.phase)}>{group.phase}</Badge>
+                          </div>
+                          <div className="space-y-2">
+                            {group.events.map((event) => (
+                              <button
+                                key={event.id}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedAuditEventId(event.id)
+                                  setAuditInspectorTab('summary')
+                                }}
+                                className={`w-full rounded-[22px] border px-4 py-3 text-left transition ${
+                                  selectedAuditEvent?.id === event.id
+                                    ? 'border-brand-500/50 bg-brand-500/8'
+                                    : 'border-slate-200 bg-white hover:border-slate-300 dark:border-[#1d1d23] dark:bg-[#0c0c10] dark:hover:border-[#2a2a31]'
+                                }`}
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+                                      {stageLabel(event)}
+                                    </p>
+                                    <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                                      {formatDateTime(event.created_at_ms)}
+                                    </p>
+                                  </div>
+                                  <Badge variant={badgeVariantForEvent(event)}>
+                                    {humanizeAuditValue(event.status) || eventTypeLabel(event.event_type)}
+                                  </Badge>
+                                </div>
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  <Badge variant="gray">{routeLabel(event.route)}</Badge>
+                                  {event.gateway ? <Badge variant="green">{event.gateway}</Badge> : null}
+                                  {event.request_id ? <Badge variant="blue">Request</Badge> : null}
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </section>
+                      ))}
+                    </div>
+                  ) : (
+                    <EmptyAuditState
+                      title="No audit trail captured yet"
+                      body="Run a simulated payment and gateway update first, then reopen the row once the audit payload is available."
+                    />
+                  )}
+                </div>
+              </div>
+
+              <div className="flex min-h-0 flex-col">
+                <div className="border-b border-slate-200 px-6 py-4 dark:border-[#1c1c23]">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+                        {selectedAuditEvent ? stageLabel(selectedAuditEvent) : 'Audit Inspector'}
+                      </h3>
+                      <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                        {selectedAuditEvent
+                          ? `${routeLabel(selectedAuditEvent.route)} · ${formatDateTime(selectedAuditEvent.created_at_ms)}`
+                          : 'Select an event from the left to inspect payloads.'}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedAuditEvent?.gateway ? <Badge variant="green">{selectedAuditEvent.gateway}</Badge> : null}
+                      {selectedAuditEvent?.status ? (
+                        <Badge variant={badgeVariantForEvent(selectedAuditEvent)}>
+                          {humanizeAuditValue(selectedAuditEvent.status)}
+                        </Badge>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {(['summary', 'input', 'response', 'raw'] as AuditInspectorTab[]).map((tab) => (
+                      <button
+                        key={tab}
+                        type="button"
+                        onClick={() => setAuditInspectorTab(tab)}
+                        className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] transition ${sectionButtonClass(auditInspectorTab === tab)}`}
+                      >
+                        {tab === 'raw' ? 'Raw JSON' : humanizeAuditValue(tab)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+                  {auditDetail.isLoading && !auditDetail.data ? (
+                    <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-[#8a8a93]">
+                      <Spinner size={16} />
+                      Loading inspector…
+                    </div>
+                  ) : auditInspectorModel ? (
+                    <div className="space-y-5">
+                      {auditInspectorTab === 'summary' ? (
+                        <>
+                          <InspectorKeyValueGrid rows={auditInspectorModel.summaryRows} />
+                          {auditInspectorModel.selectionReason ? (
+                            <div className="rounded-[22px] border border-slate-200 bg-slate-50/80 px-5 py-4 dark:border-[#1d1d23] dark:bg-[#0b0b10]">
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8a8a93]">
+                                Selection Reason
+                              </p>
+                              <p className="mt-3 text-sm leading-6 text-slate-700 dark:text-slate-200">
+                                {stringifyValue(auditInspectorModel.selectionReason)}
+                              </p>
+                            </div>
+                          ) : null}
+                          <InspectorJsonPanel
+                            title="Score Context"
+                            value={auditInspectorModel.scoreContext}
+                            emptyMessage="No scoring context was captured for this event."
+                          />
+                          {auditInspectorModel.signalRecord ? (
+                            <InspectorJsonPanel
+                              title="Additional Signals"
+                              value={auditInspectorModel.signalRecord}
+                              emptyMessage="No additional signals were captured for this event."
+                            />
+                          ) : null}
+                        </>
+                      ) : null}
+
+                      {auditInspectorTab === 'input' ? (
+                        <InspectorJsonPanel
+                          title="Request Payload"
+                          value={auditInspectorModel.requestPayload}
+                          emptyMessage="This step did not persist a request payload."
+                        />
+                      ) : null}
+
+                      {auditInspectorTab === 'response' ? (
+                        <InspectorJsonPanel
+                          title="Response Payload"
+                          value={auditInspectorModel.responsePayload}
+                          emptyMessage="This step did not persist a response payload."
+                        />
+                      ) : null}
+
+                      {auditInspectorTab === 'raw' ? (
+                        <InspectorJsonPanel
+                          title="Raw Event JSON"
+                          value={auditInspectorModel.rawEvent}
+                          emptyMessage="No raw event payload is available."
+                        />
+                      ) : null}
+                    </div>
+                  ) : (
+                    <EmptyAuditState
+                      title="Select a timeline step"
+                      body="Choose one of the audit events on the left to inspect its request, response, and score context."
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

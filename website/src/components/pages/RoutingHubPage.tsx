@@ -44,7 +44,7 @@ export function RoutingHubPage() {
     {
       id: 'rules',
       title: 'Rule-Based Routing',
-      description: 'Declarative Euclid DSL rules to route payments based on conditions and attributes.',
+      description: 'Declarative routing rules to route payments based on conditions and attributes.',
       icon: Layers,
       route: '/routing/rules',
       algorithmType: 'advanced',
