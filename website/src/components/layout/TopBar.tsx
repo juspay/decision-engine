@@ -9,9 +9,7 @@ export function TopBar() {
   const [creating, setCreating] = useState(false)
 
   // Theme management
-  const [isDark, setIsDark] = useState(() => {
-    return localStorage.getItem('theme') === 'dark'
-  })
+  const [isDark, setIsDark] = useState(() => localStorage.getItem('theme') === 'dark')
 
   useEffect(() => {
     const root = window.document.documentElement
@@ -44,7 +42,7 @@ export function TopBar() {
   }
 
   return (
-    <header className="h-[76px] bg-white dark:bg-black border-b border-slate-200 dark:border-[#151515] flex items-center justify-between px-8 shrink-0 relative z-10 transition-colors duration-300">
+    <header className="relative z-10 flex h-[78px] shrink-0 items-center justify-between border-b border-slate-200 bg-white px-6 transition-colors duration-300 dark:border-[#22262f] dark:bg-[#06080d] md:px-8">
       <div />
       <div className="flex items-center gap-6">
         <div className="relative">
@@ -53,21 +51,21 @@ export function TopBar() {
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSetMerchant()}
             placeholder="Set Merchant ID"
-            className="w-72 bg-slate-50 dark:bg-[#0f0f11] border border-slate-200 dark:border-[#222222] rounded-full px-4 py-2 text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-[#66666e] focus:outline-none focus:border-slate-400 dark:focus:border-[#444444] transition-colors"
+            className="w-72 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm text-slate-900 shadow-[0_6px_20px_-16px_rgba(15,23,42,0.18)] transition-all placeholder-slate-400 focus:outline-none focus:border-[#3b82f6]/30 dark:border-[#22262f] dark:bg-[#11141b] dark:text-white dark:placeholder-[#6c7486] dark:shadow-none"
           />
           <button
             onClick={handleSetMerchant}
             disabled={creating}
-            className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-slate-400 hover:text-brand-500 dark:text-[#66666e] dark:hover:text-white transition-colors"
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-2 text-slate-400 transition-colors hover:text-slate-700 dark:text-[#7a8397] dark:hover:text-[#dbe7ff]"
           >
             {creating ? <Loader2 size={16} className="animate-spin" /> : <ArrowRight size={16} />}
           </button>
         </div>
 
         {merchantId && (
-          <div className="flex items-center gap-2 pl-6 ml-2 border-l border-slate-200 dark:border-[#222222] transition-colors duration-300">
-            <Building2 size={16} className="text-brand-500 dark:text-[#66666e]" />
-            <span className="text-sm text-slate-800 dark:text-white font-medium">
+          <div className="ml-2 flex items-center gap-2 border-l border-slate-200 pl-6 transition-colors duration-300 dark:border-[#22262f]">
+            <Building2 size={16} className="text-brand-500 dark:text-sky-300" />
+            <span className="text-sm font-medium text-slate-800 dark:text-white">
               {merchantId}
             </span>
           </div>
@@ -76,7 +74,7 @@ export function TopBar() {
         {/* Theme Toggle */}
         <button
           onClick={() => setIsDark(!isDark)}
-          className="p-2.5 rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-[#151515] dark:text-[#a1a1aa] dark:hover:text-white dark:hover:bg-[#222222] transition-colors duration-200"
+          className="rounded-full border border-slate-200 bg-white p-2.5 text-slate-600 shadow-[0_6px_20px_-16px_rgba(15,23,42,0.18)] transition-colors duration-200 hover:bg-slate-50 hover:text-slate-900 dark:border-[#22262f] dark:bg-[#11141b] dark:text-[#aeb6c7] dark:shadow-none dark:hover:bg-[#171b23] dark:hover:text-white"
           aria-label="Toggle theme"
         >
           {isDark ? <Sun size={18} /> : <Moon size={18} />}

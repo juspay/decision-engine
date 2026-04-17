@@ -737,7 +737,7 @@ export function AnalyticsPage() {
             </>
           ) : null}
 
-          <div className="min-w-[220px] flex-1 rounded-[24px] border border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-[#1d1d23] dark:bg-[#0c0c0e]">
+          <div className="min-w-[220px] flex-1 rounded-[24px] border border-slate-200 bg-white px-4 py-3 dark:border-[#1d1d23] dark:bg-[#0c0c0e]">
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
               Active window
             </p>
@@ -851,7 +851,7 @@ export function AnalyticsPage() {
           </div>
         </CardHeader>
         <CardBody className="space-y-4">
-          <div className="rounded-[24px] border border-slate-200 bg-slate-50/80 p-4 dark:border-[#1d1d23] dark:bg-[#0c0c0e]">
+          <div className="rounded-[24px] border border-slate-200 bg-white p-4 dark:border-[#1d1d23] dark:bg-[#0c0c0e]">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
@@ -899,7 +899,7 @@ export function AnalyticsPage() {
                   ))}
                 </div>
                 {hasExtraDimensions ? (
-                  <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white/70 px-4 py-3 dark:border-[#1d1d23] dark:bg-[#09090b]">
+                  <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 dark:border-[#1d1d23] dark:bg-[#09090b]">
                     <p className="text-xs text-slate-500 dark:text-[#8a8a93]">
                       {showAllFilters
                         ? 'Showing all routing dimensions available for this merchant.'
@@ -923,7 +923,7 @@ export function AnalyticsPage() {
             ) : null}
 
             {availableFilters.missing_dimensions.length ? (
-              <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-white/70 px-4 py-3 dark:border-[#1d1d23] dark:bg-[#09090b]">
+              <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-3 dark:border-[#1d1d23] dark:bg-[#09090b]">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
                   No values in this window yet
                 </p>

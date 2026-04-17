@@ -4,12 +4,12 @@ interface BadgeProps {
 }
 
 const variantClasses: Record<string, string> = {
-  green:  'bg-emerald-500/10 text-emerald-400 ring-1 ring-inset ring-emerald-500/20',
-  gray:   'bg-white/5 text-slate-600 ring-1 ring-inset ring-white/8',
-  blue:   'bg-blue-500/10 text-blue-400 ring-1 ring-inset ring-blue-500/20',
-  red:    'bg-red-500/10 text-red-400 ring-1 ring-inset ring-red-500/20',
-  orange: 'bg-orange-500/10 text-orange-400 ring-1 ring-inset ring-orange-500/20',
-  purple: 'bg-purple-500/10 text-purple-400 ring-1 ring-inset ring-purple-500/20',
+  green:  'bg-emerald-500/10 text-emerald-600 ring-1 ring-inset ring-emerald-500/20 dark:text-emerald-300',
+  gray:   'bg-slate-900/[0.04] text-slate-700 ring-1 ring-inset ring-slate-900/8 dark:bg-white/[0.05] dark:text-slate-300 dark:ring-white/8',
+  blue:   'bg-blue-500/10 text-blue-600 ring-1 ring-inset ring-blue-500/20 dark:text-blue-300',
+  red:    'bg-red-500/10 text-red-600 ring-1 ring-inset ring-red-500/20 dark:text-red-300',
+  orange: 'bg-orange-500/10 text-orange-600 ring-1 ring-inset ring-orange-500/20 dark:text-orange-300',
+  purple: 'bg-purple-500/10 text-purple-600 ring-1 ring-inset ring-purple-500/20 dark:text-purple-300',
 }
 
 export function Badge({ variant = 'gray', children }: BadgeProps) {
