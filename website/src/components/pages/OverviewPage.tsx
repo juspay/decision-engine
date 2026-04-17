@@ -1,30 +1,208 @@
+import type { ElementType, ReactNode } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useEffect, useState } from 'react'
 import useSWR from 'swr'
-import { Card, CardBody, CardHeader } from '../ui/Card'
-import { Badge } from '../ui/Badge'
+import {
+  Activity,
+  AlertCircle,
+  ArrowRight,
+  BarChart3,
+  CheckCircle2,
+  Clock3,
+  GitBranch,
+  ShieldCheck,
+  Sparkles,
+  XCircle,
+} from 'lucide-react'
 import { useMerchantStore } from '../../store/merchantStore'
-import { apiPost } from '../../lib/api'
-import { RoutingAlgorithm, RuleConfig } from '../../types/api'
-import { CheckCircle, XCircle, AlertCircle } from 'lucide-react'
+import { apiPost, fetcher } from '../../lib/api'
+import {
+  AnalyticsOverviewResponse,
+  AnalyticsRoutingStatsResponse,
+  RoutingAlgorithm,
+  RuleConfig,
+} from '../../types/api'
+import { Badge } from '../ui/Badge'
 
 function useHealth() {
   const [status, setStatus] = useState<'up' | 'down' | 'loading'>('loading')
+
   useEffect(() => {
-    console.log(`\n[HEALTH CHECK] ${new Date().toISOString()}`)
-    console.log('Fetching: GET /health')
-    
     fetch('/health')
-      .then((r) => {
-        console.log(`[HEALTH CHECK] Response: ${r.status} ${r.statusText}`)
-        setStatus(r.ok ? 'up' : 'down')
-      })
-      .catch((err) => {
-        console.log(`[HEALTH CHECK ERROR] ${err.message}`)
-        setStatus('down')
-      })
+      .then((response) => setStatus(response.ok ? 'up' : 'down'))
+      .catch(() => setStatus('down'))
   }, [])
+
   return status
+}
+
+function formatCompactNumber(value: number | undefined) {
+  return new Intl.NumberFormat(undefined, {
+    notation: 'compact',
+    maximumFractionDigits: value && value < 100 ? 1 : 0,
+  }).format(value || 0)
+}
+
+function formatPercent(value: number | undefined) {
+  if (value === undefined || value === null || Number.isNaN(value)) return '0%'
+  return `${value.toFixed(value >= 100 ? 0 : 1)}%`
+}
+
+function formatUpdatedAt(timestampMs: number | undefined) {
+  if (!timestampMs) return 'No updates yet'
+  return new Intl.DateTimeFormat(undefined, {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(timestampMs))
+}
+
+function healthLabel(status: 'up' | 'down' | 'loading') {
+  if (status === 'up') return 'Healthy'
+  if (status === 'down') return 'Needs attention'
+  return 'Checking'
+}
+
+function GlassCard({
+  children,
+  className = '',
+  onClick,
+}: {
+  children: ReactNode
+  className?: string
+  onClick?: () => void
+}) {
+  const baseClassName =
+    'group relative overflow-hidden rounded-[30px] border border-slate-200 bg-white shadow-[0_18px_60px_-42px_rgba(15,23,42,0.15)] dark:border-[#2a303a] dark:bg-[#11151d] dark:shadow-[0_18px_60px_-42px_rgba(0,0,0,0.7)]'
+
+  const inner = (
+    <>
+      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#3b82f6]/25 to-transparent dark:via-[#3b82f6]/30" />
+      <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.55),transparent_26%)] dark:bg-[linear-gradient(180deg,rgba(255,255,255,0.02),transparent_26%)]" />
+      <div className="relative">{children}</div>
+    </>
+  )
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className={`${baseClassName} text-left transition duration-300 hover:-translate-y-0.5 hover:border-[#3b82f6]/35 hover:bg-slate-50 dark:hover:bg-[#141923] ${className}`}
+      >
+        {inner}
+      </button>
+    )
+  }
+
+  return <div className={`${baseClassName} ${className}`}>{inner}</div>
+}
+
+function SurfaceLabel({ children }: { children: ReactNode }) {
+  return (
+    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8390a7]">
+      {children}
+    </p>
+  )
+}
+
+function HeroStat({
+  label,
+  value,
+  detail,
+}: {
+  label: string
+  value: string
+  detail: string
+}) {
+  return (
+    <div className="rounded-[22px] border border-slate-200 bg-white px-4 py-4 dark:border-[#2a303a] dark:bg-[#161b24]">
+      <SurfaceLabel>{label}</SurfaceLabel>
+      <p className="mt-3 text-2xl font-semibold tracking-tight text-slate-950 dark:text-white">
+        {value}
+      </p>
+      <p className="mt-1 text-sm text-slate-500 dark:text-[#b2bdd1]">{detail}</p>
+    </div>
+  )
+}
+
+function MetricCard({
+  icon: Icon,
+  label,
+  value,
+  detail,
+}: {
+  icon: ElementType
+  label: string
+  value: string
+  detail: string
+}) {
+  return (
+    <GlassCard className="p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <SurfaceLabel>{label}</SurfaceLabel>
+          <p className="mt-4 text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">
+            {value}
+          </p>
+          <p className="mt-2 text-sm text-slate-500 dark:text-[#b2bdd1]">{detail}</p>
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-[#2a303a] dark:bg-[#161b24]">
+          <Icon className="h-5 w-5 text-brand-600 dark:text-sky-300" />
+        </div>
+      </div>
+    </GlassCard>
+  )
+}
+
+function EmptyWorkspace() {
+  return (
+    <div className="grid gap-5 pt-8 lg:grid-cols-[1.1fr_0.9fr]">
+      <GlassCard className="p-7">
+        <SurfaceLabel>Merchant required</SurfaceLabel>
+        <h2 className="mt-4 max-w-xl text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">
+          Set a merchant in the top bar to turn this into a live overview.
+        </h2>
+        <p className="mt-4 max-w-xl text-sm leading-7 text-slate-600 dark:text-[#b2bdd1]">
+          Once selected, this page will show business-facing status: service health, active
+          routing, request count, and the gateway currently handling the most traffic.
+        </p>
+      </GlassCard>
+
+      <GlassCard className="p-7">
+        <div className="space-y-5">
+          {[
+            {
+              icon: Activity,
+              title: 'System status',
+              text: 'Check whether the service is reachable.',
+            },
+            {
+              icon: GitBranch,
+              title: 'Routing setup',
+              text: 'See whether a strategy is configured.',
+            },
+            {
+              icon: BarChart3,
+              title: 'Gateway activity',
+              text: 'View recent request distribution by gateway.',
+            },
+          ].map((item) => (
+            <div key={item.title} className="flex items-start gap-4">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-[#2a303a] dark:bg-[#161b24]">
+                <item.icon className="h-5 w-5 text-brand-600 dark:text-sky-300" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-slate-950 dark:text-white">{item.title}</p>
+                <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-[#b2bdd1]">{item.text}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </GlassCard>
+    </div>
+  )
 }
 
 export function OverviewPage() {
@@ -35,144 +213,393 @@ export function OverviewPage() {
   const { data: activeAlgorithms } = useSWR<RoutingAlgorithm[]>(
     merchantId ? `/routing/list/active/${merchantId}` : null,
     () => apiPost<RoutingAlgorithm[]>(`/routing/list/active/${merchantId}`),
-    { shouldRetryOnError: false }
+    { shouldRetryOnError: false },
   )
 
-  const { data: srConfig, error: srError } = useSWR<RuleConfig>(
-    merchantId ? [`/rule/get`, 'successRate', merchantId] : null,
-    () =>
-      apiPost('/rule/get', { merchant_id: merchantId, algorithm: 'successRate' })
+  const { data: srConfig } = useSWR<RuleConfig>(
+    merchantId ? ['/rule/get', 'successRate', merchantId] : null,
+    () => apiPost('/rule/get', { merchant_id: merchantId, algorithm: 'successRate' }),
+    { shouldRetryOnError: false },
   )
 
-  const activeRouting =
-    activeAlgorithms && activeAlgorithms.length > 0 ? activeAlgorithms[0] : null
+  const analyticsOverviewUrl = merchantId
+    ? `/analytics/overview?scope=current&range=1h&merchant_id=${encodeURIComponent(merchantId)}`
+    : null
+  const analyticsRoutingUrl = merchantId
+    ? `/analytics/routing-stats?scope=current&range=1h&merchant_id=${encodeURIComponent(merchantId)}`
+    : null
 
-  const hasRuleBasedRouting = (activeAlgorithms || []).some(a => 
-    (a.algorithm_data || a.algorithm)?.type === 'advanced'
+  const analyticsOverview = useSWR<AnalyticsOverviewResponse>(analyticsOverviewUrl, fetcher, {
+    refreshInterval: 15000,
+    revalidateOnFocus: true,
+    shouldRetryOnError: false,
+  })
+  const analyticsRouting = useSWR<AnalyticsRoutingStatsResponse>(analyticsRoutingUrl, fetcher, {
+    refreshInterval: 15000,
+    revalidateOnFocus: true,
+    shouldRetryOnError: false,
+  })
+
+  const activeRouting = activeAlgorithms?.[0] || null
+  const hasRuleBasedRouting = (activeAlgorithms || []).some(
+    (algorithm) => (algorithm.algorithm_data || algorithm.algorithm)?.type === 'advanced',
   )
+
+  const latestSync =
+    analyticsOverview.data?.generated_at_ms || analyticsRouting.data?.generated_at_ms || undefined
+
+  const routeHits = analyticsOverview.data?.route_hits || []
+  const decideHits = routeHits.find((item) => item.route === '/decide_gateway')?.count || 0
+  const totalErrors =
+    analyticsOverview.data?.top_errors?.reduce((sum, item) => sum + item.count, 0) || 0
+
+  const gatewayUsage = useMemo(() => {
+    const totals = new Map<string, number>()
+
+    for (const point of analyticsRouting.data?.gateway_share || []) {
+      totals.set(point.gateway, (totals.get(point.gateway) || 0) + point.count)
+    }
+
+    const totalTraffic = Array.from(totals.values()).reduce((sum, count) => sum + count, 0)
+
+    return Array.from(totals.entries())
+      .map(([gateway, count]) => ({
+        gateway,
+        count,
+        share: totalTraffic ? (count / totalTraffic) * 100 : 0,
+      }))
+      .sort((left, right) => right.count - left.count)
+  }, [analyticsRouting.data])
+
+  const topGateway = gatewayUsage[0]?.gateway || analyticsOverview.data?.top_scores?.[0]?.gateway
+  const configuredBasics = [
+    health === 'up',
+    Boolean(activeRouting),
+    Boolean(srConfig?.data),
+    hasRuleBasedRouting,
+  ].filter(Boolean).length
+
+  const setupItems = [
+    {
+      label: 'Service health',
+      description: health === 'up' ? 'Service is reachable.' : 'Please verify service health.',
+      state: health === 'up' ? 'Healthy' : health === 'down' ? 'Issue' : 'Checking',
+      icon: health === 'up' ? CheckCircle2 : health === 'down' ? XCircle : AlertCircle,
+      route: undefined,
+    },
+    {
+      label: 'Routing strategy',
+      description: activeRouting ? activeRouting.name : 'No active routing configured.',
+      state: activeRouting ? 'Configured' : 'Not set',
+      icon: GitBranch,
+      route: '/routing',
+    },
+    {
+      label: 'Auth-rate config',
+      description: srConfig?.data ? 'Configured and available.' : 'Not configured yet.',
+      state: srConfig?.data ? 'Configured' : 'Not set',
+      icon: ShieldCheck,
+      route: '/routing/sr',
+    },
+    {
+      label: 'Rule-based routing',
+      description: hasRuleBasedRouting ? 'Enabled for this merchant.' : 'Not enabled.',
+      state: hasRuleBasedRouting ? 'Enabled' : 'Optional',
+      icon: Sparkles,
+      route: '/routing/rules',
+    },
+  ]
+
+  const workspaceBadge = !merchantId
+    ? { label: 'Merchant not selected', variant: 'orange' as const }
+    : health === 'up'
+      ? { label: 'System live', variant: 'green' as const }
+      : health === 'down'
+        ? { label: 'Attention needed', variant: 'red' as const }
+        : { label: 'Checking status', variant: 'gray' as const }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-slate-900">Overview</h1>
-        <p className="text-sm text-slate-500 mt-1">
-          Decision Engine routing health and status
-        </p>
+    <div className="relative mx-auto max-w-[1380px]">
+      <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
+        <div className="absolute -left-16 top-0 h-72 w-72 rounded-full bg-sky-500/10 blur-3xl dark:bg-sky-500/8" />
+        <div className="absolute right-0 top-12 h-80 w-80 rounded-full bg-brand-500/10 blur-3xl dark:bg-brand-500/10" />
       </div>
 
-      {!merchantId && (
-        <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 flex items-center gap-2 text-sm text-yellow-800">
-          <AlertCircle size={16} />
-          Set your Merchant ID in the top bar to load configuration.
-        </div>
-      )}
+      <section className="relative overflow-hidden rounded-[40px] border border-slate-200 bg-white px-5 py-5 shadow-[0_28px_90px_-56px_rgba(15,23,42,0.16)] md:px-6 md:py-6 dark:border-[#232933] dark:bg-[#090c12] dark:shadow-[0_28px_90px_-56px_rgba(0,0,0,0.72)]">
+        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#3b82f6]/25 to-transparent dark:via-[#3b82f6]/35" />
 
-      {/* Health status */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <CardBody className="flex items-center gap-3">
-            {health === 'up' ? (
-              <CheckCircle className="text-green-500" size={24} />
-            ) : health === 'down' ? (
-              <XCircle className="text-red-500" size={24} />
-            ) : (
-              <div className="w-6 h-6 rounded-full border-2 border-gray-200 border-t-gray-500 animate-spin" />
-            )}
-            <div>
-              <p className="text-xs text-slate-500">API Health</p>
-              <p className="text-sm font-medium">
-                {health === 'up' ? 'Healthy' : health === 'down' ? 'Down' : 'Checking...'}
-              </p>
+        <header className="relative flex flex-col gap-4 border-b border-slate-200 pb-5 dark:border-[#232933]">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={workspaceBadge.variant}>{workspaceBadge.label}</Badge>
+            {merchantId ? <Badge variant="blue">{merchantId}</Badge> : null}
+            {latestSync ? (
+                <span className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500 dark:text-[#7d879b]">
+                Last sync {formatUpdatedAt(latestSync)}
+              </span>
+            ) : null}
+          </div>
+          <div>
+            <h1 className="text-4xl font-semibold tracking-tight text-slate-950 md:text-[4rem] dark:text-white">
+              Overview
+            </h1>
+            <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-600 dark:text-[#a6b0c3]">
+              Basic business-facing view of system status, setup, request volume, and gateway activity.
+            </p>
+          </div>
+        </header>
+
+        {!merchantId ? (
+          <EmptyWorkspace />
+        ) : (
+          <>
+            <div className="grid gap-5 pt-8 xl:grid-cols-[1.15fr_0.85fr]">
+              <GlassCard className="p-6 md:p-7">
+                <div className="flex h-full flex-col justify-between">
+                  <div>
+                    <SurfaceLabel>Traffic leader</SurfaceLabel>
+                    <div className="mt-5 flex flex-wrap items-end gap-4">
+                      <h2 className="text-5xl font-semibold tracking-[-0.05em] text-slate-950 md:text-7xl dark:text-white">
+                        {topGateway?.toUpperCase() || '--'}
+                      </h2>
+                      <div className="pb-2">
+                        <p className="text-lg font-medium text-slate-700 dark:text-[#d5dded]">
+                          {gatewayUsage[0] ? formatPercent(gatewayUsage[0].share) : '0%'}
+                        </p>
+                        <p className="mt-1 text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-[#8390a7]">
+                          Share of recent traffic
+                        </p>
+                      </div>
+                    </div>
+                    <p className="mt-4 max-w-xl text-sm leading-7 text-slate-600 dark:text-[#a6b0c3]">
+                      {activeRouting
+                        ? `${activeRouting.name} is the current routing strategy for this merchant.`
+                        : 'No active routing strategy is configured for this merchant yet.'}
+                    </p>
+                  </div>
+
+                  <div className="mt-8 grid gap-3 sm:grid-cols-3">
+                    <HeroStat label="Requests" value={formatCompactNumber(decideHits)} detail="Last hour" />
+                    <HeroStat label="Setup ready" value={`${configuredBasics}/4`} detail="Core basics configured" />
+                    <HeroStat label="Last sync" value={latestSync ? formatUpdatedAt(latestSync) : '--'} detail="Latest refresh" />
+                  </div>
+                </div>
+              </GlassCard>
+
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
+                <MetricCard
+                  icon={Activity}
+                  label="System status"
+                  value={healthLabel(health)}
+                  detail={health === 'up' ? 'Service is reachable' : 'Please verify service health'}
+                />
+                <MetricCard
+                  icon={GitBranch}
+                  label="Active routing"
+                  value={activeRouting?.name || 'Not set'}
+                  detail={activeRouting ? 'Currently selected strategy' : 'No routing configured yet'}
+                />
+                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-2">
+                  <MetricCard
+                    icon={Clock3}
+                    label="Requests"
+                    value={formatCompactNumber(decideHits)}
+                    detail="Last hour"
+                  />
+                  <MetricCard
+                    icon={BarChart3}
+                    label="Top gateway"
+                    value={topGateway?.toUpperCase() || '--'}
+                    detail={gatewayUsage[0] ? `${formatPercent(gatewayUsage[0].share)} of traffic` : 'No activity yet'}
+                  />
+                </div>
+              </div>
             </div>
-          </CardBody>
-        </Card>
 
-        <Card 
-          className="cursor-pointer hover:border-brand-300 transition-all"
-          onClick={() => navigate('/routing')}
-        >
-          <CardBody>
-            <p className="text-xs text-slate-500 mb-1">Active Routing Rule</p>
-            {!merchantId ? (
-              <Badge variant="gray">Not set</Badge>
-            ) : activeRouting ? (
-              <div>
-                <Badge variant="green">Active</Badge>
-                <p className="text-sm font-medium mt-1 truncate">{activeRouting.name}</p>
-                <p className="text-xs text-slate-400">{(activeRouting.algorithm_data || activeRouting.algorithm)?.type}</p>
-              </div>
-            ) : (
-              <Badge variant="gray">Not Configured</Badge>
-            )}
-          </CardBody>
-        </Card>
+            <div className="mt-6 grid gap-6 xl:grid-cols-[1.02fr_0.98fr]">
+              <GlassCard className="p-6">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <SurfaceLabel>Current setup</SurfaceLabel>
+                    <p className="mt-2 text-sm text-slate-600 dark:text-[#a6b0c3]">
+                      The status cards you can explain in a demo without technical jargon.
+                    </p>
+                  </div>
+                  <Badge variant={configuredBasics >= 3 ? 'green' : 'orange'}>
+                    {configuredBasics}/4 ready
+                  </Badge>
+                </div>
 
-        <Card 
-          className="cursor-pointer hover:border-brand-300 transition-all"
-          onClick={() => navigate('/routing/sr')}
-        >
-          <CardBody>
-            <p className="text-xs text-slate-500 mb-1">Auth-Rate Config</p>
-            {!merchantId ? (
-              <Badge variant="gray">Not set</Badge>
-            ) : srError ? (
-              <Badge variant="gray">Not Configured</Badge>
-            ) : srConfig?.data ? (
-              <Badge variant="green">Configured</Badge>
-            ) : (
-              <Badge variant="gray">Not Configured</Badge>
-            )}
-          </CardBody>
-        </Card>
+                <div className="mt-5 grid gap-4 md:grid-cols-2">
+                  {setupItems.map((item) => (
+                    <GlassCard
+                      key={item.label}
+                      className="min-h-[158px] p-5"
+                      onClick={item.route ? () => navigate(item.route) : undefined}
+                    >
+                      <div className="flex h-full flex-col justify-between">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-[#2a303a] dark:bg-[#161b24]">
+                            <item.icon className="h-5 w-5 text-brand-600 dark:text-sky-300" />
+                          </div>
+                          <Badge
+                            variant={
+                              item.state === 'Healthy' || item.state === 'Configured' || item.state === 'Enabled'
+                                ? 'green'
+                                : item.state === 'Issue'
+                                  ? 'red'
+                                  : item.state === 'Checking' || item.state === 'Optional'
+                                    ? 'gray'
+                                    : 'orange'
+                            }
+                          >
+                            {item.state}
+                          </Badge>
+                        </div>
 
-        <Card 
-          className="cursor-pointer hover:border-brand-300 transition-all"
-          onClick={() => navigate('/routing/rules')}
-        >
-          <CardBody>
-            <p className="text-xs text-slate-500 mb-1">Rule-Based Routing</p>
-            {!merchantId ? (
-              <Badge variant="gray">Not set</Badge>
-            ) : hasRuleBasedRouting ? (
-              <Badge variant="green">Configured</Badge>
-            ) : (
-              <Badge variant="gray">Not Configured</Badge>
-            )}
-          </CardBody>
-        </Card>
-      </div>
+                        <div className="mt-6">
+                          <p className="text-sm font-semibold text-slate-950 dark:text-white">{item.label}</p>
+                          <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-[#a6b0c3]">
+                            {item.description}
+                          </p>
+                        </div>
+                      </div>
+                    </GlassCard>
+                  ))}
+                </div>
+              </GlassCard>
 
-      {/* Active algorithm detail */}
-      {activeRouting && (
-        <Card 
-          className="cursor-pointer hover:border-brand-300 transition-all"
-          onClick={() => navigate('/routing')}
-        >
-          <CardHeader>
-            <h2 className="text-sm font-semibold text-slate-800">Active Routing Configuration</h2>
-          </CardHeader>
-          <CardBody>
-            <dl className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <dt className="text-slate-500">Name</dt>
-                <dd className="font-medium">{activeRouting.name}</dd>
+              <GlassCard className="p-6">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <SurfaceLabel>Gateway activity</SurfaceLabel>
+                    <p className="mt-2 text-sm text-slate-600 dark:text-[#a6b0c3]">
+                      Recent request distribution by gateway.
+                    </p>
+                  </div>
+                  <Badge variant="blue">Live 1h</Badge>
+                </div>
+
+                <div className="mt-6 space-y-4">
+                  {gatewayUsage.length ? (
+                    gatewayUsage.slice(0, 4).map((item, index) => (
+                      <div
+                        key={item.gateway}
+                        className="rounded-[24px] border border-slate-200 bg-slate-50/80 p-4 dark:border-[#2a303a] dark:bg-[#121720]"
+                      >
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="flex items-center gap-3">
+                            <span
+                              className="h-2.5 w-2.5 rounded-full"
+                              style={{
+                                backgroundColor:
+                                  ['#38bdf8', '#60a5fa', '#22c55e', '#f59e0b'][index] || '#38bdf8',
+                              }}
+                            />
+                            <div>
+                              <p className="text-sm font-semibold text-slate-950 dark:text-white">
+                                {item.gateway.toUpperCase()}
+                              </p>
+                              <p className="mt-1 text-xs text-slate-500 dark:text-[#98a3b8]">
+                                {formatCompactNumber(item.count)} requests
+                              </p>
+                            </div>
+                          </div>
+                          <p className="text-sm font-medium text-slate-950 dark:text-white">
+                            {formatPercent(item.share)}
+                          </p>
+                        </div>
+
+                        <div className="mt-4 h-2 rounded-full bg-slate-200 dark:bg-[#232933]">
+                          <div
+                            className="h-full rounded-full bg-gradient-to-r from-sky-400 via-blue-500 to-cyan-300"
+                            style={{ width: `${Math.max(10, item.share)}%` }}
+                          />
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="rounded-[24px] border border-dashed border-white/10 px-5 py-10 text-center">
+                      <p className="text-sm font-semibold text-slate-950 dark:text-white">
+                        No gateway activity yet
+                      </p>
+                      <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-[#a6b0c3]">
+                        Once requests start flowing, this section will show traffic by gateway.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </GlassCard>
+            </div>
+
+            <div className="mt-6 grid gap-6 xl:grid-cols-[0.86fr_1.14fr]">
+              <GlassCard className="p-6">
+                <SurfaceLabel>Quick summary</SurfaceLabel>
+                <div className="mt-5 space-y-4">
+                  {[
+                    { label: 'Selected merchant', value: merchantId },
+                    { label: 'Last sync', value: formatUpdatedAt(latestSync) },
+                    { label: 'Errors last hour', value: formatCompactNumber(totalErrors) },
+                    { label: 'Top gateway', value: topGateway?.toUpperCase() || 'No activity' },
+                  ].map((item) => (
+                    <div
+                      key={item.label}
+                      className="flex items-center justify-between gap-4 rounded-[20px] border border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-[#2a303a] dark:bg-[#121720]"
+                    >
+                      <span className="text-sm text-slate-600 dark:text-[#a6b0c3]">{item.label}</span>
+                      <span className="text-sm font-semibold text-slate-950 dark:text-white">
+                        {item.value}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </GlassCard>
+
+              <div className="grid gap-4 md:grid-cols-3">
+                {[
+                  {
+                    label: 'Routing Hub',
+                    text: 'Configure routing strategies.',
+                    icon: GitBranch,
+                    route: '/routing',
+                  },
+                  {
+                    label: 'Analytics',
+                    text: 'Inspect request and gateway trends.',
+                    icon: BarChart3,
+                    route: '/analytics',
+                  },
+                  {
+                    label: 'Audit Trail',
+                    text: 'Review individual decision records.',
+                    icon: Clock3,
+                    route: '/audit',
+                  },
+                ].map((item) => (
+                  <GlassCard key={item.label} className="p-5" onClick={() => navigate(item.route)}>
+                    <div className="flex h-full flex-col justify-between">
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-[#2a303a] dark:bg-[#161b24]">
+                        <item.icon className="h-5 w-5 text-brand-600 dark:text-sky-300" />
+                      </div>
+                      <div className="mt-10">
+                        <p className="text-sm font-semibold text-slate-950 dark:text-white">
+                          {item.label}
+                        </p>
+                        <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-[#a6b0c3]">
+                          {item.text}
+                        </p>
+                        <div className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-brand-600 dark:text-sky-300">
+                          <span>Open</span>
+                          <ArrowRight className="h-4 w-4" />
+                        </div>
+                      </div>
+                    </div>
+                  </GlassCard>
+                ))}
               </div>
-              <div>
-                <dt className="text-slate-500">Type</dt>
-                <dd className="font-medium capitalize">{(activeRouting.algorithm_data || activeRouting.algorithm)?.type}</dd>
-              </div>
-              <div>
-                <dt className="text-slate-500">Algorithm For</dt>
-                <dd className="font-medium capitalize">{activeRouting.algorithm_for}</dd>
-              </div>
-              <div>
-                <dt className="text-slate-500">ID</dt>
-                <dd className="font-mono text-xs text-slate-600">{activeRouting.id}</dd>
-              </div>
-            </dl>
-          </CardBody>
-        </Card>
-      )}
+            </div>
+          </>
+        )}
+      </section>
     </div>
   )
 }
