@@ -1,7 +1,8 @@
 use crate::analytics::{
     decisions as fetch_decisions, gateway_scores as fetch_gateway_scores,
     log_summaries as fetch_log_summaries, overview as fetch_overview, parse_payment_audit_query,
-    parse_query, payment_audit as fetch_payment_audit, routing_stats as fetch_routing_stats,
+    parse_query, payment_audit as fetch_payment_audit, preview_trace as fetch_preview_trace,
+    routing_stats as fetch_routing_stats,
 };
 use crate::custom_extractors::TenantStateResolver;
 use crate::error;
@@ -44,6 +45,7 @@ pub fn serve() -> axum::Router<Arc<crate::tenant::GlobalAppState>> {
         .route("/routing-stats", axum::routing::get(routing_stats))
         .route("/log-summaries", axum::routing::get(log_summaries))
         .route("/payment-audit", axum::routing::get(payment_audit))
+        .route("/preview-trace", axum::routing::get(preview_trace))
 }
 
 pub async fn overview(
@@ -197,4 +199,25 @@ pub async fn payment_audit(
         params.error_code,
     );
     Ok(Json(fetch_payment_audit(&state, &query).await?))
+}
+
+pub async fn preview_trace(
+    TenantStateResolver(state): TenantStateResolver,
+    Query(params): Query<AnalyticsQueryParams>,
+) -> Result<Json<crate::analytics::PaymentAuditResponse>, error::ContainerError<error::ApiError>> {
+    let query = parse_payment_audit_query(
+        params.merchant_id,
+        params.scope,
+        params.range,
+        params.page,
+        params.page_size,
+        params.payment_id,
+        params.request_id,
+        params.gateway,
+        params.route,
+        params.status,
+        params.event_type,
+        params.error_code,
+    );
+    Ok(Json(fetch_preview_trace(&state, &query).await?))
 }
