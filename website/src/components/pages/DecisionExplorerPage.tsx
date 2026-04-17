@@ -48,6 +48,8 @@ interface SimulationResult {
   timestamp: string
 }
 
+type TransactionOutcome = 'CHARGED' | 'FAILURE'
+
 type AuditInspectorTab = 'summary' | 'input' | 'response' | 'raw'
 
 interface RuleEvaluateParams {
@@ -194,6 +196,7 @@ function eventTypeLabel(eventType?: string | null) {
   if (eventType === 'decision') return 'Decide Gateway'
   if (eventType === 'gateway_update') return 'Update Gateway'
   if (eventType === 'rule_hit') return 'Rule Evaluate'
+  if (eventType === 'rule_evaluation_preview') return 'Preview Result'
   if (eventType === 'error') return 'Errors'
   return humanizeAuditValue(eventType)
 }
@@ -202,6 +205,7 @@ function stageLabel(event: PaymentAuditEvent) {
   if (event.event_stage === 'gateway_decided') return 'Decide Gateway'
   if (event.event_stage === 'score_updated') return 'Update Gateway'
   if (event.event_stage === 'rule_applied') return 'Rule Evaluate'
+  if (event.event_stage === 'preview_evaluated' || event.event_type === 'rule_evaluation_preview') return 'Preview Result'
   if (event.event_type === 'error') return 'Errors'
   return humanizeAuditValue(event.event_stage || event.event_type)
 }
@@ -210,6 +214,7 @@ function eventPhase(event: PaymentAuditEvent) {
   if (event.event_type === 'decision' || event.event_stage === 'gateway_decided') return 'Decide Gateway'
   if (event.event_type === 'rule_hit' || event.event_stage === 'rule_applied') return 'Rule Evaluate'
   if (event.event_type === 'gateway_update' || event.event_stage === 'score_updated') return 'Update Gateway'
+  if (event.event_type === 'rule_evaluation_preview' || event.event_stage === 'preview_evaluated') return 'Preview'
   return 'Errors'
 }
 
@@ -227,6 +232,7 @@ function badgeVariantForEvent(event: PaymentAuditEvent): 'blue' | 'green' | 'pur
     normalizedStatus === 'AUTHORIZED' ||
     normalizedStatus === 'SUCCESS'
   ) return 'green'
+  if (event.event_type === 'rule_evaluation_preview') return 'purple'
   if (event.event_type === 'gateway_update') return 'green'
   if (event.event_type === 'decision') return 'blue'
   return 'orange'
@@ -250,6 +256,7 @@ function summaryBadgeVariant(status?: string | null): 'blue' | 'green' | 'purple
 function phaseBadgeVariant(phase: string): 'blue' | 'green' | 'purple' | 'red' | 'orange' | 'gray' {
   if (phase === 'Decide Gateway') return 'blue'
   if (phase === 'Rule Evaluate') return 'purple'
+  if (phase === 'Preview') return 'purple'
   if (phase === 'Update Gateway') return 'green'
   if (phase === 'Errors') return 'red'
   return 'gray'
@@ -280,6 +287,18 @@ function buildAuditUrl(merchantId: string, paymentId: string) {
     payment_id: paymentId,
   })
   return `/analytics/payment-audit?${qs}`
+}
+
+function buildPreviewTraceUrl(merchantId: string, paymentId: string) {
+  const qs = queryString({
+    scope: 'current',
+    range: '24h',
+    page: 1,
+    page_size: 25,
+    merchant_id: merchantId,
+    payment_id: paymentId,
+  })
+  return `/analytics/preview-trace?${qs}`
 }
 
 function buildInspectorModel(event: PaymentAuditEvent | null) {
@@ -469,6 +488,8 @@ export function DecisionExplorerPage() {
   const [volumePayments, setVolumePayments] = useState<string>('100')
 
   const [result, setResult] = useState<DecideGatewayResponse | null>(null)
+  const [singleRunPaymentId, setSingleRunPaymentId] = useState<string | null>(null)
+  const [singleRunOutcome, setSingleRunOutcome] = useState<TransactionOutcome>('CHARGED')
   const [ruleResult, setRuleResult] = useState<RuleEvaluateResponse | null>(null)
   const [volumeDistribution, setVolumeDistribution] = useState<{ name: string; count: number; percentage: number }[]>([])
   const [simulationResults, setSimulationResults] = useState<SimulationResult[]>([])
@@ -481,6 +502,10 @@ export function DecisionExplorerPage() {
   const [selectedAuditPaymentId, setSelectedAuditPaymentId] = useState<string | null>(null)
   const [selectedAuditEventId, setSelectedAuditEventId] = useState<number | null>(null)
   const [auditInspectorTab, setAuditInspectorTab] = useState<AuditInspectorTab>('summary')
+  const [selectedPreviewPaymentId, setSelectedPreviewPaymentId] = useState<string | null>(null)
+  const [selectedPreviewEventId, setSelectedPreviewEventId] = useState<number | null>(null)
+  const [previewInspectorTab, setPreviewInspectorTab] = useState<AuditInspectorTab>('summary')
+  const [previewTraceLabel, setPreviewTraceLabel] = useState('Rule Evaluation Preview')
 
   const routingKeyNames = useMemo(
     () => Object.keys(routingKeysConfig).sort(),
@@ -518,6 +543,15 @@ export function DecisionExplorerPage() {
 
   const auditDetail = useSWR<PaymentAuditResponse>(auditUrl, fetcher, {
     refreshInterval: selectedAuditPaymentId ? 12000 : 0,
+    revalidateOnFocus: true,
+  })
+
+  const previewTraceUrl = merchantId && selectedPreviewPaymentId
+    ? buildPreviewTraceUrl(merchantId, selectedPreviewPaymentId)
+    : null
+
+  const previewTraceDetail = useSWR<PaymentAuditResponse>(previewTraceUrl, fetcher, {
+    refreshInterval: selectedPreviewPaymentId ? 12000 : 0,
     revalidateOnFocus: true,
   })
 
@@ -576,7 +610,7 @@ export function DecisionExplorerPage() {
   ])
 
   useEffect(() => {
-    if (!selectedAuditPaymentId) return
+    if (!selectedAuditPaymentId && !selectedPreviewPaymentId) return
 
     const previousOverflow = document.body.style.overflow
     const onKeyDown = (event: KeyboardEvent) => {
@@ -584,6 +618,9 @@ export function DecisionExplorerPage() {
         setSelectedAuditPaymentId(null)
         setSelectedAuditEventId(null)
         setAuditInspectorTab('summary')
+        setSelectedPreviewPaymentId(null)
+        setSelectedPreviewEventId(null)
+        setPreviewInspectorTab('summary')
       }
     }
 
@@ -594,7 +631,7 @@ export function DecisionExplorerPage() {
       document.body.style.overflow = previousOverflow
       window.removeEventListener('keydown', onKeyDown)
     }
-  }, [selectedAuditPaymentId])
+  }, [selectedAuditPaymentId, selectedPreviewPaymentId])
 
   function set(field: keyof FormState, value: string | boolean) {
     setForm(f => ({ ...f, [field]: value }))
@@ -646,12 +683,14 @@ export function DecisionExplorerPage() {
     if (!merchantId) return setError('Set a merchant ID in the top bar')
     if (routingConfigUnavailable) return setError('Routing key config unavailable. Fix /config/routing-keys and retry.')
     setLoading(true); setError(null)
+    setSingleRunPaymentId(null)
     const gateways = form.eligible_gateways.split(',').map(s => s.trim()).filter(Boolean)
+    const paymentId = `explorer_${Date.now()}`
     try {
       const res = await apiPost<DecideGatewayResponse>('/decide-gateway', {
         merchantId: merchantId,
         paymentInfo: {
-          paymentId: `explorer_${Date.now()}`,
+          paymentId: paymentId,
           amount: parseFloat(form.amount) || 1000,
           currency: form.currency,
           paymentType: 'ORDER_PAYMENT',
@@ -664,7 +703,16 @@ export function DecisionExplorerPage() {
         rankingAlgorithm: form.ranking_algorithm,
         eliminationEnabled: form.elimination_enabled,
       })
+      await apiPost('/update-gateway-score', {
+        merchantId: merchantId,
+        gateway: res.decided_gateway,
+        gatewayReferenceId: null,
+        status: singleRunOutcome,
+        paymentId: paymentId,
+        enforceDynamicRoutingFailure: null,
+      })
       setResult(res)
+      setSingleRunPaymentId(paymentId)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Request failed')
     } finally {
@@ -757,6 +805,7 @@ export function DecisionExplorerPage() {
     setError(null)
     setRuleResult(null)
     setVolumeDistribution([])
+    const previewPaymentId = `rule_preview_${Date.now()}`
 
     try {
       const parameters: Record<string, { type: string; value: string | number | { key: string; value: string } }> = {}
@@ -777,6 +826,7 @@ export function DecisionExplorerPage() {
 
       const res = await apiPost<RuleEvaluateResponse>('/routing/evaluate', {
         created_by: merchantId || 'test_user',
+        payment_id: previewPaymentId,
         fallback_output: fallbackConnectors.filter(c => c.gateway_name),
         parameters,
       })
@@ -803,10 +853,12 @@ export function DecisionExplorerPage() {
     setLoading(true)
     setError(null)
     setVolumeDistribution([])
+    const previewPaymentId = `volume_preview_${Date.now()}`
 
     try {
       const res = await apiPost<RuleEvaluateResponse>('/routing/evaluate', {
         created_by: merchantId || 'test_user',
+        payment_id: previewPaymentId,
         fallback_output: [
           { gateway_name: 'stripe', gateway_id: 'gateway_001' },
           { gateway_name: 'adyen', gateway_id: 'gateway_002' },
@@ -891,7 +943,47 @@ export function DecisionExplorerPage() {
 
   const auditInspectorModel = useMemo(() => buildInspectorModel(selectedAuditEvent), [selectedAuditEvent])
 
+  const previewSummary = useMemo(() => {
+    const results = previewTraceDetail.data?.results || []
+    return results.find((row) => row.payment_id === selectedPreviewPaymentId) || results[0] || null
+  }, [previewTraceDetail.data?.results, selectedPreviewPaymentId])
+
+  const selectedPreviewEvent = useMemo(() => {
+    const timeline = previewTraceDetail.data?.timeline || []
+    return timeline.find((event) => event.id === selectedPreviewEventId) || timeline[0] || null
+  }, [previewTraceDetail.data?.timeline, selectedPreviewEventId])
+
+  useEffect(() => {
+    if (selectedPreviewEvent?.id) {
+      setSelectedPreviewEventId(selectedPreviewEvent.id)
+      return
+    }
+    const first = previewTraceDetail.data?.timeline?.[0]
+    if (first?.id) {
+      setSelectedPreviewEventId(first.id)
+    }
+  }, [previewTraceDetail.data?.timeline, selectedPreviewEvent?.id])
+
+  const groupedPreviewTimeline = useMemo(() => {
+    const groups: Array<{ phase: string; events: PaymentAuditEvent[] }> = []
+    for (const event of previewTraceDetail.data?.timeline || []) {
+      const phase = eventPhase(event)
+      const current = groups[groups.length - 1]
+      if (!current || current.phase !== phase) {
+        groups.push({ phase, events: [event] })
+      } else {
+        current.events.push(event)
+      }
+    }
+    return groups
+  }, [previewTraceDetail.data?.timeline])
+
+  const previewInspectorModel = useMemo(() => buildInspectorModel(selectedPreviewEvent), [selectedPreviewEvent])
+
   function openAuditModal(paymentId: string) {
+    setSelectedPreviewPaymentId(null)
+    setSelectedPreviewEventId(null)
+    setPreviewInspectorTab('summary')
     setSelectedAuditPaymentId(paymentId)
     setSelectedAuditEventId(null)
     setAuditInspectorTab('summary')
@@ -901,6 +993,22 @@ export function DecisionExplorerPage() {
     setSelectedAuditPaymentId(null)
     setSelectedAuditEventId(null)
     setAuditInspectorTab('summary')
+  }
+
+  function openPreviewModal(paymentId: string, label: string) {
+    setSelectedAuditPaymentId(null)
+    setSelectedAuditEventId(null)
+    setAuditInspectorTab('summary')
+    setPreviewTraceLabel(label)
+    setSelectedPreviewPaymentId(paymentId)
+    setSelectedPreviewEventId(null)
+    setPreviewInspectorTab('summary')
+  }
+
+  function closePreviewModal() {
+    setSelectedPreviewPaymentId(null)
+    setSelectedPreviewEventId(null)
+    setPreviewInspectorTab('summary')
   }
 
   return (
@@ -1182,6 +1290,23 @@ export function DecisionExplorerPage() {
                   </div>
                 </div>
 
+                {activeTab === 'single' && (
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Transaction Outcome</label>
+                    <select
+                      value={singleRunOutcome}
+                      onChange={e => setSingleRunOutcome(e.target.value as TransactionOutcome)}
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    >
+                      <option value="CHARGED">Success (CHARGED)</option>
+                      <option value="FAILURE">Failure (FAILURE)</option>
+                    </select>
+                    <p className="mt-1 text-xs text-slate-500">
+                      After deciding the gateway, single test will post feedback with this outcome so the payment appears in Decision Audit.
+                    </p>
+                  </div>
+                )}
+
                 {activeTab === 'batch' && (
                   <div className="border-t border-slate-200 dark:border-[#1c1c24] pt-4 mt-4 space-y-3">
                     <h3 className="text-sm font-medium text-slate-800 flex items-center gap-2">
@@ -1250,7 +1375,7 @@ export function DecisionExplorerPage() {
               </Button>
             ) : (
               <Button onClick={run} disabled={loading || !merchantId || routingConfigUnavailable} className="w-full justify-center">
-                {loading ? <><Spinner size={14} /> Running…</> : <><Play size={14} /> Run Decision</>}
+                {loading ? <><Spinner size={14} /> Running…</> : <><Play size={14} /> Run Single Transaction</>}
               </Button>
             )}
           </CardBody>
@@ -1262,7 +1387,21 @@ export function DecisionExplorerPage() {
               <>
                 <Card>
                   <CardHeader>
-                    <h3 className="text-sm font-medium text-slate-800">Volume Distribution Overview</h3>
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-medium text-slate-800">Volume Distribution Overview</h3>
+                        <p className="mt-1 text-xs text-slate-500">Preview only. This uses the active routing rule and stores a trace for inspection.</p>
+                      </div>
+                      {ruleResult?.payment_id ? (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => openPreviewModal(ruleResult.payment_id!, 'Volume Split Preview')}
+                        >
+                          View preview trace
+                        </Button>
+                      ) : null}
+                    </div>
                   </CardHeader>
                   <CardBody>
                     <div className="text-center mb-4">
@@ -1418,9 +1557,9 @@ export function DecisionExplorerPage() {
                 <Card>
                   <CardHeader>
                     <div>
-                      <h3 className="text-sm font-medium text-slate-800">Payment Log</h3>
+                      <h3 className="text-sm font-medium text-slate-800">Projected Sequence</h3>
                       <p className="mt-1 text-xs text-slate-500">
-                        Simulated sequence based on the configured split, shown in shuffled order instead of connector blocks.
+                        Preview-only projection based on the configured split. This is not a live payment trail.
                       </p>
                     </div>
                   </CardHeader>
@@ -1493,6 +1632,15 @@ export function DecisionExplorerPage() {
                         <p className="text-2xl font-bold text-slate-900">{ruleResult.status}</p>
                         <p className="text-xs text-slate-500 mt-1">output_type: {ruleResult.output.type}</p>
                       </div>
+                      {ruleResult.payment_id ? (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => openPreviewModal(ruleResult.payment_id!, 'Rule Evaluation Preview')}
+                        >
+                          View preview trace
+                        </Button>
+                      ) : null}
                     </div>
 
                     {ruleResult.output.type === 'single' && ruleResult.output.connector && (
@@ -1667,18 +1815,43 @@ export function DecisionExplorerPage() {
                         <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Decided Gateway</p>
                         <p className="text-3xl font-bold text-slate-900">{result.decided_gateway}</p>
                       </div>
-                      <div className="text-right space-y-1">
+                      <div className="text-right space-y-2">
                         <div>
                           <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${approachColor(result.routing_approach)}`}>
                             {result.routing_approach}
                           </span>
                         </div>
+                        {singleRunPaymentId ? (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => openAuditModal(singleRunPaymentId)}
+                          >
+                            View audit
+                          </Button>
+                        ) : null}
                         {result.is_scheduled_outage && <Badge variant="red">Scheduled Outage</Badge>}
+                        {singleRunPaymentId ? (
+                          <Badge variant={singleRunOutcome === 'CHARGED' ? 'green' : 'red'}>
+                            {singleRunOutcome}
+                          </Badge>
+                        ) : null}
                         {result.latency != null && (
                           <p className="text-xs text-slate-400">{result.latency}ms</p>
                         )}
                       </div>
                     </div>
+                    {singleRunPaymentId ? (
+                      <div className="mb-3 rounded-[18px] border border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-[#1c1c23] dark:bg-[#0b0b10]">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8a8a93]">
+                          Payment ID
+                        </p>
+                        <p className="mt-2 font-mono text-sm text-slate-900 dark:text-white">{singleRunPaymentId}</p>
+                        <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                          Feedback recorded as {singleRunOutcome}. Open audit to inspect the full decide and update flow.
+                        </p>
+                      </div>
+                    ) : null}
                     {result.routing_dimension && (
                       <div className="flex gap-4 text-sm text-slate-600 border-t border-slate-200 dark:border-[#1c1c24] pt-3">
                         <div>
@@ -1793,7 +1966,7 @@ export function DecisionExplorerPage() {
               <Card>
                 <CardBody className="py-16 text-center">
                   <Play size={32} className="text-gray-300 mx-auto mb-3" />
-                  <p className="text-slate-400 text-sm">Fill in the parameters and click "Run Decision" to see the routing result.</p>
+                  <p className="text-slate-400 text-sm">Fill in the parameters and click "Run Single Transaction" to decide a gateway, post feedback, and inspect the audit trail.</p>
                 </CardBody>
               </Card>
             )
@@ -2020,6 +2193,216 @@ export function DecisionExplorerPage() {
                     <EmptyAuditState
                       title="Select a timeline step"
                       body="Choose one of the audit events on the left to inspect its request, response, and score context."
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {selectedPreviewPaymentId && (
+        <div className="fixed bottom-0 left-64 right-0 top-[76px] z-[130] p-8">
+          <button
+            type="button"
+            aria-label="Close preview trace"
+            className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm"
+            onClick={closePreviewModal}
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="decision-explorer-preview-title"
+            className="relative mx-auto flex h-full w-full max-w-7xl flex-col overflow-hidden rounded-[30px] border border-slate-200 bg-white shadow-2xl dark:border-[#1c1c23] dark:bg-[#09090d]"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 bg-slate-50/90 px-6 py-5 dark:border-[#1c1c23] dark:bg-[#0b0b10]">
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-[#8a8a93]">
+                  Preview Trace
+                </p>
+                <h2
+                  id="decision-explorer-preview-title"
+                  className="mt-2 truncate text-2xl font-semibold text-slate-900 dark:text-white"
+                >
+                  {selectedPreviewPaymentId}
+                </h2>
+                <p className="mt-2 max-w-3xl text-sm text-slate-500 dark:text-[#8a8a93]">
+                  {previewTraceLabel}. This is a preview-only trace captured from <code className="font-mono text-xs">/routing/evaluate</code>, not a transaction outcome.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {previewSummary?.latest_gateway ? <Badge variant="green">{previewSummary.latest_gateway}</Badge> : null}
+                {previewSummary?.latest_status ? (
+                  <Badge variant={summaryBadgeVariant(previewSummary.latest_status)}>
+                    {humanizeAuditValue(previewSummary.latest_status)}
+                  </Badge>
+                ) : null}
+                {previewSummary?.event_count ? <Badge variant="gray">{previewSummary.event_count} events</Badge> : null}
+                <Button size="sm" variant="secondary" onClick={() => previewTraceDetail.mutate()}>
+                  <RefreshCw size={12} />
+                  Refresh
+                </Button>
+                <Button size="sm" variant="ghost" onClick={closePreviewModal}>
+                  <X size={14} />
+                  Close
+                </Button>
+              </div>
+            </div>
+
+            <div className="grid min-h-0 flex-1 gap-0 xl:grid-cols-[340px_minmax(0,1fr)]">
+              <div className="flex min-h-0 flex-col border-b border-slate-200 bg-slate-50/70 xl:border-b-0 xl:border-r dark:border-[#1c1c23] dark:bg-[#08080b]">
+                <div className="border-b border-slate-200 px-6 py-4 dark:border-[#1c1c23]">
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Preview Timeline</h3>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                    Choose a preview step to inspect its request, response, and routing output.
+                  </p>
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+                  {previewTraceDetail.isLoading && !previewTraceDetail.data ? (
+                    <div className="flex items-center gap-2 px-2 text-sm text-slate-500 dark:text-[#8a8a93]">
+                      <Spinner size={16} />
+                      Loading preview trace…
+                    </div>
+                  ) : previewTraceDetail.error ? (
+                    <ErrorMessage error={previewTraceDetail.error.message} />
+                  ) : groupedPreviewTimeline.length ? (
+                    <div className="space-y-4">
+                      {groupedPreviewTimeline.map((group) => (
+                        <section key={group.phase} className="space-y-2">
+                          <div className="px-2">
+                            <Badge variant={phaseBadgeVariant(group.phase)}>{group.phase}</Badge>
+                          </div>
+                          <div className="space-y-2">
+                            {group.events.map((event) => (
+                              <button
+                                key={event.id}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedPreviewEventId(event.id)
+                                  setPreviewInspectorTab('summary')
+                                }}
+                                className={`w-full rounded-[22px] border px-4 py-3 text-left transition ${
+                                  selectedPreviewEvent?.id === event.id
+                                    ? 'border-brand-500/50 bg-brand-500/8'
+                                    : 'border-slate-200 bg-white hover:border-slate-300 dark:border-[#1d1d23] dark:bg-[#0c0c10] dark:hover:border-[#2a2a31]'
+                                }`}
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+                                      {stageLabel(event)}
+                                    </p>
+                                    <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                                      {formatDateTime(event.created_at_ms)}
+                                    </p>
+                                  </div>
+                                  <Badge variant={badgeVariantForEvent(event)}>
+                                    {humanizeAuditValue(event.status) || eventTypeLabel(event.event_type)}
+                                  </Badge>
+                                </div>
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  <Badge variant="gray">{routeLabel(event.route)}</Badge>
+                                  {event.gateway ? <Badge variant="green">{event.gateway}</Badge> : null}
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </section>
+                      ))}
+                    </div>
+                  ) : (
+                    <EmptyAuditState
+                      title="No preview trace captured yet"
+                      body="Run Rule-Based or Volume Split evaluation first, then open the preview trace once the request has been logged."
+                    />
+                  )}
+                </div>
+              </div>
+
+              <div className="flex min-h-0 flex-col">
+                <div className="border-b border-slate-200 px-6 py-4 dark:border-[#1c1c23]">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+                        {selectedPreviewEvent ? stageLabel(selectedPreviewEvent) : 'Preview Inspector'}
+                      </h3>
+                      <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                        {selectedPreviewEvent
+                          ? `${routeLabel(selectedPreviewEvent.route)} · ${formatDateTime(selectedPreviewEvent.created_at_ms)}`
+                          : 'Select an event from the left to inspect the preview payload.'}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedPreviewEvent?.gateway ? <Badge variant="green">{selectedPreviewEvent.gateway}</Badge> : null}
+                      {selectedPreviewEvent?.status ? (
+                        <Badge variant={badgeVariantForEvent(selectedPreviewEvent)}>
+                          {humanizeAuditValue(selectedPreviewEvent.status)}
+                        </Badge>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {(['summary', 'input', 'response', 'raw'] as AuditInspectorTab[]).map((tab) => (
+                      <button
+                        key={tab}
+                        type="button"
+                        onClick={() => setPreviewInspectorTab(tab)}
+                        className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] transition ${sectionButtonClass(previewInspectorTab === tab)}`}
+                      >
+                        {tab === 'raw' ? 'Raw JSON' : humanizeAuditValue(tab)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+                  {previewTraceDetail.isLoading && !previewTraceDetail.data ? (
+                    <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-[#8a8a93]">
+                      <Spinner size={16} />
+                      Loading preview inspector…
+                    </div>
+                  ) : previewInspectorModel ? (
+                    <div className="space-y-5">
+                      {previewInspectorTab === 'summary' ? (
+                        <>
+                          <InspectorKeyValueGrid rows={previewInspectorModel.summaryRows} />
+                          <InspectorJsonPanel
+                            title="Preview Signals"
+                            value={previewInspectorModel.signalRecord}
+                            emptyMessage="No extra preview metadata was captured for this evaluation."
+                          />
+                        </>
+                      ) : null}
+
+                      {previewInspectorTab === 'input' ? (
+                        <InspectorJsonPanel
+                          title="Request Payload"
+                          value={previewInspectorModel.requestPayload}
+                          emptyMessage="No request payload was captured for this preview."
+                        />
+                      ) : null}
+
+                      {previewInspectorTab === 'response' ? (
+                        <InspectorJsonPanel
+                          title="Response Payload"
+                          value={previewInspectorModel.responsePayload}
+                          emptyMessage="No response payload was captured for this preview."
+                        />
+                      ) : null}
+
+                      {previewInspectorTab === 'raw' ? (
+                        <InspectorJsonPanel
+                          title="Raw Event JSON"
+                          value={previewInspectorModel.rawEvent}
+                          emptyMessage="No raw event payload is available for this preview."
+                        />
+                      ) : null}
+                    </div>
+                  ) : (
+                    <EmptyAuditState
+                      title="Select a preview step"
+                      body="Choose one of the preview events on the left to inspect its request and response payload."
                     />
                   )}
                 </div>

@@ -93,6 +93,7 @@ fn event_type_label(kind: &str) -> &'static str {
         "gateway_update" => "gateway_update",
         "score_snapshot" => "score_snapshot",
         "rule_hit" => "rule_hit",
+        "rule_evaluation_preview" => "rule_evaluation_preview",
         "error" => "error",
         "request_hit" => "request_hit",
         _ => "other",
@@ -290,6 +291,44 @@ pub fn record_rule_hit_event(
         tp99_latency: None,
         transaction_count: None,
         route: Some("routing".to_string()),
+        details,
+        created_at_ms: now_ms(),
+    });
+}
+
+pub fn record_rule_evaluation_preview_event(
+    merchant_id: Option<String>,
+    payment_id: Option<String>,
+    gateway: Option<String>,
+    rule_name: Option<String>,
+    status: Option<String>,
+    details: Option<String>,
+) {
+    spawn_persist(NewAnalyticsEvent {
+        event_type: "rule_evaluation_preview".to_string(),
+        merchant_id,
+        payment_id,
+        request_id: None,
+        payment_method_type: None,
+        payment_method: None,
+        card_network: None,
+        card_is_in: None,
+        currency: None,
+        country: None,
+        auth_type: None,
+        gateway,
+        event_stage: Some("preview_evaluated".to_string()),
+        routing_approach: Some("RULE_EVALUATE_PREVIEW".to_string()),
+        rule_name,
+        status,
+        error_code: None,
+        error_message: None,
+        score_value: None,
+        sigma_factor: None,
+        average_latency: None,
+        tp99_latency: None,
+        transaction_count: None,
+        route: Some("routing_evaluate".to_string()),
         details,
         created_at_ms: now_ms(),
     });
@@ -538,6 +577,94 @@ async fn load_payment_audit_events(
         .or_else(|_| Ok(Vec::new()))
 }
 
+async fn load_preview_trace_events(
+    state: &crate::app::TenantAppState,
+    query: &PaymentAuditQuery,
+) -> Result<Vec<AnalyticsEvent>, error::ApiError> {
+    let conn = &state
+        .db
+        .get_conn()
+        .await
+        .map_err(|_| error::ApiError::DatabaseError)?;
+
+    let mut builder = analytics_dsl::analytics_event
+        .select(AnalyticsEvent::as_select())
+        .into_boxed();
+    let cutoff_ms = now_ms().saturating_sub(query.range.window_ms());
+    builder = builder.filter(analytics_dsl::created_at_ms.ge(cutoff_ms));
+    builder = builder.filter(analytics_dsl::route.eq("routing_evaluate".to_string()));
+    builder = builder.filter(analytics_dsl::event_type.eq_any(vec![
+        "rule_evaluation_preview".to_string(),
+        "error".to_string(),
+    ]));
+
+    if query.scope == AnalyticsScope::Current {
+        if let Some(merchant_id) = &query.merchant_id {
+            builder = builder.filter(analytics_dsl::merchant_id.eq(merchant_id.clone()));
+        }
+    }
+
+    if let Some(payment_id) = &query.payment_id {
+        builder = builder.filter(analytics_dsl::payment_id.eq(payment_id.clone()));
+    }
+
+    if query.payment_id.is_none() {
+        if let Some(request_id) = &query.request_id {
+            builder = builder.filter(analytics_dsl::request_id.eq(request_id.clone()));
+        }
+    }
+
+    if let Some(gateway) = &query.gateway {
+        builder = builder.filter(analytics_dsl::gateway.eq(gateway.clone()));
+    }
+
+    if let Some(status) = &query.status {
+        if status.eq_ignore_ascii_case("success") {
+            builder = builder.filter(
+                analytics_dsl::status
+                    .eq("success".to_string())
+                    .or(analytics_dsl::status.eq("default_selection".to_string())),
+            );
+        } else if status.eq_ignore_ascii_case("failure") || status.eq_ignore_ascii_case("FAILURE") {
+            builder = builder.filter(
+                analytics_dsl::status
+                    .eq("FAILURE".to_string())
+                    .or(analytics_dsl::status
+                        .like("%FAILED%")
+                        .or(analytics_dsl::status.like("%DECLINED%"))),
+            );
+        } else {
+            builder = builder.filter(analytics_dsl::status.eq(status.clone()));
+        }
+    }
+
+    if let Some(event_type) = &query.event_type {
+        builder = builder.filter(analytics_dsl::event_type.eq(event_type.clone()));
+    }
+
+    if let Some(error_code) = &query.error_code {
+        builder = builder.filter(analytics_dsl::error_code.eq(error_code.clone()));
+    }
+
+    builder
+        .order((
+            analytics_dsl::created_at_ms.desc(),
+            analytics_dsl::id.desc(),
+        ))
+        .load_async::<AnalyticsEvent>(&**conn)
+        .await
+        .map_err(|err| {
+            crate::logger::error!(
+                error = ?err,
+                merchant_id = ?query.merchant_id,
+                payment_id = ?query.payment_id,
+                "Preview trace read failed; returning empty preview state"
+            );
+            err
+        })
+        .or_else(|_| Ok(Vec::new()))
+}
+
 fn parse_details_json(details: &Option<String>) -> Option<serde_json::Value> {
     details
         .as_ref()
@@ -633,6 +760,7 @@ fn payment_audit_stage_label(event: &AnalyticsEvent) -> &'static str {
         "decision" => "Decide Gateway",
         "gateway_update" => "Update Gateway",
         "rule_hit" => "Rule Evaluate",
+        "rule_evaluation_preview" => "Preview Result",
         "error" => "Errors",
         _ => "Errors",
     }
@@ -1367,7 +1495,9 @@ fn summarise_payment_audit_results(events: &[AnalyticsEvent]) -> Vec<PaymentAudi
                             .rev()
                             .find_map(|event| match event.event_type.as_str() {
                                 "error" => Some("FAILURE".to_string()),
-                                "decision" | "gateway_update" => event.status.clone(),
+                                "decision" | "gateway_update" | "rule_evaluation_preview" => {
+                                    event.status.clone()
+                                }
                                 _ => None,
                             })
                     }),
@@ -1651,6 +1781,71 @@ pub async fn payment_audit(
             .or_else(|| paged_results.first().and_then(|row| row.request_id.clone())),
         gateway: query.gateway.clone(),
         route: query.route.clone(),
+        status: query.status.clone(),
+        event_type: query.event_type.clone(),
+        error_code: query.error_code.clone(),
+        page,
+        page_size,
+        total_results: results.len(),
+        results: paged_results,
+        timeline,
+    })
+}
+
+pub async fn preview_trace(
+    state: &crate::app::TenantAppState,
+    query: &PaymentAuditQuery,
+) -> Result<PaymentAuditResponse, error::ApiError> {
+    if query.scope == AnalyticsScope::All {
+        return Ok(empty_payment_audit_response(query));
+    }
+
+    let preview_events = load_preview_trace_events(state, query).await?;
+    let results = summarise_payment_audit_results(&preview_events);
+
+    let page_size = query.page_size.clamp(1, 50);
+    let page = query.page.max(1);
+    let start = (page - 1) * page_size;
+    let paged_results: Vec<PaymentAuditSummary> = results
+        .iter()
+        .skip(start)
+        .take(page_size)
+        .cloned()
+        .collect();
+
+    let selected_payment_id = query.payment_id.as_deref().or_else(|| {
+        paged_results
+            .first()
+            .and_then(|row| row.payment_id.as_deref())
+    });
+    let selected_request_id = query.request_id.as_deref().or_else(|| {
+        paged_results
+            .first()
+            .and_then(|row| row.request_id.as_deref())
+    });
+    let selected_lookup_key = paged_results.first().map(|row| row.lookup_key.as_str());
+    let timeline = build_payment_timeline(
+        &preview_events,
+        selected_payment_id,
+        selected_request_id,
+        selected_lookup_key,
+    );
+
+    Ok(PaymentAuditResponse {
+        generated_at_ms: now_ms(),
+        scope: query.scope.as_str().to_string(),
+        merchant_id: query.merchant_id.clone(),
+        range: format_payment_audit_range(query),
+        payment_id: query
+            .payment_id
+            .clone()
+            .or_else(|| paged_results.first().and_then(|row| row.payment_id.clone())),
+        request_id: query
+            .request_id
+            .clone()
+            .or_else(|| paged_results.first().and_then(|row| row.request_id.clone())),
+        gateway: query.gateway.clone(),
+        route: Some("routing_evaluate".to_string()),
         status: query.status.clone(),
         event_type: query.event_type.clone(),
         error_code: query.error_code.clone(),
