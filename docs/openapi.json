@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Decision Engine",
-    "description": "Open-source payment gateway routing service by Juspay. Selects the optimal payment processor for each transaction in real-time using success-rate scoring, rule-based routing, and elimination logic.",
+    "description": "HTTP API for gateway decisions, score feedback, merchant configuration, and routing rule management.",
     "version": "1.2.1",
     "contact": {
       "name": "Juspay",
@@ -359,15 +359,15 @@
         }
       }
     },
-    "/routing/list/{merchantId}": {
+    "/routing/list/{created_by}": {
       "post": {
         "operationId": "listRoutingRules",
         "tags": ["Routing Rules"],
         "summary": "List routing rules",
-        "description": "List all routing rules for a merchant.",
+        "description": "List all routing rules for a given `created_by` scope.",
         "parameters": [
           {
-            "name": "merchantId",
+            "name": "created_by",
             "in": "path",
             "required": true,
             "schema": { "type": "string" },
