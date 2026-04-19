@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import useSWR from 'swr'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts'
-import { Card, CardBody, CardHeader } from '../ui/Card'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
+import { Card, CardBody, CardHeader, SurfaceLabel } from '../ui/Card'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { Spinner } from '../ui/Spinner'
 import { useMerchantStore } from '../../store/merchantStore'
@@ -82,8 +82,8 @@ function approachColor(approach: string): string {
 const COLORS = ['#0069ED', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16']
 
 type VolumePaymentEntry = {
+  paymentId: string
   connector: string
-  colorIdx: number
 }
 
 function toUpperOptions(values: string[] = []): string[] {
@@ -94,56 +94,13 @@ function uniqueUpperOptions(values: string[] = []): string[] {
   return Array.from(new Set(toUpperOptions(values)))
 }
 
-function mulberry32(seed: number) {
-  return function random() {
-    let t = seed += 0x6D2B79F5
-    t = Math.imul(t ^ (t >>> 15), t | 1)
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
-
-function buildVolumePaymentLog(
-  distribution: Array<{ name: string; count: number; percentage: number }>,
-  totalPayments: number,
-): VolumePaymentEntry[] {
-  const total = Math.max(0, totalPayments)
-  if (!distribution.length || total === 0) return []
-
-  const payments: VolumePaymentEntry[] = []
-
-  distribution.forEach((item, idx) => {
-    for (let count = 0; count < item.count; count += 1) {
-      payments.push({ connector: item.name, colorIdx: idx })
-    }
-  })
-
-  const rankedConnectors = distribution
-    .map((item, idx) => ({ connector: item.name, colorIdx: idx, percentage: item.percentage }))
-    .sort((a, b) => b.percentage - a.percentage)
-
-  while (payments.length < total) {
-    const filler = rankedConnectors[payments.length % rankedConnectors.length]
-    payments.push({ connector: filler.connector, colorIdx: filler.colorIdx })
-  }
-
-  if (payments.length > total) {
-    payments.length = total
-  }
-
-  const seed = distribution.reduce((acc, item, idx) => {
-    const connectorScore = Array.from(item.name).reduce((sum, char) => sum + char.charCodeAt(0), 0)
-    return acc + connectorScore + idx * 31 + item.count * 17 + Math.round(item.percentage * 10)
-  }, total * 13)
-
-  const random = mulberry32(seed)
-  const shuffled = [...payments]
-  for (let idx = shuffled.length - 1; idx > 0; idx -= 1) {
-    const swapIndex = Math.floor(random() * (idx + 1))
-    ;[shuffled[idx], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[idx]]
-  }
-
-  return shuffled
+function extractVolumeConnector(response: RuleEvaluateResponse) {
+  return (
+    response.evaluated_output?.[0]?.gateway_name ||
+    response.output.connector?.gateway_name ||
+    response.output.connectors?.[0]?.gateway_name ||
+    null
+  )
 }
 
 function mapRoutingTypeToRuleParamType(
@@ -392,15 +349,15 @@ function buildInspectorModel(event: PaymentAuditEvent | null) {
 
 function sectionButtonClass(active: boolean) {
   return active
-    ? 'bg-brand-600 text-white'
-    : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 dark:bg-[#121214] dark:text-[#a1a1aa] dark:border-[#27272a]'
+    ? '!border-slate-200 !bg-white !text-slate-950 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.28)] dark:!border-[#2a303a] dark:!bg-[#161b24] dark:!text-white'
+    : '!border-transparent !bg-slate-100 !text-slate-600 hover:!bg-slate-200 hover:!text-slate-900 dark:!bg-[#161b24] dark:!text-[#a7b2c6] dark:hover:!bg-[#1c2330] dark:hover:!text-white'
 }
 
 function EmptyAuditState({ title, body }: { title: string; body: string }) {
   return (
-    <div className="rounded-[22px] border border-dashed border-slate-200 bg-slate-50/80 px-6 py-12 text-center dark:border-[#1f1f26] dark:bg-[#0b0b0f]">
+    <div className="rounded-[22px] border border-dashed border-slate-200 bg-slate-50/80 px-6 py-12 text-center dark:border-[#2a303a] dark:bg-[#161b24]/80">
       <p className="text-sm font-semibold text-slate-900 dark:text-white">{title}</p>
-      <p className="mt-2 text-sm text-slate-500 dark:text-[#8a8a93]">{body}</p>
+      <p className="mt-2 text-sm text-slate-500 dark:text-[#b2bdd1]">{body}</p>
     </div>
   )
 }
@@ -413,9 +370,9 @@ function InspectorKeyValueGrid({ rows }: { rows: Array<{ label: string; value: s
       {rows.map((row) => (
         <div
           key={`${row.label}-${row.value}`}
-          className="rounded-[20px] border border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-[#1d1d23] dark:bg-[#0b0b10]"
+          className="rounded-[22px] border border-slate-200 bg-white/80 px-4 py-3 shadow-[0_14px_30px_-28px_rgba(15,23,42,0.18)] dark:border-[#2a303a] dark:bg-[#161b24] dark:shadow-none"
         >
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8a8a93]">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8390a7]">
             {row.label}
           </p>
           <p className="mt-2 break-words text-sm text-slate-900 dark:text-white">{row.value}</p>
@@ -440,7 +397,7 @@ function InspectorJsonPanel({
         <h3 className="text-sm font-semibold text-slate-900 dark:text-white">{title}</h3>
       </div>
       {value ? (
-        <pre className="overflow-x-auto rounded-[22px] bg-slate-950 px-4 py-4 text-xs leading-6 text-slate-200">
+        <pre className="overflow-x-auto rounded-[22px] border border-slate-200 bg-slate-950/95 px-4 py-4 text-xs leading-6 text-slate-200 shadow-[0_16px_30px_-28px_rgba(15,23,42,0.4)] dark:border-[#2a303a] dark:bg-[#0b1017] dark:text-[#d8e1ef] dark:shadow-none">
           {stringifyValue(value)}
         </pre>
       ) : (
@@ -492,6 +449,8 @@ export function DecisionExplorerPage() {
   const [singleRunOutcome, setSingleRunOutcome] = useState<TransactionOutcome>('CHARGED')
   const [ruleResult, setRuleResult] = useState<RuleEvaluateResponse | null>(null)
   const [volumeDistribution, setVolumeDistribution] = useState<{ name: string; count: number; percentage: number }[]>([])
+  const [volumeEvaluationLog, setVolumeEvaluationLog] = useState<VolumePaymentEntry[]>([])
+  const [volumeProgress, setVolumeProgress] = useState(0)
   const [simulationResults, setSimulationResults] = useState<SimulationResult[]>([])
   const [isSimulating, setIsSimulating] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -805,6 +764,8 @@ export function DecisionExplorerPage() {
     setError(null)
     setRuleResult(null)
     setVolumeDistribution([])
+    setVolumeEvaluationLog([])
+    setVolumeProgress(0)
     const previewPaymentId = `rule_preview_${Date.now()}`
 
     try {
@@ -850,32 +811,78 @@ export function DecisionExplorerPage() {
   }
 
   async function runVolumeSplit() {
+    if (!merchantId) return setError('Set a merchant ID in the top bar')
     setLoading(true)
     setError(null)
+    setRuleResult(null)
     setVolumeDistribution([])
-    const previewPaymentId = `volume_preview_${Date.now()}`
+    setVolumeEvaluationLog([])
+    setVolumeProgress(0)
+    const totalPayments = parseInt(volumePayments) || 0
+
+    if (totalPayments <= 0) {
+      setLoading(false)
+      return setError('Total Payments must be greater than 0')
+    }
 
     try {
-      const res = await apiPost<RuleEvaluateResponse>('/routing/evaluate', {
-        created_by: merchantId || 'test_user',
-        payment_id: previewPaymentId,
-        fallback_output: [
-          { gateway_name: 'stripe', gateway_id: 'gateway_001' },
-          { gateway_name: 'adyen', gateway_id: 'gateway_002' },
-        ],
-        parameters: {},
-      })
+      const batchSize = 10
+      const basePaymentId = `volume_preview_${Date.now()}`
+      const logEntries: VolumePaymentEntry[] = []
+      const counts = new Map<string, number>()
+      let latestResponse: RuleEvaluateResponse | null = null
 
-      setRuleResult(res)
+      for (let start = 0; start < totalPayments; start += batchSize) {
+        const chunkSize = Math.min(batchSize, totalPayments - start)
+        const chunkResponses = await Promise.all(
+          Array.from({ length: chunkSize }, async (_, offset) => {
+            const index = start + offset
+            const paymentId = `${basePaymentId}_${index}`
+            const response = await apiPost<RuleEvaluateResponse>('/routing/evaluate', {
+              created_by: merchantId,
+              payment_id: paymentId,
+              fallback_output: [
+                { gateway_name: 'stripe', gateway_id: 'gateway_001' },
+                { gateway_name: 'adyen', gateway_id: 'gateway_002' },
+              ],
+              parameters: {},
+            })
 
-      if (res.output.type === 'volume_split' && res.output.splits) {
-        const totalPayments = parseInt(volumePayments) || 100
-        const distribution = res.output.splits.map(item => ({
-          name: item.connector.gateway_name,
-          count: Math.round((item.split / 100) * totalPayments),
-          percentage: item.split,
-        }))
+            return { paymentId, response }
+          }),
+        )
+
+        for (const { paymentId, response } of chunkResponses) {
+          if (response.output.type !== 'volume_split') {
+            throw new Error('Active routing algorithm is not a volume split rule.')
+          }
+
+          const connector = extractVolumeConnector(response)
+          if (!connector) {
+            throw new Error('Volume split evaluation did not return a connector.')
+          }
+
+          counts.set(connector, (counts.get(connector) || 0) + 1)
+          logEntries.push({ paymentId, connector })
+          latestResponse = response
+        }
+
+        setVolumeProgress(logEntries.length)
+      }
+
+      if (latestResponse) {
+        const distribution = Array.from(counts.entries())
+          .map(([name, count]) => ({
+            name,
+            count,
+            percentage: Number(((count / totalPayments) * 100).toFixed(1)),
+          }))
+          .sort((left, right) => right.count - left.count)
+
+        setRuleResult(latestResponse)
+        setVolumeEvaluationLog(logEntries)
         setVolumeDistribution(distribution)
+        setSelectedPreviewPaymentId(latestResponse.payment_id)
       }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Request failed')
@@ -901,9 +908,9 @@ export function DecisionExplorerPage() {
   }, {} as Record<string, { total: number; success: number; failure: number }>)
 
   const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
-  const simulatedVolumePayments = useMemo(
-    () => buildVolumePaymentLog(volumeDistribution, parseInt(volumePayments) || 0),
-    [volumeDistribution, volumePayments],
+  const volumeColorIndex = useMemo(
+    () => new Map(volumeDistribution.map((item, index) => [item.name, index] as const)),
+    [volumeDistribution],
   )
 
   const auditSummary = useMemo(() => {
@@ -1014,34 +1021,34 @@ export function DecisionExplorerPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900">Decision Explorer</h1>
-        <p className="text-slate-500 mt-1 text-sm">
+        <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Decision Explorer</h1>
+        <p className="mt-1 text-sm text-slate-500 dark:text-[#b2bdd1]">
           Test payment routing with different algorithms: Success Rate, Priority List, Rule-Based, or Volume Split.
         </p>
       </div>
 
-      <div className="flex gap-2 border-b border-slate-200 dark:border-[#1c1c24]">
+      <div className="flex flex-wrap gap-2">
         <button
           onClick={() => setActiveTab('single')}
-          className={`px-4 py-2 text-sm font-medium ${activeTab === 'single' ? 'text-brand-500 border-b-2 border-brand-500' : 'text-slate-500 hover:text-slate-700'}`}
+          className={`rounded-full border px-4 py-2 text-sm font-medium transition ${sectionButtonClass(activeTab === 'single')}`}
         >
           Single Test
         </button>
         <button
           onClick={() => setActiveTab('batch')}
-          className={`px-4 py-2 text-sm font-medium ${activeTab === 'batch' ? 'text-brand-500 border-b-2 border-brand-500' : 'text-slate-500 hover:text-slate-700'}`}
+          className={`rounded-full border px-4 py-2 text-sm font-medium transition ${sectionButtonClass(activeTab === 'batch')}`}
         >
           Batch Simulation
         </button>
         <button
           onClick={() => setActiveTab('rule')}
-          className={`px-4 py-2 text-sm font-medium ${activeTab === 'rule' ? 'text-brand-500 border-b-2 border-brand-500' : 'text-slate-500 hover:text-slate-700'}`}
+          className={`rounded-full border px-4 py-2 text-sm font-medium transition ${sectionButtonClass(activeTab === 'rule')}`}
         >
           Rule-Based
         </button>
         <button
           onClick={() => setActiveTab('volume')}
-          className={`px-4 py-2 text-sm font-medium ${activeTab === 'volume' ? 'text-brand-500 border-b-2 border-brand-500' : 'text-slate-500 hover:text-slate-700'}`}
+          className={`rounded-full border px-4 py-2 text-sm font-medium transition ${sectionButtonClass(activeTab === 'volume')}`}
         >
           Volume Split
         </button>
@@ -1050,14 +1057,21 @@ export function DecisionExplorerPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
-            <h2 className="font-medium text-slate-800">
-              {activeTab === 'rule' ? 'Rule Evaluation Parameters' :
-                activeTab === 'volume' ? 'Volume Split Configuration' :
-                  'Payment Parameters'}
-            </h2>
+            <div>
+              <SurfaceLabel>
+                {activeTab === 'rule' ? 'Rule Evaluation' :
+                  activeTab === 'volume' ? 'Volume Split' :
+                    'Payment Setup'}
+              </SurfaceLabel>
+              <h2 className="mt-3 font-medium text-slate-800 dark:text-white">
+                {activeTab === 'rule' ? 'Rule Evaluation Parameters' :
+                  activeTab === 'volume' ? 'Volume Split Configuration' :
+                    'Payment Parameters'}
+              </h2>
+            </div>
           </CardHeader>
           <CardBody className="space-y-3">
-            {!merchantId && activeTab !== 'volume' && (
+            {!merchantId && (
               <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-3 py-2">
                 Set a merchant ID in the top bar first.
               </p>
@@ -1212,7 +1226,7 @@ export function DecisionExplorerPage() {
                   className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
                 />
                 <p className="text-xs text-slate-500 mt-1">
-                  Enter the total number of payments to visualize how they would be distributed across gateways.
+                  Enter how many preview evaluations to run against the active volume split rule.
                 </p>
               </div>
             ) : (
@@ -1357,8 +1371,12 @@ export function DecisionExplorerPage() {
                 {loading ? <><Spinner size={14} /> Evaluating…</> : <><Play size={14} /> Evaluate Rules</>}
               </Button>
             ) : activeTab === 'volume' ? (
-              <Button onClick={runVolumeSplit} disabled={loading} className="w-full justify-center">
-                {loading ? <><Spinner size={14} /> Calculating…</> : <><PieChartIcon size={14} /> Visualize Distribution</>}
+              <Button onClick={runVolumeSplit} disabled={loading || !merchantId} className="w-full justify-center">
+                {loading ? (
+                  <><Spinner size={14} /> Running {volumeProgress}/{volumePayments || 0} previews…</>
+                ) : (
+                  <><PieChartIcon size={14} /> Run Volume Evaluation</>
+                )}
               </Button>
             ) : activeTab === 'batch' ? (
               <Button onClick={runSimulation} disabled={isSimulating || !merchantId || routingConfigUnavailable} className="w-full justify-center">
@@ -1390,7 +1408,9 @@ export function DecisionExplorerPage() {
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <h3 className="text-sm font-medium text-slate-800">Volume Distribution Overview</h3>
-                        <p className="mt-1 text-xs text-slate-500">Preview only. This uses the active routing rule and stores a trace for inspection.</p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          Actual distribution from {volumeEvaluationLog.length} calls to <code>/routing/evaluate</code> using the active volume split rule.
+                        </p>
                       </div>
                       {ruleResult?.payment_id ? (
                         <Button
@@ -1398,15 +1418,15 @@ export function DecisionExplorerPage() {
                           variant="secondary"
                           onClick={() => openPreviewModal(ruleResult.payment_id!, 'Volume Split Preview')}
                         >
-                          View preview trace
+                          View latest preview trace
                         </Button>
                       ) : null}
                     </div>
                   </CardHeader>
                   <CardBody>
                     <div className="text-center mb-4">
-                      <p className="text-3xl font-bold text-slate-900">{volumePayments}</p>
-                      <p className="text-xs text-slate-500">Total Payments</p>
+                      <p className="text-3xl font-bold text-slate-900">{volumeEvaluationLog.length}</p>
+                      <p className="text-xs text-slate-500">Evaluations completed</p>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       {volumeDistribution.map((item, idx) => (
@@ -1546,7 +1566,7 @@ export function DecisionExplorerPage() {
                         ))}
                         <tr className="bg-slate-50 dark:bg-[#111114] font-medium">
                           <td className="px-4 py-2">Total</td>
-                          <td className="px-4 py-2 text-right">{volumePayments}</td>
+                          <td className="px-4 py-2 text-right">{volumeEvaluationLog.length}</td>
                           <td className="px-4 py-2 text-right">100%</td>
                         </tr>
                       </tbody>
@@ -1557,9 +1577,9 @@ export function DecisionExplorerPage() {
                 <Card>
                   <CardHeader>
                     <div>
-                      <h3 className="text-sm font-medium text-slate-800">Projected Sequence</h3>
+                      <h3 className="text-sm font-medium text-slate-800">Evaluation Sequence</h3>
                       <p className="mt-1 text-xs text-slate-500">
-                        Preview-only projection based on the configured split. This is not a live payment trail.
+                        Actual connector sequence returned by repeated <code>/routing/evaluate</code> calls.
                       </p>
                     </div>
                   </CardHeader>
@@ -1572,14 +1592,17 @@ export function DecisionExplorerPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-[#222226]">
-                        {simulatedVolumePayments.map((entry, idx) => (
-                          <tr key={`${entry.connector}-${idx}`} className="hover:bg-slate-50 dark:bg-[#111114]">
+                        {volumeEvaluationLog.map((entry, idx) => (
+                          <tr key={entry.paymentId} className="hover:bg-slate-50 dark:bg-[#111114]">
                             <td className="px-4 py-1.5 text-slate-500 font-mono text-xs">{idx + 1}</td>
                             <td className="px-4 py-1.5">
                               <div className="flex items-center gap-2">
                                 <div
                                   className="w-2 h-2 rounded"
-                                  style={{ backgroundColor: COLORS[entry.colorIdx % COLORS.length] }}
+                                  style={{
+                                    backgroundColor:
+                                      COLORS[(volumeColorIndex.get(entry.connector) || 0) % COLORS.length],
+                                  }}
                                 />
                                 <span className="font-medium">{entry.connector}</span>
                               </div>
@@ -1617,7 +1640,7 @@ export function DecisionExplorerPage() {
               <Card>
                 <CardBody className="py-16 text-center">
                   <PieChartIcon size={32} className="text-gray-300 mx-auto mb-3" />
-                  <p className="text-slate-400 text-sm">Enter the number of payments and click "Visualize Distribution" to see how payments are split across gateways.</p>
+                  <p className="text-slate-400 text-sm">Enter the number of payments and click "Run Volume Evaluation" to execute repeated <code>/routing/evaluate</code> calls against the active volume rule.</p>
                 </CardBody>
               </Card>
             )

@@ -1,10 +1,14 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-export default defineConfig({
-  plugins: [react()],
-  base: '/dashboard/',
-  server: {
+export default defineConfig(({ command }) => {
+  const isDevServer = command === 'serve'
+  const publicBaseUrl = isDevServer ? '/' : '/dashboard/'
+
+  return {
+    plugins: [react()],
+    base: publicBaseUrl,
+    server: {
     proxy: {
       '/decide-gateway': {
         target: 'http://localhost:8080',
@@ -160,18 +164,14 @@ export default defineConfig({
         },
       },
     },
-    fs: {
-      strict: false,
+      fs: {
+        strict: false,
+      },
+      host: true,
+      port: 5173,
     },
-    historyApiFallback: {
-      rewrites: [
-        { from: /./, to: '/dashboard/index.html' }
-      ]
+    build: {
+      outDir: 'dist',
     },
-    host: true,
-    port: 5173,
-  },
-  build: {
-    outDir: 'dist',
-  },
+  }
 })
