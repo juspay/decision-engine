@@ -2,65 +2,46 @@
 
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/logo/decision-engine-dark.svg">
-  <img src="docs/logo/decision-engine-light.svg" alt="Juspay Decision Engine" width="380" />
-</picture>
+<img src="https://img.shields.io/badge/Rust-1.85%2B-orange?style=for-the-badge&logo=rust&logoColor=white" alt="Rust 1.85+"/>
+<img src="https://img.shields.io/badge/License-AGPL%20v3-blue?style=for-the-badge" alt="AGPL v3"/>
+<img src="https://img.shields.io/badge/PostgreSQL-%26%20MySQL-336791?style=for-the-badge" alt="PostgreSQL and MySQL"/>
+<img src="https://img.shields.io/badge/Docker%20Compose-Local%20Profiles-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker Compose profiles"/>
+<img src="https://img.shields.io/badge/Dashboard-React-61DAFB?style=for-the-badge&logo=react&logoColor=111827" alt="React dashboard"/>
 
-<br />
-<br />
+Rust routing service for selecting a gateway from an eligible list and recording outcome feedback used by routing decisions.
 
-<img src="https://img.shields.io/badge/Rust-1.85%2B-orange?style=flat-square&logo=rust&logoColor=white" alt="Rust 1.85+" />
-<img src="https://img.shields.io/badge/License-AGPL%20v3-blue?style=flat-square" alt="AGPL v3" />
-<img src="https://img.shields.io/badge/PostgreSQL-%26%20MySQL-336791?style=flat-square" alt="PostgreSQL and MySQL" />
-<img src="https://img.shields.io/badge/Dashboard-React-61DAFB?style=flat-square&logo=react&logoColor=111827" alt="React dashboard" />
-<img src="https://img.shields.io/badge/Docs-Mintlify-111827?style=flat-square" alt="Mintlify docs" />
-
-<br />
-<br />
-
-Merchant-facing routing control plane for deciding gateways, updating score models, exposing connector analytics, and tracing payment-level audit flows from one product.
-
-<br />
-<br />
-
-<a href="docs/local-setup.md"><strong>Quick Start</strong></a>
-·
-<a href="docs/dashboard.mdx"><strong>Dashboard</strong></a>
-·
-<a href="docs/analytics.mdx"><strong>Analytics</strong></a>
-·
-<a href="docs/payment-audit.mdx"><strong>Payment Audit</strong></a>
-·
-<a href="docs/api-reference.md"><strong>API Reference</strong></a>
+**[Quick Start](#quick-start)** •
+**[Docs Map](#docs-map)** •
+**[Dashboard](#dashboard--docs)** •
+**[Development](#development-commands)** •
+**[Contributing](#contributing)**
 
 </div>
 
-<br />
+## What Ships In This Repository
 
-![Decision Engine Analytics](docs/readme/analytics-overview.gif)
+- HTTP APIs for gateway selection, routing configuration, rule configuration, and merchant account configuration
+- PostgreSQL and MySQL runtime tracks
+- Docker Compose profiles for API-only, dashboard, docs, and monitoring flows
+- Helm chart assets under [`helm-charts/`](helm-charts/)
+- A React dashboard under [`website/`](website/) served at `/dashboard/` in the `dashboard-*` Compose profiles
+- Mintlify docs under [`docs/`](docs/) served alongside the dashboard in the `dashboard-*` Compose profiles
 
-## Table of Contents
+## Start Here
 
-- [What You Can Do](#what-you-can-do)
-- [Quickstart](#quickstart)
-- [Dashboard Surfaces](#dashboard-surfaces)
-- [Docs Map](#docs-map)
-- [Development](#development)
-- [License](#license)
+| If you want to... | Open this first |
+|---|---|
+| Run the API locally | [`docs/local-setup.md`](docs/local-setup.md) |
+| Understand configuration | [`docs/configuration.md`](docs/configuration.md) |
+| Browse the API surface | [`docs/api-reference.md`](docs/api-reference.md) |
+| Use ready-made curl flows | [`docs/api-reference1.md`](docs/api-reference1.md) |
+| Inspect request and response schemas | [`docs/openapi.json`](docs/openapi.json) |
+| Bring up the dashboard | [`docs/dashboard.mdx`](docs/dashboard.mdx) |
+| Inspect Kubernetes/on-prem assets | [`helm-charts/`](helm-charts/) |
 
-## What You Can Do
+## Quick Start
 
-- **Route with live score context**
-  Use `POST /decide-gateway` and `POST /update-gateway-score` to choose connectors and continuously feed transaction outcomes back into the scoring model.
-- **Mix static and dynamic routing**
-  Combine `priority`, `single`, `volume_split`, and `advanced` rule-based routing under `/routing/*`, while keeping `/rule/*` for runtime routing configuration.
-- **Operate from a real dashboard**
-  The React dashboard ships with routing views, analytics, connector score trends, and payment audit timelines instead of forcing operators into Redis, SQL, or raw logs.
-- **Explain why a payment routed where it did**
-  Payment Audit links decision responses, rule hits, score updates, and connector score context so teams can answer why a connector was selected at that point in time.
-
-## Quickstart
+### API Only
 
 ```bash
 git clone https://github.com/juspay/decision-engine.git
@@ -75,38 +56,84 @@ Expected response:
 {"message":"Health is good"}
 ```
 
-For the full local setup matrix, source runs, dashboard profiles, and Helm flows, use [docs/local-setup.md](docs/local-setup.md).
+### Dashboard + Docs
 
-## Dashboard Surfaces
+```bash
+docker compose --profile dashboard-postgres-ghcr up -d
+```
 
-| Surface | Why you open it | Primary doc |
-| --- | --- | --- |
-| `Analytics` | live connector metrics, score snapshots, rule hits, and routing summaries | [docs/analytics.mdx](docs/analytics.mdx) |
-| `Payment Audit` | payment-by-payment request, response, score context, and timeline inspection | [docs/payment-audit.mdx](docs/payment-audit.mdx) |
-| `Routing Hub` | configure rule-based routing, SR-based routing, volume splits, and debit routing | [docs/dashboard.mdx](docs/dashboard.mdx) |
-| `API Reference` | OpenAPI-backed endpoint pages and curl examples | [docs/api-reference.md](docs/api-reference.md) |
+Available URLs:
+
+- API: `http://localhost:8080`
+- Dashboard: `http://localhost:8081/dashboard/`
+- Docs: `http://localhost:8081/introduction`
+
+For source builds, Helm installs, and MySQL-specific flows, use [`docs/local-setup.md`](docs/local-setup.md).
 
 ## Docs Map
 
-- [Introduction](docs/introduction.mdx)
-- [Local Setup](docs/local-setup.md)
-- [Configuration](docs/configuration.md)
-- [Dashboard](docs/dashboard.mdx)
-- [Analytics](docs/analytics.mdx)
-- [Payment Audit](docs/payment-audit.mdx)
-- [API Reference](docs/api-reference.md)
-- [API Examples](docs/api-reference1.md)
-- [OpenAPI Source](docs/openapi.json)
-- [PostgreSQL Setup](docs/setup-guide-postgres.md)
-- [MySQL Setup](docs/setup-guide-mysql.md)
+| Path | What it is for |
+|---|---|
+| [`docs/introduction.mdx`](docs/introduction.mdx) | Product-level docs landing page |
+| [`docs/local-setup.md`](docs/local-setup.md) | Canonical local, Compose, source-run, and Helm setup guide |
+| [`docs/configuration.md`](docs/configuration.md) | Config files, env overrides, and runtime config model |
+| [`docs/dashboard.mdx`](docs/dashboard.mdx) | Dashboard routes, availability, and serving model |
+| [`docs/api-reference.md`](docs/api-reference.md) | API overview grouped by endpoint family |
+| [`docs/api-reference1.md`](docs/api-reference1.md) | Local curl examples and smoke-test flows |
+| [`docs/openapi.json`](docs/openapi.json) | OpenAPI source consumed by the docs site |
+| [`docs/setup-guide-postgres.md`](docs/setup-guide-postgres.md) | PostgreSQL-focused setup commands |
+| [`docs/setup-guide-mysql.md`](docs/setup-guide-mysql.md) | MySQL-focused setup commands |
 
-## Development
+## Runtime Shape
+
+```text
+client or orchestrator
+        |
+        v
+POST /decide-gateway
+        |
+        v
+Decision Engine evaluates eligible gateways against merchant config,
+routing rules, and stored score data
+        |
+        v
+response with selected gateway and routing metadata
+```
+
+Related flows:
+
+- `POST /update-gateway-score` records transaction outcomes used by routing
+- `POST /routing/*` manages routing algorithms and routing metadata
+- `POST /rule/*` manages service-level rule configuration
+- `POST /merchant-account/*` manages merchant account configuration
+
+## Dashboard & Docs
+
+When the `dashboard-*` Compose profiles are running, Nginx serves:
+
+- the React dashboard at `/dashboard/`
+- Mintlify docs at `/introduction`
+- built frontend assets from `website/dist`
+
+Documented dashboard routes include:
+
+- `/dashboard/`
+- `/dashboard/routing`
+- `/dashboard/routing/sr`
+- `/dashboard/routing/rules`
+- `/dashboard/routing/volume`
+- `/dashboard/routing/debit`
+- `/dashboard/decisions`
+
+See [`docs/dashboard.mdx`](docs/dashboard.mdx), [`website/src/App.tsx`](website/src/App.tsx), and [`nginx/nginx.conf`](nginx/nginx.conf).
+
+## Development Commands
 
 ```bash
 # lint
 just clippy
 
-# compile matrix
+# compile matrix checks
 just check
 
 # tests
@@ -116,7 +143,22 @@ cargo test
 just migrate-pg
 ```
 
-The repo also ships a one-command local startup path in [oneclick.sh](oneclick.sh), which brings up the API, dashboard, and docs preview together.
+CI-sensitive compile and lint coverage is driven by [`scripts/ci-checks.sh`](scripts/ci-checks.sh) and [`.github/workflows/`](.github/workflows/).
+
+## Repository Pointers
+
+- Runtime entrypoint: [`src/bin/open_router.rs`](src/bin/open_router.rs)
+- Router and middleware wiring: [`src/app.rs`](src/app.rs)
+- API handlers: [`src/routes/`](src/routes/)
+- Config loading: [`src/config.rs`](src/config.rs)
+- Tenant state wiring: [`src/tenant.rs`](src/tenant.rs)
+- Frontend dashboard: [`website/`](website/)
+- Local deployment topology: [`docker-compose.yaml`](docker-compose.yaml)
+- Kubernetes assets: [`helm-charts/`](helm-charts/)
+
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for contribution workflow and expectations.
 
 ## License
 

@@ -1,9 +1,9 @@
 {
   "$schema": "https://mintlify.com/schema.json",
-  "name": "Juspay Decision Engine",
+  "name": "Decision Engine",
   "logo": {
-    "dark": "/logo/decision-engine-docs-dark.svg",
-    "light": "/logo/decision-engine-docs-light.svg"
+    "dark": "/logo/dark.svg",
+    "light": "/logo/light.svg"
   },
   "favicon": "/favicon.svg",
   "colors": {
@@ -11,9 +11,7 @@
     "light": "#4D9CFF",
     "dark": "#0050B4"
   },
-  "openapi": [
-    "openapi.json"
-  ],
+  "openapi": ["openapi.json"],
   "api": {
     "baseUrl": "http://localhost:8080",
     "playground": {
@@ -29,9 +27,9 @@
         "local-setup",
         "configuration",
         "dashboard",
-        "analytics",
-        "payment-audit",
-        "api-reference"
+        "api-reference",
+        "api-reference1",
+        "dual-protocol-layer"
       ]
     },
     {
@@ -43,12 +41,18 @@
     },
     {
       "group": "Health",
-      "pages": [
-        "api-reference/endpoint/healthCheck"
-      ]
+      "pages": ["api-reference/endpoint/healthCheck"]
     },
     {
-      "group": "Merchant API",
+      "group": "Gateway Decision",
+      "pages": ["api-reference/endpoint/decideGateway"]
+    },
+    {
+      "group": "Score Feedback",
+      "pages": ["api-reference/endpoint/updateGatewayScore"]
+    },
+    {
+      "group": "Merchant Account",
       "pages": [
         "api-reference/endpoint/createMerchant",
         "api-reference/endpoint/getMerchant",
@@ -56,7 +60,7 @@
       ]
     },
     {
-      "group": "Rule Based Routing",
+      "group": "Routing Rules",
       "pages": [
         "api-reference/endpoint/createRoutingRule",
         "api-reference/endpoint/activateRoutingRule",
@@ -66,10 +70,8 @@
       ]
     },
     {
-      "group": "Dynamic Routing APIs",
+      "group": "Rule Configuration",
       "pages": [
-        "api-reference/endpoint/decideGateway",
-        "api-reference/endpoint/updateGatewayScore",
         "api-reference/endpoint/createRuleConfig",
         "api-reference/endpoint/getRuleConfig",
         "api-reference/endpoint/updateRuleConfig",
