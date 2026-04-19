@@ -32,6 +32,7 @@ pub enum AnalyticsRange {
     M15,
     H1,
     H24,
+    D30,
 }
 
 impl AnalyticsRange {
@@ -39,6 +40,7 @@ impl AnalyticsRange {
         match value {
             Some("15m") => Self::M15,
             Some("24h") => Self::H24,
+            Some("30d") => Self::D30,
             _ => Self::H1,
         }
     }
@@ -48,6 +50,7 @@ impl AnalyticsRange {
             Self::M15 => 15 * 60 * 1000,
             Self::H1 => 60 * 60 * 1000,
             Self::H24 => 24 * 60 * 60 * 1000,
+            Self::D30 => 30 * 24 * 60 * 60 * 1000,
         }
     }
 
@@ -56,6 +59,7 @@ impl AnalyticsRange {
             Self::M15 => 60 * 1000,
             Self::H1 => 5 * 60 * 1000,
             Self::H24 => 15 * 60 * 1000,
+            Self::D30 => 3 * 60 * 60 * 1000,
         }
     }
 }

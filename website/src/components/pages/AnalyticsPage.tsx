@@ -63,6 +63,7 @@ const PRESET_OPTIONS: { value: AnalyticsRangeValue; label: string }[] = [
   { value: '15m', label: 'Last 15 mins' },
   { value: '1h', label: 'Last 1 hour' },
   { value: '24h', label: 'Last 1 day' },
+  { value: '30d', label: 'Last 1 month' },
   { value: 'custom', label: 'Custom window' },
 ]
 
@@ -250,10 +251,27 @@ function formatPercent(value: number | string | undefined, digits = 1) {
   return `${formatNumber(toPercent(Number(value)), digits)}%`
 }
 
-function formatBucket(ms: number) {
+function formatBucketLabel(ms: number, window: TimeWindow) {
+  const duration = Math.max(0, window.end_ms - window.start_ms)
+
+  if (duration <= 24 * 60 * 60 * 1000) {
+    return new Intl.DateTimeFormat(undefined, {
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date(ms))
+  }
+
+  if (duration <= 7 * 24 * 60 * 60 * 1000) {
+    return new Intl.DateTimeFormat(undefined, {
+      day: 'numeric',
+      month: 'short',
+      hour: '2-digit',
+    }).format(new Date(ms))
+  }
+
   return new Intl.DateTimeFormat(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
+    day: 'numeric',
+    month: 'short',
   }).format(new Date(ms))
 }
 
@@ -271,7 +289,9 @@ function bucketSizeForWindow(range: AnalyticsRangeValue, customWindow?: TimeWind
       ? 15 * 60 * 1000
       : range === '1h'
         ? 60 * 60 * 1000
-        : 24 * 60 * 60 * 1000
+        : range === '24h'
+          ? 24 * 60 * 60 * 1000
+          : 30 * 24 * 60 * 60 * 1000
 
   if (windowMs <= 15 * 60 * 1000) return 60 * 1000
   if (windowMs <= 60 * 60 * 1000) return 5 * 60 * 1000
@@ -304,7 +324,9 @@ function presetWindow(range: AnalyticsRange) {
       ? 15 * 60 * 1000
       : range === '1h'
         ? 60 * 60 * 1000
-        : 24 * 60 * 60 * 1000
+        : range === '24h'
+          ? 24 * 60 * 60 * 1000
+          : 30 * 24 * 60 * 60 * 1000
 
   return {
     start_ms: now - duration,
@@ -723,15 +745,19 @@ export function AnalyticsPage() {
       .map(([status, count]) => ({ status, count }))
       .sort((left, right) => right.count - left.count)
   }, [previewRows])
-  const previewBucketSize = useMemo(
+  const chartBucketSize = useMemo(
     () => bucketSizeForWindow(range, customWindow),
     [customWindow, range],
+  )
+  const bucketTickFormatter = useMemo(
+    () => (value: number | string) => formatBucketLabel(Number(value), effectiveWindow),
+    [effectiveWindow],
   )
   const previewConnectorSeriesData = useMemo(() => {
     const gateways = previewGatewaySummary.map((item) => item.gateway).slice(0, 6)
     const buckets = new Map<number, Record<string, number>>()
 
-    for (const bucket_ms of buildBucketTimeline(effectiveWindow, previewBucketSize)) {
+    for (const bucket_ms of buildBucketTimeline(effectiveWindow, chartBucketSize)) {
       buckets.set(
         bucket_ms,
         gateways.reduce<Record<string, number>>(
@@ -747,7 +773,7 @@ export function AnalyticsPage() {
     for (const row of previewRows) {
       const gateway = row.latest_gateway || 'No gateway selected'
       if (!gateways.includes(gateway)) continue
-      const bucket_ms = bucketTimestamp(row.last_seen_ms, previewBucketSize)
+      const bucket_ms = bucketTimestamp(row.last_seen_ms, chartBucketSize)
       const bucket =
         buckets.get(bucket_ms) ||
         gateways.reduce<Record<string, number>>(
@@ -765,7 +791,7 @@ export function AnalyticsPage() {
       gateways,
       rows: Array.from(buckets.values()).sort((left, right) => left.bucket_ms - right.bucket_ms),
     }
-  }, [effectiveWindow, previewBucketSize, previewRows, previewGatewaySummary])
+  }, [chartBucketSize, effectiveWindow, previewRows, previewGatewaySummary])
   const latestPreviewActivity = previewRows[0]?.last_seen_ms
   const previewListTotalResults = previewList.data?.total_results || 0
   const previewListTotalPages = Math.max(
@@ -809,11 +835,39 @@ export function AnalyticsPage() {
 
   const gatewayShareData = useMemo(() => {
     const gateways = Array.from(new Set((routing.data?.gateway_share || []).map((point) => point.gateway))).slice(0, 6)
+    if (!gateways.length) {
+      return {
+        gateways,
+        rows: [],
+      }
+    }
+
     const buckets = new Map<number, Record<string, number>>()
+
+    for (const bucket_ms of buildBucketTimeline(effectiveWindow, chartBucketSize)) {
+      buckets.set(
+        bucket_ms,
+        gateways.reduce<Record<string, number>>(
+          (row, gateway) => {
+            row[gateway] = 0
+            return row
+          },
+          { bucket_ms },
+        ),
+      )
+    }
 
     for (const point of routing.data?.gateway_share || []) {
       if (!gateways.includes(point.gateway)) continue
-      const row = buckets.get(point.bucket_ms) || { bucket_ms: point.bucket_ms }
+      const row =
+        buckets.get(point.bucket_ms) ||
+        gateways.reduce<Record<string, number>>(
+          (seriesRow, seriesGateway) => {
+            seriesRow[seriesGateway] = 0
+            return seriesRow
+          },
+          { bucket_ms: point.bucket_ms },
+        )
       row[point.gateway] = point.count
       buckets.set(point.bucket_ms, row)
     }
@@ -822,28 +876,61 @@ export function AnalyticsPage() {
       gateways,
       rows: Array.from(buckets.values()).sort((left, right) => left.bucket_ms - right.bucket_ms),
     }
-  }, [routing.data])
+  }, [chartBucketSize, effectiveWindow, routing.data])
 
   const connectorTrendData = useMemo(() => {
     const gateways = Array.from(new Set((filteredRouting.data?.sr_trend || []).map((point) => point.gateway))).slice(0, 6)
-    const buckets = new Map<number, Record<string, number>>()
+    if (!gateways.length) {
+      return {
+        gateways,
+        rows: [],
+      }
+    }
+
+    const buckets = new Map<number, Record<string, number | null>>()
+
+    for (const bucket_ms of buildBucketTimeline(effectiveWindow, chartBucketSize)) {
+      buckets.set(
+        bucket_ms,
+        gateways.reduce<Record<string, number | null>>(
+          (row, gateway) => {
+            row[gateway] = null
+            return row
+          },
+          { bucket_ms },
+        ),
+      )
+    }
 
     for (const point of filteredRouting.data?.sr_trend || []) {
       if (!gateways.includes(point.gateway)) continue
-      const row = buckets.get(point.bucket_ms) || { bucket_ms: point.bucket_ms }
+      const row =
+        buckets.get(point.bucket_ms) ||
+        gateways.reduce<Record<string, number | null>>(
+          (seriesRow, seriesGateway) => {
+            seriesRow[seriesGateway] = null
+            return seriesRow
+          },
+          { bucket_ms: point.bucket_ms },
+        )
       row[point.gateway] = toPercent(point.score_value)
       buckets.set(point.bucket_ms, row)
     }
 
     return {
       gateways,
-      rows: Array.from(buckets.values()).sort((left, right) => left.bucket_ms - right.bucket_ms),
+      rows: Array.from(buckets.values()).sort(
+        (left, right) => Number(left.bucket_ms) - Number(right.bucket_ms),
+      ),
     }
-  }, [filteredRouting.data])
+  }, [chartBucketSize, effectiveWindow, filteredRouting.data])
 
   const latestConnectorSummary = useMemo(() => {
     if (!connectorTrendData.rows.length) return []
-    const latestRow = connectorTrendData.rows[connectorTrendData.rows.length - 1]
+    const latestRow = [...connectorTrendData.rows].reverse().find((row) =>
+      connectorTrendData.gateways.some((gateway) => typeof row[gateway] === 'number'),
+    )
+    if (!latestRow) return []
     return connectorTrendData.gateways
       .map((gateway) => ({
         gateway,
@@ -1134,7 +1221,7 @@ export function AnalyticsPage() {
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={gatewayShareData.rows}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="bucket_ms" tickFormatter={formatBucket} tick={{ fontSize: 11 }} />
+                  <XAxis dataKey="bucket_ms" tickFormatter={bucketTickFormatter} tick={{ fontSize: 11 }} />
                   <YAxis tick={{ fontSize: 11 }} />
                   <Tooltip
                     labelFormatter={(label) => formatDateTime(Number(label))}
@@ -1336,7 +1423,7 @@ export function AnalyticsPage() {
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={connectorTrendData.rows}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="bucket_ms" tickFormatter={formatBucket} tick={{ fontSize: 11 }} />
+                  <XAxis dataKey="bucket_ms" tickFormatter={bucketTickFormatter} tick={{ fontSize: 11 }} />
                   <YAxis
                     domain={connectorTrendDomain as [number, number]}
                     tick={{ fontSize: 11 }}
@@ -1424,7 +1511,7 @@ export function AnalyticsPage() {
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={previewConnectorSeriesData.rows} barGap={6}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                        <XAxis dataKey="bucket_ms" tickFormatter={formatBucket} tick={{ fontSize: 11 }} />
+                        <XAxis dataKey="bucket_ms" tickFormatter={bucketTickFormatter} tick={{ fontSize: 11 }} />
                         <YAxis tick={{ fontSize: 11 }} />
                         <Tooltip
                           labelFormatter={(label) => formatDateTime(Number(label))}

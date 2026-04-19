@@ -2009,6 +2009,7 @@ pub fn format_range(query: &AnalyticsQuery) -> String {
         AnalyticsRange::M15 => "15m".to_string(),
         AnalyticsRange::H1 => "1h".to_string(),
         AnalyticsRange::H24 => "24h".to_string(),
+        AnalyticsRange::D30 => "30d".to_string(),
     }
 }
 
@@ -2021,5 +2022,6 @@ fn format_payment_audit_range(query: &PaymentAuditQuery) -> String {
         AnalyticsRange::M15 => "15m".to_string(),
         AnalyticsRange::H1 => "1h".to_string(),
         AnalyticsRange::H24 => "24h".to_string(),
+        AnalyticsRange::D30 => "30d".to_string(),
     }
 }

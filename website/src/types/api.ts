@@ -145,7 +145,7 @@ export interface SRDimensionRequest {
 }
 
 export type AnalyticsScope = 'current' | 'all'
-export type AnalyticsRange = '15m' | '1h' | '24h'
+export type AnalyticsRange = '15m' | '1h' | '24h' | '30d'
 export type AnalyticsRangeValue = AnalyticsRange | 'custom'
 
 export interface AnalyticsQuery {
