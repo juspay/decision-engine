@@ -95,12 +95,20 @@ impl ApiClient {
         let url =
             reqwest::Url::parse(&url).change_error(error::ApiClientError::UrlEncodingFailed)?;
 
-        let headers = headers.construct_header_map()?;
+        let mut headers = headers.construct_header_map()?;
 
         let request_builder = match method {
             Method::Get => self.get(url),
             Method::Post => self.post(url).json(&request_body),
         };
+
+        // Inject OTel trace context (traceparent/tracestate) into outgoing headers
+        // so downstream services can continue the distributed trace.
+        opentelemetry::global::get_text_map_propagator(|propagator| {
+            let cx =
+                tracing_opentelemetry::OpenTelemetrySpanExt::context(&tracing::Span::current());
+            propagator.inject_context(&cx, &mut opentelemetry_http::HeaderInjector(&mut headers));
+        });
 
         let response = request_builder
             .headers(headers)
