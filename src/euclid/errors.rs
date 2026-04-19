@@ -35,6 +35,9 @@ pub enum EuclidErrors {
     #[error("routing_algorithm not found for: {0}")]
     RoutingAlgorithmNotFound(String),
 
+    #[error("Routing algorithm not active for merchant: {0}")]
+    RoutingAlgorithmNotActive(String),
+
     #[error("default fallback not found in evaluate request for: {0}")]
     DefaultFallbackNotFound(String),
 
@@ -177,6 +180,19 @@ impl axum::response::IntoResponse for EuclidErrors {
                     error_codes::TE_04,
                     format!(
                     "Routing algorithm not found for the provided id : {}",
+                    msg
+                ),
+                    None,
+                )),
+            )
+                .into_response(),
+
+            Self::RoutingAlgorithmNotActive(msg) => (
+                hyper::StatusCode::NOT_FOUND,
+                axum::Json(ApiErrorResponse::new(
+                    error_codes::TE_04,
+                    format!(
+                    "Routing algorithm not active for merchant: {}",
                     msg
                 ),
                     None,
