@@ -7,6 +7,8 @@ import { EuclidRulesPage } from './components/pages/EuclidRulesPage'
 import { VolumeSplitPage } from './components/pages/VolumeSplitPage'
 import { DebitRoutingPage } from './components/pages/DebitRoutingPage'
 import { DecisionExplorerPage } from './components/pages/DecisionExplorerPage'
+import { AnalyticsPage } from './components/pages/AnalyticsPage'
+import { PaymentAuditPage } from './components/pages/PaymentAuditPage'
 
 export default function App() {
   return (
@@ -19,6 +21,8 @@ export default function App() {
         <Route path="routing/volume" element={<VolumeSplitPage />} />
         <Route path="routing/debit" element={<DebitRoutingPage />} />
         <Route path="decisions" element={<DecisionExplorerPage />} />
+        <Route path="analytics" element={<AnalyticsPage />} />
+        <Route path="audit" element={<PaymentAuditPage />} />
         <Route path="*" element={<Navigate to="." replace />} />
       </Route>
     </Routes>

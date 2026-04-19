@@ -520,6 +520,56 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    analytics_event (id) {
+        id -> Int4,
+        #[max_length = 64]
+        event_type -> Varchar,
+        #[max_length = 255]
+        merchant_id -> Nullable<Varchar>,
+        #[max_length = 255]
+        payment_id -> Nullable<Varchar>,
+        #[max_length = 255]
+        request_id -> Nullable<Varchar>,
+        #[max_length = 255]
+        payment_method_type -> Nullable<Varchar>,
+        #[max_length = 255]
+        payment_method -> Nullable<Varchar>,
+        #[max_length = 255]
+        card_network -> Nullable<Varchar>,
+        #[max_length = 255]
+        card_is_in -> Nullable<Varchar>,
+        #[max_length = 64]
+        currency -> Nullable<Varchar>,
+        #[max_length = 64]
+        country -> Nullable<Varchar>,
+        #[max_length = 64]
+        auth_type -> Nullable<Varchar>,
+        #[max_length = 255]
+        gateway -> Nullable<Varchar>,
+        #[max_length = 128]
+        event_stage -> Nullable<Varchar>,
+        #[max_length = 128]
+        routing_approach -> Nullable<Varchar>,
+        #[max_length = 255]
+        rule_name -> Nullable<Varchar>,
+        #[max_length = 64]
+        status -> Nullable<Varchar>,
+        #[max_length = 64]
+        error_code -> Nullable<Varchar>,
+        error_message -> Nullable<Text>,
+        score_value -> Nullable<Double>,
+        sigma_factor -> Nullable<Double>,
+        average_latency -> Nullable<Double>,
+        tp99_latency -> Nullable<Double>,
+        transaction_count -> Nullable<Bigint>,
+        #[max_length = 128]
+        route -> Nullable<Varchar>,
+        details -> Nullable<Text>,
+        created_at_ms -> Bigint,
+    }
+}
+
 diesel::allow_tables_to_appear_in_same_query!(
     card_brand_routes,
     card_info,
@@ -541,6 +591,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     merchant_gateway_payment_method_flow,
     merchant_iframe_preferences,
     merchant_priority_logic,
+    analytics_event,
     payment_method,
     service_configuration,
     tenant_config,

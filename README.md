@@ -1,252 +1,123 @@
-<div align="center">
-
-<img src="https://img.shields.io/badge/Rust-1.85%2B-orange?style=for-the-badge&logo=rust&logoColor=white" alt="Rust"/>
-<img src="https://img.shields.io/badge/License-AGPL%20v3-blue?style=for-the-badge" alt="License"/>
-<img src="https://img.shields.io/badge/Docker-Ready-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker"/>
-<img src="https://img.shields.io/github/v/release/juspay/decision-engine?include_prereleases&style=for-the-badge&label=Release&color=brightgreen" alt="Release"/>
-<img src="https://img.shields.io/badge/Slack-Join%20Chat-4A154B?style=for-the-badge&logo=slack&logoColor=white" alt="Slack"/>
-
-<br/><br/>
-
-# ⚡ Decision Engine
-
-### **The Brain Behind Smarter Payments**
-
-**Open-Source • High-Performance • Success Rate Based**
-
-*Route payments intelligently. Maximize success rates. Zero vendor lock-in.*
-
----
-
-**[🚀 Quick Start](#-quick-start)** • 
-**[📚 Documentation](#-documentation)** • 
-**[🏗 Architecture](#-architecture)** • 
-**[🤝 Contributing](#-contributing)**
-
-</div>
-
----
-
-## 🎯 What is Decision Engine?
-
-Decision Engine is a **high-performance payment gateway router** built in Rust that intelligently selects the optimal payment gateway for each transaction — in real-time.
-
-```
-┌─────────────┐     ┌──────────────────┐     ┌─────────────┐
-│  Payment    │────▶│  Decision Engine │────▶│  Best       │
-│  Request    │     │  (Fast routing)  │     │  Gateway    │
-└─────────────┘     └──────────────────┘     └─────────────┘
-```
-
-### Why Teams Choose Decision Engine
-
-| 💥 The Problem | ✅ Our Solution |
-|----------------|-----------------|
-| Payment failures from gateway downtime | **Real-time health monitoring** with automatic failover |
-| Suboptimal routing = lost revenue | **SR-based routing** based on success rates & latency |
-| Vendor lock-in limits flexibility | **Modular design** — works with any orchestrator |
-| Complex rule management | **Flexible policies** — rule-based + SR-based hybrid |
-
----
-
-## ✨ Features
-
-<table>
-<tr>
-<td width="50%">
-
-### 🧠 Intelligent Routing
-
-| Feature | What It Does |
-|---------|--------------|
-| **Eligibility Check** | Filters out ineligible gateways before routing |
-| **Rule-Based Ordering** | Apply merchant-specific priority rules |
-| **Dynamic Ordering** | Success rate based gateway optimization |
-| **Downtime Detection** | Auto-pause failing gateways |
-
-</td>
-<td width="50%">
-
-### 🛠 Built for Production
-
-| Capability | Details |
-|------------|---------|
-| **⚡ Blazing Fast** | Fast routing decisions |
-| **🔐 Memory Safe** | Built in Rust — no data races |
-| **📊 Multi-DB** | MySQL & PostgreSQL support |
-| **🐳 Docker Ready** | One-command deployment |
-| **☸️ K8s Native** | Helm charts included |
-
-</td>
-</tr>
-</table>
-
----
-
-## 📊 Performance at a Glance
+# Decision Engine
 
 <div align="center">
 
-| Metric | Value |
-|--------|-------|
-| Routing Decision Time | **Low latency** |
-| Memory Footprint | **~50MB** |
-| Concurrent Requests | **100K+** |
-| Uptime SLA Support | **99.99%** |
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/logo/decision-engine-dark.svg">
+  <img src="docs/logo/decision-engine-light.svg" alt="Juspay Decision Engine" width="380" />
+</picture>
+
+<br />
+<br />
+
+<img src="https://img.shields.io/badge/Rust-1.85%2B-orange?style=flat-square&logo=rust&logoColor=white" alt="Rust 1.85+" />
+<img src="https://img.shields.io/badge/License-AGPL%20v3-blue?style=flat-square" alt="AGPL v3" />
+<img src="https://img.shields.io/badge/PostgreSQL-%26%20MySQL-336791?style=flat-square" alt="PostgreSQL and MySQL" />
+<img src="https://img.shields.io/badge/Dashboard-React-61DAFB?style=flat-square&logo=react&logoColor=111827" alt="React dashboard" />
+<img src="https://img.shields.io/badge/Docs-Mintlify-111827?style=flat-square" alt="Mintlify docs" />
+
+<br />
+<br />
+
+Merchant-facing routing control plane for deciding gateways, updating score models, exposing connector analytics, and tracing payment-level audit flows from one product.
+
+<br />
+<br />
+
+<a href="docs/local-setup.md"><strong>Quick Start</strong></a>
+·
+<a href="docs/dashboard.mdx"><strong>Dashboard</strong></a>
+·
+<a href="docs/analytics.mdx"><strong>Analytics</strong></a>
+·
+<a href="docs/payment-audit.mdx"><strong>Payment Audit</strong></a>
+·
+<a href="docs/api-reference.md"><strong>API Reference</strong></a>
 
 </div>
 
----
+<br />
 
-## 🏃 Quick Start
+![Decision Engine Analytics](docs/readme/analytics-overview.gif)
 
-### 🐳 Docker (Recommended)
+## Table of Contents
+
+- [What You Can Do](#what-you-can-do)
+- [Quickstart](#quickstart)
+- [Dashboard Surfaces](#dashboard-surfaces)
+- [Docs Map](#docs-map)
+- [Development](#development)
+- [License](#license)
+
+## What You Can Do
+
+- **Route with live score context**
+  Use `POST /decide-gateway` and `POST /update-gateway-score` to choose connectors and continuously feed transaction outcomes back into the scoring model.
+- **Mix static and dynamic routing**
+  Combine `priority`, `single`, `volume_split`, and `advanced` rule-based routing under `/routing/*`, while keeping `/rule/*` for runtime routing configuration.
+- **Operate from a real dashboard**
+  The React dashboard ships with routing views, analytics, connector score trends, and payment audit timelines instead of forcing operators into Redis, SQL, or raw logs.
+- **Explain why a payment routed where it did**
+  Payment Audit links decision responses, rule hits, score updates, and connector score context so teams can answer why a connector was selected at that point in time.
+
+## Quickstart
 
 ```bash
-# Clone and run
 git clone https://github.com/juspay/decision-engine.git
 cd decision-engine
 docker compose --profile postgres-ghcr up -d
-
-# That's it! API ready at http://localhost:8080
-```
-
-### 🦀 From Source
-
-```bash
-# Prerequisites: Rust 1.85+, MySQL/PostgreSQL, Redis
-
-git clone https://github.com/juspay/decision-engine.git
-cd decision-engine
-cargo build --release
-
-# Configure
-cp config.example.toml config/development.toml
-# Edit config with your settings
-
-# Run migrations & start
-diesel migration run
-./target/release/open_router
-```
-
-### ✅ Verify
-
-```bash
 curl http://localhost:8080/health
-# → {"message":"Health is good"}
 ```
 
----
+Expected response:
 
-## 📖 Documentation
+```json
+{"message":"Health is good"}
+```
 
-| 📘 Resource | Description |
-|-------------|-------------|
-| [Local Setup Guide](docs/local-setup.md) | Canonical guide for CLI, Docker, Compose profiles, and Helm |
-| [MySQL Setup Guide](docs/setup-guide-mysql.md) | MySQL-specific walkthrough |
-| [PostgreSQL Setup Guide](docs/setup-guide-postgres.md) | PostgreSQL-specific walkthrough |
-| [API Reference](docs/api-reference1.md) | Complete REST API documentation |
-| [Configuration Guide](docs/configuration.md) | All config options explained |
-| [Deep Dive Blog](https://juspay.io/blog/juspay-orchestrator-and-merchant-controlled-routing-engine) | How routing logic works |
+For the full local setup matrix, source runs, dashboard profiles, and Helm flows, use [docs/local-setup.md](docs/local-setup.md).
 
----
+## Dashboard Surfaces
 
-## 🏗 Architecture
+| Surface | Why you open it | Primary doc |
+| --- | --- | --- |
+| `Analytics` | live connector metrics, score snapshots, rule hits, and routing summaries | [docs/analytics.mdx](docs/analytics.mdx) |
+| `Payment Audit` | payment-by-payment request, response, score context, and timeline inspection | [docs/payment-audit.mdx](docs/payment-audit.mdx) |
+| `Routing Hub` | configure rule-based routing, SR-based routing, volume splits, and debit routing | [docs/dashboard.mdx](docs/dashboard.mdx) |
+| `API Reference` | OpenAPI-backed endpoint pages and curl examples | [docs/api-reference.md](docs/api-reference.md) |
 
-### High-Level Flow
+## Docs Map
 
-<div align="center">
-  <img src="https://cdn.sanity.io/images/9sed75bn/production/fd872ae5b086e7a60011ad9d4d5c7988e1084d03-1999x1167.png" alt="Decision Engine Architecture" width="80%"/>
-</div>
+- [Introduction](docs/introduction.mdx)
+- [Local Setup](docs/local-setup.md)
+- [Configuration](docs/configuration.md)
+- [Dashboard](docs/dashboard.mdx)
+- [Analytics](docs/analytics.mdx)
+- [Payment Audit](docs/payment-audit.mdx)
+- [API Reference](docs/api-reference.md)
+- [API Examples](docs/api-reference1.md)
+- [OpenAPI Source](docs/openapi.json)
+- [PostgreSQL Setup](docs/setup-guide-postgres.md)
+- [MySQL Setup](docs/setup-guide-mysql.md)
 
-### Integration Pattern
-
-Decision Engine integrates seamlessly into your existing payment stack:
-
-<div align="center">
-  <img src="https://github.com/user-attachments/assets/272ad222-8a91-4bb2-aa3a-e1fc9c28e3da" alt="Integration Pattern" width="70%"/>
-</div>
-
-**Integration Steps:**
-
-| Step | Direction | Component | Action |
-|:----:|:---------:|-----------|--------|
-| 1 | → | Your App | Initiates payment request |
-| 2 | → | Orchestrator | Forwards to Decision Engine |
-| 3 | → | Decision Engine | Selects optimal gateway |
-| 4 | → | Vault | Returns card token (PCI-safe) |
-| 5 | → | Gateway | Processes payment |
-| 6 | ← | Gateway | Returns result |
-| 7 | ← | Orchestrator | Routes response back |
-| 8 | ← | Your App | Receives final result |
-
-**Key Benefits:**
-- **Zero PCI scope** — Vault handles all card data
-- **Drop-in integration** — Works with any orchestrator
-- **Intelligent fallback** — Auto-switches on gateway failure
-
----
-
-## 🗺 Roadmap
-
-| Status | Feature | Description |
-|:------:|---------|-------------|
-| ✅ | Rule-based routing | Merchant-defined priority rules |
-| ✅ | Dynamic ordering | SR-based gateway selection |
-| ✅ | Downtime detection | Automatic health monitoring |
-| ✅ | Multi-database | MySQL & PostgreSQL support |
-| 🔄 | Enhanced routing models | Better success rate prediction |
-| 🔄 | Admin dashboard | Visual rule management UI |
-| 📋 | Multi-tenant analytics | Per-tenant routing insights |
-| 📋 | GraphQL API | Alternative query interface |
-
----
-
-## 🤝 Contributing
-
-We ❤️ contributions!
+## Development
 
 ```bash
-# 1. Fork & clone
-git clone https://github.com/YOUR_USERNAME/decision-engine.git
+# lint
+just clippy
 
-# 2. Create branch
-git checkout -b feature/your-feature
+# compile matrix
+just check
 
-# 3. Make changes & test
+# tests
 cargo test
 
-# 4. Submit PR!
+# postgres migrations
+just migrate-pg
 ```
 
-👉 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+The repo also ships a one-command local startup path in [oneclick.sh](oneclick.sh), which brings up the API, dashboard, and docs preview together.
 
-🌱 **New to open source?** Check out [good first issues](https://github.com/juspay/decision-engine/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)!
-
----
-
-## 💬 Community
-
-| Platform | What It's For |
-|----------|---------------|
-| [![Slack](https://img.shields.io/badge/Slack-Join_Chat-4A154B?logo=slack)](https://join.slack.com/t/hyperswitch-io/shared_invite/zt-2jqxmpsbm-WXUENx022HjNEy~Ark7Orw) | Real-time help, discussions |
-| [GitHub Discussions](https://github.com/juspay/decision-engine/discussions) | Ideas, feature requests |
-| [GitHub Issues](https://github.com/juspay/decision-engine/issues) | Bug reports |
-
----
-
-## 📜 License
+## License
 
 Licensed under [GNU AGPL v3.0](LICENSE).
-
----
-
-<div align="center">
-
-### Built with ❤️ by [Juspay](https://juspay.io)
-
-*Reliable, open-source payments infrastructure for the world.*
-
-**[⬆ Back to Top](#-decision-engine)**
-
-</div>

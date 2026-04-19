@@ -16,6 +16,7 @@ use tower::ServiceBuilder;
 use tower_http::trace as tower_trace;
 
 use crate::{
+    analytics::{analytics_middleware, AnalyticsClient},
     api_client::ApiClient,
     config::{self, GlobalConfig, TenantConfig},
     error, logger, routes, storage,
@@ -80,6 +81,7 @@ pub struct TenantAppState {
     pub api_client: ApiClient,
     pub pm_filter_graph_bundle:
         Arc<TokioOnceCell<Arc<crate::euclid::pm_filter_graph::PmFilterGraphBundle>>>,
+    pub analytics_client: Arc<AnalyticsClient>,
 }
 
 #[allow(clippy::expect_used)]
@@ -106,6 +108,18 @@ impl TenantAppState {
             .await
             .expect("Failed to create Redis connection Pool");
 
+        // Initialize analytics client
+        let analytics_client = AnalyticsClient::new(global_config.analytics.clone())
+            .map_err(|e| {
+                logger::warn!("Failed to initialize analytics client: {:?}", e);
+                e
+            })
+            .unwrap_or_else(|_| {
+                // Fallback to disabled analytics client
+                let disabled_config = crate::analytics::AnalyticsConfig::default();
+                AnalyticsClient::new(disabled_config).unwrap()
+            });
+
         Ok(Self {
             db,
             redis_conn: Arc::new(RedisConnectionWrapper::new(
@@ -115,6 +129,7 @@ impl TenantAppState {
             api_client,
             config: tenant_config,
             pm_filter_graph_bundle: Arc::new(TokioOnceCell::new()),
+            analytics_client: Arc::new(analytics_client),
         })
     }
 
@@ -271,9 +286,14 @@ where
         "/update-gateway-score",
         post(routes::update_gateway_score::update_gateway_score),
     );
+    let router = router.nest("/analytics", routes::analytics::serve());
 
     let middleware = ServiceBuilder::new()
         .layer(middleware::from_fn(ensure_request_id))
+        .layer(axum::middleware::from_fn_with_state(
+            global_app_state.clone(),
+            analytics_middleware,
+        ))
         .layer(
             tower_trace::TraceLayer::new_for_http()
                 .make_span_with(|request: &Request<_>| utils::record_fields_from_header(request))

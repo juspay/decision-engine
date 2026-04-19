@@ -991,6 +991,18 @@ pub struct PaymentInfo {
 // write a function to transfer DomainDeciderRequestForApiCallV2 to DomainDeciderRequest
 
 impl DomainDeciderRequestForApiCallV2 {
+    pub fn payment_id(&self) -> &str {
+        &self.payment_info.payment_id
+    }
+
+    pub fn payment_method_type(&self) -> &str {
+        &self.payment_info.payment_method_type
+    }
+
+    pub fn payment_method(&self) -> &str {
+        &self.payment_info.payment_method
+    }
+
     pub async fn to_domain_decider_request(&self) -> DomainDeciderRequest {
         DomainDeciderRequest {
             orderReference: ETO::Order {

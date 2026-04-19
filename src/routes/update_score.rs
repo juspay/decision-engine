@@ -84,6 +84,24 @@ pub async fn update_score(
             // Log the error
             let latency = start_time.elapsed().as_millis() as u64;
             let cpu_time = cpu_start.elapsed().as_millis() as u64;
+
+            crate::analytics::record_error_event(
+                "update_score",
+                None,
+                None,
+                None,
+                None,
+                Some(x_request_id.to_string()),
+                error_response.error_code.clone(),
+                error_response.error_message.clone(),
+                serde_json::to_string(&serde_json::json!({
+                    "request_id": x_request_id,
+                    "query_params": query_params,
+                }))
+                .ok(),
+                Some("request_parse_failed".to_string()),
+            );
+
             logger::error!(
                 url = original_url,
                 method = "POST",
@@ -140,6 +158,24 @@ pub async fn update_score(
                 // Log the error
                 let latency = start_time.elapsed().as_millis() as u64;
                 let cpu_time = cpu_start.elapsed().as_millis() as u64;
+
+                crate::analytics::record_error_event(
+                    "update_score",
+                    Some(merchant_id_txt.clone()),
+                    None,
+                    None,
+                    None,
+                    Some(x_request_id.to_string()),
+                    error_response.error_code.clone(),
+                    error_response.error_message.clone(),
+                    serde_json::to_string(&serde_json::json!({
+                        "request_id": x_request_id,
+                        "reason": "gateway_missing",
+                    }))
+                    .ok(),
+                    Some("validation_failed".to_string()),
+                );
+
                 logger::error!(
                     url = original_url,
                     method = "POST",

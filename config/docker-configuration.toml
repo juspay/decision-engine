@@ -53,6 +53,25 @@ max_capacity = 5000
 service_config_redis_prefix = "DE_service_config_"
 service_config_ttl = 300    # 5 minutes
 
+[analytics]
+enabled = false
+
+[analytics.kafka]
+brokers = ["kafka:29092"]
+topic_prefix = "decision-engine"
+batch_size = 100
+batch_timeout_ms = 1000
+max_consecutive_failures = 5
+
+[analytics.clickhouse]
+host = "http://clickhouse:8123"
+username = "analytics_user"
+password = "analytics_pass"
+database = "decision_engine_analytics"
+
+[secrets]
+open_router_private_key = ""
+
 [tenant_secrets]
 public = { schema = "public" }
 

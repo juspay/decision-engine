@@ -1,4 +1,31 @@
 ---
 title: "Create Routing Rule"
+description: "Create a routing algorithm for a given created_by scope."
 openapi: "POST /routing/create"
 ---
+
+Use this endpoint to store a priority, single, volume-split, or advanced routing algorithm.
+
+## Supported algorithm shapes
+
+- `priority`: ordered connector fallback list.
+- `single`: pin the route to exactly one connector.
+- `volume_split`: distribute traffic by weighted percentages.
+- `advanced`: Euclid program for conditional routing.
+
+For `advanced` rules:
+
+- each item in `statements` is an `OR` branch
+- each item inside a single `condition` array is an `AND` block
+- `nested` lets you build deeper hierarchical checks under a matched branch
+- `default_selection` is the fallback when no rule matches
+
+The OpenAPI examples on this page include:
+
+- `priority`
+- `single`
+- `volume_split`
+- `advanced` with top-level `OR` branches
+- `advanced` with nested conditions and a volume-split output
+
+If you want curl-ready payloads for each of those variants, use [API Examples](/api-reference1).

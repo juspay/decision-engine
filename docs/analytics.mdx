@@ -1,0 +1,88 @@
+---
+title: "Analytics"
+description: "Routing metrics, score snapshots, and operational summaries"
+---
+
+## What It Shows
+
+Analytics is the operator-facing view for understanding how routing is behaving in practice.
+
+The page is split into these sections:
+
+- Overview
+- Gateway Scoring
+- Decisions
+- Routing Stats
+- Logs / Summaries
+
+For single-payment inspection, use the separate Payment Audit surface documented in [`payment-audit`](payment-audit).
+
+## Data Sources
+
+The first release uses the sources already present in the repository:
+
+- Redis for live SR and latency snapshots
+- Prometheus for live counters and error-rate tiles
+- Postgres for stored analytics events, snapshots, and summaries
+
+ClickHouse is intentionally not required for the first release. If the volume or retention profile grows beyond Postgres, it can be added later as a write sink.
+
+## Scope
+
+Analytics supports two views:
+
+- current merchant
+- all merchants
+
+The current-merchant view uses the merchant selected in the top bar. The all-merchants view aggregates across the stored analytics events.
+
+Connector success-rate history is sourced from stored `score_snapshot` analytics events, not directly from Redis. Redis remains the live source for current score state. In the merchant-scoped view, the connector SR chart can be narrowed by:
+
+- `payment_method_type`
+- `payment_method`
+- connector
+
+In all-merchants mode, the chart intentionally stays connector-only so operators get a global SR trend without per-method slicing.
+
+## Generating Demo Traffic
+
+To populate Analytics and Decision Audit with real traffic, use the routing traffic generator.
+
+First apply the Postgres migration that creates `analytics_event`:
+
+```bash
+just migrate-pg
+```
+
+Then generate traffic for `merchant_space`:
+
+```bash
+bash scripts/generate-routing-traffic.sh
+```
+
+What the script does:
+
+- creates or reuses `merchant_space`
+- enables success-rate routing for that merchant through the real `/rule/create` or `/rule/update` flow
+- sends `100` real `POST /decide-gateway` requests with mixed payment-method combinations
+- follows each decision with `POST /update-gateway-score` using a mix of successful and failed outcomes
+- creates and activates a priority-based routing rule through `/routing/create` and `/routing/activate`
+- sends rule-based `POST /routing/evaluate` traffic so the rule-evaluation analytics path is populated
+
+Useful overrides:
+
+```bash
+MERCHANT_ID=merchant_space TOTAL_PAYMENTS=100 bash scripts/generate-routing-traffic.sh
+RULE_EVALUATIONS=40 bash scripts/generate-routing-traffic.sh
+CONNECTORS_CSV=stripe,adyen,checkout,paypal bash scripts/generate-routing-traffic.sh
+```
+
+After the script finishes, open `/dashboard/analytics` or `/dashboard/audit` and select `merchant_space` in the merchant picker.
+
+## Related Files
+
+- `website/src/components/pages/AnalyticsPage.tsx`
+- `website/src/components/layout/Sidebar.tsx`
+- `src/routes/analytics.rs`
+- `src/analytics/`
+- `src/metrics.rs`

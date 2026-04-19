@@ -1,0 +1,50 @@
+---
+title: "Dashboard"
+description: "Local dashboard routes and how they are served"
+---
+
+## Availability
+
+The dashboard is available in the `dashboard-*` Docker Compose profiles.
+
+Example:
+
+```bash
+docker compose --profile dashboard-postgres-ghcr up -d
+```
+
+Then open:
+
+- `http://localhost:8081/dashboard/`
+
+The dashboard is served by Nginx from the built assets in `website/dist`.
+
+## What It Includes
+
+Based on the React routes in `website/src/App.tsx`, the dashboard exposes:
+
+- `/dashboard/`
+- `/dashboard/routing`
+- `/dashboard/routing/sr`
+- `/dashboard/routing/rules`
+- `/dashboard/routing/volume`
+- `/dashboard/routing/debit`
+- `/dashboard/decisions`
+- `/dashboard/analytics`
+- `/dashboard/audit`
+
+## Docs And API In The Same Profile
+
+The same `dashboard-*` profiles also expose:
+
+- Mintlify docs at `http://localhost:8081/introduction`
+- the API at `http://localhost:8080`
+
+Proxy behavior is defined in `nginx/nginx.conf`.
+
+## Related Files
+
+- `website/src/App.tsx`
+- `website/src/components/pages/*`
+- `docker-compose.yaml`
+- `nginx/nginx.conf`

@@ -1,6 +1,7 @@
 // All API calls use relative URLs so nginx/vite-proxy can handle routing
 
 const DEBUG_API = true
+const DEFAULT_TENANT_ID = 'public'
 
 function logRequest(method: string, path: string, body?: unknown) {
   if (!DEBUG_API) return
@@ -49,7 +50,11 @@ export async function apiFetch<T>(
   
   try {
     const res = await fetch(path, {
-      headers: { 'Content-Type': 'application/json', ...options?.headers },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-tenant-id': DEFAULT_TENANT_ID,
+        ...options?.headers,
+      },
       ...options,
     })
     

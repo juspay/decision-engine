@@ -28,6 +28,27 @@ lazy_static! {
         &["endpoint"],
         exponential_buckets(0.0005, 2.0, 10).unwrap()
     ).unwrap();
+
+    /// Count of routing decisions grouped by routing approach and result status
+    pub static ref ROUTING_DECISION_COUNTER: IntCounterVec = register_int_counter_vec!(
+        "routing_decisions_total",
+        "Count of routing decisions grouped by routing approach and result status",
+        &["approach", "status"]
+    ).unwrap();
+
+    /// Count of priority logic rule hits grouped by rule name
+    pub static ref ROUTING_RULE_HIT_COUNTER: IntCounterVec = register_int_counter_vec!(
+        "routing_rule_hits_total",
+        "Count of priority logic rule hits grouped by rule name",
+        &["rule_name"]
+    ).unwrap();
+
+    /// Count of analytics events captured by type
+    pub static ref ANALYTICS_EVENT_COUNTER: IntCounterVec = register_int_counter_vec!(
+        "analytics_events_total",
+        "Count of analytics events captured by type",
+        &["event_type"]
+    ).unwrap();
 }
 
 pub async fn metrics_handler() -> error_stack::Result<String, MetricsError> {

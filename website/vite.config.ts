@@ -1,10 +1,14 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-export default defineConfig({
-  plugins: [react()],
-  base: '/dashboard/',
-  server: {
+export default defineConfig(({ command }) => {
+  const isDevServer = command === 'serve'
+  const publicBaseUrl = isDevServer ? '/' : '/dashboard/'
+
+  return {
+    plugins: [react()],
+    base: publicBaseUrl,
+    server: {
     proxy: {
       '/decide-gateway': {
         target: 'http://localhost:8080',
@@ -125,6 +129,23 @@ export default defineConfig({
           })
         },
       },
+      '/analytics': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq, req) => {
+            console.log(`\n[PROXY] ${new Date().toISOString()}`)
+            console.log(`Forwarding: ${req.method} ${req.url} -> http://localhost:8080${req.url}`)
+          })
+          proxy.on('proxyRes', (proxyRes, req) => {
+            console.log(`[PROXY] Response: ${proxyRes.statusCode} ${proxyRes.statusMessage} for ${req.url}`)
+          })
+          proxy.on('error', (err, req) => {
+            console.log(`\n[PROXY ERROR] ${new Date().toISOString()}`)
+            console.log(`Error forwarding ${req.url}:`, err.message)
+          })
+        },
+      },
       '/update-gateway-score': {
         target: 'http://localhost:8080',
         changeOrigin: true,
@@ -143,18 +164,14 @@ export default defineConfig({
         },
       },
     },
-    fs: {
-      strict: false,
+      fs: {
+        strict: false,
+      },
+      host: true,
+      port: 5173,
     },
-    historyApiFallback: {
-      rewrites: [
-        { from: /./, to: '/dashboard/index.html' }
-      ]
+    build: {
+      outDir: 'dist',
     },
-    host: true,
-    port: 5173,
-  },
-  build: {
-    outDir: 'dist',
-  },
+  }
 })
