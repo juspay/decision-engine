@@ -1,4 +1,4 @@
-import type { ElementType, ReactNode } from 'react'
+import type { ElementType } from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useSWR from 'swr'
@@ -17,12 +17,26 @@ import {
 import { useMerchantStore } from '../../store/merchantStore'
 import { apiPost, fetcher } from '../../lib/api'
 import {
+  AnalyticsRange,
   AnalyticsOverviewResponse,
   AnalyticsRoutingStatsResponse,
   RoutingAlgorithm,
   RuleConfig,
 } from '../../types/api'
 import { Badge } from '../ui/Badge'
+import { Card as GlassCard, SurfaceLabel } from '../ui/Card'
+
+const OVERVIEW_RANGE_OPTIONS: {
+  value: AnalyticsRange
+  label: string
+  detail: string
+  badge: string
+  summaryLabel: string
+}[] = [
+  { value: '15m', label: '15m', detail: 'Last 15 mins', badge: 'Live 15m', summaryLabel: 'Errors last 15 mins' },
+  { value: '1h', label: '1h', detail: 'Last hour', badge: 'Live 1h', summaryLabel: 'Errors last hour' },
+  { value: '24h', label: '1 day', detail: 'Last 1 day', badge: 'Live 1d', summaryLabel: 'Errors last 1 day' },
+]
 
 function useHealth() {
   const [status, setStatus] = useState<'up' | 'down' | 'loading'>('loading')
@@ -62,49 +76,6 @@ function healthLabel(status: 'up' | 'down' | 'loading') {
   if (status === 'up') return 'Healthy'
   if (status === 'down') return 'Needs attention'
   return 'Checking'
-}
-
-function GlassCard({
-  children,
-  className = '',
-  onClick,
-}: {
-  children: ReactNode
-  className?: string
-  onClick?: () => void
-}) {
-  const baseClassName =
-    'group relative overflow-hidden rounded-[30px] border border-slate-200 bg-white shadow-[0_18px_60px_-42px_rgba(15,23,42,0.15)] dark:border-[#2a303a] dark:bg-[#11151d] dark:shadow-[0_18px_60px_-42px_rgba(0,0,0,0.7)]'
-
-  const inner = (
-    <>
-      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#3b82f6]/25 to-transparent dark:via-[#3b82f6]/30" />
-      <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.55),transparent_26%)] dark:bg-[linear-gradient(180deg,rgba(255,255,255,0.02),transparent_26%)]" />
-      <div className="relative">{children}</div>
-    </>
-  )
-
-  if (onClick) {
-    return (
-      <button
-        type="button"
-        onClick={onClick}
-        className={`${baseClassName} text-left transition duration-300 hover:-translate-y-0.5 hover:border-[#3b82f6]/35 hover:bg-slate-50 dark:hover:bg-[#141923] ${className}`}
-      >
-        {inner}
-      </button>
-    )
-  }
-
-  return <div className={`${baseClassName} ${className}`}>{inner}</div>
-}
-
-function SurfaceLabel({ children }: { children: ReactNode }) {
-  return (
-    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8390a7]">
-      {children}
-    </p>
-  )
 }
 
 function HeroStat({
@@ -209,6 +180,7 @@ export function OverviewPage() {
   const navigate = useNavigate()
   const { merchantId } = useMerchantStore()
   const health = useHealth()
+  const [range, setRange] = useState<AnalyticsRange>('24h')
 
   const { data: activeAlgorithms } = useSWR<RoutingAlgorithm[]>(
     merchantId ? `/routing/list/active/${merchantId}` : null,
@@ -223,10 +195,10 @@ export function OverviewPage() {
   )
 
   const analyticsOverviewUrl = merchantId
-    ? `/analytics/overview?scope=current&range=1h&merchant_id=${encodeURIComponent(merchantId)}`
+    ? `/analytics/overview?scope=current&range=${range}&merchant_id=${encodeURIComponent(merchantId)}`
     : null
   const analyticsRoutingUrl = merchantId
-    ? `/analytics/routing-stats?scope=current&range=1h&merchant_id=${encodeURIComponent(merchantId)}`
+    ? `/analytics/routing-stats?scope=current&range=${range}&merchant_id=${encodeURIComponent(merchantId)}`
     : null
 
   const analyticsOverview = useSWR<AnalyticsOverviewResponse>(analyticsOverviewUrl, fetcher, {
@@ -272,6 +244,8 @@ export function OverviewPage() {
   }, [analyticsRouting.data])
 
   const topGateway = gatewayUsage[0]?.gateway || analyticsOverview.data?.top_scores?.[0]?.gateway
+  const selectedWindow =
+    OVERVIEW_RANGE_OPTIONS.find((option) => option.value === range) || OVERVIEW_RANGE_OPTIONS[1]
   const configuredBasics = [
     health === 'up',
     Boolean(activeRouting),
@@ -345,6 +319,25 @@ export function OverviewPage() {
             <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-600 dark:text-[#a6b0c3]">
               Basic business-facing view of system status, setup, request volume, and gateway activity.
             </p>
+            <div className="mt-4 inline-flex rounded-2xl border border-slate-200 bg-slate-50 p-1 dark:border-[#2a303a] dark:bg-[#121720]">
+              {OVERVIEW_RANGE_OPTIONS.map((option) => {
+                const active = option.value === range
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setRange(option.value)}
+                    className={`rounded-[14px] px-3 py-2 text-xs font-semibold transition ${
+                      active
+                        ? 'bg-white text-slate-950 shadow-sm dark:bg-[#1a2332] dark:text-white'
+                        : 'text-slate-500 hover:text-slate-900 dark:text-[#8ea0bb] dark:hover:text-white'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                )
+              })}
+            </div>
           </div>
         </header>
 
@@ -358,7 +351,7 @@ export function OverviewPage() {
                   <div>
                     <SurfaceLabel>Traffic leader</SurfaceLabel>
                     <div className="mt-5 flex flex-wrap items-end gap-4">
-                      <h2 className="text-5xl font-semibold tracking-[-0.05em] text-slate-950 md:text-7xl dark:text-white">
+                      <h2 className="text-[2.5rem] font-semibold tracking-[-0.05em] text-slate-950 md:text-[3rem] dark:text-white">
                         {topGateway?.toUpperCase() || '--'}
                       </h2>
                       <div className="pb-2">
@@ -366,7 +359,7 @@ export function OverviewPage() {
                           {gatewayUsage[0] ? formatPercent(gatewayUsage[0].share) : '0%'}
                         </p>
                         <p className="mt-1 text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-[#8390a7]">
-                          Share of recent traffic
+                          Share in selected window
                         </p>
                       </div>
                     </div>
@@ -378,7 +371,11 @@ export function OverviewPage() {
                   </div>
 
                   <div className="mt-8 grid gap-3 sm:grid-cols-3">
-                    <HeroStat label="Requests" value={formatCompactNumber(decideHits)} detail="Last hour" />
+                    <HeroStat
+                      label="Requests"
+                      value={formatCompactNumber(decideHits)}
+                      detail={selectedWindow.detail}
+                    />
                     <HeroStat label="Setup ready" value={`${configuredBasics}/4`} detail="Core basics configured" />
                     <HeroStat label="Last sync" value={latestSync ? formatUpdatedAt(latestSync) : '--'} detail="Latest refresh" />
                   </div>
@@ -403,7 +400,7 @@ export function OverviewPage() {
                     icon={Clock3}
                     label="Requests"
                     value={formatCompactNumber(decideHits)}
-                    detail="Last hour"
+                    detail={selectedWindow.detail}
                   />
                   <MetricCard
                     icon={BarChart3}
@@ -473,10 +470,10 @@ export function OverviewPage() {
                   <div>
                     <SurfaceLabel>Gateway activity</SurfaceLabel>
                     <p className="mt-2 text-sm text-slate-600 dark:text-[#a6b0c3]">
-                      Recent request distribution by gateway.
+                      Request distribution by gateway for the selected window.
                     </p>
                   </div>
-                  <Badge variant="blue">Live 1h</Badge>
+                  <Badge variant="blue">{selectedWindow.badge}</Badge>
                 </div>
 
                 <div className="mt-6 space-y-4">
@@ -538,7 +535,7 @@ export function OverviewPage() {
                   {[
                     { label: 'Selected merchant', value: merchantId },
                     { label: 'Last sync', value: formatUpdatedAt(latestSync) },
-                    { label: 'Errors last hour', value: formatCompactNumber(totalErrors) },
+                    { label: selectedWindow.summaryLabel, value: formatCompactNumber(totalErrors) },
                     { label: 'Top gateway', value: topGateway?.toUpperCase() || 'No activity' },
                   ].map((item) => (
                     <div
@@ -577,7 +574,7 @@ export function OverviewPage() {
                 ].map((item) => (
                   <GlassCard key={item.label} className="p-5" onClick={() => navigate(item.route)}>
                     <div className="flex h-full flex-col justify-between">
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-[#2a303a] dark:bg-[#161b24]">
+                      <div className="inline-flex w-fit rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-[#2a303a] dark:bg-[#161b24]">
                         <item.icon className="h-5 w-5 text-brand-600 dark:text-sky-300" />
                       </div>
                       <div className="mt-10">

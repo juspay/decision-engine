@@ -240,6 +240,8 @@ pub struct PaymentAuditQuery {
     pub merchant_id: Option<String>,
     pub scope: AnalyticsScope,
     pub range: AnalyticsRange,
+    pub start_ms: Option<i64>,
+    pub end_ms: Option<i64>,
     pub page: usize,
     pub page_size: usize,
     pub payment_id: Option<String>,

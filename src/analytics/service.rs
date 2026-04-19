@@ -492,8 +492,10 @@ async fn load_payment_audit_events(
     let mut builder = analytics_dsl::analytics_event
         .select(AnalyticsEvent::as_select())
         .into_boxed();
-    let cutoff_ms = now_ms().saturating_sub(query.range.window_ms());
-    builder = builder.filter(analytics_dsl::created_at_ms.ge(cutoff_ms));
+    let (start_ms, end_ms) = effective_payment_audit_window_bounds(query);
+    builder = builder
+        .filter(analytics_dsl::created_at_ms.ge(start_ms))
+        .filter(analytics_dsl::created_at_ms.le(end_ms));
     builder = builder.filter(analytics_dsl::event_type.eq_any(vec![
         "decision".to_string(),
         "gateway_update".to_string(),
@@ -590,8 +592,10 @@ async fn load_preview_trace_events(
     let mut builder = analytics_dsl::analytics_event
         .select(AnalyticsEvent::as_select())
         .into_boxed();
-    let cutoff_ms = now_ms().saturating_sub(query.range.window_ms());
-    builder = builder.filter(analytics_dsl::created_at_ms.ge(cutoff_ms));
+    let (start_ms, end_ms) = effective_payment_audit_window_bounds(query);
+    builder = builder
+        .filter(analytics_dsl::created_at_ms.ge(start_ms))
+        .filter(analytics_dsl::created_at_ms.le(end_ms));
     builder = builder.filter(analytics_dsl::route.eq("routing_evaluate".to_string()));
     builder = builder.filter(analytics_dsl::event_type.eq_any(vec![
         "rule_evaluation_preview".to_string(),
@@ -688,6 +692,17 @@ fn transaction_status_from_details(event: &AnalyticsEvent) -> Option<String> {
 }
 
 fn effective_window_bounds(query: &AnalyticsQuery) -> (i64, i64) {
+    let now = now_ms();
+    let end_ms = query.end_ms.unwrap_or(now).min(now);
+    let start_ms = query
+        .start_ms
+        .filter(|start_ms| *start_ms >= 0 && *start_ms < end_ms)
+        .unwrap_or_else(|| end_ms.saturating_sub(query.range.window_ms()));
+
+    (start_ms, end_ms)
+}
+
+fn effective_payment_audit_window_bounds(query: &PaymentAuditQuery) -> (i64, i64) {
     let now = now_ms();
     let end_ms = query.end_ms.unwrap_or(now).min(now);
     let start_ms = query
@@ -1944,6 +1959,8 @@ pub fn parse_payment_audit_query(
     merchant_id: Option<String>,
     scope: Option<String>,
     range: Option<String>,
+    start_ms: Option<i64>,
+    end_ms: Option<i64>,
     page: Option<u32>,
     page_size: Option<u32>,
     payment_id: Option<String>,
@@ -1956,6 +1973,12 @@ pub fn parse_payment_audit_query(
 ) -> PaymentAuditQuery {
     let scope = AnalyticsScope::from_query(scope.as_deref());
     let range = AnalyticsRange::from_query(range.as_deref());
+    let (start_ms, end_ms) = match (start_ms, end_ms) {
+        (Some(start_ms), Some(end_ms)) if start_ms >= 0 && end_ms > start_ms => {
+            (Some(start_ms), Some(end_ms))
+        }
+        _ => (None, None),
+    };
     let page = page.unwrap_or(1).max(1) as usize;
     let page_size = page_size.unwrap_or(12).clamp(1, 50) as usize;
 
@@ -1963,6 +1986,8 @@ pub fn parse_payment_audit_query(
         merchant_id,
         scope,
         range,
+        start_ms,
+        end_ms,
         page,
         page_size,
         payment_id,
@@ -1988,6 +2013,10 @@ pub fn format_range(query: &AnalyticsQuery) -> String {
 }
 
 fn format_payment_audit_range(query: &PaymentAuditQuery) -> String {
+    if query.start_ms.is_some() && query.end_ms.is_some() {
+        return "custom".to_string();
+    }
+
     match query.range {
         AnalyticsRange::M15 => "15m".to_string(),
         AnalyticsRange::H1 => "1h".to_string(),

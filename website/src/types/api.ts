@@ -353,7 +353,7 @@ export interface PaymentAuditResponse {
   generated_at_ms: number
   scope: AnalyticsScope
   merchant_id?: string | null
-  range: AnalyticsRange
+  range: AnalyticsRangeValue
   payment_id?: string | null
   request_id?: string | null
   gateway?: string | null

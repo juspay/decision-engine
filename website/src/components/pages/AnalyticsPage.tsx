@@ -3,10 +3,15 @@ import useSWR from 'swr'
 import {
   Area,
   AreaChart,
+  Bar,
+  BarChart,
   CartesianGrid,
+  Cell,
   Legend,
   Line,
   LineChart,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -19,6 +24,7 @@ import {
   AnalyticsRange,
   AnalyticsRangeValue,
   AnalyticsRoutingStatsResponse,
+  PaymentAuditResponse,
   RoutingFilterOptions,
 } from '../../types/api'
 import { Button } from '../ui/Button'
@@ -36,6 +42,15 @@ type RoutingFilters = {
   dimensions: Record<string, string>
   gateways: string[]
 }
+
+type AnalyticsView = 'transactions' | 'rule_based'
+type PreviewTraceKey = readonly [
+  'preview-trace-analytics',
+  AnalyticsRangeValue,
+  string,
+  number | null,
+  number | null,
+]
 
 type InfoContent = {
   title: string
@@ -77,12 +92,15 @@ const EMPTY_ROUTING_FILTERS: RoutingFilters = {
   gateways: [],
 }
 const MAX_VISIBLE_DIMENSIONS = 3
+const PREVIEW_TRACE_PAGE_SIZE = 50
+const MAX_PREVIEW_TRACE_PAGES = 5
+const PREVIEW_LIST_PAGE_SIZE = 10
 
-const CARD_INFO: Record<'hits' | 'share' | 'sr', InfoContent> = {
+const CARD_INFO: Record<'hits' | 'share' | 'sr' | 'preview_hits' | 'preview_activity' | 'preview_share', InfoContent> = {
   hits: {
     title: 'API call counts',
     purpose: 'Use these cards to see how much traffic each major decision-engine API handled in the selected window.',
-    calculation: 'Each request records one lightweight API-call event. The cards count those recorded calls for `/decide_gateway`, `/update_gateway`, and `/rule_evaluate`.',
+    calculation: 'Each request records one lightweight API-call event. The cards count those recorded calls for the endpoints surfaced in the current view.',
     source: 'Counts come from analytics rows persisted in `analytics_event` in Postgres.',
   },
   share: {
@@ -96,6 +114,24 @@ const CARD_INFO: Record<'hits' | 'share' | 'sr', InfoContent> = {
     purpose: 'Use this to explain why a connector won routing at a given time, based on the recorded historical score trail.',
     calculation: 'Stored `score_snapshot` events are bucketed over the selected window and averaged per connector. The line values are displayed as percentages.',
     source: 'Reads persisted `score_snapshot` rows from `analytics_event` in Postgres. The current score state originates from Redis-backed scoring flows.',
+  },
+  preview_hits: {
+    title: 'Rule-based summary',
+    purpose: 'Use these cards to distinguish preview request volume from the connector coverage produced by rule-based routing.',
+    calculation: 'Rule Evaluate counts come from request-hit analytics for `/routing/evaluate`. Gateway coverage counts the unique connectors selected in the fetched preview sample.',
+    source: 'Reads `request_hit` and `rule_evaluation_preview` analytics associated with preview routing activity.',
+  },
+  preview_activity: {
+    title: 'Connector selections over time',
+    purpose: 'Use this to see which connectors were selected in each time bucket inside the selected preview window.',
+    calculation: 'Returned preview traces are bucketed by time using each trace\'s latest activity timestamp, then grouped by latest selected connector. The chart shows connector counts per bucket.',
+    source: 'Reads `rule_evaluation_preview` activity through `/analytics/preview-trace`.',
+  },
+  preview_share: {
+    title: 'Rule-based gateway selection mix',
+    purpose: 'Use this to see which connectors dominate the fetched rule-preview sample, separate from real transaction decisions.',
+    calculation: 'Returned preview traces are grouped by latest selected connector and displayed as share of the fetched preview sample.',
+    source: 'Reads `rule_evaluation_preview` activity through `/analytics/preview-trace`.',
   },
 }
 
@@ -135,6 +171,64 @@ function buildAnalyticsUrl(
   return qs ? `${path}?${qs}` : path
 }
 
+function buildPreviewTraceUrl(
+  range: AnalyticsRangeValue,
+  merchantId: string,
+  page: number,
+  pageSize: number,
+  customWindow?: TimeWindow,
+) {
+  const params: Record<string, string | number | undefined> = {
+    scope: 'current',
+    range: range === 'custom' ? '1h' : range,
+    start_ms: customWindow?.start_ms,
+    end_ms: customWindow?.end_ms,
+    merchant_id: merchantId,
+    page,
+    page_size: pageSize,
+  }
+
+  const qs = queryString(params)
+  return qs ? `/analytics/preview-trace?${qs}` : '/analytics/preview-trace'
+}
+
+async function loadPreviewTraceSample(
+  range: AnalyticsRangeValue,
+  merchantId: string,
+  customWindow?: TimeWindow,
+) {
+  const firstPage = await fetcher<PaymentAuditResponse>(
+    buildPreviewTraceUrl(range, merchantId, 1, PREVIEW_TRACE_PAGE_SIZE, customWindow),
+  )
+  const totalPages = Math.min(
+    Math.ceil(firstPage.total_results / PREVIEW_TRACE_PAGE_SIZE),
+    MAX_PREVIEW_TRACE_PAGES,
+  )
+
+  if (totalPages <= 1) {
+    return firstPage
+  }
+
+  const remainingPages = await Promise.all(
+    Array.from({ length: totalPages - 1 }, (_, index) =>
+      fetcher<PaymentAuditResponse>(
+        buildPreviewTraceUrl(
+          range,
+          merchantId,
+          index + 2,
+          PREVIEW_TRACE_PAGE_SIZE,
+          customWindow,
+        ),
+      ),
+    ),
+  )
+
+  return {
+    ...firstPage,
+    results: [firstPage.results, ...remainingPages.map((page) => page.results)].flat(),
+  }
+}
+
 function formatNumber(value: number | string | undefined, digits = 2) {
   if (value === undefined || value === null || Number.isNaN(Number(value))) {
     return '0'
@@ -168,6 +262,39 @@ function formatDateTime(ms: number) {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(new Date(ms))
+}
+
+function bucketSizeForWindow(range: AnalyticsRangeValue, customWindow?: TimeWindow) {
+  const windowMs = customWindow
+    ? customWindow.end_ms - customWindow.start_ms
+    : range === '15m'
+      ? 15 * 60 * 1000
+      : range === '1h'
+        ? 60 * 60 * 1000
+        : 24 * 60 * 60 * 1000
+
+  if (windowMs <= 15 * 60 * 1000) return 60 * 1000
+  if (windowMs <= 60 * 60 * 1000) return 5 * 60 * 1000
+  if (windowMs <= 24 * 60 * 60 * 1000) return 15 * 60 * 1000
+  if (windowMs <= 72 * 60 * 60 * 1000) return 60 * 60 * 1000
+  return 3 * 60 * 60 * 1000
+}
+
+function bucketTimestamp(ms: number, bucketSize: number) {
+  return ms - (ms % Math.max(1, bucketSize))
+}
+
+function buildBucketTimeline(window: TimeWindow, bucketSize: number) {
+  const buckets: number[] = []
+  const safeBucketSize = Math.max(1, bucketSize)
+  const startBucket = bucketTimestamp(window.start_ms, safeBucketSize)
+  const endBucket = bucketTimestamp(window.end_ms, safeBucketSize)
+
+  for (let bucket = startBucket; bucket <= endBucket; bucket += safeBucketSize) {
+    buckets.push(bucket)
+  }
+
+  return buckets
 }
 
 function presetWindow(range: AnalyticsRange) {
@@ -317,17 +444,19 @@ function HitsCard({
   label,
   value,
   subtitle,
+  eyebrow = 'Endpoint hits',
 }: {
   label: string
   value: number
   subtitle: string
+  eyebrow?: string
 }) {
   return (
     <Card className="h-full overflow-hidden">
       <CardBody className="flex h-full min-h-[150px] flex-col justify-between">
         <div className="space-y-2">
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
-            Endpoint hits
+            {eyebrow}
           </p>
           <p className="text-lg font-semibold text-slate-900 dark:text-white">{label}</p>
         </div>
@@ -352,8 +481,10 @@ function analyticsRouteLabel(route: string) {
 export function AnalyticsPage() {
   const { merchantId } = useMerchantStore()
   const [range, setRange] = useState<AnalyticsRangeValue>('1h')
+  const [view, setView] = useState<AnalyticsView>('transactions')
   const [routingFilters, setRoutingFilters] = useState<RoutingFilters>(EMPTY_ROUTING_FILTERS)
   const [showAllFilters, setShowAllFilters] = useState(false)
+  const [previewListPage, setPreviewListPage] = useState(1)
   const [customStart, setCustomStart] = useState(() =>
     toDateTimeInputValue(Date.now() - 2 * 60 * 60 * 1000),
   )
@@ -383,6 +514,26 @@ export function AnalyticsPage() {
     canQueryCurrent && merchantId && (range !== 'custom' || customWindow)
       ? buildAnalyticsUrl('/analytics/routing-stats', range, merchantId, customWindow, routingFilters)
       : null
+  const previewTraceKey =
+    canQueryCurrent && merchantId && (range !== 'custom' || customWindow)
+      ? ([
+          'preview-trace-analytics',
+          range,
+          merchantId,
+          customWindow?.start_ms ?? null,
+          customWindow?.end_ms ?? null,
+        ] as const)
+      : null
+  const previewListUrl =
+    canQueryCurrent && merchantId && (range !== 'custom' || customWindow)
+      ? buildPreviewTraceUrl(
+          range,
+          merchantId,
+          previewListPage,
+          PREVIEW_LIST_PAGE_SIZE,
+          customWindow,
+        )
+      : null
 
   const overviewSwrOptions = {
     refreshInterval: 10000,
@@ -398,6 +549,10 @@ export function AnalyticsPage() {
     ...routingSwrOptions,
     keepPreviousData: true,
   } as const
+  const previewListSwrOptions = {
+    ...routingSwrOptions,
+    keepPreviousData: true,
+  } as const
 
   const overview = useSWR<AnalyticsOverviewResponse>(overviewUrl, fetcher, overviewSwrOptions)
   const routing = useSWR<AnalyticsRoutingStatsResponse>(routingUrl, fetcher, routingSwrOptions)
@@ -406,16 +561,45 @@ export function AnalyticsPage() {
     fetcher,
     filteredRoutingSwrOptions,
   )
+  const previewTrace = useSWR<PaymentAuditResponse>(
+    previewTraceKey,
+    async (key) => {
+      const [, selectedRange, selectedMerchantId, startMs, endMs] = key as PreviewTraceKey
+      return loadPreviewTraceSample(
+        selectedRange,
+        selectedMerchantId,
+        startMs !== null && endMs !== null
+          ? { start_ms: Number(startMs), end_ms: Number(endMs) }
+          : undefined,
+      )
+    },
+    routingSwrOptions,
+  )
+  const previewList = useSWR<PaymentAuditResponse>(
+    previewListUrl,
+    fetcher,
+    previewListSwrOptions,
+  )
 
-  const loading =
+  const transactionLoading =
     (!overview.data && overview.isLoading) ||
     (!routing.data && routing.isLoading) ||
     (!filteredRouting.data && filteredRouting.isLoading)
-  const error =
+  const ruleBasedLoading =
+    (!overview.data && overview.isLoading) ||
+    (!previewTrace.data && previewTrace.isLoading)
+  const transactionError =
     overview.error?.message ||
     routing.error?.message ||
     filteredRouting.error?.message ||
     null
+  const ruleBasedError =
+    overview.error?.message ||
+    previewTrace.error?.message ||
+    previewList.error?.message ||
+    null
+  const loading = view === 'transactions' ? transactionLoading : ruleBasedLoading
+  const error = view === 'transactions' ? transactionError : ruleBasedError
 
   const availableFilters: RoutingFilterOptions = {
     dimensions:
@@ -476,12 +660,20 @@ export function AnalyticsPage() {
     }
   }, [availableFilters.dimensions.length, showAllFilters])
 
+  useEffect(() => {
+    setPreviewListPage(1)
+  }, [merchantId, range, customWindow?.start_ms, customWindow?.end_ms])
+
   const activeWindowLabel = useMemo(() => {
     if (range !== 'custom') {
       return PRESET_OPTIONS.find((option) => option.value === range)?.label || 'Selected window'
     }
     if (!customWindow) return 'Custom window'
     return `${formatDateTime(customWindow.start_ms)} to ${formatDateTime(customWindow.end_ms)}`
+  }, [customWindow, range])
+  const effectiveWindow = useMemo(() => {
+    if (customWindow) return customWindow
+    return presetWindow(range as AnalyticsRange)
   }, [customWindow, range])
 
   const routeHits = useMemo(() => {
@@ -496,6 +688,124 @@ export function AnalyticsPage() {
       count: overview.data?.route_hits.find((row) => row.route === item.route)?.count || 0,
     }))
   }, [overview.data])
+  const transactionRouteHits = useMemo(
+    () => routeHits.filter((item) => item.route !== '/rule_evaluate'),
+    [routeHits],
+  )
+  const ruleEvaluateHits = useMemo(
+    () => routeHits.find((item) => item.route === '/rule_evaluate')?.count || 0,
+    [routeHits],
+  )
+  const previewRows = previewTrace.data?.results || []
+  const previewListRows = previewList.data?.results || []
+  const previewGatewaySummary = useMemo(() => {
+    const counts = new Map<string, number>()
+
+    for (const row of previewRows) {
+      const gateway = row.latest_gateway || 'No gateway selected'
+      counts.set(gateway, (counts.get(gateway) || 0) + 1)
+    }
+
+    return Array.from(counts.entries())
+      .map(([gateway, count]) => ({ gateway, count }))
+      .sort((left, right) => right.count - left.count)
+      .slice(0, 6)
+  }, [previewRows])
+  const previewStatusSummary = useMemo(() => {
+    const counts = new Map<string, number>()
+
+    for (const row of previewRows) {
+      const status = row.latest_status || 'unknown'
+      counts.set(status, (counts.get(status) || 0) + 1)
+    }
+
+    return Array.from(counts.entries())
+      .map(([status, count]) => ({ status, count }))
+      .sort((left, right) => right.count - left.count)
+  }, [previewRows])
+  const previewBucketSize = useMemo(
+    () => bucketSizeForWindow(range, customWindow),
+    [customWindow, range],
+  )
+  const previewConnectorSeriesData = useMemo(() => {
+    const gateways = previewGatewaySummary.map((item) => item.gateway).slice(0, 6)
+    const buckets = new Map<number, Record<string, number>>()
+
+    for (const bucket_ms of buildBucketTimeline(effectiveWindow, previewBucketSize)) {
+      buckets.set(
+        bucket_ms,
+        gateways.reduce<Record<string, number>>(
+          (row, gateway) => {
+            row[gateway] = 0
+            return row
+          },
+          { bucket_ms },
+        ),
+      )
+    }
+
+    for (const row of previewRows) {
+      const gateway = row.latest_gateway || 'No gateway selected'
+      if (!gateways.includes(gateway)) continue
+      const bucket_ms = bucketTimestamp(row.last_seen_ms, previewBucketSize)
+      const bucket =
+        buckets.get(bucket_ms) ||
+        gateways.reduce<Record<string, number>>(
+          (seriesRow, seriesGateway) => {
+            seriesRow[seriesGateway] = 0
+            return seriesRow
+          },
+          { bucket_ms },
+        )
+      bucket[gateway] = (bucket[gateway] || 0) + 1
+      buckets.set(bucket_ms, bucket)
+    }
+
+    return {
+      gateways,
+      rows: Array.from(buckets.values()).sort((left, right) => left.bucket_ms - right.bucket_ms),
+    }
+  }, [effectiveWindow, previewBucketSize, previewRows, previewGatewaySummary])
+  const latestPreviewActivity = previewRows[0]?.last_seen_ms
+  const previewListTotalResults = previewList.data?.total_results || 0
+  const previewListTotalPages = Math.max(
+    1,
+    Math.ceil(previewListTotalResults / PREVIEW_LIST_PAGE_SIZE),
+  )
+  const previewListStart = previewListTotalResults
+    ? (previewListPage - 1) * PREVIEW_LIST_PAGE_SIZE + 1
+    : 0
+  const previewListEnd = previewListTotalResults
+    ? previewListStart + previewListRows.length - 1
+    : 0
+  const previewGatewaysTouched = previewGatewaySummary.filter(
+    (item) => item.gateway !== 'No gateway selected',
+  ).length
+  const previewGatewayMaxCount = previewGatewaySummary[0]?.count || 1
+  const previewGatewayMixData = useMemo(() => {
+    const total = previewGatewaySummary.reduce((sum, item) => sum + item.count, 0)
+
+    return previewGatewaySummary.map((item, index) => ({
+      name: item.gateway,
+      value: item.count,
+      percentage: total ? (item.count / total) * 100 : 0,
+      color:
+        item.gateway === 'No gateway selected'
+          ? '#64748b'
+          : CHART_COLORS[index % CHART_COLORS.length],
+    }))
+  }, [previewGatewaySummary])
+
+  useEffect(() => {
+    if (!previewListTotalResults && previewListPage !== 1) {
+      setPreviewListPage(1)
+      return
+    }
+
+    if (previewListPage > previewListTotalPages) {
+      setPreviewListPage(previewListTotalPages)
+    }
+  }, [previewListPage, previewListTotalPages, previewListTotalResults])
 
   const gatewayShareData = useMemo(() => {
     const gateways = Array.from(new Set((routing.data?.gateway_share || []).map((point) => point.gateway))).slice(0, 6)
@@ -609,6 +919,8 @@ export function AnalyticsPage() {
     overview.mutate()
     routing.mutate()
     filteredRouting.mutate()
+    previewTrace.mutate()
+    previewList.mutate()
   }
 
   function toggleGatewayFilter(gateway: string) {
@@ -679,7 +991,9 @@ export function AnalyticsPage() {
             <Badge variant="green">{merchantId || 'Current merchant'}</Badge>
           </div>
           <p className="text-sm text-slate-500 dark:text-[#8a8a93]">
-            One working surface for route volume, connector share, and historical connector success rate.
+            {view === 'transactions'
+              ? 'One working surface for route volume, connector share, and historical connector success rate.'
+              : 'Preview-only activity for rule-based routing, separate from transaction decisions and score updates.'}
           </p>
         </div>
 
@@ -688,6 +1002,25 @@ export function AnalyticsPage() {
             Refresh
           </Button>
         </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          size="sm"
+          variant="secondary"
+          className={view === 'transactions' ? '!border-slate-200 !bg-white !text-slate-950 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.28)] dark:!border-[#2a303a] dark:!bg-[#161b24] dark:!text-white' : '!border-transparent !bg-slate-100 !text-slate-600 hover:!bg-slate-200 hover:!text-slate-900 dark:!bg-[#161b24] dark:!text-[#a7b2c6] dark:hover:!bg-[#1c2330] dark:hover:!text-white'}
+          onClick={() => setView('transactions')}
+        >
+          Transactions
+        </Button>
+        <Button
+          size="sm"
+          variant="secondary"
+          className={view === 'rule_based' ? '!border-slate-200 !bg-white !text-slate-950 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.28)] dark:!border-[#2a303a] dark:!bg-[#161b24] dark:!text-white' : '!border-transparent !bg-slate-100 !text-slate-600 hover:!bg-slate-200 hover:!text-slate-900 dark:!bg-[#161b24] dark:!text-[#a7b2c6] dark:hover:!bg-[#1c2330] dark:hover:!text-white'}
+          onClick={() => setView('rule_based')}
+        >
+          Rule-Based
+        </Button>
       </div>
 
       <Card className="overflow-visible">
@@ -758,30 +1091,32 @@ export function AnalyticsPage() {
         </div>
       ) : null}
 
-      <section className="space-y-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-900 dark:text-white">API calls</h2>
-            <p className="mt-1 text-sm text-slate-500 dark:text-[#8a8a93]">
-              Counts for the three routing surfaces most operators watch first.
-            </p>
-          </div>
-          <InfoButton content={CARD_INFO.hits} />
-        </div>
+      {view === 'transactions' ? (
+        <>
+          <section className="space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">API calls</h2>
+                <p className="mt-1 text-sm text-slate-500 dark:text-[#8a8a93]">
+                  Counts for the decision and feedback surfaces tied to real transaction flow.
+                </p>
+              </div>
+              <InfoButton content={CARD_INFO.hits} />
+            </div>
 
-        <div className="grid gap-4 lg:grid-cols-3">
-          {routeHits.map((item) => (
-            <HitsCard
-              key={item.route}
-              label={analyticsRouteLabel(item.route)}
-              value={item.count}
-              subtitle={range === 'custom' ? 'Custom window' : activeWindowLabel}
-            />
-          ))}
-        </div>
-      </section>
+            <div className="grid gap-4 lg:grid-cols-2">
+              {transactionRouteHits.map((item) => (
+                <HitsCard
+                  key={item.route}
+                  label={analyticsRouteLabel(item.route)}
+                  value={item.count}
+                  subtitle={range === 'custom' ? 'Custom window' : activeWindowLabel}
+                />
+              ))}
+            </div>
+          </section>
 
-      <Card className="overflow-visible">
+          <Card className="overflow-visible">
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -833,7 +1168,7 @@ export function AnalyticsPage() {
         </CardBody>
       </Card>
 
-      <Card className="overflow-visible">
+          <Card className="overflow-visible">
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -1039,6 +1374,363 @@ export function AnalyticsPage() {
           )}
         </CardBody>
       </Card>
+        </>
+      ) : (
+        <>
+          <section className="space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Rule-based activity</h2>
+                <p className="mt-1 text-sm text-slate-500 dark:text-[#8a8a93]">
+                  Preview-only routing activity from <code>/routing/evaluate</code>, kept separate from transaction routing and gateway scoring.
+                </p>
+              </div>
+              <InfoButton content={CARD_INFO.preview_hits} />
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              <HitsCard
+                label="Rule Evaluate"
+                value={ruleEvaluateHits}
+                subtitle={range === 'custom' ? 'Custom window' : activeWindowLabel}
+              />
+              <HitsCard
+                label="Gateways touched"
+                value={previewGatewaysTouched}
+                subtitle="Across recent preview selections"
+                eyebrow="Preview coverage"
+              />
+            </div>
+          </section>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Card className="overflow-visible">
+              <CardHeader>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-sm font-semibold text-slate-800 dark:text-white">
+                      Connector selections over time
+                    </h2>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                      Time-bucketed connector counts from the fetched rule-preview sample.
+                    </p>
+                  </div>
+                  <InfoButton content={CARD_INFO.preview_activity} />
+                </div>
+              </CardHeader>
+              <CardBody>
+                {previewConnectorSeriesData.gateways.length ? (
+                  <div className="h-80">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={previewConnectorSeriesData.rows} barGap={6}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                        <XAxis dataKey="bucket_ms" tickFormatter={formatBucket} tick={{ fontSize: 11 }} />
+                        <YAxis tick={{ fontSize: 11 }} />
+                        <Tooltip
+                          labelFormatter={(label) => formatDateTime(Number(label))}
+                          contentStyle={CHART_TOOLTIP_STYLE}
+                          labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                          itemStyle={CHART_TOOLTIP_ITEM_STYLE}
+                          wrapperStyle={CHART_TOOLTIP_WRAPPER_STYLE}
+                        />
+                        <Legend />
+                        {previewConnectorSeriesData.gateways.map((gateway, index) => (
+                          <Bar
+                            key={gateway}
+                            dataKey={gateway}
+                            stackId="preview-connectors"
+                            fill={
+                              gateway === 'No gateway selected'
+                                ? '#64748b'
+                                : CHART_COLORS[index % CHART_COLORS.length]
+                            }
+                            radius={[6, 6, 0, 0]}
+                            name={gateway}
+                          />
+                        ))}
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <EmptyState
+                    title="No connector selections yet"
+                    body="Send /routing/evaluate preview traffic in the selected window to populate connector time-series."
+                  />
+                )}
+              </CardBody>
+            </Card>
+
+            <Card className="overflow-visible">
+              <CardHeader>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-sm font-semibold text-slate-800 dark:text-white">
+                      Gateway selection mix
+                    </h2>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                      Connector share across the fetched rule-preview sample.
+                    </p>
+                  </div>
+                  <InfoButton content={CARD_INFO.preview_share} />
+                </div>
+              </CardHeader>
+              <CardBody>
+                {previewGatewayMixData.length ? (
+                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_240px]">
+                    <div className="relative h-80">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Tooltip
+                            formatter={(value: unknown, name: string | number, item: { payload?: { percentage?: number } }) => [
+                              `${formatNumber(value as number, 0)} previews`,
+                              `${String(name)} (${formatPercent(item.payload?.percentage || 0)})`,
+                            ]}
+                            contentStyle={CHART_TOOLTIP_STYLE}
+                            labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                            itemStyle={CHART_TOOLTIP_ITEM_STYLE}
+                            wrapperStyle={CHART_TOOLTIP_WRAPPER_STYLE}
+                          />
+                          <Legend />
+                          <Pie
+                            data={previewGatewayMixData}
+                            dataKey="value"
+                            nameKey="name"
+                            innerRadius={72}
+                            outerRadius={108}
+                            paddingAngle={3}
+                          >
+                            {previewGatewayMixData.map((entry) => (
+                              <Cell key={entry.name} fill={entry.color} />
+                            ))}
+                          </Pie>
+                        </PieChart>
+                      </ResponsiveContainer>
+                      <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                          Sample size
+                        </p>
+                        <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">
+                          {previewRows.length}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                          preview groups
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      {previewGatewayMixData.map((item) => (
+                        <div
+                          key={item.name}
+                          className="rounded-[20px] border border-slate-200 bg-white/80 px-4 py-3 dark:border-[#1d1d23] dark:bg-[#0c0c0e]"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className="h-2.5 w-2.5 rounded-full"
+                                style={{ backgroundColor: item.color }}
+                              />
+                              <p className="text-sm font-medium text-slate-900 dark:text-white">
+                                {item.name}
+                              </p>
+                            </div>
+                            <p className="text-xs font-semibold text-slate-500 dark:text-[#8a8a93]">
+                              {item.value}
+                            </p>
+                          </div>
+                          <p className="mt-2 text-xs text-slate-500 dark:text-[#8a8a93]">
+                            {formatPercent(item.percentage)} of fetched previews
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <EmptyState
+                    title="No preview connector mix yet"
+                    body="Rule previews need to return gateway selections before the mix chart can render."
+                  />
+                )}
+              </CardBody>
+            </Card>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+            <Card className="overflow-visible">
+              <CardHeader>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Recent rule previews</h2>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                      Preview-only evaluations captured from <code>/routing/evaluate</code>. This does not affect transaction scoring.
+                    </p>
+                  </div>
+                  <Badge variant="purple">
+                    {latestPreviewActivity ? `Latest ${formatDateTime(latestPreviewActivity)}` : 'No activity'}
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardBody>
+                {!previewList.data && previewList.isLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-[#8a8a93]">
+                    <Spinner size={16} />
+                    Loading rule previews…
+                  </div>
+                ) : previewList.error && !previewList.data ? (
+                  <ErrorMessage error={previewList.error.message} />
+                ) : previewListRows.length ? (
+                  <div className="space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <p className="text-xs text-slate-500 dark:text-[#8a8a93]">
+                        Showing {previewListStart}-{previewListEnd} of {previewListTotalResults}
+                      </p>
+                      {previewList.isLoading ? (
+                        <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-[#8a8a93]">
+                          <Spinner size={14} />
+                          Loading page…
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="space-y-3">
+                      {previewListRows.map((row) => (
+                        <div
+                          key={row.lookup_key}
+                          className="rounded-[22px] border border-slate-200 bg-white/90 px-4 py-4 dark:border-[#1d1d23] dark:bg-[#0c0c0e]"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+                                {row.payment_id || row.request_id || row.lookup_key}
+                              </p>
+                              <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                                {(row.merchant_id || 'unknown merchant')} · {formatDateTime(row.last_seen_ms)}
+                              </p>
+                            </div>
+                            <Badge variant="purple">
+                              {row.latest_status || 'preview'}
+                            </Badge>
+                          </div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <Badge variant="blue">Rule Evaluate</Badge>
+                            {row.latest_gateway ? <Badge variant="green">{row.latest_gateway}</Badge> : null}
+                            <Badge variant="gray">{row.event_count} events</Badge>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {previewListTotalPages > 1 ? (
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4 dark:border-[#1d1d23]">
+                        <p className="text-xs text-slate-500 dark:text-[#8a8a93]">
+                          Page {previewListPage} of {previewListTotalPages}
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() =>
+                              setPreviewListPage((current) => Math.max(1, current - 1))
+                            }
+                            disabled={previewListPage === 1 || previewList.isLoading}
+                          >
+                            Previous
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() =>
+                              setPreviewListPage((current) =>
+                                Math.min(previewListTotalPages, current + 1),
+                              )
+                            }
+                            disabled={
+                              previewListPage >= previewListTotalPages || previewList.isLoading
+                            }
+                          >
+                            Next
+                          </Button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <EmptyState
+                    title="No rule-based activity yet"
+                    body="Send /routing/evaluate preview traffic in the selected window to populate rule-based activity."
+                  />
+                )}
+              </CardBody>
+            </Card>
+
+            <div className="space-y-4">
+              <Card className="overflow-visible">
+                <CardHeader>
+                  <div>
+                    <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Gateway activity</h2>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                      Recent preview selections grouped by latest chosen gateway.
+                    </p>
+                  </div>
+                </CardHeader>
+                <CardBody>
+                  {previewGatewaySummary.length ? (
+                    <div className="space-y-3">
+                      {previewGatewaySummary.map((item, index) => (
+                        <div key={item.gateway} className="space-y-2">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-sm font-medium text-slate-900 dark:text-white">{item.gateway}</p>
+                            <p className="text-xs font-semibold text-slate-500 dark:text-[#8a8a93]">{item.count}</p>
+                          </div>
+                          <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-[#141822]">
+                            <div
+                              className="h-full rounded-full"
+                              style={{
+                                width: `${(item.count / previewGatewayMaxCount) * 100}%`,
+                                backgroundColor: CHART_COLORS[index % CHART_COLORS.length],
+                              }}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <EmptyState
+                      title="No gateway activity yet"
+                      body="Once rule previews are captured, this panel will show which connectors are being selected."
+                    />
+                  )}
+                </CardBody>
+              </Card>
+
+              <Card className="overflow-visible">
+                <CardHeader>
+                  <div>
+                    <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Recent preview outcomes</h2>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                      Status mix from the loaded preview sample.
+                    </p>
+                  </div>
+                </CardHeader>
+                <CardBody>
+                  {previewStatusSummary.length ? (
+                    <div className="flex flex-wrap gap-2">
+                      {previewStatusSummary.map((item) => (
+                        <Badge key={item.status} variant={item.status.toLowerCase().includes('fail') ? 'red' : item.status === 'default_selection' ? 'orange' : 'purple'}>
+                          {item.status} · {item.count}
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : (
+                    <EmptyState
+                      title="No preview outcomes yet"
+                      body="Recent rule preview results will appear here once preview traffic is recorded."
+                    />
+                  )}
+                </CardBody>
+              </Card>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }
