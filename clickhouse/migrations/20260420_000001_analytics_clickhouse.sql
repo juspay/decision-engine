@@ -101,7 +101,13 @@ CREATE TABLE IF NOT EXISTS decision_engine_analytics.analytics_decisions_5m_v1 (
     count UInt64
 ) ENGINE = SummingMergeTree
 PARTITION BY toYYYYMM(toDateTime(bucket_ms / 1000))
-ORDER BY (tenant_id, merchant_id, bucket_ms, routing_approach, status);
+ORDER BY (
+    tenant_id,
+    ifNull(merchant_id, ''),
+    bucket_ms,
+    routing_approach,
+    status
+);
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS decision_engine_analytics.analytics_decisions_5m_mv
 TO decision_engine_analytics.analytics_decisions_5m_v1 AS
@@ -124,7 +130,12 @@ CREATE TABLE IF NOT EXISTS decision_engine_analytics.analytics_gateway_share_5m_
     count UInt64
 ) ENGINE = SummingMergeTree
 PARTITION BY toYYYYMM(toDateTime(bucket_ms / 1000))
-ORDER BY (tenant_id, merchant_id, bucket_ms, gateway);
+ORDER BY (
+    tenant_id,
+    ifNull(merchant_id, ''),
+    bucket_ms,
+    gateway
+);
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS decision_engine_analytics.analytics_gateway_share_5m_mv
 TO decision_engine_analytics.analytics_gateway_share_5m_v1 AS
@@ -146,7 +157,12 @@ CREATE TABLE IF NOT EXISTS decision_engine_analytics.analytics_rule_hits_5m_v1 (
     count UInt64
 ) ENGINE = SummingMergeTree
 PARTITION BY toYYYYMM(toDateTime(bucket_ms / 1000))
-ORDER BY (tenant_id, merchant_id, bucket_ms, rule_name);
+ORDER BY (
+    tenant_id,
+    ifNull(merchant_id, ''),
+    bucket_ms,
+    rule_name
+);
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS decision_engine_analytics.analytics_rule_hits_5m_mv
 TO decision_engine_analytics.analytics_rule_hits_5m_v1 AS
@@ -170,7 +186,13 @@ CREATE TABLE IF NOT EXISTS decision_engine_analytics.analytics_errors_5m_v1 (
     count UInt64
 ) ENGINE = SummingMergeTree
 PARTITION BY toYYYYMM(toDateTime(bucket_ms / 1000))
-ORDER BY (tenant_id, merchant_id, bucket_ms, route, error_code);
+ORDER BY (
+    tenant_id,
+    ifNull(merchant_id, ''),
+    bucket_ms,
+    route,
+    error_code
+);
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS decision_engine_analytics.analytics_errors_5m_mv
 TO decision_engine_analytics.analytics_errors_5m_v1 AS
@@ -201,7 +223,15 @@ CREATE TABLE IF NOT EXISTS decision_engine_analytics.analytics_score_latest_v1 (
     event_id UInt64
 ) ENGINE = ReplacingMergeTree(created_at_ms)
 PARTITION BY toYYYYMM(toDateTime(created_at_ms / 1000))
-ORDER BY (tenant_id, merchant_id, payment_method_type, payment_method, gateway, created_at_ms, event_id);
+ORDER BY (
+    tenant_id,
+    ifNull(merchant_id, ''),
+    ifNull(payment_method_type, ''),
+    ifNull(payment_method, ''),
+    ifNull(gateway, ''),
+    created_at_ms,
+    event_id
+);
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS decision_engine_analytics.analytics_score_latest_mv
 TO decision_engine_analytics.analytics_score_latest_v1 AS
@@ -220,37 +250,3 @@ SELECT
     event_id
 FROM decision_engine_analytics.analytics_domain_events_v1
 WHERE event_type = 'score_snapshot';
-
-CREATE TABLE IF NOT EXISTS decision_engine_analytics.analytics_payment_lookup_v1 (
-    tenant_id String,
-    lookup_key String,
-    payment_id Nullable(String),
-    request_id Nullable(String),
-    merchant_id Nullable(String),
-    gateway Nullable(String),
-    route Nullable(String),
-    status Nullable(String),
-    event_stage Nullable(String),
-    created_at_ms Int64,
-    event_id UInt64
-) ENGINE = ReplacingMergeTree(created_at_ms)
-PARTITION BY toYYYYMM(toDateTime(created_at_ms / 1000))
-ORDER BY (tenant_id, lookup_key, created_at_ms, event_id);
-
-CREATE MATERIALIZED VIEW IF NOT EXISTS decision_engine_analytics.analytics_payment_lookup_mv
-TO decision_engine_analytics.analytics_payment_lookup_v1 AS
-SELECT
-    tenant_id,
-    if(payment_id != '' AND payment_id IS NOT NULL, payment_id, request_id) AS lookup_key,
-    payment_id,
-    request_id,
-    merchant_id,
-    gateway,
-    route,
-    status,
-    event_stage,
-    created_at_ms,
-    event_id
-FROM decision_engine_analytics.analytics_domain_events_v1
-WHERE event_type IN ('decision', 'gateway_update', 'rule_hit', 'rule_evaluation_preview', 'error')
-  AND if(payment_id != '' AND payment_id IS NOT NULL, payment_id, request_id) != '';

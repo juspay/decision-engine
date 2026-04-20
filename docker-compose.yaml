@@ -310,7 +310,13 @@ services:
       - /bin/bash
       - -lc
       - |
-        find /migrations -name '*.sql' -print0 | xargs -0 -I{} clickhouse-client --host clickhouse --user decision_engine --password decision_engine --multiquery --queries-file {}
+        clickhouse-client --host clickhouse --user decision_engine --password decision_engine --multiquery --query "
+          DROP DATABASE IF EXISTS decision_engine_analytics;
+          CREATE DATABASE decision_engine_analytics;
+        "
+        find /migrations -name '*.sql' -print0 \
+          | sort -z \
+          | xargs -0 -I{} clickhouse-client --host clickhouse --user decision_engine --password decision_engine --multiquery --queries-file {}
 
   # ==========================================
   # Core Infrastructure

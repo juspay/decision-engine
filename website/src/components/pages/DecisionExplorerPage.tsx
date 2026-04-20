@@ -86,6 +86,108 @@ type VolumePaymentEntry = {
   connector: string
 }
 
+const EXPLORER_STORAGE_KEY = 'decision-explorer-state-v1'
+
+const DEFAULT_FORM: FormState = {
+  amount: '1000',
+  currency: '',
+  payment_method_type: '',
+  payment_method: '',
+  card_brand: '',
+  auth_type: '',
+  eligible_gateways: 'stripe, adyen',
+  ranking_algorithm: 'SR_BASED_ROUTING',
+  elimination_enabled: false,
+}
+
+const DEFAULT_SIMULATION_CONFIG: SimulationConfig = {
+  totalPayments: '10',
+  successCount: '7',
+  failureCount: '3',
+}
+
+const DEFAULT_RULE_PARAMS: RuleEvaluateParams[] = [
+  { key: 'payment_method_type', type: 'enum_variant', value: '', metadataKey: '' },
+  { key: 'currency', type: 'enum_variant', value: '', metadataKey: '' },
+]
+
+const DEFAULT_FALLBACK_CONNECTORS: GatewayConnector[] = [
+  { gateway_name: 'stripe', gateway_id: 'gateway_001' },
+  { gateway_name: 'adyen', gateway_id: 'gateway_002' },
+]
+
+interface ExplorerPersistedState {
+  activeTab: TabType
+  form: FormState
+  simulationConfig: SimulationConfig
+  ruleParams: RuleEvaluateParams[]
+  fallbackConnectors: GatewayConnector[]
+  volumePayments: string
+  result: DecideGatewayResponse | null
+  singleRunPaymentId: string | null
+  singleRunOutcome: TransactionOutcome
+  ruleResult: RuleEvaluateResponse | null
+  volumeDistribution: { name: string; count: number; percentage: number }[]
+  volumeEvaluationLog: VolumePaymentEntry[]
+  volumeProgress: number
+  simulationResults: SimulationResult[]
+  responseOpen: boolean
+  volumeResponseOpen: boolean
+}
+
+function cloneRuleParams(params: RuleEvaluateParams[]) {
+  return params.map((param) => ({ ...param }))
+}
+
+function cloneConnectors(connectors: GatewayConnector[]) {
+  return connectors.map((connector) => ({ ...connector }))
+}
+
+function getDefaultExplorerState(): ExplorerPersistedState {
+  return {
+    activeTab: 'single',
+    form: { ...DEFAULT_FORM },
+    simulationConfig: { ...DEFAULT_SIMULATION_CONFIG },
+    ruleParams: cloneRuleParams(DEFAULT_RULE_PARAMS),
+    fallbackConnectors: cloneConnectors(DEFAULT_FALLBACK_CONNECTORS),
+    volumePayments: '100',
+    result: null,
+    singleRunPaymentId: null,
+    singleRunOutcome: 'CHARGED',
+    ruleResult: null,
+    volumeDistribution: [],
+    volumeEvaluationLog: [],
+    volumeProgress: 0,
+    simulationResults: [],
+    responseOpen: false,
+    volumeResponseOpen: false,
+  }
+}
+
+function loadExplorerState(): ExplorerPersistedState {
+  if (typeof window === 'undefined') return getDefaultExplorerState()
+
+  try {
+    const raw = window.localStorage.getItem(EXPLORER_STORAGE_KEY)
+    if (!raw) return getDefaultExplorerState()
+    const parsed = JSON.parse(raw) as Partial<ExplorerPersistedState>
+    const defaults = getDefaultExplorerState()
+    return {
+      ...defaults,
+      ...parsed,
+      form: { ...defaults.form, ...(parsed.form || {}) },
+      simulationConfig: { ...defaults.simulationConfig, ...(parsed.simulationConfig || {}) },
+      ruleParams: parsed.ruleParams?.length ? cloneRuleParams(parsed.ruleParams) : defaults.ruleParams,
+      fallbackConnectors: parsed.fallbackConnectors?.length ? cloneConnectors(parsed.fallbackConnectors) : defaults.fallbackConnectors,
+      volumeDistribution: parsed.volumeDistribution || defaults.volumeDistribution,
+      volumeEvaluationLog: parsed.volumeEvaluationLog || defaults.volumeEvaluationLog,
+      simulationResults: parsed.simulationResults || defaults.simulationResults,
+    }
+  } catch {
+    return getDefaultExplorerState()
+  }
+}
+
 function toUpperOptions(values: string[] = []): string[] {
   return values.map(v => v.trim()).filter(Boolean).map(v => v.toUpperCase())
 }
@@ -362,6 +464,24 @@ function EmptyAuditState({ title, body }: { title: string; body: string }) {
   )
 }
 
+function PendingAuditState({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="rounded-[22px] border border-slate-200 bg-slate-50/80 px-6 py-10 text-center dark:border-[#2a303a] dark:bg-[#161b24]/80">
+      <div className="flex justify-center">
+        <Spinner size={18} />
+      </div>
+      <p className="mt-4 text-sm font-semibold text-slate-900 dark:text-white">{title}</p>
+      <p className="mt-2 text-sm text-slate-500 dark:text-[#b2bdd1]">{body}</p>
+      <div className="mt-5 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-[#202734]">
+        <div className="h-full w-1/3 animate-pulse rounded-full bg-brand-500" />
+      </div>
+      <p className="mt-3 text-[11px] uppercase tracking-[0.16em] text-slate-400 dark:text-[#8390a7]">
+        Polling every second
+      </p>
+    </div>
+  )
+}
+
 function InspectorKeyValueGrid({ rows }: { rows: Array<{ label: string; value: string }> }) {
   if (!rows.length) return null
 
@@ -412,52 +532,33 @@ export function DecisionExplorerPage() {
   const { routingKeysConfig, isLoading: routingKeysLoading, error: routingKeysError } = useDynamicRoutingConfig()
   const hasRoutingKeys = Object.keys(routingKeysConfig).length > 0
   const routingConfigUnavailable = !routingKeysLoading && (!hasRoutingKeys || Boolean(routingKeysError))
-  const [activeTab, setActiveTab] = useState<TabType>('single')
+  const initialState = useMemo(() => loadExplorerState(), [])
+  const [activeTab, setActiveTab] = useState<TabType>(initialState.activeTab)
 
-  const [form, setForm] = useState<FormState>({
-    amount: '1000',
-    currency: '',
-    payment_method_type: '',
-    payment_method: '',
-    card_brand: '',
-    auth_type: '',
-    eligible_gateways: 'stripe, adyen',
-    ranking_algorithm: 'SR_BASED_ROUTING',
-    elimination_enabled: false,
-  })
+  const [form, setForm] = useState<FormState>(initialState.form)
 
-  const [simulationConfig, setSimulationConfig] = useState<SimulationConfig>({
-    totalPayments: '10',
-    successCount: '7',
-    failureCount: '3',
-  })
+  const [simulationConfig, setSimulationConfig] = useState<SimulationConfig>(initialState.simulationConfig)
 
-  const [ruleParams, setRuleParams] = useState<RuleEvaluateParams[]>([
-    { key: 'payment_method_type', type: 'enum_variant', value: '', metadataKey: '' },
-    { key: 'currency', type: 'enum_variant', value: '', metadataKey: '' },
-  ])
+  const [ruleParams, setRuleParams] = useState<RuleEvaluateParams[]>(initialState.ruleParams)
 
-  const [fallbackConnectors, setFallbackConnectors] = useState<GatewayConnector[]>([
-    { gateway_name: 'stripe', gateway_id: 'gateway_001' },
-    { gateway_name: 'adyen', gateway_id: 'gateway_002' },
-  ])
+  const [fallbackConnectors, setFallbackConnectors] = useState<GatewayConnector[]>(initialState.fallbackConnectors)
 
-  const [volumePayments, setVolumePayments] = useState<string>('100')
+  const [volumePayments, setVolumePayments] = useState<string>(initialState.volumePayments)
 
-  const [result, setResult] = useState<DecideGatewayResponse | null>(null)
-  const [singleRunPaymentId, setSingleRunPaymentId] = useState<string | null>(null)
-  const [singleRunOutcome, setSingleRunOutcome] = useState<TransactionOutcome>('CHARGED')
-  const [ruleResult, setRuleResult] = useState<RuleEvaluateResponse | null>(null)
-  const [volumeDistribution, setVolumeDistribution] = useState<{ name: string; count: number; percentage: number }[]>([])
-  const [volumeEvaluationLog, setVolumeEvaluationLog] = useState<VolumePaymentEntry[]>([])
-  const [volumeProgress, setVolumeProgress] = useState(0)
-  const [simulationResults, setSimulationResults] = useState<SimulationResult[]>([])
+  const [result, setResult] = useState<DecideGatewayResponse | null>(initialState.result)
+  const [singleRunPaymentId, setSingleRunPaymentId] = useState<string | null>(initialState.singleRunPaymentId)
+  const [singleRunOutcome, setSingleRunOutcome] = useState<TransactionOutcome>(initialState.singleRunOutcome)
+  const [ruleResult, setRuleResult] = useState<RuleEvaluateResponse | null>(initialState.ruleResult)
+  const [volumeDistribution, setVolumeDistribution] = useState<{ name: string; count: number; percentage: number }[]>(initialState.volumeDistribution)
+  const [volumeEvaluationLog, setVolumeEvaluationLog] = useState<VolumePaymentEntry[]>(initialState.volumeEvaluationLog)
+  const [volumeProgress, setVolumeProgress] = useState(initialState.volumeProgress)
+  const [simulationResults, setSimulationResults] = useState<SimulationResult[]>(initialState.simulationResults)
   const [isSimulating, setIsSimulating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [filterOpen, setFilterOpen] = useState(false)
-  const [responseOpen, setResponseOpen] = useState(false)
-  const [volumeResponseOpen, setVolumeResponseOpen] = useState(false)
+  const [responseOpen, setResponseOpen] = useState(initialState.responseOpen)
+  const [volumeResponseOpen, setVolumeResponseOpen] = useState(initialState.volumeResponseOpen)
   const [selectedAuditPaymentId, setSelectedAuditPaymentId] = useState<string | null>(null)
   const [selectedAuditEventId, setSelectedAuditEventId] = useState<number | null>(null)
   const [auditInspectorTab, setAuditInspectorTab] = useState<AuditInspectorTab>('summary')
@@ -510,7 +611,10 @@ export function DecisionExplorerPage() {
     : null
 
   const previewTraceDetail = useSWR<PaymentAuditResponse>(previewTraceUrl, fetcher, {
-    refreshInterval: selectedPreviewPaymentId ? 12000 : 0,
+    refreshInterval: (data) => {
+      if (!selectedPreviewPaymentId) return 0
+      return (data?.timeline?.length || 0) > 0 ? 12000 : 1000
+    },
     revalidateOnFocus: true,
   })
 
@@ -591,6 +695,48 @@ export function DecisionExplorerPage() {
       window.removeEventListener('keydown', onKeyDown)
     }
   }, [selectedAuditPaymentId, selectedPreviewPaymentId])
+
+  useEffect(() => {
+    const nextState: ExplorerPersistedState = {
+      activeTab,
+      form,
+      simulationConfig,
+      ruleParams,
+      fallbackConnectors,
+      volumePayments,
+      result,
+      singleRunPaymentId,
+      singleRunOutcome,
+      ruleResult,
+      volumeDistribution,
+      volumeEvaluationLog,
+      volumeProgress,
+      simulationResults,
+      responseOpen,
+      volumeResponseOpen,
+    }
+
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(EXPLORER_STORAGE_KEY, JSON.stringify(nextState))
+    }
+  }, [
+    activeTab,
+    form,
+    simulationConfig,
+    ruleParams,
+    fallbackConnectors,
+    volumePayments,
+    result,
+    singleRunPaymentId,
+    singleRunOutcome,
+    ruleResult,
+    volumeDistribution,
+    volumeEvaluationLog,
+    volumeProgress,
+    simulationResults,
+    responseOpen,
+    volumeResponseOpen,
+  ])
 
   function set(field: keyof FormState, value: string | boolean) {
     setForm(f => ({ ...f, [field]: value }))
@@ -987,6 +1133,11 @@ export function DecisionExplorerPage() {
 
   const previewInspectorModel = useMemo(() => buildInspectorModel(selectedPreviewEvent), [selectedPreviewEvent])
 
+  useEffect(() => {
+    if (!selectedPreviewPaymentId) return
+    void previewTraceDetail.mutate()
+  }, [selectedPreviewPaymentId])
+
   function openAuditModal(paymentId: string) {
     setSelectedPreviewPaymentId(null)
     setSelectedPreviewEventId(null)
@@ -1018,6 +1169,58 @@ export function DecisionExplorerPage() {
     setPreviewInspectorTab('summary')
   }
 
+  function resetCurrentTabState() {
+    const defaults = getDefaultExplorerState()
+
+    if (activeTab === 'single') {
+      setForm(defaults.form)
+      setResult(defaults.result)
+      setSingleRunPaymentId(defaults.singleRunPaymentId)
+      setSingleRunOutcome(defaults.singleRunOutcome)
+      setResponseOpen(defaults.responseOpen)
+    } else if (activeTab === 'batch') {
+      setForm(defaults.form)
+      setSimulationConfig(defaults.simulationConfig)
+      setSimulationResults(defaults.simulationResults)
+      setIsSimulating(false)
+    } else if (activeTab === 'rule') {
+      setRuleParams(defaults.ruleParams)
+      setFallbackConnectors(defaults.fallbackConnectors)
+      setRuleResult(defaults.ruleResult)
+      setSelectedPreviewPaymentId(null)
+      setSelectedPreviewEventId(null)
+      setPreviewInspectorTab('summary')
+      setPreviewTraceLabel('Rule Evaluation Preview')
+    } else if (activeTab === 'volume') {
+      setVolumePayments(defaults.volumePayments)
+      setRuleResult(defaults.ruleResult)
+      setVolumeDistribution(defaults.volumeDistribution)
+      setVolumeEvaluationLog(defaults.volumeEvaluationLog)
+      setVolumeProgress(defaults.volumeProgress)
+      setVolumeResponseOpen(defaults.volumeResponseOpen)
+      setSelectedPreviewPaymentId(null)
+      setSelectedPreviewEventId(null)
+      setPreviewInspectorTab('summary')
+      setPreviewTraceLabel('Volume Split Preview')
+    }
+
+    setError(null)
+    setLoading(false)
+    setFilterOpen(false)
+    setSelectedAuditPaymentId(null)
+    setSelectedAuditEventId(null)
+    setAuditInspectorTab('summary')
+  }
+
+  const resetButtonLabel =
+    activeTab === 'single'
+      ? 'Reset Single Test'
+      : activeTab === 'batch'
+        ? 'Reset Batch'
+        : activeTab === 'rule'
+          ? 'Reset Rule-Based'
+          : 'Reset Volume Split'
+
   return (
     <div className="space-y-6">
       <div>
@@ -1027,31 +1230,37 @@ export function DecisionExplorerPage() {
         </p>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <button
-          onClick={() => setActiveTab('single')}
-          className={`rounded-full border px-4 py-2 text-sm font-medium transition ${sectionButtonClass(activeTab === 'single')}`}
-        >
-          Single Test
-        </button>
-        <button
-          onClick={() => setActiveTab('batch')}
-          className={`rounded-full border px-4 py-2 text-sm font-medium transition ${sectionButtonClass(activeTab === 'batch')}`}
-        >
-          Batch Simulation
-        </button>
-        <button
-          onClick={() => setActiveTab('rule')}
-          className={`rounded-full border px-4 py-2 text-sm font-medium transition ${sectionButtonClass(activeTab === 'rule')}`}
-        >
-          Rule-Based
-        </button>
-        <button
-          onClick={() => setActiveTab('volume')}
-          className={`rounded-full border px-4 py-2 text-sm font-medium transition ${sectionButtonClass(activeTab === 'volume')}`}
-        >
-          Volume Split
-        </button>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => setActiveTab('single')}
+            className={`rounded-full border px-4 py-2 text-sm font-medium transition ${sectionButtonClass(activeTab === 'single')}`}
+          >
+            Single Test
+          </button>
+          <button
+            onClick={() => setActiveTab('batch')}
+            className={`rounded-full border px-4 py-2 text-sm font-medium transition ${sectionButtonClass(activeTab === 'batch')}`}
+          >
+            Batch Simulation
+          </button>
+          <button
+            onClick={() => setActiveTab('rule')}
+            className={`rounded-full border px-4 py-2 text-sm font-medium transition ${sectionButtonClass(activeTab === 'rule')}`}
+          >
+            Rule-Based
+          </button>
+          <button
+            onClick={() => setActiveTab('volume')}
+            className={`rounded-full border px-4 py-2 text-sm font-medium transition ${sectionButtonClass(activeTab === 'volume')}`}
+          >
+            Volume Split
+          </button>
+        </div>
+        <Button size="sm" variant="secondary" onClick={resetCurrentTabState}>
+          <RefreshCw size={14} />
+          {resetButtonLabel}
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -1588,13 +1797,20 @@ export function DecisionExplorerPage() {
                       <thead className="bg-slate-50 dark:bg-[#111114] text-xs text-slate-500 sticky top-0">
                         <tr>
                           <th className="text-left px-4 py-2 w-20">#</th>
+                          <th className="text-left px-4 py-2">payment_id</th>
                           <th className="text-left px-4 py-2">gateway_name</th>
+                          <th className="text-right px-4 py-2 w-28">trace</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-[#222226]">
                         {volumeEvaluationLog.map((entry, idx) => (
-                          <tr key={entry.paymentId} className="hover:bg-slate-50 dark:bg-[#111114]">
+                          <tr
+                            key={entry.paymentId}
+                            className="cursor-pointer hover:bg-slate-50 dark:bg-[#111114]"
+                            onClick={() => openPreviewModal(entry.paymentId, 'Volume Split Preview')}
+                          >
                             <td className="px-4 py-1.5 text-slate-500 font-mono text-xs">{idx + 1}</td>
+                            <td className="px-4 py-1.5 font-mono text-xs text-slate-500">{entry.paymentId}</td>
                             <td className="px-4 py-1.5">
                               <div className="flex items-center gap-2">
                                 <div
@@ -1606,6 +1822,18 @@ export function DecisionExplorerPage() {
                                 />
                                 <span className="font-medium">{entry.connector}</span>
                               </div>
+                            </td>
+                            <td className="px-4 py-1.5 text-right">
+                              <button
+                                type="button"
+                                className="text-xs font-medium text-brand-600 hover:text-brand-700"
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  openPreviewModal(entry.paymentId, 'Volume Split Preview')
+                                }}
+                              >
+                                View trace
+                              </button>
                             </td>
                           </tr>
                         ))}
@@ -2334,6 +2562,11 @@ export function DecisionExplorerPage() {
                         </section>
                       ))}
                     </div>
+                  ) : selectedPreviewPaymentId ? (
+                    <PendingAuditState
+                      title="Preview trace still arriving"
+                      body="This preview was just logged. The modal is polling every second and will populate once the analytics writer flushes the trace."
+                    />
                   ) : (
                     <EmptyAuditState
                       title="No preview trace captured yet"
@@ -2422,6 +2655,11 @@ export function DecisionExplorerPage() {
                         />
                       ) : null}
                     </div>
+                  ) : selectedPreviewPaymentId && !(previewTraceDetail.data?.timeline?.length || 0) ? (
+                    <PendingAuditState
+                      title="Waiting for preview step"
+                      body="Inspector will unlock as soon as the first preview event is available."
+                    />
                   ) : (
                     <EmptyAuditState
                       title="Select a preview step"

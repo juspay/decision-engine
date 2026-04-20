@@ -356,6 +356,18 @@ function EmptyState({ title, body }: { title: string; body: string }) {
   )
 }
 
+function PendingState({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="rounded-[24px] border border-slate-200 bg-white/60 px-6 py-12 text-center dark:border-[#222227] dark:bg-[#0b0b0d]">
+      <div className="flex justify-center">
+        <Spinner size={20} />
+      </div>
+      <p className="mt-4 text-sm font-semibold text-slate-900 dark:text-white">{title}</p>
+      <p className="mt-2 text-sm text-slate-500 dark:text-[#8a8a93]">{body}</p>
+    </div>
+  )
+}
+
 function controlClassName() {
   return 'h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 shadow-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-[#27272a] dark:bg-[#121214] dark:text-[#e5e7eb]'
 }
@@ -572,7 +584,10 @@ export function AnalyticsPage() {
     keepPreviousData: true,
   } as const
   const previewListSwrOptions = {
-    ...routingSwrOptions,
+    refreshInterval: (data?: PaymentAuditResponse) =>
+      data?.results?.length ? 12000 : 2000,
+    revalidateOnFocus: true,
+    revalidateIfStale: false,
     keepPreviousData: true,
   } as const
 
@@ -595,7 +610,12 @@ export function AnalyticsPage() {
           : undefined,
       )
     },
-    routingSwrOptions,
+    {
+      refreshInterval: (data?: PaymentAuditResponse) =>
+        data?.results?.length ? 12000 : 2000,
+      revalidateOnFocus: true,
+      revalidateIfStale: false,
+    },
   )
   const previewList = useSWR<PaymentAuditResponse>(
     previewListUrl,
@@ -821,6 +841,12 @@ export function AnalyticsPage() {
           : CHART_COLORS[index % CHART_COLORS.length],
     }))
   }, [previewGatewaySummary])
+  const previewIngestionPending =
+    ruleEvaluateHits > 0 &&
+    !previewTrace.error &&
+    !previewList.error &&
+    previewRows.length === 0 &&
+    previewListRows.length === 0
 
   useEffect(() => {
     if (!previewListTotalResults && previewListPage !== 1) {
@@ -1538,6 +1564,11 @@ export function AnalyticsPage() {
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
+                ) : previewIngestionPending ? (
+                  <PendingState
+                    title="Processing recent rule previews"
+                    body="Rule evaluate calls have landed, but the preview sample has not been materialized yet. This panel is auto-refreshing and will fill in once analytics catches up."
+                  />
                 ) : (
                   <EmptyState
                     title="No connector selections yet"
@@ -1632,6 +1663,11 @@ export function AnalyticsPage() {
                       ))}
                     </div>
                   </div>
+                ) : previewIngestionPending ? (
+                  <PendingState
+                    title="Building preview connector mix"
+                    body="Recent rule-preview activity is still being folded into the fetched sample. This card will update automatically once the preview rows appear."
+                  />
                 ) : (
                   <EmptyState
                     title="No preview connector mix yet"
@@ -1739,6 +1775,11 @@ export function AnalyticsPage() {
                       </div>
                     ) : null}
                   </div>
+                ) : previewIngestionPending ? (
+                  <PendingState
+                    title="Waiting for preview rows"
+                    body="Recent /routing/evaluate calls were recorded, but the detailed rule-preview rows are still being flushed. This list is polling every few seconds."
+                  />
                 ) : (
                   <EmptyState
                     title="No rule-based activity yet"
@@ -1779,6 +1820,11 @@ export function AnalyticsPage() {
                         </div>
                       ))}
                     </div>
+                  ) : previewIngestionPending ? (
+                    <PendingState
+                      title="Waiting for gateway activity"
+                      body="The preview sample is still being assembled from recent rule-evaluate calls. Gateway activity will appear here automatically once the rows are available."
+                    />
                   ) : (
                     <EmptyState
                       title="No gateway activity yet"
@@ -1806,6 +1852,11 @@ export function AnalyticsPage() {
                         </Badge>
                       ))}
                     </div>
+                  ) : previewIngestionPending ? (
+                    <PendingState
+                      title="Waiting for preview outcomes"
+                      body="Recent preview traffic is still being ingested. Outcome summaries will appear here automatically once the preview rows land."
+                    />
                   ) : (
                     <EmptyState
                       title="No preview outcomes yet"

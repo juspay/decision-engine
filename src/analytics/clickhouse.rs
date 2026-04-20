@@ -81,7 +81,7 @@ struct ClickHouseApiEventRow {
 #[derive(Debug, Clone, Deserialize, Row)]
 struct RouteHitRow {
     route: Option<String>,
-    count: i64,
+    count: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Row)]
@@ -113,34 +113,34 @@ struct ErrorSummaryRow {
     route: String,
     error_code: String,
     error_message: String,
-    count: i64,
+    count: u64,
     last_seen_ms: i64,
 }
 
 #[derive(Debug, Clone, Deserialize, Row)]
 struct RuleHitRow {
     rule_name: String,
-    count: i64,
+    count: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Row)]
 struct DecisionPointRow {
     bucket_ms: i64,
     routing_approach: String,
-    count: i64,
+    count: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Row)]
 struct GatewaySharePointRow {
     bucket_ms: i64,
     gateway: String,
-    count: i64,
+    count: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Row)]
 struct CountTileRow {
-    total: i64,
-    failures: i64,
+    total: u64,
+    failures: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Row)]
@@ -474,7 +474,7 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
         .map(|row| AnalyticsDecisionPoint {
             bucket_ms: row.bucket_ms,
             routing_approach: row.routing_approach,
-            count: row.count,
+            count: row.count as i64,
         })
         .collect();
 
@@ -490,7 +490,7 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
         .into_iter()
         .map(|row| AnalyticsRuleHit {
             rule_name: row.rule_name,
-            count: row.count,
+            count: row.count as i64,
         })
         .collect::<Vec<_>>();
 
@@ -546,7 +546,7 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
         .map(|row| AnalyticsGatewaySharePoint {
             bucket_ms: row.bucket_ms,
             gateway: row.gateway,
-            count: row.count,
+            count: row.count as i64,
         })
         .collect();
 
@@ -735,11 +735,11 @@ impl ClickHouseAnalyticsStore {
                 ifNull(payment_method_type, '') AS payment_method_type, \
                 ifNull(payment_method, '') AS payment_method, \
                 ifNull(gateway, '') AS gateway, \
-                argMax(score_value, created_at_ms) AS score_value, \
-                argMax(sigma_factor, created_at_ms) AS sigma_factor, \
-                argMax(average_latency, created_at_ms) AS average_latency, \
-                argMax(tp99_latency, created_at_ms) AS tp99_latency, \
-                argMax(transaction_count, created_at_ms) AS transaction_count, \
+                ifNull(argMax(score_value, created_at_ms), 0.0) AS score_value, \
+                ifNull(argMax(sigma_factor, created_at_ms), 0.0) AS sigma_factor, \
+                ifNull(argMax(average_latency, created_at_ms), 0.0) AS average_latency, \
+                ifNull(argMax(tp99_latency, created_at_ms), 0.0) AS tp99_latency, \
+                ifNull(argMax(transaction_count, created_at_ms), 0) AS transaction_count, \
                 max(created_at_ms) AS last_updated_ms \
              FROM {DOMAIN_TABLE} \
              WHERE tenant_id = '{tenant_id}' \
@@ -788,7 +788,7 @@ impl ClickHouseAnalyticsStore {
                 ifNull(payment_method_type, '') AS payment_method_type, \
                 ifNull(payment_method, '') AS payment_method, \
                 ifNull(gateway, '') AS gateway, \
-                avg(score_value) AS score_value \
+                avg(ifNull(score_value, 0.0)) AS score_value \
              FROM {DOMAIN_TABLE} \
              WHERE tenant_id = '{tenant_id}' \
                AND created_at_ms >= {start_ms} AND created_at_ms <= {end_ms} \
@@ -846,14 +846,14 @@ impl ClickHouseAnalyticsStore {
             .fetch_all::<ErrorSummaryRow>()
             .await
             .map_err(|_| self.store_error())?
-            .into_iter()
-            .map(|row| AnalyticsErrorSummary {
-                route: row.route,
-                error_code: row.error_code,
-                error_message: row.error_message,
-                count: row.count,
-                last_seen_ms: row.last_seen_ms,
-            })
+        .into_iter()
+        .map(|row| AnalyticsErrorSummary {
+            route: row.route,
+            error_code: row.error_code,
+            error_message: row.error_message,
+            count: row.count as i64,
+            last_seen_ms: row.last_seen_ms,
+        })
             .collect::<Vec<_>>()
             .pipe(Ok)
     }
@@ -883,11 +883,11 @@ impl ClickHouseAnalyticsStore {
             .fetch_all::<RuleHitRow>()
             .await
             .map_err(|_| self.store_error())?
-            .into_iter()
-            .map(|row| AnalyticsRuleHit {
-                rule_name: row.rule_name,
-                count: row.count,
-            })
+        .into_iter()
+        .map(|row| AnalyticsRuleHit {
+            rule_name: row.rule_name,
+            count: row.count as i64,
+        })
             .collect::<Vec<_>>()
             .pipe(Ok)
     }
@@ -985,7 +985,7 @@ impl ClickHouseAnalyticsStore {
                 arrayFilter(x -> x != '', groupUniqArray(ifNull(route, ''))) AS routes \
              FROM ( \
                 SELECT \
-                    if(payment_id != '' AND payment_id IS NOT NULL, payment_id, request_id) AS lookup_key, \
+                    ifNull(if(payment_id != '' AND payment_id IS NOT NULL, payment_id, request_id), '') AS lookup_key, \
                     payment_id, request_id, merchant_id, created_at_ms, status, gateway, event_stage, route \
                 FROM {DOMAIN_TABLE} {audit_where} \
              ) \
@@ -1078,10 +1078,10 @@ impl ClickHouseAnalyticsStore {
 
 #[derive(Debug, Clone, Deserialize, Row)]
 struct OverviewCountRow {
-    total: i64,
-    score_count: i64,
-    rule_hit_count: i64,
-    error_count: i64,
+    total: u64,
+    score_count: u64,
+    rule_hit_count: u64,
+    error_count: u64,
 }
 
 impl From<DomainAnalyticsEvent> for ClickHouseDomainEventRow {
@@ -1291,7 +1291,7 @@ fn payment_audit_where_clause(tenant_id: &str, query: &PaymentAuditQuery, previe
 fn map_route_hits(rows: Vec<RouteHitRow>) -> Vec<AnalyticsRouteHit> {
     let mut counts = std::collections::HashMap::new();
     for row in rows {
-        counts.insert(row.route.unwrap_or_else(|| "unknown".to_string()), row.count);
+        counts.insert(row.route.unwrap_or_else(|| "unknown".to_string()), row.count as i64);
     }
     [
         ("decide_gateway", "/decide_gateway"),
