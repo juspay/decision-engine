@@ -14,34 +14,34 @@ docker-it-run:
 	docker run --platform=linux/amd64 -v `pwd`/config/docker-configuration.toml:/local/config/development.toml -it $(TAG) /bin/bash
 
 init-mysql-ghcr:
-	DECISION_ENGINE_TAG=$(DECISION_ENGINE_TAG) GROOVY_RUNNER_TAG=$(GROOVY_RUNNER_TAG) docker compose --profile mysql-ghcr up -d
+	DECISION_ENGINE_TAG=$(DECISION_ENGINE_TAG) GROOVY_RUNNER_TAG=$(GROOVY_RUNNER_TAG) docker compose --profile mysql-ghcr --profile analytics-clickhouse up -d
 
 init-pg-ghcr:
-	DECISION_ENGINE_TAG=$(DECISION_ENGINE_TAG) GROOVY_RUNNER_TAG=$(GROOVY_RUNNER_TAG) docker compose --profile postgres-ghcr up -d
+	DECISION_ENGINE_TAG=$(DECISION_ENGINE_TAG) GROOVY_RUNNER_TAG=$(GROOVY_RUNNER_TAG) docker compose --profile postgres-ghcr --profile analytics-clickhouse up -d
 
 init-mysql-local:
-	docker compose --profile mysql-local up -d --build
+	docker compose --profile mysql-local --profile analytics-clickhouse up -d --build
 
 init-pg-local:
-	docker compose --profile postgres-local up -d --build
+	docker compose --profile postgres-local --profile analytics-clickhouse up -d --build
 
 run-mysql-ghcr:
-	DECISION_ENGINE_TAG=$(DECISION_ENGINE_TAG) GROOVY_RUNNER_TAG=$(GROOVY_RUNNER_TAG) docker compose --profile mysql-ghcr up -d open-router-mysql-ghcr
+	DECISION_ENGINE_TAG=$(DECISION_ENGINE_TAG) GROOVY_RUNNER_TAG=$(GROOVY_RUNNER_TAG) docker compose --profile mysql-ghcr --profile analytics-clickhouse up -d open-router-mysql-ghcr
 
 run-pg-ghcr:
-	DECISION_ENGINE_TAG=$(DECISION_ENGINE_TAG) GROOVY_RUNNER_TAG=$(GROOVY_RUNNER_TAG) docker compose --profile postgres-ghcr up -d open-router-pg-ghcr
+	DECISION_ENGINE_TAG=$(DECISION_ENGINE_TAG) GROOVY_RUNNER_TAG=$(GROOVY_RUNNER_TAG) docker compose --profile postgres-ghcr --profile analytics-clickhouse up -d open-router-pg-ghcr
 
 run-mysql-local:
-	docker compose --profile mysql-local up -d --build open-router-mysql-local
+	docker compose --profile mysql-local --profile analytics-clickhouse up -d --build open-router-mysql-local
 
 run-pg-local:
-	docker compose --profile postgres-local up -d --build open-router-pg-local
+	docker compose --profile postgres-local --profile analytics-clickhouse up -d --build open-router-pg-local
 
 init-pg-monitor:
-	DECISION_ENGINE_TAG=$(DECISION_ENGINE_TAG) GROOVY_RUNNER_TAG=$(GROOVY_RUNNER_TAG) docker compose --profile postgres-ghcr --profile monitoring up -d
+	DECISION_ENGINE_TAG=$(DECISION_ENGINE_TAG) GROOVY_RUNNER_TAG=$(GROOVY_RUNNER_TAG) docker compose --profile postgres-ghcr --profile analytics-clickhouse --profile monitoring up -d
 
 init-local-pg-monitor:
-	docker compose --profile postgres-local --profile monitoring up -d --build
+	docker compose --profile postgres-local --profile analytics-clickhouse --profile monitoring up -d --build
 
 update-config:
 	docker compose --profile mysql-ghcr run --rm routing-config

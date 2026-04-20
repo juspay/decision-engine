@@ -606,7 +606,9 @@ pub async fn run_decider_flow(
                         decider_flow.writer.gwDeciderApproach.clone(),
                     );
                     if let Some(rule_name) = updatedPriorityLogicOutput.priority_logic_tag.clone() {
+                        let tenant_id = get_tenant_app_state().await.config.tenant_id.clone();
                         crate::analytics::record_rule_hit_event(
+                            tenant_id,
                             Some(crate::types::merchant::id::merchant_id_to_text(
                                 deciderParams.dpMerchantAccount.merchantId.clone(),
                             )),

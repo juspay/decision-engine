@@ -43,6 +43,11 @@ pub async fn update_score(
     let headers = req.headers().clone();
     // let req_headers = serde_json::to_string(&headers).unwrap_or("{}".to_string());
     let original_url = req.uri().to_string();
+    let x_tenant_id = headers
+        .get("x-tenant-id")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("public")
+        .to_string();
     let x_request_id = headers
         .get("x-request-id")
         .and_then(|v| v.to_str().ok())
@@ -86,12 +91,13 @@ pub async fn update_score(
             let cpu_time = cpu_start.elapsed().as_millis() as u64;
 
             crate::analytics::record_error_event(
+                x_tenant_id.clone(),
                 "update_score",
                 None,
                 None,
                 None,
                 None,
-                Some(x_request_id.to_string()),
+                None,
                 error_response.error_code.clone(),
                 error_response.error_message.clone(),
                 serde_json::to_string(&serde_json::json!({
@@ -160,12 +166,13 @@ pub async fn update_score(
                 let cpu_time = cpu_start.elapsed().as_millis() as u64;
 
                 crate::analytics::record_error_event(
+                    x_tenant_id.clone(),
                     "update_score",
                     Some(merchant_id_txt.clone()),
                     None,
                     None,
                     None,
-                    Some(x_request_id.to_string()),
+                    None,
                     error_response.error_code.clone(),
                     error_response.error_message.clone(),
                     serde_json::to_string(&serde_json::json!({

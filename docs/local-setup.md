@@ -35,10 +35,10 @@ You must pass at least one profile.
 
 | Profile | DB | Includes |
 |---|---|---|
-| `postgres-ghcr` | PostgreSQL | API + PostgreSQL + Redis + PG migrations |
-| `postgres-local` | PostgreSQL | API + PostgreSQL + Redis + PG migrations |
-| `mysql-ghcr` | MySQL | API + MySQL + Redis + MySQL migrations + routing-config |
-| `mysql-local` | MySQL | API + MySQL + Redis + MySQL migrations + routing-config |
+| `postgres-ghcr` | PostgreSQL | API + PostgreSQL + Redis + ClickHouse + PG migrations |
+| `postgres-local` | PostgreSQL | API + PostgreSQL + Redis + ClickHouse + PG migrations |
+| `mysql-ghcr` | MySQL | API + MySQL + Redis + ClickHouse + MySQL migrations + routing-config |
+| `mysql-local` | MySQL | API + MySQL + Redis + ClickHouse + MySQL migrations + routing-config |
 
 ### Dashboard profiles
 
@@ -56,25 +56,32 @@ You must pass at least one profile.
 | `monitoring` | Prometheus + Grafana |
 | `groovy-ghcr` | Groovy runner image |
 | `groovy-local` | Groovy runner built from local source |
+| `analytics-clickhouse` | Standalone ClickHouse + schema init when you want only the analytics stack |
 
 ## Fastest Bring-Up
 
 ### API Only
 
 ```bash
-docker compose --profile postgres-ghcr up -d
+docker compose --profile postgres-ghcr --profile analytics-clickhouse up -d
 ```
 
 ### API + Dashboard + Docs
 
 ```bash
-docker compose --profile dashboard-postgres-ghcr up -d
+docker compose --profile dashboard-postgres-ghcr --profile analytics-clickhouse up -d
 ```
 
 ### With Monitoring
 
 ```bash
-docker compose --profile postgres-ghcr --profile monitoring up -d
+docker compose --profile postgres-ghcr --profile analytics-clickhouse --profile monitoring up -d
+```
+
+### With ClickHouse Analytics
+
+```bash
+docker compose --profile analytics-clickhouse up -d
 ```
 
 ## Make Targets
@@ -96,6 +103,7 @@ make stop
 ### PostgreSQL
 
 ```bash
+docker compose --profile analytics-clickhouse up -d
 cargo build --release --no-default-features --features middleware,kms-aws,postgres
 just migrate-pg
 RUSTFLAGS="-Awarnings" cargo run --no-default-features --features postgres
@@ -104,9 +112,26 @@ RUSTFLAGS="-Awarnings" cargo run --no-default-features --features postgres
 ### MySQL
 
 ```bash
+docker compose --profile analytics-clickhouse up -d
 cargo build --release --features release
 RUSTFLAGS="-Awarnings" cargo run --features release
 ```
+
+### `oneclick.sh`
+
+For the local source-run dashboard flow:
+
+```bash
+./oneclick.sh
+```
+
+The script now performs an infrastructure checklist first:
+
+- reports whether Postgres is reachable on `localhost:5432`
+- reports whether Redis is reachable on `localhost:6379`
+- reports whether ClickHouse is reachable on `http://localhost:8123/ping`
+- starts any missing Postgres, Redis, or ClickHouse Docker services
+- waits for those services to become healthy before running migrations and starting the app
 
 ## Docker Builds Without Compose
 
@@ -178,5 +203,6 @@ docker compose logs db-migrator
 
 - `docker-compose.yaml`
 - `config/docker-configuration.toml`
+- `clickhouse/migrations/`
 - `src/config.rs`
 - `src/app.rs`

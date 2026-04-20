@@ -719,10 +719,12 @@ pub async fn update_gateway_score(
         && should_isolate_srv3_producer
         && should_update_explore_txn
         && is_update_within_window;
+    let tenant_id = get_tenant_app_state().await.config.tenant_id.clone();
 
     if !should_record_srv3_post_update {
         if let Some(metric_entry) = m_metric_entry.clone() {
             crate::analytics::record_score_snapshot_event(
+                tenant_id.clone(),
                 Some(MID::merchant_id_to_text(txn_detail.clone().merchantId)),
                 Some(txn_card_info.paymentMethodType.to_string()),
                 Some(m_source_object.clone().unwrap_or_default()),
@@ -839,6 +841,7 @@ pub async fn update_gateway_score(
                         )
                         .await;
                     crate::analytics::record_score_snapshot_event(
+                        tenant_id.clone(),
                         Some(merchant_id),
                         Some(pmt_str),
                         Some(pm_str),

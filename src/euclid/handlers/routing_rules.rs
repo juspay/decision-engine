@@ -269,6 +269,7 @@ pub async fn routing_evaluate(
         "Received routing evaluation request"
     );
     crate::analytics::record_request_hit_event(
+        state.config.tenant_id.clone(),
         "routing_evaluate",
         Some(payload.created_by.clone()),
         payload.payment_id.clone(),
@@ -491,6 +492,7 @@ pub async fn routing_evaluate(
 
     logger::debug!("Response: {response:?}");
     crate::analytics::record_rule_evaluation_preview_event(
+        state.config.tenant_id.clone(),
         Some(payload.created_by.clone()),
         payload.payment_id.clone(),
         preview_gateway(&response),
@@ -543,6 +545,7 @@ fn record_routing_evaluate_preview_error(
         .unwrap_or_else(|| error.get_inner().to_string());
 
     crate::analytics::record_error_event(
+        "public".to_string(),
         "routing_evaluate",
         Some(payload.created_by.clone()),
         payload.payment_id.clone(),

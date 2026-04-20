@@ -1,0 +1,48 @@
+---
+title: "ClickHouse Analytics"
+description: "ClickHouse setup notes for analytics"
+---
+
+## Overview
+
+Decision Engine uses ClickHouse as the analytics store for:
+
+- business-domain analytics events
+- raw API request and response events
+
+## Local Bring-Up
+
+Start ClickHouse and initialize the schema:
+
+```bash
+docker compose --profile analytics-clickhouse up -d
+```
+
+The standard Docker runtime profiles also bring ClickHouse up automatically.
+
+The schema DDL lives in:
+
+- `clickhouse/migrations/`
+
+## Config
+
+Relevant config lives under:
+
+```toml
+[analytics]
+enabled = true
+
+[analytics.clickhouse]
+enabled = true
+url = "http://clickhouse:8123"
+database = "decision_engine_analytics"
+user = "decision_engine"
+password = "decision_engine"
+secure = false
+batch_size = 500
+flush_interval_ms = 250
+queue_capacity = 50000
+body_max_bytes = 65536
+```
+
+The schema is append-only for fresh analytics data; there is no SQL backfill path.

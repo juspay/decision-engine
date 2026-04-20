@@ -1,8 +1,8 @@
 use error_stack::ResultExt;
 use lazy_static::lazy_static;
 use prometheus::{
-    self, exponential_buckets, register_histogram_vec, register_int_counter_vec, Encoder,
-    HistogramVec, IntCounterVec, TextEncoder,
+    self, exponential_buckets, register_histogram_vec, register_int_counter_vec,
+    register_int_gauge_vec, Encoder, HistogramVec, IntCounterVec, IntGaugeVec, TextEncoder,
 };
 use tokio::signal::unix::{signal, SignalKind};
 lazy_static! {
@@ -49,6 +49,32 @@ lazy_static! {
         "Count of analytics events captured by type",
         &["event_type"]
     ).unwrap();
+
+    pub static ref ANALYTICS_SINK_WRITES_TOTAL: IntCounterVec = register_int_counter_vec!(
+        "analytics_sink_writes_total",
+        "Count of analytics sink write attempts grouped by sink, stream and result",
+        &["sink", "stream", "result"]
+    ).unwrap();
+
+    pub static ref ANALYTICS_SINK_WRITE_LATENCY_HISTOGRAM: HistogramVec = register_histogram_vec!(
+        "analytics_sink_write_latency_seconds",
+        "Latency of analytics sink writes",
+        &["sink", "stream"],
+        exponential_buckets(0.001, 2.0, 12).unwrap()
+    ).unwrap();
+
+    pub static ref ANALYTICS_EVENTS_DROPPED_TOTAL: IntCounterVec = register_int_counter_vec!(
+        "analytics_events_dropped_total",
+        "Count of dropped analytics events",
+        &["stream", "reason"]
+    ).unwrap();
+
+    pub static ref ANALYTICS_SINK_QUEUE_DEPTH: IntGaugeVec = register_int_gauge_vec!(
+        "analytics_sink_queue_depth",
+        "Current analytics queue depth by stream",
+        &["stream"]
+    ).unwrap();
+
 }
 
 pub async fn metrics_handler() -> error_stack::Result<String, MetricsError> {

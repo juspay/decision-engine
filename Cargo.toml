@@ -75,6 +75,7 @@ hex = "0.4.3"
 time = { version = "0.3.36", features = ["serde"] }
 uuid = { version = "1.10.0", features = ["v4", "v7", "fast-rng"] }
 reqwest = { version = "0.12.7", features = ["json", "__rustls"] }
+clickhouse = { version = "0.13.3", features = ["time"] }
 
 nanoid = "0.4.0"
 mysqlclient-sys = { version = "0.4.2", features = ["buildtime_bindgen"] }

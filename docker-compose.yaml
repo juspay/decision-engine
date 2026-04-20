@@ -20,6 +20,10 @@ services:
         condition: service_healthy
       db-migrator-postgres:
         condition: service_completed_successfully
+      clickhouse:
+        condition: service_healthy
+      clickhouse-init:
+        condition: service_completed_successfully
     volumes:
       - ./config/docker-configuration.toml:/local/config/development.toml
     networks:
@@ -47,6 +51,10 @@ services:
       routing-config:
         condition: service_completed_successfully
       db-migrator:
+        condition: service_completed_successfully
+      clickhouse:
+        condition: service_healthy
+      clickhouse-init:
         condition: service_completed_successfully
     volumes:
       - ./config/docker-configuration.toml:/local/config/development.toml
@@ -82,6 +90,10 @@ services:
         condition: service_healthy
       db-migrator-postgres:
         condition: service_completed_successfully
+      clickhouse:
+        condition: service_healthy
+      clickhouse-init:
+        condition: service_completed_successfully
     volumes:
       - ./config/docker-configuration.toml:/local/config/development.toml
     networks:
@@ -113,6 +125,10 @@ services:
       routing-config:
         condition: service_completed_successfully
       db-migrator:
+        condition: service_completed_successfully
+      clickhouse:
+        condition: service_healthy
+      clickhouse-init:
         condition: service_completed_successfully
     volumes:
       - ./config/docker-configuration.toml:/local/config/development.toml
@@ -241,6 +257,60 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3
+    profiles:
+      - postgres-ghcr
+      - dashboard-postgres-ghcr
+      - postgres-local
+      - dashboard-postgres-local
+      - mysql-ghcr
+      - dashboard-mysql-ghcr
+      - mysql-local
+      - dashboard-mysql-local
+      - analytics-clickhouse
+    restart: unless-stopped
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    environment:
+      CLICKHOUSE_DB: decision_engine_analytics
+      CLICKHOUSE_USER: decision_engine
+      CLICKHOUSE_PASSWORD: decision_engine
+    networks:
+      - open-router-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping | grep -q Ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  clickhouse-init:
+    image: clickhouse/clickhouse-server:24.3
+    profiles:
+      - postgres-ghcr
+      - dashboard-postgres-ghcr
+      - postgres-local
+      - dashboard-postgres-local
+      - mysql-ghcr
+      - dashboard-mysql-ghcr
+      - mysql-local
+      - dashboard-mysql-local
+      - analytics-clickhouse
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    networks:
+      - open-router-network
+    volumes:
+      - ./clickhouse/migrations:/migrations:ro
+    entrypoint:
+      - /bin/bash
+      - -lc
+      - |
+        find /migrations -name '*.sql' -print0 | xargs -0 -I{} clickhouse-client --host clickhouse --user decision_engine --password decision_engine --multiquery --queries-file {}
 
   # ==========================================
   # Core Infrastructure

@@ -68,6 +68,24 @@ client_idle_timeout = 90
 pool_max_idle_per_host = 10
 identity = ""
 
+[analytics]
+enabled = true
+
+[analytics.clickhouse]
+enabled = true
+url = "http://clickhouse:8123"
+database = "decision_engine_analytics"
+user = "decision_engine"
+password = "decision_engine"
+secure = false
+connect_timeout_ms = 3000
+query_timeout_ms = 10000
+insert_timeout_ms = 5000
+batch_size = 500
+flush_interval_ms = 250
+queue_capacity = 50000
+body_max_bytes = 65536
+
 [routing_config.keys]
 amount = { type = "integer", min = 0 }
 authentication_type = { type = "enum", values = "three_ds, no_three_ds" }

@@ -46,6 +46,11 @@ pub async fn decide_gateway(
         .inc();
 
     let headers = req.headers().clone();
+    let x_tenant_id = headers
+        .get("x-tenant-id")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("public")
+        .to_string();
     let x_request_id = headers
         .get("x-request-id")
         .and_then(|value| value.to_str().ok())
@@ -62,6 +67,7 @@ pub async fn decide_gateway(
         Err(e) => {
             logger::debug!(tag = "DecideGateway", "Error: {:?}", e);
             crate::analytics::record_error_event(
+                x_tenant_id.clone(),
                 "decide_gateway",
                 None,
                 None,
@@ -112,6 +118,7 @@ pub async fn decide_gateway(
     let result = match api_decider_request {
         Ok(payload) => {
             crate::analytics::record_request_hit_event(
+                x_tenant_id.clone(),
                 "decide_gateway",
                 Some(payload.merchant_id.clone()),
                 Some(payload.payment_id().to_string()),
@@ -125,6 +132,7 @@ pub async fn decide_gateway(
                         .to_string();
 
                     crate::analytics::record_decision_event(
+                    x_tenant_id.clone(),
                     Some(payload.merchant_id.clone()),
                     Some(routing_approach),
                     Some(decided_gateway.decided_gateway.clone()),
@@ -158,6 +166,7 @@ pub async fn decide_gateway(
                 Err(e) => {
                     logger::debug!(tag = "DecideGateway", "Error: {:?}", e);
                     crate::analytics::record_error_event(
+                        x_tenant_id.clone(),
                         "decide_gateway",
                         Some(payload.merchant_id.clone()),
                         Some(payload.payment_id().to_string()),
@@ -204,6 +213,7 @@ pub async fn decide_gateway(
         Err(e) => {
             logger::debug!(tag = "DecideGateway", "Error: {:?}", e);
             crate::analytics::record_error_event(
+                x_tenant_id.clone(),
                 "decide_gateway",
                 None,
                 None,

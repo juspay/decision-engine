@@ -4,6 +4,7 @@ use std::{collections::HashSet, sync::Arc};
 use rustc_hash::FxHashMap;
 use tokio::sync::RwLock;
 
+use crate::analytics::AnalyticsRuntime;
 use crate::config::TenantConfig;
 use crate::{api_client::ApiClient, app::TenantAppState, config::GlobalConfig, error::ApiError};
 
@@ -13,6 +14,7 @@ pub struct GlobalAppState {
     pub known_tenants: HashSet<String>,
     pub global_config: GlobalConfig,
     pub readiness_flag: Arc<AtomicBool>,
+    pub analytics_runtime: Arc<AnalyticsRuntime>,
 }
 
 impl GlobalAppState {
@@ -48,12 +50,16 @@ impl GlobalAppState {
             }
         };
 
+        let analytics_runtime =
+            crate::analytics::AnalyticsRuntime::new(global_config.analytics.clone()).await;
+
         Arc::new(Self {
             tenants_app_state: RwLock::new(tenants_app_state),
             api_client: api_client.clone(),
             known_tenants: HashSet::<String>::from_iter(known_tenants),
             global_config,
             readiness_flag: Arc::new(AtomicBool::new(true)),
+            analytics_runtime,
         })
     }
 

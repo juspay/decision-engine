@@ -1,8 +1,9 @@
 use crate::redis::commands::RedisConnectionWrapper;
 use axum::http::HeaderValue;
 use axum::{
+    body::to_bytes,
     body::Body,
-    extract::Request,
+    extract::{Request, State},
     middleware::{self, Next},
     response::Response,
     routing::{delete, get, post},
@@ -10,6 +11,7 @@ use axum::{
 use axum_server::{tls_rustls::RustlsConfig, Handle};
 use error_stack::ResultExt;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::OnceCell as TokioOnceCell;
 use tower::ServiceBuilder;
@@ -64,6 +66,131 @@ fn generate_request_id_header_value() -> HeaderValue {
             return value;
         }
     }
+}
+
+fn api_capture_flow(path: &str) -> Option<&'static str> {
+    match path {
+        "/decide-gateway" => Some("decide_gateway"),
+        "/update-gateway-score" => Some("update_gateway_score"),
+        "/routing/evaluate" => Some("routing_evaluate"),
+        "/routing/hybrid" => Some("routing_hybrid"),
+        "/routing/create" => Some("routing_create"),
+        "/routing/activate" => Some("routing_activate"),
+        _ => None,
+    }
+}
+
+fn truncated_body(body: &[u8], max_bytes: usize) -> (String, bool) {
+    let truncated = body.len() > max_bytes;
+    let body_slice = if truncated { &body[..max_bytes] } else { body };
+    (String::from_utf8_lossy(body_slice).to_string(), truncated)
+}
+
+fn extract_json_field(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| value.get(*key))
+        .and_then(|value| value.as_str().map(str::to_string))
+}
+
+async fn capture_api_event(
+    State(global_state): State<Arc<GlobalAppState>>,
+    request: Request<Body>,
+    next: Next,
+) -> Response {
+    let path = request.uri().path().to_string();
+    let Some(api_flow) = api_capture_flow(&path) else {
+        return next.run(request).await;
+    };
+
+    let started_at = Instant::now();
+    let max_bytes = global_state.analytics_runtime.body_max_bytes();
+    let (parts, body) = request.into_parts();
+    let request_bytes = to_bytes(body, usize::MAX).await.unwrap_or_default();
+    let request_json = serde_json::from_slice::<serde_json::Value>(&request_bytes).ok();
+    let (request_payload, request_truncated) = truncated_body(&request_bytes, max_bytes);
+    let merchant_id = request_json
+        .as_ref()
+        .and_then(|value| extract_json_field(value, &["merchant_id", "created_by"]));
+    let payment_id = request_json
+        .as_ref()
+        .and_then(|value| extract_json_field(value, &["payment_id"]));
+    let auth_type = request_json
+        .as_ref()
+        .and_then(|value| extract_json_field(value, &["authentication_type", "auth_type"]));
+
+    let tenant_id = parts
+        .headers
+        .get(crate::storage::consts::X_TENANT_ID)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("public")
+        .to_string();
+    let request_id = parts
+        .headers
+        .get(crate::storage::consts::X_REQUEST_ID)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
+    let user_agent = parts
+        .headers
+        .get(axum::http::header::USER_AGENT)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let ip_addr = parts
+        .headers
+        .get("x-forwarded-for")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.split(',').next().unwrap_or(value).trim().to_string())
+        .or_else(|| {
+            parts
+                .headers
+                .get("x-real-ip")
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_string)
+        });
+    let method = parts.method.to_string();
+
+    let response = next
+        .run(Request::from_parts(parts, Body::from(request_bytes.clone())))
+        .await;
+    let status_code = i64::from(response.status().as_u16());
+    let (response_parts, response_body) = response.into_parts();
+    let response_bytes = to_bytes(response_body, usize::MAX).await.unwrap_or_default();
+    let (response_payload, response_truncated) = truncated_body(&response_bytes, max_bytes);
+    let error = if status_code >= 400 {
+        serde_json::from_slice::<serde_json::Value>(&response_bytes).ok()
+    } else {
+        None
+    };
+
+    global_state.analytics_runtime.enqueue_api_event(crate::analytics::ApiEvent {
+        event_id: crate::analytics::next_event_id(crate::analytics::now_ms()),
+        tenant_id,
+        merchant_id,
+        payment_id,
+        api_flow: api_flow.to_string(),
+        created_at_timestamp: crate::analytics::now_ms(),
+        request_id,
+        latency: started_at.elapsed().as_millis() as u64,
+        status_code,
+        auth_type,
+        request: request_payload,
+        user_agent,
+        ip_addr,
+        url_path: path,
+        response: Some(response_payload),
+        error,
+        event_type: if status_code >= 400 {
+            "error".to_string()
+        } else {
+            "success".to_string()
+        },
+        http_method: method,
+        infra_components: None,
+        request_truncated,
+        response_truncated,
+    });
+
+    Response::from_parts(response_parts, Body::from(response_bytes))
 }
 
 ///
@@ -275,6 +402,10 @@ where
 
     let middleware = ServiceBuilder::new()
         .layer(middleware::from_fn(ensure_request_id))
+        .layer(middleware::from_fn_with_state(
+            global_app_state.clone(),
+            capture_api_event,
+        ))
         .layer(
             tower_trace::TraceLayer::new_for_http()
                 .make_span_with(|request: &Request<_>| utils::record_fields_from_header(request))

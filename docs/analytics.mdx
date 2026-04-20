@@ -19,13 +19,11 @@ For single-payment inspection, use the separate Payment Audit surface documented
 
 ## Data Sources
 
-The first release uses the sources already present in the repository:
+The current implementation uses these sources:
 
 - Redis for live SR and latency snapshots
 - Prometheus for live counters and error-rate tiles
-- Postgres for stored analytics events, snapshots, and summaries
-
-ClickHouse is intentionally not required for the first release. If the volume or retention profile grows beyond Postgres, it can be added later as a write sink.
+- ClickHouse as the analytics event store and analytics query backend
 
 ## Scope
 
@@ -48,13 +46,7 @@ In all-merchants mode, the chart intentionally stays connector-only so operators
 
 To populate Analytics and Decision Audit with real traffic, use the routing traffic generator.
 
-First apply the Postgres migration that creates `analytics_event`:
-
-```bash
-just migrate-pg
-```
-
-Then generate traffic for `merchant_space`:
+Generate traffic for `merchant_space`:
 
 ```bash
 bash scripts/generate-routing-traffic.sh
@@ -79,10 +71,19 @@ CONNECTORS_CSV=stripe,adyen,checkout,paypal bash scripts/generate-routing-traffi
 
 After the script finishes, open `/dashboard/analytics` or `/dashboard/audit` and select `merchant_space` in the merchant picker.
 
+## ClickHouse Setup
+
+ClickHouse is part of the standard local runtime stacks. To bring up only ClickHouse and its schema init job:
+
+```bash
+docker compose --profile analytics-clickhouse up -d
+```
+
 ## Related Files
 
 - `website/src/components/pages/AnalyticsPage.tsx`
 - `website/src/components/layout/Sidebar.tsx`
 - `src/routes/analytics.rs`
 - `src/analytics/`
+- `clickhouse/migrations/`
 - `src/metrics.rs`

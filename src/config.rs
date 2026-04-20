@@ -40,6 +40,8 @@ pub struct GlobalConfig {
     #[serde(default)]
     pub api_client: ApiClientConfig,
     #[serde(default)]
+    pub analytics: AnalyticsConfig,
+    #[serde(default)]
     pub routing_config: Option<TomlConfig>,
     #[serde(default)]
     pub pm_filters: ConnectorFilters,
@@ -56,6 +58,60 @@ pub struct TenantConfig {
     pub pm_filters: ConnectorFilters,
     pub debit_routing_config: network_decider::types::DebitRoutingConfig,
     pub cache_config: CacheConfig,
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(default)]
+pub struct AnalyticsConfig {
+    pub enabled: bool,
+    pub clickhouse: ClickHouseAnalyticsConfig,
+}
+
+impl Default for AnalyticsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            clickhouse: ClickHouseAnalyticsConfig::default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(default)]
+pub struct ClickHouseAnalyticsConfig {
+    pub enabled: bool,
+    pub url: String,
+    pub database: String,
+    pub user: String,
+    pub password: Option<masking::Secret<String>>,
+    pub secure: bool,
+    pub connect_timeout_ms: u64,
+    pub query_timeout_ms: u64,
+    pub insert_timeout_ms: u64,
+    pub batch_size: usize,
+    pub flush_interval_ms: u64,
+    pub queue_capacity: usize,
+    pub body_max_bytes: usize,
+}
+
+impl Default for ClickHouseAnalyticsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            url: "http://localhost:8123".to_string(),
+            database: "decision_engine_analytics".to_string(),
+            user: "default".to_string(),
+            password: None,
+            secure: false,
+            connect_timeout_ms: 3_000,
+            query_timeout_ms: 10_000,
+            insert_timeout_ms: 5_000,
+            batch_size: 500,
+            flush_interval_ms: 250,
+            queue_capacity: 50_000,
+            body_max_bytes: 65_536,
+        }
+    }
 }
 
 impl TenantConfig {
@@ -315,11 +371,36 @@ impl GlobalConfig {
                 ))?;
         }
 
+        if let Some(password) = self.analytics.clickhouse.password.clone() {
+            self.analytics.clickhouse.password = Some(
+                secret_management_client
+                    .get_secret(password)
+                    .await
+                    .change_context(error::ConfigurationError::KmsDecryptError(
+                        "analytics_clickhouse_password",
+                    ))?,
+            );
+        }
+
         Ok(())
     }
 
     pub fn validate(&self) -> error_stack::Result<(), error::ConfigurationError> {
         self.secrets_management.validate()?;
+        if self.analytics.clickhouse.batch_size == 0 {
+            return Err(error_stack::report!(
+                error::ConfigurationError::InvalidConfigurationValueError(
+                    "analytics.clickhouse.batch_size".to_string(),
+                )
+            ));
+        }
+        if self.analytics.clickhouse.queue_capacity == 0 {
+            return Err(error_stack::report!(
+                error::ConfigurationError::InvalidConfigurationValueError(
+                    "analytics.clickhouse.queue_capacity".to_string(),
+                )
+            ));
+        }
         Ok(())
     }
 }

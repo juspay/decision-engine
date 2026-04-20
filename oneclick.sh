@@ -13,6 +13,17 @@ API_REF_URL="${DOCS_URL}/api-reference"
 API_EXAMPLES_URL="${DOCS_URL}/api-reference1"
 DOCS_LOG_PATH="${SCRIPT_DIR}/.mintlify-dev.log"
 
+POSTGRES_HOST="${POSTGRES_HOST:-localhost}"
+POSTGRES_PORT="${POSTGRES_PORT:-5432}"
+POSTGRES_USER="${POSTGRES_USER:-db_user}"
+POSTGRES_DB="${POSTGRES_DB:-decision_engine_db}"
+REDIS_HOST="${REDIS_HOST:-localhost}"
+REDIS_PORT="${REDIS_PORT:-6379}"
+CLICKHOUSE_HTTP_URL="${CLICKHOUSE_HTTP_URL:-http://localhost:8123}"
+CLICKHOUSE_PING_URL="${CLICKHOUSE_PING_URL:-${CLICKHOUSE_HTTP_URL}/ping}"
+CLICKHOUSE_USER="${CLICKHOUSE_USER:-decision_engine}"
+CLICKHOUSE_PASSWORD="${CLICKHOUSE_PASSWORD:-decision_engine}"
+
 PORTS=(8080 5173 "$DOCS_PORT")
 
 check_and_kill_ports() {
@@ -92,6 +103,131 @@ cleanup() {
 
 trap cleanup SIGINT SIGTERM
 
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+check_docker_daemon() {
+    if ! command_exists docker; then
+        return 1
+    fi
+
+    docker info >/dev/null 2>&1
+}
+
+check_postgres() {
+    if command_exists pg_isready; then
+        pg_isready -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1
+    elif command_exists nc; then
+        nc -z "$POSTGRES_HOST" "$POSTGRES_PORT" >/dev/null 2>&1
+    else
+        lsof -t -iTCP:"$POSTGRES_PORT" -sTCP:LISTEN >/dev/null 2>&1
+    fi
+}
+
+check_redis() {
+    if command_exists redis-cli; then
+        [ "$(redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" ping 2>/dev/null)" = "PONG" ]
+    elif command_exists nc; then
+        nc -z "$REDIS_HOST" "$REDIS_PORT" >/dev/null 2>&1
+    else
+        lsof -t -iTCP:"$REDIS_PORT" -sTCP:LISTEN >/dev/null 2>&1
+    fi
+}
+
+check_clickhouse() {
+    curl -fsS \
+        --user "${CLICKHOUSE_USER}:${CLICKHOUSE_PASSWORD}" \
+        "${CLICKHOUSE_HTTP_URL}/?query=SELECT%201" >/dev/null 2>&1
+}
+
+print_service_status() {
+    local service_name="$1"
+    local status="$2"
+
+    if [ "$status" -eq 1 ]; then
+        echo "  [ok] $service_name"
+    else
+        echo "  [missing] $service_name"
+    fi
+}
+
+run_infra_checklist() {
+    echo "Running infrastructure checklist..."
+
+    if check_docker_daemon; then
+        DOCKER_READY=1
+    else
+        DOCKER_READY=0
+    fi
+
+    if check_postgres; then
+        POSTGRES_READY=1
+    else
+        POSTGRES_READY=0
+    fi
+
+    if check_redis; then
+        REDIS_READY=1
+    else
+        REDIS_READY=0
+    fi
+
+    if check_clickhouse; then
+        CLICKHOUSE_READY=1
+    else
+        CLICKHOUSE_READY=0
+    fi
+
+    print_service_status "Docker daemon" "$DOCKER_READY"
+    print_service_status "Postgres (${POSTGRES_HOST}:${POSTGRES_PORT})" "$POSTGRES_READY"
+    print_service_status "Redis (${REDIS_HOST}:${REDIS_PORT})" "$REDIS_READY"
+    print_service_status "ClickHouse (${CLICKHOUSE_HTTP_URL})" "$CLICKHOUSE_READY"
+    echo ""
+}
+
+wait_for_postgres() {
+    local attempts=0
+    local max_attempts=60
+
+    echo "Waiting for Postgres on ${POSTGRES_HOST}:${POSTGRES_PORT}..."
+
+    while [ $attempts -lt $max_attempts ]; do
+        if check_postgres; then
+            echo "Postgres is healthy."
+            echo ""
+            return 0
+        fi
+
+        attempts=$((attempts + 1))
+        sleep 1
+    done
+
+    echo "Postgres did not become healthy within ${max_attempts}s."
+    return 1
+}
+
+wait_for_redis() {
+    local attempts=0
+    local max_attempts=60
+
+    echo "Waiting for Redis on ${REDIS_HOST}:${REDIS_PORT}..."
+
+    while [ $attempts -lt $max_attempts ]; do
+        if check_redis; then
+            echo "Redis is healthy."
+            echo ""
+            return 0
+        fi
+
+        attempts=$((attempts + 1))
+        sleep 1
+    done
+
+    echo "Redis did not become healthy within ${max_attempts}s."
+    return 1
+}
+
 wait_for_backend() {
     local attempts=0
     local max_attempts=90
@@ -115,6 +251,27 @@ wait_for_backend() {
     done
 
     echo "Decision Engine API did not become healthy within ${max_attempts}s."
+    return 1
+}
+
+wait_for_clickhouse() {
+    local attempts=0
+    local max_attempts=60
+
+    echo "Waiting for ClickHouse on ${CLICKHOUSE_HTTP_URL}..."
+
+    while [ $attempts -lt $max_attempts ]; do
+        if check_clickhouse; then
+            echo "ClickHouse is healthy."
+            echo ""
+            return 0
+        fi
+
+        attempts=$((attempts + 1))
+        sleep 1
+    done
+
+    echo "ClickHouse did not become healthy within ${max_attempts}s."
     return 1
 }
 
@@ -147,6 +304,64 @@ wait_for_docs() {
 }
 
 check_and_kill_ports
+
+run_infra_checklist
+
+missing_services=()
+if [ "${POSTGRES_READY}" -eq 0 ]; then
+    missing_services+=("postgresql")
+fi
+
+if [ "${REDIS_READY}" -eq 0 ]; then
+    missing_services+=("redis")
+fi
+
+if [ "${#missing_services[@]}" -gt 0 ]; then
+    if [ "${DOCKER_READY}" -eq 0 ]; then
+        echo "Cannot start missing infrastructure services because Docker is not available."
+        echo "Missing services: ${missing_services[*]}"
+        echo "Start Docker/OrbStack first, then rerun ./oneclick.sh."
+        cleanup 1
+    fi
+    echo "Starting missing infrastructure services: ${missing_services[*]}"
+    docker compose --profile postgres-ghcr up -d "${missing_services[@]}"
+    echo ""
+fi
+
+if [ "${CLICKHOUSE_READY}" -eq 0 ]; then
+    if [ "${DOCKER_READY}" -eq 0 ]; then
+        echo "Cannot start missing infrastructure services because Docker is not available."
+        echo "Missing services: clickhouse"
+        echo "Start Docker/OrbStack first, then rerun ./oneclick.sh."
+        cleanup 1
+    fi
+    echo "Starting or refreshing ClickHouse service"
+    docker compose --profile analytics-clickhouse up -d --force-recreate clickhouse
+    echo ""
+fi
+
+if [ "${POSTGRES_READY}" -eq 0 ] && ! wait_for_postgres; then
+    cleanup 1
+fi
+
+if [ "${REDIS_READY}" -eq 0 ] && ! wait_for_redis; then
+    cleanup 1
+fi
+
+if [ "${CLICKHOUSE_READY}" -eq 0 ] && ! wait_for_clickhouse; then
+    cleanup 1
+fi
+
+echo "Infrastructure checklist after bring-up:"
+run_infra_checklist
+
+if [ "${POSTGRES_READY}" -eq 0 ] || [ "${REDIS_READY}" -eq 0 ] || [ "${CLICKHOUSE_READY}" -eq 0 ]; then
+    echo "Infrastructure checklist failed. Please resolve the missing services and rerun ./oneclick.sh."
+    cleanup 1
+fi
+
+echo "Initializing ClickHouse analytics schema..."
+docker compose --profile analytics-clickhouse run --rm clickhouse-init
 
 echo "Running Postgres migrations..."
 just migrate-pg
@@ -194,7 +409,7 @@ echo "  Decision Engine is starting up!"
 echo "=========================================="
 echo ""
 echo "  Server:      http://localhost:8080"
-echo "  Dashboard:   http://localhost:5173/dashboard/"
+echo "  Dashboard:   http://localhost:5173/"
 echo "  Docs:        $DOCS_HOME_URL"
 echo "  API Ref:     $API_REF_URL"
 echo "  API Examples:$API_EXAMPLES_URL"

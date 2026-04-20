@@ -31,6 +31,12 @@ use axum::extract::Json;
 pub async fn update_gateway_score(
     req: axum::http::Request<axum::body::Body>,
 ) -> Result<Json<UpdateScoreResponse>, ErrorResponse> {
+    let x_tenant_id = req
+        .headers()
+        .get("x-tenant-id")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("public")
+        .to_string();
     let x_request_id = req
         .headers()
         .get("x-request-id")
@@ -56,12 +62,13 @@ pub async fn update_gateway_score(
         Err(e) => {
             crate::logger::debug!(tag = "UpdateGatewayScore", "Error: {:?}", e);
             crate::analytics::record_error_event(
+                x_tenant_id.clone(),
                 "update_gateway_score",
                 None,
                 None,
                 None,
                 None,
-                x_request_id.clone(),
+                None,
                 "400".to_string(),
                 "Error parsing request".to_string(),
                 Some("request body parse failure".to_string()),
@@ -96,6 +103,7 @@ pub async fn update_gateway_score(
             let gateway = payload.gateway.clone();
             let payment_id = payload.payment_id.clone();
             crate::analytics::record_request_hit_event(
+                x_tenant_id.clone(),
                 "update_gateway_score",
                 Some(merchant_id.clone()),
                 Some(payment_id.clone()),
@@ -115,6 +123,7 @@ pub async fn update_gateway_score(
                         payment_id: payment_id.clone(),
                     };
                     crate::analytics::record_gateway_update_event(
+                        x_tenant_id.clone(),
                         Some(merchant_id.clone()),
                         Some(gateway.clone()),
                         Some(transaction_status.clone()),
@@ -151,6 +160,7 @@ pub async fn update_gateway_score(
                         .with_label_values(&["update_gateway_score", "failure"])
                         .inc();
                     crate::analytics::record_error_event(
+                        x_tenant_id.clone(),
                         "update_gateway_score",
                         Some(merchant_id.clone()),
                         Some(payment_id.clone()),
@@ -175,12 +185,13 @@ pub async fn update_gateway_score(
         Err(e) => {
             crate::logger::debug!(tag = "UpdateScoreRequest", "Error: {:?}", e);
             crate::analytics::record_error_event(
+                x_tenant_id.clone(),
                 "update_gateway_score",
                 None,
                 None,
                 None,
                 None,
-                x_request_id.clone(),
+                None,
                 "400".to_string(),
                 "Error parsing request".to_string(),
                 Some("request body parse failure".to_string()),
