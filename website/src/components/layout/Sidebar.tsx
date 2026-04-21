@@ -53,7 +53,6 @@ export function Sidebar() {
       {/* Nav */}
       <nav className="flex-1 space-y-1 overflow-y-auto px-4 py-8">
         <SideLink to="/" icon={LayoutDashboard} end selectedPath={selectedPath} onNavigate={setPendingPath}>Overview</SideLink>
-        <SideLink to="/decisions" icon={Search} selectedPath={selectedPath} onNavigate={setPendingPath}>Decision Explorer</SideLink>
         <SideLink to="/analytics" icon={BarChart3} selectedPath={selectedPath} onNavigate={setPendingPath}>Analytics</SideLink>
         <SideLink to="/audit" icon={Activity} selectedPath={selectedPath} onNavigate={setPendingPath}>Decision Audit</SideLink>
 
@@ -68,6 +67,14 @@ export function Sidebar() {
         <SideLink to="/routing/rules" icon={BookOpen} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Rule-Based</SideLink>
         <SideLink to="/routing/volume" icon={PieChart} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Volume Split</SideLink>
         <SideLink to="/routing/debit" icon={Network} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Debit Routing</SideLink>
+
+        <div className="flex items-center gap-2 px-3 pb-3 pt-8">
+          <span className="text-[11px] font-bold uppercase tracking-widest text-slate-400 dark:text-[#6d768a]">
+            Simulation
+          </span>
+        </div>
+
+        <SideLink to="/decisions" icon={Search} selectedPath={selectedPath} onNavigate={setPendingPath}>Decision Explorer</SideLink>
       </nav>
 
       {/* Footer */}

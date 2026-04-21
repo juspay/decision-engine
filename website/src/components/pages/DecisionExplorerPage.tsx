@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import useSWR from 'swr'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts'
 import { Button } from '../ui/Button'
@@ -145,7 +145,7 @@ function cloneConnectors(connectors: GatewayConnector[]) {
 
 function getDefaultExplorerState(): ExplorerPersistedState {
   return {
-    activeTab: 'single',
+    activeTab: 'batch',
     form: { ...DEFAULT_FORM },
     simulationConfig: { ...DEFAULT_SIMULATION_CONFIG },
     ruleParams: cloneRuleParams(DEFAULT_RULE_PARAMS),
@@ -175,6 +175,10 @@ function loadExplorerState(): ExplorerPersistedState {
     return {
       ...defaults,
       ...parsed,
+      activeTab:
+        parsed.activeTab && parsed.activeTab !== 'single'
+          ? parsed.activeTab
+          : defaults.activeTab,
       form: { ...defaults.form, ...(parsed.form || {}) },
       simulationConfig: { ...defaults.simulationConfig, ...(parsed.simulationConfig || {}) },
       ruleParams: parsed.ruleParams?.length ? cloneRuleParams(parsed.ruleParams) : defaults.ruleParams,
@@ -566,6 +570,7 @@ export function DecisionExplorerPage() {
   const [selectedPreviewEventId, setSelectedPreviewEventId] = useState<number | null>(null)
   const [previewInspectorTab, setPreviewInspectorTab] = useState<AuditInspectorTab>('summary')
   const [previewTraceLabel, setPreviewTraceLabel] = useState('Rule Evaluation Preview')
+  const deferredSimulationResults = useDeferredValue(simulationResults)
 
   const routingKeyNames = useMemo(
     () => Object.keys(routingKeysConfig).sort(),
@@ -623,13 +628,16 @@ export function DecisionExplorerPage() {
 
     setForm(prev => {
       const next = { ...prev }
+      let changed = false
 
       if (currencyOptions.length > 0 && !currencyOptions.includes(next.currency)) {
         next.currency = currencyOptions[0]
+        changed = true
       }
 
       if (paymentMethodTypeOptions.length > 0 && !paymentMethodTypeOptions.includes(next.payment_method_type)) {
         next.payment_method_type = paymentMethodTypeOptions[0]
+        changed = true
       }
 
       const methodsForType = toUpperOptions(
@@ -637,21 +645,25 @@ export function DecisionExplorerPage() {
       )
       if (methodsForType.length > 0 && !methodsForType.includes(next.payment_method)) {
         next.payment_method = methodsForType[0]
+        changed = true
       }
 
       if (authTypeOptions.length > 0 && !authTypeOptions.includes(next.auth_type)) {
         next.auth_type = authTypeOptions[0]
+        changed = true
       }
 
       if (cardBrandOptions.length > 0 && !cardBrandOptions.includes(next.card_brand)) {
         next.card_brand = cardBrandOptions[0]
+        changed = true
       }
 
-      return next
+      return changed ? next : prev
     })
 
-    setRuleParams(prev =>
-      prev.map(param => {
+    setRuleParams(prev => {
+      let changed = false
+      const next = prev.map(param => {
         if (!param.key || !routingKeysConfig[param.key]) return param
         const keyConfig = routingKeysConfig[param.key]
         const mappedType = mapRoutingTypeToRuleParamType(keyConfig.type)
@@ -659,9 +671,14 @@ export function DecisionExplorerPage() {
         const nextValue = mappedType === 'enum_variant'
           ? (enumValues.includes(param.value) ? param.value : (enumValues[0] || ''))
           : param.value
-        return { ...param, type: mappedType, value: nextValue }
+        if (param.type !== mappedType || param.value !== nextValue) {
+          changed = true
+          return { ...param, type: mappedType, value: nextValue }
+        }
+        return param
       })
-    )
+      return changed ? next : prev
+    })
   }, [
     routingConfigUnavailable,
     routingKeysLoading,
@@ -1043,7 +1060,15 @@ export function DecisionExplorerPage() {
       .map(([name, score]) => ({ name, score: Math.round(score * 1000) / 10 }))
     : []
 
-  const gatewayStats = simulationResults.reduce((acc, curr) => {
+  const totalSimulationPayments = parseInt(simulationConfig.totalPayments) || 0
+  const completedSimulationCount = simulationResults.length
+  const simulationProgressPercentage =
+    totalSimulationPayments > 0
+      ? Math.round((completedSimulationCount / totalSimulationPayments) * 100)
+      : 0
+  const hasSimulationActivity = isSimulating || completedSimulationCount > 0
+
+  const gatewayStats = deferredSimulationResults.reduce((acc, curr) => {
     if (!acc[curr.decidedGateway]) {
       acc[curr.decidedGateway] = { total: 0, success: 0, failure: 0 }
     }
@@ -1213,48 +1238,40 @@ export function DecisionExplorerPage() {
   }
 
   const resetButtonLabel =
-    activeTab === 'single'
-      ? 'Reset Single Test'
-      : activeTab === 'batch'
-        ? 'Reset Batch'
-        : activeTab === 'rule'
-          ? 'Reset Rule-Based'
-          : 'Reset Volume Split'
+    activeTab === 'batch'
+      ? 'Reset Auth-Rate Based Routing'
+      : activeTab === 'rule'
+        ? 'Reset Rule Based Routing'
+        : 'Reset Volume Based Routing'
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Decision Explorer</h1>
         <p className="mt-1 text-sm text-slate-500 dark:text-[#b2bdd1]">
-          Test payment routing with different algorithms: Success Rate, Priority List, Rule-Based, or Volume Split.
+          Simulate payment routing across auth-rate based, rule based, and volume based strategies.
         </p>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap gap-2">
           <button
-            onClick={() => setActiveTab('single')}
-            className={`rounded-full border px-4 py-2 text-sm font-medium transition ${sectionButtonClass(activeTab === 'single')}`}
-          >
-            Single Test
-          </button>
-          <button
             onClick={() => setActiveTab('batch')}
             className={`rounded-full border px-4 py-2 text-sm font-medium transition ${sectionButtonClass(activeTab === 'batch')}`}
           >
-            Batch Simulation
+            Auth-Rate Based Routing
           </button>
           <button
             onClick={() => setActiveTab('rule')}
             className={`rounded-full border px-4 py-2 text-sm font-medium transition ${sectionButtonClass(activeTab === 'rule')}`}
           >
-            Rule-Based
+            Rule Based Routing
           </button>
           <button
             onClick={() => setActiveTab('volume')}
             className={`rounded-full border px-4 py-2 text-sm font-medium transition ${sectionButtonClass(activeTab === 'volume')}`}
           >
-            Volume Split
+            Volume Based Routing
           </button>
         </div>
         <Button size="sm" variant="secondary" onClick={resetCurrentTabState}>
@@ -1270,12 +1287,12 @@ export function DecisionExplorerPage() {
               <SurfaceLabel>
                 {activeTab === 'rule' ? 'Rule Evaluation' :
                   activeTab === 'volume' ? 'Volume Split' :
-                    'Payment Setup'}
+                    'Simulation'}
               </SurfaceLabel>
               <h2 className="mt-3 font-medium text-slate-800 dark:text-white">
                 {activeTab === 'rule' ? 'Rule Evaluation Parameters' :
                   activeTab === 'volume' ? 'Volume Split Configuration' :
-                    'Payment Parameters'}
+                    'Auth-Rate Based Routing Parameters'}
               </h2>
             </div>
           </CardHeader>
@@ -1495,21 +1512,13 @@ export function DecisionExplorerPage() {
                     className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500" />
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div>
                   <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1">Algorithm</label>
                     <select value={form.ranking_algorithm} onChange={e => set('ranking_algorithm', e.target.value)}
                       className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
                       {ALGORITHMS.map(a => <option key={a} value={a}>{ALGORITHM_LABELS[a]}</option>)}
                     </select>
-                  </div>
-                  <div className="flex items-end pb-1">
-                    <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-                      <input type="checkbox" checked={form.elimination_enabled}
-                        onChange={e => set('elimination_enabled', e.target.checked)}
-                        className="rounded" />
-                      Elimination enabled
-                    </label>
                   </div>
                 </div>
 
@@ -1596,7 +1605,7 @@ export function DecisionExplorerPage() {
                   </>
                 ) : (
                   <>
-                    <Activity size={14} /> Run Batch Simulation
+                    <Activity size={14} /> Run Auth-Rate Simulation
                   </>
                 )}
               </Button>
@@ -1959,7 +1968,7 @@ export function DecisionExplorerPage() {
               </Card>
             )
           ) : activeTab === 'batch' ? (
-            simulationResults.length > 0 ? (
+            hasSimulationActivity ? (
               <>
                 <Card>
                   <CardHeader>
@@ -1969,14 +1978,17 @@ export function DecisionExplorerPage() {
                     <div className="mb-4">
                       <div className="flex justify-between text-xs text-slate-600 mb-1">
                         <span>Progress</span>
-                        <span>{Math.round((simulationResults.length / (parseInt(simulationConfig.totalPayments) || 1)) * 100)}%</span>
+                        <span>{simulationProgressPercentage}%</span>
                       </div>
-                      <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div className="w-full overflow-hidden rounded-full bg-gray-200 h-2">
                         <div
-                          className="bg-brand-500 h-2 rounded-full transition-all duration-300"
-                          style={{ width: `${(simulationResults.length / (parseInt(simulationConfig.totalPayments) || 1)) * 100}%` }}
+                          className={`h-2 rounded-full bg-brand-500 transition-[width] duration-300 ease-out ${isSimulating && completedSimulationCount === 0 ? 'animate-pulse' : ''}`}
+                          style={{ width: `${simulationProgressPercentage}%` }}
                         />
                       </div>
+                      <p className="mt-2 text-xs text-slate-500">
+                        {completedSimulationCount} of {totalSimulationPayments || 0} payments processed.
+                      </p>
                     </div>
 
                     {Object.keys(gatewayStats).length > 0 && (
@@ -2002,49 +2014,56 @@ export function DecisionExplorerPage() {
                     <h3 className="text-sm font-medium text-slate-800">Transaction Log</h3>
                   </CardHeader>
                   <CardBody className="p-0 max-h-96 overflow-auto">
-                    <table className="w-full text-sm">
-                      <thead className="bg-slate-50 dark:bg-[#0a0a0f] text-xs text-slate-500 sticky top-0">
-                        <tr>
-                          <th className="text-left px-3 py-2">#</th>
-                          <th className="text-left px-3 py-2">Payment ID</th>
-                          <th className="text-left px-3 py-2">Gateway</th>
-                          <th className="text-left px-3 py-2">Outcome</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-[#1c1c24]">
-                        {simulationResults.map((res, idx) => (
-                          <tr key={res.paymentId} className="hover:bg-slate-100 dark:bg-[#0f0f16]">
-                            <td className="px-3 py-2 text-slate-500">{idx + 1}</td>
-                            <td className="px-3 py-2">
-                              <button
-                                type="button"
-                                title={res.paymentId}
-                                onClick={() => openAuditModal(res.paymentId)}
-                                className="group flex items-start gap-3 text-left"
-                              >
-                                <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-brand-500/10 text-[11px] font-semibold uppercase tracking-[0.16em] text-brand-600 dark:text-brand-300">
-                                  {idx + 1}
-                                </span>
-                                <span className="min-w-0">
-                                  <span className="block truncate font-mono text-xs font-semibold text-slate-900 transition group-hover:text-brand-600 dark:text-white">
-                                    {res.paymentId}
-                                  </span>
-                                  <span className="mt-1 block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 transition group-hover:text-brand-500">
-                                    View audit
-                                  </span>
-                                </span>
-                              </button>
-                            </td>
-                            <td className="px-3 py-2 font-medium">{res.decidedGateway}</td>
-                            <td className="px-3 py-2">
-                              <Badge variant={res.status === 'CHARGED' ? 'green' : 'red'}>
-                                {res.status}
-                              </Badge>
-                            </td>
+                    {deferredSimulationResults.length > 0 ? (
+                      <table className="w-full text-sm">
+                        <thead className="bg-slate-50 dark:bg-[#0a0a0f] text-xs text-slate-500 sticky top-0">
+                          <tr>
+                            <th className="text-left px-3 py-2">#</th>
+                            <th className="text-left px-3 py-2">Payment ID</th>
+                            <th className="text-left px-3 py-2">Gateway</th>
+                            <th className="text-left px-3 py-2">Outcome</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody className="divide-y divide-[#1c1c24]">
+                          {deferredSimulationResults.map((res, idx) => (
+                            <tr key={res.paymentId} className="hover:bg-slate-100 dark:bg-[#0f0f16]">
+                              <td className="px-3 py-2 text-slate-500">{idx + 1}</td>
+                              <td className="px-3 py-2">
+                                <button
+                                  type="button"
+                                  title={res.paymentId}
+                                  onClick={() => openAuditModal(res.paymentId)}
+                                  className="group flex items-start gap-3 text-left"
+                                >
+                                  <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-brand-500/10 text-[11px] font-semibold uppercase tracking-[0.16em] text-brand-600 dark:text-brand-300">
+                                    {idx + 1}
+                                  </span>
+                                  <span className="min-w-0">
+                                    <span className="block truncate font-mono text-xs font-semibold text-slate-900 transition group-hover:text-brand-600 dark:text-white">
+                                      {res.paymentId}
+                                    </span>
+                                    <span className="mt-1 block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 transition group-hover:text-brand-500">
+                                      View audit
+                                    </span>
+                                  </span>
+                                </button>
+                              </td>
+                              <td className="px-3 py-2 font-medium">{res.decidedGateway}</td>
+                              <td className="px-3 py-2">
+                                <Badge variant={res.status === 'CHARGED' ? 'green' : 'red'}>
+                                  {res.status}
+                                </Badge>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <div className="flex items-center gap-3 px-4 py-6 text-sm text-slate-500">
+                        <Spinner size={16} />
+                        Waiting for the first simulated payment result…
+                      </div>
+                    )}
                   </CardBody>
                 </Card>
               </>
@@ -2052,7 +2071,7 @@ export function DecisionExplorerPage() {
               <Card>
                 <CardBody className="py-16 text-center">
                   <Activity size={32} className="text-gray-300 mx-auto mb-3" />
-                  <p className="text-slate-400 text-sm">Configure simulation parameters and click "Run Batch Simulation" to test Success Rate routing.</p>
+                  <p className="text-slate-400 text-sm">Configure simulation parameters and click "Run Auth-Rate Simulation" to test auth-rate based routing.</p>
                 </CardBody>
               </Card>
             )
@@ -2242,7 +2261,7 @@ export function DecisionExplorerPage() {
             <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 bg-slate-50/90 px-6 py-5 dark:border-[#1c1c23] dark:bg-[#0b0b10]">
               <div className="min-w-0">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-[#8a8a93]">
-                  Batch Simulation Audit
+                  Simulation Audit
                 </p>
                 <h2
                   id="decision-explorer-audit-title"
