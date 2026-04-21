@@ -1,0 +1,88 @@
+---
+title: "ClickHouse Analytics"
+description: "ClickHouse setup notes for analytics"
+---
+
+## Overview
+
+Decision Engine now uses a hard-cutover analytics pipeline:
+
+- API server captures bounded request and response prefixes
+- API server publishes analytics events to Kafka
+- ClickHouse Kafka engine tables consume Kafka and materialized views fan into the raw tables
+
+ClickHouse remains the analytics read store for:
+
+- business-domain analytics events
+- raw API request and response events
+
+The analytics read path still uses the two raw tables:
+
+- `analytics_domain_events_v1`
+- `analytics_api_events_v1`
+
+The ingestion path is now explicit in ClickHouse too:
+
+- `analytics_domain_events_kafka_v1`
+- `analytics_api_events_kafka_v1`
+- `mv_analytics_domain_events_kafka_v1`
+- `mv_analytics_api_events_kafka_v1`
+
+## Local Bring-Up
+
+Start the local analytics stack:
+
+```bash
+docker compose --profile analytics-clickhouse up -d
+```
+
+That profile now includes ClickHouse, Kafka, and topic creation. The full runtime profiles use the same ClickHouse-native ingestion path. There is no separate Rust worker process anymore.
+
+The schema DDL lives in:
+
+- `clickhouse/migrations/`
+
+## Config
+
+Relevant config lives under:
+
+```toml
+[analytics]
+enabled = true
+
+[analytics.capture]
+body_max_bytes = 65536
+request_body_limit_bytes = 1048576
+details_max_bytes = 65536
+
+[analytics.kafka]
+# container-to-container traffic uses the internal listener
+brokers = "kafka:19092"
+client_id = "decision-engine"
+api_topic = "decision-engine.analytics.api.v1"
+domain_topic = "decision-engine.analytics.domain.v1"
+acks = "all"
+compression = "lz4"
+message_timeout_ms = 5000
+max_message_bytes = 262144
+queue_capacity = 250
+
+[analytics.clickhouse]
+url = "http://clickhouse:8123"
+database = "decision_engine_analytics"
+user = "decision_engine"
+password = "decision_engine"
+```
+
+There is no direct API-server write path to ClickHouse anymore. ClickHouse owns Kafka consumption through the queue tables and materialized views.
+
+## Troubleshooting
+
+Useful checks when ingestion looks stalled:
+
+```sql
+SHOW TABLES FROM decision_engine_analytics;
+SELECT * FROM system.kafka_consumers WHERE database = 'decision_engine_analytics';
+SELECT count() FROM decision_engine_analytics.analytics_api_events_v1;
+SELECT count() FROM decision_engine_analytics.analytics_domain_events_v1;
+```
