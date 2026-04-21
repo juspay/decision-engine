@@ -5,11 +5,15 @@ import App from './App'
 import { ErrorBoundary } from './ErrorBoundary'
 import './index.css'
 
+const routerBaseName = import.meta.env.BASE_URL.endsWith('/')
+  ? import.meta.env.BASE_URL.slice(0, -1)
+  : import.meta.env.BASE_URL
+
 console.log('\n' + '='.repeat(80))
 console.log('[APP STARTUP] Dashboard initializing...')
 console.log(`Timestamp: ${new Date().toISOString()}`)
 console.log(`Environment: ${(import.meta as any).env?.MODE ?? 'production'}`)
-console.log(`Base URL: /dashboard`)
+console.log(`Base URL: ${import.meta.env.BASE_URL}`)
 console.log('='.repeat(80) + '\n')
 
 window.onerror = (message, source, lineno, colno, error) => {
@@ -38,7 +42,7 @@ window.onunhandledrejection = (event) => {
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ErrorBoundary>
-      <BrowserRouter basename="/dashboard">
+      <BrowserRouter basename={routerBaseName}>
         <App />
       </BrowserRouter>
     </ErrorBoundary>

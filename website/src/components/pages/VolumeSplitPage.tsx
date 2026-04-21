@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import useSWR from 'swr'
+import useSWR, { useSWRConfig } from 'swr'
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { Card, CardBody, CardHeader } from '../ui/Card'
 import { Button } from '../ui/Button'
@@ -21,8 +21,9 @@ function makeId() { return Math.random().toString(36).slice(2) }
 
 export function VolumeSplitPage() {
   const { merchantId } = useMerchantStore()
+  const { mutate: mutateCache } = useSWRConfig()
 
-  const { data: active, mutate } = useSWR<RoutingAlgorithm[]>(
+  const { data: active, mutate: mutateActive } = useSWR<RoutingAlgorithm[]>(
     merchantId ? ['active-routing', merchantId] : null,
     () => apiPost(`/routing/list/active/${merchantId}`)
   )
@@ -63,8 +64,11 @@ export function VolumeSplitPage() {
     try {
       const payload = toVolumeSplitCreatePayload({ ruleName, gateways }, merchantId)
       await apiPost('/routing/create', payload)
+      await Promise.all([
+        mutateActive(),
+        mutateCache(['routing-list', merchantId]),
+      ])
       setSuccess(`Rule "${ruleName}" created successfully. Find it in the list below to activate.`)
-      mutate()
       setRuleName('')
       setGateways([
         { id: makeId(), gatewayName: '', gatewayId: '', split: 50 },
@@ -81,7 +85,10 @@ export function VolumeSplitPage() {
     if (!merchantId) return
     try {
       await apiPost('/routing/activate', { created_by: merchantId, routing_algorithm_id: ruleId })
-      mutate()
+      await Promise.all([
+        mutateActive(),
+        mutateCache(['routing-list', merchantId]),
+      ])
       setSuccess('Rule activated.')
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to activate')
