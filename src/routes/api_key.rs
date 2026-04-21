@@ -121,7 +121,11 @@ pub async fn revoke_api_key(
     Path(key_id): Path<String>,
 ) -> Result<Json<RevokeApiKeyResponse>, error::ContainerError<ApiKeyError>> {
     let app_state = get_tenant_app_state().await;
-    let conn = &app_state.db.get_conn().await.map_err(|_| ApiKeyError::StorageError)?;
+    let conn = &app_state
+        .db
+        .get_conn()
+        .await
+        .map_err(|_| ApiKeyError::StorageError)?;
 
     let revoke = MerchantApiKeyRevoke {
         #[cfg(feature = "mysql")]
@@ -130,11 +134,11 @@ pub async fn revoke_api_key(
         is_active: false,
     };
 
-    crate::generics::generic_update::<
-        <MerchantApiKey as HasTable>::Table,
-        _,
-        _,
-    >(conn, dsl::key_id.eq(key_id.clone()), revoke)
+    crate::generics::generic_update::<<MerchantApiKey as HasTable>::Table, _, _>(
+        conn,
+        dsl::key_id.eq(key_id.clone()),
+        revoke,
+    )
     .await
     .map_err(|_| ApiKeyError::RevocationFailed)?;
 
@@ -143,7 +147,9 @@ pub async fn revoke_api_key(
         <MerchantApiKey as HasTable>::Table,
         _,
         MerchantApiKey,
-    >(&app_state.db, dsl::key_id.eq(key_id.clone())).await {
+    >(&app_state.db, dsl::key_id.eq(key_id.clone()))
+    .await
+    {
         for key in keys {
             let cache_key = format!("api_key:{}", key.key_hash);
             let _ = app_state.redis_conn.conn.delete_key(&cache_key).await;

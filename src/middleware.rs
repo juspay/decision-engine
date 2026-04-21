@@ -29,11 +29,7 @@ pub async fn authenticate(
 ) -> Result<Response<Body>, ContainerError<error::ApiError>> {
     let app_state = match APP_STATE.get() {
         Some(s) => s,
-        None => {
-            return Ok(
-                (StatusCode::INTERNAL_SERVER_ERROR, "Server not ready").into_response()
-            )
-        }
+        None => return Ok((StatusCode::INTERNAL_SERVER_ERROR, "Server not ready").into_response()),
     };
 
     if !app_state.global_config.api_key_auth_enabled {
@@ -42,27 +38,19 @@ pub async fn authenticate(
 
     let api_key = match req.headers().get("x-api-key").and_then(|v| v.to_str().ok()) {
         Some(k) => k.to_owned(),
-        None => {
-            return Ok((StatusCode::UNAUTHORIZED, "Missing x-api-key header").into_response())
-        }
+        None => return Ok((StatusCode::UNAUTHORIZED, "Missing x-api-key header").into_response()),
     };
 
     let key_hash = auth::hash_api_key(&api_key);
     let cache_key = format!("api_key:{}", key_hash);
 
-    let tenant_state = match crate::tenant::GlobalAppState::get_app_state_of_tenant(
-        app_state,
-        "public",
-    )
-    .await
-    {
-        Ok(s) => s,
-        Err(_) => {
-            return Ok(
-                (StatusCode::INTERNAL_SERVER_ERROR, "Tenant not found").into_response()
-            )
-        }
-    };
+    let tenant_state =
+        match crate::tenant::GlobalAppState::get_app_state_of_tenant(app_state, "public").await {
+            Ok(s) => s,
+            Err(_) => {
+                return Ok((StatusCode::INTERNAL_SERVER_ERROR, "Tenant not found").into_response())
+            }
+        };
 
     // Check Redis cache first
     if let Ok(cached) = tenant_state.redis_conn.get_key_string(&cache_key).await {
@@ -84,10 +72,7 @@ pub async fn authenticate(
         <MerchantApiKey as HasTable>::Table,
         _,
         MerchantApiKey,
-    >(
-        &tenant_state.db,
-        dsl::key_hash.eq(key_hash.clone()),
-    )
+    >(&tenant_state.db, dsl::key_hash.eq(key_hash.clone()))
     .await;
 
     let key_record = match results {
@@ -99,9 +84,13 @@ pub async fn authenticate(
         Some(record) => {
             let is_active = {
                 #[cfg(feature = "mysql")]
-                { record.is_active != 0 }
+                {
+                    record.is_active != 0
+                }
                 #[cfg(feature = "postgres")]
-                { record.is_active }
+                {
+                    record.is_active
+                }
             };
 
             if !is_active {

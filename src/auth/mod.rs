@@ -34,7 +34,13 @@ mod tests {
     fn generated_key_has_correct_length() {
         let key = generate_api_key();
         // "DE_" (3) + hex of 32 bytes (64) = 67
-        assert_eq!(key.len(), 67, "expected length 67, got {}: {}", key.len(), key);
+        assert_eq!(
+            key.len(),
+            67,
+            "expected length 67, got {}: {}",
+            key.len(),
+            key
+        );
     }
 
     #[test]
@@ -71,7 +77,10 @@ mod tests {
         let stored_hash = hash_api_key(&raw_key);
         // Simulate what the middleware does: hash the incoming key and compare
         let incoming_hash = hash_api_key(&raw_key);
-        assert_eq!(stored_hash, incoming_hash, "stored hash must match recomputed hash");
+        assert_eq!(
+            stored_hash, incoming_hash,
+            "stored hash must match recomputed hash"
+        );
     }
 
     #[test]
@@ -80,7 +89,10 @@ mod tests {
         let stored_hash = hash_api_key(&raw_key);
         let wrong_key = generate_api_key();
         let wrong_hash = hash_api_key(&wrong_key);
-        assert_ne!(stored_hash, wrong_hash, "wrong key must not match stored hash");
+        assert_ne!(
+            stored_hash, wrong_hash,
+            "wrong key must not match stored hash"
+        );
     }
 
     #[test]

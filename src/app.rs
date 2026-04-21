@@ -264,18 +264,12 @@ where
             "/update-gateway-score",
             post(routes::update_gateway_score::update_gateway_score),
         )
-        .route(
-            "/api-key/create",
-            post(routes::api_key::create_api_key),
-        )
+        .route("/api-key/create", post(routes::api_key::create_api_key))
         .route(
             "/api-key/list/:merchant_id",
             get(routes::api_key::list_api_keys),
         )
-        .route(
-            "/api-key/:key_id",
-            delete(routes::api_key::revoke_api_key),
-        )
+        .route("/api-key/:key_id", delete(routes::api_key::revoke_api_key))
         .layer(middleware::from_fn(custom_middleware::authenticate));
 
     // Routes that do not require authentication (public)
