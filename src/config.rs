@@ -64,14 +64,76 @@ pub struct TenantConfig {
 #[serde(default)]
 pub struct AnalyticsConfig {
     pub enabled: bool,
+    pub capture: AnalyticsCaptureConfig,
+    pub kafka: KafkaAnalyticsConfig,
     pub clickhouse: ClickHouseAnalyticsConfig,
+    pub worker: AnalyticsWorkerConfig,
 }
 
 impl Default for AnalyticsConfig {
     fn default() -> Self {
         Self {
             enabled: true,
+            capture: AnalyticsCaptureConfig::default(),
+            kafka: KafkaAnalyticsConfig::default(),
             clickhouse: ClickHouseAnalyticsConfig::default(),
+            worker: AnalyticsWorkerConfig::default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(default)]
+pub struct AnalyticsCaptureConfig {
+    pub body_max_bytes: usize,
+    pub request_body_limit_bytes: usize,
+    pub details_max_bytes: usize,
+}
+
+impl Default for AnalyticsCaptureConfig {
+    fn default() -> Self {
+        Self {
+            body_max_bytes: 65_536,
+            request_body_limit_bytes: 1_048_576,
+            details_max_bytes: 65_536,
+        }
+    }
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(default)]
+pub struct KafkaAnalyticsConfig {
+    pub brokers: String,
+    pub client_id: String,
+    pub api_topic: String,
+    pub domain_topic: String,
+    pub acks: String,
+    pub compression: String,
+    pub message_timeout_ms: u64,
+    pub max_message_bytes: usize,
+    pub queue_capacity: usize,
+    pub security_protocol: Option<String>,
+    pub sasl_mechanism: Option<String>,
+    pub sasl_username: Option<String>,
+    pub sasl_password: Option<masking::Secret<String>>,
+}
+
+impl Default for KafkaAnalyticsConfig {
+    fn default() -> Self {
+        Self {
+            brokers: "localhost:9092".to_string(),
+            client_id: "decision-engine".to_string(),
+            api_topic: "decision-engine.analytics.api.v1".to_string(),
+            domain_topic: "decision-engine.analytics.domain.v1".to_string(),
+            acks: "all".to_string(),
+            compression: "lz4".to_string(),
+            message_timeout_ms: 5_000,
+            max_message_bytes: 262_144,
+            queue_capacity: 250,
+            security_protocol: None,
+            sasl_mechanism: None,
+            sasl_username: None,
+            sasl_password: None,
         }
     }
 }
@@ -79,37 +141,41 @@ impl Default for AnalyticsConfig {
 #[derive(Clone, Debug, serde::Deserialize)]
 #[serde(default)]
 pub struct ClickHouseAnalyticsConfig {
-    pub enabled: bool,
     pub url: String,
     pub database: String,
     pub user: String,
     pub password: Option<masking::Secret<String>>,
-    pub secure: bool,
-    pub connect_timeout_ms: u64,
-    pub query_timeout_ms: u64,
-    pub insert_timeout_ms: u64,
-    pub batch_size: usize,
-    pub flush_interval_ms: u64,
-    pub queue_capacity: usize,
-    pub body_max_bytes: usize,
 }
 
 impl Default for ClickHouseAnalyticsConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
             url: "http://localhost:8123".to_string(),
             database: "decision_engine_analytics".to_string(),
             user: "default".to_string(),
             password: None,
-            secure: false,
-            connect_timeout_ms: 3_000,
-            query_timeout_ms: 10_000,
-            insert_timeout_ms: 5_000,
+        }
+    }
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(default)]
+pub struct AnalyticsWorkerConfig {
+    pub consumer_group: String,
+    pub poll_timeout_ms: u64,
+    pub batch_size: usize,
+    pub flush_interval_ms: u64,
+    pub retry_backoff_ms: u64,
+}
+
+impl Default for AnalyticsWorkerConfig {
+    fn default() -> Self {
+        Self {
+            consumer_group: "decision-engine-analytics-worker-v1".to_string(),
+            poll_timeout_ms: 1_000,
             batch_size: 500,
             flush_interval_ms: 250,
-            queue_capacity: 50_000,
-            body_max_bytes: 65_536,
+            retry_backoff_ms: 1_000,
         }
     }
 }
@@ -382,27 +448,76 @@ impl GlobalConfig {
             );
         }
 
+        if let Some(password) = self.analytics.kafka.sasl_password.clone() {
+            self.analytics.kafka.sasl_password = Some(
+                secret_management_client
+                    .get_secret(password)
+                    .await
+                    .change_context(error::ConfigurationError::KmsDecryptError(
+                        "analytics_kafka_sasl_password",
+                    ))?,
+            );
+        }
+
         Ok(())
     }
 
     pub fn validate(&self) -> error_stack::Result<(), error::ConfigurationError> {
         self.secrets_management.validate()?;
-        if self.analytics.clickhouse.batch_size == 0 {
+        if self.analytics.capture.body_max_bytes == 0 {
             return Err(error_stack::report!(
                 error::ConfigurationError::InvalidConfigurationValueError(
-                    "analytics.clickhouse.batch_size".to_string(),
+                    "analytics.capture.body_max_bytes".to_string(),
                 )
             ));
         }
-        if self.analytics.clickhouse.queue_capacity == 0 {
+        if self.analytics.capture.details_max_bytes == 0 {
             return Err(error_stack::report!(
                 error::ConfigurationError::InvalidConfigurationValueError(
-                    "analytics.clickhouse.queue_capacity".to_string(),
+                    "analytics.capture.details_max_bytes".to_string(),
+                )
+            ));
+        }
+        if self.analytics.capture.request_body_limit_bytes < self.analytics.capture.body_max_bytes {
+            return Err(error_stack::report!(
+                error::ConfigurationError::InvalidConfigurationValueError(
+                    "analytics.capture.request_body_limit_bytes".to_string(),
+                )
+            ));
+        }
+        if self.analytics.kafka.queue_capacity == 0 {
+            return Err(error_stack::report!(
+                error::ConfigurationError::InvalidConfigurationValueError(
+                    "analytics.kafka.queue_capacity".to_string(),
+                )
+            ));
+        }
+        if self.analytics.kafka.max_message_bytes
+            <= minimum_analytics_message_budget(&self.analytics.capture)
+        {
+            return Err(error_stack::report!(
+                error::ConfigurationError::InvalidConfigurationValueError(
+                    "analytics.kafka.max_message_bytes".to_string(),
+                )
+            ));
+        }
+        if self.analytics.worker.batch_size == 0 {
+            return Err(error_stack::report!(
+                error::ConfigurationError::InvalidConfigurationValueError(
+                    "analytics.worker.batch_size".to_string(),
                 )
             ));
         }
         Ok(())
     }
+}
+
+fn minimum_analytics_message_budget(capture: &AnalyticsCaptureConfig) -> usize {
+    capture
+        .body_max_bytes
+        .saturating_mul(2)
+        .saturating_add(capture.details_max_bytes)
+        .saturating_add(8 * 1024)
 }
 
 #[cfg(test)]

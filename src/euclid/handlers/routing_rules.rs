@@ -254,8 +254,8 @@ pub async fn routing_evaluate(
 ) -> Result<Json<RoutingEvaluateResponse>, ContainerError<EuclidErrors>> {
     let mut timer = Some(
         metrics::API_LATENCY_HISTOGRAM
-        .with_label_values(&["routing_evaluate"])
-        .start_timer(),
+            .with_label_values(&["routing_evaluate"])
+            .start_timer(),
     );
 
     API_REQUEST_TOTAL_COUNTER
@@ -273,6 +273,7 @@ pub async fn routing_evaluate(
         "routing_evaluate",
         Some(payload.created_by.clone()),
         payload.payment_id.clone(),
+        None,
         None,
     );
 
@@ -565,6 +566,7 @@ fn record_routing_evaluate_preview_error(
         }))
         .ok(),
         Some(event_stage.to_string()),
+        None,
     );
 }
 

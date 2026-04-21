@@ -5,20 +5,40 @@ description: "ClickHouse setup notes for analytics"
 
 ## Overview
 
-Decision Engine uses ClickHouse as the analytics store for:
+Decision Engine now uses a hard-cutover analytics pipeline:
+
+- API server captures bounded request and response prefixes
+- API server publishes analytics events to Kafka
+- `analytics_worker` consumes Kafka and persists to ClickHouse
+
+ClickHouse remains the analytics read store for:
 
 - business-domain analytics events
 - raw API request and response events
 
+The schema is intentionally minimal for this PR:
+
+- `analytics_domain_events_v1`
+- `analytics_api_events_v1`
+
+Derived aggregate tables and materialized views were removed because the current runtime reads directly from the raw tables.
+
 ## Local Bring-Up
 
-Start ClickHouse and initialize the schema:
+Start the local analytics stack:
 
 ```bash
 docker compose --profile analytics-clickhouse up -d
 ```
 
-The standard Docker runtime profiles also bring ClickHouse up automatically.
+That profile now includes ClickHouse, Kafka, and topic creation. The full runtime profiles also start the analytics worker.
+
+If you are source-running the API, start the worker separately:
+
+```bash
+# run in a separate terminal
+cargo run --bin analytics_worker --no-default-features --features postgres
+```
 
 The schema DDL lives in:
 
@@ -32,17 +52,35 @@ Relevant config lives under:
 [analytics]
 enabled = true
 
+[analytics.capture]
+body_max_bytes = 65536
+request_body_limit_bytes = 1048576
+details_max_bytes = 65536
+
+[analytics.kafka]
+# container-to-container traffic uses the internal listener
+brokers = "kafka:19092"
+client_id = "decision-engine"
+api_topic = "decision-engine.analytics.api.v1"
+domain_topic = "decision-engine.analytics.domain.v1"
+acks = "all"
+compression = "lz4"
+message_timeout_ms = 5000
+max_message_bytes = 262144
+queue_capacity = 250
+
 [analytics.clickhouse]
-enabled = true
 url = "http://clickhouse:8123"
 database = "decision_engine_analytics"
 user = "decision_engine"
 password = "decision_engine"
-secure = false
+
+[analytics.worker]
+consumer_group = "decision-engine-analytics-worker-v1"
+poll_timeout_ms = 1000
 batch_size = 500
 flush_interval_ms = 250
-queue_capacity = 50000
-body_max_bytes = 65536
+retry_backoff_ms = 1000
 ```
 
-The schema is append-only for fresh analytics data; there is no SQL backfill path.
+There is no direct API-server write path to ClickHouse anymore. The worker is the only analytics writer.

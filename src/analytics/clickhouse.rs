@@ -9,9 +9,7 @@ use crate::analytics::service::{format_range, now_ms};
 use crate::analytics::store::{AnalyticsReadStore, AnalyticsWriteStore};
 use crate::config::ClickHouseAnalyticsConfig;
 use crate::error::ApiError;
-use crate::metrics::{
-    ANALYTICS_SINK_WRITE_LATENCY_HISTOGRAM, ANALYTICS_SINK_WRITES_TOTAL,
-};
+use crate::metrics::{ANALYTICS_SINK_WRITES_TOTAL, ANALYTICS_SINK_WRITE_LATENCY_HISTOGRAM};
 
 const DOMAIN_TABLE: &str = "analytics_domain_events_v1";
 const API_TABLE: &str = "analytics_api_events_v1";
@@ -234,17 +232,12 @@ impl ClickHouseAnalyticsStore {
     fn store_error(&self) -> ApiError {
         ApiError::DatabaseError
     }
-}
 
-#[derive(Debug, Clone, Deserialize, Row)]
-struct SingleValueRow {
-    #[serde(rename = "one")]
-    _one: u8,
-}
-
-#[async_trait]
-impl AnalyticsWriteStore for ClickHouseAnalyticsStore {
-    async fn persist_domain_events(&self, events: &[DomainAnalyticsEvent]) -> Result<(), ApiError> {
+    pub async fn persist_domain_events_with_token(
+        &self,
+        events: &[DomainAnalyticsEvent],
+        deduplication_token: Option<&str>,
+    ) -> Result<(), ApiError> {
         if events.is_empty() {
             return Ok(());
         }
@@ -256,6 +249,9 @@ impl AnalyticsWriteStore for ClickHouseAnalyticsStore {
             .client
             .insert(DOMAIN_TABLE)
             .map_err(|_| self.store_error())?;
+        if let Some(token) = deduplication_token {
+            insert = insert.with_option("insert_deduplication_token", token);
+        }
         for event in events {
             insert
                 .write(&ClickHouseDomainEventRow::from(event.clone()))
@@ -271,7 +267,11 @@ impl AnalyticsWriteStore for ClickHouseAnalyticsStore {
         result
     }
 
-    async fn persist_api_events(&self, events: &[ApiEvent]) -> Result<(), ApiError> {
+    pub async fn persist_api_events_with_token(
+        &self,
+        events: &[ApiEvent],
+        deduplication_token: Option<&str>,
+    ) -> Result<(), ApiError> {
         if events.is_empty() {
             return Ok(());
         }
@@ -279,7 +279,13 @@ impl AnalyticsWriteStore for ClickHouseAnalyticsStore {
         let timer = ANALYTICS_SINK_WRITE_LATENCY_HISTOGRAM
             .with_label_values(&["clickhouse", "api"])
             .start_timer();
-        let mut insert = self.client.insert(API_TABLE).map_err(|_| self.store_error())?;
+        let mut insert = self
+            .client
+            .insert(API_TABLE)
+            .map_err(|_| self.store_error())?;
+        if let Some(token) = deduplication_token {
+            insert = insert.with_option("insert_deduplication_token", token);
+        }
         for event in events {
             insert
                 .write(&ClickHouseApiEventRow::from(event.clone()))
@@ -293,6 +299,23 @@ impl AnalyticsWriteStore for ClickHouseAnalyticsStore {
             .inc();
         timer.observe_duration();
         result
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Row)]
+struct SingleValueRow {
+    #[serde(rename = "one")]
+    _one: u8,
+}
+
+#[async_trait]
+impl AnalyticsWriteStore for ClickHouseAnalyticsStore {
+    async fn persist_domain_events(&self, events: &[DomainAnalyticsEvent]) -> Result<(), ApiError> {
+        self.persist_domain_events_with_token(events, None).await
+    }
+
+    async fn persist_api_events(&self, events: &[ApiEvent]) -> Result<(), ApiError> {
+        self.persist_api_events_with_token(events, None).await
     }
 
     fn sink_name(&self) -> &'static str {
@@ -313,15 +336,42 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
                 scope: query.scope.as_str().to_string(),
                 merchant_id: query.merchant_id.clone(),
                 kpis: vec![
-                    AnalyticsKpi { label: format!("Decisions / {}", format_range(query)), value: "0".to_string(), subtitle: Some("Global mode is limited to connector-level analytics".to_string()) },
-                    AnalyticsKpi { label: "Score snapshots".to_string(), value: "0".to_string(), subtitle: Some("Global mode hides merchant-specific data".to_string()) },
-                    AnalyticsKpi { label: "Rule hits".to_string(), value: "0".to_string(), subtitle: Some("Global mode hides merchant-specific data".to_string()) },
-                    AnalyticsKpi { label: "Errors".to_string(), value: "0".to_string(), subtitle: Some("Global mode hides merchant-specific data".to_string()) },
+                    AnalyticsKpi {
+                        label: format!("Decisions / {}", format_range(query)),
+                        value: "0".to_string(),
+                        subtitle: Some(
+                            "Global mode is limited to connector-level analytics".to_string(),
+                        ),
+                    },
+                    AnalyticsKpi {
+                        label: "Score snapshots".to_string(),
+                        value: "0".to_string(),
+                        subtitle: Some("Global mode hides merchant-specific data".to_string()),
+                    },
+                    AnalyticsKpi {
+                        label: "Rule hits".to_string(),
+                        value: "0".to_string(),
+                        subtitle: Some("Global mode hides merchant-specific data".to_string()),
+                    },
+                    AnalyticsKpi {
+                        label: "Errors".to_string(),
+                        value: "0".to_string(),
+                        subtitle: Some("Global mode hides merchant-specific data".to_string()),
+                    },
                 ],
                 route_hits: vec![
-                    AnalyticsRouteHit { route: "/decide_gateway".to_string(), count: 0 },
-                    AnalyticsRouteHit { route: "/update_gateway".to_string(), count: 0 },
-                    AnalyticsRouteHit { route: "/rule_evaluate".to_string(), count: 0 },
+                    AnalyticsRouteHit {
+                        route: "/decide_gateway".to_string(),
+                        count: 0,
+                    },
+                    AnalyticsRouteHit {
+                        route: "/update_gateway".to_string(),
+                        count: 0,
+                    },
+                    AnalyticsRouteHit {
+                        route: "/rule_evaluate".to_string(),
+                        count: 0,
+                    },
                 ],
                 top_scores: Vec::new(),
                 top_errors: Vec::new(),
@@ -330,7 +380,8 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
         }
 
         let (start_ms, end_ms) = effective_window_bounds(query);
-        let base_where = base_where_clause(tenant_id, query.merchant_id.as_deref(), start_ms, end_ms);
+        let base_where =
+            base_where_clause(tenant_id, query.merchant_id.as_deref(), start_ms, end_ms);
 
         let counts_query = format!(
             "SELECT \
@@ -433,8 +484,20 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
                 merchant_id: query.merchant_id.clone(),
                 range: format_range(query),
                 tiles: vec![
-                    AnalyticsKpi { label: "Decisions".to_string(), value: "0".to_string(), subtitle: Some("Global mode hides merchant-specific traffic volumes".to_string()) },
-                    AnalyticsKpi { label: "Error rate".to_string(), value: "0.00%".to_string(), subtitle: Some("Global mode hides merchant-specific traffic volumes".to_string()) },
+                    AnalyticsKpi {
+                        label: "Decisions".to_string(),
+                        value: "0".to_string(),
+                        subtitle: Some(
+                            "Global mode hides merchant-specific traffic volumes".to_string(),
+                        ),
+                    },
+                    AnalyticsKpi {
+                        label: "Error rate".to_string(),
+                        value: "0.00%".to_string(),
+                        subtitle: Some(
+                            "Global mode hides merchant-specific traffic volumes".to_string(),
+                        ),
+                    },
                 ],
                 series: Vec::new(),
                 approaches: Vec::new(),
@@ -448,51 +511,57 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
             base_where_clause(tenant_id, query.merchant_id.as_deref(), start_ms, end_ms)
         );
 
-        let count_row = self.client.query(&format!(
-            "SELECT \
+        let count_row = self
+            .client
+            .query(&format!(
+                "SELECT \
                 count() AS total, \
                 countIf(lowerUTF8(ifNull(status, '')) = 'failure') AS failures \
              FROM {DOMAIN_TABLE} {base_where}"
-        ))
-        .fetch_one::<CountTileRow>()
-        .await
-        .map_err(|_| self.store_error())?;
+            ))
+            .fetch_one::<CountTileRow>()
+            .await
+            .map_err(|_| self.store_error())?;
 
-        let series = self.client.query(&format!(
-            "SELECT \
+        let series = self
+            .client
+            .query(&format!(
+                "SELECT \
                 intDiv(created_at_ms, {bucket}) * {bucket} AS bucket_ms, \
                 ifNull(routing_approach, 'UNKNOWN') AS routing_approach, \
                 count() AS count \
              FROM {DOMAIN_TABLE} {base_where} \
              GROUP BY bucket_ms, routing_approach \
              ORDER BY bucket_ms ASC, routing_approach ASC"
-        ))
-        .fetch_all::<DecisionPointRow>()
-        .await
-        .map_err(|_| self.store_error())?
-        .into_iter()
-        .map(|row| AnalyticsDecisionPoint {
-            bucket_ms: row.bucket_ms,
-            routing_approach: row.routing_approach,
-            count: row.count as i64,
-        })
-        .collect();
+            ))
+            .fetch_all::<DecisionPointRow>()
+            .await
+            .map_err(|_| self.store_error())?
+            .into_iter()
+            .map(|row| AnalyticsDecisionPoint {
+                bucket_ms: row.bucket_ms,
+                routing_approach: row.routing_approach,
+                count: row.count as i64,
+            })
+            .collect();
 
-        let approaches = self.client.query(&format!(
-            "SELECT ifNull(routing_approach, 'UNKNOWN') AS rule_name, count() AS count \
+        let approaches = self
+            .client
+            .query(&format!(
+                "SELECT ifNull(routing_approach, 'UNKNOWN') AS rule_name, count() AS count \
              FROM {DOMAIN_TABLE} {base_where} \
              GROUP BY rule_name \
              ORDER BY count DESC, rule_name ASC"
-        ))
-        .fetch_all::<RuleHitRow>()
-        .await
-        .map_err(|_| self.store_error())?
-        .into_iter()
-        .map(|row| AnalyticsRuleHit {
-            rule_name: row.rule_name,
-            count: row.count as i64,
-        })
-        .collect::<Vec<_>>();
+            ))
+            .fetch_all::<RuleHitRow>()
+            .await
+            .map_err(|_| self.store_error())?
+            .into_iter()
+            .map(|row| AnalyticsRuleHit {
+                rule_name: row.rule_name,
+                count: row.count as i64,
+            })
+            .collect::<Vec<_>>();
 
         let error_rate = if count_row.total > 0 {
             (count_row.failures as f64 / count_row.total as f64) * 100.0
@@ -529,26 +598,29 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
     ) -> Result<AnalyticsRoutingStatsResponse, ApiError> {
         let (start_ms, end_ms) = effective_window_bounds(query);
         let bucket = query_bucket_size_ms(start_ms, end_ms);
-        let base_where = base_where_clause(tenant_id, query.merchant_id.as_deref(), start_ms, end_ms);
-        let gateway_share = self.client.query(&format!(
-            "SELECT \
+        let base_where =
+            base_where_clause(tenant_id, query.merchant_id.as_deref(), start_ms, end_ms);
+        let gateway_share = self
+            .client
+            .query(&format!(
+                "SELECT \
                 intDiv(created_at_ms, {bucket}) * {bucket} AS bucket_ms, \
                 ifNull(gateway, 'unknown') AS gateway, \
                 count() AS count \
              FROM {DOMAIN_TABLE} {base_where} AND event_type = 'decision' \
              GROUP BY bucket_ms, gateway \
              ORDER BY bucket_ms ASC, gateway ASC"
-        ))
-        .fetch_all::<GatewaySharePointRow>()
-        .await
-        .map_err(|_| self.store_error())?
-        .into_iter()
-        .map(|row| AnalyticsGatewaySharePoint {
-            bucket_ms: row.bucket_ms,
-            gateway: row.gateway,
-            count: row.count as i64,
-        })
-        .collect();
+            ))
+            .fetch_all::<GatewaySharePointRow>()
+            .await
+            .map_err(|_| self.store_error())?
+            .into_iter()
+            .map(|row| AnalyticsGatewaySharePoint {
+                bucket_ms: row.bucket_ms,
+                gateway: row.gateway,
+                count: row.count as i64,
+            })
+            .collect();
 
         Ok(AnalyticsRoutingStatsResponse {
             generated_at_ms: now_ms(),
@@ -581,7 +653,9 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
             });
         }
 
-        let errors = self.load_error_summaries(tenant_id, query, Some(10)).await?;
+        let errors = self
+            .load_error_summaries(tenant_id, query, Some(10))
+            .await?;
         let total_errors = errors.iter().map(|entry| entry.count).sum();
         let (start_ms, end_ms) = effective_window_bounds(query);
         let base_where = format!(
@@ -591,32 +665,34 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
         let page = query.page.max(1);
         let page_size = query.page_size.clamp(1, 50);
         let offset = (page - 1) * page_size;
-        let samples = self.client.query(&format!(
-            "SELECT \
+        let samples = self
+            .client
+            .query(&format!(
+                "SELECT \
                 ifNull(route, 'unknown') AS route, merchant_id, payment_id, request_id, gateway, \
                 routing_approach, status, error_code, error_message, event_type, created_at_ms \
              FROM {DOMAIN_TABLE} {base_where} \
              ORDER BY created_at_ms DESC \
              LIMIT {page_size} OFFSET {offset}"
-        ))
-        .fetch_all::<LogSampleRow>()
-        .await
-        .map_err(|_| self.store_error())?
-        .into_iter()
-        .map(|row| AnalyticsLogSample {
-            route: row.route,
-            merchant_id: row.merchant_id,
-            payment_id: row.payment_id,
-            request_id: row.request_id,
-            gateway: row.gateway,
-            routing_approach: row.routing_approach,
-            status: row.status,
-            error_code: row.error_code,
-            error_message: row.error_message,
-            event_type: Some(row.event_type),
-            created_at_ms: row.created_at_ms,
-        })
-        .collect();
+            ))
+            .fetch_all::<LogSampleRow>()
+            .await
+            .map_err(|_| self.store_error())?
+            .into_iter()
+            .map(|row| AnalyticsLogSample {
+                route: row.route,
+                merchant_id: row.merchant_id,
+                payment_id: row.payment_id,
+                request_id: row.request_id,
+                gateway: row.gateway,
+                routing_approach: row.routing_approach,
+                status: row.status,
+                error_code: row.error_code,
+                error_message: row.error_message,
+                event_type: Some(row.event_type),
+                created_at_ms: row.created_at_ms,
+            })
+            .collect();
 
         Ok(AnalyticsLogSummariesResponse {
             generated_at_ms: now_ms(),
@@ -636,7 +712,8 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
         tenant_id: &str,
         query: &PaymentAuditQuery,
     ) -> Result<PaymentAuditResponse, ApiError> {
-        self.load_payment_audit_response(tenant_id, query, false).await
+        self.load_payment_audit_response(tenant_id, query, false)
+            .await
     }
 
     async fn preview_trace(
@@ -644,7 +721,8 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
         tenant_id: &str,
         query: &PaymentAuditQuery,
     ) -> Result<PaymentAuditResponse, ApiError> {
-        self.load_payment_audit_response(tenant_id, query, true).await
+        self.load_payment_audit_response(tenant_id, query, true)
+            .await
     }
 }
 
@@ -660,7 +738,11 @@ impl ClickHouseAnalyticsStore {
                 generated_at_ms: now_ms(),
                 scope: query.scope.as_str().to_string(),
                 merchant_id: query.merchant_id.clone(),
-                range: if query.start_ms.is_some() && query.end_ms.is_some() { "custom".to_string() } else { payment_audit_range(query) },
+                range: if query.start_ms.is_some() && query.end_ms.is_some() {
+                    "custom".to_string()
+                } else {
+                    payment_audit_range(query)
+                },
                 payment_id: query.payment_id.clone(),
                 request_id: query.request_id.clone(),
                 gateway: query.gateway.clone(),
@@ -676,7 +758,9 @@ impl ClickHouseAnalyticsStore {
             });
         }
 
-        let summary_rows = self.load_audit_summaries(tenant_id, query, preview_only).await?;
+        let summary_rows = self
+            .load_audit_summaries(tenant_id, query, preview_only)
+            .await?;
         let total_results = summary_rows.len();
         let page = query.page.max(1);
         let page_size = query.page_size.clamp(1, 50);
@@ -704,11 +788,25 @@ impl ClickHouseAnalyticsStore {
             generated_at_ms: now_ms(),
             scope: query.scope.as_str().to_string(),
             merchant_id: query.merchant_id.clone(),
-            range: if query.start_ms.is_some() && query.end_ms.is_some() { "custom".to_string() } else { payment_audit_range(query) },
-            payment_id: query.payment_id.clone().or_else(|| results.first().and_then(|row| row.payment_id.clone())),
-            request_id: query.request_id.clone().or_else(|| results.first().and_then(|row| row.request_id.clone())),
+            range: if query.start_ms.is_some() && query.end_ms.is_some() {
+                "custom".to_string()
+            } else {
+                payment_audit_range(query)
+            },
+            payment_id: query
+                .payment_id
+                .clone()
+                .or_else(|| results.first().and_then(|row| row.payment_id.clone())),
+            request_id: query
+                .request_id
+                .clone()
+                .or_else(|| results.first().and_then(|row| row.request_id.clone())),
             gateway: query.gateway.clone(),
-            route: if preview_only { Some("routing_evaluate".to_string()) } else { query.route.clone() },
+            route: if preview_only {
+                Some("routing_evaluate".to_string())
+            } else {
+                query.route.clone()
+            },
             status: query.status.clone(),
             event_type: query.event_type.clone(),
             error_code: query.error_code.clone(),
@@ -728,7 +826,9 @@ impl ClickHouseAnalyticsStore {
     ) -> Result<Vec<GatewayScoreSnapshot>, ApiError> {
         let (start_ms, end_ms) = effective_window_bounds(query);
         let filter_suffix = score_filters(query);
-        let limit_clause = limit.map(|value| format!("LIMIT {value}")).unwrap_or_default();
+        let limit_clause = limit
+            .map(|value| format!("LIMIT {value}"))
+            .unwrap_or_default();
         let sql = format!(
             "SELECT \
                 ifNull(merchant_id, '') AS merchant_id, \
@@ -822,7 +922,9 @@ impl ClickHouseAnalyticsStore {
         limit: Option<usize>,
     ) -> Result<Vec<AnalyticsErrorSummary>, ApiError> {
         let (start_ms, end_ms) = effective_window_bounds(query);
-        let limit_clause = limit.map(|value| format!("LIMIT {value}")).unwrap_or_default();
+        let limit_clause = limit
+            .map(|value| format!("LIMIT {value}"))
+            .unwrap_or_default();
         let sql = format!(
             "SELECT \
                 ifNull(route, 'unknown') AS route, \
@@ -846,14 +948,14 @@ impl ClickHouseAnalyticsStore {
             .fetch_all::<ErrorSummaryRow>()
             .await
             .map_err(|_| self.store_error())?
-        .into_iter()
-        .map(|row| AnalyticsErrorSummary {
-            route: row.route,
-            error_code: row.error_code,
-            error_message: row.error_message,
-            count: row.count as i64,
-            last_seen_ms: row.last_seen_ms,
-        })
+            .into_iter()
+            .map(|row| AnalyticsErrorSummary {
+                route: row.route,
+                error_code: row.error_code,
+                error_message: row.error_message,
+                count: row.count as i64,
+                last_seen_ms: row.last_seen_ms,
+            })
             .collect::<Vec<_>>()
             .pipe(Ok)
     }
@@ -865,7 +967,9 @@ impl ClickHouseAnalyticsStore {
         limit: Option<usize>,
     ) -> Result<Vec<AnalyticsRuleHit>, ApiError> {
         let (start_ms, end_ms) = effective_window_bounds(query);
-        let limit_clause = limit.map(|value| format!("LIMIT {value}")).unwrap_or_default();
+        let limit_clause = limit
+            .map(|value| format!("LIMIT {value}"))
+            .unwrap_or_default();
         let sql = format!(
             "SELECT ifNull(rule_name, 'unknown') AS rule_name, count() AS count \
              FROM {DOMAIN_TABLE} \
@@ -883,11 +987,11 @@ impl ClickHouseAnalyticsStore {
             .fetch_all::<RuleHitRow>()
             .await
             .map_err(|_| self.store_error())?
-        .into_iter()
-        .map(|row| AnalyticsRuleHit {
-            rule_name: row.rule_name,
-            count: row.count as i64,
-        })
+            .into_iter()
+            .map(|row| AnalyticsRuleHit {
+                rule_name: row.rule_name,
+                count: row.count as i64,
+            })
             .collect::<Vec<_>>()
             .pipe(Ok)
     }
@@ -907,7 +1011,8 @@ impl ClickHouseAnalyticsStore {
             tenant_id = escape_sql(tenant_id),
             merchant_filter = merchant_filter(query.merchant_id.as_deref()),
         );
-        let rows = self.client
+        let rows = self
+            .client
             .query(&sql)
             .fetch_all::<DistinctDimensionRow>()
             .await
@@ -1012,7 +1117,11 @@ impl ClickHouseAnalyticsStore {
                 latest_gateway: row.latest_gateway,
                 latest_stage: row.latest_stage.map(payment_audit_stage_label),
                 gateways: row.gateways,
-                routes: row.routes.into_iter().map(payment_audit_route_label).collect(),
+                routes: row
+                    .routes
+                    .into_iter()
+                    .map(payment_audit_route_label)
+                    .collect(),
             })
             .collect::<Vec<_>>()
             .pipe(Ok)
@@ -1137,7 +1246,9 @@ impl From<ApiEvent> for ClickHouseApiEventRow {
             ip_addr: event.ip_addr,
             url_path: event.url_path,
             response: event.response,
-            error: event.error.and_then(|value| serde_json::to_string(&value).ok()),
+            error: event
+                .error
+                .and_then(|value| serde_json::to_string(&value).ok()),
             event_type: event.event_type,
             http_method: event.http_method,
             infra_components: event
@@ -1212,7 +1323,10 @@ fn merchant_filter(merchant_id: Option<&str>) -> String {
 fn score_filters(query: &AnalyticsQuery) -> String {
     let mut filters = merchant_filter(query.merchant_id.as_deref());
     if let Some(value) = &query.payment_method_type {
-        filters.push_str(&format!(" AND payment_method_type = '{}'", escape_sql(value)));
+        filters.push_str(&format!(
+            " AND payment_method_type = '{}'",
+            escape_sql(value)
+        ));
     }
     if let Some(value) = &query.payment_method {
         filters.push_str(&format!(" AND payment_method = '{}'", escape_sql(value)));
@@ -1246,7 +1360,11 @@ fn score_filters(query: &AnalyticsQuery) -> String {
     filters
 }
 
-fn payment_audit_where_clause(tenant_id: &str, query: &PaymentAuditQuery, preview_only: bool) -> String {
+fn payment_audit_where_clause(
+    tenant_id: &str,
+    query: &PaymentAuditQuery,
+    preview_only: bool,
+) -> String {
     let (start_ms, end_ms) = effective_payment_audit_window_bounds(query);
     let mut filters = vec![
         format!("tenant_id = '{}'", escape_sql(tenant_id)),
@@ -1260,7 +1378,8 @@ fn payment_audit_where_clause(tenant_id: &str, query: &PaymentAuditQuery, previe
         filters.push("route = 'routing_evaluate'".to_string());
         filters.push("event_type IN ('rule_evaluation_preview', 'error')".to_string());
     } else {
-        filters.push("event_type IN ('decision', 'gateway_update', 'rule_hit', 'error')".to_string());
+        filters
+            .push("event_type IN ('decision', 'gateway_update', 'rule_hit', 'error')".to_string());
         if let Some(route) = &query.route {
             filters.push(format!("route = '{}'", escape_sql(route)));
         }
@@ -1291,7 +1410,10 @@ fn payment_audit_where_clause(tenant_id: &str, query: &PaymentAuditQuery, previe
 fn map_route_hits(rows: Vec<RouteHitRow>) -> Vec<AnalyticsRouteHit> {
     let mut counts = std::collections::HashMap::new();
     for row in rows {
-        counts.insert(row.route.unwrap_or_else(|| "unknown".to_string()), row.count as i64);
+        counts.insert(
+            row.route.unwrap_or_else(|| "unknown".to_string()),
+            row.count as i64,
+        );
     }
     [
         ("decide_gateway", "/decide_gateway"),

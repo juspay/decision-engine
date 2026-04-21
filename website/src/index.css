@@ -172,3 +172,17 @@
   opacity: 0.8;
   z-index: 100;
 }
+
+@keyframes analytics-progress {
+  0% {
+    transform: scaleX(0.18);
+  }
+
+  55% {
+    transform: scaleX(0.82);
+  }
+
+  100% {
+    transform: scaleX(0.96);
+  }
+}

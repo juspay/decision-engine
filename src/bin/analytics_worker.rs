@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_in_result)]
 
-use open_router::{logger, tenant::GlobalAppState};
+use open_router::{analytics::AnalyticsWorker, logger};
 
 #[allow(clippy::expect_used)]
 #[tokio::main]
@@ -11,10 +11,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _guard = logger::setup(
         &global_config.log,
         open_router::service_name!(),
-        ["tower_http"],
+        ["rdkafka", "tower_http"],
     );
 
-    #[allow(clippy::expect_used)]
     global_config
         .validate()
         .expect("Failed to validate application configuration");
@@ -23,17 +22,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .expect("Failed to fetch raw application secrets");
 
-    log_startup_configuration(&global_config);
-
-    let global_app_state = GlobalAppState::new(global_config.clone())
+    let worker = AnalyticsWorker::new(global_config.analytics.clone())
         .await
-        .expect("Failed while configuring global application state");
+        .expect("Failed to initialize analytics worker");
 
-    // Run both servers concurrently using tokio::spawn
-    let main_server_handle = tokio::spawn(async move {
-        open_router::app::server_builder(global_app_state)
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .expect("Failed to create SIGTERM handler");
+
+    let worker_handle = tokio::spawn(async move {
+        worker
+            .run_until_shutdown(async move {
+                let _ = sigterm.recv().await;
+                open_router::logger::info!("SIGTERM signal received, stopping analytics worker");
+            })
             .await
-            .expect("Failed while building the main server")
+            .expect("Analytics worker exited unexpectedly")
     });
 
     let metrics_server_handle = tokio::spawn(async move {
@@ -42,12 +45,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .expect("Failed while building the metrics server")
     });
 
-    // Wait for both servers to complete (they should run indefinitely)
-    tokio::try_join!(main_server_handle, metrics_server_handle)?;
+    tokio::try_join!(worker_handle, metrics_server_handle)?;
 
     Ok(())
-}
-
-fn log_startup_configuration(global_config: &open_router::config::GlobalConfig) {
-    logger::info!("Decision engine started [{:?}]", global_config);
 }

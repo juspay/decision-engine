@@ -368,6 +368,22 @@ function PendingState({ title, body }: { title: string; body: string }) {
   )
 }
 
+function RefreshingState({ label }: { label: string }) {
+  return (
+    <div className="overflow-hidden rounded-[22px] border border-brand-500/20 bg-white shadow-[0_10px_30px_-24px_rgba(0,105,237,0.9)] dark:bg-[#0c0c0e]">
+      <div className="h-2 w-full bg-brand-500/15">
+        <div className="h-full origin-left animate-[analytics-progress_1.8s_ease-in-out_infinite] rounded-r-full bg-brand-500" />
+      </div>
+      <div className="flex items-center justify-between gap-3 px-4 py-3">
+        <p className="text-sm font-medium text-slate-900 dark:text-white">{label}</p>
+        <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-brand-600 dark:text-brand-300">
+          Loading
+        </span>
+      </div>
+    </div>
+  )
+}
+
 function controlClassName() {
   return 'h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 shadow-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-[#27272a] dark:bg-[#121214] dark:text-[#e5e7eb]'
 }
@@ -642,6 +658,13 @@ export function AnalyticsPage() {
     null
   const loading = view === 'transactions' ? transactionLoading : ruleBasedLoading
   const error = view === 'transactions' ? transactionError : ruleBasedError
+  const transactionRefreshing =
+    !transactionLoading &&
+    (overview.isValidating || routing.isValidating || filteredRouting.isValidating)
+  const ruleBasedRefreshing =
+    !ruleBasedLoading &&
+    (overview.isValidating || previewTrace.isValidating || previewList.isValidating)
+  const refreshing = view === 'transactions' ? transactionRefreshing : ruleBasedRefreshing
 
   const availableFilters: RoutingFilterOptions = {
     dimensions:
@@ -1204,8 +1227,23 @@ export function AnalyticsPage() {
         </div>
       ) : null}
 
+      {refreshing ? (
+        <RefreshingState
+          label={
+            view === 'transactions'
+              ? `Refreshing transaction analytics for ${activeWindowLabel.toLowerCase()}`
+              : `Refreshing rule-based analytics for ${activeWindowLabel.toLowerCase()}`
+          }
+        />
+      ) : null}
+
+      <div className="relative">
+        {refreshing ? (
+          <div className="pointer-events-none absolute inset-0 z-20 rounded-[28px] bg-white/45 backdrop-blur-[1px] dark:bg-[#050507]/45" />
+        ) : null}
+
       {view === 'transactions' ? (
-        <>
+        <div className={refreshing ? 'transition-opacity duration-200 opacity-60' : 'transition-opacity duration-200 opacity-100'}>
           <section className="space-y-4">
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -1487,9 +1525,9 @@ export function AnalyticsPage() {
           )}
         </CardBody>
       </Card>
-        </>
+        </div>
       ) : (
-        <>
+        <div className={refreshing ? 'transition-opacity duration-200 opacity-60' : 'transition-opacity duration-200 opacity-100'}>
           <section className="space-y-4">
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -1867,8 +1905,9 @@ export function AnalyticsPage() {
               </Card>
             </div>
           </div>
-        </>
+        </div>
       )}
+      </div>
     </div>
   )
 }

@@ -25,6 +25,7 @@ import {
 } from '../../types/api'
 import { Badge } from '../ui/Badge'
 import { Card as GlassCard, SurfaceLabel } from '../ui/Card'
+import { Spinner } from '../ui/Spinner'
 
 const OVERVIEW_RANGE_OPTIONS: {
   value: AnalyticsRange
@@ -177,6 +178,25 @@ function EmptyWorkspace() {
   )
 }
 
+function RefreshingState({ label }: { label: string }) {
+  return (
+    <div className="overflow-hidden rounded-[22px] border border-brand-500/20 bg-white shadow-[0_10px_30px_-24px_rgba(0,105,237,0.9)] dark:bg-[#0c0c0e]">
+      <div className="h-2 w-full bg-brand-500/15">
+        <div className="h-full origin-left animate-[analytics-progress_1.8s_ease-in-out_infinite] rounded-r-full bg-brand-500" />
+      </div>
+      <div className="flex items-center justify-between gap-3 px-4 py-3">
+        <div className="flex items-center gap-2">
+          <Spinner size={14} />
+          <p className="text-sm font-medium text-slate-900 dark:text-white">{label}</p>
+        </div>
+        <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-brand-600 dark:text-brand-300">
+          Loading
+        </span>
+      </div>
+    </div>
+  )
+}
+
 export function OverviewPage() {
   const navigate = useNavigate()
   const { merchantId } = useMerchantStore()
@@ -206,11 +226,13 @@ export function OverviewPage() {
     refreshInterval: 15000,
     revalidateOnFocus: true,
     shouldRetryOnError: false,
+    keepPreviousData: true,
   })
   const analyticsRouting = useSWR<AnalyticsRoutingStatsResponse>(analyticsRoutingUrl, fetcher, {
     refreshInterval: 15000,
     revalidateOnFocus: true,
     shouldRetryOnError: false,
+    keepPreviousData: true,
   })
 
   const activeRouting = activeAlgorithms?.[0] || null
@@ -292,6 +314,14 @@ export function OverviewPage() {
       : health === 'down'
         ? { label: 'Attention needed', variant: 'red' as const }
         : { label: 'Checking status', variant: 'gray' as const }
+  const analyticsLoading =
+    merchantId &&
+    ((!analyticsOverview.data && analyticsOverview.isLoading) ||
+      (!analyticsRouting.data && analyticsRouting.isLoading))
+  const analyticsRefreshing =
+    Boolean(merchantId) &&
+    !analyticsLoading &&
+    (analyticsOverview.isValidating || analyticsRouting.isValidating)
 
   return (
     <div className="relative mx-auto max-w-[1380px]">
@@ -346,7 +376,19 @@ export function OverviewPage() {
           <EmptyWorkspace />
         ) : (
           <>
-            <div className="grid gap-5 pt-8 xl:grid-cols-[1.15fr_0.85fr]">
+            {analyticsLoading ? (
+              <div className="pt-8">
+                <RefreshingState label={`Loading overview analytics for ${selectedWindow.detail.toLowerCase()}`} />
+              </div>
+            ) : null}
+
+            {analyticsRefreshing ? (
+              <div className="pt-8">
+                <RefreshingState label={`Refreshing overview analytics for ${selectedWindow.detail.toLowerCase()}`} />
+              </div>
+            ) : null}
+
+            <div className={`grid gap-5 pt-8 xl:grid-cols-[1.15fr_0.85fr] transition-opacity duration-200 ${analyticsRefreshing ? 'opacity-60' : 'opacity-100'}`}>
               <GlassCard className="p-6 md:p-7">
                 <div className="flex h-full flex-col justify-between">
                   <div>
@@ -413,7 +455,7 @@ export function OverviewPage() {
               </div>
             </div>
 
-            <div className="mt-6 grid gap-6 xl:grid-cols-[1.02fr_0.98fr]">
+            <div className={`mt-6 grid gap-6 xl:grid-cols-[1.02fr_0.98fr] transition-opacity duration-200 ${analyticsRefreshing ? 'opacity-60' : 'opacity-100'}`}>
               <GlassCard className="p-6">
                 <div className="flex items-center justify-between gap-4">
                   <div>
@@ -529,7 +571,7 @@ export function OverviewPage() {
               </GlassCard>
             </div>
 
-            <div className="mt-6 grid gap-6 xl:grid-cols-[0.86fr_1.14fr]">
+            <div className={`mt-6 grid gap-6 xl:grid-cols-[0.86fr_1.14fr] transition-opacity duration-200 ${analyticsRefreshing ? 'opacity-60' : 'opacity-100'}`}>
               <GlassCard className="p-6">
                 <SurfaceLabel>Quick summary</SurfaceLabel>
                 <div className="mt-5 space-y-4">

@@ -6,11 +6,12 @@ use tokio::sync::mpsc;
 
 use crate::analytics::clickhouse::ClickHouseAnalyticsStore;
 use crate::analytics::events::{ApiEvent, DomainAnalyticsEvent};
+use crate::analytics::kafka::KafkaAnalyticsStore;
 use crate::analytics::store::{
-    AnalyticsReadStore, AnalyticsWriteStore, NoopAnalyticsWriteStore,
-    UnavailableAnalyticsReadStore,
+    AnalyticsReadStore, AnalyticsWriteStore, NoopAnalyticsWriteStore, UnavailableAnalyticsReadStore,
 };
 use crate::config::AnalyticsConfig;
+use crate::error::ConfigurationError;
 use crate::metrics::{ANALYTICS_EVENTS_DROPPED_TOTAL, ANALYTICS_SINK_QUEUE_DEPTH};
 
 #[derive(Clone)]
@@ -25,33 +26,28 @@ pub struct AnalyticsRuntime {
 }
 
 impl AnalyticsRuntime {
-    pub async fn new(config: AnalyticsConfig) -> Arc<Self> {
+    pub async fn new(config: AnalyticsConfig) -> Result<Arc<Self>, ConfigurationError> {
         let (read_store, write_store): (Arc<dyn AnalyticsReadStore>, Arc<dyn AnalyticsWriteStore>) =
-            if !config.enabled || !config.clickhouse.enabled {
+            if !config.enabled {
                 (
                     Arc::new(UnavailableAnalyticsReadStore),
                     Arc::new(NoopAnalyticsWriteStore),
                 )
             } else {
-                match ClickHouseAnalyticsStore::new(config.clickhouse.clone()).await {
-                    Ok(store) => {
-                        let store = Arc::new(store);
-                        (store.clone(), store)
-                    }
-                    Err(error) => {
-                        crate::logger::warn!(
-                            error = %error,
-                            "Failed to initialize ClickHouse analytics store"
-                        );
-                        (
-                            Arc::new(UnavailableAnalyticsReadStore),
-                            Arc::new(NoopAnalyticsWriteStore),
-                        )
-                    }
-                }
+                let clickhouse_store = Arc::new(
+                    ClickHouseAnalyticsStore::new(config.clickhouse.clone())
+                        .await
+                        .map_err(|_| {
+                            ConfigurationError::InvalidConfigurationValueError(
+                                "analytics.clickhouse".to_string(),
+                            )
+                        })?,
+                );
+                let kafka_store = Arc::new(KafkaAnalyticsStore::new(config.kafka.clone()).await?);
+                (clickhouse_store, kafka_store)
             };
 
-        let queue_capacity = config.clickhouse.queue_capacity.max(1);
+        let queue_capacity = config.kafka.queue_capacity.max(1);
         let (domain_tx, domain_rx) = mpsc::channel(queue_capacity);
         let (api_tx, api_rx) = mpsc::channel(queue_capacity);
 
@@ -68,15 +64,27 @@ impl AnalyticsRuntime {
         runtime.spawn_domain_worker(domain_rx);
         runtime.spawn_api_worker(api_rx);
 
-        runtime
+        Ok(runtime)
     }
 
     pub fn read_store(&self) -> Arc<dyn AnalyticsReadStore> {
         self.read_store.clone()
     }
 
+    pub fn is_enabled(&self) -> bool {
+        self.config.enabled
+    }
+
     pub fn body_max_bytes(&self) -> usize {
-        self.config.clickhouse.body_max_bytes
+        self.config.capture.body_max_bytes
+    }
+
+    pub fn request_body_limit_bytes(&self) -> usize {
+        self.config.capture.request_body_limit_bytes
+    }
+
+    pub fn details_max_bytes(&self) -> usize {
+        self.config.capture.details_max_bytes
     }
 
     pub fn enqueue_domain_event(&self, event: DomainAnalyticsEvent) {
@@ -113,8 +121,8 @@ impl AnalyticsRuntime {
 
     fn spawn_domain_worker(self: &Arc<Self>, mut receiver: mpsc::Receiver<DomainAnalyticsEvent>) {
         let write_store = self.write_store.clone();
-        let batch_size = self.config.clickhouse.batch_size.max(1);
-        let flush_interval = Duration::from_millis(self.config.clickhouse.flush_interval_ms.max(1));
+        let batch_size = self.config.worker.batch_size.max(1);
+        let flush_interval = Duration::from_millis(self.config.worker.flush_interval_ms.max(1));
         let depth = self.domain_depth.clone();
 
         tokio::spawn(async move {
@@ -150,8 +158,8 @@ impl AnalyticsRuntime {
 
     fn spawn_api_worker(self: &Arc<Self>, mut receiver: mpsc::Receiver<ApiEvent>) {
         let write_store = self.write_store.clone();
-        let batch_size = self.config.clickhouse.batch_size.max(1);
-        let flush_interval = Duration::from_millis(self.config.clickhouse.flush_interval_ms.max(1));
+        let batch_size = self.config.worker.batch_size.max(1);
+        let flush_interval = Duration::from_millis(self.config.worker.flush_interval_ms.max(1));
         let depth = self.api_depth.clone();
 
         tokio::spawn(async move {
@@ -215,7 +223,8 @@ fn update_depth(stream: &'static str, depth: &AtomicUsize, delta: isize) {
     let new_value = if delta.is_positive() {
         depth.fetch_add(delta as usize, Ordering::Relaxed) + delta as usize
     } else {
-        depth.fetch_sub(delta.unsigned_abs(), Ordering::Relaxed)
+        depth
+            .fetch_sub(delta.unsigned_abs(), Ordering::Relaxed)
             .saturating_sub(delta.unsigned_abs())
     };
 

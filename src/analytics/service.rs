@@ -24,12 +24,34 @@ fn event_type_label(kind: &str) -> &'static str {
 }
 
 fn enqueue_domain_event(event: DomainAnalyticsEvent) {
+    let event = truncate_domain_event_details(event);
     let label = event_type_label(event.event_type.as_str());
     ANALYTICS_EVENT_COUNTER.with_label_values(&[label]).inc();
 
     if let Some(global_state) = crate::app::APP_STATE.get() {
         global_state.analytics_runtime.enqueue_domain_event(event);
     }
+}
+
+fn truncate_domain_event_details(mut event: DomainAnalyticsEvent) -> DomainAnalyticsEvent {
+    let Some(details) = event.details.take() else {
+        return event;
+    };
+
+    let max_bytes = crate::app::APP_STATE
+        .get()
+        .map(|state| state.analytics_runtime.details_max_bytes())
+        .unwrap_or_else(|| crate::config::AnalyticsCaptureConfig::default().details_max_bytes);
+
+    if details.len() <= max_bytes {
+        event.details = Some(details);
+        return event;
+    }
+
+    let mut truncated = details;
+    truncated.truncate(max_bytes);
+    event.details = Some(truncated);
+    event
 }
 
 pub fn record_decision_event(
@@ -46,6 +68,7 @@ pub fn record_decision_event(
     event_stage: Option<String>,
     payment_method_type: Option<String>,
     payment_method: Option<String>,
+    auth_type: Option<String>,
 ) {
     let approach = routing_approach
         .clone()
@@ -67,7 +90,7 @@ pub fn record_decision_event(
         card_is_in: None,
         currency: None,
         country: None,
-        auth_type: None,
+        auth_type,
         gateway,
         event_stage,
         routing_approach,
@@ -282,6 +305,7 @@ pub fn record_error_event(
     error_message: String,
     details: Option<String>,
     event_stage: Option<String>,
+    auth_type: Option<String>,
 ) {
     enqueue_domain_event(DomainAnalyticsEvent {
         event_id: crate::analytics::next_event_id(now_ms()),
@@ -296,7 +320,7 @@ pub fn record_error_event(
         card_is_in: None,
         currency: None,
         country: None,
-        auth_type: None,
+        auth_type,
         gateway,
         event_stage,
         routing_approach,
@@ -321,6 +345,7 @@ pub fn record_request_hit_event(
     merchant_id: Option<String>,
     payment_id: Option<String>,
     request_id: Option<String>,
+    auth_type: Option<String>,
 ) {
     enqueue_domain_event(DomainAnalyticsEvent {
         event_id: crate::analytics::next_event_id(now_ms()),
@@ -335,7 +360,7 @@ pub fn record_request_hit_event(
         card_is_in: None,
         currency: None,
         country: None,
-        auth_type: None,
+        auth_type,
         gateway: None,
         event_stage: Some("request_received".to_string()),
         routing_approach: None,

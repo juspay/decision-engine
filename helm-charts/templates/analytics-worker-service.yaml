@@ -1,0 +1,19 @@
+{{- if .Values.analyticsWorker.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "decision-engine.fullname" . }}-analytics-worker
+  labels:
+    {{- include "decision-engine.labels" . | nindent 4 }}
+    app.kubernetes.io/component: {{ .Values.analyticsWorker.metadata.labels.component }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: metrics
+      port: {{ .Values.analyticsWorker.service.port }}
+      targetPort: {{ .Values.decisionEngine.metrics.port }}
+      protocol: TCP
+  selector:
+    {{- include "decision-engine.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: {{ .Values.analyticsWorker.metadata.labels.component }}
+{{- end }}

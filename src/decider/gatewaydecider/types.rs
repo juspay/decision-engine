@@ -1003,6 +1003,13 @@ impl DomainDeciderRequestForApiCallV2 {
         &self.payment_info.payment_method
     }
 
+    pub fn auth_type(&self) -> Option<String> {
+        self.payment_info
+            .auth_type
+            .as_ref()
+            .map(ToString::to_string)
+    }
+
     pub async fn to_domain_decider_request(&self) -> DomainDeciderRequest {
         DomainDeciderRequest {
             orderReference: ETO::Order {

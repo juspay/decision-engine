@@ -75,6 +75,43 @@ lazy_static! {
         &["stream"]
     ).unwrap();
 
+    pub static ref ANALYTICS_KAFKA_PRODUCE_TOTAL: IntCounterVec = register_int_counter_vec!(
+        "analytics_kafka_produce_total",
+        "Count of Kafka analytics produce attempts grouped by stream and result",
+        &["stream", "result"]
+    ).unwrap();
+
+    pub static ref ANALYTICS_KAFKA_DELIVERY_LATENCY_HISTOGRAM: HistogramVec = register_histogram_vec!(
+        "analytics_kafka_delivery_latency_seconds",
+        "Latency of Kafka analytics delivery acknowledgements",
+        &["stream"],
+        exponential_buckets(0.001, 2.0, 12).unwrap()
+    ).unwrap();
+
+    pub static ref ANALYTICS_WORKER_BATCHES_TOTAL: IntCounterVec = register_int_counter_vec!(
+        "analytics_worker_batches_total",
+        "Count of analytics worker batch flush attempts grouped by stream and result",
+        &["stream", "result"]
+    ).unwrap();
+
+    pub static ref ANALYTICS_CAPTURE_TRUNCATIONS_TOTAL: IntCounterVec = register_int_counter_vec!(
+        "analytics_capture_truncations_total",
+        "Count of truncated captured HTTP bodies grouped by direction",
+        &["direction"]
+    ).unwrap();
+
+    pub static ref ANALYTICS_REQUEST_BODY_REJECTIONS_TOTAL: IntCounterVec = register_int_counter_vec!(
+        "analytics_request_body_rejections_total",
+        "Count of request body limit rejections grouped by endpoint",
+        &["endpoint"]
+    ).unwrap();
+
+    pub static ref ANALYTICS_WORKER_RETRY_TOTAL: IntCounterVec = register_int_counter_vec!(
+        "analytics_worker_retry_total",
+        "Count of analytics worker retries grouped by stream",
+        &["stream"]
+    ).unwrap();
+
 }
 
 pub async fn metrics_handler() -> error_stack::Result<String, MetricsError> {

@@ -1,0 +1,90 @@
+{{- if .Values.analyticsWorker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "decision-engine.fullname" . }}-analytics-worker
+  labels:
+    {{- include "decision-engine.labels" . | nindent 4 }}
+    app.kubernetes.io/component: {{ .Values.analyticsWorker.metadata.labels.component }}
+spec:
+  replicas: {{ .Values.analyticsWorker.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "decision-engine.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: {{ .Values.analyticsWorker.metadata.labels.component }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "decision-engine.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: {{ .Values.analyticsWorker.metadata.labels.component }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "decision-engine.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: analytics-worker
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.analyticsWorker.image.repository }}:{{ .Values.analyticsWorker.image.version | default .Values.image.version | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.analyticsWorker.image.pullPolicy | default .Values.image.pullPolicy }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.decisionEngine.metrics.port }}
+              protocol: TCP
+          {{- if .Values.analyticsWorker.extraEnvVars }}
+          env:
+          {{- range $name, $value := .Values.analyticsWorker.extraEnvVars }}
+            - name: {{ $name }}
+            {{- if and (kindIs "map" $value) $value.valueFrom }}
+              valueFrom:
+                {{- toYaml $value.valueFrom | nindent 16 }}
+            {{- else }}
+              value: {{ $value | quote }}
+            {{- end }}
+          {{- end }}
+          {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+          resources:
+            {{- toYaml .Values.analyticsWorker.resources | nindent 12 }}
+          volumeMounts:
+            - name: config-volume
+              mountPath: /local/config/development.toml
+              subPath: development.toml
+      volumes:
+        - name: config-volume
+          configMap:
+            name: {{ include "decision-engine.fullname" . }}-config
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

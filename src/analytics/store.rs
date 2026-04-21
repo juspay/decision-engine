@@ -66,7 +66,10 @@ pub struct NoopAnalyticsWriteStore;
 
 #[async_trait]
 impl AnalyticsWriteStore for NoopAnalyticsWriteStore {
-    async fn persist_domain_events(&self, _events: &[DomainAnalyticsEvent]) -> Result<(), ApiError> {
+    async fn persist_domain_events(
+        &self,
+        _events: &[DomainAnalyticsEvent],
+    ) -> Result<(), ApiError> {
         Ok(())
     }
 

@@ -18,13 +18,12 @@
 //     utils,
 // };
 
-use crate::decider::gatewaydecider::types::{ErrorResponse, UnifiedError};
+use crate::decider::gatewaydecider::types::ErrorResponse;
 use crate::feedback::gateway_scoring_service::check_and_update_gateway_score_;
 use crate::feedback::types::{UpdateScorePayload, UpdateScoreResponse};
 use crate::metrics::API_LATENCY_HISTOGRAM;
 use crate::metrics::API_REQUEST_COUNTER;
 use crate::metrics::API_REQUEST_TOTAL_COUNTER;
-use axum::body::to_bytes;
 use axum::extract::Json;
 
 #[axum::debug_handler]
@@ -53,14 +52,16 @@ pub async fn update_gateway_score(
     for (name, value) in headers.iter() {
         crate::logger::debug!(tag = "UpdateGatewayScore", "Header: {}: {:?}", name, value);
     }
-    let body = match to_bytes(req.into_body(), usize::MAX).await {
+    let body = match crate::routes::body::read_request_body(req.into_body()).await {
         Ok(body) => {
             crate::logger::debug!(tag = "UpdateGatewayScore", "Body: {:?}", body);
 
             body
         }
         Err(e) => {
+            crate::routes::body::observe_request_body_error("update_gateway_score", &e);
             crate::logger::debug!(tag = "UpdateGatewayScore", "Error: {:?}", e);
+            let (error_code, error_message) = e.analytics_code_and_message();
             crate::analytics::record_error_event(
                 x_tenant_id.clone(),
                 "update_gateway_score",
@@ -69,30 +70,17 @@ pub async fn update_gateway_score(
                 None,
                 None,
                 None,
-                "400".to_string(),
-                "Error parsing request".to_string(),
+                error_code.to_string(),
+                error_message.to_string(),
                 Some("request body parse failure".to_string()),
-                Some("request_parse_failed".to_string()),
+                Some(e.analytics_stage().to_string()),
+                None,
             );
             API_REQUEST_COUNTER
                 .with_label_values(&["update_gateway_score", "failure"])
                 .inc();
             timer.observe_duration();
-            return Err(ErrorResponse {
-                status: "400".to_string(),
-                error_code: "400".to_string(),
-                error_message: "Error parsing request".to_string(),
-                priority_logic_tag: None,
-                routing_approach: None,
-                filter_wise_gateways: None,
-                error_info: UnifiedError {
-                    code: "INVALID_INPUT".to_string(),
-                    user_message: "Invalid request params. Please verify your input.".to_string(),
-                    developer_message: e.to_string(),
-                },
-                priority_logic_output: None,
-                is_dynamic_mga_enabled: false,
-            });
+            return Err(e.into_error_response());
         }
     };
 
@@ -108,6 +96,7 @@ pub async fn update_gateway_score(
                 Some(merchant_id.clone()),
                 Some(payment_id.clone()),
                 x_request_id.clone(),
+                None,
             );
             let result = check_and_update_gateway_score_(payload.clone()).await;
             match result {
@@ -175,6 +164,7 @@ pub async fn update_gateway_score(
                         }))
                         .ok(),
                         Some("score_update_failed".to_string()),
+                        None,
                     );
                     timer.observe_duration();
                     println!("Error: {:?}", e);
@@ -196,26 +186,16 @@ pub async fn update_gateway_score(
                 "Error parsing request".to_string(),
                 Some("request body parse failure".to_string()),
                 Some("request_parse_failed".to_string()),
+                None,
             );
             API_REQUEST_COUNTER
                 .with_label_values(&["update_gateway_score", "failure"])
                 .inc();
             timer.observe_duration();
-            Err(ErrorResponse {
-                status: "400".to_string(),
-                error_code: "400".to_string(),
-                error_message: "Error parsing request".to_string(),
-                priority_logic_tag: None,
-                routing_approach: None,
-                filter_wise_gateways: None,
-                error_info: UnifiedError {
-                    code: "INVALID_INPUT".to_string(),
-                    user_message: "Invalid request params. Please verify your input.".to_string(),
-                    developer_message: e.to_string(),
-                },
-                priority_logic_output: None,
-                is_dynamic_mga_enabled: false,
-            })
+            Err(
+                crate::routes::body::RequestBodyError::Read(axum::Error::new(e))
+                    .into_error_response(),
+            )
         }
     }
 }

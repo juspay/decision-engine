@@ -188,6 +188,21 @@ groovyRunner:
     labels:
       component: groovy-runner
 
+analyticsWorker:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: "ghcr.io/juspay/decision-engine/postgres-analytics-worker"
+    version: "v1.4"
+    pullPolicy: "Always"
+  service:
+    port: 9090
+  resources: {}
+  extraEnvVars: {}
+  metadata:
+    labels:
+      component: analytics-worker
+
 # Database Migration Job
 dbMigration:
   enabled: true

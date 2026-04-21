@@ -12,7 +12,6 @@ use crate::types::card::txn_card_info::{convert_safe_to_txn_card_info, SafeTxnCa
 use crate::types::txn_details::types::{
     convert_safe_txn_detail_to_txn_detail, SafeTxnDetail, TransactionLatency,
 };
-use axum::body::to_bytes;
 use cpu_time::ProcessTime;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -63,28 +62,16 @@ pub async fn update_score(
         .to_string();
     tracing::Span::current().record("is_audit_trail_log", "true");
     // Buffer the body into memory
-    let body_bytes = match to_bytes(req.into_body(), usize::MAX).await {
+    let body_bytes = match crate::routes::body::read_request_body(req.into_body()).await {
         Ok(bytes) => bytes,
         Err(e) => {
+            crate::routes::body::observe_request_body_error("update_score", &e);
             API_REQUEST_COUNTER
                 .with_label_values(&["update_score", "failure"])
                 .inc();
             timer.observe_duration();
-            let error_response = ErrorResponse {
-                status: "400".to_string(),
-                error_code: "400".to_string(),
-                error_message: "Error parsing request".to_string(),
-                priority_logic_tag: None,
-                routing_approach: None,
-                filter_wise_gateways: None,
-                error_info: UnifiedError {
-                    code: "INVALID_INPUT".to_string(),
-                    user_message: "Invalid request params. Please verify your input.".to_string(),
-                    developer_message: e.to_string(),
-                },
-                priority_logic_output: None,
-                is_dynamic_mga_enabled: false,
-            };
+            let analytics_stage = e.analytics_stage().to_string();
+            let error_response = e.into_error_response();
 
             // Log the error
             let latency = start_time.elapsed().as_millis() as u64;
@@ -105,7 +92,8 @@ pub async fn update_score(
                     "query_params": query_params,
                 }))
                 .ok(),
-                Some("request_parse_failed".to_string()),
+                Some(analytics_stage),
+                None,
             );
 
             logger::error!(
@@ -119,10 +107,10 @@ pub async fn update_score(
                 x_request_id = x_request_id,
                 env = std::env::var("APP_ENV").unwrap_or_else(|_| "development".to_string()),
                 action = "POST",
-                error_code = error_response.error_code,
-                error_message = error_response.error_message,
-                developer_message = error_response.error_info.developer_message,
-                user_message = error_response.error_info.user_message,
+                error_code = error_response.error_code.clone(),
+                error_message = error_response.error_message.clone(),
+                developer_message = error_response.error_info.developer_message.clone(),
+                user_message = error_response.error_info.user_message.clone(),
                 req_body = "Failed to parse body",
                 req_headers = format!("{:?}", headers),
                 level = "Error",
@@ -181,6 +169,7 @@ pub async fn update_score(
                     }))
                     .ok(),
                     Some("validation_failed".to_string()),
+                    None,
                 );
 
                 logger::error!(
