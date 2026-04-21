@@ -10,6 +10,7 @@ pub struct MerchantAccountCreateResponse {
     pub message: String,
     pub merchant_id: String,
     pub gateway_success_rate_based_decider_input: Option<String>,
+    pub api_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -106,10 +107,16 @@ pub async fn create_merchant_config(
             API_REQUEST_COUNTER
                 .with_label_values(&["merchant_account_create", "success"])
                 .inc();
+            let api_key = crate::routes::api_key::insert_api_key_for_merchant(
+                &merchant_id,
+                Some("Default API key".to_string()),
+            )
+            .await;
             Ok(Json(MerchantAccountCreateResponse {
                 message: "Merchant account created successfully".to_string(),
                 merchant_id,
                 gateway_success_rate_based_decider_input,
+                api_key,
             }))
         }
         Err(e) => {
