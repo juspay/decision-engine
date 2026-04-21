@@ -100,11 +100,6 @@ export function DecisionExplorerPage() {
   const routingConfigUnavailable = !routingKeysLoading && (!hasRoutingKeys || Boolean(routingKeysError))
   const [activeTab, setActiveTab] = useState<TabType>('single')
 
-  function switchTab(tab: TabType) {
-    setActiveTab(tab)
-    setError(null)
-  }
-
   const [form, setForm] = useState<FormState>({
     amount: '1000',
     currency: '',
@@ -495,25 +490,25 @@ export function DecisionExplorerPage() {
 
       <div className="flex gap-2 border-b border-slate-200 dark:border-[#1c1c24]">
         <button
-          onClick={() => switchTab('single')}
+          onClick={() => setActiveTab('single')}
           className={`px-4 py-2 text-sm font-medium ${activeTab === 'single' ? 'text-brand-500 border-b-2 border-brand-500' : 'text-slate-500 hover:text-slate-700'}`}
         >
           Single Test
         </button>
         <button
-          onClick={() => switchTab('batch')}
+          onClick={() => setActiveTab('batch')}
           className={`px-4 py-2 text-sm font-medium ${activeTab === 'batch' ? 'text-brand-500 border-b-2 border-brand-500' : 'text-slate-500 hover:text-slate-700'}`}
         >
           Batch Simulation
         </button>
         <button
-          onClick={() => switchTab('rule')}
+          onClick={() => setActiveTab('rule')}
           className={`px-4 py-2 text-sm font-medium ${activeTab === 'rule' ? 'text-brand-500 border-b-2 border-brand-500' : 'text-slate-500 hover:text-slate-700'}`}
         >
           Rule-Based
         </button>
         <button
-          onClick={() => switchTab('volume')}
+          onClick={() => setActiveTab('volume')}
           className={`px-4 py-2 text-sm font-medium ${activeTab === 'volume' ? 'text-brand-500 border-b-2 border-brand-500' : 'text-slate-500 hover:text-slate-700'}`}
         >
           Volume Split

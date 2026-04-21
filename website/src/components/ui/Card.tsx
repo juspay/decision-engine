@@ -9,11 +9,9 @@ interface CardProps {
 export function Card({ children, className = '', onClick }: CardProps) {
   return (
     <div
-      className={`bg-white dark:bg-[#0c0c10] border border-[#e6e6ee] dark:border-[#1a1a24] rounded-lg transition-all duration-200 ${
-        onClick ? 'cursor-pointer hover:border-slate-300 dark:hover:border-[#222230] hover:shadow-sm' : ''
-      } ${className}`}
+      className={`glass-panel rounded-[20px] ${onClick ? 'glass-panel-hover cursor-pointer' : ''} ${className}`}
       onClick={onClick}
-      role={onClick ? 'button' : undefined}
+      role={onClick ? "button" : undefined}
       tabIndex={onClick ? 0 : undefined}
     >
       {children}
@@ -23,12 +21,12 @@ export function Card({ children, className = '', onClick }: CardProps) {
 
 export function CardHeader({ children, className = '' }: CardProps) {
   return (
-    <div className={`px-5 py-4 border-b border-[#e6e6ee] dark:border-[#1a1a24] bg-[#fafafa] dark:bg-[#0c0c10] rounded-t-lg ${className}`}>
+    <div className={`px-6 py-5 border-b border-slate-200 dark:border-[#1c1c1f] bg-slate-50 dark:bg-[#0c0c0e] rounded-t-[20px] ${className}`}>
       {children}
     </div>
   )
 }
 
 export function CardBody({ children, className = '' }: CardProps) {
-  return <div className={`px-5 py-4 ${className}`}>{children}</div>
+  return <div className={`px-6 py-5 ${className}`}>{children}</div>
 }

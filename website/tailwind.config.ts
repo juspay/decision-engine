@@ -7,17 +7,16 @@ export default {
     extend: {
       colors: {
         brand: {
-          DEFAULT: '#006df9',
-          50: '#eff6ff',
-          100: '#dbeafe',
-          300: '#7cb9fc',
-          500: '#1272f9',
-          600: '#006df9',
-          700: '#0057cc',
+          DEFAULT: '#4f46e5',
+          50: '#eef2ff',
+          100: '#e0e7ff',
+          500: '#6366f1',
+          600: '#4f46e5',
+          700: '#4338ca',
         },
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+        sans: ['Outfit', 'Inter', 'system-ui', '-apple-system', 'sans-serif'],
         mono: ['JetBrains Mono', 'Menlo', 'Monaco', 'monospace'],
       },
       letterSpacing: {
