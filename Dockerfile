@@ -20,6 +20,7 @@ FROM debian:bookworm
 ARG CONFIG_DIR=/local/config
 ARG BIN_DIR=/local
 ARG BINARY=open_router
+ENV BINARY=${BINARY}
 
 RUN apt-get update \
     && apt-get install -y ca-certificates tzdata libpq-dev curl procps libmariadb-dev
@@ -32,5 +33,4 @@ COPY --from=builder /open_router/target/release/${BINARY} ${BIN_DIR}/${BINARY}
 
 WORKDIR ${BIN_DIR}
 
-CMD ./open_router
-
+CMD ["sh", "-c", "./${BINARY}"]

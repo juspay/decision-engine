@@ -68,6 +68,31 @@ client_idle_timeout = 90
 pool_max_idle_per_host = 10
 identity = ""
 
+[analytics]
+enabled = true
+
+[analytics.capture]
+body_max_bytes = 65536
+request_body_limit_bytes = 1048576
+details_max_bytes = 65536
+
+[analytics.kafka]
+brokers = "kafka:19092"
+client_id = "decision-engine"
+api_topic = "decision-engine.analytics.api.v1"
+domain_topic = "decision-engine.analytics.domain.v1"
+acks = "all"
+compression = "lz4"
+message_timeout_ms = 5000
+max_message_bytes = 262144
+queue_capacity = 250
+
+[analytics.clickhouse]
+url = "http://clickhouse:8123"
+database = "decision_engine_analytics"
+user = "decision_engine"
+password = "decision_engine"
+
 [routing_config.keys]
 amount = { type = "integer", min = 0 }
 authentication_type = { type = "enum", values = "three_ds, no_three_ds" }

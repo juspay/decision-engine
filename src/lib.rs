@@ -25,6 +25,7 @@
 #![allow(clippy::single_match)]
 #![allow(clippy::manual_ok_err)]
 
+pub mod analytics;
 pub mod api_client;
 pub mod app;
 pub mod config;
