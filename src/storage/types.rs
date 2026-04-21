@@ -734,3 +734,44 @@ pub struct MerchantApiKeyRevoke {
     #[cfg(feature = "postgres")]
     pub is_active: bool,
 }
+
+#[derive(Debug, Clone, Identifiable, Queryable, Serialize, Deserialize)]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::users))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::users))]
+pub struct User {
+    pub id: i64,
+    pub user_id: String,
+    pub email: String,
+    pub password_hash: String,
+    pub merchant_id: String,
+    pub role: String,
+    #[cfg(feature = "mysql")]
+    pub is_active: i8,
+    #[cfg(feature = "postgres")]
+    pub is_active: bool,
+    #[cfg(feature = "mysql")]
+    pub email_verified: i8,
+    #[cfg(feature = "postgres")]
+    pub email_verified: bool,
+    pub created_at: PrimitiveDateTime,
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::users))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::users))]
+pub struct NewUser {
+    pub user_id: String,
+    pub email: String,
+    pub password_hash: String,
+    pub merchant_id: String,
+    pub role: String,
+    #[cfg(feature = "mysql")]
+    pub is_active: i8,
+    #[cfg(feature = "postgres")]
+    pub is_active: bool,
+    #[cfg(feature = "mysql")]
+    pub email_verified: i8,
+    #[cfg(feature = "postgres")]
+    pub email_verified: bool,
+    pub created_at: PrimitiveDateTime,
+}

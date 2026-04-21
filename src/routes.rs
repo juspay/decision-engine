@@ -1,4 +1,5 @@
 pub mod api_key;
+pub mod user_auth;
 pub mod hybrid_routing;
 // pub mod data;
 pub mod decide_gateway;

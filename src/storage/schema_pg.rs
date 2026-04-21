@@ -514,6 +514,25 @@ diesel::table! {
 }
 
 diesel::table! {
+    users (id) {
+        id -> Int8,
+        #[max_length = 64]
+        user_id -> Varchar,
+        #[max_length = 255]
+        email -> Varchar,
+        #[max_length = 255]
+        password_hash -> Varchar,
+        #[max_length = 255]
+        merchant_id -> Varchar,
+        #[max_length = 50]
+        role -> Varchar,
+        is_active -> Bool,
+        email_verified -> Bool,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     merchant_api_keys (id) {
         id -> Int8,
         #[max_length = 64]
@@ -565,4 +584,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     txn_offer_detail,
     user_eligibility_info,
     merchant_api_keys,
+    users,
 );
