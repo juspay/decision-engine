@@ -1,0 +1,77 @@
+{{- if .Values.analytics.clickhouse.bootstrap.enabled -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "decision-engine.analyticsClickhouseJobName" . }}
+  labels:
+    {{- include "decision-engine.labels" . | nindent 4 }}
+    app.kubernetes.io/component: analytics-clickhouse
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        {{- include "decision-engine.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: analytics-clickhouse
+    spec:
+      restartPolicy: OnFailure
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "decision-engine.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if .Values.initContainers.enabled }}
+      initContainers:
+        - name: wait-for-clickhouse
+          image: "{{ .Values.initContainers.busybox.repository }}:{{ .Values.initContainers.busybox.tag }}"
+          imagePullPolicy: {{ .Values.initContainers.busybox.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - until nc -z {{ .Values.analytics.clickhouse.host }} {{ .Values.analytics.clickhouse.nativePort }}; do echo waiting for clickhouse; sleep 2; done;
+      {{- end }}
+      containers:
+        - name: analytics-clickhouse-init
+          image: "{{ .Values.analytics.clickhouse.bootstrap.image.repository }}:{{ .Values.analytics.clickhouse.bootstrap.image.tag }}"
+          imagePullPolicy: {{ .Values.analytics.clickhouse.bootstrap.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              find /analytics-clickhouse -name '*.sql' -print0 \
+                | sort -z \
+                | xargs -0 -I{} clickhouse-client \
+                    --host {{ .Values.analytics.clickhouse.host }} \
+                    --port {{ .Values.analytics.clickhouse.nativePort }} \
+                    --user {{ .Values.analytics.clickhouse.user }} \
+                    --password {{ .Values.analytics.clickhouse.password }} \
+                    --multiquery \
+                    --queries-file {}
+          volumeMounts:
+            - name: analytics-clickhouse-scripts
+              mountPath: /analytics-clickhouse
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: analytics-clickhouse-scripts
+          configMap:
+            name: {{ include "decision-engine.analyticsClickhouseConfigName" . }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

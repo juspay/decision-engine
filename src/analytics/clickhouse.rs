@@ -1053,20 +1053,24 @@ struct OverviewCountRow {
 fn effective_window_bounds(query: &AnalyticsQuery) -> (i64, i64) {
     let now = now_ms();
     let end_ms = query.end_ms.unwrap_or(now).min(now);
+    let min_start_ms = end_ms.saturating_sub(MAX_ANALYTICS_LOOKBACK_MS);
     let start_ms = query
         .start_ms
         .filter(|start_ms| *start_ms >= 0 && *start_ms < end_ms)
-        .unwrap_or_else(|| end_ms.saturating_sub(query.range.window_ms()));
+        .unwrap_or_else(|| end_ms.saturating_sub(query.range.window_ms()))
+        .max(min_start_ms);
     (start_ms, end_ms)
 }
 
 fn effective_payment_audit_window_bounds(query: &PaymentAuditQuery) -> (i64, i64) {
     let now = now_ms();
     let end_ms = query.end_ms.unwrap_or(now).min(now);
+    let min_start_ms = end_ms.saturating_sub(MAX_ANALYTICS_LOOKBACK_MS);
     let start_ms = query
         .start_ms
         .filter(|start_ms| *start_ms >= 0 && *start_ms < end_ms)
-        .unwrap_or_else(|| end_ms.saturating_sub(query.range.window_ms()));
+        .unwrap_or_else(|| end_ms.saturating_sub(query.range.window_ms()))
+        .max(min_start_ms);
     (start_ms, end_ms)
 }
 
@@ -1077,7 +1081,9 @@ fn query_bucket_size_ms(start_ms: i64, end_ms: i64) -> i64 {
         900_001..=3_600_000 => 5 * 60 * 1000,
         3_600_001..=86_400_000 => 15 * 60 * 1000,
         86_400_001..=259_200_000 => 60 * 60 * 1000,
-        _ => 3 * 60 * 60 * 1000,
+        259_200_001..=2_592_000_000 => 3 * 60 * 60 * 1000,
+        2_592_000_001..=15_552_000_000 => 24 * 60 * 60 * 1000,
+        _ => 7 * 24 * 60 * 60 * 1000,
     }
 }
 
@@ -1087,6 +1093,7 @@ fn payment_audit_range(query: &PaymentAuditQuery) -> String {
         AnalyticsRange::H1 => "1h".to_string(),
         AnalyticsRange::H24 => "24h".to_string(),
         AnalyticsRange::D30 => "30d".to_string(),
+        AnalyticsRange::M18 => "18mo".to_string(),
     }
 }
 

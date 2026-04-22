@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+pub const MAX_ANALYTICS_LOOKBACK_MS: i64 = 18 * 30 * 24 * 60 * 60 * 1000;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsQuery {
     pub merchant_id: Option<String>,
@@ -33,6 +35,7 @@ pub enum AnalyticsRange {
     H1,
     H24,
     D30,
+    M18,
 }
 
 impl AnalyticsRange {
@@ -41,6 +44,7 @@ impl AnalyticsRange {
             Some("15m") => Self::M15,
             Some("24h") => Self::H24,
             Some("30d") => Self::D30,
+            Some("18mo") => Self::M18,
             _ => Self::H1,
         }
     }
@@ -51,6 +55,7 @@ impl AnalyticsRange {
             Self::H1 => 60 * 60 * 1000,
             Self::H24 => 24 * 60 * 60 * 1000,
             Self::D30 => 30 * 24 * 60 * 60 * 1000,
+            Self::M18 => MAX_ANALYTICS_LOOKBACK_MS,
         }
     }
 
@@ -60,6 +65,7 @@ impl AnalyticsRange {
             Self::H1 => 5 * 60 * 1000,
             Self::H24 => 15 * 60 * 1000,
             Self::D30 => 3 * 60 * 60 * 1000,
+            Self::M18 => 7 * 24 * 60 * 60 * 1000,
         }
     }
 }

@@ -1,5 +1,3 @@
-CREATE DATABASE IF NOT EXISTS decision_engine_analytics;
-
 CREATE TABLE IF NOT EXISTS decision_engine_analytics.analytics_domain_events_v1 (
     event_id UInt64,
     tenant_id String,
@@ -46,47 +44,18 @@ ORDER BY (
     coalesce(payment_id, ''),
     event_id
 )
-TTL created_at + INTERVAL 90 DAY;
+TTL created_at + INTERVAL 18 MONTH;
 
-CREATE TABLE IF NOT EXISTS decision_engine_analytics.analytics_api_events_v1 (
-    event_id UInt64,
-    tenant_id String,
-    merchant_id Nullable(String),
-    payment_id Nullable(String),
-    api_flow LowCardinality(String),
-    created_at_timestamp Int64,
-    created_at DateTime64(3, 'UTC') MATERIALIZED fromUnixTimestamp64Milli(created_at_timestamp),
-    request_id String,
-    latency UInt64,
-    status_code Int64,
-    auth_type Nullable(String),
-    request String,
-    user_agent Nullable(String),
-    ip_addr Nullable(String),
-    url_path String,
-    response Nullable(String),
-    error Nullable(String),
-    event_type LowCardinality(String),
-    http_method LowCardinality(String),
-    infra_components Nullable(String),
-    request_truncated Bool,
-    response_truncated Bool
-) ENGINE = ReplacingMergeTree(event_id)
-PARTITION BY toYYYYMM(created_at)
-ORDER BY (
-    tenant_id,
-    created_at_timestamp,
-    api_flow,
-    request_id,
-    isNull(merchant_id),
-    coalesce(merchant_id, ''),
-    isNull(payment_id),
-    coalesce(payment_id, ''),
-    event_id
-)
-TTL created_at + INTERVAL 90 DAY;
+CREATE TABLE IF NOT EXISTS decision_engine_analytics.analytics_domain_events_parse_errors (
+    topic String,
+    partition Int64,
+    offset Int64,
+    raw String,
+    error String
+) ENGINE = MergeTree
+ORDER BY (topic, partition, offset);
 
-CREATE TABLE IF NOT EXISTS decision_engine_analytics.analytics_domain_events_kafka_v1 (
+CREATE TABLE IF NOT EXISTS decision_engine_analytics.analytics_domain_events_queue (
     schema_version UInt8,
     produced_at_ms Int64,
     event_id UInt64,
@@ -126,40 +95,18 @@ SETTINGS
     kafka_num_consumers = 1,
     kafka_handle_error_mode = 'stream';
 
-CREATE TABLE IF NOT EXISTS decision_engine_analytics.analytics_api_events_kafka_v1 (
-    schema_version UInt8,
-    produced_at_ms Int64,
-    event_id UInt64,
-    tenant_id String,
-    merchant_id Nullable(String),
-    payment_id Nullable(String),
-    api_flow LowCardinality(String),
-    created_at_timestamp Int64,
-    request_id String,
-    latency UInt64,
-    status_code Int64,
-    auth_type Nullable(String),
-    request String,
-    user_agent Nullable(String),
-    ip_addr Nullable(String),
-    url_path String,
-    response Nullable(String),
-    error Nullable(String),
-    event_type LowCardinality(String),
-    http_method LowCardinality(String),
-    infra_components Nullable(String),
-    request_truncated Bool,
-    response_truncated Bool
-) ENGINE = Kafka
-SETTINGS
-    kafka_broker_list = 'kafka:19092',
-    kafka_topic_list = 'decision-engine.analytics.api.v1',
-    kafka_group_name = 'decision-engine-analytics-api-v1',
-    kafka_format = 'JSONEachRow',
-    kafka_num_consumers = 1,
-    kafka_handle_error_mode = 'stream';
+CREATE MATERIALIZED VIEW IF NOT EXISTS decision_engine_analytics.analytics_domain_events_parse_errors_mv
+TO decision_engine_analytics.analytics_domain_events_parse_errors AS
+SELECT
+    _topic AS topic,
+    _partition AS partition,
+    _offset AS offset,
+    _raw_message AS raw,
+    _error AS error
+FROM decision_engine_analytics.analytics_domain_events_queue
+WHERE length(_error) > 0;
 
-CREATE MATERIALIZED VIEW IF NOT EXISTS decision_engine_analytics.mv_analytics_domain_events_kafka_v1
+CREATE MATERIALIZED VIEW IF NOT EXISTS decision_engine_analytics.analytics_domain_events_mv
 TO decision_engine_analytics.analytics_domain_events_v1 AS
 SELECT
     event_id,
@@ -190,30 +137,5 @@ SELECT
     route,
     details,
     created_at_ms
-FROM decision_engine_analytics.analytics_domain_events_kafka_v1;
-
-CREATE MATERIALIZED VIEW IF NOT EXISTS decision_engine_analytics.mv_analytics_api_events_kafka_v1
-TO decision_engine_analytics.analytics_api_events_v1 AS
-SELECT
-    event_id,
-    tenant_id,
-    merchant_id,
-    payment_id,
-    api_flow,
-    created_at_timestamp,
-    request_id,
-    latency,
-    status_code,
-    auth_type,
-    request,
-    user_agent,
-    ip_addr,
-    url_path,
-    response,
-    error,
-    event_type,
-    http_method,
-    infra_components,
-    request_truncated,
-    response_truncated
-FROM decision_engine_analytics.analytics_api_events_kafka_v1;
+FROM decision_engine_analytics.analytics_domain_events_queue
+WHERE length(_error) = 0;
