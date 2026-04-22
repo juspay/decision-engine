@@ -46,15 +46,6 @@ ORDER BY (
 )
 TTL created_at + INTERVAL 18 MONTH;
 
-CREATE TABLE IF NOT EXISTS decision_engine_analytics.analytics_domain_events_parse_errors (
-    topic String,
-    partition Int64,
-    offset Int64,
-    raw String,
-    error String
-) ENGINE = MergeTree
-ORDER BY (topic, partition, offset);
-
 CREATE TABLE IF NOT EXISTS decision_engine_analytics.analytics_domain_events_queue (
     schema_version UInt8,
     produced_at_ms Int64,
@@ -96,17 +87,6 @@ SETTINGS
     kafka_format = 'JSONEachRow',
     kafka_num_consumers = 1,
     kafka_handle_error_mode = 'stream';
-
-CREATE MATERIALIZED VIEW IF NOT EXISTS decision_engine_analytics.analytics_domain_events_parse_errors_mv
-TO decision_engine_analytics.analytics_domain_events_parse_errors AS
-SELECT
-    _topic AS topic,
-    _partition AS partition,
-    _offset AS offset,
-    _raw_message AS raw,
-    _error AS error
-FROM decision_engine_analytics.analytics_domain_events_queue
-WHERE length(_error) > 0;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS decision_engine_analytics.analytics_domain_events_mv
 TO decision_engine_analytics.analytics_domain_events_v1 AS

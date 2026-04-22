@@ -546,9 +546,11 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
         let errors = self.load_error_summaries(query, Some(10)).await?;
         let total_errors = errors.iter().map(|entry| entry.count).sum();
         let (start_ms, end_ms) = effective_window_bounds(query);
+        let filter_suffix = analytics_dimension_filters(query);
         let base_where = format!(
-            "{} AND flow_type IN {}",
+            "{}{} AND flow_type IN {}",
             base_where_clause(query.merchant_id.as_deref(), start_ms, end_ms),
+            filter_suffix,
             flow_type_list_sql(OVERVIEW_ERROR_FLOW_TYPES),
         );
         let page = query.page.max(1);
@@ -802,6 +804,7 @@ impl ClickHouseAnalyticsStore {
         limit: Option<usize>,
     ) -> Result<Vec<AnalyticsErrorSummary>, ApiError> {
         let (start_ms, end_ms) = effective_window_bounds(query);
+        let filter_suffix = analytics_dimension_filters(query);
         let limit_clause = limit
             .map(|value| format!("LIMIT {value}"))
             .unwrap_or_default();
@@ -815,11 +818,11 @@ impl ClickHouseAnalyticsStore {
              FROM {DOMAIN_TABLE} \
              WHERE created_at_ms >= {start_ms} AND created_at_ms <= {end_ms} \
                AND flow_type IN {error_flow_types} \
-               {merchant_filter} \
+               {filter_suffix} \
              GROUP BY route, error_code, error_message \
              ORDER BY count DESC, last_seen_ms DESC \
              {limit_clause}",
-            merchant_filter = merchant_filter(query.merchant_id.as_deref()),
+            filter_suffix = merchant_filter(query.merchant_id.as_deref()) + &filter_suffix,
             error_flow_types = flow_type_list_sql(OVERVIEW_ERROR_FLOW_TYPES),
         );
         self.client
@@ -1131,6 +1134,12 @@ fn merchant_filter(merchant_id: Option<&str>) -> String {
 
 fn score_filters(query: &AnalyticsQuery) -> String {
     let mut filters = merchant_filter(query.merchant_id.as_deref());
+    filters.push_str(&analytics_dimension_filters(query));
+    filters
+}
+
+fn analytics_dimension_filters(query: &AnalyticsQuery) -> String {
+    let mut filters = String::new();
     if let Some(value) = &query.payment_method_type {
         filters.push_str(&format!(
             " AND payment_method_type = '{}'",
