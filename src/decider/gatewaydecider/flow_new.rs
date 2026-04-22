@@ -26,6 +26,7 @@ use crate::redis::feature::RedisDataStruct;
 use crate::types::card::txn_card_info::TxnCardInfo;
 use crate::types::merchant as ETM;
 use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
+use crate::types::service_configuration;
 
 pub async fn decider_full_payload_hs_function(
     dreq_: T::DomainDeciderRequestForApiCallV2,
@@ -110,6 +111,43 @@ pub async fn decider_full_payload_hs_function(
     };
 
     if dreq_.ranking_algorithm == Some(RankingAlgorithm::NtwBasedRouting) {
+        let config_name = format!("DEBIT_ROUTING_ENABLED_{}", dreq_.merchant_id);
+        let debit_routing_enabled = service_configuration::find_config_by_name(config_name)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|c| c.value)
+            .and_then(|v| v.parse::<bool>().ok())
+            .unwrap_or(false);
+
+        if !debit_routing_enabled {
+            logger::warn!(
+                "Debit routing requested but not enabled for merchant: {}",
+                dreq_.merchant_id
+            );
+            return Err(T::ErrorResponse {
+                status: "Forbidden".to_string(),
+                error_code: "debit_routing_not_enabled".to_string(),
+                error_message: format!(
+                    "Debit routing is not enabled for merchant: {}",
+                    dreq_.merchant_id
+                ),
+                priority_logic_tag: None,
+                routing_approach: None,
+                filter_wise_gateways: None,
+                error_info: UnifiedError {
+                    code: "TE_05".to_string(),
+                    user_message: "Debit routing is not enabled for this merchant".to_string(),
+                    developer_message: format!(
+                        "Merchant {} does not have debit routing enabled. Enable it via the /merchant-account/:merchant-id/debit-routing/toggle API.",
+                        dreq_.merchant_id
+                    ),
+                },
+                priority_logic_output: None,
+                is_dynamic_mga_enabled: false,
+            });
+        }
+
         logger::debug!("Performing debit routing");
         network_decider::debit_routing::perform_debit_routing(dreq_).await
     } else {
