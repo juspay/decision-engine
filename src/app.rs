@@ -287,10 +287,6 @@ where
         .merge(protected_router)
         .merge(public_router);
 
-    let router = axum::Router::new()
-        .merge(protected_router)
-        .merge(public_router);
-
     let middleware = ServiceBuilder::new()
         .layer(middleware::from_fn(ensure_request_id))
         .layer(
