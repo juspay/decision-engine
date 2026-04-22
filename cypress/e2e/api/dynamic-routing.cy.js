@@ -77,13 +77,13 @@ describe('Dynamic Routing API', () => {
         }),
       ({ response }) =>
         Array.isArray(response.timeline) &&
-        response.timeline.some((event) => event.event_type === 'decision') &&
-        response.timeline.some((event) => event.event_type === 'gateway_update'),
+        response.timeline.some((event) => event.flow_type === 'decide_gateway_decision') &&
+        response.timeline.some((event) => event.flow_type === 'update_gateway_score_update'),
       { errorMessage: 'Expected payment audit decision + gateway update trail' },
     ).then(({ response }) => {
-      const eventTypes = response.timeline.map((event) => event.event_type)
-      expect(eventTypes).to.include('decision')
-      expect(eventTypes).to.include('gateway_update')
+      const flowTypes = response.timeline.map((event) => event.flow_type)
+      expect(flowTypes).to.include('decide_gateway_decision')
+      expect(flowTypes).to.include('update_gateway_score_update')
     })
 
     cy.pollRequest(

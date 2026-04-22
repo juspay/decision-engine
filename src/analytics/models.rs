@@ -217,12 +217,14 @@ pub struct AnalyticsLogSample {
     pub merchant_id: Option<String>,
     pub payment_id: Option<String>,
     pub request_id: Option<String>,
+    pub global_request_id: Option<String>,
+    pub trace_id: Option<String>,
     pub gateway: Option<String>,
     pub routing_approach: Option<String>,
     pub status: Option<String>,
     pub error_code: Option<String>,
     pub error_message: Option<String>,
-    pub event_type: Option<String>,
+    pub flow_type: Option<String>,
     pub created_at_ms: i64,
 }
 
@@ -259,7 +261,7 @@ pub struct PaymentAuditQuery {
     pub gateway: Option<String>,
     pub route: Option<String>,
     pub status: Option<String>,
-    pub event_type: Option<String>,
+    pub flow_type: Option<String>,
     pub error_code: Option<String>,
 }
 
@@ -282,12 +284,14 @@ pub struct PaymentAuditSummary {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaymentAuditEvent {
     pub id: i64,
-    pub event_type: String,
+    pub flow_type: String,
     pub event_stage: Option<String>,
     pub route: Option<String>,
     pub merchant_id: Option<String>,
     pub payment_id: Option<String>,
     pub request_id: Option<String>,
+    pub global_request_id: Option<String>,
+    pub trace_id: Option<String>,
     pub payment_method_type: Option<String>,
     pub payment_method: Option<String>,
     pub gateway: Option<String>,
@@ -317,7 +321,7 @@ pub struct PaymentAuditResponse {
     pub gateway: Option<String>,
     pub route: Option<String>,
     pub status: Option<String>,
-    pub event_type: Option<String>,
+    pub flow_type: Option<String>,
     pub error_code: Option<String>,
     pub page: usize,
     pub page_size: usize,

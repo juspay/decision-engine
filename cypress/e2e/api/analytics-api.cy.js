@@ -101,8 +101,8 @@ describe('Analytics API', () => {
           payment_id: decisionPaymentId,
         }),
       ({ response }) =>
-        response.timeline.some((event) => event.event_type === 'decision') &&
-        response.timeline.some((event) => event.event_type === 'gateway_update'),
+        response.timeline.some((event) => event.flow_type === 'decide_gateway_decision') &&
+        response.timeline.some((event) => event.flow_type === 'update_gateway_score_update'),
       { errorMessage: 'Payment audit did not include decision + gateway update' },
     ).then(({ response }) => {
       expect(response).to.haveValidPaymentAudit()
@@ -117,7 +117,7 @@ describe('Analytics API', () => {
           payment_id: previewPaymentId,
         }),
       ({ response }) =>
-        response.timeline.some((event) => event.event_type === 'rule_evaluation_preview'),
+        response.timeline.some((event) => event.flow_type === 'routing_evaluate_advanced'),
       { errorMessage: 'Preview trace did not include rule evaluation preview' },
     ).then(({ response }) => {
       expect(response).to.haveValidPaymentAudit()

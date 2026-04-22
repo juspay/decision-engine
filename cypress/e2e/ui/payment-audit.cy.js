@@ -62,7 +62,7 @@ describe('Payment Audit UI', () => {
         }),
       ({ response }) =>
         Array.isArray(response.timeline) &&
-        response.timeline.some((event) => event.event_type === 'decision'),
+        response.timeline.some((event) => event.flow_type === 'decide_gateway_decision'),
       { errorMessage: 'Transaction audit seed data did not reach payment audit in time' },
     )
     cy.pollRequest(
@@ -75,7 +75,7 @@ describe('Payment Audit UI', () => {
         }),
       ({ response }) =>
         Array.isArray(response.timeline) &&
-        response.timeline.some((event) => event.event_type === 'rule_evaluation_preview'),
+        response.timeline.some((event) => event.flow_type === 'routing_evaluate_advanced'),
       { errorMessage: 'Preview audit seed data did not reach preview trace in time' },
     )
   })

@@ -43,11 +43,11 @@ lazy_static! {
         &["rule_name"]
     ).unwrap();
 
-    /// Count of analytics events captured by type
+    /// Count of analytics events captured by flow type
     pub static ref ANALYTICS_EVENT_COUNTER: IntCounterVec = register_int_counter_vec!(
         "analytics_events_total",
-        "Count of analytics events captured by type",
-        &["event_type"]
+        "Count of analytics events captured by flow type",
+        &["flow_type"]
     ).unwrap();
 
     pub static ref ANALYTICS_SINK_WRITES_TOTAL: IntCounterVec = register_int_counter_vec!(
@@ -86,18 +86,6 @@ lazy_static! {
         "Latency of Kafka analytics delivery acknowledgements",
         &["stream"],
         exponential_buckets(0.001, 2.0, 12).unwrap()
-    ).unwrap();
-
-    pub static ref ANALYTICS_CAPTURE_TRUNCATIONS_TOTAL: IntCounterVec = register_int_counter_vec!(
-        "analytics_capture_truncations_total",
-        "Count of truncated captured HTTP bodies grouped by direction",
-        &["direction"]
-    ).unwrap();
-
-    pub static ref ANALYTICS_REQUEST_BODY_REJECTIONS_TOTAL: IntCounterVec = register_int_counter_vec!(
-        "analytics_request_body_rejections_total",
-        "Count of request body limit rejections grouped by endpoint",
-        &["endpoint"]
     ).unwrap();
 
 }

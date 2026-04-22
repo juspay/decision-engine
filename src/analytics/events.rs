@@ -2,16 +2,20 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 
+use crate::analytics::flow::{ApiFlow, FlowType};
+
 static EVENT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DomainAnalyticsEvent {
     pub event_id: u64,
-    pub tenant_id: String,
-    pub event_type: String,
+    pub api_flow: ApiFlow,
+    pub flow_type: FlowType,
     pub merchant_id: Option<String>,
     pub payment_id: Option<String>,
     pub request_id: Option<String>,
+    pub global_request_id: Option<String>,
+    pub trace_id: Option<String>,
     pub payment_method_type: Option<String>,
     pub payment_method: Option<String>,
     pub card_network: Option<String>,
@@ -39,14 +43,16 @@ pub struct DomainAnalyticsEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiEvent {
     pub event_id: u64,
-    pub tenant_id: String,
     pub merchant_id: Option<String>,
     pub payment_id: Option<String>,
-    pub api_flow: String,
+    pub api_flow: ApiFlow,
+    pub flow_type: FlowType,
     pub created_at_timestamp: i64,
     pub request_id: String,
+    pub global_request_id: Option<String>,
+    pub trace_id: Option<String>,
     pub latency: u64,
-    pub status_code: i64,
+    pub status_code: u16,
     pub auth_type: Option<String>,
     pub request: String,
     pub user_agent: Option<String>,
@@ -54,11 +60,7 @@ pub struct ApiEvent {
     pub url_path: String,
     pub response: Option<String>,
     pub error: Option<serde_json::Value>,
-    pub event_type: String,
     pub http_method: String,
-    pub infra_components: Option<serde_json::Value>,
-    pub request_truncated: bool,
-    pub response_truncated: bool,
 }
 
 pub fn next_event_id(now_ms: i64) -> u64 {

@@ -8,6 +8,10 @@ function getUiBaseUrl() {
   return Cypress.env('UI_BASE_URL') || 'http://localhost:5173'
 }
 
+function getAdminSecret() {
+  return Cypress.env('ADMIN_SECRET') || 'test_admin'
+}
+
 function resolveApiUrl(path) {
   if (/^https?:\/\//.test(path)) return path
   return `${getApiBaseUrl()}${path}`
@@ -24,6 +28,7 @@ function requestApi(method, path, options = {}) {
     headers: {
       'Content-Type': 'application/json',
       'x-tenant-id': 'public',
+      'x-admin-secret': getAdminSecret(),
       ...headers,
     },
     body,
@@ -33,6 +38,16 @@ function requestApi(method, path, options = {}) {
 function merchantStoreState(merchantId) {
   return JSON.stringify({
     state: { merchantId },
+    version: 0,
+  })
+}
+
+function authStoreState(session) {
+  return JSON.stringify({
+    state: {
+      token: session.token,
+      user: session.user,
+    },
     version: 0,
   })
 }
@@ -333,20 +348,63 @@ Cypress.Commands.add('setMerchantContext', (merchantId) => {
   })
 })
 
+Cypress.Commands.add('ensureDashboardSession', (merchantId) => {
+  const email = `${merchantId}@example.com`
+  const password = 'Password123!'
+
+  return requestApi('POST', '/auth/signup', {
+    failOnStatusCode: false,
+    body: {
+      email,
+      password,
+      merchant_id: merchantId,
+    },
+  }).then((response) => {
+    if (response.status === 200) {
+      return cy.wrap({
+        token: response.body.token,
+        user: {
+          userId: response.body.user_id,
+          email: response.body.email,
+          merchantId: response.body.merchant_id,
+          role: response.body.role,
+        },
+      })
+    }
+
+    return requestApi('POST', '/auth/login', {
+      body: { email, password },
+    }).then((loginResponse) =>
+      cy.wrap({
+        token: loginResponse.body.token,
+        user: {
+          userId: loginResponse.body.user_id,
+          email: loginResponse.body.email,
+          merchantId: loginResponse.body.merchant_id,
+          role: loginResponse.body.role,
+        },
+      }),
+    )
+  })
+})
+
 Cypress.Commands.add('visitWithMerchant', (path = '/', merchantId, options = {}) => {
   const id = merchantId || factory.merchantId('ui')
   const targetUrl = /^https?:\/\//.test(path) ? path : `${getUiBaseUrl()}${path}`
 
   return cy.ensureMerchantAccount(id).then(() =>
-    cy.visit(targetUrl, {
-      ...options,
-      onBeforeLoad(win) {
-        win.localStorage.setItem('merchant-store', merchantStoreState(id))
-        if (typeof options.onBeforeLoad === 'function') {
-          options.onBeforeLoad(win)
-        }
-      },
-    }),
+    cy.ensureDashboardSession(id).then((session) =>
+      cy.visit(targetUrl, {
+        ...options,
+        onBeforeLoad(win) {
+          win.localStorage.setItem('merchant-store', merchantStoreState(id))
+          win.localStorage.setItem('auth-store', authStoreState(session))
+          if (typeof options.onBeforeLoad === 'function') {
+            options.onBeforeLoad(win)
+          }
+        },
+      }),
+    ),
   )
 })
 

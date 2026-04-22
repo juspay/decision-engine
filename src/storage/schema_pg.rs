@@ -271,6 +271,24 @@ diesel::table! {
 }
 
 diesel::table! {
+    merchant_api_keys (id) {
+        id -> Int8,
+        #[max_length = 64]
+        key_id -> Varchar,
+        #[max_length = 255]
+        merchant_id -> Varchar,
+        #[max_length = 64]
+        key_hash -> Varchar,
+        #[max_length = 16]
+        key_prefix -> Varchar,
+        #[max_length = 255]
+        description -> Nullable<Varchar>,
+        is_active -> Bool,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     merchant_config (id) {
         id -> Text,
         merchant_account_id -> Int8,
@@ -563,6 +581,25 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    users (id) {
+        id -> Int8,
+        #[max_length = 64]
+        user_id -> Varchar,
+        #[max_length = 255]
+        email -> Varchar,
+        #[max_length = 255]
+        password_hash -> Varchar,
+        #[max_length = 255]
+        merchant_id -> Varchar,
+        #[max_length = 50]
+        role -> Varchar,
+        is_active -> Bool,
+        email_verified -> Bool,
+        created_at -> Timestamp,
+    }
+}
+
 diesel::allow_tables_to_appear_in_same_query!(
     analytics_event,
     card_brand_routes,
@@ -579,6 +616,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     issuer_routes,
     juspay_bank_code,
     merchant_account,
+    merchant_api_keys,
     merchant_config,
     merchant_gateway_account,
     merchant_gateway_account_sub_info,
@@ -598,4 +636,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     txn_offer,
     txn_offer_detail,
     user_eligibility_info,
+    users,
 );

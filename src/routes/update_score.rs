@@ -42,15 +42,12 @@ pub async fn update_score(
     let headers = req.headers().clone();
     // let req_headers = serde_json::to_string(&headers).unwrap_or("{}".to_string());
     let original_url = req.uri().to_string();
-    let x_tenant_id = headers
-        .get("x-tenant-id")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("public")
-        .to_string();
     let x_request_id = headers
         .get("x-request-id")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("unknown");
+    let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
+    let trace_id = crate::analytics::trace_id_from_headers(&headers);
     let start_time = std::time::Instant::now();
     let request_time = time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
@@ -65,7 +62,6 @@ pub async fn update_score(
     let body_bytes = match crate::routes::body::read_request_body(req.into_body()).await {
         Ok(bytes) => bytes,
         Err(e) => {
-            crate::routes::body::observe_request_body_error("update_score", &e);
             API_REQUEST_COUNTER
                 .with_label_values(&["update_score", "failure"])
                 .inc();
@@ -78,11 +74,16 @@ pub async fn update_score(
             let cpu_time = cpu_start.elapsed().as_millis() as u64;
 
             crate::analytics::record_error_event(
-                x_tenant_id.clone(),
-                "update_score",
+                crate::analytics::AnalyticsFlowContext::new(
+                    crate::analytics::ApiFlow::DynamicRouting,
+                    crate::analytics::FlowType::UpdateScoreLegacyError,
+                ),
+                crate::analytics::AnalyticsRoute::UpdateScore,
                 None,
                 None,
                 None,
+                global_request_id.clone(),
+                trace_id.clone(),
                 None,
                 None,
                 error_response.error_code.clone(),
@@ -154,11 +155,16 @@ pub async fn update_score(
                 let cpu_time = cpu_start.elapsed().as_millis() as u64;
 
                 crate::analytics::record_error_event(
-                    x_tenant_id.clone(),
-                    "update_score",
+                    crate::analytics::AnalyticsFlowContext::new(
+                        crate::analytics::ApiFlow::DynamicRouting,
+                        crate::analytics::FlowType::UpdateScoreLegacyError,
+                    ),
+                    crate::analytics::AnalyticsRoute::UpdateScore,
                     Some(merchant_id_txt.clone()),
                     None,
                     None,
+                    global_request_id.clone(),
+                    trace_id.clone(),
                     None,
                     None,
                     error_response.error_code.clone(),
@@ -245,6 +251,11 @@ pub async fn update_score(
                 enforce_failure,
                 gateway_reference_id,
                 txn_latency,
+                crate::analytics::AnalyticsRoute::UpdateScore,
+                crate::analytics::AnalyticsFlowContext::new(
+                    crate::analytics::ApiFlow::DynamicRouting,
+                    crate::analytics::FlowType::UpdateScoreLegacyScoreSnapshot,
+                ),
                 redis_comp_config_final,
             )
             .await;

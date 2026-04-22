@@ -20,6 +20,7 @@ pub struct RuleConfigDeleteResponse {
 
 #[axum::debug_handler]
 pub async fn create_rule_config(
+    headers: axum::http::HeaderMap,
     Json(payload): Json<types::routing_configuration::RoutingRule>,
 ) -> Result<Json<RuleConfigResponse>, error::ContainerError<error::RuleConfigurationError>> {
     let timer = API_LATENCY_HISTOGRAM
@@ -32,6 +33,15 @@ pub async fn create_rule_config(
 
     let merchant_id = payload.merchant_id.clone();
     let config = payload.config.clone();
+    let analytics_payload = payload.clone();
+    let analytics_merchant_id = merchant_id.clone();
+    let analytics_config = config.clone();
+    let request_id = headers
+        .get(crate::storage::consts::X_REQUEST_ID)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
+    let trace_id = crate::analytics::trace_id_from_headers(&headers);
 
     let mid = payload.merchant_id.clone();
 
@@ -167,12 +177,34 @@ pub async fn create_rule_config(
         }
     };
 
+    if let Ok(response) = &result {
+        crate::analytics::record_operation_event(
+            crate::analytics::AnalyticsFlowContext::new(
+                crate::analytics::ApiFlow::RuleBasedRouting,
+                crate::analytics::refine_rule_config_create_flow_type(&analytics_config),
+            ),
+            crate::analytics::AnalyticsRoute::RuleConfigCreate,
+            Some(analytics_merchant_id),
+            None,
+            request_id,
+            global_request_id,
+            trace_id,
+            Some("success".to_string()),
+            serde_json::to_string(&serde_json::json!({
+                "request": &analytics_payload,
+                "response": &response.0,
+            }))
+            .ok(),
+            Some("rule_config_created".to_string()),
+        );
+    }
     timer.observe_duration();
     result
 }
 
 #[axum::debug_handler]
 pub async fn get_rule_config(
+    headers: axum::http::HeaderMap,
     Json(payload): Json<types::routing_configuration::FetchRoutingRule>,
 ) -> Result<
     Json<types::routing_configuration::RoutingRule>,
@@ -185,8 +217,16 @@ pub async fn get_rule_config(
         .with_label_values(&["get_rule_config"])
         .inc();
     logger::debug!("Received rule fetch request: {:?}", payload);
+    let analytics_payload = payload.clone();
+    let request_id = headers
+        .get(crate::storage::consts::X_REQUEST_ID)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
+    let trace_id = crate::analytics::trace_id_from_headers(&headers);
 
     let mid = payload.merchant_id.clone();
+    let analytics_mid = mid.clone();
     let merchant_account = ETM::merchant_account::load_merchant_by_merchant_id(mid.clone())
         .await
         .ok_or(error::RuleConfigurationError::MerchantNotFound);
@@ -295,12 +335,34 @@ pub async fn get_rule_config(
             }
         }
     };
+    if let Ok(response) = &result {
+        crate::analytics::record_operation_event(
+            crate::analytics::AnalyticsFlowContext::new(
+                crate::analytics::ApiFlow::RuleBasedRouting,
+                crate::analytics::flow_type_for_rule_config_algorithm_get(&payload.algorithm),
+            ),
+            crate::analytics::AnalyticsRoute::RuleConfigGet,
+            Some(analytics_mid),
+            None,
+            request_id,
+            global_request_id,
+            trace_id,
+            Some("success".to_string()),
+            serde_json::to_string(&serde_json::json!({
+                "request": &analytics_payload,
+                "response": &response.0,
+            }))
+            .ok(),
+            Some("rule_config_loaded".to_string()),
+        );
+    }
     timer.observe_duration();
     result
 }
 
 #[axum::debug_handler]
 pub async fn update_rule_config(
+    headers: axum::http::HeaderMap,
     Json(payload): Json<types::routing_configuration::RoutingRule>,
 ) -> Result<Json<RuleConfigResponse>, error::ContainerError<error::RuleConfigurationError>> {
     let timer = API_LATENCY_HISTOGRAM
@@ -313,6 +375,15 @@ pub async fn update_rule_config(
 
     let merchant_id = payload.merchant_id.clone();
     let config = payload.config.clone();
+    let analytics_payload = payload.clone();
+    let analytics_merchant_id = merchant_id.clone();
+    let analytics_config = config.clone();
+    let request_id = headers
+        .get(crate::storage::consts::X_REQUEST_ID)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
+    let trace_id = crate::analytics::trace_id_from_headers(&headers);
 
     let mid = payload.merchant_id.clone();
     ETM::merchant_account::load_merchant_by_merchant_id(mid.clone())
@@ -409,12 +480,34 @@ pub async fn update_rule_config(
             }
         }
     };
+    if let Ok(response) = &result {
+        crate::analytics::record_operation_event(
+            crate::analytics::AnalyticsFlowContext::new(
+                crate::analytics::ApiFlow::RuleBasedRouting,
+                crate::analytics::refine_rule_config_update_flow_type(&analytics_config),
+            ),
+            crate::analytics::AnalyticsRoute::RuleConfigUpdate,
+            Some(analytics_merchant_id),
+            None,
+            request_id,
+            global_request_id,
+            trace_id,
+            Some("success".to_string()),
+            serde_json::to_string(&serde_json::json!({
+                "request": &analytics_payload,
+                "response": &response.0,
+            }))
+            .ok(),
+            Some("rule_config_updated".to_string()),
+        );
+    }
     timer.observe_duration();
     result
 }
 
 #[axum::debug_handler]
 pub async fn delete_rule_config(
+    headers: axum::http::HeaderMap,
     Json(payload): Json<types::routing_configuration::FetchRoutingRule>,
 ) -> Result<Json<RuleConfigDeleteResponse>, error::ContainerError<error::RuleConfigurationError>> {
     let timer = API_LATENCY_HISTOGRAM
@@ -424,8 +517,16 @@ pub async fn delete_rule_config(
         .with_label_values(&["delete_rule_config"])
         .inc();
     logger::debug!("Received rule delete request: {:?}", payload);
+    let analytics_payload = payload.clone();
+    let request_id = headers
+        .get(crate::storage::consts::X_REQUEST_ID)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
+    let trace_id = crate::analytics::trace_id_from_headers(&headers);
 
     let mid = payload.merchant_id.clone();
+    let analytics_mid = mid.clone();
     let merchant_account = ETM::merchant_account::load_merchant_by_merchant_id(mid.clone())
         .await
         .ok_or(error::RuleConfigurationError::MerchantNotFound)?;
@@ -518,6 +619,27 @@ pub async fn delete_rule_config(
         }
     };
 
+    if let Ok(response) = &result {
+        crate::analytics::record_operation_event(
+            crate::analytics::AnalyticsFlowContext::new(
+                crate::analytics::ApiFlow::RuleBasedRouting,
+                crate::analytics::flow_type_for_rule_config_algorithm_delete(&payload.algorithm),
+            ),
+            crate::analytics::AnalyticsRoute::RuleConfigDelete,
+            Some(analytics_mid),
+            None,
+            request_id,
+            global_request_id,
+            trace_id,
+            Some("success".to_string()),
+            serde_json::to_string(&serde_json::json!({
+                "request": &analytics_payload,
+                "response": &response.0,
+            }))
+            .ok(),
+            Some("rule_config_deleted".to_string()),
+        );
+    }
     timer.observe_duration();
     result
 }

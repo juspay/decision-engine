@@ -83,7 +83,6 @@ where
     let body = match crate::routes::body::read_request_body(req.into_body()).await {
         Ok(body) => body,
         Err(e) => {
-            crate::routes::body::observe_request_body_error("decision_gateway", &e);
             let error_response = e.into_error_response();
 
             let latency = start_time.elapsed().as_millis() as u64;

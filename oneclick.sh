@@ -20,6 +20,7 @@ POSTGRES_DB="${POSTGRES_DB:-decision_engine_db}"
 REDIS_HOST="${REDIS_HOST:-localhost}"
 REDIS_PORT="${REDIS_PORT:-6379}"
 CLICKHOUSE_HTTP_URL="${CLICKHOUSE_HTTP_URL:-http://localhost:8123}"
+CLICKHOUSE_DATABASE="${CLICKHOUSE_DATABASE:-default}"
 CLICKHOUSE_USER="${CLICKHOUSE_USER:-decision_engine}"
 CLICKHOUSE_PASSWORD="${CLICKHOUSE_PASSWORD:-decision_engine}"
 KAFKA_HOST="${KAFKA_HOST:-localhost}"
@@ -29,8 +30,8 @@ PORTS=(8080 5173 "$DOCS_PORT" 9094)
 EXPECTED_CLICKHOUSE_TABLES=(
     analytics_api_events_queue
     analytics_domain_events_queue
-    analytics_api_events_v1
-    analytics_domain_events_v1
+    analytics_api_events
+    analytics_domain_events
 )
 
 check_and_kill_ports() {
@@ -161,7 +162,7 @@ check_clickhouse_schema() {
 
     for table_name in "${EXPECTED_CLICKHOUSE_TABLES[@]}"; do
         local query
-        query="SELECT%20count()%20FROM%20system.tables%20WHERE%20database%20%3D%20'decision_engine_analytics'%20AND%20name%20%3D%20'${table_name}'"
+        query="SELECT%20count()%20FROM%20system.tables%20WHERE%20database%20%3D%20'${CLICKHOUSE_DATABASE}'%20AND%20name%20%3D%20'${table_name}'"
         local result
         result=$(curl -fsS \
             --user "${CLICKHOUSE_USER}:${CLICKHOUSE_PASSWORD}" \

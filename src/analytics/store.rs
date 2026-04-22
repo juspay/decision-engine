@@ -18,45 +18,36 @@ pub trait AnalyticsWriteStore: Send + Sync {
 
 #[async_trait]
 pub trait AnalyticsReadStore: Send + Sync {
-    async fn overview(
-        &self,
-        tenant_id: &str,
-        query: &AnalyticsQuery,
-    ) -> Result<AnalyticsOverviewResponse, ApiError>;
+    async fn overview(&self, query: &AnalyticsQuery)
+        -> Result<AnalyticsOverviewResponse, ApiError>;
 
     async fn gateway_scores(
         &self,
-        tenant_id: &str,
         query: &AnalyticsQuery,
     ) -> Result<AnalyticsGatewayScoresResponse, ApiError>;
 
     async fn decisions(
         &self,
-        tenant_id: &str,
         query: &AnalyticsQuery,
     ) -> Result<AnalyticsDecisionResponse, ApiError>;
 
     async fn routing_stats(
         &self,
-        tenant_id: &str,
         query: &AnalyticsQuery,
     ) -> Result<AnalyticsRoutingStatsResponse, ApiError>;
 
     async fn log_summaries(
         &self,
-        tenant_id: &str,
         query: &AnalyticsQuery,
     ) -> Result<AnalyticsLogSummariesResponse, ApiError>;
 
     async fn payment_audit(
         &self,
-        tenant_id: &str,
         query: &PaymentAuditQuery,
     ) -> Result<PaymentAuditResponse, ApiError>;
 
     async fn preview_trace(
         &self,
-        tenant_id: &str,
         query: &PaymentAuditQuery,
     ) -> Result<PaymentAuditResponse, ApiError>;
 }
@@ -89,7 +80,6 @@ pub struct UnavailableAnalyticsReadStore;
 impl AnalyticsReadStore for UnavailableAnalyticsReadStore {
     async fn overview(
         &self,
-        _tenant_id: &str,
         _query: &AnalyticsQuery,
     ) -> Result<AnalyticsOverviewResponse, ApiError> {
         Err(ApiError::DatabaseError)
@@ -97,7 +87,6 @@ impl AnalyticsReadStore for UnavailableAnalyticsReadStore {
 
     async fn gateway_scores(
         &self,
-        _tenant_id: &str,
         _query: &AnalyticsQuery,
     ) -> Result<AnalyticsGatewayScoresResponse, ApiError> {
         Err(ApiError::DatabaseError)
@@ -105,7 +94,6 @@ impl AnalyticsReadStore for UnavailableAnalyticsReadStore {
 
     async fn decisions(
         &self,
-        _tenant_id: &str,
         _query: &AnalyticsQuery,
     ) -> Result<AnalyticsDecisionResponse, ApiError> {
         Err(ApiError::DatabaseError)
@@ -113,7 +101,6 @@ impl AnalyticsReadStore for UnavailableAnalyticsReadStore {
 
     async fn routing_stats(
         &self,
-        _tenant_id: &str,
         _query: &AnalyticsQuery,
     ) -> Result<AnalyticsRoutingStatsResponse, ApiError> {
         Err(ApiError::DatabaseError)
@@ -121,7 +108,6 @@ impl AnalyticsReadStore for UnavailableAnalyticsReadStore {
 
     async fn log_summaries(
         &self,
-        _tenant_id: &str,
         _query: &AnalyticsQuery,
     ) -> Result<AnalyticsLogSummariesResponse, ApiError> {
         Err(ApiError::DatabaseError)
@@ -129,7 +115,6 @@ impl AnalyticsReadStore for UnavailableAnalyticsReadStore {
 
     async fn payment_audit(
         &self,
-        _tenant_id: &str,
         _query: &PaymentAuditQuery,
     ) -> Result<PaymentAuditResponse, ApiError> {
         Err(ApiError::DatabaseError)
@@ -137,7 +122,6 @@ impl AnalyticsReadStore for UnavailableAnalyticsReadStore {
 
     async fn preview_trace(
         &self,
-        _tenant_id: &str,
         _query: &PaymentAuditQuery,
     ) -> Result<PaymentAuditResponse, ApiError> {
         Err(ApiError::DatabaseError)
