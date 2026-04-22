@@ -76,8 +76,6 @@ pub struct KafkaApiEventRowV1 {
     pub response: Option<String>,
     pub error: Option<String>,
     pub http_method: String,
-    pub request_truncated: bool,
-    pub response_truncated: bool,
 }
 
 impl From<DomainAnalyticsEvent> for KafkaDomainEventRowV1 {
@@ -145,8 +143,6 @@ impl From<ApiEvent> for KafkaApiEventRowV1 {
                 .error
                 .and_then(|value| serde_json::to_string(&value).ok()),
             http_method: event.http_method,
-            request_truncated: event.request_truncated,
-            response_truncated: event.response_truncated,
         }
     }
 }
@@ -200,16 +196,6 @@ impl KafkaAnalyticsStore {
         key: &str,
         payload: Vec<u8>,
     ) -> Result<(), ApiError> {
-        if payload.len() > self.config.max_message_bytes {
-            ANALYTICS_EVENTS_DROPPED_TOTAL
-                .with_label_values(&[stream, "message_too_large"])
-                .inc();
-            ANALYTICS_KAFKA_PRODUCE_TOTAL
-                .with_label_values(&[stream, "dropped"])
-                .inc();
-            return Err(ApiError::EncodingError);
-        }
-
         let started_at = Instant::now();
         let delivery = self
             .producer
@@ -414,8 +400,6 @@ mod tests {
             response: None,
             error: Some(serde_json::json!({"code":"bad_request"})),
             http_method: "POST".to_string(),
-            request_truncated: false,
-            response_truncated: false,
         };
         let row = KafkaApiEventRowV1::from(event);
         assert_eq!(row.error.as_deref(), Some("{\"code\":\"bad_request\"}"));
@@ -447,8 +431,6 @@ mod tests {
             response: None,
             error: None,
             http_method: "POST".to_string(),
-            request_truncated: false,
-            response_truncated: false,
         };
         let domain = DomainAnalyticsEvent {
             event_id: 11,

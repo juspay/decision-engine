@@ -141,9 +141,8 @@ async fn capture_api_event(
     };
 
     let started_at = Instant::now();
-    let max_bytes = global_state.analytics_runtime.body_max_bytes();
     let (parts, body) = request.into_parts();
-    let (request_body, request_handle) = crate::analytics::CaptureBody::new(body, max_bytes);
+    let (request_body, request_handle) = crate::analytics::CaptureBody::new(body);
 
     let request_id = parts
         .headers
@@ -177,23 +176,12 @@ async fn capture_api_event(
         .await;
     let status_code = response.status().as_u16();
     let (response_parts, response_body) = response.into_parts();
-    let (response_body, response_handle) =
-        crate::analytics::CaptureBody::new(response_body, max_bytes);
+    let (response_body, response_handle) = crate::analytics::CaptureBody::new(response_body);
 
     let runtime = global_state.analytics_runtime.clone();
     tokio::spawn(async move {
         let request_capture = request_handle.wait().await;
         let response_capture = response_handle.wait().await;
-        if request_capture.truncated {
-            crate::metrics::ANALYTICS_CAPTURE_TRUNCATIONS_TOTAL
-                .with_label_values(&["request"])
-                .inc();
-        }
-        if response_capture.truncated {
-            crate::metrics::ANALYTICS_CAPTURE_TRUNCATIONS_TOTAL
-                .with_label_values(&["response"])
-                .inc();
-        }
         let (merchant_id, payment_id, auth_type) = parse_request_metadata(&request_capture);
         let error = parse_response_error(status_code, &response_capture);
 
@@ -217,8 +205,6 @@ async fn capture_api_event(
             response: Some(String::from_utf8_lossy(&response_capture.bytes).to_string()),
             error,
             http_method: method,
-            request_truncated: request_capture.truncated,
-            response_truncated: response_capture.truncated,
         });
     });
 
@@ -524,7 +510,6 @@ mod tests {
                     }
                 }"#,
             ),
-            truncated: false,
         };
 
         let (merchant_id, payment_id, auth_type) = parse_request_metadata(&captured);
@@ -544,7 +529,6 @@ mod tests {
                     "authentication_type":"NO_THREE_DS"
                 }"#,
             ),
-            truncated: false,
         };
 
         let (merchant_id, payment_id, auth_type) = parse_request_metadata(&captured);

@@ -88,18 +88,6 @@ lazy_static! {
         exponential_buckets(0.001, 2.0, 12).unwrap()
     ).unwrap();
 
-    pub static ref ANALYTICS_CAPTURE_TRUNCATIONS_TOTAL: IntCounterVec = register_int_counter_vec!(
-        "analytics_capture_truncations_total",
-        "Count of truncated captured HTTP bodies grouped by direction",
-        &["direction"]
-    ).unwrap();
-
-    pub static ref ANALYTICS_REQUEST_BODY_REJECTIONS_TOTAL: IntCounterVec = register_int_counter_vec!(
-        "analytics_request_body_rejections_total",
-        "Count of request body limit rejections grouped by endpoint",
-        &["endpoint"]
-    ).unwrap();
-
 }
 
 pub async fn metrics_handler() -> error_stack::Result<String, MetricsError> {

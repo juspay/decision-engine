@@ -62,7 +62,6 @@ pub async fn update_score(
     let body_bytes = match crate::routes::body::read_request_body(req.into_body()).await {
         Ok(bytes) => bytes,
         Err(e) => {
-            crate::routes::body::observe_request_body_error("update_score", &e);
             API_REQUEST_COUNTER
                 .with_label_values(&["update_score", "failure"])
                 .inc();

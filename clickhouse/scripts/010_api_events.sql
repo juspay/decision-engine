@@ -18,9 +18,7 @@ CREATE TABLE analytics_api_events_v1 (
     url_path String,
     response Nullable(String),
     error Nullable(String),
-    http_method LowCardinality(String),
-    request_truncated Bool,
-    response_truncated Bool
+    http_method LowCardinality(String)
 ) ENGINE = ReplacingMergeTree(event_id)
 PARTITION BY toYYYYMM(created_at)
 ORDER BY (
@@ -54,9 +52,7 @@ CREATE TABLE analytics_api_events_queue (
     url_path String,
     response Nullable(String),
     error Nullable(String),
-    http_method LowCardinality(String),
-    request_truncated Bool,
-    response_truncated Bool
+    http_method LowCardinality(String)
 ) ENGINE = Kafka
 SETTINGS
     kafka_broker_list = 'kafka:19092',
@@ -87,8 +83,6 @@ SELECT
     url_path,
     response,
     error,
-    http_method,
-    request_truncated,
-    response_truncated
+    http_method
 FROM analytics_api_events_queue
 WHERE length(_error) = 0;

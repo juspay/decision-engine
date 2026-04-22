@@ -137,16 +137,12 @@ impl Default for AnalyticsConfig {
 #[derive(Clone, Debug, serde::Deserialize)]
 #[serde(default)]
 pub struct AnalyticsCaptureConfig {
-    pub body_max_bytes: usize,
-    pub request_body_limit_bytes: usize,
     pub details_max_bytes: usize,
 }
 
 impl Default for AnalyticsCaptureConfig {
     fn default() -> Self {
         Self {
-            body_max_bytes: 65_536,
-            request_body_limit_bytes: 1_048_576,
             details_max_bytes: 65_536,
         }
     }
@@ -162,7 +158,6 @@ pub struct KafkaAnalyticsConfig {
     pub acks: String,
     pub compression: String,
     pub message_timeout_ms: u64,
-    pub max_message_bytes: usize,
     pub queue_capacity: usize,
     pub security_protocol: Option<String>,
     pub sasl_mechanism: Option<String>,
@@ -180,7 +175,6 @@ impl Default for KafkaAnalyticsConfig {
             acks: "all".to_string(),
             compression: "lz4".to_string(),
             message_timeout_ms: 5_000,
-            max_message_bytes: 262_144,
             queue_capacity: 250,
             security_protocol: None,
             sasl_mechanism: None,
@@ -494,24 +488,10 @@ impl GlobalConfig {
 
     pub fn validate(&self) -> error_stack::Result<(), error::ConfigurationError> {
         self.secrets_management.validate()?;
-        if self.analytics.capture.body_max_bytes == 0 {
-            return Err(error_stack::report!(
-                error::ConfigurationError::InvalidConfigurationValueError(
-                    "analytics.capture.body_max_bytes".to_string(),
-                )
-            ));
-        }
         if self.analytics.capture.details_max_bytes == 0 {
             return Err(error_stack::report!(
                 error::ConfigurationError::InvalidConfigurationValueError(
                     "analytics.capture.details_max_bytes".to_string(),
-                )
-            ));
-        }
-        if self.analytics.capture.request_body_limit_bytes < self.analytics.capture.body_max_bytes {
-            return Err(error_stack::report!(
-                error::ConfigurationError::InvalidConfigurationValueError(
-                    "analytics.capture.request_body_limit_bytes".to_string(),
                 )
             ));
         }
@@ -522,25 +502,8 @@ impl GlobalConfig {
                 )
             ));
         }
-        if self.analytics.kafka.max_message_bytes
-            <= minimum_analytics_message_budget(&self.analytics.capture)
-        {
-            return Err(error_stack::report!(
-                error::ConfigurationError::InvalidConfigurationValueError(
-                    "analytics.kafka.max_message_bytes".to_string(),
-                )
-            ));
-        }
         Ok(())
     }
-}
-
-fn minimum_analytics_message_budget(capture: &AnalyticsCaptureConfig) -> usize {
-    capture
-        .body_max_bytes
-        .saturating_mul(2)
-        .saturating_add(capture.details_max_bytes)
-        .saturating_add(8 * 1024)
 }
 
 #[cfg(test)]

@@ -55,7 +55,6 @@ pub async fn update_gateway_score(
             body
         }
         Err(e) => {
-            crate::routes::body::observe_request_body_error("update_gateway_score", &e);
             crate::logger::debug!(tag = "UpdateGatewayScore", "Error: {:?}", e);
             let (error_code, error_message) = e.analytics_code_and_message();
             crate::analytics::record_error_event(

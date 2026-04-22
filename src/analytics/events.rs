@@ -61,8 +61,6 @@ pub struct ApiEvent {
     pub response: Option<String>,
     pub error: Option<serde_json::Value>,
     pub http_method: String,
-    pub request_truncated: bool,
-    pub response_truncated: bool,
 }
 
 pub fn next_event_id(now_ms: i64) -> u64 {

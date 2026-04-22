@@ -61,7 +61,6 @@ pub async fn decide_gateway(
             body
         }
         Err(e) => {
-            crate::routes::body::observe_request_body_error("decide_gateway", &e);
             logger::debug!(tag = "DecideGateway", "Error: {:?}", e);
             let (error_code, error_message) = e.analytics_code_and_message();
             let analytics_stage = e.analytics_stage().to_string();
