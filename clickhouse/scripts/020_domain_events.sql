@@ -1,4 +1,4 @@
-CREATE TABLE analytics_domain_events_v1 (
+CREATE TABLE analytics_domain_events (
     event_id UInt64,
     api_flow LowCardinality(String),
     flow_type LowCardinality(String),

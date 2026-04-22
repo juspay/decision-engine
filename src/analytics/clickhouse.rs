@@ -10,8 +10,8 @@ use crate::analytics::store::AnalyticsReadStore;
 use crate::config::{ClickHouseAnalyticsConfig, KafkaAnalyticsConfig};
 use crate::error::ApiError;
 
-const DOMAIN_TABLE: &str = "analytics_domain_events_v1";
-const API_TABLE: &str = "analytics_api_events_v1";
+const DOMAIN_TABLE: &str = "analytics_domain_events";
+const API_TABLE: &str = "analytics_api_events";
 const API_QUEUE_TABLE: &str = "analytics_api_events_queue";
 const API_MV: &str = "analytics_api_events_mv";
 const DOMAIN_QUEUE_TABLE: &str = "analytics_domain_events_queue";

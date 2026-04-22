@@ -1,4 +1,4 @@
-CREATE TABLE analytics_api_events_v1 (
+CREATE TABLE analytics_api_events (
     event_id UInt64,
     merchant_id Nullable(String),
     payment_id Nullable(String),
