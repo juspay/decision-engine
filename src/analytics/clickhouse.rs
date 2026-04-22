@@ -7,15 +7,10 @@ use crate::analytics::flow::FlowType;
 use crate::analytics::models::*;
 use crate::analytics::service::{format_range, now_ms};
 use crate::analytics::store::AnalyticsReadStore;
-use crate::config::{ClickHouseAnalyticsConfig, KafkaAnalyticsConfig};
+use crate::config::ClickHouseAnalyticsConfig;
 use crate::error::ApiError;
 
 const DOMAIN_TABLE: &str = "analytics_domain_events";
-const API_TABLE: &str = "analytics_api_events";
-const API_QUEUE_TABLE: &str = "analytics_api_events_queue";
-const API_MV: &str = "analytics_api_events_mv";
-const DOMAIN_QUEUE_TABLE: &str = "analytics_domain_events_queue";
-const DOMAIN_MV: &str = "analytics_domain_events_mv";
 const OVERVIEW_SCORE_FLOW_TYPES: &[FlowType] = &[
     FlowType::UpdateGatewayScoreScoreSnapshot,
     FlowType::UpdateScoreLegacyScoreSnapshot,
@@ -189,10 +184,7 @@ struct DistinctDimensionRow {
 }
 
 impl ClickHouseAnalyticsStore {
-    pub async fn new(
-        config: ClickHouseAnalyticsConfig,
-        kafka_config: KafkaAnalyticsConfig,
-    ) -> Result<Self, ApiError> {
+    pub async fn new(config: ClickHouseAnalyticsConfig) -> Result<Self, ApiError> {
         let mut client = Client::default()
             .with_url(config.url.clone())
             .with_database(config.database.clone())
@@ -207,37 +199,11 @@ impl ClickHouseAnalyticsStore {
             .await
             .map_err(|_| ApiError::DatabaseError)?;
 
-        let store = Self { client };
-        store.ensure_ingestion_objects(&kafka_config).await?;
-        Ok(store)
+        Ok(Self { client })
     }
 
     fn store_error(&self) -> ApiError {
         ApiError::DatabaseError
-    }
-
-    async fn ensure_ingestion_objects(
-        &self,
-        kafka_config: &KafkaAnalyticsConfig,
-    ) -> Result<(), ApiError> {
-        for sql in [
-            format!("DROP TABLE IF EXISTS {API_MV}"),
-            format!("DROP TABLE IF EXISTS {API_QUEUE_TABLE}"),
-            format!("DROP TABLE IF EXISTS {DOMAIN_MV}"),
-            format!("DROP TABLE IF EXISTS {DOMAIN_QUEUE_TABLE}"),
-            api_queue_table_sql(kafka_config),
-            api_mv_sql(),
-            domain_queue_table_sql(kafka_config),
-            domain_mv_sql(),
-        ] {
-            self.client
-                .query(&sql)
-                .execute()
-                .await
-                .map_err(|_| self.store_error())?;
-        }
-
-        Ok(())
     }
 }
 
@@ -1301,156 +1267,6 @@ fn payment_audit_route_label(route: String) -> String {
 
 fn escape_sql(value: &str) -> String {
     value.replace('\\', "\\\\").replace('\'', "\\'")
-}
-
-fn api_queue_table_sql(kafka_config: &KafkaAnalyticsConfig) -> String {
-    format!(
-        "CREATE TABLE {API_QUEUE_TABLE} (\
-            schema_version UInt8,\
-            produced_at_ms Int64,\
-            event_id UInt64,\
-            merchant_id Nullable(String),\
-            payment_id Nullable(String),\
-            api_flow LowCardinality(String),\
-            flow_type LowCardinality(String),\
-            created_at_timestamp Int64,\
-            request_id String,\
-            global_request_id Nullable(String),\
-            trace_id Nullable(String),\
-            latency UInt64,\
-            status_code UInt16,\
-            auth_type Nullable(String),\
-            request String,\
-            user_agent Nullable(String),\
-            ip_addr Nullable(String),\
-            url_path String,\
-            response Nullable(String),\
-            error Nullable(String),\
-            http_method LowCardinality(String)\
-        ) ENGINE = Kafka SETTINGS \
-            kafka_broker_list = '{brokers}', \
-            kafka_topic_list = '{topic}', \
-            kafka_group_name = '{group_name}', \
-            kafka_format = 'JSONEachRow', \
-            kafka_handle_error_mode = 'stream'",
-        brokers = escape_sql(&kafka_config.brokers),
-        topic = escape_sql(&kafka_config.api_topic),
-        group_name = escape_sql(&kafka_config.api_group_name),
-    )
-}
-
-fn api_mv_sql() -> String {
-    format!(
-        "CREATE MATERIALIZED VIEW {API_MV} TO {API_TABLE} AS \
-         SELECT \
-            event_id, \
-            merchant_id, \
-            payment_id, \
-            api_flow, \
-            flow_type, \
-            created_at_timestamp, \
-            request_id, \
-            global_request_id, \
-            trace_id, \
-            latency, \
-            status_code, \
-            auth_type, \
-            request, \
-            user_agent, \
-            ip_addr, \
-            url_path, \
-            response, \
-            error, \
-            http_method \
-         FROM {API_QUEUE_TABLE} \
-         WHERE length(_error) = 0"
-    )
-}
-
-fn domain_queue_table_sql(kafka_config: &KafkaAnalyticsConfig) -> String {
-    format!(
-        "CREATE TABLE {DOMAIN_QUEUE_TABLE} (\
-            schema_version UInt8,\
-            produced_at_ms Int64,\
-            event_id UInt64,\
-            api_flow LowCardinality(String),\
-            flow_type LowCardinality(String),\
-            merchant_id Nullable(String),\
-            payment_id Nullable(String),\
-            request_id Nullable(String),\
-            global_request_id Nullable(String),\
-            trace_id Nullable(String),\
-            payment_method_type Nullable(String),\
-            payment_method Nullable(String),\
-            card_network Nullable(String),\
-            card_is_in Nullable(String),\
-            currency Nullable(String),\
-            country Nullable(String),\
-            auth_type Nullable(String),\
-            gateway Nullable(String),\
-            event_stage Nullable(String),\
-            routing_approach Nullable(String),\
-            rule_name Nullable(String),\
-            status Nullable(String),\
-            error_code Nullable(String),\
-            error_message Nullable(String),\
-            score_value Nullable(Float64),\
-            sigma_factor Nullable(Float64),\
-            average_latency Nullable(Float64),\
-            tp99_latency Nullable(Float64),\
-            transaction_count Nullable(Int64),\
-            route Nullable(String),\
-            details Nullable(String),\
-            created_at_ms Int64\
-        ) ENGINE = Kafka SETTINGS \
-            kafka_broker_list = '{brokers}', \
-            kafka_topic_list = '{topic}', \
-            kafka_group_name = '{group_name}', \
-            kafka_format = 'JSONEachRow', \
-            kafka_handle_error_mode = 'stream'",
-        brokers = escape_sql(&kafka_config.brokers),
-        topic = escape_sql(&kafka_config.domain_topic),
-        group_name = escape_sql(&kafka_config.domain_group_name),
-    )
-}
-
-fn domain_mv_sql() -> String {
-    format!(
-        "CREATE MATERIALIZED VIEW {DOMAIN_MV} TO {DOMAIN_TABLE} AS \
-         SELECT \
-            event_id, \
-            api_flow, \
-            flow_type, \
-            merchant_id, \
-            payment_id, \
-            request_id, \
-            global_request_id, \
-            trace_id, \
-            payment_method_type, \
-            payment_method, \
-            card_network, \
-            card_is_in, \
-            currency, \
-            country, \
-            auth_type, \
-            gateway, \
-            event_stage, \
-            routing_approach, \
-            rule_name, \
-            status, \
-            error_code, \
-            error_message, \
-            score_value, \
-            sigma_factor, \
-            average_latency, \
-            tp99_latency, \
-            transaction_count, \
-            route, \
-            details, \
-            created_at_ms \
-         FROM {DOMAIN_QUEUE_TABLE} \
-         WHERE length(_error) = 0"
-    )
 }
 
 fn flow_type_list_sql(flow_types: &[FlowType]) -> String {

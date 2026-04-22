@@ -34,7 +34,7 @@ impl AnalyticsRuntime {
                 )
             } else {
                 let clickhouse_store = Arc::new(
-                    ClickHouseAnalyticsStore::new(config.clickhouse.clone(), config.kafka.clone())
+                    ClickHouseAnalyticsStore::new(config.clickhouse.clone())
                         .await
                         .map_err(|_| {
                             ConfigurationError::InvalidConfigurationValueError(
