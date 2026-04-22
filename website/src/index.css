@@ -25,7 +25,74 @@
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    @apply bg-[#f7f8fa] text-slate-800 dark:bg-[#0d0d14] dark:text-[#f4f4f5] transition-colors duration-300;
+    @apply bg-[#f8fafc] text-slate-800 dark:bg-[#000000] dark:text-[#f4f4f5] transition-colors duration-300;
+  }
+
+  /* Fallback text colors for robust contrast when not overridden */
+  p,
+  span,
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply text-slate-800 dark:text-slate-200 transition-colors duration-300;
+  }
+
+  .dark p.text-slate-500,
+  .dark span.text-slate-500,
+  .dark div.text-slate-500 {
+    color: #94a3b8;
+  }
+
+  .dark p.text-slate-600,
+  .dark span.text-slate-600,
+  .dark div.text-slate-600 {
+    color: #cbd5e1;
+  }
+
+  /* Automatic inversion for tailwind colors in dark mode */
+  .dark .text-slate-900,
+  .dark .text-slate-800 {
+    color: #f1f5f9 !important;
+  }
+
+  .dark .text-slate-700 {
+    color: #e2e8f0 !important;
+  }
+
+  .dark .text-slate-600 {
+    color: #cbd5e1 !important;
+  }
+
+  .dark .text-slate-500 {
+    color: #94a3b8 !important;
+  }
+
+  .dark .text-slate-400 {
+    color: #64748b !important;
+  }
+
+  .dark .text-blue-800,
+  .dark .text-blue-700 {
+    color: #93c5fd !important;
+  }
+
+  .dark .text-blue-600 {
+    color: #60a5fa !important;
+  }
+
+  .dark .text-brand-500 {
+    color: #818cf8 !important;
+  }
+
+  .dark .bg-slate-50 {
+    @apply bg-[#1a1a1d] !important;
+  }
+
+  .dark .bg-slate-100 {
+    @apply bg-[#222226] !important;
   }
 
   /* Scrollbar */
