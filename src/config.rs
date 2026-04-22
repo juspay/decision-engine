@@ -170,8 +170,8 @@ impl Default for KafkaAnalyticsConfig {
         Self {
             brokers: "localhost:9092".to_string(),
             client_id: "decision-engine".to_string(),
-            api_topic: "decision-engine.analytics.api.v1".to_string(),
-            domain_topic: "decision-engine.analytics.domain.v1".to_string(),
+            api_topic: "api".to_string(),
+            domain_topic: "domain".to_string(),
             acks: "all".to_string(),
             compression: "lz4".to_string(),
             message_timeout_ms: 5_000,

@@ -70,6 +70,8 @@ identity = ""
 
 [analytics.kafka]
 brokers = "kafka:19092"
+api_topic = "api"
+domain_topic = "domain"
 
 [analytics.clickhouse]
 url = "http://clickhouse:8123"

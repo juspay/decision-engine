@@ -56,10 +56,9 @@ CREATE TABLE analytics_api_events_queue (
 ) ENGINE = Kafka
 SETTINGS
     kafka_broker_list = 'kafka:19092',
-    kafka_topic_list = 'decision-engine.analytics.api.v1',
-    kafka_group_name = 'decision-engine-analytics-api-v1',
+    kafka_topic_list = 'api',
+    kafka_group_name = 'decision-engine-analytics-api',
     kafka_format = 'JSONEachRow',
-    kafka_num_consumers = 1,
     kafka_handle_error_mode = 'stream';
 
 CREATE MATERIALIZED VIEW analytics_api_events_mv
