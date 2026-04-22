@@ -339,10 +339,9 @@ impl axum::response::IntoResponse for UserAuthError {
             Self::EmailNotVerified => (hyper::StatusCode::FORBIDDEN, self.to_string()),
             Self::InvalidToken => (hyper::StatusCode::UNAUTHORIZED, self.to_string()),
             Self::MerchantNotFound => (hyper::StatusCode::NOT_FOUND, self.to_string()),
-            Self::StorageError | Self::TokenGenerationFailed | Self::PasswordHashingFailed => (
-                hyper::StatusCode::INTERNAL_SERVER_ERROR,
-                self.to_string(),
-            ),
+            Self::StorageError | Self::TokenGenerationFailed | Self::PasswordHashingFailed => {
+                (hyper::StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
+            }
         };
         (
             status,

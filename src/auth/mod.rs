@@ -35,13 +35,36 @@ pub fn generate_jwt(
 
     let mut payload = JwtPayload::new();
     payload.set_subject(user_id);
-    payload.set_claim("user_id", Some(serde_json::Value::String(user_id.to_string()))).map_err(|e| e.to_string())?;
-    payload.set_claim("email", Some(serde_json::Value::String(email.to_string()))).map_err(|e| e.to_string())?;
-    payload.set_claim("merchant_id", Some(serde_json::Value::String(merchant_id.to_string()))).map_err(|e| e.to_string())?;
-    payload.set_claim("role", Some(serde_json::Value::String(role.to_string()))).map_err(|e| e.to_string())?;
-    payload.set_claim("jti", Some(serde_json::Value::String(jti))).map_err(|e| e.to_string())?;
-    payload.set_claim("iat", Some(serde_json::Value::Number(now.into()))).map_err(|e| e.to_string())?;
-    payload.set_claim("exp", Some(serde_json::Value::Number((now + expiry_seconds).into()))).map_err(|e| e.to_string())?;
+    payload
+        .set_claim(
+            "user_id",
+            Some(serde_json::Value::String(user_id.to_string())),
+        )
+        .map_err(|e| e.to_string())?;
+    payload
+        .set_claim("email", Some(serde_json::Value::String(email.to_string())))
+        .map_err(|e| e.to_string())?;
+    payload
+        .set_claim(
+            "merchant_id",
+            Some(serde_json::Value::String(merchant_id.to_string())),
+        )
+        .map_err(|e| e.to_string())?;
+    payload
+        .set_claim("role", Some(serde_json::Value::String(role.to_string())))
+        .map_err(|e| e.to_string())?;
+    payload
+        .set_claim("jti", Some(serde_json::Value::String(jti)))
+        .map_err(|e| e.to_string())?;
+    payload
+        .set_claim("iat", Some(serde_json::Value::Number(now.into())))
+        .map_err(|e| e.to_string())?;
+    payload
+        .set_claim(
+            "exp",
+            Some(serde_json::Value::Number((now + expiry_seconds).into())),
+        )
+        .map_err(|e| e.to_string())?;
 
     let signer = josekit::jws::HS256
         .signer_from_bytes(secret.as_bytes())
@@ -73,11 +96,30 @@ pub fn verify_jwt(token: &str, secret: &str) -> Result<JwtClaims, String> {
     }
 
     let user_id = payload.subject().ok_or("missing sub")?.to_string();
-    let email = payload.claim("email").and_then(|v| v.as_str()).ok_or("missing email")?.to_string();
-    let merchant_id = payload.claim("merchant_id").and_then(|v| v.as_str()).ok_or("missing merchant_id")?.to_string();
-    let role = payload.claim("role").and_then(|v| v.as_str()).ok_or("missing role")?.to_string();
-    let jti = payload.claim("jti").and_then(|v| v.as_str()).ok_or("missing jti")?.to_string();
-    let iat = payload.claim("iat").and_then(|v| v.as_u64()).ok_or("missing iat")?;
+    let email = payload
+        .claim("email")
+        .and_then(|v| v.as_str())
+        .ok_or("missing email")?
+        .to_string();
+    let merchant_id = payload
+        .claim("merchant_id")
+        .and_then(|v| v.as_str())
+        .ok_or("missing merchant_id")?
+        .to_string();
+    let role = payload
+        .claim("role")
+        .and_then(|v| v.as_str())
+        .ok_or("missing role")?
+        .to_string();
+    let jti = payload
+        .claim("jti")
+        .and_then(|v| v.as_str())
+        .ok_or("missing jti")?
+        .to_string();
+    let iat = payload
+        .claim("iat")
+        .and_then(|v| v.as_u64())
+        .ok_or("missing iat")?;
 
     Ok(JwtClaims {
         sub: user_id.clone(),

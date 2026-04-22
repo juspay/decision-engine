@@ -57,9 +57,11 @@ pub async fn authenticate(
     let api_key = match req.headers().get("x-api-key").and_then(|v| v.to_str().ok()) {
         Some(k) => k.to_owned(),
         None => {
-            return Ok(
-                (StatusCode::UNAUTHORIZED, "Missing authentication credentials").into_response(),
+            return Ok((
+                StatusCode::UNAUTHORIZED,
+                "Missing authentication credentials",
             )
+                .into_response())
         }
     };
 

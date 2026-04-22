@@ -68,7 +68,10 @@ pub async fn signup(
             <crate::storage::types::MerchantAccount as HasTable>::Table,
             _,
             crate::storage::types::MerchantAccount,
-        >(&app_state.db, ma_dsl::merchant_id.eq(payload.merchant_id.clone()))
+        >(
+            &app_state.db,
+            ma_dsl::merchant_id.eq(payload.merchant_id.clone()),
+        )
         .await
         .map_err(|_| UserAuthError::StorageError)?;
 
@@ -78,20 +81,21 @@ pub async fn signup(
     }
 
     // Check email uniqueness
-    let existing = crate::generics::generic_find_all::<
-        <User as HasTable>::Table,
-        _,
-        User,
-    >(&app_state.db, dsl::email.eq(payload.email.clone()))
+    let existing = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
+        &app_state.db,
+        dsl::email.eq(payload.email.clone()),
+    )
     .await
     .map_err(|_| UserAuthError::StorageError)?;
 
     if !existing.is_empty() {
-        return Err(error::ContainerError::from(UserAuthError::EmailAlreadyExists));
+        return Err(error::ContainerError::from(
+            UserAuthError::EmailAlreadyExists,
+        ));
     }
 
-    let password_hash = auth::hash_password(&payload.password)
-        .map_err(|_| UserAuthError::PasswordHashingFailed)?;
+    let password_hash =
+        auth::hash_password(&payload.password).map_err(|_| UserAuthError::PasswordHashingFailed)?;
 
     let user_id = uuid::Uuid::new_v4().to_string();
     let now = date_time::now();
@@ -108,7 +112,11 @@ pub async fn signup(
         is_active: true,
         // Email verification skipped for local; in production set to 0/false and send email
         #[cfg(feature = "mysql")]
-        email_verified: if global_config.user_auth.email_verification_enabled { 0 } else { 1 },
+        email_verified: if global_config.user_auth.email_verification_enabled {
+            0
+        } else {
+            1
+        },
         #[cfg(feature = "postgres")]
         email_verified: !global_config.user_auth.email_verification_enabled,
         created_at: now,
@@ -152,11 +160,10 @@ pub async fn login(
         .map(|s| s.global_config.clone())
         .ok_or(UserAuthError::StorageError)?;
 
-    let mut users = crate::generics::generic_find_all::<
-        <User as HasTable>::Table,
-        _,
-        User,
-    >(&app_state.db, dsl::email.eq(payload.email.clone()))
+    let mut users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
+        &app_state.db,
+        dsl::email.eq(payload.email.clone()),
+    )
     .await
     .map_err(|_| UserAuthError::StorageError)?;
 
@@ -164,9 +171,13 @@ pub async fn login(
 
     let is_active = {
         #[cfg(feature = "mysql")]
-        { user.is_active != 0 }
+        {
+            user.is_active != 0
+        }
         #[cfg(feature = "postgres")]
-        { user.is_active }
+        {
+            user.is_active
+        }
     };
     if !is_active {
         return Err(error::ContainerError::from(UserAuthError::AccountInactive));
@@ -174,9 +185,13 @@ pub async fn login(
 
     let email_verified = {
         #[cfg(feature = "mysql")]
-        { user.email_verified != 0 }
+        {
+            user.email_verified != 0
+        }
         #[cfg(feature = "postgres")]
-        { user.email_verified }
+        {
+            user.email_verified
+        }
     };
     if global_config.user_auth.email_verification_enabled && !email_verified {
         return Err(error::ContainerError::from(UserAuthError::EmailNotVerified));
@@ -235,7 +250,9 @@ pub async fn logout(
             .await;
     }
 
-    Ok(Json(serde_json::json!({ "message": "Logged out successfully" })))
+    Ok(Json(
+        serde_json::json!({ "message": "Logged out successfully" }),
+    ))
 }
 
 #[axum::debug_handler]
@@ -251,11 +268,10 @@ pub async fn me(
     let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
 
     let app_state = get_tenant_app_state().await;
-    let mut users = crate::generics::generic_find_all::<
-        <User as HasTable>::Table,
-        _,
-        User,
-    >(&app_state.db, dsl::user_id.eq(claims.user_id.clone()))
+    let mut users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
+        &app_state.db,
+        dsl::user_id.eq(claims.user_id.clone()),
+    )
     .await
     .map_err(|_| UserAuthError::StorageError)?;
 
