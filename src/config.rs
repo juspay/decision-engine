@@ -203,7 +203,7 @@ impl Default for ClickHouseAnalyticsConfig {
     fn default() -> Self {
         Self {
             url: "http://localhost:8123".to_string(),
-            database: "decision_engine_analytics".to_string(),
+            database: "default".to_string(),
             user: "default".to_string(),
             password: None,
         }

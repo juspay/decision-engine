@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS decision_engine_analytics.analytics_api_events_v1 (
+CREATE TABLE analytics_api_events_v1 (
     event_id UInt64,
     merchant_id Nullable(String),
     payment_id Nullable(String),
@@ -33,7 +33,7 @@ ORDER BY (
 )
 TTL created_at + INTERVAL 18 MONTH;
 
-CREATE TABLE IF NOT EXISTS decision_engine_analytics.analytics_api_events_queue (
+CREATE TABLE analytics_api_events_queue (
     schema_version UInt8,
     produced_at_ms Int64,
     event_id UInt64,
@@ -66,8 +66,8 @@ SETTINGS
     kafka_num_consumers = 1,
     kafka_handle_error_mode = 'stream';
 
-CREATE MATERIALIZED VIEW IF NOT EXISTS decision_engine_analytics.analytics_api_events_mv
-TO decision_engine_analytics.analytics_api_events_v1 AS
+CREATE MATERIALIZED VIEW analytics_api_events_mv
+TO analytics_api_events_v1 AS
 SELECT
     event_id,
     merchant_id,
@@ -90,5 +90,5 @@ SELECT
     http_method,
     request_truncated,
     response_truncated
-FROM decision_engine_analytics.analytics_api_events_queue
+FROM analytics_api_events_queue
 WHERE length(_error) = 0;
