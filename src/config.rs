@@ -48,6 +48,60 @@ pub struct GlobalConfig {
     #[serde(default)]
     pub debit_routing_config: network_decider::types::DebitRoutingConfig,
     pub compression_filepath: Option<CompressionFilepath>,
+    #[serde(default)]
+    pub api_key_auth_enabled: bool,
+    #[serde(default)]
+    pub user_auth: UserAuthConfig,
+    #[serde(default)]
+    pub admin_secret: AdminSecretConfig,
+}
+
+#[derive(Clone, serde::Deserialize, Debug)]
+pub struct UserAuthConfig {
+    /// Secret used to sign JWTs — set a strong random value in production
+    pub jwt_secret: String,
+    /// JWT expiry in seconds (default 24 hours)
+    #[serde(default = "default_jwt_expiry")]
+    pub jwt_expiry_seconds: u64,
+    /// Send verification email on signup; block login until verified
+    #[serde(default)]
+    pub email_verification_enabled: bool,
+}
+
+fn default_jwt_expiry() -> u64 {
+    86400
+}
+
+const DEFAULT_ADMIN_SECRET: &str = "test_admin";
+
+#[derive(Clone, serde::Deserialize, Debug)]
+pub struct AdminSecretConfig {
+    /// Secret required in `x-admin-secret` header to call privileged endpoints (e.g. merchant create)
+    pub secret: String,
+}
+
+impl Default for AdminSecretConfig {
+    fn default() -> Self {
+        Self {
+            secret: DEFAULT_ADMIN_SECRET.to_string(),
+        }
+    }
+}
+
+impl AdminSecretConfig {
+    pub fn is_default(&self) -> bool {
+        self.secret == DEFAULT_ADMIN_SECRET
+    }
+}
+
+impl Default for UserAuthConfig {
+    fn default() -> Self {
+        Self {
+            jwt_secret: "change_me_in_production_use_32chars!!".to_string(),
+            jwt_expiry_seconds: default_jwt_expiry(),
+            email_verification_enabled: false,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
