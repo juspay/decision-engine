@@ -136,10 +136,10 @@ pub async fn decider_full_payload_hs_function(
                 routing_approach: None,
                 filter_wise_gateways: None,
                 error_info: UnifiedError {
-                    code: "TE_05".to_string(),
+                    code: crate::error::error_codes::TE_05.to_string(),
                     user_message: "Debit routing is not enabled for this merchant".to_string(),
                     developer_message: format!(
-                        "Merchant {} does not have debit routing enabled. Enable it via the /merchant-account/:merchant-id/debit-routing/toggle API.",
+                        "Merchant {} does not have debit routing enabled. Enable it via the /merchant-account/:merchant-id/debit-routing API.",
                         dreq_.merchant_id
                     ),
                 },

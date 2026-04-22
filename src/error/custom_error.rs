@@ -168,7 +168,7 @@ impl axum::response::IntoResponse for RuleConfigurationError {
             Self::DebitRoutingNotEnabled => (
                 hyper::StatusCode::FORBIDDEN,
                 axum::Json(crate::error::ApiErrorResponse::new(
-                    crate::error::error_codes::TE_04,
+                    crate::error::error_codes::TE_05,
                     "Debit routing not enabled for merchant".to_string(),
                     None,
                 )),
