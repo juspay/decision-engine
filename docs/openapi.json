@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Decision Engine",
-    "description": "HTTP API for gateway decisions, score feedback, merchant configuration, and routing rule management.",
-    "version": "1.2.1",
+    "description": "HTTP API for gateway decisions, score feedback, merchant configuration, and routing rule management.\n\n## Authentication\n\nThis API supports two authentication methods:\n\n1. **JWT Bearer Token** - For dashboard/user sessions\n   - Header: `Authorization: Bearer <jwt_token>`\n   - Obtain via `/auth/login` endpoint\n\n2. **API Key** - For service-to-service/programmatic access\n   - Header: `x-api-key: DE_<64_char_hex>`\n   - Create via `/api-key/create` endpoint\n\nProtected endpoints require one of these authentication methods.",
+    "version": "1.2.2",
     "contact": {
       "name": "Juspay",
       "url": "https://github.com/juspay/decision-engine"
@@ -52,7 +52,11 @@
         "operationId": "decideGateway",
         "tags": ["Gateway Decision"],
         "summary": "Decide gateway",
-        "description": "Core routing decision API. Given a payment context and a list of eligible gateways, returns the optimal gateway to route to.\n\nThe engine applies a sequence of filters (currency, card brand, auth type, EMI, etc.) then scores remaining gateways using success rate history, elimination status, and contract obligations.",
+        "description": "Core routing decision API. Given a payment context and a list of eligible gateways, returns the optimal gateway to route to.\n\nThe engine applies a sequence of filters (currency, card brand, auth type, EMI, etc.) then scores remaining gateways using success rate history, elimination status, and contract obligations.\n\n**Authentication:** Requires either JWT Bearer token or API Key.",
+        "security": [
+          { "BearerAuth": [] },
+          { "ApiKeyAuth": [] }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -631,6 +635,20 @@
     }
   },
   "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "JWT token obtained from /auth/login"
+      },
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-key",
+        "description": "API key created via /api-key/create (starts with DE_)"
+      }
+    },
     "schemas": {
       "HealthResponse": {
         "type": "object",
