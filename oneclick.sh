@@ -11,7 +11,7 @@ DOCS_URL="http://localhost:${DOCS_PORT}"
 DOCS_HOME_URL="${DOCS_URL}/introduction"
 API_REF_URL="${DOCS_URL}/api-reference"
 API_EXAMPLES_URL="${DOCS_URL}/api-reference1"
-DOCS_LOG_PATH="${SCRIPT_DIR}/.mintlify-dev.log"
+DOCS_LOG_PATH="$SCRIPT_DIR/.mintlify-dev.log"
 
 POSTGRES_HOST="${POSTGRES_HOST:-localhost}"
 POSTGRES_PORT="${POSTGRES_PORT:-5432}"
@@ -20,13 +20,18 @@ POSTGRES_DB="${POSTGRES_DB:-decision_engine_db}"
 REDIS_HOST="${REDIS_HOST:-localhost}"
 REDIS_PORT="${REDIS_PORT:-6379}"
 CLICKHOUSE_HTTP_URL="${CLICKHOUSE_HTTP_URL:-http://localhost:8123}"
-CLICKHOUSE_PING_URL="${CLICKHOUSE_PING_URL:-${CLICKHOUSE_HTTP_URL}/ping}"
 CLICKHOUSE_USER="${CLICKHOUSE_USER:-decision_engine}"
 CLICKHOUSE_PASSWORD="${CLICKHOUSE_PASSWORD:-decision_engine}"
 KAFKA_HOST="${KAFKA_HOST:-localhost}"
 KAFKA_PORT="${KAFKA_PORT:-9092}"
 
 PORTS=(8080 5173 "$DOCS_PORT" 9094)
+EXPECTED_CLICKHOUSE_TABLES=(
+    analytics_api_events_queue
+    analytics_domain_events_queue
+    analytics_api_events_v1
+    analytics_domain_events_v1
+)
 
 check_and_kill_ports() {
     local pids_to_kill=()
@@ -64,7 +69,7 @@ check_and_kill_ports() {
         echo ""
         echo "Killing processes..."
         for pid in "${pids_to_kill[@]}"; do
-            kill $pid 2>/dev/null || true
+            kill "$pid" 2>/dev/null || true
             echo "  Killed PID $pid"
         done
 
@@ -74,7 +79,7 @@ check_and_kill_ports() {
             local pid
             pid=$(lsof -t -iTCP:$port -sTCP:LISTEN 2>/dev/null || true)
             if [ -n "$pid" ]; then
-                kill -9 $pid 2>/dev/null || true
+                kill -9 "$pid" 2>/dev/null || true
                 echo "  Force killed PID $pid on port $port"
             fi
         done
@@ -92,13 +97,13 @@ cleanup() {
     echo ""
     echo "Stopping services..."
     if [ -n "$SERVER_PID" ]; then
-        kill $SERVER_PID 2>/dev/null || true
+        kill "$SERVER_PID" 2>/dev/null || true
     fi
     if [ -n "$DASHBOARD_PID" ]; then
-        kill $DASHBOARD_PID 2>/dev/null || true
+        kill "$DASHBOARD_PID" 2>/dev/null || true
     fi
     if [ -n "$DOCS_PID" ]; then
-        kill $DOCS_PID 2>/dev/null || true
+        kill "$DOCS_PID" 2>/dev/null || true
     fi
     exit "$exit_code"
 }
@@ -151,6 +156,25 @@ check_kafka() {
     fi
 }
 
+check_clickhouse_schema() {
+    local missing=0
+
+    for table_name in "${EXPECTED_CLICKHOUSE_TABLES[@]}"; do
+        local query
+        query="SELECT%20count()%20FROM%20system.tables%20WHERE%20database%20%3D%20'decision_engine_analytics'%20AND%20name%20%3D%20'${table_name}'"
+        local result
+        result=$(curl -fsS \
+            --user "${CLICKHOUSE_USER}:${CLICKHOUSE_PASSWORD}" \
+            "${CLICKHOUSE_HTTP_URL}/?query=${query}" 2>/dev/null || echo "0")
+        if [ "$result" != "1" ]; then
+            echo "  [missing] ClickHouse table ${table_name}"
+            missing=1
+        fi
+    done
+
+    return "$missing"
+}
+
 print_service_status() {
     local service_name="$1"
     local status="$2"
@@ -183,16 +207,16 @@ run_infra_checklist() {
         REDIS_READY=0
     fi
 
-    if check_clickhouse; then
-        CLICKHOUSE_READY=1
-    else
-        CLICKHOUSE_READY=0
-    fi
-
     if check_kafka; then
         KAFKA_READY=1
     else
         KAFKA_READY=0
+    fi
+
+    if check_clickhouse; then
+        CLICKHOUSE_READY=1
+    else
+        CLICKHOUSE_READY=0
     fi
 
     print_service_status "Docker daemon" "$DOCKER_READY"
@@ -245,29 +269,24 @@ wait_for_redis() {
     return 1
 }
 
-wait_for_backend() {
+wait_for_kafka() {
     local attempts=0
-    local max_attempts=90
+    local max_attempts=60
 
-    echo "Waiting for Decision Engine API on http://localhost:8080/health..."
+    echo "Waiting for Kafka on ${KAFKA_HOST}:${KAFKA_PORT}..."
 
     while [ $attempts -lt $max_attempts ]; do
-        if curl -fsS http://localhost:8080/health >/dev/null 2>&1; then
-            echo "Decision Engine API is healthy."
+        if check_kafka; then
+            echo "Kafka is healthy."
             echo ""
             return 0
-        fi
-
-        if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-            echo "Decision Engine server exited before becoming healthy."
-            return 1
         fi
 
         attempts=$((attempts + 1))
         sleep 1
     done
 
-    echo "Decision Engine API did not become healthy within ${max_attempts}s."
+    echo "Kafka did not become healthy within ${max_attempts}s."
     return 1
 }
 
@@ -292,24 +311,29 @@ wait_for_clickhouse() {
     return 1
 }
 
-wait_for_kafka() {
+wait_for_backend() {
     local attempts=0
-    local max_attempts=60
+    local max_attempts=90
 
-    echo "Waiting for Kafka on ${KAFKA_HOST}:${KAFKA_PORT}..."
+    echo "Waiting for Decision Engine API on http://localhost:8080/health..."
 
     while [ $attempts -lt $max_attempts ]; do
-        if check_kafka; then
-            echo "Kafka is healthy."
+        if curl -fsS http://localhost:8080/health >/dev/null 2>&1; then
+            echo "Decision Engine API is healthy."
             echo ""
             return 0
+        fi
+
+        if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+            echo "Decision Engine server exited before becoming healthy."
+            return 1
         fi
 
         attempts=$((attempts + 1))
         sleep 1
     done
 
-    echo "Kafka did not become healthy within ${max_attempts}s."
+    echo "Decision Engine API did not become healthy within ${max_attempts}s."
     return 1
 }
 
@@ -342,43 +366,17 @@ wait_for_docs() {
 }
 
 check_and_kill_ports
-
 run_infra_checklist
 
-missing_services=()
-if [ "${POSTGRES_READY}" -eq 0 ]; then
-    missing_services+=("postgresql")
+if [ "${DOCKER_READY}" -eq 0 ] && ([ "${POSTGRES_READY}" -eq 0 ] || [ "${REDIS_READY}" -eq 0 ] || [ "${KAFKA_READY}" -eq 0 ] || [ "${CLICKHOUSE_READY}" -eq 0 ]); then
+    echo "Cannot start missing infrastructure services because Docker is not available."
+    echo "Start Docker/OrbStack first, then rerun ./oneclick.sh."
+    cleanup 1
 fi
 
-if [ "${REDIS_READY}" -eq 0 ]; then
-    missing_services+=("redis")
-fi
-
-if [ "${KAFKA_READY}" -eq 0 ]; then
-    missing_services+=("kafka")
-fi
-
-if [ "${#missing_services[@]}" -gt 0 ]; then
-    if [ "${DOCKER_READY}" -eq 0 ]; then
-        echo "Cannot start missing infrastructure services because Docker is not available."
-        echo "Missing services: ${missing_services[*]}"
-        echo "Start Docker/OrbStack first, then rerun ./oneclick.sh."
-        cleanup 1
-    fi
-    echo "Starting missing infrastructure services: ${missing_services[*]}"
-    docker compose --profile postgres-ghcr up -d "${missing_services[@]}"
-    echo ""
-fi
-
-if [ "${CLICKHOUSE_READY}" -eq 0 ]; then
-    if [ "${DOCKER_READY}" -eq 0 ]; then
-        echo "Cannot start missing infrastructure services because Docker is not available."
-        echo "Missing services: clickhouse"
-        echo "Start Docker/OrbStack first, then rerun ./oneclick.sh."
-        cleanup 1
-    fi
-    echo "Starting or refreshing ClickHouse service"
-    docker compose --profile analytics-clickhouse up -d --force-recreate clickhouse
+if [ "${POSTGRES_READY}" -eq 0 ] || [ "${REDIS_READY}" -eq 0 ] || [ "${KAFKA_READY}" -eq 0 ] || [ "${CLICKHOUSE_READY}" -eq 0 ]; then
+    echo "Starting infrastructure services..."
+    docker compose --profile postgres-ghcr --profile analytics-clickhouse up -d postgresql redis kafka kafka-init clickhouse
     echo ""
 fi
 
@@ -401,16 +399,12 @@ fi
 echo "Infrastructure checklist after bring-up:"
 run_infra_checklist
 
-if [ "${POSTGRES_READY}" -eq 0 ] || [ "${REDIS_READY}" -eq 0 ] || [ "${KAFKA_READY}" -eq 0 ] || [ "${CLICKHOUSE_READY}" -eq 0 ]; then
-    echo "Infrastructure checklist failed. Please resolve the missing services and rerun ./oneclick.sh."
+if ! check_clickhouse_schema; then
+    echo ""
+    echo "ClickHouse is reachable but the analytics schema is incomplete."
+    echo "Run 'make reset-analytics-clickhouse' to recreate the ClickHouse analytics volume."
     cleanup 1
 fi
-
-echo "Initializing Kafka analytics topics..."
-docker compose --profile analytics-clickhouse run --rm kafka-init
-
-echo "Initializing ClickHouse analytics schema..."
-docker compose --profile analytics-clickhouse run --rm clickhouse-init
 
 echo "Running Postgres migrations..."
 just migrate-pg
@@ -457,12 +451,12 @@ echo "=========================================="
 echo "  Decision Engine is starting up!"
 echo "=========================================="
 echo ""
-echo "  Server:      http://localhost:8080"
-echo "  Dashboard:   http://localhost:5173/"
-echo "  Docs:        $DOCS_HOME_URL"
-echo "  API Ref:     $API_REF_URL"
-echo "  API Examples:$API_EXAMPLES_URL"
-echo "  OpenAPI:     $OPENAPI_PATH"
+echo "  Server:       http://localhost:8080"
+echo "  Dashboard:    http://localhost:5173/"
+echo "  Docs:         $DOCS_HOME_URL"
+echo "  API Ref:      $API_REF_URL"
+echo "  API Examples: $API_EXAMPLES_URL"
+echo "  OpenAPI:      $OPENAPI_PATH"
 echo ""
 echo "=========================================="
 echo ""

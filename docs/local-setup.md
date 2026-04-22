@@ -56,32 +56,26 @@ You must pass at least one profile.
 | `monitoring` | Prometheus + Grafana |
 | `groovy-ghcr` | Groovy runner image |
 | `groovy-local` | Groovy runner built from local source |
-| `analytics-clickhouse` | Standalone analytics infra: ClickHouse + Kafka + topic init |
+| `analytics-clickhouse` | Kafka topic init + ClickHouse analytics bootstrap only |
 
 ## Fastest Bring-Up
 
 ### API Only
 
 ```bash
-docker compose --profile postgres-ghcr --profile analytics-clickhouse up -d
+docker compose --profile postgres-ghcr up -d
 ```
 
 ### API + Dashboard + Docs
 
 ```bash
-docker compose --profile dashboard-postgres-ghcr --profile analytics-clickhouse up -d
+docker compose --profile dashboard-postgres-ghcr up -d
 ```
 
 ### With Monitoring
 
 ```bash
-docker compose --profile postgres-ghcr --profile analytics-clickhouse --profile monitoring up -d
-```
-
-### With Analytics Infra
-
-```bash
-docker compose --profile analytics-clickhouse up -d
+docker compose --profile postgres-ghcr --profile monitoring up -d
 ```
 
 ## Make Targets
@@ -95,15 +89,32 @@ make init-mysql-ghcr
 make init-mysql-local
 make run-pg-ghcr
 make run-mysql-local
+make reset-analytics-clickhouse
 make stop
 ```
+
+## Analytics Bootstrap
+
+The Kafka to ClickHouse analytics path is bootstrapped automatically.
+
+- Kafka topics are created by `kafka-init`
+- ClickHouse loads analytics SQL from `clickhouse/scripts/` on first boot
+- analytics data is stored in the named Docker volume `clickhouse-data`
+- normal restarts keep analytics history intact
+
+If you need a clean analytics rebuild, use:
+
+```bash
+make reset-analytics-clickhouse
+```
+
+That removes the ClickHouse analytics volume and recreates the Kafka + ClickHouse analytics stack.
 
 ## Source Build And Run
 
 ### PostgreSQL
 
 ```bash
-docker compose --profile analytics-clickhouse up -d
 cargo build --release --no-default-features --features middleware,kms-aws,postgres
 just migrate-pg
 RUSTFLAGS="-Awarnings" cargo run --no-default-features --features postgres
@@ -112,27 +123,9 @@ RUSTFLAGS="-Awarnings" cargo run --no-default-features --features postgres
 ### MySQL
 
 ```bash
-docker compose --profile analytics-clickhouse up -d
 cargo build --release --features release
 RUSTFLAGS="-Awarnings" cargo run --features release
 ```
-
-### `oneclick.sh`
-
-For the local source-run dashboard flow:
-
-```bash
-./oneclick.sh
-```
-
-The script now performs an infrastructure checklist first:
-
-- reports whether Postgres is reachable on `localhost:5432`
-- reports whether Redis is reachable on `localhost:6379`
-- reports whether Kafka is reachable on `localhost:9092`
-- reports whether ClickHouse is reachable on `http://localhost:8123/ping`
-- starts any missing Postgres, Redis, Kafka, or ClickHouse Docker services
-- waits for those services to become healthy before running Kafka topic init, ClickHouse init, Postgres migrations, and the app
 
 ## Docker Builds Without Compose
 
@@ -200,11 +193,23 @@ docker compose logs db-migrator-postgres
 docker compose logs db-migrator
 ```
 
+### Inspect analytics infrastructure
+
+```bash
+docker compose logs kafka-init
+docker compose logs clickhouse
+```
+
+Check the ClickHouse schema directly:
+
+```bash
+curl --user decision_engine:decision_engine \
+  "http://localhost:8123/?query=SHOW%20TABLES%20FROM%20decision_engine_analytics"
+```
+
 ### Common next files to inspect
 
 - `docker-compose.yaml`
 - `config/docker-configuration.toml`
-- `docs/clickhouse-analytics.mdx`
-- `clickhouse/migrations/`
 - `src/config.rs`
 - `src/app.rs`
