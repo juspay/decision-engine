@@ -1,8 +1,9 @@
+use crate::app::APP_STATE;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
 use crate::types::merchant as ETM;
 use crate::types::service_configuration;
 use crate::{error, logger};
-use axum::{extract::Path, Json};
+use axum::{extract::Path, http::HeaderMap, Json};
 use error_stack::ResultExt;
 use serde::{Deserialize, Serialize};
 
@@ -11,6 +12,7 @@ pub struct MerchantAccountCreateResponse {
     pub message: String,
     pub merchant_id: String,
     pub gateway_success_rate_based_decider_input: Option<String>,
+    pub api_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -75,11 +77,25 @@ pub async fn get_merchant_config(
 
 #[axum::debug_handler]
 pub async fn create_merchant_config(
+    headers: HeaderMap,
     Json(payload): Json<ETM::merchant_account::MerchantAccountCreateRequest>,
 ) -> Result<
     Json<MerchantAccountCreateResponse>,
     error::ContainerError<error::MerchantAccountConfigurationError>,
 > {
+    let global_config = APP_STATE
+        .get()
+        .map(|s| s.global_config.clone())
+        .ok_or(error::MerchantAccountConfigurationError::StorageError)?;
+
+    let provided = headers
+        .get("x-admin-secret")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    if provided != global_config.admin_secret.secret {
+        return Err(error::MerchantAccountConfigurationError::Unauthorized.into());
+    }
     // Record total request count and start timer
     API_REQUEST_TOTAL_COUNTER
         .with_label_values(&["merchant_account_create"])
@@ -118,10 +134,16 @@ pub async fn create_merchant_config(
             API_REQUEST_COUNTER
                 .with_label_values(&["merchant_account_create", "success"])
                 .inc();
+            let api_key = crate::routes::api_key::insert_api_key_for_merchant(
+                &merchant_id,
+                Some("Default API key".to_string()),
+            )
+            .await;
             Ok(Json(MerchantAccountCreateResponse {
                 message: "Merchant account created successfully".to_string(),
                 merchant_id,
                 gateway_success_rate_based_decider_input,
+                api_key,
             }))
         }
         Err(e) => {

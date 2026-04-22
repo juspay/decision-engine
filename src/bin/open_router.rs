@@ -48,4 +48,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn log_startup_configuration(global_config: &open_router::config::GlobalConfig) {
     logger::info!("Decision engine started [{:?}]", global_config);
+
+    if global_config.admin_secret.is_default() {
+        logger::warn!(
+            "SECURITY WARNING: admin_secret is set to the default value. \
+             Set `admin_secret.secret` in your config to a strong secret before exposing this server."
+        );
+    }
+    if global_config.user_auth.jwt_secret == "change_me_in_production_use_32chars!!" {
+        logger::warn!(
+            "SECURITY WARNING: user_auth.jwt_secret is set to the default value. \
+             Set it to a strong random secret in production."
+        );
+    }
 }
