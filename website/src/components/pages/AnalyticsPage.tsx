@@ -64,6 +64,7 @@ const PRESET_OPTIONS: { value: AnalyticsRangeValue; label: string }[] = [
   { value: '1h', label: 'Last 1 hour' },
   { value: '24h', label: 'Last 1 day' },
   { value: '30d', label: 'Last 1 month' },
+  { value: '18mo', label: 'Last 18 months' },
   { value: 'custom', label: 'Custom window' },
 ]
 
@@ -96,6 +97,7 @@ const MAX_VISIBLE_DIMENSIONS = 3
 const PREVIEW_TRACE_PAGE_SIZE = 50
 const MAX_PREVIEW_TRACE_PAGES = 5
 const PREVIEW_LIST_PAGE_SIZE = 10
+const EIGHTEEN_MONTHS_MS = 18 * 30 * 24 * 60 * 60 * 1000
 
 const CARD_INFO: Record<'hits' | 'share' | 'sr' | 'preview_hits' | 'preview_activity' | 'preview_share', InfoContent> = {
   hits: {
@@ -291,13 +293,17 @@ function bucketSizeForWindow(range: AnalyticsRangeValue, customWindow?: TimeWind
         ? 60 * 60 * 1000
         : range === '24h'
           ? 24 * 60 * 60 * 1000
-          : 30 * 24 * 60 * 60 * 1000
+          : range === '30d'
+            ? 30 * 24 * 60 * 60 * 1000
+            : EIGHTEEN_MONTHS_MS
 
   if (windowMs <= 15 * 60 * 1000) return 60 * 1000
   if (windowMs <= 60 * 60 * 1000) return 5 * 60 * 1000
   if (windowMs <= 24 * 60 * 60 * 1000) return 15 * 60 * 1000
   if (windowMs <= 72 * 60 * 60 * 1000) return 60 * 60 * 1000
-  return 3 * 60 * 60 * 1000
+  if (windowMs <= 30 * 24 * 60 * 60 * 1000) return 3 * 60 * 60 * 1000
+  if (windowMs <= 180 * 24 * 60 * 60 * 1000) return 24 * 60 * 60 * 1000
+  return 7 * 24 * 60 * 60 * 1000
 }
 
 function bucketTimestamp(ms: number, bucketSize: number) {
@@ -326,7 +332,9 @@ function presetWindow(range: AnalyticsRange) {
         ? 60 * 60 * 1000
         : range === '24h'
           ? 24 * 60 * 60 * 1000
-          : 30 * 24 * 60 * 60 * 1000
+          : range === '30d'
+            ? 30 * 24 * 60 * 60 * 1000
+            : EIGHTEEN_MONTHS_MS
 
   return {
     start_ms: now - duration,

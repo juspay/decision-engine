@@ -38,6 +38,7 @@ const OVERVIEW_RANGE_OPTIONS: {
   { value: '1h', label: '1h', detail: 'Last hour', badge: 'Live 1h', summaryLabel: 'Errors last hour' },
   { value: '24h', label: '1 day', detail: 'Last 1 day', badge: 'Live 1d', summaryLabel: 'Errors last 1 day' },
   { value: '30d', label: '1 month', detail: 'Last 1 month', badge: 'Live 30d', summaryLabel: 'Errors last 1 month' },
+  { value: '18mo', label: '18 months', detail: 'Last 18 months', badge: 'Live 18mo', summaryLabel: 'Errors last 18 months' },
 ]
 
 function useHealth() {
