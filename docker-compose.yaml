@@ -22,8 +22,6 @@ services:
         condition: service_completed_successfully
       clickhouse:
         condition: service_healthy
-      clickhouse-init:
-        condition: service_completed_successfully
       kafka:
         condition: service_healthy
       kafka-init:
@@ -58,8 +56,6 @@ services:
         condition: service_completed_successfully
       clickhouse:
         condition: service_healthy
-      clickhouse-init:
-        condition: service_completed_successfully
       kafka:
         condition: service_healthy
       kafka-init:
@@ -100,8 +96,6 @@ services:
         condition: service_completed_successfully
       clickhouse:
         condition: service_healthy
-      clickhouse-init:
-        condition: service_completed_successfully
       kafka:
         condition: service_healthy
       kafka-init:
@@ -140,8 +134,6 @@ services:
         condition: service_completed_successfully
       clickhouse:
         condition: service_healthy
-      clickhouse-init:
-        condition: service_completed_successfully
       kafka:
         condition: service_healthy
       kafka-init:
@@ -360,47 +352,20 @@ services:
       CLICKHOUSE_DB: decision_engine_analytics
       CLICKHOUSE_USER: decision_engine
       CLICKHOUSE_PASSWORD: decision_engine
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
     networks:
       - open-router-network
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./clickhouse/scripts:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping | grep -q Ok"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 20s
-
-  clickhouse-init:
-    image: clickhouse/clickhouse-server:26.1
-    profiles:
-      - postgres-ghcr
-      - dashboard-postgres-ghcr
-      - postgres-local
-      - dashboard-postgres-local
-      - mysql-ghcr
-      - dashboard-mysql-ghcr
-      - mysql-local
-      - dashboard-mysql-local
-      - analytics-clickhouse
-    depends_on:
-      clickhouse:
-        condition: service_healthy
-      kafka-init:
-        condition: service_completed_successfully
-    networks:
-      - open-router-network
-    volumes:
-      - ./clickhouse/migrations:/migrations:ro
-    entrypoint:
-      - /bin/bash
-      - -lc
-      - |
-        clickhouse-client --host clickhouse --user decision_engine --password decision_engine --multiquery --query "
-          DROP DATABASE IF EXISTS decision_engine_analytics;
-          CREATE DATABASE decision_engine_analytics;
-        "
-        find /migrations -name '*.sql' -print0 \
-          | sort -z \
-          | xargs -0 -I{} clickhouse-client --host clickhouse --user decision_engine --password decision_engine --multiquery --queries-file {}
 
   # ==========================================
   # Core Infrastructure
@@ -543,3 +508,4 @@ volumes:
   mysql-data:
   redis-data:
   postgres-data:
+  clickhouse-data:

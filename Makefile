@@ -49,6 +49,12 @@ update-config:
 stop:
 	docker compose down
 
+reset-analytics-clickhouse:
+	docker compose stop clickhouse kafka kafka-init || true
+	docker compose rm -sf clickhouse kafka-init || true
+	docker volume rm $$(basename "$$(pwd)")_clickhouse-data || true
+	docker compose --profile analytics-clickhouse up -d kafka kafka-init clickhouse
+
 # Backward-compatible aliases
 init: init-mysql-ghcr
 init-pg: init-pg-ghcr

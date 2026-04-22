@@ -35,10 +35,10 @@ You must pass at least one profile.
 
 | Profile | DB | Includes |
 |---|---|---|
-| `postgres-ghcr` | PostgreSQL | API + PostgreSQL + Redis + PG migrations |
-| `postgres-local` | PostgreSQL | API + PostgreSQL + Redis + PG migrations |
-| `mysql-ghcr` | MySQL | API + MySQL + Redis + MySQL migrations + routing-config |
-| `mysql-local` | MySQL | API + MySQL + Redis + MySQL migrations + routing-config |
+| `postgres-ghcr` | PostgreSQL | API + PostgreSQL + Redis + Kafka + ClickHouse + PG migrations |
+| `postgres-local` | PostgreSQL | API + PostgreSQL + Redis + Kafka + ClickHouse + PG migrations |
+| `mysql-ghcr` | MySQL | API + MySQL + Redis + Kafka + ClickHouse + MySQL migrations + routing-config |
+| `mysql-local` | MySQL | API + MySQL + Redis + Kafka + ClickHouse + MySQL migrations + routing-config |
 
 ### Dashboard profiles
 
@@ -56,6 +56,7 @@ You must pass at least one profile.
 | `monitoring` | Prometheus + Grafana |
 | `groovy-ghcr` | Groovy runner image |
 | `groovy-local` | Groovy runner built from local source |
+| `analytics-clickhouse` | Kafka topic init + ClickHouse analytics bootstrap only |
 
 ## Fastest Bring-Up
 
@@ -88,8 +89,26 @@ make init-mysql-ghcr
 make init-mysql-local
 make run-pg-ghcr
 make run-mysql-local
+make reset-analytics-clickhouse
 make stop
 ```
+
+## Analytics Bootstrap
+
+The Kafka to ClickHouse analytics path is bootstrapped automatically.
+
+- Kafka topics are created by `kafka-init`
+- ClickHouse loads analytics SQL from `clickhouse/scripts/` on first boot
+- analytics data is stored in the named Docker volume `clickhouse-data`
+- normal restarts keep analytics history intact
+
+If you need a clean analytics rebuild, use:
+
+```bash
+make reset-analytics-clickhouse
+```
+
+That removes the ClickHouse analytics volume and recreates the Kafka + ClickHouse analytics stack.
 
 ## Source Build And Run
 
@@ -172,6 +191,20 @@ docker compose --profile postgres-ghcr up -d
 ```bash
 docker compose logs db-migrator-postgres
 docker compose logs db-migrator
+```
+
+### Inspect analytics infrastructure
+
+```bash
+docker compose logs kafka-init
+docker compose logs clickhouse
+```
+
+Check the ClickHouse schema directly:
+
+```bash
+curl --user decision_engine:decision_engine \
+  "http://localhost:8123/?query=SHOW%20TABLES%20FROM%20decision_engine_analytics"
 ```
 
 ### Common next files to inspect
