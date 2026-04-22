@@ -172,7 +172,7 @@ Cypress.Commands.add('decideGatewayLegacy', (decisionRequest) => {
 
   return cy.request({
     method: 'POST',
-    url: `${getApiBaseUrl()}/decide-gateway`,
+    url: `${getApiBaseUrl()}/decision_gateway`,
     headers: {
       'Content-Type': 'application/json'
     },

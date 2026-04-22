@@ -140,9 +140,8 @@ describe('Gateway Latency Scoring Flow', () => {
       cy.log(`Initial Gateway: ${initialGateway}`)
       cy.log(`Updated Gateway: ${updatedGateway}`)
       
-      expect(result.response).to.haveValidGatewayResponse()
-      expect(updatedGateway).to.be.oneOf(["GatewayA", "GatewayB", "GatewayC"])
-      expect(initialGatewayCurrentScore).to.be.at.most(initialGatewayScore)
+      expect(updatedGateway).to.not.equal(initialGateway);
+      expect(initialGatewayCurrentScore).to.be.lessThan(initialGatewayScore);
     })
   })
 
@@ -218,9 +217,8 @@ describe('Gateway Latency Scoring Flow', () => {
       cy.log(`Initial Gateway: ${initialGateway}`)
       cy.log(`Updated Gateway: ${updatedGateway}`)
       
-      expect(result.response).to.haveValidGatewayResponse()
-      expect(updatedGateway).to.be.oneOf(["GatewayA", "GatewayB", "GatewayC"])
-      expect(initialGatewayCurrentScore).to.be.at.most(initialGatewayScore)
+      expect(updatedGateway).to.not.equal(initialGateway);
+      expect(initialGatewayCurrentScore).to.be.lessThan(initialGatewayScore);
     })
   })
 })
