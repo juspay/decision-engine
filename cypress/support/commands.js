@@ -1,292 +1,355 @@
-// ***********************************************
-// This example commands.js shows you how to
-// create various custom commands and overwrite
-// existing commands.
-//
-// For more comprehensive examples of custom
-// commands please read more here:
-// https://on.cypress.io/custom-commands
-// ***********************************************
+const factory = require('./test-data-factory')
 
-const { v4: uuidv4 } = require('uuid')
-
-// Helper function to generate unique IDs
-function generateUniqueId(prefix = '') {
-  const timestamp = Date.now()
-  const random = Math.floor(Math.random() * 1000)
-  return `${prefix}${timestamp}${random}`
-}
-
-// Helper function to get API base URL
 function getApiBaseUrl() {
-  return Cypress.env('API_BASE_URL') || 'http://localhost:8082'
+  return Cypress.env('API_BASE_URL') || 'http://localhost:8080'
 }
 
-/**
- * Create a merchant account
- * @param {string} merchantId - Optional merchant ID, will generate if not provided
- */
-Cypress.Commands.add('createMerchantAccount', (merchantId = null) => {
-  const id = merchantId || generateUniqueId(Cypress.env('DEFAULT_MERCHANT_ID_PREFIX'))
-  
+function getUiBaseUrl() {
+  return Cypress.env('UI_BASE_URL') || 'http://localhost:5173'
+}
+
+function resolveApiUrl(path) {
+  if (/^https?:\/\//.test(path)) return path
+  return `${getApiBaseUrl()}${path}`
+}
+
+function requestApi(method, path, options = {}) {
+  const { body, failOnStatusCode = true, headers = {}, qs } = options
+
   return cy.request({
-    method: 'POST',
-    url: `${getApiBaseUrl()}/merchant-account/create`,
+    method,
+    url: resolveApiUrl(path),
+    failOnStatusCode,
+    qs,
     headers: {
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      'x-tenant-id': 'public',
+      ...headers,
     },
-    body: {
-      merchant_id: id
-    }
-  }).then((response) => {
-    expect(response.status).to.eq(200)
-    return cy.wrap({ merchantId: id, response: response.body })
+    body,
   })
+}
+
+function merchantStoreState(merchantId) {
+  return JSON.stringify({
+    state: { merchantId },
+    version: 0,
+  })
+}
+
+Cypress.Commands.add('waitForService', () => {
+  return requestApi('GET', '/health').its('status').should('eq', 200)
 })
 
-/**
- * Create a routing rule
- * @param {string} merchantId - Merchant ID
- * @param {object} ruleConfig - Rule configuration object
- */
-Cypress.Commands.add('createRoutingRule', (merchantId, ruleConfig) => {
-  const defaultConfig = {
-    type: "successRate",
-    data: {
-      defaultLatencyThreshold: 90,
-      defaultSuccessRate: 0.5,
-      defaultBucketSize: 200,
-      defaultHedgingPercent: 5,
-      txnLatency: {
-        gatewayLatency: 5000
-      },
-      subLevelInputConfig: [
-        {
-          paymentMethodType: "upi",
-          paymentMethod: "upi_collect",
-          bucketSize: 250,
-          hedgingPercent: 1
-        }
-      ]
-    }
-  }
+Cypress.Commands.add('cleanupTestData', (merchantId) => {
+  if (!merchantId) return cy.wrap(null)
+  return requestApi('DELETE', `/merchant-account/${merchantId}`, { failOnStatusCode: false })
+})
 
-  const config = { ...defaultConfig, ...ruleConfig }
-
-  return cy.request({
-    method: 'POST',
-    url: `${getApiBaseUrl()}/rule/create`,
-    headers: {
-      'Content-Type': 'application/json'
-    },
+Cypress.Commands.add('ensureMerchantAccount', (merchantId) => {
+  return requestApi('POST', '/merchant-account/create', {
+    failOnStatusCode: false,
     body: {
       merchant_id: merchantId,
-      config: config
-    }
+      gateway_success_rate_based_decider_input: null,
+    },
   }).then((response) => {
-    expect(response.status).to.eq(200)
-    return cy.wrap({ ruleConfig: config, response: response.body })
+    if (response.status === 200) {
+      return cy.wrap({ merchantId, response: response.body })
+    }
+
+    return requestApi('GET', `/merchant-account/${merchantId}`).then((getResponse) =>
+      cy.wrap({ merchantId, response: getResponse.body }),
+    )
   })
 })
 
-/**
- * Decide gateway for a payment
- * @param {object} decisionRequest - Gateway decision request object
- */
-Cypress.Commands.add('decideGateway', (decisionRequest) => {
+Cypress.Commands.add('createMerchantAccount', (merchantId, options = {}) => {
+  const id = merchantId || factory.merchantId('merchant')
+  return requestApi('POST', '/merchant-account/create', {
+    ...options,
+    body: {
+      merchant_id: id,
+      gateway_success_rate_based_decider_input: null,
+      ...(options.body || {}),
+    },
+  }).then((response) => cy.wrap({ merchantId: id, response: response.body, status: response.status }))
+})
+
+Cypress.Commands.add('getMerchantAccount', (merchantId, options = {}) => {
+  return requestApi('GET', `/merchant-account/${merchantId}`, options).then((response) =>
+    cy.wrap({ merchantId, response: response.body, status: response.status }),
+  )
+})
+
+Cypress.Commands.add('deleteMerchantAccount', (merchantId, options = {}) => {
+  return requestApi('DELETE', `/merchant-account/${merchantId}`, options).then((response) =>
+    cy.wrap({ merchantId, response: response.body, status: response.status }),
+  )
+})
+
+Cypress.Commands.add('createRuleConfig', (merchantId, config, options = {}) => {
+  return requestApi('POST', '/rule/create', {
+    ...options,
+    body: {
+      merchant_id: merchantId,
+      config,
+    },
+  }).then((response) => cy.wrap({ merchantId, config, response: response.body, status: response.status }))
+})
+
+Cypress.Commands.add('getRuleConfig', (merchantId, algorithm, options = {}) => {
+  return requestApi('POST', '/rule/get', {
+    ...options,
+    body: {
+      merchant_id: merchantId,
+      algorithm,
+    },
+  }).then((response) =>
+    cy.wrap({ merchantId, algorithm, response: response.body, status: response.status }),
+  )
+})
+
+Cypress.Commands.add('updateRuleConfig', (merchantId, config, options = {}) => {
+  return requestApi('POST', '/rule/update', {
+    ...options,
+    body: {
+      merchant_id: merchantId,
+      config,
+    },
+  }).then((response) => cy.wrap({ merchantId, config, response: response.body, status: response.status }))
+})
+
+Cypress.Commands.add('deleteRuleConfig', (merchantId, algorithm, options = {}) => {
+  return requestApi('POST', '/rule/delete', {
+    ...options,
+    body: {
+      merchant_id: merchantId,
+      algorithm,
+    },
+  }).then((response) =>
+    cy.wrap({ merchantId, algorithm, response: response.body, status: response.status }),
+  )
+})
+
+Cypress.Commands.add('createSuccessRateConfig', (merchantId, overrides = {}, options = {}) => {
+  return cy.createRuleConfig(
+    merchantId,
+    {
+      type: 'successRate',
+      data: factory.srConfigData(overrides),
+    },
+    options,
+  )
+})
+
+Cypress.Commands.add('getSuccessRateConfig', (merchantId, options = {}) => {
+  return cy.getRuleConfig(merchantId, 'successRate', options)
+})
+
+Cypress.Commands.add('updateSuccessRateConfig', (merchantId, overrides = {}, options = {}) => {
+  return cy.updateRuleConfig(
+    merchantId,
+    {
+      type: 'successRate',
+      data: factory.srConfigData(overrides),
+    },
+    options,
+  )
+})
+
+Cypress.Commands.add('deleteSuccessRateConfig', (merchantId, options = {}) => {
+  return cy.deleteRuleConfig(merchantId, 'successRate', options)
+})
+
+Cypress.Commands.add('createEliminationConfig', (merchantId, overrides = {}, options = {}) => {
+  return cy.createRuleConfig(
+    merchantId,
+    {
+      type: 'elimination',
+      data: factory.eliminationConfigData(overrides),
+    },
+    options,
+  )
+})
+
+Cypress.Commands.add('getEliminationConfig', (merchantId, options = {}) => {
+  return cy.getRuleConfig(merchantId, 'elimination', options)
+})
+
+Cypress.Commands.add('updateEliminationConfig', (merchantId, overrides = {}, options = {}) => {
+  return cy.updateRuleConfig(
+    merchantId,
+    {
+      type: 'elimination',
+      data: factory.eliminationConfigData(overrides),
+    },
+    options,
+  )
+})
+
+Cypress.Commands.add('deleteEliminationConfig', (merchantId, options = {}) => {
+  return cy.deleteRuleConfig(merchantId, 'elimination', options)
+})
+
+Cypress.Commands.add('createDebitRoutingConfig', (merchantId, overrides = {}, options = {}) => {
+  return cy.createRuleConfig(
+    merchantId,
+    {
+      type: 'debitRouting',
+      data: factory.debitRoutingConfigData(overrides),
+    },
+    options,
+  )
+})
+
+Cypress.Commands.add('decideGateway', (decisionRequest, options = {}) => {
   const request = {
-    merchantId: decisionRequest.merchantId || generateUniqueId(Cypress.env('DEFAULT_MERCHANT_ID_PREFIX')),
-    eligibleGatewayList: decisionRequest.eligibleGatewayList || Cypress.env('DEFAULT_GATEWAYS'),
-    rankingAlgorithm: decisionRequest.rankingAlgorithm || Cypress.env('ROUTING_ALGORITHMS').SUCCESS_RATE,
-    eliminationEnabled: decisionRequest.eliminationEnabled || true,
+    ...factory.srDecideGatewayRequest(),
+    ...decisionRequest,
     paymentInfo: {
-      paymentId: decisionRequest.paymentInfo.paymentId || generateUniqueId(Cypress.env('DEFAULT_PAYMENT_ID_PREFIX')),
-      amount: decisionRequest.paymentInfo.amount || 100.50,
-      currency: decisionRequest.paymentInfo.currency || 'USD',
-      customerId: decisionRequest.paymentInfo.customerId || generateUniqueId(Cypress.env('DEFAULT_CUSTOMER_ID_PREFIX') || 'CUST'),
-      udfs: decisionRequest.paymentInfo.udfs || null,
-      preferredGateway: decisionRequest.paymentInfo.preferredGateway || null,
-      paymentType: decisionRequest.paymentInfo.paymentType || "ORDER_PAYMENT",
-      metadata: decisionRequest.paymentInfo.metadata || null,
-      internalMetadata: decisionRequest.paymentInfo.internalMetadata || null,
-      isEmi: decisionRequest.paymentInfo.isEmi || false,
-      emiBank: decisionRequest.paymentInfo.emiBank || null,
-      emiTenure: decisionRequest.paymentInfo.emiTenure || null,
-      paymentMethodType: decisionRequest.paymentInfo.paymentMethodType || Cypress.env('PAYMENT_METHODS').UPI.type,
-      paymentMethod: decisionRequest.paymentInfo.paymentMethod || Cypress.env('PAYMENT_METHODS').UPI.method,
-      paymentSource: decisionRequest.paymentInfo.paymentSource || null,
-      authType: decisionRequest.paymentInfo.authType || null,
-      cardIssuerBankName: decisionRequest.paymentInfo.cardIssuerBankName || null,
-      cardIsin: decisionRequest.paymentInfo.cardIsin || null,
-      cardType: decisionRequest.paymentInfo.cardType || null,
-      cardSwitchProvider: decisionRequest.paymentInfo.cardSwitchProvider || null
-    }
+      ...factory.paymentInfo(),
+      ...(decisionRequest.paymentInfo || {}),
+    },
   }
 
-  return cy.request({
-    method: 'POST',
-    url: `${getApiBaseUrl()}/decide-gateway`,
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: request
-  }).then((response) => {
-    expect(response.status).to.eq(200)
-    return cy.wrap({ request, response: response.body })
-  })
+  return requestApi('POST', '/decide-gateway', {
+    ...options,
+    body: request,
+  }).then((response) => cy.wrap({ request, response: response.body, status: response.status }))
 })
 
-/**
- * Legacy Decide gateway for a payment
- * @param {object} decisionRequest - Gateway decision request object
- */
-Cypress.Commands.add('decideGatewayLegacy', (decisionRequest) => {
+Cypress.Commands.add('decideGatewayLegacy', (decisionRequest, options = {}) => {
+  return cy.decideGateway(decisionRequest, options)
+})
+
+Cypress.Commands.add('updateGatewayScore', (scoreUpdate, options = {}) => {
   const request = {
-    merchantId: decisionRequest.merchantId || generateUniqueId(Cypress.env('DEFAULT_MERCHANT_ID_PREFIX')),
-    eligibleGatewayList: decisionRequest.eligibleGatewayList || Cypress.env('DEFAULT_GATEWAYS'),
-    rankingAlgorithm: decisionRequest.rankingAlgorithm || Cypress.env('ROUTING_ALGORITHMS').SUCCESS_RATE,
-    eliminationEnabled: decisionRequest.eliminationEnabled || true,
-    paymentInfo: {
-      paymentId: decisionRequest.paymentInfo.paymentId || generateUniqueId(Cypress.env('DEFAULT_PAYMENT_ID_PREFIX')),
-      amount: decisionRequest.paymentInfo.amount || 100.50,
-      currency: decisionRequest.paymentInfo.currency || 'USD',
-      customerId: decisionRequest.paymentInfo.customerId || generateUniqueId(Cypress.env('DEFAULT_CUSTOMER_ID_PREFIX') || 'CUST'),
-      udfs: decisionRequest.paymentInfo.udfs || null,
-      preferredGateway: decisionRequest.paymentInfo.preferredGateway || null,
-      paymentType: decisionRequest.paymentInfo.paymentType || "ORDER_PAYMENT",
-      metadata: decisionRequest.paymentInfo.metadata || null,
-      internalMetadata: decisionRequest.paymentInfo.internalMetadata || null,
-      isEmi: decisionRequest.paymentInfo.isEmi || false,
-      emiBank: decisionRequest.paymentInfo.emiBank || null,
-      emiTenure: decisionRequest.paymentInfo.emiTenure || null,
-      paymentMethodType: decisionRequest.paymentInfo.paymentMethodType || Cypress.env('PAYMENT_METHODS').UPI.type,
-      paymentMethod: decisionRequest.paymentInfo.paymentMethod || Cypress.env('PAYMENT_METHODS').UPI.method,
-      paymentSource: decisionRequest.paymentInfo.paymentSource || null,
-      authType: decisionRequest.paymentInfo.authType || null,
-      cardIssuerBankName: decisionRequest.paymentInfo.cardIssuerBankName || null,
-      cardIsin: decisionRequest.paymentInfo.cardIsin || null,
-      cardType: decisionRequest.paymentInfo.cardType || null,
-      cardSwitchProvider: decisionRequest.paymentInfo.cardSwitchProvider || null
-    }
-  }
-
-  return cy.request({
-    method: 'POST',
-    url: `${getApiBaseUrl()}/decide-gateway`,
-    headers: {
-      'Content-Type': 'application/json'
+    ...factory.updateGatewayScoreRequest(),
+    ...scoreUpdate,
+    txnLatency: {
+      ...factory.updateGatewayScoreRequest().txnLatency,
+      ...(scoreUpdate.txnLatency || {}),
     },
-    body: request
-  }).then((response) => {
-    expect(response.status).to.eq(200)
-    return cy.wrap({ request, response: response.body })
-  })
-})
-
-/**
- * Update gateway score
- * @param {object} scoreUpdate - Score update object
- */
-Cypress.Commands.add('updateGatewayScore', (scoreUpdate) => {
-  const defaultUpdate = {
-    merchantId: scoreUpdate.merchantId || generateUniqueId(Cypress.env('DEFAULT_MERCHANT_ID_PREFIX')),
-    gateway: scoreUpdate.gateway || "GatewayC",
-    gatewayReferenceId: scoreUpdate.gatewayReferenceId || null,
-    status: scoreUpdate.status || "AUTHORIZED",
-    paymentId: scoreUpdate.paymentId || generateUniqueId(Cypress.env('DEFAULT_PAYMENT_ID_PREFIX')),
-    enforceDynamicRoutingFailure: null,
-    txnLatency: scoreUpdate.txnLatency.gatewayLatency || {
-      gatewayLatency: 6000
-    }
   }
 
-  const update = { ...defaultUpdate, ...scoreUpdate }
+  return requestApi('POST', '/update-gateway-score', {
+    ...options,
+    body: request,
+  }).then((response) => cy.wrap({ request, response: response.body, status: response.status }))
+})
 
-  return cy.request({
-    method: 'POST',
-    url: `${getApiBaseUrl()}/update-gateway-score`,
-    headers: {
-      'Content-Type': 'application/json'
+Cypress.Commands.add('createRoutingAlgorithm', (payload, options = {}) => {
+  return requestApi('POST', '/routing/create', {
+    ...options,
+    body: payload,
+  }).then((response) => cy.wrap({ request: payload, response: response.body, status: response.status }))
+})
+
+Cypress.Commands.add('listRoutingAlgorithms', (createdBy, options = {}) => {
+  return requestApi('POST', `/routing/list/${createdBy}`, options).then((response) =>
+    cy.wrap({ createdBy, response: response.body, status: response.status }),
+  )
+})
+
+Cypress.Commands.add('activateRoutingAlgorithm', (createdBy, routingAlgorithmId, options = {}) => {
+  return requestApi('POST', '/routing/activate', {
+    ...options,
+    body: {
+      created_by: createdBy,
+      routing_algorithm_id: routingAlgorithmId,
     },
-    body: update
-  }).then((response) => {
-    expect(response.status).to.eq(200)
-    return cy.wrap({ update, response: response.body })
-  })
+  }).then((response) =>
+    cy.wrap({ createdBy, routingAlgorithmId, response: response.body, status: response.status }),
+  )
 })
 
-/**
- * Create a success rate routing rule
- * @param {string} merchantId - Merchant ID
- * @param {object} options - Configuration options
- */
-Cypress.Commands.add('createSuccessRateRule', (merchantId, options = {}) => {
-  const ruleConfig = {
-    type: "successRate",
-    data: {
-      defaultLatencyThreshold: options.latencyThreshold || 90,
-      defaultSuccessRate: options.successRate || 0.5,
-      defaultBucketSize: options.bucketSize || 200,
-      defaultHedgingPercent: options.hedgingPercent || 5,
-      txnLatency: {
-        gatewayLatency: options.gatewayLatency || 5000
-      },
-      subLevelInputConfig: options.subLevelConfig || [
-        {
-          paymentMethodType: "upi",
-          paymentMethod: "upi_collect",
-          bucketSize: 250,
-          hedgingPercent: 1
-        }
-      ]
-    }
-  }
-
-  return cy.createRoutingRule(merchantId, ruleConfig)
+Cypress.Commands.add('listActiveRoutingAlgorithms', (createdBy, options = {}) => {
+  return requestApi('POST', `/routing/list/active/${createdBy}`, options).then((response) =>
+    cy.wrap({ createdBy, response: response.body, status: response.status }),
+  )
 })
 
-/**
- * Create a elimination routing rule
- * @param {string} merchantId - Merchant ID
- * @param {object} options - Configuration options
- */
-Cypress.Commands.add('createEliminationRule', (merchantId, options = {}) => {
-  const ruleConfig = {
-    type: "elimination",
-    data: {
-      threshold: 0.35,
-      txnLatency: {
-        gatewayLatency: options.gatewayLatency || 5000
+Cypress.Commands.add('evaluateRoutingAlgorithm', (payload, options = {}) => {
+  return requestApi('POST', '/routing/evaluate', {
+    ...options,
+    body: payload,
+  }).then((response) => cy.wrap({ request: payload, response: response.body, status: response.status }))
+})
+
+Cypress.Commands.add('fetchAnalyticsOverview', (query = {}, options = {}) => {
+  return requestApi('GET', '/analytics/overview', {
+    ...options,
+    qs: query,
+  }).then((response) => cy.wrap({ query, response: response.body, status: response.status }))
+})
+
+Cypress.Commands.add('fetchAnalyticsRoutingStats', (query = {}, options = {}) => {
+  return requestApi('GET', '/analytics/routing-stats', {
+    ...options,
+    qs: query,
+  }).then((response) => cy.wrap({ query, response: response.body, status: response.status }))
+})
+
+Cypress.Commands.add('fetchPaymentAudit', (query = {}, options = {}) => {
+  return requestApi('GET', '/analytics/payment-audit', {
+    ...options,
+    qs: query,
+  }).then((response) => cy.wrap({ query, response: response.body, status: response.status }))
+})
+
+Cypress.Commands.add('fetchPreviewTrace', (query = {}, options = {}) => {
+  return requestApi('GET', '/analytics/preview-trace', {
+    ...options,
+    qs: query,
+  }).then((response) => cy.wrap({ query, response: response.body, status: response.status }))
+})
+
+Cypress.Commands.add('pollRequest', (requestFactory, predicate, options = {}) => {
+  const timeout = options.timeout ?? Cypress.env('ANALYTICS_POLL_TIMEOUT_MS') ?? 30000
+  const interval = options.interval ?? Cypress.env('ANALYTICS_POLL_INTERVAL_MS') ?? 2000
+  const startedAt = Date.now()
+
+  function poll() {
+    return requestFactory().then((result) => {
+      if (predicate(result)) {
+        return cy.wrap(result)
       }
-    }
+
+      if (Date.now() - startedAt >= timeout) {
+        throw new Error(options.errorMessage || 'Timed out waiting for condition')
+      }
+
+      return cy.wait(interval).then(poll)
+    })
   }
 
-  return cy.createRoutingRule(merchantId, ruleConfig)
+  return poll()
 })
 
-/**
- * Wait for service to be ready
- */
-Cypress.Commands.add('waitForService', () => {
-  return cy.request({
-    method: 'GET',
-    url: `${getApiBaseUrl()}/health`,
-    failOnStatusCode: false,
-    timeout: 30000
-  }).then((response) => {
-    if (response.status !== 200) {
-      cy.wait(2000)
-      cy.waitForService()
-    }
+Cypress.Commands.add('setMerchantContext', (merchantId) => {
+  return cy.window().then((win) => {
+    win.localStorage.setItem('merchant-store', merchantStoreState(merchantId))
   })
 })
 
-/**
- * Clean up test data (if cleanup endpoints exist)
- * @param {string} merchantId - Merchant ID to clean up
- */
-Cypress.Commands.add('cleanupTestData', (merchantId) => {
-  // This would depend on cleanup endpoints being available
-  // For now, just log the cleanup attempt
-  cy.log(`Cleaning up test data for merchant: ${merchantId}`)
+Cypress.Commands.add('visitWithMerchant', (path = '/', merchantId, options = {}) => {
+  const id = merchantId || factory.merchantId('ui')
+  const targetUrl = /^https?:\/\//.test(path) ? path : `${getUiBaseUrl()}${path}`
+
+  return cy.ensureMerchantAccount(id).then(() =>
+    cy.visit(targetUrl, {
+      ...options,
+      onBeforeLoad(win) {
+        win.localStorage.setItem('merchant-store', merchantStoreState(id))
+        if (typeof options.onBeforeLoad === 'function') {
+          options.onBeforeLoad(win)
+        }
+      },
+    }),
+  )
+})
+
+Cypress.Commands.add('setMerchantFromTopBar', (merchantId) => {
+  return cy.get('input[placeholder="Set Merchant ID"]').clear().type(merchantId).type('{enter}')
 })
