@@ -46,6 +46,8 @@ pub struct GlobalConfig {
     #[serde(default)]
     pub debit_routing_config: network_decider::types::DebitRoutingConfig,
     pub compression_filepath: Option<CompressionFilepath>,
+    #[serde(default)]
+    pub api_key_auth_enabled: bool,
 }
 
 #[derive(Clone, Debug)]

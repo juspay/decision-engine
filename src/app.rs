@@ -18,7 +18,7 @@ use tower_http::trace as tower_trace;
 use crate::{
     api_client::ApiClient,
     config::{self, GlobalConfig, TenantConfig},
-    error, logger, routes, storage,
+    error, logger, middleware as custom_middleware, routes, storage,
     tenant::GlobalAppState,
     utils,
 };
@@ -189,11 +189,8 @@ where
         handle_clone.shutdown(); // Trigger axum_server shutdown
     });
 
-    let router = axum::Router::new()
-        // .layer(middleware::from_fn_with_state(
-        //     global_app_state.clone(),
-        //     custom_middleware::authenticate,
-        // ))
+    // Routes that require API key authentication
+    let protected_router = axum::Router::new()
         .route(
             "/routing/create",
             axum::routing::post(crate::euclid::handlers::routing_rules::routing_create),
@@ -239,10 +236,6 @@ where
             post(routes::rule_configuration::delete_rule_config),
         )
         .route(
-            "/merchant-account/create",
-            post(routes::merchant_account_config::create_merchant_config),
-        )
-        .route(
             "/merchant-account/:merchant-id",
             get(routes::merchant_account_config::get_merchant_config),
         )
@@ -257,20 +250,37 @@ where
         .route(
             "/config/routing-keys",
             axum::routing::get(crate::euclid::handlers::routing_rules::get_routing_config),
-        );
-    let router = router.route("/update-score", post(routes::update_score::update_score));
-    let router = router.route(
-        "/decide-gateway",
-        post(routes::decide_gateway::decide_gateway),
+        )
+        .route("/update-score", post(routes::update_score::update_score))
+        .route(
+            "/decide-gateway",
+            post(routes::decide_gateway::decide_gateway),
+        )
+        .route(
+            "/routing/hybrid",
+            post(routes::hybrid_routing::hybrid_routing_evaluate),
+        )
+        .route(
+            "/update-gateway-score",
+            post(routes::update_gateway_score::update_gateway_score),
+        )
+        .route("/api-key/create", post(routes::api_key::create_api_key))
+        .route(
+            "/api-key/list/:merchant_id",
+            get(routes::api_key::list_api_keys),
+        )
+        .route("/api-key/:key_id", delete(routes::api_key::revoke_api_key))
+        .layer(middleware::from_fn(custom_middleware::authenticate));
+
+    // Routes that do not require authentication (public)
+    let public_router = axum::Router::new().route(
+        "/merchant-account/create",
+        post(routes::merchant_account_config::create_merchant_config),
     );
-    let router = router.route(
-        "/routing/hybrid",
-        post(routes::hybrid_routing::hybrid_routing_evaluate),
-    );
-    let router = router.route(
-        "/update-gateway-score",
-        post(routes::update_gateway_score::update_gateway_score),
-    );
+
+    let router = axum::Router::new()
+        .merge(protected_router)
+        .merge(public_router);
 
     let middleware = ServiceBuilder::new()
         .layer(middleware::from_fn(ensure_request_id))

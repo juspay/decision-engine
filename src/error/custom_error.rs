@@ -244,6 +244,54 @@ impl axum::response::IntoResponse for MerchantAccountConfigurationError {
     }
 }
 
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum ApiKeyError {
+    #[error("API key not found")]
+    NotFound,
+    #[error("API key creation failed")]
+    CreationFailed,
+    #[error("API key revocation failed")]
+    RevocationFailed,
+    #[error("Merchant not found")]
+    MerchantNotFound,
+    #[error("Storage error")]
+    StorageError,
+}
+
+impl axum::response::IntoResponse for ApiKeyError {
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            Self::NotFound => (
+                hyper::StatusCode::NOT_FOUND,
+                axum::Json(crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_04,
+                    "API key not found".to_string(),
+                    None,
+                )),
+            )
+                .into_response(),
+            Self::MerchantNotFound => (
+                hyper::StatusCode::NOT_FOUND,
+                axum::Json(crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_04,
+                    "Merchant not found".to_string(),
+                    None,
+                )),
+            )
+                .into_response(),
+            Self::CreationFailed | Self::RevocationFailed | Self::StorageError => (
+                hyper::StatusCode::INTERNAL_SERVER_ERROR,
+                axum::Json(crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_04,
+                    self.to_string(),
+                    None,
+                )),
+            )
+                .into_response(),
+        }
+    }
+}
+
 pub trait NotFoundError {
     fn is_not_found(&self) -> bool;
 }
