@@ -1,0 +1,24 @@
+---
+title: "Create Merchant Account"
+description: "Curl example for creating a merchant account."
+---
+
+# Create Merchant Account
+
+## Request
+
+```bash
+curl --location --request POST "$BASE_URL/merchant-account/create" \
+  --header "Content-Type: application/json" \
+  --data-raw '{
+    "merchant_id": "test_merchant_123423"
+  }'
+```
+
+## Response
+
+```json
+{
+  "Merchant account created successfully"
+}
+```

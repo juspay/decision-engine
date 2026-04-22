@@ -41,4 +41,4 @@ Use this page to find the right endpoint family. Use the OpenAPI-backed endpoint
 
 ## Curl Examples
 
-For local smoke-test examples, use [API Examples](api-reference1.md).
+For local smoke-test examples, use [Curl API References](api-refs/api-ref).

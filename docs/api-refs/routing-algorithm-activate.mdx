@@ -1,0 +1,21 @@
+---
+title: "Activate Routing Algorithm"
+description: "Curl example for activating a routing algorithm."
+---
+
+# Activate Routing Algorithm
+
+## Request
+
+```bash
+curl --location "$BASE_URL/routing/activate" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "created_by": "merchant_1234",
+    "routing_algorithm_id": "routing_8711ce52-33e2-473f-9c8f-91a406acb850"
+  }'
+```
+
+## Notes
+
+At a given time, one algorithm for each `transaction_type` (`payment`, `payout`, `three_ds_authentication`) can be active for one `created_by` value.

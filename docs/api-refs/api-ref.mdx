@@ -1,0 +1,57 @@
+---
+title: "Curl API References"
+description: "Structured curl examples split into dedicated docs pages."
+---
+
+# Curl API References
+
+Use this section for request-first examples. For schema details, keep using [API Overview](../api-reference) and the OpenAPI-backed endpoint pages.
+
+Base URL used in the examples:
+
+```bash
+export BASE_URL=http://localhost:8080
+```
+
+## Decision Gateway
+
+- [Health Check](health-check)
+- [Decide Gateway: SR Based Routing](decide-gateway-sr-based)
+- [Decide Gateway: Debit Routing](decide-gateway-debit-routing)
+- [Update Gateway Score](update-gateway-score)
+
+## Rule Configuration
+
+### Success Rate Config
+
+- [Create Success Rate Config](success-rate-config-create)
+- [Get Success Rate Config](success-rate-config-get)
+- [Update Success Rate Config](success-rate-config-update)
+- [Delete Success Rate Config](success-rate-config-delete)
+
+### Elimination Config
+
+- [Create Elimination Config](elimination-config-create)
+- [Get Elimination Config](elimination-config-get)
+- [Update Elimination Config](elimination-config-update)
+- [Delete Elimination Config](elimination-config-delete)
+
+## Merchant Account
+
+- [Create Merchant Account](merchant-account-create)
+- [Get Merchant Account](merchant-account-get)
+- [Delete Merchant Account](merchant-account-delete)
+
+## Routing Algorithm
+
+- [Create Routing Algorithm](routing-algorithm-create)
+- [Evaluate Routing Algorithm](routing-algorithm-evaluate)
+- [List Routing Algorithms](routing-algorithm-list)
+- [Activate Routing Algorithm](routing-algorithm-activate)
+- [List Active Routing Algorithms](routing-algorithm-list-active)
+
+## Algorithm Shape Examples
+
+- [Priority Routing Example](routing-priority-example)
+- [Single Connector Example](routing-single-connector-example)
+- [Volume Split Example](routing-volume-split-example)

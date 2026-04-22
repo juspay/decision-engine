@@ -1,0 +1,30 @@
+---
+title: "Create Elimination Config"
+description: "Curl example for creating elimination configuration."
+---
+
+# Create Elimination Config
+
+## Request
+
+```bash
+curl -X POST "$BASE_URL/rule/create" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "merchant_id": "test_merchant_123423",
+    "config": {
+      "type": "elimination",
+      "data": {
+        "threshold": 0.35
+      }
+    }
+  }'
+```
+
+## Response
+
+```json
+{
+  "Elimination Configuration created successfully"
+}
+```

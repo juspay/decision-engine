@@ -1,0 +1,30 @@
+---
+title: "Update Elimination Config"
+description: "Curl example for updating elimination configuration."
+---
+
+# Update Elimination Config
+
+## Request
+
+```bash
+curl -X POST "$BASE_URL/rule/update" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "merchant_id": "test_merchant_123423",
+    "config": {
+      "type": "elimination",
+      "data": {
+        "threshold": 0.35
+      }
+    }
+  }'
+```
+
+## Response
+
+```json
+{
+  "Elimination Configuration updated successfully"
+}
+```

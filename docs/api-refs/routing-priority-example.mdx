@@ -1,0 +1,26 @@
+---
+title: "Priority Routing Example"
+description: "Priority routing create example."
+---
+
+# Priority Routing Example
+
+## Request
+
+```bash
+curl --location "$BASE_URL/routing/create" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "name": "priority rule test",
+    "created_by": "merchant_123",
+    "algorithm": {
+      "type": "priority",
+      "data": [
+        { "gateway_name": "stripe", "gateway_id": "mca_001" },
+        { "gateway_name": "razorpay", "gateway_id": "mca_002" }
+      ]
+    }
+  }'
+```
+
+Always returns the connectors in the given order.

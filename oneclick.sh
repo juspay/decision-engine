@@ -10,7 +10,7 @@ DOCS_PORT="${DOCS_PORT:-3000}"
 DOCS_URL="http://localhost:${DOCS_PORT}"
 DOCS_HOME_URL="${DOCS_URL}/introduction"
 API_REF_URL="${DOCS_URL}/api-reference"
-API_EXAMPLES_URL="${DOCS_URL}/api-reference1"
+API_EXAMPLES_URL="${DOCS_URL}/api-refs/api-ref"
 DOCS_LOG_PATH="$SCRIPT_DIR/.mintlify-dev.log"
 
 POSTGRES_HOST="${POSTGRES_HOST:-localhost}"
@@ -430,7 +430,7 @@ if [ "${DOCS_PORT}" != "3000" ]; then
     DOCS_URL="http://localhost:${DOCS_PORT}"
     DOCS_HOME_URL="${DOCS_URL}/introduction"
     API_REF_URL="${DOCS_URL}/api-reference"
-    API_EXAMPLES_URL="${DOCS_URL}/api-reference1"
+    API_EXAMPLES_URL="${DOCS_URL}/api-refs/api-ref"
 fi
 PORT="$DOCS_PORT" mint dev --no-open >"$DOCS_LOG_PATH" 2>&1 &
 DOCS_PID=$!

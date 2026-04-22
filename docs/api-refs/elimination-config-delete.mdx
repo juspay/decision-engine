@@ -1,0 +1,25 @@
+---
+title: "Delete Elimination Config"
+description: "Curl example for deleting elimination configuration."
+---
+
+# Delete Elimination Config
+
+## Request
+
+```bash
+curl -X POST "$BASE_URL/rule/delete" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "merchant_id": "test_merchant_123423",
+    "algorithm": "elimination"
+  }'
+```
+
+## Response
+
+```json
+{
+  "Elimination Configuration deleted successfully"
+}
+```
