@@ -14,7 +14,7 @@ import { Spinner } from '../ui/Spinner'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { Card as GlassCard, InsetPanel, SurfaceLabel } from '../ui/Card'
 
-const RANGE_OPTIONS: AnalyticsRange[] = ['15m', '1h', '24h', '30d']
+const RANGE_OPTIONS: AnalyticsRange[] = ['15m', '1h', '24h', '30d', '18mo']
 const STATUS_OPTIONS = [
   { value: '', label: 'Any status' },
   { value: 'success', label: 'Success' },
@@ -103,7 +103,7 @@ function buildAuditUrl(
 }
 
 function parseRange(value: string | null): AnalyticsRange {
-  if (value === '15m' || value === '1h' || value === '24h' || value === '30d') return value
+  if (value === '15m' || value === '1h' || value === '24h' || value === '30d' || value === '18mo') return value
   return '24h'
 }
 
