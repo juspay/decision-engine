@@ -450,7 +450,7 @@ pub async fn check_and_update_gateway_score_(
                 enforce_failure,
                 api_payload.gateway_reference_id.clone(),
                 api_payload.txn_latency.clone(),
-                "update_gateway_score",
+                crate::analytics::AnalyticsRoute::UpdateGatewayScore,
                 crate::analytics::AnalyticsFlowContext::new(
                     crate::analytics::ApiFlow::DynamicRouting,
                     crate::analytics::FlowType::UpdateGatewayScoreScoreSnapshot,
@@ -492,7 +492,7 @@ pub async fn check_and_update_gateway_score(
     enforce_failure: bool,
     gateway_reference_id: Option<String>,
     txn_latency: Option<TransactionLatency>,
-    analytics_route: &str,
+    analytics_route: crate::analytics::AnalyticsRoute,
     score_snapshot_flow: crate::analytics::AnalyticsFlowContext,
     redis_comp_config: Option<RedisCompressionConfigCombined>,
 ) -> () {
@@ -581,7 +581,7 @@ pub async fn update_gateway_score(
     txn_card_info: TxnCardInfo,
     gateway_reference_id: Option<String>,
     txn_latency: Option<TransactionLatency>,
-    analytics_route: &str,
+    analytics_route: crate::analytics::AnalyticsRoute,
     score_snapshot_flow: crate::analytics::AnalyticsFlowContext,
     redis_compression_config: Option<RedisCompressionConfigCombined>,
 ) -> () {

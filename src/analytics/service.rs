@@ -1,5 +1,5 @@
 use crate::analytics::events::DomainAnalyticsEvent;
-use crate::analytics::flow::AnalyticsFlowContext;
+use crate::analytics::flow::{AnalyticsFlowContext, AnalyticsRoute};
 use crate::analytics::models::*;
 use crate::error;
 use crate::metrics::{ANALYTICS_EVENT_COUNTER, ROUTING_DECISION_COUNTER, ROUTING_RULE_HIT_COUNTER};
@@ -84,7 +84,7 @@ pub fn record_decision_event(
     routing_approach: Option<String>,
     gateway: Option<String>,
     status: Option<String>,
-    route: &str,
+    route: AnalyticsRoute,
     rule_name: Option<String>,
     details: Option<String>,
     payment_id: Option<String>,
@@ -131,7 +131,7 @@ pub fn record_decision_event(
         average_latency: None,
         tp99_latency: None,
         transaction_count: None,
-        route: Some(route.to_string()),
+        route: Some(route.as_str().to_string()),
         details,
         created_at_ms: now_ms(),
     });
@@ -153,7 +153,7 @@ pub fn record_score_snapshot_event(
     average_latency: Option<f64>,
     tp99_latency: Option<f64>,
     transaction_count: Option<i64>,
-    route: &str,
+    route: AnalyticsRoute,
     details: Option<String>,
     payment_id: Option<String>,
     request_id: Option<String>,
@@ -189,7 +189,7 @@ pub fn record_score_snapshot_event(
         average_latency,
         tp99_latency,
         transaction_count,
-        route: Some(route.to_string()),
+        route: Some(route.as_str().to_string()),
         details,
         created_at_ms: now_ms(),
     });
@@ -200,7 +200,7 @@ pub fn record_gateway_update_event(
     merchant_id: Option<String>,
     gateway: Option<String>,
     status: Option<String>,
-    route: &str,
+    route: AnalyticsRoute,
     details: Option<String>,
     payment_id: Option<String>,
     request_id: Option<String>,
@@ -236,7 +236,7 @@ pub fn record_gateway_update_event(
         average_latency: None,
         tp99_latency: None,
         transaction_count: None,
-        route: Some(route.to_string()),
+        route: Some(route.as_str().to_string()),
         details,
         created_at_ms: now_ms(),
     });
@@ -244,7 +244,7 @@ pub fn record_gateway_update_event(
 
 pub fn record_rule_hit_event(
     flow: AnalyticsFlowContext,
-    route: &str,
+    route: AnalyticsRoute,
     merchant_id: Option<String>,
     rule_name: String,
     gateway: Option<String>,
@@ -287,7 +287,7 @@ pub fn record_rule_hit_event(
         average_latency: None,
         tp99_latency: None,
         transaction_count: None,
-        route: Some(route.to_string()),
+        route: Some(route.as_str().to_string()),
         details,
         created_at_ms: now_ms(),
     });
@@ -333,7 +333,7 @@ pub fn record_rule_evaluation_preview_event(
         average_latency: None,
         tp99_latency: None,
         transaction_count: None,
-        route: Some("routing_evaluate".to_string()),
+        route: Some(AnalyticsRoute::RoutingEvaluate.as_str().to_string()),
         details,
         created_at_ms: now_ms(),
     });
@@ -341,7 +341,7 @@ pub fn record_rule_evaluation_preview_event(
 
 pub fn record_error_event(
     flow: AnalyticsFlowContext,
-    route: &str,
+    route: AnalyticsRoute,
     merchant_id: Option<String>,
     payment_id: Option<String>,
     request_id: Option<String>,
@@ -383,7 +383,7 @@ pub fn record_error_event(
         average_latency: None,
         tp99_latency: None,
         transaction_count: None,
-        route: Some(route.to_string()),
+        route: Some(route.as_str().to_string()),
         details,
         created_at_ms: now_ms(),
     });
@@ -391,7 +391,7 @@ pub fn record_error_event(
 
 pub fn record_request_hit_event(
     flow: AnalyticsFlowContext,
-    route: &str,
+    route: AnalyticsRoute,
     merchant_id: Option<String>,
     payment_id: Option<String>,
     request_id: Option<String>,
@@ -427,7 +427,7 @@ pub fn record_request_hit_event(
         average_latency: None,
         tp99_latency: None,
         transaction_count: None,
-        route: Some(route.to_string()),
+        route: Some(route.as_str().to_string()),
         details: None,
         created_at_ms: now_ms(),
     });
@@ -435,7 +435,7 @@ pub fn record_request_hit_event(
 
 pub fn record_operation_event(
     flow: AnalyticsFlowContext,
-    route: &str,
+    route: AnalyticsRoute,
     merchant_id: Option<String>,
     payment_id: Option<String>,
     request_id: Option<String>,
@@ -473,7 +473,7 @@ pub fn record_operation_event(
         average_latency: None,
         tp99_latency: None,
         transaction_count: None,
-        route: Some(route.to_string()),
+        route: Some(route.as_str().to_string()),
         details,
         created_at_ms: now_ms(),
     });
@@ -592,12 +592,7 @@ fn normalise_payment_audit_route_filter(route: Option<String>) -> Option<String>
             return None;
         }
 
-        Some(match trimmed {
-            "Decide Gateway" => "decide_gateway".to_string(),
-            "Update Gateway" => "update_gateway_score".to_string(),
-            "Rule Evaluate" => "routing_evaluate".to_string(),
-            other => other.to_string(),
-        })
+        AnalyticsRoute::from_filter_value(trimmed).map(|route| route.as_str().to_string())
     })
 }
 

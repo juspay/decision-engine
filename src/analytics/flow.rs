@@ -169,6 +169,90 @@ impl AnalyticsFlowContext {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalyticsRoute {
+    DecideGateway,
+    UpdateGatewayScore,
+    UpdateScore,
+    RoutingEvaluate,
+    RoutingCreate,
+    RuleConfigCreate,
+    RuleConfigGet,
+    RuleConfigUpdate,
+    RuleConfigDelete,
+}
+
+impl AnalyticsRoute {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::DecideGateway => "decide_gateway",
+            Self::UpdateGatewayScore => "update_gateway_score",
+            Self::UpdateScore => "update_score",
+            Self::RoutingEvaluate => "routing_evaluate",
+            Self::RoutingCreate => "routing_create",
+            Self::RuleConfigCreate => "rule_config_create",
+            Self::RuleConfigGet => "rule_config_get",
+            Self::RuleConfigUpdate => "rule_config_update",
+            Self::RuleConfigDelete => "rule_config_delete",
+        }
+    }
+
+    pub fn from_stored_value(value: &str) -> Option<Self> {
+        match value {
+            "decision_gateway" | "decide_gateway" => Some(Self::DecideGateway),
+            "update_gateway_score" => Some(Self::UpdateGatewayScore),
+            "update_score" => Some(Self::UpdateScore),
+            "routing_evaluate" => Some(Self::RoutingEvaluate),
+            "routing_create" => Some(Self::RoutingCreate),
+            "rule_config_create" => Some(Self::RuleConfigCreate),
+            "rule_config_get" => Some(Self::RuleConfigGet),
+            "rule_config_update" => Some(Self::RuleConfigUpdate),
+            "rule_config_delete" => Some(Self::RuleConfigDelete),
+            _ => None,
+        }
+    }
+
+    pub fn from_filter_value(value: &str) -> Option<Self> {
+        let trimmed = value.trim();
+        match trimmed {
+            "Decide Gateway" => Some(Self::DecideGateway),
+            "Update Gateway" => Some(Self::UpdateGatewayScore),
+            "Update Score" => Some(Self::UpdateScore),
+            "Rule Evaluate" => Some(Self::RoutingEvaluate),
+            "Routing Create" => Some(Self::RoutingCreate),
+            "Rule Config Create" => Some(Self::RuleConfigCreate),
+            "Rule Config Get" => Some(Self::RuleConfigGet),
+            "Rule Config Update" => Some(Self::RuleConfigUpdate),
+            "Rule Config Delete" => Some(Self::RuleConfigDelete),
+            _ => Self::from_stored_value(trimmed),
+        }
+    }
+
+    pub const fn payment_audit_label(self) -> &'static str {
+        match self {
+            Self::DecideGateway => "Decide Gateway",
+            Self::UpdateGatewayScore => "Update Gateway",
+            Self::UpdateScore => "Update Score",
+            Self::RoutingEvaluate => "Rule Evaluate",
+            Self::RoutingCreate => "Routing Create",
+            Self::RuleConfigCreate => "Rule Config Create",
+            Self::RuleConfigGet => "Rule Config Get",
+            Self::RuleConfigUpdate => "Rule Config Update",
+            Self::RuleConfigDelete => "Rule Config Delete",
+        }
+    }
+
+    pub const fn overview_label(self) -> Option<&'static str> {
+        match self {
+            Self::DecideGateway => Some("/decide_gateway"),
+            Self::UpdateGatewayScore => Some("/update_gateway"),
+            Self::RoutingEvaluate => Some("/rule_evaluate"),
+            _ => None,
+        }
+    }
+}
+
 pub fn classify_request(method: &Method, path: &str) -> Option<AnalyticsFlowContext> {
     let normalized_path = normalize_path(path);
     let segments = split_path(normalized_path);

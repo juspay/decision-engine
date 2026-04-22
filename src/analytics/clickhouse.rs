@@ -3,7 +3,7 @@ use clickhouse::{Client, Row};
 use masking::PeekInterface;
 use serde::Deserialize;
 
-use crate::analytics::flow::FlowType;
+use crate::analytics::flow::{AnalyticsRoute, FlowType};
 use crate::analytics::models::*;
 use crate::analytics::service::{format_range, now_ms};
 use crate::analytics::store::AnalyticsReadStore;
@@ -690,7 +690,7 @@ impl ClickHouseAnalyticsStore {
                 .or_else(|| results.first().and_then(|row| row.request_id.clone())),
             gateway: query.gateway.clone(),
             route: if preview_only {
-                Some("routing_evaluate".to_string())
+                Some(AnalyticsRoute::RoutingEvaluate.as_str().to_string())
             } else {
                 query.route.clone()
             },
@@ -1234,14 +1234,14 @@ fn map_route_hits(rows: Vec<RouteHitRow>) -> Vec<AnalyticsRouteHit> {
         );
     }
     [
-        ("decide_gateway", "/decide_gateway"),
-        ("update_gateway_score", "/update_gateway"),
-        ("routing_evaluate", "/rule_evaluate"),
+        AnalyticsRoute::DecideGateway,
+        AnalyticsRoute::UpdateGatewayScore,
+        AnalyticsRoute::RoutingEvaluate,
     ]
     .into_iter()
-    .map(|(stored_route, display_route)| AnalyticsRouteHit {
-        route: display_route.to_string(),
-        count: counts.get(stored_route).copied().unwrap_or(0),
+    .map(|route| AnalyticsRouteHit {
+        route: route.overview_label().unwrap_or(route.as_str()).to_string(),
+        count: counts.get(route.as_str()).copied().unwrap_or(0),
     })
     .collect()
 }
@@ -1257,12 +1257,9 @@ fn payment_audit_stage_label(stage: String) -> String {
 }
 
 fn payment_audit_route_label(route: String) -> String {
-    match route.as_str() {
-        "decision_gateway" | "decide_gateway" => "Decide Gateway".to_string(),
-        "update_gateway_score" => "Update Gateway".to_string(),
-        "routing_evaluate" => "Rule Evaluate".to_string(),
-        _ => route,
-    }
+    AnalyticsRoute::from_stored_value(&route)
+        .map(|route| route.payment_audit_label().to_string())
+        .unwrap_or(route)
 }
 
 fn escape_sql(value: &str) -> String {

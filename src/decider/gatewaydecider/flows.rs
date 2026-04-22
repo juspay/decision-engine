@@ -611,7 +611,7 @@ pub async fn run_decider_flow(
                                 crate::analytics::ApiFlow::DynamicRouting,
                                 crate::analytics::FlowType::DecideGatewayRuleHit,
                             ),
-                            "decide_gateway",
+                            crate::analytics::AnalyticsRoute::DecideGateway,
                             Some(crate::types::merchant::id::merchant_id_to_text(
                                 deciderParams.dpMerchantAccount.merchantId.clone(),
                             )),
