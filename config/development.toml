@@ -33,6 +33,8 @@ pg_dbname = "decision_engine_db"
 brokers = "localhost:9092"
 api_topic = "api"
 domain_topic = "domain"
+api_group_name = "decision-engine-analytics-api"
+domain_group_name = "decision-engine-analytics-domain"
 
 [analytics.clickhouse]
 user = "decision_engine"
