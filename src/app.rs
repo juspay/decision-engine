@@ -273,10 +273,15 @@ where
         .layer(middleware::from_fn(custom_middleware::authenticate));
 
     // Routes that do not require authentication (public)
-    let public_router = axum::Router::new().route(
-        "/merchant-account/create",
-        post(routes::merchant_account_config::create_merchant_config),
-    );
+    let public_router = axum::Router::new()
+        .route(
+            "/merchant-account/create",
+            post(routes::merchant_account_config::create_merchant_config),
+        )
+        .route("/auth/signup", post(routes::user_auth::signup))
+        .route("/auth/login", post(routes::user_auth::login))
+        .route("/auth/logout", post(routes::user_auth::logout))
+        .route("/auth/me", get(routes::user_auth::me));
 
     let router = axum::Router::new()
         .merge(protected_router)

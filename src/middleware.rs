@@ -20,8 +20,10 @@ pub async fn middleware(
     Ok(response)
 }
 
-/// Middleware to authenticate requests using the x-api-key header.
-/// Validates against DB-backed API keys with Redis caching.
+/// Middleware to authenticate requests using either:
+/// - `x-api-key` header (service-to-service / programmatic access)
+/// - `Authorization: Bearer <jwt>` header (dashboard / user sessions)
+///
 /// When `api_key_auth_enabled` is false in config, all requests pass through (backward compat mode).
 pub async fn authenticate(
     req: Request<Body>,
@@ -36,9 +38,31 @@ pub async fn authenticate(
         return Ok(next.run(req).await);
     }
 
+    // Accept JWT Bearer token (dashboard sessions)
+    if let Some(bearer) = req
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+    {
+        use crate::routes::user_auth::verify_jwt_not_revoked;
+        match verify_jwt_not_revoked(bearer, &app_state.global_config.user_auth.jwt_secret).await {
+            Ok(_) => return Ok(next.run(req).await),
+            Err(_) => {
+                return Ok((StatusCode::UNAUTHORIZED, "Invalid or expired token").into_response())
+            }
+        }
+    }
+
     let api_key = match req.headers().get("x-api-key").and_then(|v| v.to_str().ok()) {
         Some(k) => k.to_owned(),
-        None => return Ok((StatusCode::UNAUTHORIZED, "Missing x-api-key header").into_response()),
+        None => {
+            return Ok((
+                StatusCode::UNAUTHORIZED,
+                "Missing authentication credentials",
+            )
+                .into_response())
+        }
     };
 
     let key_hash = auth::hash_api_key(&api_key);
