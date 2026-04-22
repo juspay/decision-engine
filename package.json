@@ -6,9 +6,11 @@
     "cypress:open": "cypress open",
     "cypress:run": "cypress run",
     "cypress:run:headless": "cypress run --headless",
-    "test:gateway-latency": "cypress run --spec 'cypress/e2e/routing-flows/gateway-latency-scoring.cy.js'",
-    "test:success-rate": "cypress run --spec 'cypress/e2e/routing-flows/success-rate-routing.cy.js'",
-    "test": "cypress run --spec 'cypress/e2e/routing-flows/*.cy.js'"
+    "test:api": "cypress run --spec 'cypress/e2e/api/**/*.cy.js'",
+    "test:ui": "cypress run --spec 'cypress/e2e/ui/**/*.cy.js'",
+    "test:analytics": "cypress run --spec 'cypress/e2e/api/analytics-api.cy.js,cypress/e2e/ui/analytics-page.cy.js,cypress/e2e/ui/payment-audit.cy.js,cypress/e2e/ui/dashboard-overview.cy.js'",
+    "test:all": "cypress run --spec 'cypress/e2e/**/*.cy.js'",
+    "test": "npm run test:all"
   },
   "devDependencies": {
     "cypress": "^13.6.0",

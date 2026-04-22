@@ -2,7 +2,7 @@ const { defineConfig } = require('cypress')
 
 module.exports = defineConfig({
   e2e: {
-    baseUrl: 'http://localhost:8080',
+    baseUrl: process.env.CYPRESS_UI_BASE_URL || 'http://localhost:5173',
     supportFile: 'cypress/support/e2e.js',
     specPattern: 'cypress/e2e/**/*.cy.{js,jsx,ts,tsx}',
     viewportWidth: 1280,
@@ -14,14 +14,17 @@ module.exports = defineConfig({
     responseTimeout: 10000,
     env: {
       // Default configuration - can be overridden via environment variables
-      API_BASE_URL: 'http://localhost:8080',
+      API_BASE_URL: process.env.CYPRESS_API_BASE_URL || 'http://localhost:8080',
+      UI_BASE_URL: process.env.CYPRESS_UI_BASE_URL || 'http://localhost:5173',
       DEFAULT_MERCHANT_ID_PREFIX: 'merc_',
       DEFAULT_PAYMENT_ID_PREFIX: 'PAY_',
       DEFAULT_CUSTOMER_ID_PREFIX: 'CUST',
       // Test data configuration
-      DEFAULT_GATEWAYS: ['GatewayA', 'GatewayB', 'GatewayC'],
+      DEFAULT_GATEWAYS: ['stripe', 'adyen', 'checkout'],
       DEFAULT_AMOUNT: 100.50,
       DEFAULT_CURRENCY: 'USD',
+      ANALYTICS_POLL_INTERVAL_MS: 2000,
+      ANALYTICS_POLL_TIMEOUT_MS: 30000,
       // Routing algorithm types
       ROUTING_ALGORITHMS: {
         SUCCESS_RATE: 'SR_BASED_ROUTING',
