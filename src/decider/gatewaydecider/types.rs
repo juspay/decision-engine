@@ -674,6 +674,7 @@ pub enum RankingAlgorithm {
     SrBasedRouting,
     PlBasedRouting,
     NtwBasedRouting,
+    NtwSrHybridRouting,
 }
 
 // pub type DeciderFlow<R> = for<'a> fn(&'a mut (dyn MonadFlow + 'a)) -> ReaderT<DeciderParams, StateT<DeciderState, &'a mut (dyn MonadFlow + 'a)>, R>;

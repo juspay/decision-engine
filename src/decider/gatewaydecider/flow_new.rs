@@ -110,7 +110,10 @@ pub async fn decider_full_payload_hs_function(
         dpRedisCompressionConfig: None,
     };
 
-    if dreq_.ranking_algorithm == Some(RankingAlgorithm::NtwBasedRouting) {
+    let is_hybrid_routing =
+        dreq_.ranking_algorithm == Some(RankingAlgorithm::NtwSrHybridRouting);
+
+    if dreq_.ranking_algorithm == Some(RankingAlgorithm::NtwBasedRouting) || is_hybrid_routing {
         let config_name = format!("DEBIT_ROUTING_ENABLED_{}", dreq_.merchant_id);
         let debit_routing_enabled = service_configuration::find_config_by_name(config_name)
             .await
@@ -148,8 +151,18 @@ pub async fn decider_full_payload_hs_function(
             });
         }
 
-        logger::debug!("Performing debit routing");
-        network_decider::debit_routing::perform_debit_routing(dreq_).await
+        if is_hybrid_routing {
+            logger::debug!("Performing hybrid routing (SR-based + debit routing)");
+            perform_hybrid_routing(
+                decider_params,
+                dreq_,
+                cpu_start,
+            )
+            .await
+        } else {
+            logger::debug!("Performing debit routing");
+            network_decider::debit_routing::perform_debit_routing(dreq_).await
+        }
     } else {
         logger::debug!("Performing gateway routing");
         run_decider_flow(
@@ -160,6 +173,41 @@ pub async fn decider_full_payload_hs_function(
             cpu_start,
         )
         .await
+    }
+}
+
+async fn perform_hybrid_routing(
+    decider_params: T::DeciderParams,
+    dreq_: T::DomainDeciderRequestForApiCallV2,
+    cpu_start: Instant,
+) -> Result<T::DecidedGateway, T::ErrorResponse> {
+    // Run SR-based routing first to get gateway priority map and decided gateway
+    let sr_result = run_decider_flow(
+        decider_params,
+        Some(RankingAlgorithm::SrBasedRouting),
+        dreq_.clone().elimination_enabled,
+        false,
+        cpu_start,
+    )
+    .await;
+
+    // Get debit routing output
+    let debit_routing_result = network_decider::debit_routing::perform_debit_routing(dreq_).await;
+
+    match (sr_result, debit_routing_result) {
+        (Ok(mut sr_gateway), Ok(debit_gateway)) => {
+            // Merge results: keep SR-based gateway selection but add debit routing output
+            sr_gateway.debit_routing_output = debit_gateway.debit_routing_output;
+            Ok(sr_gateway)
+        }
+        (Ok(sr_gateway), Err(_)) => {
+            logger::warn!("Debit routing failed in hybrid mode, returning SR-based result only");
+            Ok(sr_gateway)
+        }
+        (Err(e), _) => {
+            logger::warn!("SR-based routing failed in hybrid mode, propagating error");
+            Err(e)
+        }
     }
 }
 

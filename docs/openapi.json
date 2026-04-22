@@ -96,6 +96,23 @@
                     "rankingAlgorithm": "NtwBasedRouting",
                     "eliminationEnabled": false
                   }
+                },
+                "hybrid_routing": {
+                  "summary": "Hybrid SR + debit routing",
+                  "value": {
+                    "merchantId": "test_merchant",
+                    "paymentInfo": {
+                      "paymentId": "pay_003",
+                      "amount": 750.0,
+                      "currency": "USD",
+                      "paymentType": "ORDER_PAYMENT",
+                      "paymentMethodType": "CARD",
+                      "paymentMethod": "DEBIT"
+                    },
+                    "eligibleGatewayList": ["stripe", "braintree", "adyen"],
+                    "rankingAlgorithm": "NtwSrHybridRouting",
+                    "eliminationEnabled": false
+                  }
                 }
               }
             }
@@ -663,7 +680,7 @@
           },
           "rankingAlgorithm": {
             "type": "string",
-            "enum": ["SrBasedRouting", "PlBasedRouting", "NtwBasedRouting"],
+            "enum": ["SrBasedRouting", "PlBasedRouting", "NtwBasedRouting", "NtwSrHybridRouting"],
             "example": "SrBasedRouting"
           },
           "eliminationEnabled": { "type": "boolean", "default": false }
