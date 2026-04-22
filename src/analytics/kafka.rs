@@ -18,7 +18,7 @@ use crate::metrics::{
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KafkaDomainEventRowV1 {
+pub struct KafkaDomainEventRow {
     pub schema_version: u8,
     pub produced_at_ms: i64,
     pub event_id: u64,
@@ -54,7 +54,7 @@ pub struct KafkaDomainEventRowV1 {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KafkaApiEventRowV1 {
+pub struct KafkaApiEventRow {
     pub schema_version: u8,
     pub produced_at_ms: i64,
     pub event_id: u64,
@@ -78,7 +78,7 @@ pub struct KafkaApiEventRowV1 {
     pub http_method: String,
 }
 
-impl From<DomainAnalyticsEvent> for KafkaDomainEventRowV1 {
+impl From<DomainAnalyticsEvent> for KafkaDomainEventRow {
     fn from(event: DomainAnalyticsEvent) -> Self {
         Self {
             schema_version: 1,
@@ -117,7 +117,7 @@ impl From<DomainAnalyticsEvent> for KafkaDomainEventRowV1 {
     }
 }
 
-impl From<ApiEvent> for KafkaApiEventRowV1 {
+impl From<ApiEvent> for KafkaApiEventRow {
     fn from(event: ApiEvent) -> Self {
         Self {
             schema_version: 1,
@@ -174,7 +174,7 @@ impl KafkaAnalyticsStore {
     }
 
     async fn send_api_event(&self, event: &ApiEvent) -> Result<(), ApiError> {
-        let payload = serde_json::to_vec(&KafkaApiEventRowV1::from(event.clone()))
+        let payload = serde_json::to_vec(&KafkaApiEventRow::from(event.clone()))
             .map_err(|_| ApiError::EncodingError)?;
         let key = api_event_key(event);
         self.send_payload("api", &self.config.api_topic, &key, payload)
@@ -182,7 +182,7 @@ impl KafkaAnalyticsStore {
     }
 
     async fn send_domain_event(&self, event: &DomainAnalyticsEvent) -> Result<(), ApiError> {
-        let payload = serde_json::to_vec(&KafkaDomainEventRowV1::from(event.clone()))
+        let payload = serde_json::to_vec(&KafkaDomainEventRow::from(event.clone()))
             .map_err(|_| ApiError::EncodingError)?;
         let key = domain_event_key(event);
         self.send_payload("domain", &self.config.domain_topic, &key, payload)
@@ -331,7 +331,7 @@ mod tests {
 
     use crate::analytics::{ApiEvent, ApiFlow, DomainAnalyticsEvent, FlowType};
 
-    use super::{api_event_key, domain_event_key, KafkaApiEventRowV1, KafkaDomainEventRowV1};
+    use super::{api_event_key, domain_event_key, KafkaApiEventRow, KafkaDomainEventRow};
 
     #[test]
     fn domain_row_serializes_stably() {
@@ -367,7 +367,7 @@ mod tests {
             details: None,
             created_at_ms: 123,
         };
-        let row = KafkaDomainEventRowV1::from(event);
+        let row = KafkaDomainEventRow::from(event);
         let json = serde_json::to_string(&row).unwrap();
         assert!(json.contains("\"schema_version\":1"));
         assert!(json.contains("\"created_at_ms\":123"));
@@ -401,7 +401,7 @@ mod tests {
             error: Some(serde_json::json!({"code":"bad_request"})),
             http_method: "POST".to_string(),
         };
-        let row = KafkaApiEventRowV1::from(event);
+        let row = KafkaApiEventRow::from(event);
         assert_eq!(row.error.as_deref(), Some("{\"code\":\"bad_request\"}"));
         assert_eq!(row.api_flow, ApiFlow::DynamicRouting);
         assert_eq!(row.flow_type, FlowType::DecideGateway);
