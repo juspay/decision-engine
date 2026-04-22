@@ -654,5 +654,6 @@ pub fn format_range(query: &AnalyticsQuery) -> String {
         AnalyticsRange::H1 => "1h".to_string(),
         AnalyticsRange::H24 => "24h".to_string(),
         AnalyticsRange::D30 => "30d".to_string(),
+        AnalyticsRange::M18 => "18mo".to_string(),
     }
 }

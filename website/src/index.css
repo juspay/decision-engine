@@ -19,7 +19,7 @@
     font-family: 'Outfit', 'Inter', system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    @apply bg-[#f8fafc] text-slate-800 dark:bg-[#000000] dark:text-[#f4f4f5] transition-colors duration-300;
+    @apply bg-[#ffffff] text-slate-800 dark:bg-[#000000] dark:text-[#f4f4f5] transition-colors duration-300;
   }
 
   /* Fallback text colors for robust contrast when not overridden */
@@ -149,11 +149,11 @@
 
 /* Floating panel utility class */
 .glass-panel {
-  @apply bg-white dark:bg-[#0c0c0e] border border-slate-200 dark:border-[#1a1a1d] shadow-lg dark:shadow-2xl rounded-2xl relative overflow-hidden transition-all duration-300;
+  @apply bg-white dark:bg-[#0c0c0e] border border-slate-200 dark:border-[#1a1a1d] shadow-[0_18px_50px_-30px_rgba(15,23,42,0.12)] dark:shadow-2xl rounded-2xl relative overflow-hidden transition-all duration-300;
 }
 
 .glass-panel-hover:hover {
-  @apply bg-slate-50 dark:bg-[#111114] border-slate-300 dark:border-[#222226];
+  @apply bg-white dark:bg-[#111114] border-slate-300 dark:border-[#222226];
 }
 
 /* Brand Gradient Text Utility */
@@ -171,4 +171,18 @@
   background: linear-gradient(90deg, #9b51e0, #4f46e5, #0ea5e9, transparent);
   opacity: 0.8;
   z-index: 100;
+}
+
+@keyframes analytics-progress {
+  0% {
+    transform: scaleX(0.18);
+  }
+
+  55% {
+    transform: scaleX(0.82);
+  }
+
+  100% {
+    transform: scaleX(0.96);
+  }
 }

@@ -41,6 +41,6 @@ chai.use(function (chai, utils) {
     const obj = this._obj
     
     expect(obj).to.have.property('message')
-    expect(obj.message).to.equal('Success')
+    expect(obj.message).to.equal('Gateway score updated successfully')
   })
 })
