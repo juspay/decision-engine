@@ -172,28 +172,14 @@ Cypress.Commands.add('decideGatewayLegacy', (decisionRequest) => {
 
   return cy.request({
     method: 'POST',
-    url: `${getApiBaseUrl()}/decision_gateway`,
-    failOnStatusCode: false,
+    url: `${getApiBaseUrl()}/decide-gateway`,
     headers: {
       'Content-Type': 'application/json'
     },
     body: request
   }).then((response) => {
-    if (response.status === 200) {
-      return cy.wrap({ request, response: response.body })
-    }
-
-    return cy.request({
-      method: 'POST',
-      url: `${getApiBaseUrl()}/decide-gateway`,
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: request
-    }).then((fallbackResponse) => {
-      expect(fallbackResponse.status).to.eq(200)
-      return cy.wrap({ request, response: fallbackResponse.body })
-    })
+    expect(response.status).to.eq(200)
+    return cy.wrap({ request, response: response.body })
   })
 })
 
