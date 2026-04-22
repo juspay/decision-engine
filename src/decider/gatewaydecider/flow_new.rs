@@ -435,9 +435,12 @@ pub async fn run_decider_flow(
                         decider_flow.writer.gwDeciderApproach.clone(),
                     );
                     if let Some(rule_name) = updatedPriorityLogicOutput.priority_logic_tag.clone() {
-                        let tenant_id = get_tenant_app_state().await.config.tenant_id.clone();
                         crate::analytics::record_rule_hit_event(
-                            tenant_id,
+                            crate::analytics::AnalyticsFlowContext::new(
+                                crate::analytics::ApiFlow::DynamicRouting,
+                                crate::analytics::FlowType::DecideGatewayRuleHit,
+                            ),
+                            "decide_gateway",
                             Some(crate::types::merchant::id::merchant_id_to_text(
                                 deciderParams.dpMerchantAccount.merchantId.clone(),
                             )),
@@ -451,6 +454,13 @@ pub async fn run_decider_flow(
                             .ok(),
                             Some(deciderParams.dpTxnDetail.txnUuid.clone()),
                             decider_flow.logger.get("x-request-id").cloned(),
+                            decider_flow.logger.get("x-global-request-id").cloned(),
+                            decider_flow
+                                .logger
+                                .get("traceparent")
+                                .and_then(|value| crate::analytics::normalize_trace_id(value))
+                                .or_else(|| decider_flow.logger.get("x-trace-id").cloned())
+                                .or_else(|| decider_flow.logger.get("x-b3-traceid").cloned()),
                             Some("rule_applied".to_string()),
                         );
                     }

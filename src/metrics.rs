@@ -43,11 +43,11 @@ lazy_static! {
         &["rule_name"]
     ).unwrap();
 
-    /// Count of analytics events captured by type
+    /// Count of analytics events captured by flow type
     pub static ref ANALYTICS_EVENT_COUNTER: IntCounterVec = register_int_counter_vec!(
         "analytics_events_total",
-        "Count of analytics events captured by type",
-        &["event_type"]
+        "Count of analytics events captured by flow type",
+        &["flow_type"]
     ).unwrap();
 
     pub static ref ANALYTICS_SINK_WRITES_TOTAL: IntCounterVec = register_int_counter_vec!(

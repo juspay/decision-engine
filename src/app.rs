@@ -67,18 +67,6 @@ fn generate_request_id_header_value() -> HeaderValue {
     }
 }
 
-fn api_capture_flow(path: &str) -> Option<&'static str> {
-    match path {
-        "/decide-gateway" => Some("decide_gateway"),
-        "/update-gateway-score" => Some("update_gateway_score"),
-        "/routing/evaluate" => Some("routing_evaluate"),
-        "/routing/hybrid" => Some("routing_hybrid"),
-        "/routing/create" => Some("routing_create"),
-        "/routing/activate" => Some("routing_activate"),
-        _ => None,
-    }
-}
-
 fn extract_json_path(value: &serde_json::Value, path: &[&str]) -> Option<String> {
     let nested_value = path
         .iter()
@@ -129,7 +117,7 @@ fn parse_request_metadata(
 }
 
 fn parse_response_error(
-    status_code: i64,
+    status_code: u16,
     captured: &crate::analytics::CapturedBody,
 ) -> Option<serde_json::Value> {
     if status_code < 400 {
@@ -148,7 +136,7 @@ async fn capture_api_event(
     }
 
     let path = request.uri().path().to_string();
-    let Some(api_flow) = api_capture_flow(&path) else {
+    let Some(flow_context) = crate::analytics::classify_request(request.method(), &path) else {
         return next.run(request).await;
     };
 
@@ -157,18 +145,14 @@ async fn capture_api_event(
     let (parts, body) = request.into_parts();
     let (request_body, request_handle) = crate::analytics::CaptureBody::new(body, max_bytes);
 
-    let tenant_id = parts
-        .headers
-        .get(crate::storage::consts::X_TENANT_ID)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("public")
-        .to_string();
     let request_id = parts
         .headers
         .get(crate::storage::consts::X_REQUEST_ID)
         .and_then(|value| value.to_str().ok())
         .unwrap_or("unknown")
         .to_string();
+    let global_request_id = crate::analytics::global_request_id_from_headers(&parts.headers);
+    let trace_id = crate::analytics::trace_id_from_headers(&parts.headers);
     let user_agent = parts
         .headers
         .get(axum::http::header::USER_AGENT)
@@ -191,7 +175,7 @@ async fn capture_api_event(
     let response = next
         .run(Request::from_parts(parts, Body::new(request_body)))
         .await;
-    let status_code = i64::from(response.status().as_u16());
+    let status_code = response.status().as_u16();
     let (response_parts, response_body) = response.into_parts();
     let (response_body, response_handle) =
         crate::analytics::CaptureBody::new(response_body, max_bytes);
@@ -215,12 +199,14 @@ async fn capture_api_event(
 
         runtime.enqueue_api_event(crate::analytics::ApiEvent {
             event_id: crate::analytics::next_event_id(crate::analytics::now_ms()),
-            tenant_id,
             merchant_id,
             payment_id,
-            api_flow: api_flow.to_string(),
+            api_flow: flow_context.api_flow,
+            flow_type: flow_context.flow_type,
             created_at_timestamp: crate::analytics::now_ms(),
             request_id,
+            global_request_id,
+            trace_id,
             latency: started_at.elapsed().as_millis() as u64,
             status_code,
             auth_type,
@@ -230,13 +216,7 @@ async fn capture_api_event(
             url_path: path,
             response: Some(String::from_utf8_lossy(&response_capture.bytes).to_string()),
             error,
-            event_type: if status_code >= 400 {
-                "error".to_string()
-            } else {
-                "success".to_string()
-            },
             http_method: method,
-            infra_components: None,
             request_truncated: request_capture.truncated,
             response_truncated: response_capture.truncated,
         });

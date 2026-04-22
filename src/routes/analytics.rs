@@ -32,7 +32,7 @@ pub struct AnalyticsQueryParams {
     pub request_id: Option<String>,
     pub route: Option<String>,
     pub status: Option<String>,
-    pub event_type: Option<String>,
+    pub flow_type: Option<String>,
     pub error_code: Option<String>,
 }
 
@@ -197,7 +197,7 @@ pub async fn payment_audit(
         params.gateway,
         params.route,
         params.status,
-        params.event_type,
+        params.flow_type,
         params.error_code,
     );
     Ok(Json(fetch_payment_audit(&state, &query).await?))
@@ -220,7 +220,7 @@ pub async fn preview_trace(
         params.gateway,
         params.route,
         params.status,
-        params.event_type,
+        params.flow_type,
         params.error_code,
     );
     Ok(Json(fetch_preview_trace(&state, &query).await?))

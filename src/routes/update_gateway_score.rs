@@ -30,17 +30,13 @@ use axum::extract::Json;
 pub async fn update_gateway_score(
     req: axum::http::Request<axum::body::Body>,
 ) -> Result<Json<UpdateScoreResponse>, ErrorResponse> {
-    let x_tenant_id = req
-        .headers()
-        .get("x-tenant-id")
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("public")
-        .to_string();
     let x_request_id = req
         .headers()
         .get("x-request-id")
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
+    let global_request_id = crate::analytics::global_request_id_from_headers(req.headers());
+    let trace_id = crate::analytics::trace_id_from_headers(req.headers());
     let timer = API_LATENCY_HISTOGRAM
         .with_label_values(&["update_gateway_score"])
         .start_timer();
@@ -63,11 +59,16 @@ pub async fn update_gateway_score(
             crate::logger::debug!(tag = "UpdateGatewayScore", "Error: {:?}", e);
             let (error_code, error_message) = e.analytics_code_and_message();
             crate::analytics::record_error_event(
-                x_tenant_id.clone(),
+                crate::analytics::AnalyticsFlowContext::new(
+                    crate::analytics::ApiFlow::DynamicRouting,
+                    crate::analytics::FlowType::UpdateGatewayScoreError,
+                ),
                 "update_gateway_score",
                 None,
                 None,
                 None,
+                global_request_id.clone(),
+                trace_id.clone(),
                 None,
                 None,
                 error_code.to_string(),
@@ -91,11 +92,16 @@ pub async fn update_gateway_score(
             let gateway = payload.gateway.clone();
             let payment_id = payload.payment_id.clone();
             crate::analytics::record_request_hit_event(
-                x_tenant_id.clone(),
+                crate::analytics::AnalyticsFlowContext::new(
+                    crate::analytics::ApiFlow::DynamicRouting,
+                    crate::analytics::FlowType::UpdateGatewayScoreRequestHit,
+                ),
                 "update_gateway_score",
                 Some(merchant_id.clone()),
                 Some(payment_id.clone()),
                 x_request_id.clone(),
+                global_request_id.clone(),
+                trace_id.clone(),
                 None,
             );
             let result = check_and_update_gateway_score_(payload.clone()).await;
@@ -112,7 +118,10 @@ pub async fn update_gateway_score(
                         payment_id: payment_id.clone(),
                     };
                     crate::analytics::record_gateway_update_event(
-                        x_tenant_id.clone(),
+                        crate::analytics::AnalyticsFlowContext::new(
+                            crate::analytics::ApiFlow::DynamicRouting,
+                            crate::analytics::FlowType::UpdateGatewayScoreUpdate,
+                        ),
                         Some(merchant_id.clone()),
                         Some(gateway.clone()),
                         Some(transaction_status.clone()),
@@ -136,6 +145,8 @@ pub async fn update_gateway_score(
                         .ok(),
                         Some(response.payment_id.clone()),
                         x_request_id.clone(),
+                        global_request_id.clone(),
+                        trace_id.clone(),
                         Some("score_updated".to_string()),
                     );
                     API_REQUEST_COUNTER
@@ -149,11 +160,16 @@ pub async fn update_gateway_score(
                         .with_label_values(&["update_gateway_score", "failure"])
                         .inc();
                     crate::analytics::record_error_event(
-                        x_tenant_id.clone(),
+                        crate::analytics::AnalyticsFlowContext::new(
+                            crate::analytics::ApiFlow::DynamicRouting,
+                            crate::analytics::FlowType::UpdateGatewayScoreError,
+                        ),
                         "update_gateway_score",
                         Some(merchant_id.clone()),
                         Some(payment_id.clone()),
                         x_request_id.clone(),
+                        global_request_id.clone(),
+                        trace_id.clone(),
                         Some(gateway.clone()),
                         None,
                         e.error_code.clone(),
@@ -175,11 +191,16 @@ pub async fn update_gateway_score(
         Err(e) => {
             crate::logger::debug!(tag = "UpdateScoreRequest", "Error: {:?}", e);
             crate::analytics::record_error_event(
-                x_tenant_id.clone(),
+                crate::analytics::AnalyticsFlowContext::new(
+                    crate::analytics::ApiFlow::DynamicRouting,
+                    crate::analytics::FlowType::UpdateGatewayScoreError,
+                ),
                 "update_gateway_score",
                 None,
                 None,
                 None,
+                global_request_id,
+                trace_id,
                 None,
                 None,
                 "400".to_string(),

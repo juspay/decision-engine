@@ -3,6 +3,7 @@ use clickhouse::{Client, Row};
 use masking::PeekInterface;
 use serde::Deserialize;
 
+use crate::analytics::flow::FlowType;
 use crate::analytics::models::*;
 use crate::analytics::service::{format_range, now_ms};
 use crate::analytics::store::AnalyticsReadStore;
@@ -10,6 +11,34 @@ use crate::config::ClickHouseAnalyticsConfig;
 use crate::error::ApiError;
 
 const DOMAIN_TABLE: &str = "analytics_domain_events_v1";
+const OVERVIEW_SCORE_FLOW_TYPES: &[FlowType] = &[
+    FlowType::UpdateGatewayScoreScoreSnapshot,
+    FlowType::UpdateScoreLegacyScoreSnapshot,
+];
+const OVERVIEW_ERROR_FLOW_TYPES: &[FlowType] = &[
+    FlowType::DecideGatewayError,
+    FlowType::UpdateGatewayScoreError,
+    FlowType::UpdateScoreLegacyError,
+    FlowType::RoutingEvaluateError,
+];
+const ROUTE_HIT_FLOW_TYPES: &[FlowType] = &[
+    FlowType::DecideGatewayRequestHit,
+    FlowType::UpdateGatewayScoreRequestHit,
+    FlowType::RoutingEvaluateRequestHit,
+];
+const PAYMENT_AUDIT_PREVIEW_FLOW_TYPES: &[FlowType] = &[
+    FlowType::RoutingEvaluatePreview,
+    FlowType::RoutingEvaluateError,
+];
+const PAYMENT_AUDIT_DYNAMIC_FLOW_TYPES: &[FlowType] = &[
+    FlowType::DecideGatewayDecision,
+    FlowType::UpdateGatewayScoreUpdate,
+    FlowType::UpdateScoreLegacyScoreSnapshot,
+    FlowType::DecideGatewayRuleHit,
+    FlowType::DecideGatewayError,
+    FlowType::UpdateGatewayScoreError,
+    FlowType::UpdateScoreLegacyError,
+];
 
 #[derive(Clone)]
 pub struct ClickHouseAnalyticsStore {
@@ -87,12 +116,14 @@ struct LogSampleRow {
     merchant_id: Option<String>,
     payment_id: Option<String>,
     request_id: Option<String>,
+    global_request_id: Option<String>,
+    trace_id: Option<String>,
     gateway: Option<String>,
     routing_approach: Option<String>,
     status: Option<String>,
     error_code: Option<String>,
     error_message: Option<String>,
-    event_type: String,
+    flow_type: String,
     created_at_ms: i64,
 }
 
@@ -115,12 +146,14 @@ struct AuditSummaryRow {
 #[derive(Debug, Clone, Deserialize, Row)]
 struct AuditEventRow {
     event_id: u64,
-    event_type: String,
+    flow_type: String,
     event_stage: Option<String>,
     route: Option<String>,
     merchant_id: Option<String>,
     payment_id: Option<String>,
     request_id: Option<String>,
+    global_request_id: Option<String>,
+    trace_id: Option<String>,
     payment_method_type: Option<String>,
     payment_method: Option<String>,
     gateway: Option<String>,
@@ -184,7 +217,6 @@ struct SingleValueRow {
 impl AnalyticsReadStore for ClickHouseAnalyticsStore {
     async fn overview(
         &self,
-        tenant_id: &str,
         query: &AnalyticsQuery,
     ) -> Result<AnalyticsOverviewResponse, ApiError> {
         if query.scope == AnalyticsScope::All {
@@ -237,16 +269,19 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
         }
 
         let (start_ms, end_ms) = effective_window_bounds(query);
-        let base_where =
-            base_where_clause(tenant_id, query.merchant_id.as_deref(), start_ms, end_ms);
+        let base_where = base_where_clause(query.merchant_id.as_deref(), start_ms, end_ms);
 
         let counts_query = format!(
             "SELECT \
-                countIf(event_type = 'decision') AS total, \
-                countIf(event_type = 'score_snapshot') AS score_count, \
-                countIf(event_type = 'rule_hit') AS rule_hit_count, \
-                countIf(event_type = 'error') AS error_count \
-             FROM {DOMAIN_TABLE} {base_where}"
+                countIf(flow_type = '{decision_flow_type}') AS total, \
+                countIf(flow_type IN {score_flow_types}) AS score_count, \
+                countIf(flow_type = '{rule_hit_flow_type}') AS rule_hit_count, \
+                countIf(flow_type IN {error_flow_types}) AS error_count \
+             FROM {DOMAIN_TABLE} {base_where}",
+            decision_flow_type = FlowType::DecideGatewayDecision.as_str(),
+            score_flow_types = flow_type_list_sql(OVERVIEW_SCORE_FLOW_TYPES),
+            rule_hit_flow_type = FlowType::DecideGatewayRuleHit.as_str(),
+            error_flow_types = flow_type_list_sql(OVERVIEW_ERROR_FLOW_TYPES),
         );
         let count_row = self
             .client
@@ -259,16 +294,17 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
             .client
             .query(&format!(
                 "SELECT route, count() AS count \
-                 FROM {DOMAIN_TABLE} {base_where} AND event_type = 'request_hit' \
-                 GROUP BY route"
+                 FROM {DOMAIN_TABLE} {base_where} AND flow_type IN {route_hit_flow_types} \
+                 GROUP BY route",
+                route_hit_flow_types = flow_type_list_sql(ROUTE_HIT_FLOW_TYPES),
             ))
             .fetch_all::<RouteHitRow>()
             .await
             .map_err(|_| self.store_error())?;
 
-        let top_scores = self.load_score_snapshots(tenant_id, query, Some(5)).await?;
-        let top_errors = self.load_error_summaries(tenant_id, query, Some(5)).await?;
-        let top_rules = self.load_rule_hits(tenant_id, query, Some(5)).await?;
+        let top_scores = self.load_score_snapshots(query, Some(5)).await?;
+        let top_errors = self.load_error_summaries(query, Some(5)).await?;
+        let top_rules = self.load_rule_hits(query, Some(5)).await?;
 
         Ok(AnalyticsOverviewResponse {
             generated_at_ms: now_ms(),
@@ -305,7 +341,6 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
 
     async fn gateway_scores(
         &self,
-        tenant_id: &str,
         query: &AnalyticsQuery,
     ) -> Result<AnalyticsGatewayScoresResponse, ApiError> {
         if query.scope == AnalyticsScope::All {
@@ -324,14 +359,13 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
             scope: query.scope.as_str().to_string(),
             merchant_id: query.merchant_id.clone(),
             range: format_range(query),
-            snapshots: self.load_score_snapshots(tenant_id, query, None).await?,
-            series: self.load_score_series(tenant_id, query).await?,
+            snapshots: self.load_score_snapshots(query, None).await?,
+            series: self.load_score_series(query).await?,
         })
     }
 
     async fn decisions(
         &self,
-        tenant_id: &str,
         query: &AnalyticsQuery,
     ) -> Result<AnalyticsDecisionResponse, ApiError> {
         if query.scope == AnalyticsScope::All {
@@ -364,8 +398,9 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
         let (start_ms, end_ms) = effective_window_bounds(query);
         let bucket = query_bucket_size_ms(start_ms, end_ms);
         let base_where = format!(
-            "{} AND event_type = 'decision'",
-            base_where_clause(tenant_id, query.merchant_id.as_deref(), start_ms, end_ms)
+            "{} AND flow_type = '{}'",
+            base_where_clause(query.merchant_id.as_deref(), start_ms, end_ms),
+            FlowType::DecideGatewayDecision.as_str(),
         );
 
         let count_row = self
@@ -450,13 +485,11 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
 
     async fn routing_stats(
         &self,
-        tenant_id: &str,
         query: &AnalyticsQuery,
     ) -> Result<AnalyticsRoutingStatsResponse, ApiError> {
         let (start_ms, end_ms) = effective_window_bounds(query);
         let bucket = query_bucket_size_ms(start_ms, end_ms);
-        let base_where =
-            base_where_clause(tenant_id, query.merchant_id.as_deref(), start_ms, end_ms);
+        let base_where = base_where_clause(query.merchant_id.as_deref(), start_ms, end_ms);
         let gateway_share = self
             .client
             .query(&format!(
@@ -464,9 +497,10 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
                 intDiv(created_at_ms, {bucket}) * {bucket} AS bucket_ms, \
                 ifNull(gateway, 'unknown') AS gateway, \
                 count() AS count \
-             FROM {DOMAIN_TABLE} {base_where} AND event_type = 'decision' \
+             FROM {DOMAIN_TABLE} {base_where} AND flow_type = '{decision_flow_type}' \
              GROUP BY bucket_ms, gateway \
-             ORDER BY bucket_ms ASC, gateway ASC"
+             ORDER BY bucket_ms ASC, gateway ASC",
+                decision_flow_type = FlowType::DecideGatewayDecision.as_str(),
             ))
             .fetch_all::<GatewaySharePointRow>()
             .await
@@ -485,15 +519,14 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
             merchant_id: query.merchant_id.clone(),
             range: format_range(query),
             gateway_share,
-            top_rules: self.load_rule_hits(tenant_id, query, Some(10)).await?,
-            sr_trend: self.load_score_series(tenant_id, query).await?,
-            available_filters: self.load_filter_options(tenant_id, query).await?,
+            top_rules: self.load_rule_hits(query, Some(10)).await?,
+            sr_trend: self.load_score_series(query).await?,
+            available_filters: self.load_filter_options(query).await?,
         })
     }
 
     async fn log_summaries(
         &self,
-        tenant_id: &str,
         query: &AnalyticsQuery,
     ) -> Result<AnalyticsLogSummariesResponse, ApiError> {
         if query.scope == AnalyticsScope::All {
@@ -510,14 +543,13 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
             });
         }
 
-        let errors = self
-            .load_error_summaries(tenant_id, query, Some(10))
-            .await?;
+        let errors = self.load_error_summaries(query, Some(10)).await?;
         let total_errors = errors.iter().map(|entry| entry.count).sum();
         let (start_ms, end_ms) = effective_window_bounds(query);
         let base_where = format!(
-            "{} AND event_type = 'error'",
-            base_where_clause(tenant_id, query.merchant_id.as_deref(), start_ms, end_ms)
+            "{} AND flow_type IN {}",
+            base_where_clause(query.merchant_id.as_deref(), start_ms, end_ms),
+            flow_type_list_sql(OVERVIEW_ERROR_FLOW_TYPES),
         );
         let page = query.page.max(1);
         let page_size = query.page_size.clamp(1, 50);
@@ -526,8 +558,9 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
             .client
             .query(&format!(
                 "SELECT \
-                ifNull(route, 'unknown') AS route, merchant_id, payment_id, request_id, gateway, \
-                routing_approach, status, error_code, error_message, event_type, created_at_ms \
+                ifNull(route, 'unknown') AS route, merchant_id, payment_id, request_id, \
+                global_request_id, trace_id, gateway, routing_approach, status, error_code, \
+                error_message, flow_type, created_at_ms \
              FROM {DOMAIN_TABLE} {base_where} \
              ORDER BY created_at_ms DESC \
              LIMIT {page_size} OFFSET {offset}"
@@ -541,12 +574,14 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
                 merchant_id: row.merchant_id,
                 payment_id: row.payment_id,
                 request_id: row.request_id,
+                global_request_id: row.global_request_id,
+                trace_id: row.trace_id,
                 gateway: row.gateway,
                 routing_approach: row.routing_approach,
                 status: row.status,
                 error_code: row.error_code,
                 error_message: row.error_message,
-                event_type: Some(row.event_type),
+                flow_type: Some(row.flow_type),
                 created_at_ms: row.created_at_ms,
             })
             .collect();
@@ -566,27 +601,22 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
 
     async fn payment_audit(
         &self,
-        tenant_id: &str,
         query: &PaymentAuditQuery,
     ) -> Result<PaymentAuditResponse, ApiError> {
-        self.load_payment_audit_response(tenant_id, query, false)
-            .await
+        self.load_payment_audit_response(query, false).await
     }
 
     async fn preview_trace(
         &self,
-        tenant_id: &str,
         query: &PaymentAuditQuery,
     ) -> Result<PaymentAuditResponse, ApiError> {
-        self.load_payment_audit_response(tenant_id, query, true)
-            .await
+        self.load_payment_audit_response(query, true).await
     }
 }
 
 impl ClickHouseAnalyticsStore {
     async fn load_payment_audit_response(
         &self,
-        tenant_id: &str,
         query: &PaymentAuditQuery,
         preview_only: bool,
     ) -> Result<PaymentAuditResponse, ApiError> {
@@ -605,7 +635,7 @@ impl ClickHouseAnalyticsStore {
                 gateway: query.gateway.clone(),
                 route: query.route.clone(),
                 status: query.status.clone(),
-                event_type: query.event_type.clone(),
+                flow_type: query.flow_type.clone(),
                 error_code: query.error_code.clone(),
                 page: query.page.max(1),
                 page_size: query.page_size.clamp(1, 50),
@@ -615,9 +645,7 @@ impl ClickHouseAnalyticsStore {
             });
         }
 
-        let summary_rows = self
-            .load_audit_summaries(tenant_id, query, preview_only)
-            .await?;
+        let summary_rows = self.load_audit_summaries(query, preview_only).await?;
         let total_results = summary_rows.len();
         let page = query.page.max(1);
         let page_size = query.page_size.clamp(1, 50);
@@ -635,7 +663,7 @@ impl ClickHouseAnalyticsStore {
             .or_else(|| results.first().map(|row| row.lookup_key.clone()));
 
         let timeline = if let Some(lookup_key) = selected_lookup_key.clone() {
-            self.load_audit_timeline(tenant_id, query, preview_only, &lookup_key)
+            self.load_audit_timeline(query, preview_only, &lookup_key)
                 .await?
         } else {
             Vec::new()
@@ -665,7 +693,7 @@ impl ClickHouseAnalyticsStore {
                 query.route.clone()
             },
             status: query.status.clone(),
-            event_type: query.event_type.clone(),
+            flow_type: query.flow_type.clone(),
             error_code: query.error_code.clone(),
             page,
             page_size,
@@ -677,7 +705,6 @@ impl ClickHouseAnalyticsStore {
 
     async fn load_score_snapshots(
         &self,
-        tenant_id: &str,
         query: &AnalyticsQuery,
         limit: Option<usize>,
     ) -> Result<Vec<GatewayScoreSnapshot>, ApiError> {
@@ -699,13 +726,12 @@ impl ClickHouseAnalyticsStore {
                 ifNull(argMax(transaction_count, created_at_ms), 0) AS transaction_count, \
                 max(created_at_ms) AS last_updated_ms \
              FROM {DOMAIN_TABLE} \
-             WHERE tenant_id = '{tenant_id}' \
-               AND created_at_ms >= {start_ms} AND created_at_ms <= {end_ms} \
-               AND event_type = 'score_snapshot' {filter_suffix} \
+             WHERE created_at_ms >= {start_ms} AND created_at_ms <= {end_ms} \
+               AND flow_type IN {score_flow_types} {filter_suffix} \
              GROUP BY merchant_id, payment_method_type, payment_method, gateway \
              ORDER BY score_value DESC, last_updated_ms DESC \
              {limit_clause}",
-            tenant_id = escape_sql(tenant_id),
+            score_flow_types = flow_type_list_sql(OVERVIEW_SCORE_FLOW_TYPES),
         );
 
         self.client
@@ -732,7 +758,6 @@ impl ClickHouseAnalyticsStore {
 
     async fn load_score_series(
         &self,
-        tenant_id: &str,
         query: &AnalyticsQuery,
     ) -> Result<Vec<GatewayScoreSeriesPoint>, ApiError> {
         let (start_ms, end_ms) = effective_window_bounds(query);
@@ -747,12 +772,11 @@ impl ClickHouseAnalyticsStore {
                 ifNull(gateway, '') AS gateway, \
                 avg(ifNull(score_value, 0.0)) AS score_value \
              FROM {DOMAIN_TABLE} \
-             WHERE tenant_id = '{tenant_id}' \
-               AND created_at_ms >= {start_ms} AND created_at_ms <= {end_ms} \
-               AND event_type = 'score_snapshot' {filter_suffix} \
+             WHERE created_at_ms >= {start_ms} AND created_at_ms <= {end_ms} \
+               AND flow_type IN {score_flow_types} {filter_suffix} \
              GROUP BY bucket_ms, merchant_id, payment_method_type, payment_method, gateway \
              ORDER BY bucket_ms ASC, gateway ASC",
-            tenant_id = escape_sql(tenant_id),
+            score_flow_types = flow_type_list_sql(OVERVIEW_SCORE_FLOW_TYPES),
         );
         self.client
             .query(&sql)
@@ -774,7 +798,6 @@ impl ClickHouseAnalyticsStore {
 
     async fn load_error_summaries(
         &self,
-        tenant_id: &str,
         query: &AnalyticsQuery,
         limit: Option<usize>,
     ) -> Result<Vec<AnalyticsErrorSummary>, ApiError> {
@@ -790,15 +813,14 @@ impl ClickHouseAnalyticsStore {
                 count() AS count, \
                 max(created_at_ms) AS last_seen_ms \
              FROM {DOMAIN_TABLE} \
-             WHERE tenant_id = '{tenant_id}' \
-               AND created_at_ms >= {start_ms} AND created_at_ms <= {end_ms} \
-               AND event_type = 'error' \
+             WHERE created_at_ms >= {start_ms} AND created_at_ms <= {end_ms} \
+               AND flow_type IN {error_flow_types} \
                {merchant_filter} \
              GROUP BY route, error_code, error_message \
              ORDER BY count DESC, last_seen_ms DESC \
              {limit_clause}",
-            tenant_id = escape_sql(tenant_id),
             merchant_filter = merchant_filter(query.merchant_id.as_deref()),
+            error_flow_types = flow_type_list_sql(OVERVIEW_ERROR_FLOW_TYPES),
         );
         self.client
             .query(&sql)
@@ -819,7 +841,6 @@ impl ClickHouseAnalyticsStore {
 
     async fn load_rule_hits(
         &self,
-        tenant_id: &str,
         query: &AnalyticsQuery,
         limit: Option<usize>,
     ) -> Result<Vec<AnalyticsRuleHit>, ApiError> {
@@ -830,14 +851,13 @@ impl ClickHouseAnalyticsStore {
         let sql = format!(
             "SELECT ifNull(rule_name, 'unknown') AS rule_name, count() AS count \
              FROM {DOMAIN_TABLE} \
-             WHERE tenant_id = '{tenant_id}' \
-               AND created_at_ms >= {start_ms} AND created_at_ms <= {end_ms} \
-               AND event_type = 'rule_hit' {merchant_filter} \
+             WHERE created_at_ms >= {start_ms} AND created_at_ms <= {end_ms} \
+               AND flow_type = '{rule_hit_flow_type}' {merchant_filter} \
              GROUP BY rule_name \
              ORDER BY count DESC, rule_name ASC \
              {limit_clause}",
-            tenant_id = escape_sql(tenant_id),
             merchant_filter = merchant_filter(query.merchant_id.as_deref()),
+            rule_hit_flow_type = FlowType::DecideGatewayRuleHit.as_str(),
         );
         self.client
             .query(&sql)
@@ -855,18 +875,16 @@ impl ClickHouseAnalyticsStore {
 
     async fn load_filter_options(
         &self,
-        tenant_id: &str,
         query: &AnalyticsQuery,
     ) -> Result<RoutingFilterOptions, ApiError> {
         let (start_ms, end_ms) = effective_window_bounds(query);
         let sql = format!(
             "SELECT DISTINCT payment_method_type, payment_method, card_network, card_is_in, country, currency, auth_type, gateway \
              FROM {DOMAIN_TABLE} \
-             WHERE tenant_id = '{tenant_id}' \
-               AND created_at_ms >= {start_ms} AND created_at_ms <= {end_ms} \
-               AND event_type = 'score_snapshot' {merchant_filter}",
-            tenant_id = escape_sql(tenant_id),
+             WHERE created_at_ms >= {start_ms} AND created_at_ms <= {end_ms} \
+               AND flow_type IN {score_flow_types} {merchant_filter}",
             merchant_filter = merchant_filter(query.merchant_id.as_deref()),
+            score_flow_types = flow_type_list_sql(OVERVIEW_SCORE_FLOW_TYPES),
         );
         let rows = self
             .client
@@ -927,7 +945,6 @@ impl ClickHouseAnalyticsStore {
 
     async fn load_audit_summaries(
         &self,
-        tenant_id: &str,
         query: &PaymentAuditQuery,
         preview_only: bool,
     ) -> Result<Vec<PaymentAuditSummary>, ApiError> {
@@ -954,7 +971,7 @@ impl ClickHouseAnalyticsStore {
              WHERE lookup_key != '' \
              GROUP BY lookup_key \
              ORDER BY last_seen_ms DESC, event_count DESC",
-            audit_where = payment_audit_where_clause(tenant_id, query, preview_only),
+            audit_where = payment_audit_where_clause(query, preview_only),
         );
         self.client
             .query(&sql)
@@ -986,21 +1003,21 @@ impl ClickHouseAnalyticsStore {
 
     async fn load_audit_timeline(
         &self,
-        tenant_id: &str,
         query: &PaymentAuditQuery,
         preview_only: bool,
         lookup_key: &str,
     ) -> Result<Vec<PaymentAuditEvent>, ApiError> {
         let sql = format!(
             "SELECT \
-                event_id, event_type, event_stage, route, merchant_id, payment_id, request_id, \
-                payment_method_type, payment_method, gateway, routing_approach, rule_name, status, \
-                error_code, error_message, score_value, sigma_factor, average_latency, tp99_latency, \
-                transaction_count, details, created_at_ms \
+                event_id, flow_type, event_stage, route, merchant_id, payment_id, request_id, \
+                global_request_id, trace_id, payment_method_type, payment_method, gateway, \
+                routing_approach, rule_name, status, error_code, error_message, score_value, \
+                sigma_factor, average_latency, tp99_latency, transaction_count, details, \
+                created_at_ms \
              FROM {DOMAIN_TABLE} {audit_where} \
                AND (payment_id = '{lookup_key}' OR request_id = '{lookup_key}') \
              ORDER BY created_at_ms ASC, event_id ASC",
-            audit_where = payment_audit_where_clause(tenant_id, query, preview_only),
+            audit_where = payment_audit_where_clause(query, preview_only),
             lookup_key = escape_sql(lookup_key),
         );
         self.client
@@ -1011,12 +1028,14 @@ impl ClickHouseAnalyticsStore {
             .into_iter()
             .map(|row| PaymentAuditEvent {
                 id: row.event_id as i64,
-                event_type: row.event_type,
+                flow_type: row.flow_type,
                 event_stage: row.event_stage,
                 route: row.route,
                 merchant_id: row.merchant_id,
                 payment_id: row.payment_id,
                 request_id: row.request_id,
+                global_request_id: row.global_request_id,
+                trace_id: row.trace_id,
                 payment_method_type: row.payment_method_type,
                 payment_method: row.payment_method,
                 gateway: row.gateway,
@@ -1097,17 +1116,10 @@ fn payment_audit_range(query: &PaymentAuditQuery) -> String {
     }
 }
 
-fn base_where_clause(
-    tenant_id: &str,
-    merchant_id: Option<&str>,
-    start_ms: i64,
-    end_ms: i64,
-) -> String {
+fn base_where_clause(merchant_id: Option<&str>, start_ms: i64, end_ms: i64) -> String {
     format!(
-        "WHERE tenant_id = '{tenant_id}' \
-           AND created_at_ms >= {start_ms} AND created_at_ms <= {end_ms}{}",
+        "WHERE created_at_ms >= {start_ms} AND created_at_ms <= {end_ms}{}",
         merchant_filter(merchant_id),
-        tenant_id = escape_sql(tenant_id),
     )
 }
 
@@ -1157,14 +1169,9 @@ fn score_filters(query: &AnalyticsQuery) -> String {
     filters
 }
 
-fn payment_audit_where_clause(
-    tenant_id: &str,
-    query: &PaymentAuditQuery,
-    preview_only: bool,
-) -> String {
+fn payment_audit_where_clause(query: &PaymentAuditQuery, preview_only: bool) -> String {
     let (start_ms, end_ms) = effective_payment_audit_window_bounds(query);
     let mut filters = vec![
-        format!("tenant_id = '{}'", escape_sql(tenant_id)),
         format!("created_at_ms >= {start_ms}"),
         format!("created_at_ms <= {end_ms}"),
     ];
@@ -1173,10 +1180,15 @@ fn payment_audit_where_clause(
     }
     if preview_only {
         filters.push("route = 'routing_evaluate'".to_string());
-        filters.push("event_type IN ('rule_evaluation_preview', 'error')".to_string());
+        filters.push(format!(
+            "flow_type IN {}",
+            flow_type_list_sql(PAYMENT_AUDIT_PREVIEW_FLOW_TYPES)
+        ));
     } else {
-        filters
-            .push("event_type IN ('decision', 'gateway_update', 'rule_hit', 'error')".to_string());
+        filters.push(format!(
+            "flow_type IN {}",
+            flow_type_list_sql(PAYMENT_AUDIT_DYNAMIC_FLOW_TYPES)
+        ));
         if let Some(route) = &query.route {
             filters.push(format!("route = '{}'", escape_sql(route)));
         }
@@ -1195,8 +1207,8 @@ fn payment_audit_where_clause(
     if let Some(status) = &query.status {
         filters.push(format!("status = '{}'", escape_sql(status)));
     }
-    if let Some(event_type) = &query.event_type {
-        filters.push(format!("event_type = '{}'", escape_sql(event_type)));
+    if let Some(flow_type) = &query.flow_type {
+        filters.push(format!("flow_type = '{}'", escape_sql(flow_type)));
     }
     if let Some(error_code) = &query.error_code {
         filters.push(format!("error_code = '{}'", escape_sql(error_code)));
@@ -1246,6 +1258,17 @@ fn payment_audit_route_label(route: String) -> String {
 
 fn escape_sql(value: &str) -> String {
     value.replace('\\', "\\\\").replace('\'', "\\'")
+}
+
+fn flow_type_list_sql(flow_types: &[FlowType]) -> String {
+    format!(
+        "({})",
+        flow_types
+            .iter()
+            .map(|flow_type| format!("'{}'", flow_type.as_str()))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
 }
 
 trait Pipe: Sized {

@@ -1,14 +1,16 @@
 CREATE TABLE IF NOT EXISTS decision_engine_analytics.analytics_api_events_v1 (
     event_id UInt64,
-    tenant_id String,
     merchant_id Nullable(String),
     payment_id Nullable(String),
     api_flow LowCardinality(String),
+    flow_type LowCardinality(String),
     created_at_timestamp Int64,
     created_at DateTime64(3, 'UTC') MATERIALIZED fromUnixTimestamp64Milli(created_at_timestamp),
     request_id String,
+    global_request_id Nullable(String),
+    trace_id Nullable(String),
     latency UInt64,
-    status_code Int64,
+    status_code UInt16,
     auth_type Nullable(String),
     request String,
     user_agent Nullable(String),
@@ -16,22 +18,17 @@ CREATE TABLE IF NOT EXISTS decision_engine_analytics.analytics_api_events_v1 (
     url_path String,
     response Nullable(String),
     error Nullable(String),
-    event_type LowCardinality(String),
     http_method LowCardinality(String),
-    infra_components Nullable(String),
     request_truncated Bool,
     response_truncated Bool
 ) ENGINE = ReplacingMergeTree(event_id)
 PARTITION BY toYYYYMM(created_at)
 ORDER BY (
-    tenant_id,
     created_at_timestamp,
     api_flow,
+    flow_type,
+    status_code,
     request_id,
-    isNull(merchant_id),
-    coalesce(merchant_id, ''),
-    isNull(payment_id),
-    coalesce(payment_id, ''),
     event_id
 )
 TTL created_at + INTERVAL 18 MONTH;
@@ -49,14 +46,16 @@ CREATE TABLE IF NOT EXISTS decision_engine_analytics.analytics_api_events_queue 
     schema_version UInt8,
     produced_at_ms Int64,
     event_id UInt64,
-    tenant_id String,
     merchant_id Nullable(String),
     payment_id Nullable(String),
     api_flow LowCardinality(String),
+    flow_type LowCardinality(String),
     created_at_timestamp Int64,
     request_id String,
+    global_request_id Nullable(String),
+    trace_id Nullable(String),
     latency UInt64,
-    status_code Int64,
+    status_code UInt16,
     auth_type Nullable(String),
     request String,
     user_agent Nullable(String),
@@ -64,9 +63,7 @@ CREATE TABLE IF NOT EXISTS decision_engine_analytics.analytics_api_events_queue 
     url_path String,
     response Nullable(String),
     error Nullable(String),
-    event_type LowCardinality(String),
     http_method LowCardinality(String),
-    infra_components Nullable(String),
     request_truncated Bool,
     response_truncated Bool
 ) ENGINE = Kafka
@@ -93,12 +90,14 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS decision_engine_analytics.analytics_api_e
 TO decision_engine_analytics.analytics_api_events_v1 AS
 SELECT
     event_id,
-    tenant_id,
     merchant_id,
     payment_id,
     api_flow,
+    flow_type,
     created_at_timestamp,
     request_id,
+    global_request_id,
+    trace_id,
     latency,
     status_code,
     auth_type,
@@ -108,9 +107,7 @@ SELECT
     url_path,
     response,
     error,
-    event_type,
     http_method,
-    infra_components,
     request_truncated,
     response_truncated
 FROM decision_engine_analytics.analytics_api_events_queue
