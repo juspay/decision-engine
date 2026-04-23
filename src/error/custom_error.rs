@@ -104,6 +104,8 @@ pub enum RuleConfigurationError {
     ConfigurationAlreadyExists,
     #[error("Failed to deserialize configuration")]
     DeserializationError,
+    #[error("Debit routing not enabled for merchant")]
+    DebitRoutingNotEnabled,
 }
 
 impl axum::response::IntoResponse for RuleConfigurationError {
@@ -159,6 +161,15 @@ impl axum::response::IntoResponse for RuleConfigurationError {
                 axum::Json(crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
                     "Rule configuration already exists".to_string(),
+                    None,
+                )),
+            )
+                .into_response(),
+            Self::DebitRoutingNotEnabled => (
+                hyper::StatusCode::FORBIDDEN,
+                axum::Json(crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_05,
+                    "Debit routing not enabled for merchant".to_string(),
                     None,
                 )),
             )
