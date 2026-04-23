@@ -35,13 +35,19 @@ impl ClickHouseAnalyticsStore {
             client = client.with_password(password.peek().clone());
         }
 
-        let probe = common::fetch_one::<StartupProbeRow>(client.query("SELECT 1 AS value"))
-            .await
-            .map_err(|_| ApiError::DatabaseError)?;
-        let _ = probe.value;
+        verify_connectivity(&client).await?;
 
         Ok(Self { client })
     }
+}
+
+async fn verify_connectivity(client: &Client) -> Result<(), ApiError> {
+    // Fail fast on bad ClickHouse config instead of deferring the error to the first dashboard read.
+    let probe = common::fetch_one::<StartupProbeRow>(client.query("SELECT 1 AS value"))
+        .await
+        .map_err(|_| ApiError::DatabaseError)?;
+    let _ = probe.value;
+    Ok(())
 }
 
 #[async_trait]

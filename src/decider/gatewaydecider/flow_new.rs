@@ -435,7 +435,7 @@ pub async fn run_decider_flow(
                         decider_flow.writer.gwDeciderApproach.clone(),
                     );
                     if let Some(rule_name) = updatedPriorityLogicOutput.priority_logic_tag.clone() {
-                        crate::analytics::record_rule_hit_event(
+                        crate::analytics::DomainAnalyticsEvent::record_rule_hit(
                             crate::analytics::AnalyticsFlowContext::new(
                                 crate::analytics::ApiFlow::DynamicRouting,
                                 crate::analytics::FlowType::DecideGatewayRuleHit,
