@@ -251,7 +251,7 @@ pub async fn routing_create(
         timestamp,
     );
     logger::debug!("Response: {response:?}");
-    crate::analytics::record_operation_event(
+    crate::analytics::DomainAnalyticsEvent::record_operation(
         crate::analytics::AnalyticsFlowContext::new(
             crate::analytics::ApiFlow::RuleBasedRouting,
             create_flow_type,
@@ -305,7 +305,7 @@ pub async fn routing_evaluate(
         created_by = %payload.created_by,
         "Received routing evaluation request"
     );
-    crate::analytics::record_request_hit_event(
+    crate::analytics::DomainAnalyticsEvent::record_request_hit(
         crate::analytics::AnalyticsFlowContext::new(
             crate::analytics::ApiFlow::RuleBasedRouting,
             crate::analytics::FlowType::RoutingEvaluateRequestHit,
@@ -542,7 +542,7 @@ pub async fn routing_evaluate(
     };
 
     logger::debug!("Response: {response:?}");
-    crate::analytics::record_rule_evaluation_preview_event(
+    crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
         crate::analytics::AnalyticsFlowContext::new(
             crate::analytics::ApiFlow::RuleBasedRouting,
             preview_flow_type,
@@ -604,7 +604,7 @@ fn record_routing_evaluate_preview_error(
         .map(str::to_string)
         .unwrap_or_else(|| error.get_inner().to_string());
 
-    crate::analytics::record_error_event(
+    crate::analytics::DomainAnalyticsEvent::record_error(
         crate::analytics::AnalyticsFlowContext::new(
             crate::analytics::ApiFlow::RuleBasedRouting,
             crate::analytics::FlowType::RoutingEvaluateError,

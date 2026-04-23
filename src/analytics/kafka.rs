@@ -245,23 +245,29 @@ impl KafkaAnalyticsStore {
 #[async_trait]
 impl AnalyticsWriteStore for KafkaAnalyticsStore {
     async fn persist_domain_events(&self, events: &[DomainAnalyticsEvent]) -> Result<(), ApiError> {
-        let mut last_error = None;
         for event in events {
             if let Err(error) = self.send_domain_event(event).await {
-                last_error = Some(error);
+                crate::logger::warn!(
+                    error = %error,
+                    event_id = event.event_id,
+                    "Failed to publish analytics domain event"
+                );
             }
         }
-        last_error.map_or(Ok(()), Err)
+        Ok(())
     }
 
     async fn persist_api_events(&self, events: &[ApiEvent]) -> Result<(), ApiError> {
-        let mut last_error = None;
         for event in events {
             if let Err(error) = self.send_api_event(event).await {
-                last_error = Some(error);
+                crate::logger::warn!(
+                    error = %error,
+                    event_id = event.event_id,
+                    "Failed to publish analytics api event"
+                );
             }
         }
-        last_error.map_or(Ok(()), Err)
+        Ok(())
     }
 
     fn sink_name(&self) -> &'static str {

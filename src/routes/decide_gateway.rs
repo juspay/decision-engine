@@ -1,6 +1,10 @@
 use std::{borrow::Cow, time::Instant};
 
 use crate::{
+    analytics::{
+        global_request_id_from_headers, serialize_details, trace_id_from_headers,
+        AnalyticsFlowContext, AnalyticsRoute, ApiFlow, DomainAnalyticsEvent, FlowType,
+    },
     decider::gatewaydecider::{
         flow_new::decider_full_payload_hs_function,
         types::{
@@ -110,8 +114,8 @@ pub async fn decide_gateway(
         .and_then(|value| value.to_str().ok())
         .unwrap_or("unknown")
         .to_string();
-    let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
-    let trace_id = crate::analytics::trace_id_from_headers(&headers);
+    let global_request_id = global_request_id_from_headers(&headers);
+    let trace_id = trace_id_from_headers(&headers);
     for (name, value) in headers.iter() {
         logger::debug!(tag = "DecideGateway", "Header: {}: {:?}", name, value);
     }
@@ -125,12 +129,9 @@ pub async fn decide_gateway(
             let (error_code, error_message) = e.analytics_code_and_message();
             let analytics_stage = e.analytics_stage().to_string();
             let error_response = e.into_error_response();
-            crate::analytics::record_error_event(
-                crate::analytics::AnalyticsFlowContext::new(
-                    crate::analytics::ApiFlow::DynamicRouting,
-                    crate::analytics::FlowType::DecideGatewayError,
-                ),
-                crate::analytics::AnalyticsRoute::DecideGateway,
+            DomainAnalyticsEvent::record_error(
+                AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::DecideGatewayError),
+                AnalyticsRoute::DecideGateway,
                 None,
                 None,
                 Some(x_request_id.clone()),
@@ -140,7 +141,7 @@ pub async fn decide_gateway(
                 None,
                 error_code,
                 error_message.to_string(),
-                crate::analytics::serialize_details(&DecideGatewayReadFailureDetail {
+                serialize_details(&DecideGatewayReadFailureDetail {
                     request_id: &x_request_id,
                     response: &error_response,
                 }),
@@ -159,12 +160,12 @@ pub async fn decide_gateway(
     let result = match api_decider_request {
         Ok(payload) => {
             let auth_type = payload.auth_type();
-            crate::analytics::record_request_hit_event(
-                crate::analytics::AnalyticsFlowContext::new(
-                    crate::analytics::ApiFlow::DynamicRouting,
-                    crate::analytics::FlowType::DecideGatewayRequestHit,
+            DomainAnalyticsEvent::record_request_hit(
+                AnalyticsFlowContext::new(
+                    ApiFlow::DynamicRouting,
+                    FlowType::DecideGatewayRequestHit,
                 ),
-                crate::analytics::AnalyticsRoute::DecideGateway,
+                AnalyticsRoute::DecideGateway,
                 Some(payload.merchant_id.clone()),
                 Some(payload.payment_id().to_string()),
                 Some(x_request_id.clone()),
@@ -176,18 +177,18 @@ pub async fn decide_gateway(
                 Ok(decided_gateway) => {
                     let routing_approach = decided_gateway.routing_approach.to_string();
 
-                    crate::analytics::record_decision_event(
-                        crate::analytics::AnalyticsFlowContext::new(
-                            crate::analytics::ApiFlow::DynamicRouting,
-                            crate::analytics::FlowType::DecideGatewayDecision,
+                    DomainAnalyticsEvent::record_decision(
+                        AnalyticsFlowContext::new(
+                            ApiFlow::DynamicRouting,
+                            FlowType::DecideGatewayDecision,
                         ),
                         Some(payload.merchant_id.clone()),
                         Some(routing_approach),
                         Some(decided_gateway.decided_gateway.clone()),
                         Some("success".to_string()),
-                        crate::analytics::AnalyticsRoute::DecideGateway,
+                        AnalyticsRoute::DecideGateway,
                         decided_gateway.priority_logic_tag.clone(),
-                        crate::analytics::serialize_details(&DecideGatewaySuccessDetail {
+                        serialize_details(&DecideGatewaySuccessDetail {
                             request: &payload,
                             response: &decided_gateway,
                             score_context: decided_gateway.gateway_priority_map.as_ref(),
@@ -217,12 +218,12 @@ pub async fn decide_gateway(
                 }
                 Err(e) => {
                     logger::debug!(tag = "DecideGateway", "Error: {:?}", e);
-                    crate::analytics::record_error_event(
-                        crate::analytics::AnalyticsFlowContext::new(
-                            crate::analytics::ApiFlow::DynamicRouting,
-                            crate::analytics::FlowType::DecideGatewayError,
+                    DomainAnalyticsEvent::record_error(
+                        AnalyticsFlowContext::new(
+                            ApiFlow::DynamicRouting,
+                            FlowType::DecideGatewayError,
                         ),
-                        crate::analytics::AnalyticsRoute::DecideGateway,
+                        AnalyticsRoute::DecideGateway,
                         Some(payload.merchant_id.clone()),
                         Some(payload.payment_id().to_string()),
                         Some(x_request_id.clone()),
@@ -232,7 +233,7 @@ pub async fn decide_gateway(
                         e.routing_approach.as_ref().map(ToString::to_string),
                         e.error_code.clone(),
                         e.error_message.clone(),
-                        crate::analytics::serialize_details(&DecideGatewayFailureDetail {
+                        serialize_details(&DecideGatewayFailureDetail {
                             request_id: &x_request_id,
                             request: &payload,
                             routing_approach: e.routing_approach.as_ref(),
@@ -251,12 +252,9 @@ pub async fn decide_gateway(
         Err(e) => {
             logger::debug!(tag = "DecideGateway", "Error: {:?}", e);
             let error_response = request_parse_error_response(&e);
-            crate::analytics::record_error_event(
-                crate::analytics::AnalyticsFlowContext::new(
-                    crate::analytics::ApiFlow::DynamicRouting,
-                    crate::analytics::FlowType::DecideGatewayError,
-                ),
-                crate::analytics::AnalyticsRoute::DecideGateway,
+            DomainAnalyticsEvent::record_error(
+                AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::DecideGatewayError),
+                AnalyticsRoute::DecideGateway,
                 None,
                 None,
                 Some(x_request_id.clone()),
@@ -266,7 +264,7 @@ pub async fn decide_gateway(
                 None,
                 "400".to_string(),
                 "Error parsing request".to_string(),
-                crate::analytics::serialize_details(&DecideGatewayParseFailureDetail {
+                serialize_details(&DecideGatewayParseFailureDetail {
                     request_id: &x_request_id,
                     raw_request: String::from_utf8_lossy(&body),
                     response: &error_response,

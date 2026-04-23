@@ -178,7 +178,7 @@ pub async fn create_rule_config(
     };
 
     if let Ok(response) = &result {
-        crate::analytics::record_operation_event(
+        crate::analytics::DomainAnalyticsEvent::record_operation(
             crate::analytics::AnalyticsFlowContext::new(
                 crate::analytics::ApiFlow::RuleBasedRouting,
                 crate::analytics::refine_rule_config_create_flow_type(&analytics_config),
@@ -336,7 +336,7 @@ pub async fn get_rule_config(
         }
     };
     if let Ok(response) = &result {
-        crate::analytics::record_operation_event(
+        crate::analytics::DomainAnalyticsEvent::record_operation(
             crate::analytics::AnalyticsFlowContext::new(
                 crate::analytics::ApiFlow::RuleBasedRouting,
                 crate::analytics::flow_type_for_rule_config_algorithm_get(&payload.algorithm),
@@ -481,7 +481,7 @@ pub async fn update_rule_config(
         }
     };
     if let Ok(response) = &result {
-        crate::analytics::record_operation_event(
+        crate::analytics::DomainAnalyticsEvent::record_operation(
             crate::analytics::AnalyticsFlowContext::new(
                 crate::analytics::ApiFlow::RuleBasedRouting,
                 crate::analytics::refine_rule_config_update_flow_type(&analytics_config),
@@ -620,7 +620,7 @@ pub async fn delete_rule_config(
     };
 
     if let Ok(response) = &result {
-        crate::analytics::record_operation_event(
+        crate::analytics::DomainAnalyticsEvent::record_operation(
             crate::analytics::AnalyticsFlowContext::new(
                 crate::analytics::ApiFlow::RuleBasedRouting,
                 crate::analytics::flow_type_for_rule_config_algorithm_delete(&payload.algorithm),

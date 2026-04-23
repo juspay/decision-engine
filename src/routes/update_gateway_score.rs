@@ -106,7 +106,7 @@ pub async fn update_gateway_score(
         Err(e) => {
             crate::logger::debug!(tag = "UpdateGatewayScore", "Error: {:?}", e);
             let (error_code, error_message) = e.analytics_code_and_message();
-            crate::analytics::record_error_event(
+            crate::analytics::DomainAnalyticsEvent::record_error(
                 crate::analytics::AnalyticsFlowContext::new(
                     crate::analytics::ApiFlow::DynamicRouting,
                     crate::analytics::FlowType::UpdateGatewayScoreError,
@@ -139,7 +139,7 @@ pub async fn update_gateway_score(
             let merchant_id = payload.merchant_id.clone();
             let gateway = payload.gateway.clone();
             let payment_id = payload.payment_id.clone();
-            crate::analytics::record_request_hit_event(
+            crate::analytics::DomainAnalyticsEvent::record_request_hit(
                 crate::analytics::AnalyticsFlowContext::new(
                     crate::analytics::ApiFlow::DynamicRouting,
                     crate::analytics::FlowType::UpdateGatewayScoreRequestHit,
@@ -165,7 +165,7 @@ pub async fn update_gateway_score(
                         gateway: gateway.clone(),
                         payment_id: payment_id.clone(),
                     };
-                    crate::analytics::record_gateway_update_event(
+                    crate::analytics::DomainAnalyticsEvent::record_gateway_update(
                         crate::analytics::AnalyticsFlowContext::new(
                             crate::analytics::ApiFlow::DynamicRouting,
                             crate::analytics::FlowType::UpdateGatewayScoreUpdate,
@@ -207,7 +207,7 @@ pub async fn update_gateway_score(
                     API_REQUEST_COUNTER
                         .with_label_values(&["update_gateway_score", "failure"])
                         .inc();
-                    crate::analytics::record_error_event(
+                    crate::analytics::DomainAnalyticsEvent::record_error(
                         crate::analytics::AnalyticsFlowContext::new(
                             crate::analytics::ApiFlow::DynamicRouting,
                             crate::analytics::FlowType::UpdateGatewayScoreError,
@@ -238,7 +238,7 @@ pub async fn update_gateway_score(
         Err(e) => {
             crate::logger::debug!(tag = "UpdateScoreRequest", "Error: {:?}", e);
             let error_response = request_parse_error_response(&e);
-            crate::analytics::record_error_event(
+            crate::analytics::DomainAnalyticsEvent::record_error(
                 crate::analytics::AnalyticsFlowContext::new(
                     crate::analytics::ApiFlow::DynamicRouting,
                     crate::analytics::FlowType::UpdateGatewayScoreError,

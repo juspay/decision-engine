@@ -41,12 +41,12 @@ pub fn effective_payment_audit_window_bounds(query: &PaymentAuditQuery) -> (i64,
 fn bucket_start_expr(query: &AnalyticsQuery, start_ms: i64, end_ms: i64) -> &'static str {
     if query.start_ms.is_some() && query.end_ms.is_some() {
         return match end_ms.saturating_sub(start_ms) {
-            0..=FIFTEEN_MINUTES_MS => "toStartOfInterval(created_at, INTERVAL 1 MINUTE)",
-            OVER_FIFTEEN_MINUTES_MS..=HOUR_MS => "toStartOfInterval(created_at, INTERVAL 5 MINUTE)",
-            OVER_HOUR_MS..=TWELVE_HOURS_MS => "toStartOfInterval(created_at, INTERVAL 1 HOUR)",
-            OVER_TWELVE_HOURS_MS..=DAY_MS => "toStartOfInterval(created_at, INTERVAL 1 HOUR)",
-            OVER_DAY_MS..=WEEK_MS => "toStartOfInterval(created_at, INTERVAL 1 DAY)",
-            _ => "toStartOfInterval(created_at, INTERVAL 7 DAY)",
+            0..=FIFTEEN_MINUTES_MS => "toStartOfMinute(created_at)",
+            OVER_FIFTEEN_MINUTES_MS..=HOUR_MS => "toStartOfFiveMinutes(created_at)",
+            OVER_HOUR_MS..=TWELVE_HOURS_MS => "toStartOfHour(created_at)",
+            OVER_TWELVE_HOURS_MS..=DAY_MS => "toStartOfHour(created_at)",
+            OVER_DAY_MS..=WEEK_MS => "toStartOfDay(created_at)",
+            _ => "toStartOfWeek(created_at)",
         };
     }
 
@@ -125,7 +125,7 @@ mod tests {
         query.end_ms = Some(15 * MINUTE_MS);
         assert_eq!(
             query_bucket_select_expr(&query, 0, 15 * MINUTE_MS),
-            "toUnixTimestamp(toStartOfInterval(created_at, INTERVAL 1 MINUTE)) * 1000 AS bucket_ms"
+            "toUnixTimestamp(toStartOfMinute(created_at)) * 1000 AS bucket_ms"
         );
     }
 }
