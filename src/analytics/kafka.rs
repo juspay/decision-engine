@@ -14,6 +14,33 @@ use crate::config::KafkaAnalyticsConfig;
 use crate::error::{ApiError, ConfigurationError};
 use crate::metrics::{ANALYTICS_KAFKA_DELIVERY_LATENCY_HISTOGRAM, ANALYTICS_KAFKA_PRODUCE_TOTAL};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KafkaPublishOutcome {
+    EncodingFailed,
+    EnqueueFailedQueueFull,
+    EnqueueFailedProducerError,
+    DeliverySuccess,
+    DeliveryFailed,
+    DeliveryCanceled,
+}
+
+impl KafkaPublishOutcome {
+    fn metric_result(self) -> &'static str {
+        match self {
+            Self::EncodingFailed => "encoding_failed",
+            Self::EnqueueFailedQueueFull => "enqueue_failed_queue_full",
+            Self::EnqueueFailedProducerError => "enqueue_failed_producer_error",
+            Self::DeliverySuccess => "delivery_success",
+            Self::DeliveryFailed => "delivery_failed",
+            Self::DeliveryCanceled => "delivery_canceled",
+        }
+    }
+
+    fn is_success(self) -> bool {
+        matches!(self, Self::DeliverySuccess)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KafkaDomainEventRow {
     pub schema_version: u8,
@@ -178,17 +205,25 @@ impl KafkaAnalyticsStore {
         Ok(Self { producer, config })
     }
 
-    async fn send_api_event(&self, event: &ApiEvent) -> Result<(), ApiError> {
-        let payload = serde_json::to_vec(&KafkaApiEventRow::from(event.clone()))
-            .map_err(|_| ApiError::EncodingError)?;
+    async fn send_api_event(&self, event: &ApiEvent) -> KafkaPublishOutcome {
+        let payload = match serde_json::to_vec(&KafkaApiEventRow::from(event.clone())) {
+            Ok(payload) => payload,
+            Err(_) => {
+                return KafkaPublishOutcome::EncodingFailed;
+            }
+        };
         let key = api_event_key(event);
         self.send_payload("api", &self.config.api_topic, &key, payload)
             .await
     }
 
-    async fn send_domain_event(&self, event: &DomainAnalyticsEvent) -> Result<(), ApiError> {
-        let payload = serde_json::to_vec(&KafkaDomainEventRow::from(event.clone()))
-            .map_err(|_| ApiError::EncodingError)?;
+    async fn send_domain_event(&self, event: &DomainAnalyticsEvent) -> KafkaPublishOutcome {
+        let payload = match serde_json::to_vec(&KafkaDomainEventRow::from(event.clone())) {
+            Ok(payload) => payload,
+            Err(_) => {
+                return KafkaPublishOutcome::EncodingFailed;
+            }
+        };
         let key = domain_event_key(event);
         self.send_payload("domain", &self.config.domain_topic, &key, payload)
             .await
@@ -200,51 +235,47 @@ impl KafkaAnalyticsStore {
         topic: &str,
         key: &str,
         payload: Vec<u8>,
-    ) -> Result<(), ApiError> {
+    ) -> KafkaPublishOutcome {
         let started_at = Instant::now();
-        let delivery = self
+        let delivery = match self
             .producer
             .send_result(FutureRecord::to(topic).key(key).payload(&payload))
-            .map_err(|(error, _message)| {
-                let result = match error {
+        {
+            Ok(delivery) => delivery,
+            Err((error, _message)) => {
+                let outcome = match error {
                     KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull) => {
-                        "enqueue_failed_queue_full"
+                        KafkaPublishOutcome::EnqueueFailedQueueFull
                     }
-                    _ => "enqueue_failed_producer_error",
+                    _ => KafkaPublishOutcome::EnqueueFailedProducerError,
                 };
                 ANALYTICS_KAFKA_PRODUCE_TOTAL
-                    .with_label_values(&[stream, result])
+                    .with_label_values(&[stream, outcome.metric_result()])
                     .inc();
-                ApiError::UnknownError
-            })?;
+                return outcome;
+            }
+        };
 
         ANALYTICS_KAFKA_PRODUCE_TOTAL
             .with_label_values(&[stream, "enqueued"])
             .inc();
 
-        match delivery.await {
+        let outcome = match delivery.await {
             Ok(Ok(_)) => {
-                ANALYTICS_KAFKA_PRODUCE_TOTAL
-                    .with_label_values(&[stream, "delivery_success"])
-                    .inc();
                 ANALYTICS_KAFKA_DELIVERY_LATENCY_HISTOGRAM
                     .with_label_values(&[stream])
                     .observe(started_at.elapsed().as_secs_f64());
-                Ok(())
+                KafkaPublishOutcome::DeliverySuccess
             }
-            Ok(Err((_error, _message))) => {
-                ANALYTICS_KAFKA_PRODUCE_TOTAL
-                    .with_label_values(&[stream, "delivery_failed"])
-                    .inc();
-                Err(ApiError::UnknownError)
-            }
-            Err(_canceled) => {
-                ANALYTICS_KAFKA_PRODUCE_TOTAL
-                    .with_label_values(&[stream, "delivery_canceled"])
-                    .inc();
-                Err(ApiError::UnknownError)
-            }
-        }
+            Ok(Err((_error, _message))) => KafkaPublishOutcome::DeliveryFailed,
+            Err(_canceled) => KafkaPublishOutcome::DeliveryCanceled,
+        };
+
+        ANALYTICS_KAFKA_PRODUCE_TOTAL
+            .with_label_values(&[stream, outcome.metric_result()])
+            .inc();
+
+        outcome
     }
 }
 
@@ -252,9 +283,10 @@ impl KafkaAnalyticsStore {
 impl AnalyticsWriteStore for KafkaAnalyticsStore {
     async fn persist_domain_events(&self, events: &[DomainAnalyticsEvent]) -> Result<(), ApiError> {
         for event in events {
-            if let Err(error) = self.send_domain_event(event).await {
+            let outcome = self.send_domain_event(event).await;
+            if !outcome.is_success() {
                 crate::logger::warn!(
-                    error = %error,
+                    outcome = ?outcome,
                     event_id = event.event_id,
                     "Failed to publish analytics domain event"
                 );
@@ -265,9 +297,10 @@ impl AnalyticsWriteStore for KafkaAnalyticsStore {
 
     async fn persist_api_events(&self, events: &[ApiEvent]) -> Result<(), ApiError> {
         for event in events {
-            if let Err(error) = self.send_api_event(event).await {
+            let outcome = self.send_api_event(event).await;
+            if !outcome.is_success() {
                 crate::logger::warn!(
-                    error = %error,
+                    outcome = ?outcome,
                     event_id = event.event_id,
                     "Failed to publish analytics api event"
                 );
