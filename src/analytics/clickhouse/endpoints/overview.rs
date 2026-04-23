@@ -3,6 +3,32 @@ use crate::analytics::service::format_range;
 use crate::error::ApiError;
 
 use super::super::metrics;
+use super::super::metrics::overview_counts::OverviewCounts;
+
+fn build_overview_kpis(query: &AnalyticsQuery, counts: OverviewCounts) -> Vec<AnalyticsKpi> {
+    vec![
+        AnalyticsKpi {
+            label: format!("Decisions / {}", format_range(query)),
+            value: counts.total.to_string(),
+            subtitle: Some("Recorded decision events".to_string()),
+        },
+        AnalyticsKpi {
+            label: "Score snapshots".to_string(),
+            value: counts.score_count.to_string(),
+            subtitle: Some("Latest gateway score updates".to_string()),
+        },
+        AnalyticsKpi {
+            label: "Rule hits".to_string(),
+            value: counts.rule_hit_count.to_string(),
+            subtitle: Some("Priority-logic hits".to_string()),
+        },
+        AnalyticsKpi {
+            label: "Errors".to_string(),
+            value: counts.error_count.to_string(),
+            subtitle: Some("Structured failure summaries".to_string()),
+        },
+    ]
+}
 
 pub async fn load(
     client: &clickhouse::Client,
@@ -16,28 +42,7 @@ pub async fn load(
 
     Ok(AnalyticsOverviewResponse {
         merchant_id: query.merchant_id.clone(),
-        kpis: vec![
-            AnalyticsKpi {
-                label: format!("Decisions / {}", format_range(query)),
-                value: counts.total.to_string(),
-                subtitle: Some("Recorded decision events".to_string()),
-            },
-            AnalyticsKpi {
-                label: "Score snapshots".to_string(),
-                value: counts.score_count.to_string(),
-                subtitle: Some("Latest gateway score updates".to_string()),
-            },
-            AnalyticsKpi {
-                label: "Rule hits".to_string(),
-                value: counts.rule_hit_count.to_string(),
-                subtitle: Some("Priority-logic hits".to_string()),
-            },
-            AnalyticsKpi {
-                label: "Errors".to_string(),
-                value: counts.error_count.to_string(),
-                subtitle: Some("Structured failure summaries".to_string()),
-            },
-        ],
+        kpis: build_overview_kpis(query, counts),
         route_hits,
         top_scores,
         top_errors,
