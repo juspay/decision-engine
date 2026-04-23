@@ -25,7 +25,7 @@ The page supports these filters:
 - `gateway`
 - `route`
 - `status`
-- `event_type`
+- `flow_type`
 - time window: `15m`, `1h`, `12h`, `1d`, `1w`
 
 Use an exact `payment_id` when you have it. If you only have a request trace, use `request_id`.
@@ -53,6 +53,14 @@ The raw flow type remains visible as well, for example `decide_gateway_decision`
 ## Data Sources
 
 Payment Audit reads from the same ClickHouse analytics store used by the analytics surface.
+
+The read path is split intentionally:
+
+- exact `payment_id` / `request_id` lookups read the raw `analytics_domain_events` timeline
+- broad search results read pre-aggregated `analytics_payment_audit_summary_buckets`
+
+Both views correlate events through the write-time `lookup_key`, which prefers `payment_id` and
+falls back to `request_id`.
 
 Relevant fields include:
 

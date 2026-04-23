@@ -25,8 +25,20 @@ The ingestion path is explicit in ClickHouse too:
 
 - `analytics_domain_events_queue`
 - `analytics_api_events_queue`
+- `analytics_payment_audit_summary_buckets`
 - `analytics_domain_events_mv`
 - `analytics_api_events_mv`
+- `analytics_payment_audit_summary_buckets_mv`
+
+Payment Audit and Preview Trace now use a two-layer read shape:
+
+- raw event timelines still read from `analytics_domain_events`
+- summary lists read from the pre-aggregated `analytics_payment_audit_summary_buckets`
+
+The correlation key for those reads is the write-time `lookup_key`:
+
+- `payment_id` when present
+- otherwise `request_id`
 
 ## Local Bring-Up
 
@@ -42,7 +54,7 @@ The bootstrap DDL now lives in:
 
 - `clickhouse/scripts/`
 
-ClickHouse loads those shell scripts on first boot through `/docker-entrypoint-initdb.d`. They create the raw tables, recreate the Kafka queue tables and materialized views, and bind the queue tables to the configured Kafka brokers and topics.
+ClickHouse loads those shell scripts on first boot through `/docker-entrypoint-initdb.d`. They create the raw tables, recreate the Kafka queue tables and materialized views, create the payment-audit summary bucket table, and bind the queue tables to the configured Kafka brokers and topics.
 
 The analytics data volume is persistent, so normal restarts keep historical data.
 
@@ -101,5 +113,6 @@ SHOW TABLES FROM default;
 SELECT * FROM system.kafka_consumers WHERE database = 'default';
 SELECT count() FROM default.analytics_api_events;
 SELECT count() FROM default.analytics_domain_events;
+SELECT count() FROM default.analytics_payment_audit_summary_buckets;
 SELECT name, engine FROM system.tables WHERE database = 'default' AND name LIKE 'analytics_%';
 ```
