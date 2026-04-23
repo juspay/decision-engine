@@ -11,46 +11,27 @@ use tokio::sync::Notify;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CapturedBody {
     pub bytes: Bytes,
-    pub truncated: bool,
-}
-
-#[derive(Debug, Default)]
-struct CaptureBuffer {
-    bytes: Vec<u8>,
-    truncated: bool,
 }
 
 #[derive(Debug)]
 struct CaptureState {
-    limit: usize,
     complete: AtomicBool,
     notify: Notify,
-    buffer: Mutex<CaptureBuffer>,
+    buffer: Mutex<Vec<u8>>,
 }
 
 impl CaptureState {
-    fn new(limit: usize) -> Arc<Self> {
+    fn new() -> Arc<Self> {
         Arc::new(Self {
-            limit,
             complete: AtomicBool::new(false),
             notify: Notify::new(),
-            buffer: Mutex::new(CaptureBuffer::default()),
+            buffer: Mutex::new(Vec::new()),
         })
     }
 
     fn observe(&self, data: &Bytes) {
         let mut buffer = self.buffer.lock().expect("capture buffer poisoned");
-        if buffer.bytes.len() >= self.limit {
-            buffer.truncated = true;
-            return;
-        }
-
-        let remaining = self.limit.saturating_sub(buffer.bytes.len());
-        let take = remaining.min(data.len());
-        buffer.bytes.extend_from_slice(&data[..take]);
-        if take < data.len() {
-            buffer.truncated = true;
-        }
+        buffer.extend_from_slice(data);
     }
 
     fn finish(&self) {
@@ -62,8 +43,7 @@ impl CaptureState {
     fn snapshot(&self) -> CapturedBody {
         let buffer = self.buffer.lock().expect("capture buffer poisoned");
         CapturedBody {
-            bytes: Bytes::copy_from_slice(&buffer.bytes),
-            truncated: buffer.truncated,
+            bytes: Bytes::copy_from_slice(&buffer),
         }
     }
 }
@@ -121,8 +101,8 @@ pin_project! {
 }
 
 impl<B> CaptureBody<B> {
-    pub fn new(inner: B, limit: usize) -> (Self, CaptureHandle) {
-        let state = CaptureState::new(limit);
+    pub fn new(inner: B) -> (Self, CaptureHandle) {
+        let state = CaptureState::new();
         (
             Self {
                 inner,
@@ -177,8 +157,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
-
     use axum::body::{Body as AxumBody, Bytes};
     use futures::stream;
     use http_body::Frame;
@@ -191,38 +169,39 @@ mod tests {
         B: http_body::Body<Data = Bytes> + Unpin,
         B::Error: std::fmt::Debug,
     {
-        let (wrapped, handle) = CaptureBody::new(body, 4);
-        let _ = wrapped.collect().await.unwrap();
+        let (wrapped, handle) = CaptureBody::new(body);
+        let collected = wrapped.collect().await;
+        assert!(
+            collected.is_ok(),
+            "capture body collection should succeed: {collected:?}"
+        );
         handle.wait().await
     }
 
     #[tokio::test]
-    async fn capture_retains_prefix_only() {
+    async fn capture_retains_full_body() {
         let body = AxumBody::from("abcdef");
         let captured = collect_capture(body).await;
-        assert_eq!(captured.bytes, Bytes::from_static(b"abcd"));
-        assert!(captured.truncated);
+        assert_eq!(captured.bytes, Bytes::from_static(b"abcdef"));
     }
 
     #[tokio::test]
-    async fn capture_marks_truncation_across_frames() {
+    async fn capture_collects_across_frames() {
         let stream = stream::iter(vec![
             Ok::<_, std::convert::Infallible>(Frame::data(Bytes::from_static(b"ab"))),
             Ok::<_, std::convert::Infallible>(Frame::data(Bytes::from_static(b"cdef"))),
         ]);
         let body = StreamBody::new(stream);
         let captured = collect_capture(body).await;
-        assert_eq!(captured.bytes, Bytes::from_static(b"abcd"));
-        assert!(captured.truncated);
+        assert_eq!(captured.bytes, Bytes::from_static(b"abcdef"));
     }
 
     #[tokio::test]
     async fn capture_completes_on_drop() {
         let body = AxumBody::from("abcdef");
-        let (wrapped, handle) = CaptureBody::new(body, 10);
+        let (wrapped, handle) = CaptureBody::new(body);
         drop(wrapped);
         let captured = handle.wait().await;
         assert_eq!(captured.bytes, Bytes::new());
-        assert!(!captured.truncated);
     }
 }

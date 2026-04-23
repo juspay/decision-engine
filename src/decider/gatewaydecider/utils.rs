@@ -758,7 +758,9 @@ pub fn get_metric_log_format(decider_flow: &mut DeciderFlow<'_>, stage: &str) ->
     let txn_detail = decider_flow.get().dpTxnDetail.clone();
     let txn_card_info = decider_flow.get().dpTxnCardInfo.clone();
     let order_reference = decider_flow.get().dpOrder.clone();
-    let x_req_id = decider_flow.logger.get("x-request-id");
+    let x_req_id = decider_flow
+        .logger
+        .get(crate::storage::consts::X_REQUEST_ID);
     let payment_source_m = txn_card_info.get_payment_source_last();
 
     MessageFormat {
@@ -809,7 +811,10 @@ pub async fn log_gateway_decider_approach(
     let txn_detail = decider_flow.get().dpTxnDetail.clone();
     let order_reference = decider_flow.get().dpOrder.clone();
     let txn_card_info = decider_flow.get().dpTxnCardInfo.clone();
-    let x_req_id = decider_flow.logger.get("x-request-id").cloned();
+    let x_req_id = decider_flow
+        .logger
+        .get(crate::storage::consts::X_REQUEST_ID)
+        .cloned();
     let txn_creation_time = txn_detail.dateCreated.to_string(); // Assuming dateCreated is a DateTime field
     let consume_from_router = decider_flow.get().dpShouldConsumeResult;
     let mp = types::DeciderApproachLogData {

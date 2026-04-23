@@ -1,10 +1,32 @@
-CREATE TABLE IF NOT EXISTS decision_engine_analytics.analytics_domain_events_v1 (
+#!/bin/sh
+set -eu
+
+: "${ANALYTICS_KAFKA_BROKERS:?ANALYTICS_KAFKA_BROKERS must be set}"
+: "${ANALYTICS_KAFKA_DOMAIN_TOPIC:?ANALYTICS_KAFKA_DOMAIN_TOPIC must be set}"
+
+CLICKHOUSE_DATABASE="${CLICKHOUSE_DATABASE:-default}"
+CLICKHOUSE_USER="${CLICKHOUSE_USER:-default}"
+CLICKHOUSE_PASSWORD="${CLICKHOUSE_PASSWORD:-}"
+DOMAIN_GROUP_NAME="${ANALYTICS_KAFKA_DOMAIN_TOPIC}"
+
+auth_args="--database=${CLICKHOUSE_DATABASE} --user=${CLICKHOUSE_USER}"
+if [ -n "${CLICKHOUSE_PASSWORD}" ]; then
+  auth_args="${auth_args} --password=${CLICKHOUSE_PASSWORD}"
+fi
+
+clickhouse-client ${auth_args} --multiquery <<SQL
+CREATE TABLE analytics_domain_events (
     event_id UInt64,
-    tenant_id String,
-    event_type LowCardinality(String),
+    api_flow LowCardinality(String),
+    flow_type LowCardinality(String),
     merchant_id Nullable(String),
+    merchant_id_key String MATERIALIZED ifNull(merchant_id, ''),
     payment_id Nullable(String),
+    payment_id_key String MATERIALIZED ifNull(payment_id, ''),
     request_id Nullable(String),
+    request_id_key String MATERIALIZED ifNull(request_id, ''),
+    global_request_id Nullable(String),
+    trace_id Nullable(String),
     payment_method_type Nullable(String),
     payment_method Nullable(String),
     card_network Nullable(String),
@@ -31,39 +53,30 @@ CREATE TABLE IF NOT EXISTS decision_engine_analytics.analytics_domain_events_v1 
 ) ENGINE = ReplacingMergeTree(event_id)
 PARTITION BY toYYYYMM(created_at)
 ORDER BY (
-    tenant_id,
-    isNull(merchant_id),
-    coalesce(merchant_id, ''),
+    merchant_id_key,
     created_at_ms,
-    event_type,
-    isNull(route),
-    coalesce(route, ''),
-    isNull(request_id),
-    coalesce(request_id, ''),
-    isNull(payment_id),
-    coalesce(payment_id, ''),
+    api_flow,
+    flow_type,
+    request_id_key,
+    payment_id_key,
     event_id
 )
 TTL created_at + INTERVAL 18 MONTH;
 
-CREATE TABLE IF NOT EXISTS decision_engine_analytics.analytics_domain_events_parse_errors (
-    topic String,
-    partition Int64,
-    offset Int64,
-    raw String,
-    error String
-) ENGINE = MergeTree
-ORDER BY (topic, partition, offset);
+DROP TABLE IF EXISTS analytics_domain_events_mv;
+DROP TABLE IF EXISTS analytics_domain_events_queue;
 
-CREATE TABLE IF NOT EXISTS decision_engine_analytics.analytics_domain_events_queue (
+CREATE TABLE analytics_domain_events_queue (
     schema_version UInt8,
     produced_at_ms Int64,
     event_id UInt64,
-    tenant_id String,
-    event_type LowCardinality(String),
+    api_flow LowCardinality(String),
+    flow_type LowCardinality(String),
     merchant_id Nullable(String),
     payment_id Nullable(String),
     request_id Nullable(String),
+    global_request_id Nullable(String),
+    trace_id Nullable(String),
     payment_method_type Nullable(String),
     payment_method Nullable(String),
     card_network Nullable(String),
@@ -88,33 +101,23 @@ CREATE TABLE IF NOT EXISTS decision_engine_analytics.analytics_domain_events_que
     created_at_ms Int64
 ) ENGINE = Kafka
 SETTINGS
-    kafka_broker_list = 'kafka:19092',
-    kafka_topic_list = 'decision-engine.analytics.domain.v1',
-    kafka_group_name = 'decision-engine-analytics-domain-v1',
+    kafka_broker_list = '${ANALYTICS_KAFKA_BROKERS}',
+    kafka_topic_list = '${ANALYTICS_KAFKA_DOMAIN_TOPIC}',
+    kafka_group_name = '${DOMAIN_GROUP_NAME}',
     kafka_format = 'JSONEachRow',
-    kafka_num_consumers = 1,
     kafka_handle_error_mode = 'stream';
 
-CREATE MATERIALIZED VIEW IF NOT EXISTS decision_engine_analytics.analytics_domain_events_parse_errors_mv
-TO decision_engine_analytics.analytics_domain_events_parse_errors AS
-SELECT
-    _topic AS topic,
-    _partition AS partition,
-    _offset AS offset,
-    _raw_message AS raw,
-    _error AS error
-FROM decision_engine_analytics.analytics_domain_events_queue
-WHERE length(_error) > 0;
-
-CREATE MATERIALIZED VIEW IF NOT EXISTS decision_engine_analytics.analytics_domain_events_mv
-TO decision_engine_analytics.analytics_domain_events_v1 AS
+CREATE MATERIALIZED VIEW analytics_domain_events_mv
+TO analytics_domain_events AS
 SELECT
     event_id,
-    tenant_id,
-    event_type,
+    api_flow,
+    flow_type,
     merchant_id,
     payment_id,
     request_id,
+    global_request_id,
+    trace_id,
     payment_method_type,
     payment_method,
     card_network,
@@ -137,5 +140,6 @@ SELECT
     route,
     details,
     created_at_ms
-FROM decision_engine_analytics.analytics_domain_events_queue
+FROM analytics_domain_events_queue
 WHERE length(_error) = 0;
+SQL

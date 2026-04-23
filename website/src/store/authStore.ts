@@ -33,10 +33,11 @@ export const useAuthStore = create<AuthStore>()(
     {
       name: 'auth-store',
       onRehydrateStorage: () => (state) => {
+        // Restore token ref from persisted storage on page load
         if (state?.token) {
           tokenRef.set(state.token)
         }
       },
-    },
-  ),
+    }
+  )
 )

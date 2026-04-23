@@ -1,56 +1,6 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
-    analytics_event (id) {
-        id -> Int4,
-        #[max_length = 64]
-        event_type -> Varchar,
-        #[max_length = 255]
-        merchant_id -> Nullable<Varchar>,
-        #[max_length = 255]
-        payment_method_type -> Nullable<Varchar>,
-        #[max_length = 255]
-        payment_method -> Nullable<Varchar>,
-        #[max_length = 255]
-        gateway -> Nullable<Varchar>,
-        #[max_length = 128]
-        routing_approach -> Nullable<Varchar>,
-        #[max_length = 255]
-        rule_name -> Nullable<Varchar>,
-        #[max_length = 64]
-        status -> Nullable<Varchar>,
-        #[max_length = 64]
-        error_code -> Nullable<Varchar>,
-        error_message -> Nullable<Text>,
-        score_value -> Nullable<Float8>,
-        sigma_factor -> Nullable<Float8>,
-        average_latency -> Nullable<Float8>,
-        tp99_latency -> Nullable<Float8>,
-        transaction_count -> Nullable<Int8>,
-        #[max_length = 128]
-        route -> Nullable<Varchar>,
-        details -> Nullable<Text>,
-        created_at_ms -> Int8,
-        #[max_length = 255]
-        payment_id -> Nullable<Varchar>,
-        #[max_length = 255]
-        request_id -> Nullable<Varchar>,
-        #[max_length = 128]
-        event_stage -> Nullable<Varchar>,
-        #[max_length = 255]
-        card_network -> Nullable<Varchar>,
-        #[max_length = 255]
-        card_is_in -> Nullable<Varchar>,
-        #[max_length = 64]
-        currency -> Nullable<Varchar>,
-        #[max_length = 64]
-        country -> Nullable<Varchar>,
-        #[max_length = 64]
-        auth_type -> Nullable<Varchar>,
-    }
-}
-
-diesel::table! {
     card_brand_routes (id) {
         id -> Int8,
         card_brand -> Text,
@@ -563,8 +513,43 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    users (id) {
+        id -> Int8,
+        #[max_length = 64]
+        user_id -> Varchar,
+        #[max_length = 255]
+        email -> Varchar,
+        #[max_length = 255]
+        password_hash -> Varchar,
+        #[max_length = 255]
+        merchant_id -> Varchar,
+        #[max_length = 50]
+        role -> Varchar,
+        is_active -> Bool,
+        email_verified -> Bool,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    merchant_api_keys (id) {
+        id -> Int8,
+        #[max_length = 64]
+        key_id -> Varchar,
+        #[max_length = 255]
+        merchant_id -> Varchar,
+        #[max_length = 64]
+        key_hash -> Varchar,
+        #[max_length = 16]
+        key_prefix -> Varchar,
+        description -> Nullable<Varchar>,
+        is_active -> Bool,
+        created_at -> Timestamp,
+    }
+}
+
 diesel::allow_tables_to_appear_in_same_query!(
-    analytics_event,
     card_brand_routes,
     card_info,
     co_badged_cards_info_test,
@@ -598,4 +583,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     txn_offer,
     txn_offer_detail,
     user_eligibility_info,
+    merchant_api_keys,
+    users,
 );

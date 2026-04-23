@@ -28,6 +28,7 @@
 pub mod analytics;
 pub mod api_client;
 pub mod app;
+pub mod auth;
 pub mod config;
 pub mod crypto;
 pub mod custom_extractors;
@@ -39,7 +40,6 @@ pub mod generics;
 pub mod logger;
 pub mod merchant_config_util;
 pub mod metrics;
-#[cfg(feature = "middleware")]
 pub mod middleware;
 pub mod redis;
 pub mod routes;

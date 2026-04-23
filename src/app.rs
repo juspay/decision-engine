@@ -19,7 +19,7 @@ use tower_http::trace as tower_trace;
 use crate::{
     api_client::ApiClient,
     config::{self, GlobalConfig, TenantConfig},
-    error, logger, routes, storage,
+    error, logger, middleware as custom_middleware, routes, storage,
     tenant::GlobalAppState,
     utils,
 };
@@ -64,18 +64,6 @@ fn generate_request_id_header_value() -> HeaderValue {
         if let Ok(value) = HeaderValue::from_str(&request_id) {
             return value;
         }
-    }
-}
-
-fn api_capture_flow(path: &str) -> Option<&'static str> {
-    match path {
-        "/decide-gateway" => Some("decide_gateway"),
-        "/update-gateway-score" => Some("update_gateway_score"),
-        "/routing/evaluate" => Some("routing_evaluate"),
-        "/routing/hybrid" => Some("routing_hybrid"),
-        "/routing/create" => Some("routing_create"),
-        "/routing/activate" => Some("routing_activate"),
-        _ => None,
     }
 }
 
@@ -129,7 +117,7 @@ fn parse_request_metadata(
 }
 
 fn parse_response_error(
-    status_code: i64,
+    status_code: u16,
     captured: &crate::analytics::CapturedBody,
 ) -> Option<serde_json::Value> {
     if status_code < 400 {
@@ -148,27 +136,22 @@ async fn capture_api_event(
     }
 
     let path = request.uri().path().to_string();
-    let Some(api_flow) = api_capture_flow(&path) else {
+    let Some(flow_context) = crate::analytics::classify_request(request.method(), &path) else {
         return next.run(request).await;
     };
 
     let started_at = Instant::now();
-    let max_bytes = global_state.analytics_runtime.body_max_bytes();
     let (parts, body) = request.into_parts();
-    let (request_body, request_handle) = crate::analytics::CaptureBody::new(body, max_bytes);
+    let (request_body, request_handle) = crate::analytics::CaptureBody::new(body);
 
-    let tenant_id = parts
-        .headers
-        .get(crate::storage::consts::X_TENANT_ID)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("public")
-        .to_string();
     let request_id = parts
         .headers
         .get(crate::storage::consts::X_REQUEST_ID)
         .and_then(|value| value.to_str().ok())
         .unwrap_or("unknown")
         .to_string();
+    let global_request_id = crate::analytics::global_request_id_from_headers(&parts.headers);
+    let trace_id = crate::analytics::trace_id_from_headers(&parts.headers);
     let user_agent = parts
         .headers
         .get(axum::http::header::USER_AGENT)
@@ -191,36 +174,27 @@ async fn capture_api_event(
     let response = next
         .run(Request::from_parts(parts, Body::new(request_body)))
         .await;
-    let status_code = i64::from(response.status().as_u16());
+    let status_code = response.status().as_u16();
     let (response_parts, response_body) = response.into_parts();
-    let (response_body, response_handle) =
-        crate::analytics::CaptureBody::new(response_body, max_bytes);
+    let (response_body, response_handle) = crate::analytics::CaptureBody::new(response_body);
 
     let runtime = global_state.analytics_runtime.clone();
     tokio::spawn(async move {
         let request_capture = request_handle.wait().await;
         let response_capture = response_handle.wait().await;
-        if request_capture.truncated {
-            crate::metrics::ANALYTICS_CAPTURE_TRUNCATIONS_TOTAL
-                .with_label_values(&["request"])
-                .inc();
-        }
-        if response_capture.truncated {
-            crate::metrics::ANALYTICS_CAPTURE_TRUNCATIONS_TOTAL
-                .with_label_values(&["response"])
-                .inc();
-        }
         let (merchant_id, payment_id, auth_type) = parse_request_metadata(&request_capture);
         let error = parse_response_error(status_code, &response_capture);
 
         runtime.enqueue_api_event(crate::analytics::ApiEvent {
             event_id: crate::analytics::next_event_id(crate::analytics::now_ms()),
-            tenant_id,
             merchant_id,
             payment_id,
-            api_flow: api_flow.to_string(),
+            api_flow: flow_context.api_flow,
+            flow_type: flow_context.flow_type,
             created_at_timestamp: crate::analytics::now_ms(),
             request_id,
+            global_request_id,
+            trace_id,
             latency: started_at.elapsed().as_millis() as u64,
             status_code,
             auth_type,
@@ -230,15 +204,7 @@ async fn capture_api_event(
             url_path: path,
             response: Some(String::from_utf8_lossy(&response_capture.bytes).to_string()),
             error,
-            event_type: if status_code >= 400 {
-                "error".to_string()
-            } else {
-                "success".to_string()
-            },
             http_method: method,
-            infra_components: None,
-            request_truncated: request_capture.truncated,
-            response_truncated: response_capture.truncated,
         });
     });
 
@@ -368,11 +334,8 @@ where
         handle_clone.shutdown(); // Trigger axum_server shutdown
     });
 
-    let router = axum::Router::new()
-        // .layer(middleware::from_fn_with_state(
-        //     global_app_state.clone(),
-        //     custom_middleware::authenticate,
-        // ))
+    // Routes that require API key authentication
+    let protected_router = axum::Router::new()
         .route(
             "/routing/create",
             axum::routing::post(crate::euclid::handlers::routing_rules::routing_create),
@@ -418,10 +381,6 @@ where
             post(routes::rule_configuration::delete_rule_config),
         )
         .route(
-            "/merchant-account/create",
-            post(routes::merchant_account_config::create_merchant_config),
-        )
-        .route(
             "/merchant-account/:merchant-id",
             get(routes::merchant_account_config::get_merchant_config),
         )
@@ -436,21 +395,43 @@ where
         .route(
             "/config/routing-keys",
             axum::routing::get(crate::euclid::handlers::routing_rules::get_routing_config),
-        );
-    let router = router.route("/update-score", post(routes::update_score::update_score));
-    let router = router.route(
-        "/decide-gateway",
-        post(routes::decide_gateway::decide_gateway),
-    );
-    let router = router.route(
-        "/routing/hybrid",
-        post(routes::hybrid_routing::hybrid_routing_evaluate),
-    );
-    let router = router.route(
-        "/update-gateway-score",
-        post(routes::update_gateway_score::update_gateway_score),
-    );
-    let router = router.nest("/analytics", routes::analytics::serve());
+        )
+        .route("/update-score", post(routes::update_score::update_score))
+        .route(
+            "/decide-gateway",
+            post(routes::decide_gateway::decide_gateway),
+        )
+        .route(
+            "/routing/hybrid",
+            post(routes::hybrid_routing::hybrid_routing_evaluate),
+        )
+        .route(
+            "/update-gateway-score",
+            post(routes::update_gateway_score::update_gateway_score),
+        )
+        .route("/api-key/create", post(routes::api_key::create_api_key))
+        .route(
+            "/api-key/list/:merchant_id",
+            get(routes::api_key::list_api_keys),
+        )
+        .route("/api-key/:key_id", delete(routes::api_key::revoke_api_key))
+        .nest("/analytics", routes::analytics::serve())
+        .layer(middleware::from_fn(custom_middleware::authenticate));
+
+    // Routes that do not require authentication (public)
+    let public_router = axum::Router::new()
+        .route(
+            "/merchant-account/create",
+            post(routes::merchant_account_config::create_merchant_config),
+        )
+        .route("/auth/signup", post(routes::user_auth::signup))
+        .route("/auth/login", post(routes::user_auth::login))
+        .route("/auth/logout", post(routes::user_auth::logout))
+        .route("/auth/me", get(routes::user_auth::me));
+
+    let router = axum::Router::new()
+        .merge(protected_router)
+        .merge(public_router);
 
     let middleware = ServiceBuilder::new()
         .layer(middleware::from_fn(ensure_request_id))
@@ -529,7 +510,6 @@ mod tests {
                     }
                 }"#,
             ),
-            truncated: false,
         };
 
         let (merchant_id, payment_id, auth_type) = parse_request_metadata(&captured);
@@ -549,7 +529,6 @@ mod tests {
                     "authentication_type":"NO_THREE_DS"
                 }"#,
             ),
-            truncated: false,
         };
 
         let (merchant_id, payment_id, auth_type) = parse_request_metadata(&captured);

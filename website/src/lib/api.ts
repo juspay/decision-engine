@@ -46,9 +46,9 @@ export async function apiFetch<T>(
 ): Promise<T> {
   const method = options?.method || 'GET'
   const body = options?.body ? JSON.parse(options.body as string) : undefined
-  
+
   logRequest(method, path, body)
-  
+
   try {
     const token = tokenRef.get()
     const headers = new Headers(options?.headers)
@@ -57,23 +57,26 @@ export async function apiFetch<T>(
     if (token) {
       headers.set('Authorization', `Bearer ${token}`)
     }
+
     const res = await fetch(path, {
       ...options,
       headers,
     })
-    
+
     const responseText = await res.text()
     let responseBody: string
-    
+
     try {
       const json = JSON.parse(responseText)
       responseBody = JSON.stringify(json, null, 2)
     } catch {
       responseBody = responseText
     }
-    
+
     logResponse(path, res.status, res.statusText, responseBody)
-    
+
+    // Only clear session when the JWT itself is confirmed invalid/expired.
+    // A generic 401 (e.g. missing API key on a protected route) must NOT wipe the session.
     if (res.status === 401 && !path.startsWith('/auth/')) {
       let isTokenExpiry = false
       try {
@@ -101,12 +104,11 @@ export async function apiFetch<T>(
       logError(path, error)
       throw error
     }
-    
-    // Handle empty response body
+
     if (!responseText.trim()) {
       return undefined as T
     }
-    
+
     return JSON.parse(responseText) as T
   } catch (error) {
     logError(path, error)
@@ -121,7 +123,6 @@ export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   })
 }
 
-// Generic fetcher for SWR
 export async function fetcher<T>(url: string): Promise<T> {
   return apiFetch<T>(url)
 }

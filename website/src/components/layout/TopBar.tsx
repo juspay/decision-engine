@@ -1,14 +1,12 @@
-import { useState, useEffect } from 'react'
-import { useMerchantStore } from '../../store/merchantStore'
-import { apiPost } from '../../lib/api'
-import { Building2, ArrowRight, Loader2, Moon, Sun } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { ChevronDown, LogOut, Moon, Sun } from 'lucide-react'
+import { apiFetch } from '../../lib/api'
+import { useAuthStore } from '../../store/authStore'
 
 export function TopBar() {
-  const { merchantId, setMerchantId } = useMerchantStore()
-  const [draft, setDraft] = useState(merchantId)
-  const [creating, setCreating] = useState(false)
-
-  // Theme management
+  const navigate = useNavigate()
+  const { user, clearAuth } = useAuthStore()
   const [isDark, setIsDark] = useState(() => localStorage.getItem('theme') === 'dark')
 
   useEffect(() => {
@@ -22,62 +20,59 @@ export function TopBar() {
     }
   }, [isDark])
 
-  async function handleSetMerchant() {
-    const id = draft.trim()
-    if (!id) return
-
-    setMerchantId(id)
-    setCreating(true)
-
+  async function handleLogout() {
     try {
-      await apiPost('/merchant-account/create', {
-        merchant_id: id,
-        gateway_success_rate_based_decider_input: null,
-      })
+      await apiFetch('/auth/logout', { method: 'POST' })
     } catch {
-      // Merchant may already exist - that's fine
-    } finally {
-      setCreating(false)
+      // best-effort - clear locally regardless
     }
+    clearAuth()
+    navigate('/login', { replace: true })
   }
 
-  return (
-    <header className="relative z-10 flex h-[78px] shrink-0 items-center justify-between border-b border-slate-200 bg-white px-6 transition-colors duration-300 dark:border-[#22262f] dark:bg-[#06080d] md:px-8">
-      <div />
-      <div className="flex items-center gap-6">
-        <div className="relative">
-          <input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSetMerchant()}
-            placeholder="Set Merchant ID"
-            className="w-72 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm text-slate-900 shadow-[0_6px_20px_-16px_rgba(15,23,42,0.18)] transition-all placeholder-slate-400 focus:outline-none focus:border-[#3b82f6]/30 dark:border-[#22262f] dark:bg-[#11141b] dark:text-white dark:placeholder-[#6c7486] dark:shadow-none"
-          />
-          <button
-            onClick={handleSetMerchant}
-            disabled={creating}
-            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-2 text-slate-400 transition-colors hover:text-slate-700 dark:text-[#7a8397] dark:hover:text-[#dbe7ff]"
-          >
-            {creating ? <Loader2 size={16} className="animate-spin" /> : <ArrowRight size={16} />}
-          </button>
-        </div>
+  const initials = user?.email ? user.email.slice(0, 2).toUpperCase() : 'ME'
 
-        {merchantId && (
-          <div className="ml-2 flex items-center gap-2 border-l border-slate-200 pl-6 transition-colors duration-300 dark:border-[#22262f]">
-            <Building2 size={16} className="text-brand-500 dark:text-sky-300" />
-            <span className="text-sm font-medium text-slate-800 dark:text-white">
-              {merchantId}
-            </span>
+  return (
+    <header className="h-14 bg-white dark:bg-[#0c0c10] border-b border-[#e6e6ee] dark:border-[#1a1a24] flex items-center justify-between px-6 shrink-0 relative z-10">
+      <div />
+
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => setIsDark(!isDark)}
+          className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-[#1a1a24] transition-colors"
+          aria-label="Toggle theme"
+        >
+          {isDark ? <Sun size={16} /> : <Moon size={16} />}
+        </button>
+
+        <div className="w-px h-5 bg-[#e6e6ee] dark:bg-[#1a1a24] mx-1" />
+
+        {user && (
+          <div className="flex items-center gap-2 pl-1">
+            <div className="w-7 h-7 rounded-full bg-brand-600 flex items-center justify-center">
+              <span className="text-[10px] font-semibold text-white">{initials}</span>
+            </div>
+            <div className="hidden sm:block">
+              <p className="text-[13px] font-medium text-slate-700 dark:text-slate-300 leading-tight">
+                {user.email}
+              </p>
+              {user.merchantId && (
+                <p className="text-[11px] text-slate-400 dark:text-slate-500 leading-tight">
+                  {user.merchantId}
+                </p>
+              )}
+            </div>
+            <ChevronDown size={14} className="text-slate-400 dark:text-slate-500 ml-0.5" />
           </div>
         )}
 
-        {/* Theme Toggle */}
         <button
-          onClick={() => setIsDark(!isDark)}
-          className="rounded-full border border-slate-200 bg-white p-2.5 text-slate-600 shadow-[0_6px_20px_-16px_rgba(15,23,42,0.18)] transition-colors duration-200 hover:bg-slate-50 hover:text-slate-900 dark:border-[#22262f] dark:bg-[#11141b] dark:text-[#aeb6c7] dark:shadow-none dark:hover:bg-[#171b23] dark:hover:text-white"
-          aria-label="Toggle theme"
+          onClick={handleLogout}
+          className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:bg-red-50 hover:text-red-500 dark:text-slate-400 dark:hover:bg-red-950/30 dark:hover:text-red-400 transition-colors ml-1"
+          aria-label="Sign out"
+          title="Sign out"
         >
-          {isDark ? <Sun size={18} /> : <Moon size={18} />}
+          <LogOut size={16} />
         </button>
       </div>
     </header>
