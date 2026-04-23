@@ -72,7 +72,6 @@ identity = ""
 brokers = "kafka:19092"
 api_topic = "api"
 domain_topic = "domain"
-partitioner = "murmur2_random"
 
 [analytics.clickhouse]
 url = "http://clickhouse:8123"

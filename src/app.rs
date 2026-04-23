@@ -184,18 +184,14 @@ async fn capture_api_event(
         let response_capture = response_handle.wait().await;
         let (merchant_id, payment_id, auth_type) = parse_request_metadata(&request_capture);
         let error = parse_response_error(status_code, &response_capture);
-        let created_at_timestamp = crate::analytics::now_ms();
-        let event_id = crate::analytics::next_event_id(created_at_timestamp);
-        let shard_key = crate::analytics::api_shard_key(&request_id);
 
         runtime.enqueue_api_event(crate::analytics::ApiEvent {
-            event_id,
-            shard_key,
+            event_id: crate::analytics::next_event_id(crate::analytics::now_ms()),
             merchant_id,
             payment_id,
             api_flow: flow_context.api_flow,
             flow_type: flow_context.flow_type,
-            created_at_timestamp,
+            created_at_timestamp: crate::analytics::now_ms(),
             request_id,
             global_request_id,
             trace_id,

@@ -1,6 +1,0 @@
-<clickhouse>
-  <macros>
-    <shard from_env="CLICKHOUSE_SHARD_ID">01</shard>
-    <replica from_env="CLICKHOUSE_REPLICA_ID">1</replica>
-  </macros>
-</clickhouse>

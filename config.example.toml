@@ -67,19 +67,6 @@ client_idle_timeout = 90    # timeout for idle sockets being kept-alive
 pool_max_idle_per_host = 10 # maximum idle connection per host allowed in the pool.
 identity = ""               # identity to be used for client certificate authentication in mtls.
 
-[analytics.kafka]
-brokers = "localhost:9092"
-api_topic = "api"
-domain_topic = "domain"
-partitioner = "murmur2_random"
-
-[analytics.clickhouse]
-url = "http://localhost:8123"
-database = "default"
-user = "default"
-# password = ""
-# cluster = "analytics_cluster"
-
 api_key_auth_enabled = true
 
 [user_auth]

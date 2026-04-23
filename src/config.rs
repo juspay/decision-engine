@@ -155,7 +155,6 @@ pub struct KafkaAnalyticsConfig {
     pub client_id: String,
     pub api_topic: String,
     pub domain_topic: String,
-    pub partitioner: String,
     pub acks: String,
     pub compression: String,
     pub message_timeout_ms: u64,
@@ -173,7 +172,6 @@ impl Default for KafkaAnalyticsConfig {
             client_id: "decision-engine".to_string(),
             api_topic: "api".to_string(),
             domain_topic: "domain".to_string(),
-            partitioner: "murmur2_random".to_string(),
             acks: "all".to_string(),
             compression: "lz4".to_string(),
             message_timeout_ms: 5_000,
@@ -191,7 +189,6 @@ impl Default for KafkaAnalyticsConfig {
 pub struct ClickHouseAnalyticsConfig {
     pub url: String,
     pub database: String,
-    pub cluster: Option<String>,
     pub user: String,
     pub password: Option<masking::Secret<String>>,
 }
@@ -201,7 +198,6 @@ impl Default for ClickHouseAnalyticsConfig {
         Self {
             url: "http://localhost:8123".to_string(),
             database: "default".to_string(),
-            cluster: None,
             user: "default".to_string(),
             password: None,
         }

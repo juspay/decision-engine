@@ -78,19 +78,6 @@ fn truncate_domain_event_details(mut event: DomainAnalyticsEvent) -> DomainAnaly
     event
 }
 
-fn next_domain_event_metadata(
-    request_id: Option<&str>,
-    global_request_id: Option<&str>,
-    payment_id: Option<&str>,
-) -> (u64, i64, String) {
-    let created_at_ms = now_ms();
-    let event_id = crate::analytics::next_event_id(created_at_ms);
-    let shard_key =
-        crate::analytics::domain_shard_key(request_id, global_request_id, payment_id, event_id);
-
-    (event_id, created_at_ms, shard_key)
-}
-
 pub fn record_decision_event(
     flow: AnalyticsFlowContext,
     merchant_id: Option<String>,
@@ -109,11 +96,6 @@ pub fn record_decision_event(
     payment_method: Option<String>,
     auth_type: Option<String>,
 ) {
-    let (event_id, created_at_ms, shard_key) = next_domain_event_metadata(
-        request_id.as_deref(),
-        global_request_id.as_deref(),
-        payment_id.as_deref(),
-    );
     let approach = routing_approach
         .clone()
         .unwrap_or_else(|| "UNKNOWN".to_string());
@@ -122,8 +104,7 @@ pub fn record_decision_event(
         .with_label_values(&[approach.as_str(), status_label.as_str()])
         .inc();
     enqueue_domain_event(DomainAnalyticsEvent {
-        event_id,
-        shard_key,
+        event_id: crate::analytics::next_event_id(now_ms()),
         api_flow: flow.api_flow,
         flow_type: flow.flow_type,
         merchant_id,
@@ -152,7 +133,7 @@ pub fn record_decision_event(
         transaction_count: None,
         route: Some(route.as_str().to_string()),
         details,
-        created_at_ms,
+        created_at_ms: now_ms(),
     });
 }
 
@@ -180,14 +161,8 @@ pub fn record_score_snapshot_event(
     trace_id: Option<String>,
     event_stage: Option<String>,
 ) {
-    let (event_id, created_at_ms, shard_key) = next_domain_event_metadata(
-        request_id.as_deref(),
-        global_request_id.as_deref(),
-        payment_id.as_deref(),
-    );
     enqueue_domain_event(DomainAnalyticsEvent {
-        event_id,
-        shard_key,
+        event_id: crate::analytics::next_event_id(now_ms()),
         api_flow: flow.api_flow,
         flow_type: flow.flow_type,
         merchant_id,
@@ -216,7 +191,7 @@ pub fn record_score_snapshot_event(
         transaction_count,
         route: Some(route.as_str().to_string()),
         details,
-        created_at_ms,
+        created_at_ms: now_ms(),
     });
 }
 
@@ -233,14 +208,8 @@ pub fn record_gateway_update_event(
     trace_id: Option<String>,
     event_stage: Option<String>,
 ) {
-    let (event_id, created_at_ms, shard_key) = next_domain_event_metadata(
-        request_id.as_deref(),
-        global_request_id.as_deref(),
-        payment_id.as_deref(),
-    );
     enqueue_domain_event(DomainAnalyticsEvent {
-        event_id,
-        shard_key,
+        event_id: crate::analytics::next_event_id(now_ms()),
         api_flow: flow.api_flow,
         flow_type: flow.flow_type,
         merchant_id,
@@ -269,7 +238,7 @@ pub fn record_gateway_update_event(
         transaction_count: None,
         route: Some(route.as_str().to_string()),
         details,
-        created_at_ms,
+        created_at_ms: now_ms(),
     });
 }
 
@@ -287,17 +256,11 @@ pub fn record_rule_hit_event(
     trace_id: Option<String>,
     event_stage: Option<String>,
 ) {
-    let (event_id, created_at_ms, shard_key) = next_domain_event_metadata(
-        request_id.as_deref(),
-        global_request_id.as_deref(),
-        payment_id.as_deref(),
-    );
     ROUTING_RULE_HIT_COUNTER
         .with_label_values(&[rule_name.as_str()])
         .inc();
     enqueue_domain_event(DomainAnalyticsEvent {
-        event_id,
-        shard_key,
+        event_id: crate::analytics::next_event_id(now_ms()),
         api_flow: flow.api_flow,
         flow_type: flow.flow_type,
         merchant_id,
@@ -326,7 +289,7 @@ pub fn record_rule_hit_event(
         transaction_count: None,
         route: Some(route.as_str().to_string()),
         details,
-        created_at_ms,
+        created_at_ms: now_ms(),
     });
 }
 
@@ -342,14 +305,8 @@ pub fn record_rule_evaluation_preview_event(
     global_request_id: Option<String>,
     trace_id: Option<String>,
 ) {
-    let (event_id, created_at_ms, shard_key) = next_domain_event_metadata(
-        request_id.as_deref(),
-        global_request_id.as_deref(),
-        payment_id.as_deref(),
-    );
     enqueue_domain_event(DomainAnalyticsEvent {
-        event_id,
-        shard_key,
+        event_id: crate::analytics::next_event_id(now_ms()),
         api_flow: flow.api_flow,
         flow_type: flow.flow_type,
         merchant_id,
@@ -378,7 +335,7 @@ pub fn record_rule_evaluation_preview_event(
         transaction_count: None,
         route: Some(AnalyticsRoute::RoutingEvaluate.as_str().to_string()),
         details,
-        created_at_ms,
+        created_at_ms: now_ms(),
     });
 }
 
@@ -398,14 +355,8 @@ pub fn record_error_event(
     event_stage: Option<String>,
     auth_type: Option<String>,
 ) {
-    let (event_id, created_at_ms, shard_key) = next_domain_event_metadata(
-        request_id.as_deref(),
-        global_request_id.as_deref(),
-        payment_id.as_deref(),
-    );
     enqueue_domain_event(DomainAnalyticsEvent {
-        event_id,
-        shard_key,
+        event_id: crate::analytics::next_event_id(now_ms()),
         api_flow: flow.api_flow,
         flow_type: flow.flow_type,
         merchant_id,
@@ -434,7 +385,7 @@ pub fn record_error_event(
         transaction_count: None,
         route: Some(route.as_str().to_string()),
         details,
-        created_at_ms,
+        created_at_ms: now_ms(),
     });
 }
 
@@ -448,14 +399,8 @@ pub fn record_request_hit_event(
     trace_id: Option<String>,
     auth_type: Option<String>,
 ) {
-    let (event_id, created_at_ms, shard_key) = next_domain_event_metadata(
-        request_id.as_deref(),
-        global_request_id.as_deref(),
-        payment_id.as_deref(),
-    );
     enqueue_domain_event(DomainAnalyticsEvent {
-        event_id,
-        shard_key,
+        event_id: crate::analytics::next_event_id(now_ms()),
         api_flow: flow.api_flow,
         flow_type: flow.flow_type,
         merchant_id,
@@ -484,7 +429,7 @@ pub fn record_request_hit_event(
         transaction_count: None,
         route: Some(route.as_str().to_string()),
         details: None,
-        created_at_ms,
+        created_at_ms: now_ms(),
     });
 }
 
@@ -500,14 +445,8 @@ pub fn record_operation_event(
     details: Option<String>,
     event_stage: Option<String>,
 ) {
-    let (event_id, created_at_ms, shard_key) = next_domain_event_metadata(
-        request_id.as_deref(),
-        global_request_id.as_deref(),
-        payment_id.as_deref(),
-    );
     enqueue_domain_event(DomainAnalyticsEvent {
-        event_id,
-        shard_key,
+        event_id: crate::analytics::next_event_id(now_ms()),
         api_flow: flow.api_flow,
         flow_type: flow.flow_type,
         merchant_id,
@@ -536,7 +475,7 @@ pub fn record_operation_event(
         transaction_count: None,
         route: Some(route.as_str().to_string()),
         details,
-        created_at_ms,
+        created_at_ms: now_ms(),
     });
 }
 
