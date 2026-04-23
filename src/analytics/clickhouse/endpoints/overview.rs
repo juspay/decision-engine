@@ -1,7 +1,7 @@
 use crate::analytics::models::{
     AnalyticsKpi, AnalyticsOverviewResponse, AnalyticsQuery, AnalyticsScope,
 };
-use crate::analytics::service::{format_range, now_ms};
+use crate::analytics::service::format_range;
 use crate::error::ApiError;
 
 use super::super::metrics;
@@ -12,7 +12,6 @@ pub async fn load(
 ) -> Result<AnalyticsOverviewResponse, ApiError> {
     if query.scope == AnalyticsScope::All {
         return Ok(AnalyticsOverviewResponse {
-            generated_at_ms: now_ms(),
             scope: query.scope.as_str().to_string(),
             merchant_id: query.merchant_id.clone(),
             kpis: vec![
@@ -66,7 +65,6 @@ pub async fn load(
     let top_rules = metrics::rule_hits::load(client, query, Some(5)).await?;
 
     Ok(AnalyticsOverviewResponse {
-        generated_at_ms: now_ms(),
         scope: query.scope.as_str().to_string(),
         merchant_id: query.merchant_id.clone(),
         kpis: vec![

@@ -1,5 +1,5 @@
 use crate::analytics::models::{AnalyticsGatewayScoresResponse, AnalyticsQuery, AnalyticsScope};
-use crate::analytics::service::{format_range, now_ms};
+use crate::analytics::service::format_range;
 use crate::error::ApiError;
 
 use super::super::metrics;
@@ -10,7 +10,6 @@ pub async fn load(
 ) -> Result<AnalyticsGatewayScoresResponse, ApiError> {
     if query.scope == AnalyticsScope::All {
         return Ok(AnalyticsGatewayScoresResponse {
-            generated_at_ms: now_ms(),
             scope: query.scope.as_str().to_string(),
             merchant_id: query.merchant_id.clone(),
             range: format_range(query),
@@ -20,7 +19,6 @@ pub async fn load(
     }
 
     Ok(AnalyticsGatewayScoresResponse {
-        generated_at_ms: now_ms(),
         scope: query.scope.as_str().to_string(),
         merchant_id: query.merchant_id.clone(),
         range: format_range(query),

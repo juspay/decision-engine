@@ -102,7 +102,6 @@ pub struct AnalyticsKpi {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsOverviewResponse {
-    pub generated_at_ms: i64,
     pub scope: String,
     pub merchant_id: Option<String>,
     pub kpis: Vec<AnalyticsKpi>,
@@ -144,7 +143,6 @@ pub struct GatewayScoreSeriesPoint {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsGatewayScoresResponse {
-    pub generated_at_ms: i64,
     pub scope: String,
     pub merchant_id: Option<String>,
     pub range: String,
@@ -161,7 +159,6 @@ pub struct AnalyticsDecisionPoint {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsDecisionResponse {
-    pub generated_at_ms: i64,
     pub scope: String,
     pub merchant_id: Option<String>,
     pub range: String,
@@ -179,7 +176,6 @@ pub struct AnalyticsGatewaySharePoint {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsRoutingStatsResponse {
-    pub generated_at_ms: i64,
     pub scope: String,
     pub merchant_id: Option<String>,
     pub range: String,
@@ -237,7 +233,6 @@ pub struct AnalyticsLogSample {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsLogSummariesResponse {
-    pub generated_at_ms: i64,
     pub scope: String,
     pub merchant_id: Option<String>,
     pub range: String,
@@ -319,7 +314,6 @@ pub struct PaymentAuditEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaymentAuditResponse {
-    pub generated_at_ms: i64,
     pub scope: String,
     pub merchant_id: Option<String>,
     pub range: String,
