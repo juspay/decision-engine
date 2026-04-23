@@ -14,7 +14,7 @@ import { Spinner } from '../ui/Spinner'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { Card as GlassCard, InsetPanel, SurfaceLabel } from '../ui/Card'
 
-const RANGE_OPTIONS: AnalyticsRange[] = ['15m', '1h', '24h', '30d', '18mo']
+const RANGE_OPTIONS: AnalyticsRange[] = ['15m', '1h', '12h', '1d', '1w']
 const STATUS_OPTIONS = [
   { value: '', label: 'Any status' },
   { value: 'success', label: 'Success' },
@@ -34,7 +34,7 @@ type AuditFilters = {
   gateway: string
   route: string
   status: string
-  eventType: string
+  flowType: string
   errorCode: string
 }
 
@@ -47,7 +47,7 @@ const EMPTY_FILTERS: AuditFilters = {
   gateway: '',
   route: '',
   status: '',
-  eventType: '',
+  flowType: '',
   errorCode: '',
 }
 
@@ -60,9 +60,33 @@ function normalizeAuditFilters(filters: AuditFilters): AuditFilters {
     gateway: filters.gateway.trim(),
     route: filters.route,
     status: filters.status,
-    eventType: filters.eventType,
+    flowType: filters.flowType.trim(),
     errorCode: filters.errorCode.trim(),
   }
+}
+
+function flowTypeValue(event: PaymentAuditEvent) {
+  return event.flow_type || ''
+}
+
+function isErrorFlow(flowType: string) {
+  return flowType.endsWith('_error')
+}
+
+function isPreviewFlow(flowType: string) {
+  return flowType.startsWith('routing_evaluate_') && flowType !== 'routing_evaluate_request_hit'
+}
+
+function isRuleHitFlow(flowType: string) {
+  return flowType === 'decide_gateway_rule_hit'
+}
+
+function isUpdateFlow(flowType: string) {
+  return flowType.startsWith('update_gateway_score_') || flowType.startsWith('update_score_legacy_')
+}
+
+function isDecisionFlow(flowType: string) {
+  return flowType.startsWith('decide_gateway_') && !isRuleHitFlow(flowType)
 }
 
 function queryString(params: Record<string, string | number | undefined>) {
@@ -95,7 +119,7 @@ function buildAuditUrl(
     gateway: normalizedFilters.gateway || undefined,
     route: normalizedFilters.route || undefined,
     status: normalizedFilters.status || undefined,
-    event_type: normalizedFilters.eventType || undefined,
+    flow_type: normalizedFilters.flowType || undefined,
     error_code: normalizedFilters.errorCode || undefined,
   }
   const qs = queryString(params)
@@ -103,8 +127,8 @@ function buildAuditUrl(
 }
 
 function parseRange(value: string | null): AnalyticsRange {
-  if (value === '15m' || value === '1h' || value === '24h' || value === '30d' || value === '18mo') return value
-  return '24h'
+  if (value === '15m' || value === '1h' || value === '12h' || value === '1d' || value === '1w') return value
+  return '1d'
 }
 
 function parseAuditMode(value: string | null): AuditMode {
@@ -118,7 +142,7 @@ function parseFilters(searchParams: URLSearchParams): AuditFilters {
     gateway: searchParams.get('gateway') || '',
     route: searchParams.get('route') || '',
     status: searchParams.get('status') || '',
-    eventType: searchParams.get('event_type') || '',
+    flowType: searchParams.get('flow_type') || searchParams.get('event_type') || '',
     errorCode: searchParams.get('error_code') || '',
   })
 }
@@ -164,43 +188,46 @@ function routeLabel(route?: string | null) {
 }
 
 function stageLabel(event: PaymentAuditEvent) {
+  const flowType = flowTypeValue(event)
   if (event.event_stage === 'gateway_decided') return 'Decide Gateway'
   if (event.event_stage === 'score_updated') return 'Update Gateway'
   if (event.event_stage === 'rule_applied') return 'Rule Evaluate'
-  if (event.event_stage === 'preview_evaluated' || event.event_type === 'rule_evaluation_preview') {
+  if (event.event_stage === 'preview_evaluated' || isPreviewFlow(flowType)) {
     return 'Preview Result'
   }
-  if (event.event_type === 'error') return 'Errors'
-  return humanizeAuditValue(event.event_stage || event.event_type)
+  if (isErrorFlow(flowType)) return 'Errors'
+  return humanizeAuditValue(event.event_stage || flowType)
 }
 
 function eventPhase(event: PaymentAuditEvent) {
-  if (event.event_type === 'decision' || event.event_stage === 'gateway_decided') return 'Decide Gateway'
-  if (event.event_type === 'rule_hit' || event.event_stage === 'rule_applied') return 'Rule Evaluate'
-  if (event.event_type === 'rule_evaluation_preview' || event.event_stage === 'preview_evaluated') {
+  const flowType = flowTypeValue(event)
+  if (isDecisionFlow(flowType) || event.event_stage === 'gateway_decided') return 'Decide Gateway'
+  if (isRuleHitFlow(flowType) || event.event_stage === 'rule_applied') return 'Rule Evaluate'
+  if (isPreviewFlow(flowType) || event.event_stage === 'preview_evaluated') {
     return 'Rule Preview'
   }
-  if (event.event_type === 'gateway_update' || event.event_stage === 'score_updated') return 'Update Gateway'
+  if (isUpdateFlow(flowType) || event.event_stage === 'score_updated') return 'Update Gateway'
   return 'Errors'
 }
 
 function badgeVariantForEvent(event: PaymentAuditEvent): 'blue' | 'green' | 'purple' | 'red' | 'orange' | 'gray' {
+  const flowType = flowTypeValue(event)
   const normalizedStatus = (event.status || '').toUpperCase()
   if (
-    event.event_type === 'error' ||
+    isErrorFlow(flowType) ||
     normalizedStatus === 'FAILURE' ||
     normalizedStatus.includes('FAILED') ||
     normalizedStatus.includes('DECLINED')
   ) return 'red'
-  if (event.event_type === 'rule_evaluation_preview') return 'purple'
-  if (event.event_type === 'rule_hit') return 'purple'
+  if (isPreviewFlow(flowType)) return 'purple'
+  if (isRuleHitFlow(flowType)) return 'purple'
   if (
     normalizedStatus === 'CHARGED' ||
     normalizedStatus === 'AUTHORIZED' ||
     normalizedStatus === 'SUCCESS'
   ) return 'green'
-  if (event.event_type === 'gateway_update') return 'green'
-  if (event.event_type === 'decision') return 'blue'
+  if (isUpdateFlow(flowType)) return 'green'
+  if (isDecisionFlow(flowType)) return 'blue'
   return 'orange'
 }
 
@@ -332,7 +359,7 @@ function buildInspectorModel(event: PaymentAuditEvent | null) {
   const responsePayload =
     explicitResponse ??
     cleanRecord({
-      event_type: event.event_type,
+      flow_type: event.flow_type,
       status: event.status,
       error_code: event.error_code,
       error_message: event.error_message,
@@ -453,7 +480,7 @@ export function PaymentAuditPage() {
       gateway: '',
       route: '',
       status: '',
-      eventType: '',
+      flowType: '',
       errorCode: '',
     }
   }, [selectedSummary])
@@ -549,7 +576,7 @@ export function PaymentAuditPage() {
       gateway: normalizedFilters.gateway || undefined,
       route: normalizedFilters.route || undefined,
       status: normalizedFilters.status || undefined,
-      event_type: normalizedFilters.eventType || undefined,
+      flow_type: normalizedFilters.flowType || undefined,
       error_code: normalizedFilters.errorCode || undefined,
       selected: nextSelectedKey || undefined,
     })
@@ -635,7 +662,7 @@ export function PaymentAuditPage() {
       gateway: selectedEvent.gateway || '',
       route: '',
       status: '',
-      eventType: '',
+      flowType: '',
       errorCode: '',
     }
     setFilters(nextFilters)

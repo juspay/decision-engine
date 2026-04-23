@@ -145,7 +145,7 @@ export interface SRDimensionRequest {
 }
 
 export type AnalyticsScope = 'current' | 'all'
-export type AnalyticsRange = '15m' | '1h' | '24h' | '30d' | '18mo'
+export type AnalyticsRange = '15m' | '1h' | '12h' | '1d' | '1w'
 export type AnalyticsRangeValue = AnalyticsRange | 'custom'
 
 export interface AnalyticsQuery {
@@ -282,12 +282,14 @@ export interface AnalyticsLogSample {
   merchant_id?: string | null
   payment_id?: string | null
   request_id?: string | null
+  global_request_id?: string | null
+  trace_id?: string | null
   gateway?: string | null
   routing_approach?: string | null
   status?: string | null
   error_code?: string | null
   error_message?: string | null
-  event_type?: string | null
+  flow_type?: string | null
   created_at_ms: number
 }
 
@@ -325,12 +327,14 @@ export interface PaymentAuditSummary {
 
 export interface PaymentAuditEvent {
   id: number
-  event_type: string
+  flow_type: string
   event_stage?: string | null
   route?: string | null
   merchant_id?: string | null
   payment_id?: string | null
   request_id?: string | null
+  global_request_id?: string | null
+  trace_id?: string | null
   payment_method_type?: string | null
   payment_method?: string | null
   gateway?: string | null
@@ -359,7 +363,7 @@ export interface PaymentAuditResponse {
   gateway?: string | null
   route?: string | null
   status?: string | null
-  event_type?: string | null
+  flow_type?: string | null
   error_code?: string | null
   page: number
   page_size: number

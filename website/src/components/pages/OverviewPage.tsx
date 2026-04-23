@@ -36,9 +36,9 @@ const OVERVIEW_RANGE_OPTIONS: {
 }[] = [
   { value: '15m', label: '15m', detail: 'Last 15 mins', badge: 'Live 15m', summaryLabel: 'Errors last 15 mins' },
   { value: '1h', label: '1h', detail: 'Last hour', badge: 'Live 1h', summaryLabel: 'Errors last hour' },
-  { value: '24h', label: '1 day', detail: 'Last 1 day', badge: 'Live 1d', summaryLabel: 'Errors last 1 day' },
-  { value: '30d', label: '1 month', detail: 'Last 1 month', badge: 'Live 30d', summaryLabel: 'Errors last 1 month' },
-  { value: '18mo', label: '18 months', detail: 'Last 18 months', badge: 'Live 18mo', summaryLabel: 'Errors last 18 months' },
+  { value: '12h', label: '12h', detail: 'Last 12 hours', badge: 'Live 12h', summaryLabel: 'Errors last 12 hours' },
+  { value: '1d', label: '1 day', detail: 'Last 1 day', badge: 'Live 1d', summaryLabel: 'Errors last 1 day' },
+  { value: '1w', label: '1 week', detail: 'Last 1 week', badge: 'Live 1w', summaryLabel: 'Errors last 1 week' },
 ]
 
 function useHealth() {
@@ -202,7 +202,7 @@ export function OverviewPage() {
   const navigate = useNavigate()
   const { merchantId } = useMerchantStore()
   const health = useHealth()
-  const [range, setRange] = useState<AnalyticsRange>('24h')
+  const [range, setRange] = useState<AnalyticsRange>('1d')
 
   const { data: activeAlgorithms } = useSWR<RoutingAlgorithm[]>(
     merchantId ? `/routing/list/active/${merchantId}` : null,

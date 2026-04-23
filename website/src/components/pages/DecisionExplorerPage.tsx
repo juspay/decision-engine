@@ -256,48 +256,59 @@ function routeLabel(route?: string | null) {
 
 function eventTypeLabel(eventType?: string | null) {
   if (!eventType) return 'Unknown event'
-  if (eventType === 'decision') return 'Decide Gateway'
-  if (eventType === 'gateway_update') return 'Update Gateway'
-  if (eventType === 'rule_hit') return 'Rule Evaluate'
-  if (eventType === 'rule_evaluation_preview') return 'Preview Result'
-  if (eventType === 'error') return 'Errors'
+  if (eventType === 'decide_gateway_decision') return 'Decide Gateway'
+  if (
+    eventType === 'update_gateway_score_update' ||
+    eventType === 'update_gateway_score_score_snapshot' ||
+    eventType === 'update_score_legacy_score_snapshot'
+  ) return 'Update Gateway'
+  if (eventType === 'decide_gateway_rule_hit') return 'Rule Evaluate'
+  if (eventType.startsWith('routing_evaluate_') && eventType !== 'routing_evaluate_request_hit') return 'Preview Result'
+  if (eventType.endsWith('_error')) return 'Errors'
   return humanizeAuditValue(eventType)
 }
 
+function flowTypeValue(event: PaymentAuditEvent) {
+  return event.flow_type || ''
+}
+
 function stageLabel(event: PaymentAuditEvent) {
+  const flowType = flowTypeValue(event)
   if (event.event_stage === 'gateway_decided') return 'Decide Gateway'
   if (event.event_stage === 'score_updated') return 'Update Gateway'
   if (event.event_stage === 'rule_applied') return 'Rule Evaluate'
-  if (event.event_stage === 'preview_evaluated' || event.event_type === 'rule_evaluation_preview') return 'Preview Result'
-  if (event.event_type === 'error') return 'Errors'
-  return humanizeAuditValue(event.event_stage || event.event_type)
+  if (event.event_stage === 'preview_evaluated' || (flowType.startsWith('routing_evaluate_') && flowType !== 'routing_evaluate_request_hit')) return 'Preview Result'
+  if (flowType.endsWith('_error')) return 'Errors'
+  return humanizeAuditValue(event.event_stage || flowType)
 }
 
 function eventPhase(event: PaymentAuditEvent) {
-  if (event.event_type === 'decision' || event.event_stage === 'gateway_decided') return 'Decide Gateway'
-  if (event.event_type === 'rule_hit' || event.event_stage === 'rule_applied') return 'Rule Evaluate'
-  if (event.event_type === 'gateway_update' || event.event_stage === 'score_updated') return 'Update Gateway'
-  if (event.event_type === 'rule_evaluation_preview' || event.event_stage === 'preview_evaluated') return 'Preview'
+  const flowType = flowTypeValue(event)
+  if ((flowType.startsWith('decide_gateway_') && flowType !== 'decide_gateway_rule_hit') || event.event_stage === 'gateway_decided') return 'Decide Gateway'
+  if (flowType === 'decide_gateway_rule_hit' || event.event_stage === 'rule_applied') return 'Rule Evaluate'
+  if (flowType.startsWith('update_gateway_score_') || flowType.startsWith('update_score_legacy_') || event.event_stage === 'score_updated') return 'Update Gateway'
+  if ((flowType.startsWith('routing_evaluate_') && flowType !== 'routing_evaluate_request_hit') || event.event_stage === 'preview_evaluated') return 'Preview'
   return 'Errors'
 }
 
 function badgeVariantForEvent(event: PaymentAuditEvent): 'blue' | 'green' | 'purple' | 'red' | 'orange' | 'gray' {
+  const flowType = flowTypeValue(event)
   const normalizedStatus = (event.status || '').toUpperCase()
   if (
-    event.event_type === 'error' ||
+    flowType.endsWith('_error') ||
     normalizedStatus === 'FAILURE' ||
     normalizedStatus.includes('FAILED') ||
     normalizedStatus.includes('DECLINED')
   ) return 'red'
-  if (event.event_type === 'rule_hit') return 'purple'
+  if (flowType === 'decide_gateway_rule_hit') return 'purple'
   if (
     normalizedStatus === 'CHARGED' ||
     normalizedStatus === 'AUTHORIZED' ||
     normalizedStatus === 'SUCCESS'
   ) return 'green'
-  if (event.event_type === 'rule_evaluation_preview') return 'purple'
-  if (event.event_type === 'gateway_update') return 'green'
-  if (event.event_type === 'decision') return 'blue'
+  if (flowType.startsWith('routing_evaluate_') && flowType !== 'routing_evaluate_request_hit') return 'purple'
+  if (flowType.startsWith('update_gateway_score_') || flowType.startsWith('update_score_legacy_')) return 'green'
+  if (flowType.startsWith('decide_gateway_')) return 'blue'
   return 'orange'
 }
 
@@ -343,7 +354,7 @@ function stringifyValue(value: unknown) {
 function buildAuditUrl(merchantId: string, paymentId: string) {
   const qs = queryString({
     scope: 'current',
-    range: '24h',
+    range: '1d',
     page: 1,
     page_size: 25,
     merchant_id: merchantId,
@@ -355,7 +366,7 @@ function buildAuditUrl(merchantId: string, paymentId: string) {
 function buildPreviewTraceUrl(merchantId: string, paymentId: string) {
   const qs = queryString({
     scope: 'current',
-    range: '24h',
+    range: '1d',
     page: 1,
     page_size: 25,
     merchant_id: merchantId,
@@ -389,7 +400,7 @@ function buildInspectorModel(event: PaymentAuditEvent | null) {
   const responsePayload =
     explicitResponse ??
     cleanRecord({
-      event_type: event.event_type,
+      flow_type: event.flow_type,
       status: event.status,
       error_code: event.error_code,
       error_message: event.error_message,
@@ -2340,7 +2351,7 @@ export function DecisionExplorerPage() {
                                     </p>
                                   </div>
                                   <Badge variant={badgeVariantForEvent(event)}>
-                                    {humanizeAuditValue(event.status) || eventTypeLabel(event.event_type)}
+                                    {humanizeAuditValue(event.status) || eventTypeLabel(event.flow_type)}
                                   </Badge>
                                 </div>
                                 <div className="mt-3 flex flex-wrap gap-2">
@@ -2568,7 +2579,7 @@ export function DecisionExplorerPage() {
                                     </p>
                                   </div>
                                   <Badge variant={badgeVariantForEvent(event)}>
-                                    {humanizeAuditValue(event.status) || eventTypeLabel(event.event_type)}
+                                    {humanizeAuditValue(event.status) || eventTypeLabel(event.flow_type)}
                                   </Badge>
                                 </div>
                                 <div className="mt-3 flex flex-wrap gap-2">
