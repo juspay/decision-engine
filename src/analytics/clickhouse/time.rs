@@ -61,7 +61,7 @@ fn bucket_start_expr(query: &AnalyticsQuery, start_ms: i64, end_ms: i64) -> &'st
 
 pub fn query_bucket_select_expr(query: &AnalyticsQuery, start_ms: i64, end_ms: i64) -> String {
     format!(
-        "toUnixTimestamp64Milli({}) AS bucket_ms",
+        "toUnixTimestamp({}) * 1000 AS bucket_ms",
         bucket_start_expr(query, start_ms, end_ms)
     )
 }
@@ -114,7 +114,7 @@ mod tests {
         let query = query();
         assert_eq!(
             query_bucket_select_expr(&query, 0, HOUR_MS),
-            "toUnixTimestamp64Milli(toStartOfFiveMinutes(created_at)) AS bucket_ms"
+            "toUnixTimestamp(toStartOfFiveMinutes(created_at)) * 1000 AS bucket_ms"
         );
     }
 
@@ -125,7 +125,7 @@ mod tests {
         query.end_ms = Some(15 * MINUTE_MS);
         assert_eq!(
             query_bucket_select_expr(&query, 0, 15 * MINUTE_MS),
-            "toUnixTimestamp64Milli(toStartOfInterval(created_at, INTERVAL 1 MINUTE)) AS bucket_ms"
+            "toUnixTimestamp(toStartOfInterval(created_at, INTERVAL 1 MINUTE)) * 1000 AS bucket_ms"
         );
     }
 }
