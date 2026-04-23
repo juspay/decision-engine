@@ -22,6 +22,7 @@ pub struct KafkaDomainEventRow {
     pub schema_version: u8,
     pub produced_at_ms: i64,
     pub event_id: u64,
+    pub shard_key: String,
     pub api_flow: ApiFlow,
     pub flow_type: FlowType,
     pub merchant_id: Option<String>,
@@ -58,6 +59,7 @@ pub struct KafkaApiEventRow {
     pub schema_version: u8,
     pub produced_at_ms: i64,
     pub event_id: u64,
+    pub shard_key: String,
     pub merchant_id: Option<String>,
     pub payment_id: Option<String>,
     pub api_flow: ApiFlow,
@@ -84,6 +86,7 @@ impl From<DomainAnalyticsEvent> for KafkaDomainEventRow {
             schema_version: 1,
             produced_at_ms: crate::analytics::now_ms(),
             event_id: event.event_id,
+            shard_key: event.shard_key,
             api_flow: event.api_flow,
             flow_type: event.flow_type,
             merchant_id: event.merchant_id,
@@ -123,6 +126,7 @@ impl From<ApiEvent> for KafkaApiEventRow {
             schema_version: 1,
             produced_at_ms: crate::analytics::now_ms(),
             event_id: event.event_id,
+            shard_key: event.shard_key,
             merchant_id: event.merchant_id,
             payment_id: event.payment_id,
             api_flow: event.api_flow,
@@ -176,7 +180,7 @@ impl KafkaAnalyticsStore {
     async fn send_api_event(&self, event: &ApiEvent) -> Result<(), ApiError> {
         let payload = serde_json::to_vec(&KafkaApiEventRow::from(event.clone()))
             .map_err(|_| ApiError::EncodingError)?;
-        let key = api_event_key(event);
+        let key = event_shard_key(&event.shard_key, event.event_id);
         self.send_payload("api", &self.config.api_topic, &key, payload)
             .await
     }
@@ -184,7 +188,7 @@ impl KafkaAnalyticsStore {
     async fn send_domain_event(&self, event: &DomainAnalyticsEvent) -> Result<(), ApiError> {
         let payload = serde_json::to_vec(&KafkaDomainEventRow::from(event.clone()))
             .map_err(|_| ApiError::EncodingError)?;
-        let key = domain_event_key(event);
+        let key = event_shard_key(&event.shard_key, event.event_id);
         self.send_payload("domain", &self.config.domain_topic, &key, payload)
             .await
     }
@@ -269,31 +273,12 @@ impl AnalyticsWriteStore for KafkaAnalyticsStore {
     }
 }
 
-pub fn api_event_key(event: &ApiEvent) -> String {
-    first_non_empty([
-        Some(event.request_id.clone()),
-        event.payment_id.clone(),
-        Some(event.event_id.to_string()),
-    ])
-}
-
-pub fn domain_event_key(event: &DomainAnalyticsEvent) -> String {
-    first_non_empty([
-        event.payment_id.clone(),
-        event.request_id.clone(),
-        Some(event.event_id.to_string()),
-    ])
-}
-
-fn first_non_empty<I>(values: I) -> String
-where
-    I: IntoIterator<Item = Option<String>>,
-{
-    values
-        .into_iter()
-        .flatten()
-        .find(|value| !value.is_empty())
-        .unwrap_or_else(|| "unknown".to_string())
+pub fn event_shard_key(shard_key: &str, event_id: u64) -> String {
+    if shard_key.trim().is_empty() {
+        event_id.to_string()
+    } else {
+        shard_key.to_string()
+    }
 }
 
 fn build_client_config(config: &KafkaAnalyticsConfig) -> ClientConfig {
@@ -301,6 +286,7 @@ fn build_client_config(config: &KafkaAnalyticsConfig) -> ClientConfig {
     client_config
         .set("bootstrap.servers", &config.brokers)
         .set("client.id", &config.client_id)
+        .set("partitioner", &config.partitioner)
         .set("acks", &config.acks)
         .set("compression.type", &config.compression)
         .set("message.timeout.ms", config.message_timeout_ms.to_string())
@@ -331,12 +317,13 @@ mod tests {
 
     use crate::analytics::{ApiEvent, ApiFlow, DomainAnalyticsEvent, FlowType};
 
-    use super::{api_event_key, domain_event_key, KafkaApiEventRow, KafkaDomainEventRow};
+    use super::{build_client_config, event_shard_key, KafkaApiEventRow, KafkaDomainEventRow};
 
     #[test]
     fn domain_row_serializes_stably() {
         let event = DomainAnalyticsEvent {
             event_id: 1,
+            shard_key: "req_1".to_string(),
             api_flow: ApiFlow::DynamicRouting,
             flow_type: FlowType::DecideGatewayDecision,
             merchant_id: None,
@@ -371,6 +358,7 @@ mod tests {
         let json = serde_json::to_string(&row).unwrap();
         assert!(json.contains("\"schema_version\":1"));
         assert!(json.contains("\"created_at_ms\":123"));
+        assert!(json.contains("\"shard_key\":\"req_1\""));
         assert!(json.contains("\"payment_id\":\"pay_1\""));
         assert!(json.contains("\"api_flow\":\"dynamic_routing\""));
         assert!(json.contains("\"flow_type\":\"decide_gateway_decision\""));
@@ -382,6 +370,7 @@ mod tests {
     fn api_row_serializes_json_fields_as_strings() {
         let event = ApiEvent {
             event_id: 10,
+            shard_key: "req_123".to_string(),
             merchant_id: None,
             payment_id: Some("pay_123".to_string()),
             api_flow: ApiFlow::DynamicRouting,
@@ -403,6 +392,7 @@ mod tests {
         };
         let row = KafkaApiEventRow::from(event);
         assert_eq!(row.error.as_deref(), Some("{\"code\":\"bad_request\"}"));
+        assert_eq!(row.shard_key, "req_123");
         assert_eq!(row.api_flow, ApiFlow::DynamicRouting);
         assert_eq!(row.flow_type, FlowType::DecideGateway);
         assert_eq!(row.global_request_id.as_deref(), Some("global_123"));
@@ -410,9 +400,10 @@ mod tests {
     }
 
     #[test]
-    fn message_keys_are_deterministic() {
+    fn message_keys_use_shared_shard_key() {
         let api = ApiEvent {
             event_id: 10,
+            shard_key: "req_123".to_string(),
             merchant_id: None,
             payment_id: Some("pay_123".to_string()),
             api_flow: ApiFlow::DynamicRouting,
@@ -434,6 +425,7 @@ mod tests {
         };
         let domain = DomainAnalyticsEvent {
             event_id: 11,
+            shard_key: "req_123".to_string(),
             api_flow: ApiFlow::DynamicRouting,
             flow_type: FlowType::DecideGatewayDecision,
             merchant_id: None,
@@ -465,7 +457,18 @@ mod tests {
             created_at_ms: 2,
         };
 
-        assert_eq!(api_event_key(&api), "req_123");
-        assert_eq!(domain_event_key(&domain), "pay_456");
+        assert_eq!(event_shard_key(&api.shard_key, api.event_id), "req_123");
+        assert_eq!(
+            event_shard_key(&domain.shard_key, domain.event_id),
+            "req_123"
+        );
+    }
+
+    #[test]
+    fn client_config_sets_partitioner_explicitly() {
+        let config = crate::config::KafkaAnalyticsConfig::default();
+        let client_config = build_client_config(&config);
+
+        assert_eq!(client_config.get("partitioner"), Some("murmur2_random"));
     }
 }

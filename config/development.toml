@@ -33,6 +33,7 @@ pg_dbname = "decision_engine_db"
 brokers = "localhost:9092"
 api_topic = "api"
 domain_topic = "domain"
+partitioner = "murmur2_random"
 
 [analytics.clickhouse]
 user = "decision_engine"

@@ -9,6 +9,7 @@ static EVENT_COUNTER: AtomicU64 = AtomicU64::new(0);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DomainAnalyticsEvent {
     pub event_id: u64,
+    pub shard_key: String,
     pub api_flow: ApiFlow,
     pub flow_type: FlowType,
     pub merchant_id: Option<String>,
@@ -43,6 +44,7 @@ pub struct DomainAnalyticsEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiEvent {
     pub event_id: u64,
+    pub shard_key: String,
     pub merchant_id: Option<String>,
     pub payment_id: Option<String>,
     pub api_flow: ApiFlow,

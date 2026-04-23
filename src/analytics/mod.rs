@@ -1,3 +1,4 @@
+pub mod affinity;
 pub mod capture;
 pub mod clickhouse;
 pub mod events;
@@ -8,6 +9,7 @@ pub mod runtime;
 pub mod service;
 pub mod store;
 
+pub use affinity::*;
 pub use capture::*;
 pub use events::*;
 pub use flow::*;
