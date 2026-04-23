@@ -18,6 +18,7 @@ import {
   YAxis,
 } from 'recharts'
 import { useMerchantStore } from '../../store/merchantStore'
+import { useAuthStore } from '../../store/authStore'
 import { fetcher } from '../../lib/api'
 import {
   AnalyticsOverviewResponse,
@@ -47,7 +48,6 @@ type AnalyticsView = 'transactions' | 'rule_based'
 type PreviewTraceKey = readonly [
   'preview-trace-analytics',
   AnalyticsRangeValue,
-  string,
   number | null,
   number | null,
 ]
@@ -149,16 +149,13 @@ function queryString(params: Record<string, string | number | undefined>) {
 function buildAnalyticsUrl(
   path: string,
   range: AnalyticsRangeValue,
-  merchantId: string,
   customWindow?: TimeWindow,
   routingFilters?: RoutingFilters,
 ) {
   const params: Record<string, string | number | undefined> = {
-    scope: 'current',
     range: range === 'custom' ? '1h' : range,
     start_ms: customWindow?.start_ms,
     end_ms: customWindow?.end_ms,
-    merchant_id: merchantId,
     gateway: routingFilters?.gateways.length ? routingFilters.gateways.join(',') : undefined,
   }
 
@@ -174,17 +171,14 @@ function buildAnalyticsUrl(
 
 function buildPreviewTraceUrl(
   range: AnalyticsRangeValue,
-  merchantId: string,
   page: number,
   pageSize: number,
   customWindow?: TimeWindow,
 ) {
   const params: Record<string, string | number | undefined> = {
-    scope: 'current',
     range: range === 'custom' ? '1h' : range,
     start_ms: customWindow?.start_ms,
     end_ms: customWindow?.end_ms,
-    merchant_id: merchantId,
     page,
     page_size: pageSize,
   }
@@ -195,11 +189,10 @@ function buildPreviewTraceUrl(
 
 async function loadPreviewTraceSample(
   range: AnalyticsRangeValue,
-  merchantId: string,
   customWindow?: TimeWindow,
 ) {
   const firstPage = await fetcher<PaymentAuditResponse>(
-    buildPreviewTraceUrl(range, merchantId, 1, PREVIEW_TRACE_PAGE_SIZE, customWindow),
+    buildPreviewTraceUrl(range, 1, PREVIEW_TRACE_PAGE_SIZE, customWindow),
   )
   const totalPages = Math.min(
     Math.ceil(firstPage.total_results / PREVIEW_TRACE_PAGE_SIZE),
@@ -215,7 +208,6 @@ async function loadPreviewTraceSample(
       fetcher<PaymentAuditResponse>(
         buildPreviewTraceUrl(
           range,
-          merchantId,
           index + 2,
           PREVIEW_TRACE_PAGE_SIZE,
           customWindow,
@@ -534,6 +526,8 @@ function analyticsRouteLabel(route: string) {
 
 export function AnalyticsPage() {
   const { merchantId } = useMerchantStore()
+  const authMerchantId = useAuthStore((state) => state.user?.merchantId || '')
+  const effectiveMerchantId = merchantId || authMerchantId
   const [range, setRange] = useState<AnalyticsRangeValue>('1h')
   const [view, setView] = useState<AnalyticsView>('transactions')
   const [routingFilters, setRoutingFilters] = useState<RoutingFilters>(EMPTY_ROUTING_FILTERS)
@@ -543,8 +537,6 @@ export function AnalyticsPage() {
     toDateTimeInputValue(Date.now() - 2 * 60 * 60 * 1000),
   )
   const [customEnd, setCustomEnd] = useState(() => toDateTimeInputValue(Date.now()))
-
-  const canQueryCurrent = Boolean(merchantId)
 
   const customWindow = useMemo(() => {
     if (range !== 'custom') return undefined
@@ -557,32 +549,30 @@ export function AnalyticsPage() {
   }, [customEnd, customStart, range])
 
   const overviewUrl =
-    canQueryCurrent && merchantId && (range !== 'custom' || customWindow)
-      ? buildAnalyticsUrl('/analytics/overview', range, merchantId, customWindow)
+    range !== 'custom' || customWindow
+      ? buildAnalyticsUrl('/analytics/overview', range, customWindow)
       : null
   const routingUrl =
-    canQueryCurrent && merchantId && (range !== 'custom' || customWindow)
-      ? buildAnalyticsUrl('/analytics/routing-stats', range, merchantId, customWindow)
+    range !== 'custom' || customWindow
+      ? buildAnalyticsUrl('/analytics/routing-stats', range, customWindow)
       : null
   const filteredRoutingUrl =
-    canQueryCurrent && merchantId && (range !== 'custom' || customWindow)
-      ? buildAnalyticsUrl('/analytics/routing-stats', range, merchantId, customWindow, routingFilters)
+    range !== 'custom' || customWindow
+      ? buildAnalyticsUrl('/analytics/routing-stats', range, customWindow, routingFilters)
       : null
   const previewTraceKey =
-    canQueryCurrent && merchantId && (range !== 'custom' || customWindow)
+    range !== 'custom' || customWindow
       ? ([
           'preview-trace-analytics',
           range,
-          merchantId,
           customWindow?.start_ms ?? null,
           customWindow?.end_ms ?? null,
         ] as const)
       : null
   const previewListUrl =
-    canQueryCurrent && merchantId && (range !== 'custom' || customWindow)
+    range !== 'custom' || customWindow
       ? buildPreviewTraceUrl(
           range,
-          merchantId,
           previewListPage,
           PREVIEW_LIST_PAGE_SIZE,
           customWindow,
@@ -621,10 +611,9 @@ export function AnalyticsPage() {
   const previewTrace = useSWR<PaymentAuditResponse>(
     previewTraceKey,
     async (key) => {
-      const [, selectedRange, selectedMerchantId, startMs, endMs] = key as PreviewTraceKey
+      const [, selectedRange, startMs, endMs] = key as PreviewTraceKey
       return loadPreviewTraceSample(
         selectedRange,
-        selectedMerchantId,
         startMs !== null && endMs !== null
           ? { start_ms: Number(startMs), end_ms: Number(endMs) }
           : undefined,
@@ -731,7 +720,7 @@ export function AnalyticsPage() {
 
   useEffect(() => {
     setPreviewListPage(1)
-  }, [merchantId, range, customWindow?.start_ms, customWindow?.end_ms])
+  }, [range, customWindow?.start_ms, customWindow?.end_ms])
 
   const activeWindowLabel = useMemo(() => {
     if (range !== 'custom') {
@@ -1105,30 +1094,13 @@ export function AnalyticsPage() {
     })
   }
 
-  if (!canQueryCurrent) {
-    return (
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Analytics</h1>
-          <p className="mt-1 text-sm text-slate-500 dark:text-[#8a8a93]">
-            Set a merchant in the top bar to load merchant-scoped analytics.
-          </p>
-        </div>
-        <EmptyState
-          title="Select a merchant first"
-          body="The analytics surface is merchant-scoped. Use the merchant selector in the top bar to load data."
-        />
-      </div>
-    )
-  }
-
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Analytics</h1>
-            <Badge variant="green">{merchantId || 'Current merchant'}</Badge>
+            <Badge variant="green">{overview.data?.merchant_id || effectiveMerchantId || 'Signed-in merchant'}</Badge>
           </div>
           <p className="text-sm text-slate-500 dark:text-[#8a8a93]">
             {view === 'transactions'

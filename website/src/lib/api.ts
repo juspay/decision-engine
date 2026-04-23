@@ -1,4 +1,5 @@
 // All API calls use relative URLs so nginx/vite-proxy can handle routing
+import { tokenRef } from './tokenRef'
 
 const DEBUG_API = true
 const DEFAULT_TENANT_ID = 'public'
@@ -49,13 +50,16 @@ export async function apiFetch<T>(
   logRequest(method, path, body)
   
   try {
+    const token = tokenRef.get()
+    const headers = new Headers(options?.headers)
+    headers.set('Content-Type', 'application/json')
+    headers.set('x-tenant-id', DEFAULT_TENANT_ID)
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`)
+    }
     const res = await fetch(path, {
-      headers: {
-        'Content-Type': 'application/json',
-        'x-tenant-id': DEFAULT_TENANT_ID,
-        ...options?.headers,
-      },
       ...options,
+      headers,
     })
     
     const responseText = await res.text()
@@ -70,6 +74,28 @@ export async function apiFetch<T>(
     
     logResponse(path, res.status, res.statusText, responseBody)
     
+    if (res.status === 401 && !path.startsWith('/auth/')) {
+      let isTokenExpiry = false
+      try {
+        const json = JSON.parse(responseText)
+        const message = `${json.message ?? ''}`.toLowerCase()
+        isTokenExpiry =
+          message.includes('expired') ||
+          message.includes('invalid or expired')
+      } catch {
+        // Ignore non-JSON 401s; not every unauthorized response should clear the session.
+      }
+
+      if (isTokenExpiry) {
+        tokenRef.set(null)
+        import('../store/authStore').then(({ useAuthStore }) => {
+          useAuthStore.getState().clearAuth()
+        })
+        window.location.href = '/dashboard/login'
+        throw new Error('Session expired')
+      }
+    }
+
     if (!res.ok) {
       const error = new Error(`API error ${res.status}: ${responseText}`)
       logError(path, error)

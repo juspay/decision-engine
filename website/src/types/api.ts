@@ -144,13 +144,10 @@ export interface SRDimensionRequest {
   }
 }
 
-export type AnalyticsScope = 'current' | 'all'
 export type AnalyticsRange = '15m' | '1h' | '12h' | '1d' | '1w'
 export type AnalyticsRangeValue = AnalyticsRange | 'custom'
 
 export interface AnalyticsQuery {
-  merchant_id?: string
-  scope?: AnalyticsScope
   range?: AnalyticsRange
   start_ms?: number
   end_ms?: number
@@ -195,9 +192,7 @@ export interface GatewayScoreSeriesPoint {
 }
 
 export interface AnalyticsOverviewResponse {
-  generated_at_ms: number
-  scope: AnalyticsScope
-  merchant_id?: string | null
+  merchant_id: string
   kpis: AnalyticsKpi[]
   route_hits: AnalyticsRouteHit[]
   top_scores: GatewayScoreSnapshot[]
@@ -211,9 +206,7 @@ export interface AnalyticsRouteHit {
 }
 
 export interface AnalyticsGatewayScoresResponse {
-  generated_at_ms: number
-  scope: AnalyticsScope
-  merchant_id?: string | null
+  merchant_id: string
   range: AnalyticsRangeValue
   snapshots: GatewayScoreSnapshot[]
   series: GatewayScoreSeriesPoint[]
@@ -226,9 +219,7 @@ export interface AnalyticsDecisionPoint {
 }
 
 export interface AnalyticsDecisionResponse {
-  generated_at_ms: number
-  scope: AnalyticsScope
-  merchant_id?: string | null
+  merchant_id: string
   range: AnalyticsRangeValue
   tiles: AnalyticsKpi[]
   series: AnalyticsDecisionPoint[]
@@ -242,9 +233,7 @@ export interface AnalyticsGatewaySharePoint {
 }
 
 export interface AnalyticsRoutingStatsResponse {
-  generated_at_ms: number
-  scope: AnalyticsScope
-  merchant_id?: string | null
+  merchant_id: string
   range: AnalyticsRangeValue
   gateway_share: AnalyticsGatewaySharePoint[]
   top_rules: AnalyticsRuleHit[]
@@ -294,9 +283,7 @@ export interface AnalyticsLogSample {
 }
 
 export interface AnalyticsLogSummariesResponse {
-  generated_at_ms: number
-  scope: AnalyticsScope
-  merchant_id?: string | null
+  merchant_id: string
   range: AnalyticsRange
   total_errors: number
   errors: AnalyticsErrorSummary[]
@@ -354,9 +341,7 @@ export interface PaymentAuditEvent {
 }
 
 export interface PaymentAuditResponse {
-  generated_at_ms: number
-  scope: AnalyticsScope
-  merchant_id?: string | null
+  merchant_id: string
   range: AnalyticsRangeValue
   payment_id?: string | null
   request_id?: string | null
