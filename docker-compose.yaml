@@ -329,8 +329,8 @@ services:
       - /bin/bash
       - -lc
       - |
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists --topic decision-engine.analytics.api.v1 --partitions 3 --replication-factor 1
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists --topic decision-engine.analytics.domain.v1 --partitions 3 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists --topic api --partitions 4 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists --topic domain --partitions 4 --replication-factor 1
 
   clickhouse:
     image: clickhouse/clickhouse-server:26.1
@@ -349,9 +349,12 @@ services:
       - "8123:8123"
       - "9000:9000"
     environment:
-      CLICKHOUSE_DB: decision_engine_analytics
+      CLICKHOUSE_DB: default
       CLICKHOUSE_USER: decision_engine
       CLICKHOUSE_PASSWORD: decision_engine
+      ANALYTICS_KAFKA_BROKERS: kafka:19092
+      ANALYTICS_KAFKA_API_TOPIC: api
+      ANALYTICS_KAFKA_DOMAIN_TOPIC: domain
     depends_on:
       kafka-init:
         condition: service_completed_successfully
