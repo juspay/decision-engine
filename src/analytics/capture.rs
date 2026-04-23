@@ -157,8 +157,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
-
     use axum::body::{Body as AxumBody, Bytes};
     use futures::stream;
     use http_body::Frame;
@@ -172,7 +170,11 @@ mod tests {
         B::Error: std::fmt::Debug,
     {
         let (wrapped, handle) = CaptureBody::new(body);
-        let _ = wrapped.collect().await.unwrap();
+        let collected = wrapped.collect().await;
+        assert!(
+            collected.is_ok(),
+            "capture body collection should succeed: {collected:?}"
+        );
         handle.wait().await
     }
 
