@@ -190,6 +190,10 @@ mod tests {
             .any(|predicate| predicate.contains("route = 'routing_evaluate'")));
         assert!(predicates
             .iter()
-            .any(|predicate| predicate.contains("flow_type IN")));
+            .any(|predicate| {
+                predicate.contains("flow_type IN")
+                    && predicate.contains("routing_evaluate_advanced")
+                    && predicate.contains("routing_evaluate_preview")
+            }));
     }
 }

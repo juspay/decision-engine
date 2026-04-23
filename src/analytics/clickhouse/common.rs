@@ -22,6 +22,10 @@ pub const ROUTE_HIT_FLOW_TYPES: &[FlowType] = &[
     FlowType::RoutingEvaluateRequestHit,
 ];
 pub const PAYMENT_AUDIT_PREVIEW_FLOW_TYPES: &[FlowType] = &[
+    FlowType::RoutingEvaluateSingle,
+    FlowType::RoutingEvaluatePriority,
+    FlowType::RoutingEvaluateVolumeSplit,
+    FlowType::RoutingEvaluateAdvanced,
     FlowType::RoutingEvaluatePreview,
     FlowType::RoutingEvaluateError,
 ];
