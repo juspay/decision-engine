@@ -62,7 +62,7 @@ describe('Dashboard Overview UI', () => {
       req.continue((res) => res.setDelay(1000))
     }).as('routingRefresh')
 
-    cy.contains('button', '18 months').click()
+    cy.contains('button', '1 week').click()
     cy.contains(/Refreshing overview analytics for/i).should('be.visible')
     cy.wait('@overviewRefresh')
     cy.wait('@routingRefresh')

@@ -88,7 +88,7 @@ describe('Analytics UI', () => {
       req.continue((res) => res.setDelay(1200))
     }).as('routingRefresh')
 
-    cy.get('select').first().select('Last 18 months')
+    cy.get('select').first().select('Last 1 week')
     cy.contains('button', 'Refresh').click()
     cy.contains(/Refreshing transaction analytics for/i).should('be.visible')
     cy.wait('@overviewRefresh')
