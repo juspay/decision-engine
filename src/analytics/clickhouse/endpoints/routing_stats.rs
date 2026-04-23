@@ -9,7 +9,6 @@ pub async fn load(
     query: &AnalyticsQuery,
 ) -> Result<AnalyticsRoutingStatsResponse, ApiError> {
     Ok(AnalyticsRoutingStatsResponse {
-        scope: query.scope.as_str().to_string(),
         merchant_id: query.merchant_id.clone(),
         range: format_range(query),
         gateway_share: metrics::gateway_share::load(client, query).await?,

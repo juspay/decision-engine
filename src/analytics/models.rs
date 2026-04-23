@@ -21,8 +21,7 @@ pub fn normalise_page_size(page_size: Option<u32>, default: usize) -> usize {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsQuery {
-    pub merchant_id: Option<String>,
-    pub scope: AnalyticsScope,
+    pub merchant_id: String,
     pub range: AnalyticsRange,
     pub start_ms: Option<i64>,
     pub end_ms: Option<i64>,
@@ -36,13 +35,6 @@ pub struct AnalyticsQuery {
     pub country: Option<String>,
     pub auth_type: Option<String>,
     pub gateways: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum AnalyticsScope {
-    Current,
-    All,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -77,22 +69,6 @@ impl AnalyticsRange {
     }
 }
 
-impl AnalyticsScope {
-    pub fn from_query(value: Option<&str>) -> Self {
-        match value {
-            Some("all") => Self::All,
-            _ => Self::Current,
-        }
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Current => "current",
-            Self::All => "all",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsKpi {
     pub label: String,
@@ -102,8 +78,7 @@ pub struct AnalyticsKpi {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsOverviewResponse {
-    pub scope: String,
-    pub merchant_id: Option<String>,
+    pub merchant_id: String,
     pub kpis: Vec<AnalyticsKpi>,
     pub route_hits: Vec<AnalyticsRouteHit>,
     pub top_scores: Vec<GatewayScoreSnapshot>,
@@ -143,8 +118,7 @@ pub struct GatewayScoreSeriesPoint {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsGatewayScoresResponse {
-    pub scope: String,
-    pub merchant_id: Option<String>,
+    pub merchant_id: String,
     pub range: String,
     pub snapshots: Vec<GatewayScoreSnapshot>,
     pub series: Vec<GatewayScoreSeriesPoint>,
@@ -159,8 +133,7 @@ pub struct AnalyticsDecisionPoint {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsDecisionResponse {
-    pub scope: String,
-    pub merchant_id: Option<String>,
+    pub merchant_id: String,
     pub range: String,
     pub tiles: Vec<AnalyticsKpi>,
     pub series: Vec<AnalyticsDecisionPoint>,
@@ -176,8 +149,7 @@ pub struct AnalyticsGatewaySharePoint {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsRoutingStatsResponse {
-    pub scope: String,
-    pub merchant_id: Option<String>,
+    pub merchant_id: String,
     pub range: String,
     pub gateway_share: Vec<AnalyticsGatewaySharePoint>,
     pub top_rules: Vec<AnalyticsRuleHit>,
@@ -233,8 +205,7 @@ pub struct AnalyticsLogSample {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsLogSummariesResponse {
-    pub scope: String,
-    pub merchant_id: Option<String>,
+    pub merchant_id: String,
     pub range: String,
     pub total_errors: i64,
     pub errors: Vec<AnalyticsErrorSummary>,
@@ -251,8 +222,7 @@ pub struct AnalyticsRuleHit {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaymentAuditQuery {
-    pub merchant_id: Option<String>,
-    pub scope: AnalyticsScope,
+    pub merchant_id: String,
     pub range: AnalyticsRange,
     pub start_ms: Option<i64>,
     pub end_ms: Option<i64>,
@@ -314,8 +284,7 @@ pub struct PaymentAuditEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaymentAuditResponse {
-    pub scope: String,
-    pub merchant_id: Option<String>,
+    pub merchant_id: String,
     pub range: String,
     pub payment_id: Option<String>,
     pub request_id: Option<String>,

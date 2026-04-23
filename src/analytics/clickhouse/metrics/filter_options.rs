@@ -40,7 +40,7 @@ pub async fn load(
         "gateway",
     ]);
     builder.extend_filters(base_window_filters(start_ms, end_ms));
-    builder.extend_filters(merchant_filter(query.merchant_id.as_deref()));
+    builder.extend_filters(merchant_filter(&query.merchant_id));
     builder.add_filter(FilterClause::raw(format!(
         "flow_type IN {}",
         static_flow_type_in_sql(OVERVIEW_SCORE_FLOW_TYPES)

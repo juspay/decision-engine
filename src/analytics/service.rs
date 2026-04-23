@@ -612,8 +612,7 @@ fn normalise_payment_audit_status_filter(status: Option<String>) -> Option<Strin
 }
 
 pub fn parse_query(
-    merchant_id: Option<String>,
-    scope: Option<String>,
+    merchant_id: String,
     range: Option<String>,
     start_ms: Option<i64>,
     end_ms: Option<i64>,
@@ -628,7 +627,6 @@ pub fn parse_query(
     auth_type: Option<String>,
     gateways: Option<String>,
 ) -> AnalyticsQuery {
-    let scope = AnalyticsScope::from_query(scope.as_deref());
     let range = AnalyticsRange::from_query(range.as_deref());
     let (start_ms, end_ms) = match (start_ms, end_ms) {
         (Some(start_ms), Some(end_ms)) if start_ms >= 0 && end_ms > start_ms => {
@@ -639,45 +637,16 @@ pub fn parse_query(
     let page = normalise_page(page);
     let page_size = normalise_page_size(page_size, DEFAULT_ANALYTICS_PAGE_SIZE);
     let gateways = normalise_gateways(gateways);
-    let payment_method_type = if scope == AnalyticsScope::Current {
-        payment_method_type.filter(|value| !value.is_empty())
-    } else {
-        None
-    };
-    let payment_method = if scope == AnalyticsScope::Current {
-        payment_method.filter(|value| !value.is_empty())
-    } else {
-        None
-    };
-    let card_network = if scope == AnalyticsScope::Current {
-        card_network.filter(|value| !value.is_empty())
-    } else {
-        None
-    };
-    let card_is_in = if scope == AnalyticsScope::Current {
-        card_is_in.filter(|value| !value.is_empty())
-    } else {
-        None
-    };
-    let currency = if scope == AnalyticsScope::Current {
-        currency.filter(|value| !value.is_empty())
-    } else {
-        None
-    };
-    let country = if scope == AnalyticsScope::Current {
-        country.filter(|value| !value.is_empty())
-    } else {
-        None
-    };
-    let auth_type = if scope == AnalyticsScope::Current {
-        auth_type.filter(|value| !value.is_empty())
-    } else {
-        None
-    };
+    let payment_method_type = payment_method_type.filter(|value| !value.is_empty());
+    let payment_method = payment_method.filter(|value| !value.is_empty());
+    let card_network = card_network.filter(|value| !value.is_empty());
+    let card_is_in = card_is_in.filter(|value| !value.is_empty());
+    let currency = currency.filter(|value| !value.is_empty());
+    let country = country.filter(|value| !value.is_empty());
+    let auth_type = auth_type.filter(|value| !value.is_empty());
 
     AnalyticsQuery {
         merchant_id,
-        scope,
         range,
         start_ms,
         end_ms,
@@ -695,8 +664,7 @@ pub fn parse_query(
 }
 
 pub fn parse_payment_audit_query(
-    merchant_id: Option<String>,
-    scope: Option<String>,
+    merchant_id: String,
     range: Option<String>,
     start_ms: Option<i64>,
     end_ms: Option<i64>,
@@ -710,7 +678,6 @@ pub fn parse_payment_audit_query(
     flow_type: Option<String>,
     error_code: Option<String>,
 ) -> PaymentAuditQuery {
-    let scope = AnalyticsScope::from_query(scope.as_deref());
     let range = AnalyticsRange::from_query(range.as_deref());
     let (start_ms, end_ms) = match (start_ms, end_ms) {
         (Some(start_ms), Some(end_ms)) if start_ms >= 0 && end_ms > start_ms => {
@@ -723,7 +690,6 @@ pub fn parse_payment_audit_query(
 
     PaymentAuditQuery {
         merchant_id,
-        scope,
         range,
         start_ms,
         end_ms,

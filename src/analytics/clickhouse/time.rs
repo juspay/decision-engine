@@ -78,14 +78,13 @@ pub fn payment_audit_range(query: &PaymentAuditQuery) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::analytics::models::{AnalyticsQuery, AnalyticsRange, AnalyticsScope};
+    use crate::analytics::models::{AnalyticsQuery, AnalyticsRange};
 
     use super::{effective_window_bounds, query_bucket_select_expr, HOUR_MS, MINUTE_MS};
 
     fn query() -> AnalyticsQuery {
         AnalyticsQuery {
-            merchant_id: None,
-            scope: AnalyticsScope::Current,
+            merchant_id: "m_123".to_string(),
             range: AnalyticsRange::H1,
             start_ms: None,
             end_ms: None,
