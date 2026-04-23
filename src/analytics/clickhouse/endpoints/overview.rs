@@ -9,9 +9,9 @@ impl OverviewCounts {
     fn into_kpis(self, query: &AnalyticsQuery) -> Vec<AnalyticsKpi> {
         vec![
             AnalyticsKpi {
-                label: format!("Decisions / {}", format_range(query)),
+                label: format!("Decision events / {}", format_range(query)),
                 value: self.total.to_string(),
-                subtitle: Some("Recorded decision events".to_string()),
+                subtitle: Some("Counts decision events, not unique payments".to_string()),
             },
             AnalyticsKpi {
                 label: "Score snapshots".to_string(),
