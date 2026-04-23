@@ -313,7 +313,7 @@ export interface PaymentAuditSummary {
 }
 
 export interface PaymentAuditEvent {
-  id: number
+  id: string
   flow_type: string
   event_stage?: string | null
   route?: string | null
