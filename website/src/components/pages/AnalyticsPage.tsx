@@ -102,19 +102,19 @@ const CARD_INFO: Record<'hits' | 'share' | 'sr' | 'preview_hits' | 'preview_acti
     title: 'API call counts',
     purpose: 'Use these cards to see how much traffic each major decision-engine API handled in the selected window.',
     calculation: 'Each request records one lightweight API-call event. The cards count those recorded calls for the endpoints surfaced in the current view.',
-    source: 'Counts come from analytics rows persisted in `analytics_event` in Postgres.',
+    source: 'Counts come from ClickHouse-backed API analytics rows ingested from Kafka into `analytics_api_events`.',
   },
   share: {
     title: 'Gateway share over time',
     purpose: 'Use this to see when traffic shifted from one connector to another for the selected merchant.',
     calculation: 'Decision events are bucketed by time and grouped by chosen connector. The chart shows how many decisions each gateway captured in each bucket.',
-    source: 'Reads persisted `decision` rows from `analytics_event` in Postgres.',
+    source: 'Reads ClickHouse-backed domain analytics rows from `analytics_domain_events`.',
   },
   sr: {
     title: 'Connector success rate over time',
     purpose: 'Use this to explain why a connector won routing at a given time, based on the recorded historical score trail.',
     calculation: 'Stored `score_snapshot` events are bucketed over the selected window and averaged per connector. The line values are displayed as percentages.',
-    source: 'Reads persisted `score_snapshot` rows from `analytics_event` in Postgres. The current score state originates from Redis-backed scoring flows.',
+    source: 'Reads ClickHouse-backed `score_snapshot` analytics rows from `analytics_domain_events`. The current score state still originates from Redis-backed scoring flows.',
   },
   preview_hits: {
     title: 'Rule-based summary',

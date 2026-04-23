@@ -439,7 +439,7 @@ export function PaymentAuditPage() {
   const [appliedFilters, setAppliedFilters] = useState<AuditFilters>(initialFilters)
   const [page, setPage] = useState(initialPage)
   const [selectedKey, setSelectedKey] = useState<string>(initialSelectedKey)
-  const [selectedEventId, setSelectedEventId] = useState<number | null>(null)
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('summary')
   const pageSize = 12
 
