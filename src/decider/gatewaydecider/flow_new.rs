@@ -453,14 +453,30 @@ pub async fn run_decider_flow(
                             }))
                             .ok(),
                             Some(deciderParams.dpTxnDetail.txnUuid.clone()),
-                            decider_flow.logger.get("x-request-id").cloned(),
-                            decider_flow.logger.get("x-global-request-id").cloned(),
                             decider_flow
                                 .logger
-                                .get("traceparent")
+                                .get(crate::storage::consts::X_REQUEST_ID)
+                                .cloned(),
+                            decider_flow
+                                .logger
+                                .get(crate::storage::consts::X_GLOBAL_REQUEST_ID)
+                                .cloned(),
+                            decider_flow
+                                .logger
+                                .get(crate::storage::consts::TRACEPARENT)
                                 .and_then(|value| crate::analytics::normalize_trace_id(value))
-                                .or_else(|| decider_flow.logger.get("x-trace-id").cloned())
-                                .or_else(|| decider_flow.logger.get("x-b3-traceid").cloned()),
+                                .or_else(|| {
+                                    decider_flow
+                                        .logger
+                                        .get(crate::storage::consts::X_TRACE_ID)
+                                        .cloned()
+                                })
+                                .or_else(|| {
+                                    decider_flow
+                                        .logger
+                                        .get(crate::storage::consts::X_B3_TRACE_ID)
+                                        .cloned()
+                                }),
                             Some("rule_applied".to_string()),
                         );
                     }

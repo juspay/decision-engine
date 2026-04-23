@@ -16,7 +16,7 @@ pub async fn read_request_body(body: Body) -> Result<Bytes, RequestBodyError> {
 impl RequestBodyError {
     pub fn analytics_stage(&self) -> &'static str {
         match self {
-            Self::Read(_) => "request_parse_failed",
+            Self::Read(_) => "request_read_failed",
         }
     }
 
@@ -25,7 +25,7 @@ impl RequestBodyError {
             Self::Read(error) => ErrorResponse {
                 status: "400".to_string(),
                 error_code: "400".to_string(),
-                error_message: "Error parsing request".to_string(),
+                error_message: "Error reading request body".to_string(),
                 priority_logic_tag: None,
                 routing_approach: None,
                 filter_wise_gateways: None,
@@ -42,7 +42,7 @@ impl RequestBodyError {
 
     pub fn analytics_code_and_message(&self) -> (&'static str, &'static str) {
         match self {
-            Self::Read(_) => ("400", "Error parsing request"),
+            Self::Read(_) => ("400", "Error reading request body"),
         }
     }
 }

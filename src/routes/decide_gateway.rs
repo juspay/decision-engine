@@ -46,7 +46,7 @@ pub async fn decide_gateway(
 
     let headers = req.headers().clone();
     let x_request_id = headers
-        .get("x-request-id")
+        .get(crate::storage::consts::X_REQUEST_ID)
         .and_then(|value| value.to_str().ok())
         .unwrap_or("unknown")
         .to_string();

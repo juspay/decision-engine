@@ -64,7 +64,7 @@ where
     let headers = req.headers().clone();
     let original_url = req.uri().to_string();
     let x_request_id = headers
-        .get("x-request-id")
+        .get(crate::storage::consts::X_REQUEST_ID)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("unknown");
     let start_time = std::time::Instant::now();
