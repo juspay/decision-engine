@@ -78,6 +78,29 @@ docker compose --profile dashboard-postgres-ghcr up -d
 docker compose --profile postgres-ghcr --profile monitoring up -d
 ```
 
+## One-Command Local Dev
+
+For local source-run development with the full PostgreSQL analytics stack:
+
+```bash
+./oneclick.sh
+```
+
+This flow:
+
+- starts PostgreSQL, Redis, Kafka, ClickHouse, and the analytics init jobs with Docker Compose
+- waits for infra health
+- runs PostgreSQL migrations
+- starts the API locally with `cargo run --no-default-features --features postgres`
+- starts the dashboard locally with Vite on `http://localhost:5173/dashboard/`
+
+By default, `Ctrl+C` stops the local API/dashboard processes and any infra services that `oneclick.sh`
+started itself. To keep infra running after exit:
+
+```bash
+ONECLICK_KEEP_INFRA=1 ./oneclick.sh
+```
+
 ## Make Targets
 
 Common wrappers:
