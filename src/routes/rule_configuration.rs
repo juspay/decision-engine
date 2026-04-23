@@ -18,6 +18,19 @@ pub struct RuleConfigDeleteResponse {
     pub merchant_id: String,
 }
 
+#[derive(Debug, Serialize)]
+struct RuleConfigAnalyticsDetails<'a, Request, Response> {
+    request: &'a Request,
+    response: &'a Response,
+}
+
+fn serialize_rule_config_analytics_details<Request: Serialize, Response: Serialize>(
+    request: &Request,
+    response: &Response,
+) -> Option<String> {
+    crate::analytics::serialize_details(&RuleConfigAnalyticsDetails { request, response })
+}
+
 #[axum::debug_handler]
 pub async fn create_rule_config(
     headers: axum::http::HeaderMap,
@@ -190,11 +203,7 @@ pub async fn create_rule_config(
             global_request_id,
             trace_id,
             Some("success".to_string()),
-            serde_json::to_string(&serde_json::json!({
-                "request": &analytics_payload,
-                "response": &response.0,
-            }))
-            .ok(),
+            serialize_rule_config_analytics_details(&analytics_payload, &response.0),
             Some("rule_config_created".to_string()),
         );
     }
@@ -348,11 +357,7 @@ pub async fn get_rule_config(
             global_request_id,
             trace_id,
             Some("success".to_string()),
-            serde_json::to_string(&serde_json::json!({
-                "request": &analytics_payload,
-                "response": &response.0,
-            }))
-            .ok(),
+            serialize_rule_config_analytics_details(&analytics_payload, &response.0),
             Some("rule_config_loaded".to_string()),
         );
     }
@@ -493,11 +498,7 @@ pub async fn update_rule_config(
             global_request_id,
             trace_id,
             Some("success".to_string()),
-            serde_json::to_string(&serde_json::json!({
-                "request": &analytics_payload,
-                "response": &response.0,
-            }))
-            .ok(),
+            serialize_rule_config_analytics_details(&analytics_payload, &response.0),
             Some("rule_config_updated".to_string()),
         );
     }
@@ -632,11 +633,7 @@ pub async fn delete_rule_config(
             global_request_id,
             trace_id,
             Some("success".to_string()),
-            serde_json::to_string(&serde_json::json!({
-                "request": &analytics_payload,
-                "response": &response.0,
-            }))
-            .ok(),
+            serialize_rule_config_analytics_details(&analytics_payload, &response.0),
             Some("rule_config_deleted".to_string()),
         );
     }
