@@ -51,16 +51,12 @@ export async function apiFetch<T>(
 
   try {
     const token = tokenRef.get()
-    const authHeader: Record<string, string> = token
-      ? { Authorization: `Bearer ${token}` }
-      : {}
-    const headers = {
-      'Content-Type': 'application/json',
-      'x-tenant-id': DEFAULT_TENANT_ID,
-      ...authHeader,
-      ...options?.headers,
+    const headers = new Headers(options?.headers)
+    headers.set('Content-Type', 'application/json')
+    headers.set('x-tenant-id', DEFAULT_TENANT_ID)
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`)
     }
-
     const res = await fetch(path, {
       ...options,
       headers,

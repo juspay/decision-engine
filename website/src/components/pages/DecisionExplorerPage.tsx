@@ -351,25 +351,21 @@ function stringifyValue(value: unknown) {
   return JSON.stringify(value, null, 2)
 }
 
-function buildAuditUrl(merchantId: string, paymentId: string) {
+function buildAuditUrl(paymentId: string) {
   const qs = queryString({
-    scope: 'current',
     range: '1d',
     page: 1,
     page_size: 25,
-    merchant_id: merchantId,
     payment_id: paymentId,
   })
   return `/analytics/payment-audit?${qs}`
 }
 
-function buildPreviewTraceUrl(merchantId: string, paymentId: string) {
+function buildPreviewTraceUrl(paymentId: string) {
   const qs = queryString({
-    scope: 'current',
     range: '1d',
     page: 1,
     page_size: 25,
-    merchant_id: merchantId,
     payment_id: paymentId,
   })
   return `/analytics/preview-trace?${qs}`
@@ -613,8 +609,8 @@ export function DecisionExplorerPage() {
     [routingKeysConfig]
   )
 
-  const auditUrl = merchantId && selectedAuditPaymentId
-    ? buildAuditUrl(merchantId, selectedAuditPaymentId)
+  const auditUrl = selectedAuditPaymentId
+    ? buildAuditUrl(selectedAuditPaymentId)
     : null
 
   const auditDetail = useSWR<PaymentAuditResponse>(auditUrl, fetcher, {
@@ -622,8 +618,8 @@ export function DecisionExplorerPage() {
     revalidateOnFocus: true,
   })
 
-  const previewTraceUrl = merchantId && selectedPreviewPaymentId
-    ? buildPreviewTraceUrl(merchantId, selectedPreviewPaymentId)
+  const previewTraceUrl = selectedPreviewPaymentId
+    ? buildPreviewTraceUrl(selectedPreviewPaymentId)
     : null
 
   const previewTraceDetail = useSWR<PaymentAuditResponse>(previewTraceUrl, fetcher, {

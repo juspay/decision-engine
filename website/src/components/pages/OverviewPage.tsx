@@ -15,6 +15,7 @@ import {
   XCircle,
 } from 'lucide-react'
 import { useMerchantStore } from '../../store/merchantStore'
+import { useAuthStore } from '../../store/authStore'
 import { apiPost, fetcher } from '../../lib/api'
 import {
   AnalyticsRange,
@@ -63,16 +64,6 @@ function formatCompactNumber(value: number | undefined) {
 function formatPercent(value: number | undefined) {
   if (value === undefined || value === null || Number.isNaN(value)) return '0%'
   return `${value.toFixed(value >= 100 ? 0 : 1)}%`
-}
-
-function formatUpdatedAt(timestampMs: number | undefined) {
-  if (!timestampMs) return 'No updates yet'
-  return new Intl.DateTimeFormat(undefined, {
-    day: 'numeric',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(timestampMs))
 }
 
 function healthLabel(status: 'up' | 'down' | 'loading') {
@@ -134,13 +125,14 @@ function EmptyWorkspace() {
   return (
     <div className="grid gap-5 pt-8 lg:grid-cols-[1.1fr_0.9fr]">
       <GlassCard className="p-7">
-        <SurfaceLabel>Merchant required</SurfaceLabel>
+        <SurfaceLabel>Merchant session required</SurfaceLabel>
         <h2 className="mt-4 max-w-xl text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">
-          Set a merchant in the top bar to turn this into a live overview.
+          Sign in with a merchant account to turn this into a live overview.
         </h2>
         <p className="mt-4 max-w-xl text-sm leading-7 text-slate-600 dark:text-[#b2bdd1]">
-          Once selected, this page will show business-facing status: service health, active
-          routing, request count, and the gateway currently handling the most traffic.
+          Analytics now derive merchant scope from your authenticated session. Once you are signed in,
+          this page shows service health, active routing, request count, and gateway activity without
+          needing analytics query params for merchant selection.
         </p>
       </GlassCard>
 
@@ -201,27 +193,25 @@ function RefreshingState({ label }: { label: string }) {
 export function OverviewPage() {
   const navigate = useNavigate()
   const { merchantId } = useMerchantStore()
+  const authMerchantId = useAuthStore((state) => state.user?.merchantId || '')
+  const effectiveMerchantId = merchantId || authMerchantId
   const health = useHealth()
   const [range, setRange] = useState<AnalyticsRange>('1d')
 
   const { data: activeAlgorithms } = useSWR<RoutingAlgorithm[]>(
-    merchantId ? `/routing/list/active/${merchantId}` : null,
-    () => apiPost<RoutingAlgorithm[]>(`/routing/list/active/${merchantId}`),
+    effectiveMerchantId ? `/routing/list/active/${effectiveMerchantId}` : null,
+    () => apiPost<RoutingAlgorithm[]>(`/routing/list/active/${effectiveMerchantId}`),
     { shouldRetryOnError: false },
   )
 
   const { data: srConfig } = useSWR<RuleConfig>(
-    merchantId ? ['/rule/get', 'successRate', merchantId] : null,
-    () => apiPost('/rule/get', { merchant_id: merchantId, algorithm: 'successRate' }),
+    effectiveMerchantId ? ['/rule/get', 'successRate', effectiveMerchantId] : null,
+    () => apiPost('/rule/get', { merchant_id: effectiveMerchantId, algorithm: 'successRate' }),
     { shouldRetryOnError: false },
   )
 
-  const analyticsOverviewUrl = merchantId
-    ? `/analytics/overview?scope=current&range=${range}&merchant_id=${encodeURIComponent(merchantId)}`
-    : null
-  const analyticsRoutingUrl = merchantId
-    ? `/analytics/routing-stats?scope=current&range=${range}&merchant_id=${encodeURIComponent(merchantId)}`
-    : null
+  const analyticsOverviewUrl = `/analytics/overview?range=${range}`
+  const analyticsRoutingUrl = `/analytics/routing-stats?range=${range}`
 
   const analyticsOverview = useSWR<AnalyticsOverviewResponse>(analyticsOverviewUrl, fetcher, {
     refreshInterval: 15000,
@@ -240,9 +230,6 @@ export function OverviewPage() {
   const hasRuleBasedRouting = (activeAlgorithms || []).some(
     (algorithm) => (algorithm.algorithm_data || algorithm.algorithm)?.type === 'advanced',
   )
-
-  const latestSync =
-    analyticsOverview.data?.generated_at_ms || analyticsRouting.data?.generated_at_ms || undefined
 
   const routeHits = analyticsOverview.data?.route_hits || []
   const decideHits = routeHits.find((item) => item.route === '/decide_gateway')?.count || 0
@@ -308,7 +295,7 @@ export function OverviewPage() {
     },
   ]
 
-  const workspaceBadge = !merchantId
+  const workspaceBadge = !effectiveMerchantId
     ? { label: 'Merchant not selected', variant: 'orange' as const }
     : health === 'up'
       ? { label: 'System live', variant: 'green' as const }
@@ -316,11 +303,9 @@ export function OverviewPage() {
         ? { label: 'Attention needed', variant: 'red' as const }
         : { label: 'Checking status', variant: 'gray' as const }
   const analyticsLoading =
-    merchantId &&
-    ((!analyticsOverview.data && analyticsOverview.isLoading) ||
-      (!analyticsRouting.data && analyticsRouting.isLoading))
+    (!analyticsOverview.data && analyticsOverview.isLoading) ||
+    (!analyticsRouting.data && analyticsRouting.isLoading)
   const analyticsRefreshing =
-    Boolean(merchantId) &&
     !analyticsLoading &&
     (analyticsOverview.isValidating || analyticsRouting.isValidating)
 
@@ -337,11 +322,8 @@ export function OverviewPage() {
         <header className="relative flex flex-col gap-4 border-b border-slate-200 pb-5 dark:border-[#232933]">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant={workspaceBadge.variant}>{workspaceBadge.label}</Badge>
-            {merchantId ? <Badge variant="blue">{merchantId}</Badge> : null}
-            {latestSync ? (
-                <span className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500 dark:text-[#7d879b]">
-                Last sync {formatUpdatedAt(latestSync)}
-              </span>
+            {(analyticsOverview.data?.merchant_id || effectiveMerchantId) ? (
+              <Badge variant="blue">{analyticsOverview.data?.merchant_id || effectiveMerchantId}</Badge>
             ) : null}
           </div>
           <div>
@@ -373,7 +355,7 @@ export function OverviewPage() {
           </div>
         </header>
 
-        {!merchantId ? (
+        {!effectiveMerchantId ? (
           <EmptyWorkspace />
         ) : (
           <>
@@ -421,7 +403,7 @@ export function OverviewPage() {
                       detail={selectedWindow.detail}
                     />
                     <HeroStat label="Setup ready" value={`${configuredBasics}/4`} detail="Core basics configured" />
-                    <HeroStat label="Last sync" value={latestSync ? formatUpdatedAt(latestSync) : '--'} detail="Latest refresh" />
+                    <HeroStat label="Window" value={selectedWindow.label} detail={selectedWindow.detail} />
                   </div>
                 </div>
               </GlassCard>
@@ -577,8 +559,8 @@ export function OverviewPage() {
                 <SurfaceLabel>Quick summary</SurfaceLabel>
                 <div className="mt-5 space-y-4">
                   {[
-                    { label: 'Selected merchant', value: merchantId },
-                    { label: 'Last sync', value: formatUpdatedAt(latestSync) },
+                    { label: 'Signed-in merchant', value: analyticsOverview.data?.merchant_id || effectiveMerchantId || '--' },
+                    { label: 'Time window', value: selectedWindow.detail },
                     { label: selectedWindow.summaryLabel, value: formatCompactNumber(totalErrors) },
                     { label: 'Top gateway', value: topGateway?.toUpperCase() || 'No activity' },
                   ].map((item) => (

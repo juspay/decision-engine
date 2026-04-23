@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import useSWR from 'swr'
 import { useSearchParams } from 'react-router-dom'
 import { useMerchantStore } from '../../store/merchantStore'
+import { useAuthStore } from '../../store/authStore'
 import { fetcher } from '../../lib/api'
 import {
   AnalyticsRange,
@@ -102,18 +103,15 @@ function queryString(params: Record<string, string | number | undefined>) {
 function buildAuditUrl(
   path: '/analytics/payment-audit' | '/analytics/preview-trace',
   range: AnalyticsRange,
-  merchantId: string,
   page: number,
   pageSize: number,
   filters: AuditFilters,
 ) {
   const normalizedFilters = normalizeAuditFilters(filters)
   const params: Record<string, string | number | undefined> = {
-    scope: 'current',
     range,
     page,
     page_size: pageSize,
-    merchant_id: merchantId,
     payment_id: normalizedFilters.paymentId || undefined,
     request_id: normalizedFilters.requestId || undefined,
     gateway: normalizedFilters.gateway || undefined,
@@ -425,6 +423,8 @@ function buildInspectorModel(event: PaymentAuditEvent | null) {
 
 export function PaymentAuditPage() {
   const { merchantId } = useMerchantStore()
+  const authMerchantId = useAuthStore((state) => state.user?.merchantId || '')
+  const effectiveMerchantId = merchantId || authMerchantId
   const [searchParams, setSearchParams] = useSearchParams()
 
   const initialMode = parseAuditMode(searchParams.get('mode'))
@@ -443,12 +443,9 @@ export function PaymentAuditPage() {
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('summary')
   const pageSize = 12
 
-  const canQueryCurrent = Boolean(merchantId)
   const auditPath = mode === 'rule_based' ? '/analytics/preview-trace' : '/analytics/payment-audit'
 
-  const searchUrl = canQueryCurrent && merchantId
-    ? buildAuditUrl(auditPath, range, merchantId, page, pageSize, appliedFilters)
-    : null
+  const searchUrl = buildAuditUrl(auditPath, range, page, pageSize, appliedFilters)
 
   const auditSearch = useSWR<PaymentAuditResponse>(searchUrl, fetcher, {
     refreshInterval: 12000,
@@ -485,8 +482,8 @@ export function PaymentAuditPage() {
     }
   }, [selectedSummary])
 
-  const detailUrl = canQueryCurrent && merchantId && detailFilters
-    ? buildAuditUrl(auditPath, range, merchantId, 1, 50, detailFilters)
+  const detailUrl = detailFilters
+    ? buildAuditUrl(auditPath, range, 1, 50, detailFilters)
     : null
 
   const auditDetail = useSWR<PaymentAuditResponse>(detailUrl, fetcher, {
@@ -535,7 +532,7 @@ export function PaymentAuditPage() {
     ? {
         title: 'Decision Audit',
         description: 'Inspect preview-only rule activity from /routing/evaluate without mixing it into transaction outcomes.',
-        merchantPrompt: 'Use the merchant selector in the top bar to load the preview trace for a merchant.',
+        merchantPrompt: 'Analytics is scoped to your signed-in merchant. The top-bar merchant selector is not used for preview-trace access.',
         searchTitle: 'Search Rule Preview Trail',
         searchDescription: 'Use preview payment IDs or request IDs when you have them. Gateway, status, and error code help narrow rule-preview activity quickly.',
         matchingLabel: 'Matching previews',
@@ -548,7 +545,7 @@ export function PaymentAuditPage() {
     : {
         title: 'Decision Audit',
         description: 'Search by payment or request, then inspect gateway decisions, gateway updates, rule evaluations, and errors with the exact payload captured at each step.',
-        merchantPrompt: 'Use the merchant selector in the top bar to load the decision trail for a merchant.',
+        merchantPrompt: 'Analytics is scoped to your signed-in merchant. The top-bar merchant selector is not used for payment-audit access.',
         searchTitle: 'Search Decision Trail',
         searchDescription: 'Use payment or request IDs when you have them. Error code, gateway, route, and status narrow operational noise quickly.',
         matchingLabel: 'Matching payments',
@@ -671,23 +668,6 @@ export function PaymentAuditPage() {
     syncSearch(mode, range, 1, nextFilters, selectedKey)
   }
 
-  if (!canQueryCurrent) {
-    return (
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">{content.title}</h1>
-          <p className="mt-1 text-sm text-slate-500 dark:text-[#8a8a93]">
-            {content.description}
-          </p>
-        </div>
-        <EmptyState
-          title={mode === 'rule_based' ? 'Select a merchant to start auditing previews' : 'Select a merchant to start auditing payments'}
-          body={content.merchantPrompt}
-        />
-      </div>
-    )
-  }
-
   return (
     <div className="space-y-6">
       <div className="space-y-3">
@@ -697,7 +677,7 @@ export function PaymentAuditPage() {
             {content.description}
           </p>
           <div className="mt-4 flex flex-wrap items-center gap-3">
-            <Badge variant="green">{merchantId || 'Current merchant'}</Badge>
+            <Badge variant="green">{auditSearch.data?.merchant_id || effectiveMerchantId || 'Signed-in merchant'}</Badge>
             <Button size="sm" variant="ghost" onClick={refreshAll}>
               Refresh
             </Button>
