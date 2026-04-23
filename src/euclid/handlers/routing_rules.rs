@@ -21,6 +21,7 @@ use crate::{
 
 use crate::euclid::{
     errors::EuclidErrors,
+    errors::ValidationErrorDetails,
     types::{RoutingAlgorithmMapper, RoutingAlgorithmMapperUpdate},
 };
 use crate::{euclid::types::RoutingAlgorithm, logger, metrics};
@@ -32,10 +33,94 @@ use crate::app::get_tenant_app_state;
 
 use crate::error::ContainerError;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
+use serde::Serialize;
 use serde_json::{json, Value};
 
 #[allow(dead_code)]
 const DEFAULT_FALLBACK_IDENTIFIER: &str = "default_fallback_enabled";
+
+#[derive(Debug, Serialize)]
+struct RoutingCreateAnalyticsDetails<'a> {
+    request: &'a Value,
+    response: &'a RoutingDictionaryRecord,
+    algorithm_name: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+struct RoutingEvaluateAnalyticsDetails<'a> {
+    request: &'a RoutingRequest,
+    response: &'a RoutingEvaluateResponse,
+    rule_name: Option<&'a str>,
+    preview_kind: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct RoutingEvaluateErrorResponseDetails<'a> {
+    status: &'a str,
+    error_message: &'a str,
+    api_error: &'a Option<Value>,
+}
+
+#[derive(Debug, Serialize)]
+struct RoutingEvaluateErrorAnalyticsDetails<'a> {
+    request: &'a RoutingRequest,
+    response: RoutingEvaluateErrorResponseDetails<'a>,
+    preview_kind: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct ValidationErrorsPayload<'a> {
+    validation_errors: &'a [ValidationErrorDetails],
+}
+
+fn serialize_routing_create_analytics_details(
+    request: &Value,
+    response: &RoutingDictionaryRecord,
+    algorithm_name: &str,
+) -> Option<String> {
+    crate::analytics::serialize_details(&RoutingCreateAnalyticsDetails {
+        request,
+        response,
+        algorithm_name,
+    })
+}
+
+fn serialize_routing_evaluate_analytics_details(
+    request: &RoutingRequest,
+    response: &RoutingEvaluateResponse,
+    rule_name: Option<&str>,
+) -> Option<String> {
+    crate::analytics::serialize_details(&RoutingEvaluateAnalyticsDetails {
+        request,
+        response,
+        rule_name,
+        preview_kind: "routing_evaluate",
+    })
+}
+
+fn serialize_routing_evaluate_error_analytics_details(
+    request: &RoutingRequest,
+    status: &str,
+    error_message: &str,
+    api_error: &Option<Value>,
+) -> Option<String> {
+    crate::analytics::serialize_details(&RoutingEvaluateErrorAnalyticsDetails {
+        request,
+        response: RoutingEvaluateErrorResponseDetails {
+            status,
+            error_message,
+            api_error,
+        },
+        preview_kind: "routing_evaluate",
+    })
+}
+
+fn validation_errors_payload(
+    validation_errors: &[ValidationErrorDetails],
+) -> Option<serde_json::Value> {
+    serde_json::to_value(ValidationErrorsPayload { validation_errors }).ok()
+}
+
 pub async fn config_sr_dimensions(
     Json(payload): Json<SrDimensionConfig>,
 ) -> Result<Json<String>, ContainerError<EuclidErrors>> {
@@ -169,18 +254,6 @@ pub async fn routing_create(
                     );
                 }
 
-                let error_details: Vec<serde_json::Value> = validation_result
-                    .errors
-                    .iter()
-                    .map(|e| {
-                        serde_json::json!({
-                            "field": e.field,
-                            "error_type": e.error_type,
-                            "message": e.message,
-                        })
-                    })
-                    .collect();
-
                 let detailed_error = validation_result.to_error_message();
 
                 metrics::API_REQUEST_COUNTER
@@ -194,7 +267,7 @@ pub async fn routing_create(
                     ApiErrorResponse::new(
                         "FIELD_VALIDATION_FAILED",
                         format!("Routing rule validation failed: {}", detailed_error),
-                        Some(serde_json::json!({ "validation_errors": error_details })),
+                        validation_errors_payload(&validation_result.errors),
                     ),
                 ));
             }
@@ -263,12 +336,7 @@ pub async fn routing_create(
         global_request_id,
         trace_id,
         Some("success".to_string()),
-        serde_json::to_string(&serde_json::json!({
-            "request": payload,
-            "response": &response,
-            "algorithm_name": analytics_config_name,
-        }))
-        .ok(),
+        serialize_routing_create_analytics_details(&payload, &response, &analytics_config_name),
         Some("routing_created".to_string()),
     );
 
@@ -552,13 +620,7 @@ pub async fn routing_evaluate(
         preview_gateway(&response),
         rule_name.clone(),
         Some(response.status.clone()),
-        serde_json::to_string(&json!({
-            "request": &payload,
-            "response": &response,
-            "rule_name": rule_name.clone(),
-            "preview_kind": "routing_evaluate",
-        }))
-        .ok(),
+        serialize_routing_evaluate_analytics_details(&payload, &response, rule_name.as_deref()),
         request_id,
         global_request_id,
         trace_id,
@@ -619,16 +681,12 @@ fn record_routing_evaluate_preview_error(
         Some("RULE_EVALUATE_PREVIEW".to_string()),
         error_code,
         error_message.clone(),
-        serde_json::to_string(&json!({
-            "request": payload,
-            "response": {
-                "status": status,
-                "error_message": error_message,
-                "api_error": response_payload,
-            },
-            "preview_kind": "routing_evaluate",
-        }))
-        .ok(),
+        serialize_routing_evaluate_error_analytics_details(
+            payload,
+            &status,
+            &error_message,
+            &response_payload,
+        ),
         Some(event_stage.to_string()),
         None,
     );
