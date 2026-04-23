@@ -17,8 +17,8 @@ pub async fn load(
             total_errors: 0,
             errors: Vec::new(),
             samples: Vec::new(),
-            page: query.page.max(1),
-            page_size: query.page_size.clamp(1, 50),
+            page: query.page,
+            page_size: query.page_size,
         });
     }
 
@@ -34,7 +34,7 @@ pub async fn load(
         total_errors,
         errors,
         samples,
-        page: query.page.max(1),
-        page_size: query.page_size.clamp(1, 50),
+        page: query.page,
+        page_size: query.page_size,
     })
 }

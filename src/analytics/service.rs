@@ -636,8 +636,8 @@ pub fn parse_query(
         }
         _ => (None, None),
     };
-    let page = page.unwrap_or(1).max(1) as usize;
-    let page_size = page_size.unwrap_or(10).clamp(1, 50) as usize;
+    let page = normalise_page(page);
+    let page_size = normalise_page_size(page_size, DEFAULT_ANALYTICS_PAGE_SIZE);
     let gateways = normalise_gateways(gateways);
     let payment_method_type = if scope == AnalyticsScope::Current {
         payment_method_type.filter(|value| !value.is_empty())
@@ -718,8 +718,8 @@ pub fn parse_payment_audit_query(
         }
         _ => (None, None),
     };
-    let page = page.unwrap_or(1).max(1) as usize;
-    let page_size = page_size.unwrap_or(12).clamp(1, 50) as usize;
+    let page = normalise_page(page);
+    let page_size = normalise_page_size(page_size, DEFAULT_PAYMENT_AUDIT_PAGE_SIZE);
 
     PaymentAuditQuery {
         merchant_id,

@@ -33,8 +33,8 @@ pub async fn load(
     query: &AnalyticsQuery,
 ) -> Result<Vec<AnalyticsLogSample>, ApiError> {
     let (start_ms, end_ms) = effective_window_bounds(query);
-    let page = query.page.max(1);
-    let page_size = query.page_size.clamp(1, 50);
+    let page = query.page;
+    let page_size = query.page_size;
     let offset = (page - 1) * page_size;
 
     let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);

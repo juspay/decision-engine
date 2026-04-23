@@ -28,8 +28,8 @@ pub async fn load(
             status: query.status.clone(),
             flow_type: query.flow_type.clone(),
             error_code: query.error_code.clone(),
-            page: query.page.max(1),
-            page_size: query.page_size.clamp(1, 50),
+            page: query.page,
+            page_size: query.page_size,
             total_results: 0,
             results: Vec::new(),
             timeline: Vec::new(),
@@ -38,8 +38,8 @@ pub async fn load(
 
     let summary_rows = metrics::audit_summaries::load(client, query, preview_only).await?;
     let total_results = summary_rows.len();
-    let page = query.page.max(1);
-    let page_size = query.page_size.clamp(1, 50);
+    let page = query.page;
+    let page_size = query.page_size;
     let offset = (page - 1) * page_size;
     let results = summary_rows
         .iter()
