@@ -151,6 +151,15 @@ jobs:
           toolchain: stable 2 weeks ago
           components: clippy
 
+      - name: Install native deps for rdkafka
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libcurl4-openssl-dev \
+            libsasl2-dev \
+            zlib1g-dev
+
       - name: Install cargo-hack
         uses: taiki-e/install-action@v2.41.10
         with:
