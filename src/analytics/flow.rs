@@ -449,20 +449,20 @@ fn split_path(path: &str) -> Vec<&str> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used)]
-
     use super::*;
 
     #[test]
     fn serializes_enum_names_as_snake_case_strings() {
-        assert_eq!(
-            serde_json::to_string(&ApiFlow::DynamicRouting).unwrap(),
-            "\"dynamic_routing\""
-        );
-        assert_eq!(
-            serde_json::to_string(&FlowType::RoutingEvaluateVolumeSplit).unwrap(),
-            "\"routing_evaluate_volume_split\""
-        );
+        let api_flow = match serde_json::to_string(&ApiFlow::DynamicRouting) {
+            Ok(value) => value,
+            Err(error) => panic!("api flow should serialize: {error}"),
+        };
+        assert_eq!(api_flow, "\"dynamic_routing\"");
+        let flow_type = match serde_json::to_string(&FlowType::RoutingEvaluateVolumeSplit) {
+            Ok(value) => value,
+            Err(error) => panic!("flow type should serialize: {error}"),
+        };
+        assert_eq!(flow_type, "\"routing_evaluate_volume_split\"");
     }
 
     #[test]

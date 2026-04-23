@@ -13,7 +13,7 @@ use super::super::time::effective_window_bounds;
 
 #[derive(Debug, Clone, Deserialize, Row)]
 struct LogSampleRow {
-    route: String,
+    route: Option<String>,
     merchant_id: Option<String>,
     payment_id: Option<String>,
     request_id: Option<String>,
@@ -33,13 +33,13 @@ pub async fn load(
     query: &AnalyticsQuery,
 ) -> Result<Vec<AnalyticsLogSample>, ApiError> {
     let (start_ms, end_ms) = effective_window_bounds(query);
-    let page = query.page.max(1);
-    let page_size = query.page_size.clamp(1, 50);
+    let page = query.page;
+    let page_size = query.page_size;
     let offset = (page - 1) * page_size;
 
     let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
     builder.extend_selects([
-        "ifNull(route, 'unknown') AS route".to_string(),
+        "route".to_string(),
         "merchant_id".to_string(),
         "payment_id".to_string(),
         "request_id".to_string(),

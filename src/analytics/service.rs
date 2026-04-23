@@ -4,12 +4,17 @@ use crate::analytics::models::*;
 use crate::error;
 use crate::metrics::{ANALYTICS_EVENT_COUNTER, ROUTING_DECISION_COUNTER, ROUTING_RULE_HIT_COUNTER};
 use axum::http::HeaderMap;
+use serde::Serialize;
 use time::OffsetDateTime;
 
 pub fn now_ms() -> i64 {
     (OffsetDateTime::now_utc()
         .unix_timestamp_nanos()
         .div_euclid(1_000_000)) as i64
+}
+
+pub fn serialize_details<T: Serialize>(details: &T) -> Option<String> {
+    serde_json::to_string(details).ok()
 }
 
 fn header_string(headers: &HeaderMap, name: &'static str) -> Option<String> {
@@ -100,41 +105,29 @@ pub fn record_decision_event(
         .clone()
         .unwrap_or_else(|| "UNKNOWN".to_string());
     let status_label = status.clone().unwrap_or_else(|| "success".to_string());
+    let created_at_ms = now_ms();
     ROUTING_DECISION_COUNTER
         .with_label_values(&[approach.as_str(), status_label.as_str()])
         .inc();
-    enqueue_domain_event(DomainAnalyticsEvent {
-        event_id: crate::analytics::next_event_id(now_ms()),
-        api_flow: flow.api_flow,
-        flow_type: flow.flow_type,
+    enqueue_domain_event(DomainAnalyticsEvent::decision(
+        flow,
+        route,
         merchant_id,
+        routing_approach,
+        gateway,
+        status,
+        rule_name,
+        details,
         payment_id,
         request_id,
         global_request_id,
         trace_id,
+        event_stage,
         payment_method_type,
         payment_method,
-        card_network: None,
-        card_is_in: None,
-        currency: None,
-        country: None,
         auth_type,
-        gateway,
-        event_stage,
-        routing_approach,
-        rule_name,
-        status,
-        error_code: None,
-        error_message: None,
-        score_value: None,
-        sigma_factor: None,
-        average_latency: None,
-        tp99_latency: None,
-        transaction_count: None,
-        route: Some(route.as_str().to_string()),
-        details,
-        created_at_ms: now_ms(),
-    });
+        created_at_ms,
+    ));
 }
 
 pub fn record_score_snapshot_event(
@@ -161,15 +154,10 @@ pub fn record_score_snapshot_event(
     trace_id: Option<String>,
     event_stage: Option<String>,
 ) {
-    enqueue_domain_event(DomainAnalyticsEvent {
-        event_id: crate::analytics::next_event_id(now_ms()),
-        api_flow: flow.api_flow,
-        flow_type: flow.flow_type,
+    enqueue_domain_event(DomainAnalyticsEvent::score_snapshot(
+        flow,
+        route,
         merchant_id,
-        payment_id,
-        request_id,
-        global_request_id,
-        trace_id,
         payment_method_type,
         payment_method,
         card_network,
@@ -178,21 +166,19 @@ pub fn record_score_snapshot_event(
         country,
         auth_type,
         gateway,
-        event_stage,
-        routing_approach: None,
-        rule_name: None,
-        status: Some("snapshot".to_string()),
-        error_code: None,
-        error_message: None,
         score_value,
         sigma_factor,
         average_latency,
         tp99_latency,
         transaction_count,
-        route: Some(route.as_str().to_string()),
         details,
-        created_at_ms: now_ms(),
-    });
+        payment_id,
+        request_id,
+        global_request_id,
+        trace_id,
+        event_stage,
+        now_ms(),
+    ));
 }
 
 pub fn record_gateway_update_event(
@@ -208,38 +194,20 @@ pub fn record_gateway_update_event(
     trace_id: Option<String>,
     event_stage: Option<String>,
 ) {
-    enqueue_domain_event(DomainAnalyticsEvent {
-        event_id: crate::analytics::next_event_id(now_ms()),
-        api_flow: flow.api_flow,
-        flow_type: flow.flow_type,
+    enqueue_domain_event(DomainAnalyticsEvent::gateway_update(
+        flow,
+        route,
         merchant_id,
+        gateway,
+        status,
+        details,
         payment_id,
         request_id,
         global_request_id,
         trace_id,
-        payment_method_type: None,
-        payment_method: None,
-        card_network: None,
-        card_is_in: None,
-        currency: None,
-        country: None,
-        auth_type: None,
-        gateway,
         event_stage,
-        routing_approach: None,
-        rule_name: None,
-        status,
-        error_code: None,
-        error_message: None,
-        score_value: None,
-        sigma_factor: None,
-        average_latency: None,
-        tp99_latency: None,
-        transaction_count: None,
-        route: Some(route.as_str().to_string()),
-        details,
-        created_at_ms: now_ms(),
-    });
+        now_ms(),
+    ));
 }
 
 pub fn record_rule_hit_event(
@@ -259,38 +227,21 @@ pub fn record_rule_hit_event(
     ROUTING_RULE_HIT_COUNTER
         .with_label_values(&[rule_name.as_str()])
         .inc();
-    enqueue_domain_event(DomainAnalyticsEvent {
-        event_id: crate::analytics::next_event_id(now_ms()),
-        api_flow: flow.api_flow,
-        flow_type: flow.flow_type,
+    enqueue_domain_event(DomainAnalyticsEvent::rule_hit(
+        flow,
+        route,
         merchant_id,
+        rule_name,
+        gateway,
+        routing_approach,
+        details,
         payment_id,
         request_id,
         global_request_id,
         trace_id,
-        payment_method_type: None,
-        payment_method: None,
-        card_network: None,
-        card_is_in: None,
-        currency: None,
-        country: None,
-        auth_type: None,
-        gateway,
         event_stage,
-        routing_approach,
-        rule_name: Some(rule_name),
-        status: Some("hit".to_string()),
-        error_code: None,
-        error_message: None,
-        score_value: None,
-        sigma_factor: None,
-        average_latency: None,
-        tp99_latency: None,
-        transaction_count: None,
-        route: Some(route.as_str().to_string()),
-        details,
-        created_at_ms: now_ms(),
-    });
+        now_ms(),
+    ));
 }
 
 pub fn record_rule_evaluation_preview_event(
@@ -305,38 +256,19 @@ pub fn record_rule_evaluation_preview_event(
     global_request_id: Option<String>,
     trace_id: Option<String>,
 ) {
-    enqueue_domain_event(DomainAnalyticsEvent {
-        event_id: crate::analytics::next_event_id(now_ms()),
-        api_flow: flow.api_flow,
-        flow_type: flow.flow_type,
+    enqueue_domain_event(DomainAnalyticsEvent::rule_evaluation_preview(
+        flow,
         merchant_id,
         payment_id,
+        gateway,
+        rule_name,
+        status,
+        details,
         request_id,
         global_request_id,
         trace_id,
-        payment_method_type: None,
-        payment_method: None,
-        card_network: None,
-        card_is_in: None,
-        currency: None,
-        country: None,
-        auth_type: None,
-        gateway,
-        event_stage: Some("preview_evaluated".to_string()),
-        routing_approach: Some("RULE_EVALUATE_PREVIEW".to_string()),
-        rule_name,
-        status,
-        error_code: None,
-        error_message: None,
-        score_value: None,
-        sigma_factor: None,
-        average_latency: None,
-        tp99_latency: None,
-        transaction_count: None,
-        route: Some(AnalyticsRoute::RoutingEvaluate.as_str().to_string()),
-        details,
-        created_at_ms: now_ms(),
-    });
+        now_ms(),
+    ));
 }
 
 pub fn record_error_event(
@@ -355,38 +287,23 @@ pub fn record_error_event(
     event_stage: Option<String>,
     auth_type: Option<String>,
 ) {
-    enqueue_domain_event(DomainAnalyticsEvent {
-        event_id: crate::analytics::next_event_id(now_ms()),
-        api_flow: flow.api_flow,
-        flow_type: flow.flow_type,
+    enqueue_domain_event(DomainAnalyticsEvent::error(
+        flow,
+        route,
         merchant_id,
         payment_id,
         request_id,
         global_request_id,
         trace_id,
-        payment_method_type: None,
-        payment_method: None,
-        card_network: None,
-        card_is_in: None,
-        currency: None,
-        country: None,
-        auth_type,
         gateway,
-        event_stage,
         routing_approach,
-        rule_name: None,
-        status: Some("failure".to_string()),
-        error_code: Some(error_code),
-        error_message: Some(error_message),
-        score_value: None,
-        sigma_factor: None,
-        average_latency: None,
-        tp99_latency: None,
-        transaction_count: None,
-        route: Some(route.as_str().to_string()),
+        error_code,
+        error_message,
         details,
-        created_at_ms: now_ms(),
-    });
+        event_stage,
+        auth_type,
+        now_ms(),
+    ));
 }
 
 pub fn record_request_hit_event(
@@ -399,38 +316,17 @@ pub fn record_request_hit_event(
     trace_id: Option<String>,
     auth_type: Option<String>,
 ) {
-    enqueue_domain_event(DomainAnalyticsEvent {
-        event_id: crate::analytics::next_event_id(now_ms()),
-        api_flow: flow.api_flow,
-        flow_type: flow.flow_type,
+    enqueue_domain_event(DomainAnalyticsEvent::request_hit(
+        flow,
+        route,
         merchant_id,
         payment_id,
         request_id,
         global_request_id,
         trace_id,
-        payment_method_type: None,
-        payment_method: None,
-        card_network: None,
-        card_is_in: None,
-        currency: None,
-        country: None,
         auth_type,
-        gateway: None,
-        event_stage: Some("request_received".to_string()),
-        routing_approach: None,
-        rule_name: None,
-        status: Some("received".to_string()),
-        error_code: None,
-        error_message: None,
-        score_value: None,
-        sigma_factor: None,
-        average_latency: None,
-        tp99_latency: None,
-        transaction_count: None,
-        route: Some(route.as_str().to_string()),
-        details: None,
-        created_at_ms: now_ms(),
-    });
+        now_ms(),
+    ));
 }
 
 pub fn record_operation_event(
@@ -445,38 +341,19 @@ pub fn record_operation_event(
     details: Option<String>,
     event_stage: Option<String>,
 ) {
-    enqueue_domain_event(DomainAnalyticsEvent {
-        event_id: crate::analytics::next_event_id(now_ms()),
-        api_flow: flow.api_flow,
-        flow_type: flow.flow_type,
+    enqueue_domain_event(DomainAnalyticsEvent::operation(
+        flow,
+        route,
         merchant_id,
         payment_id,
         request_id,
         global_request_id,
         trace_id,
-        payment_method_type: None,
-        payment_method: None,
-        card_network: None,
-        card_is_in: None,
-        currency: None,
-        country: None,
-        auth_type: None,
-        gateway: None,
-        event_stage,
-        routing_approach: None,
-        rule_name: None,
         status,
-        error_code: None,
-        error_message: None,
-        score_value: None,
-        sigma_factor: None,
-        average_latency: None,
-        tp99_latency: None,
-        transaction_count: None,
-        route: Some(route.as_str().to_string()),
         details,
-        created_at_ms: now_ms(),
-    });
+        event_stage,
+        now_ms(),
+    ));
 }
 
 pub async fn overview(
@@ -575,134 +452,6 @@ pub async fn preview_trace(
         .read_store()
         .preview_trace(query)
         .await
-}
-
-fn normalise_gateways(raw: Option<String>) -> Vec<String> {
-    raw.into_iter()
-        .flat_map(|value| value.split(',').map(str::to_owned).collect::<Vec<_>>())
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .collect()
-}
-
-fn normalise_payment_audit_route_filter(route: Option<String>) -> Option<String> {
-    route.and_then(|value| {
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            return None;
-        }
-
-        AnalyticsRoute::from_filter_value(trimmed).map(|route| route.as_str().to_string())
-    })
-}
-
-fn normalise_payment_audit_status_filter(status: Option<String>) -> Option<String> {
-    status.and_then(|value| {
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            return None;
-        }
-
-        Some(match trimmed.to_ascii_lowercase().as_str() {
-            "success" => "success".to_string(),
-            "failure" => "FAILURE".to_string(),
-            _ => trimmed.to_string(),
-        })
-    })
-}
-
-pub fn parse_query(
-    merchant_id: String,
-    range: Option<String>,
-    start_ms: Option<i64>,
-    end_ms: Option<i64>,
-    page: Option<u32>,
-    page_size: Option<u32>,
-    payment_method_type: Option<String>,
-    payment_method: Option<String>,
-    card_network: Option<String>,
-    card_is_in: Option<String>,
-    currency: Option<String>,
-    country: Option<String>,
-    auth_type: Option<String>,
-    gateways: Option<String>,
-) -> AnalyticsQuery {
-    let range = AnalyticsRange::from_query(range.as_deref());
-    let (start_ms, end_ms) = match (start_ms, end_ms) {
-        (Some(start_ms), Some(end_ms)) if start_ms >= 0 && end_ms > start_ms => {
-            (Some(start_ms), Some(end_ms))
-        }
-        _ => (None, None),
-    };
-    let page = page.unwrap_or(1).max(1) as usize;
-    let page_size = page_size.unwrap_or(10).clamp(1, 50) as usize;
-    let gateways = normalise_gateways(gateways);
-    let payment_method_type = payment_method_type.filter(|value| !value.is_empty());
-    let payment_method = payment_method.filter(|value| !value.is_empty());
-    let card_network = card_network.filter(|value| !value.is_empty());
-    let card_is_in = card_is_in.filter(|value| !value.is_empty());
-    let currency = currency.filter(|value| !value.is_empty());
-    let country = country.filter(|value| !value.is_empty());
-    let auth_type = auth_type.filter(|value| !value.is_empty());
-
-    AnalyticsQuery {
-        merchant_id,
-        range,
-        start_ms,
-        end_ms,
-        page,
-        page_size,
-        payment_method_type,
-        payment_method,
-        card_network,
-        card_is_in,
-        currency,
-        country,
-        auth_type,
-        gateways,
-    }
-}
-
-pub fn parse_payment_audit_query(
-    merchant_id: String,
-    range: Option<String>,
-    start_ms: Option<i64>,
-    end_ms: Option<i64>,
-    page: Option<u32>,
-    page_size: Option<u32>,
-    payment_id: Option<String>,
-    request_id: Option<String>,
-    gateway: Option<String>,
-    route: Option<String>,
-    status: Option<String>,
-    flow_type: Option<String>,
-    error_code: Option<String>,
-) -> PaymentAuditQuery {
-    let range = AnalyticsRange::from_query(range.as_deref());
-    let (start_ms, end_ms) = match (start_ms, end_ms) {
-        (Some(start_ms), Some(end_ms)) if start_ms >= 0 && end_ms > start_ms => {
-            (Some(start_ms), Some(end_ms))
-        }
-        _ => (None, None),
-    };
-    let page = page.unwrap_or(1).max(1) as usize;
-    let page_size = page_size.unwrap_or(12).clamp(1, 50) as usize;
-
-    PaymentAuditQuery {
-        merchant_id,
-        range,
-        start_ms,
-        end_ms,
-        page,
-        page_size,
-        payment_id,
-        request_id,
-        gateway,
-        route: normalise_payment_audit_route_filter(route),
-        status: normalise_payment_audit_status_filter(status),
-        flow_type,
-        error_code,
-    }
 }
 
 pub fn format_range(query: &AnalyticsQuery) -> String {

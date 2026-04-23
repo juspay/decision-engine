@@ -327,8 +327,6 @@ fn build_client_config(config: &KafkaAnalyticsConfig) -> ClientConfig {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used)]
-
     use crate::analytics::{ApiEvent, ApiFlow, DomainAnalyticsEvent, FlowType};
 
     use super::{api_event_key, domain_event_key, KafkaApiEventRow, KafkaDomainEventRow};
@@ -368,7 +366,10 @@ mod tests {
             created_at_ms: 123,
         };
         let row = KafkaDomainEventRow::from(event);
-        let json = serde_json::to_string(&row).unwrap();
+        let json = match serde_json::to_string(&row) {
+            Ok(json) => json,
+            Err(error) => panic!("domain analytics row should serialize: {error}"),
+        };
         assert!(json.contains("\"schema_version\":1"));
         assert!(json.contains("\"created_at_ms\":123"));
         assert!(json.contains("\"payment_id\":\"pay_1\""));

@@ -13,9 +13,9 @@ use super::super::time::effective_window_bounds;
 
 #[derive(Debug, Clone, Deserialize, Row)]
 struct ErrorSummaryRow {
-    route: String,
-    error_code: String,
-    error_message: String,
+    route: Option<String>,
+    error_code: Option<String>,
+    error_message: Option<String>,
     count: u64,
     last_seen_ms: i64,
 }
@@ -28,9 +28,9 @@ pub async fn load(
     let (start_ms, end_ms) = effective_window_bounds(query);
     let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
     builder.extend_selects([
-        "ifNull(route, 'unknown') AS route".to_string(),
-        "ifNull(error_code, 'unknown') AS error_code".to_string(),
-        "ifNull(error_message, 'unknown') AS error_message".to_string(),
+        "route".to_string(),
+        "error_code".to_string(),
+        "error_message".to_string(),
         "count() AS count".to_string(),
         "max(created_at_ms) AS last_seen_ms".to_string(),
     ]);

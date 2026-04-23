@@ -25,6 +25,55 @@ use crate::metrics::API_LATENCY_HISTOGRAM;
 use crate::metrics::API_REQUEST_COUNTER;
 use crate::metrics::API_REQUEST_TOTAL_COUNTER;
 use axum::extract::Json;
+use serde::Serialize;
+
+#[derive(Debug, Serialize)]
+struct UpdateGatewayScoreRequestDetail<'a> {
+    merchant_id: &'a str,
+    gateway: &'a str,
+    payment_id: &'a str,
+    status: &'a str,
+    gateway_reference_id: Option<&'a str>,
+    enforce_dynamic_routing_failure: Option<bool>,
+    txn_latency: Option<&'a crate::types::txn_details::types::TransactionLatency>,
+}
+
+#[derive(Debug, Serialize)]
+struct UpdateGatewayScoreSelectionReason<'a> {
+    transaction_status: &'a str,
+    stage: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct UpdateGatewayScoreSuccessDetail<'a> {
+    request: UpdateGatewayScoreRequestDetail<'a>,
+    response: &'a UpdateScoreResponse,
+    selection_reason: UpdateGatewayScoreSelectionReason<'a>,
+}
+
+#[derive(Debug, Serialize)]
+struct UpdateGatewayScoreFailureDetail<'a> {
+    payment_id: &'a str,
+    request_id: Option<&'a str>,
+}
+
+fn request_parse_error_response(error: impl ToString) -> ErrorResponse {
+    ErrorResponse {
+        status: "400".to_string(),
+        error_code: "400".to_string(),
+        error_message: "Error parsing request".to_string(),
+        priority_logic_tag: None,
+        routing_approach: None,
+        filter_wise_gateways: None,
+        error_info: crate::decider::gatewaydecider::types::UnifiedError {
+            code: "INVALID_INPUT".to_string(),
+            user_message: "Invalid request params. Please verify your input.".to_string(),
+            developer_message: error.to_string(),
+        },
+        priority_logic_output: None,
+        is_dynamic_mga_enabled: false,
+    }
+}
 
 #[axum::debug_handler]
 pub async fn update_gateway_score(
@@ -125,23 +174,23 @@ pub async fn update_gateway_score(
                         Some(gateway.clone()),
                         Some(transaction_status.clone()),
                         crate::analytics::AnalyticsRoute::UpdateGatewayScore,
-                        serde_json::to_string(&serde_json::json!({
-                            "request": {
-                                "merchant_id": merchant_id,
-                                "gateway": gateway,
-                                "payment_id": payment_id,
-                                "status": transaction_status,
-                                "gateway_reference_id": payload.gateway_reference_id,
-                                "enforce_dynamic_routing_failure": payload.enforce_dynamic_routing_failure,
-                                "txn_latency": payload.txn_latency,
+                        crate::analytics::serialize_details(&UpdateGatewayScoreSuccessDetail {
+                            request: UpdateGatewayScoreRequestDetail {
+                                merchant_id: &merchant_id,
+                                gateway: &gateway,
+                                payment_id: &payment_id,
+                                status: &transaction_status,
+                                gateway_reference_id: payload.gateway_reference_id.as_deref(),
+                                enforce_dynamic_routing_failure: payload
+                                    .enforce_dynamic_routing_failure,
+                                txn_latency: payload.txn_latency.as_ref(),
                             },
-                            "response": &response,
-                            "selection_reason": {
-                                "transaction_status": transaction_status,
-                                "stage": "gateway score updated",
-                            }
-                        }))
-                        .ok(),
+                            response: &response,
+                            selection_reason: UpdateGatewayScoreSelectionReason {
+                                transaction_status: &transaction_status,
+                                stage: "gateway score updated",
+                            },
+                        }),
                         Some(response.payment_id.clone()),
                         x_request_id.clone(),
                         global_request_id.clone(),
@@ -173,11 +222,10 @@ pub async fn update_gateway_score(
                         None,
                         e.error_code.clone(),
                         e.error_message.clone(),
-                        serde_json::to_string(&serde_json::json!({
-                            "payment_id": payment_id,
-                            "request_id": x_request_id,
-                        }))
-                        .ok(),
+                        crate::analytics::serialize_details(&UpdateGatewayScoreFailureDetail {
+                            payment_id: &payment_id,
+                            request_id: x_request_id.as_deref(),
+                        }),
                         Some("score_update_failed".to_string()),
                         None,
                     );
@@ -189,6 +237,7 @@ pub async fn update_gateway_score(
         }
         Err(e) => {
             crate::logger::debug!(tag = "UpdateScoreRequest", "Error: {:?}", e);
+            let error_response = request_parse_error_response(&e);
             crate::analytics::record_error_event(
                 crate::analytics::AnalyticsFlowContext::new(
                     crate::analytics::ApiFlow::DynamicRouting,
@@ -212,10 +261,7 @@ pub async fn update_gateway_score(
                 .with_label_values(&["update_gateway_score", "failure"])
                 .inc();
             timer.observe_duration();
-            Err(
-                crate::routes::body::RequestBodyError::Read(axum::Error::new(e))
-                    .into_error_response(),
-            )
+            Err(error_response)
         }
     }
 }

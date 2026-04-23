@@ -57,6 +57,7 @@ export async function apiFetch<T>(
     if (token) {
       headers.set('Authorization', `Bearer ${token}`)
     }
+
     const res = await fetch(path, {
       ...options,
       headers,
@@ -80,12 +81,12 @@ export async function apiFetch<T>(
       let isTokenExpiry = false
       try {
         const json = JSON.parse(responseText)
-        const msg: string = json.message ?? ''
+        const message = `${json.message ?? ''}`.toLowerCase()
         isTokenExpiry =
-          msg.toLowerCase().includes('expired') ||
-          msg.toLowerCase().includes('invalid or expired')
+          message.includes('expired') ||
+          message.includes('invalid or expired')
       } catch {
-        // non-JSON 401, not a JWT error
+        // Ignore non-JSON 401s; not every unauthorized response should clear the session.
       }
 
       if (isTokenExpiry) {

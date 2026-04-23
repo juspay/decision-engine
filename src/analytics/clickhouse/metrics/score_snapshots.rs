@@ -13,15 +13,15 @@ use super::super::time::effective_window_bounds;
 
 #[derive(Debug, Clone, Deserialize, Row)]
 struct ScoreSnapshotRow {
-    merchant_id: String,
-    payment_method_type: String,
-    payment_method: String,
-    gateway: String,
-    score_value: f64,
-    sigma_factor: f64,
-    average_latency: f64,
-    tp99_latency: f64,
-    transaction_count: i64,
+    merchant_id: Option<String>,
+    payment_method_type: Option<String>,
+    payment_method: Option<String>,
+    gateway: Option<String>,
+    score_value: Option<f64>,
+    sigma_factor: Option<f64>,
+    average_latency: Option<f64>,
+    tp99_latency: Option<f64>,
+    transaction_count: Option<i64>,
     last_updated_ms: i64,
 }
 
@@ -33,15 +33,15 @@ pub async fn load(
     let (start_ms, end_ms) = effective_window_bounds(query);
     let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
     builder.extend_selects([
-        "ifNull(merchant_id, '') AS merchant_id".to_string(),
-        "ifNull(payment_method_type, '') AS payment_method_type".to_string(),
-        "ifNull(payment_method, '') AS payment_method".to_string(),
-        "ifNull(gateway, '') AS gateway".to_string(),
-        "ifNull(argMax(score_value, created_at_ms), 0.0) AS score_value".to_string(),
-        "ifNull(argMax(sigma_factor, created_at_ms), 0.0) AS sigma_factor".to_string(),
-        "ifNull(argMax(average_latency, created_at_ms), 0.0) AS average_latency".to_string(),
-        "ifNull(argMax(tp99_latency, created_at_ms), 0.0) AS tp99_latency".to_string(),
-        "ifNull(argMax(transaction_count, created_at_ms), 0) AS transaction_count".to_string(),
+        "merchant_id".to_string(),
+        "payment_method_type".to_string(),
+        "payment_method".to_string(),
+        "gateway".to_string(),
+        "argMax(score_value, created_at_ms) AS score_value".to_string(),
+        "argMax(sigma_factor, created_at_ms) AS sigma_factor".to_string(),
+        "argMax(average_latency, created_at_ms) AS average_latency".to_string(),
+        "argMax(tp99_latency, created_at_ms) AS tp99_latency".to_string(),
+        "argMax(transaction_count, created_at_ms) AS transaction_count".to_string(),
         "max(created_at_ms) AS last_updated_ms".to_string(),
     ]);
     builder.extend_filters(score_filters(query, start_ms, end_ms));
