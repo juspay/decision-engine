@@ -323,6 +323,9 @@ pub mod error_codes {
 
     /// Validation error: Represents an error occurring in euclid codebase.
     pub const TE_04: &str = "TE_04";
+
+    /// Validation error: Represents an error occurring in debit routing codebase.
+    pub const TE_05: &str = "TE_05";
 }
 
 impl axum::response::IntoResponse for ApiError {
