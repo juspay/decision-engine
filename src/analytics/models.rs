@@ -379,7 +379,7 @@ pub struct PaymentAuditSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaymentAuditEvent {
-    pub id: i64,
+    pub id: String,
     pub flow_type: String,
     pub event_stage: Option<String>,
     pub route: Option<String>,

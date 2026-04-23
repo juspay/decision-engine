@@ -2,10 +2,11 @@ use crate::analytics::flow::AnalyticsRoute;
 use crate::analytics::models::{AnalyticsQuery, PaymentAuditQuery};
 
 use super::common::{
-    static_flow_type_in_sql, PAYMENT_AUDIT_DYNAMIC_FLOW_TYPES, PAYMENT_AUDIT_PREVIEW_FLOW_TYPES,
+    payment_audit_summary_kind, static_flow_type_in_sql, PAYMENT_AUDIT_DYNAMIC_FLOW_TYPES,
+    PAYMENT_AUDIT_PREVIEW_FLOW_TYPES,
 };
 use super::query::FilterClause;
-use super::time::effective_payment_audit_window_bounds;
+use super::time::{effective_payment_audit_window_bounds, payment_audit_summary_bucket_bounds};
 
 pub fn base_window_filters(start_ms: i64, end_ms: i64) -> Vec<FilterClause> {
     vec![
@@ -56,7 +57,10 @@ pub fn score_filters(query: &AnalyticsQuery, start_ms: i64, end_ms: i64) -> Vec<
     filters
 }
 
-pub fn payment_audit_filters(query: &PaymentAuditQuery, preview_only: bool) -> Vec<FilterClause> {
+pub fn payment_audit_raw_filters(
+    query: &PaymentAuditQuery,
+    preview_only: bool,
+) -> Vec<FilterClause> {
     let (start_ms, end_ms) = effective_payment_audit_window_bounds(query);
     let mut filters = base_window_filters(start_ms, end_ms);
 
@@ -81,12 +85,6 @@ pub fn payment_audit_filters(query: &PaymentAuditQuery, preview_only: bool) -> V
         }
     }
 
-    if let Some(payment_id) = &query.payment_id {
-        filters.push(FilterClause::eq("payment_id", payment_id.clone()));
-    } else if let Some(request_id) = &query.request_id {
-        filters.push(FilterClause::eq("request_id", request_id.clone()));
-    }
-
     if let Some(gateway) = &query.gateway {
         filters.push(FilterClause::eq("gateway", gateway.clone()));
     }
@@ -103,11 +101,27 @@ pub fn payment_audit_filters(query: &PaymentAuditQuery, preview_only: bool) -> V
     filters
 }
 
+pub fn payment_audit_summary_bucket_filters(
+    query: &PaymentAuditQuery,
+    preview_only: bool,
+) -> Vec<FilterClause> {
+    let (start_ms, end_ms) = payment_audit_summary_bucket_bounds(query);
+    vec![
+        FilterClause::eq("merchant_id", query.merchant_id.clone()),
+        FilterClause::gte("bucket_start_ms", start_ms),
+        FilterClause::lte("bucket_start_ms", end_ms),
+        FilterClause::eq("summary_kind", payment_audit_summary_kind(preview_only)),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use crate::analytics::models::{AnalyticsQuery, AnalyticsRange, PaymentAuditQuery};
 
-    use super::{analytics_dimension_filters, merchant_filter, payment_audit_filters};
+    use super::{
+        analytics_dimension_filters, merchant_filter, payment_audit_raw_filters,
+        payment_audit_summary_bucket_filters,
+    };
 
     fn analytics_query() -> AnalyticsQuery {
         AnalyticsQuery {
@@ -179,7 +193,7 @@ mod tests {
 
     #[test]
     fn payment_audit_filters_switch_preview_flow_types() {
-        let filters = payment_audit_filters(&payment_audit_query(), true);
+        let filters = payment_audit_raw_filters(&payment_audit_query(), true);
         let predicates = filters
             .iter()
             .map(|filter| filter.predicate().to_string())
@@ -192,5 +206,26 @@ mod tests {
                 && predicate.contains("routing_evaluate_advanced")
                 && predicate.contains("routing_evaluate_preview")
         }));
+    }
+
+    #[test]
+    fn payment_audit_summary_bucket_filters_use_bucket_time_and_kind() {
+        let filters = payment_audit_summary_bucket_filters(&payment_audit_query(), true);
+        let predicates = filters
+            .iter()
+            .map(|filter| filter.predicate().to_string())
+            .collect::<Vec<_>>();
+        assert!(predicates
+            .iter()
+            .any(|predicate| predicate == "merchant_id = ?"));
+        assert!(predicates
+            .iter()
+            .any(|predicate| predicate == "bucket_start_ms >= ?"));
+        assert!(predicates
+            .iter()
+            .any(|predicate| predicate == "bucket_start_ms <= ?"));
+        assert!(predicates
+            .iter()
+            .any(|predicate| predicate == "summary_kind = ?"));
     }
 }
