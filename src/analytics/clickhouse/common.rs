@@ -6,6 +6,9 @@ use crate::analytics::models::AnalyticsRouteHit;
 use crate::error::ApiError;
 
 pub const DOMAIN_TABLE: &str = "analytics_domain_events";
+pub const PAYMENT_AUDIT_SUMMARY_BUCKET_TABLE: &str = "analytics_payment_audit_summary_buckets";
+pub const PAYMENT_AUDIT_SUMMARY_KIND_DYNAMIC: &str = "dynamic";
+pub const PAYMENT_AUDIT_SUMMARY_KIND_PREVIEW: &str = "preview";
 pub const OVERVIEW_SCORE_FLOW_TYPES: &[FlowType] = &[
     FlowType::UpdateGatewayScoreScoreSnapshot,
     FlowType::UpdateScoreLegacyScoreSnapshot,
@@ -105,4 +108,12 @@ pub fn payment_audit_route_label(route: String) -> String {
     AnalyticsRoute::from_stored_value(&route)
         .map(|route| route.payment_audit_label().to_string())
         .unwrap_or(route)
+}
+
+pub const fn payment_audit_summary_kind(preview_only: bool) -> &'static str {
+    if preview_only {
+        PAYMENT_AUDIT_SUMMARY_KIND_PREVIEW
+    } else {
+        PAYMENT_AUDIT_SUMMARY_KIND_DYNAMIC
+    }
 }

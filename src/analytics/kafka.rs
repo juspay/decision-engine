@@ -12,21 +12,46 @@ use crate::analytics::flow::{ApiFlow, FlowType};
 use crate::analytics::store::AnalyticsWriteStore;
 use crate::config::KafkaAnalyticsConfig;
 use crate::error::{ApiError, ConfigurationError};
-use crate::metrics::{
-    ANALYTICS_EVENTS_DROPPED_TOTAL, ANALYTICS_KAFKA_DELIVERY_LATENCY_HISTOGRAM,
-    ANALYTICS_KAFKA_PRODUCE_TOTAL,
-};
+use crate::metrics::{ANALYTICS_KAFKA_DELIVERY_LATENCY_HISTOGRAM, ANALYTICS_KAFKA_PRODUCE_TOTAL};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KafkaPublishOutcome {
+    EncodingFailed,
+    EnqueueFailedQueueFull,
+    EnqueueFailedProducerError,
+    DeliverySuccess,
+    DeliveryFailed,
+    DeliveryCanceled,
+}
+
+impl KafkaPublishOutcome {
+    fn metric_result(self) -> &'static str {
+        match self {
+            Self::EncodingFailed => "encoding_failed",
+            Self::EnqueueFailedQueueFull => "enqueue_failed_queue_full",
+            Self::EnqueueFailedProducerError => "enqueue_failed_producer_error",
+            Self::DeliverySuccess => "delivery_success",
+            Self::DeliveryFailed => "delivery_failed",
+            Self::DeliveryCanceled => "delivery_canceled",
+        }
+    }
+
+    fn is_success(self) -> bool {
+        matches!(self, Self::DeliverySuccess)
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KafkaDomainEventRow {
     pub schema_version: u8,
     pub produced_at_ms: i64,
-    pub event_id: u64,
+    pub event_id: String,
     pub api_flow: ApiFlow,
     pub flow_type: FlowType,
     pub merchant_id: Option<String>,
     pub payment_id: Option<String>,
     pub request_id: Option<String>,
+    pub lookup_key: Option<String>,
     pub global_request_id: Option<String>,
     pub trace_id: Option<String>,
     pub payment_method_type: Option<String>,
@@ -57,7 +82,7 @@ pub struct KafkaDomainEventRow {
 pub struct KafkaApiEventRow {
     pub schema_version: u8,
     pub produced_at_ms: i64,
-    pub event_id: u64,
+    pub event_id: String,
     pub merchant_id: Option<String>,
     pub payment_id: Option<String>,
     pub api_flow: ApiFlow,
@@ -80,6 +105,12 @@ pub struct KafkaApiEventRow {
 
 impl From<DomainAnalyticsEvent> for KafkaDomainEventRow {
     fn from(event: DomainAnalyticsEvent) -> Self {
+        let lookup_key = event.lookup_key.clone().or_else(|| {
+            crate::analytics::derive_lookup_key(
+                event.payment_id.as_deref(),
+                event.request_id.as_deref(),
+            )
+        });
         Self {
             schema_version: 1,
             produced_at_ms: crate::analytics::now_ms(),
@@ -89,6 +120,7 @@ impl From<DomainAnalyticsEvent> for KafkaDomainEventRow {
             merchant_id: event.merchant_id,
             payment_id: event.payment_id,
             request_id: event.request_id,
+            lookup_key,
             global_request_id: event.global_request_id,
             trace_id: event.trace_id,
             payment_method_type: event.payment_method_type,
@@ -173,17 +205,25 @@ impl KafkaAnalyticsStore {
         Ok(Self { producer, config })
     }
 
-    async fn send_api_event(&self, event: &ApiEvent) -> Result<(), ApiError> {
-        let payload = serde_json::to_vec(&KafkaApiEventRow::from(event.clone()))
-            .map_err(|_| ApiError::EncodingError)?;
+    async fn send_api_event(&self, event: &ApiEvent) -> KafkaPublishOutcome {
+        let payload = match serde_json::to_vec(&KafkaApiEventRow::from(event.clone())) {
+            Ok(payload) => payload,
+            Err(_) => {
+                return KafkaPublishOutcome::EncodingFailed;
+            }
+        };
         let key = api_event_key(event);
         self.send_payload("api", &self.config.api_topic, &key, payload)
             .await
     }
 
-    async fn send_domain_event(&self, event: &DomainAnalyticsEvent) -> Result<(), ApiError> {
-        let payload = serde_json::to_vec(&KafkaDomainEventRow::from(event.clone()))
-            .map_err(|_| ApiError::EncodingError)?;
+    async fn send_domain_event(&self, event: &DomainAnalyticsEvent) -> KafkaPublishOutcome {
+        let payload = match serde_json::to_vec(&KafkaDomainEventRow::from(event.clone())) {
+            Ok(payload) => payload,
+            Err(_) => {
+                return KafkaPublishOutcome::EncodingFailed;
+            }
+        };
         let key = domain_event_key(event);
         self.send_payload("domain", &self.config.domain_topic, &key, payload)
             .await
@@ -195,50 +235,47 @@ impl KafkaAnalyticsStore {
         topic: &str,
         key: &str,
         payload: Vec<u8>,
-    ) -> Result<(), ApiError> {
+    ) -> KafkaPublishOutcome {
         let started_at = Instant::now();
-        let delivery = self
+        let delivery = match self
             .producer
             .send_result(FutureRecord::to(topic).key(key).payload(&payload))
-            .map_err(|(error, _message)| {
-                let reason = match error {
+        {
+            Ok(delivery) => delivery,
+            Err((error, _message)) => {
+                let outcome = match error {
                     KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull) => {
-                        "producer_queue_full"
+                        KafkaPublishOutcome::EnqueueFailedQueueFull
                     }
-                    _ => "producer_error",
+                    _ => KafkaPublishOutcome::EnqueueFailedProducerError,
                 };
-                ANALYTICS_EVENTS_DROPPED_TOTAL
-                    .with_label_values(&[stream, reason])
-                    .inc();
                 ANALYTICS_KAFKA_PRODUCE_TOTAL
-                    .with_label_values(&[stream, "dropped"])
+                    .with_label_values(&[stream, outcome.metric_result()])
                     .inc();
-                ApiError::UnknownError
-            })?;
+                return outcome;
+            }
+        };
 
-        match delivery.await {
+        ANALYTICS_KAFKA_PRODUCE_TOTAL
+            .with_label_values(&[stream, "enqueued"])
+            .inc();
+
+        let outcome = match delivery.await {
             Ok(Ok(_)) => {
-                ANALYTICS_KAFKA_PRODUCE_TOTAL
-                    .with_label_values(&[stream, "success"])
-                    .inc();
                 ANALYTICS_KAFKA_DELIVERY_LATENCY_HISTOGRAM
                     .with_label_values(&[stream])
                     .observe(started_at.elapsed().as_secs_f64());
-                Ok(())
+                KafkaPublishOutcome::DeliverySuccess
             }
-            Ok(Err((_error, _message))) => {
-                ANALYTICS_KAFKA_PRODUCE_TOTAL
-                    .with_label_values(&[stream, "failure"])
-                    .inc();
-                Err(ApiError::UnknownError)
-            }
-            Err(_canceled) => {
-                ANALYTICS_KAFKA_PRODUCE_TOTAL
-                    .with_label_values(&[stream, "failure"])
-                    .inc();
-                Err(ApiError::UnknownError)
-            }
-        }
+            Ok(Err((_error, _message))) => KafkaPublishOutcome::DeliveryFailed,
+            Err(_canceled) => KafkaPublishOutcome::DeliveryCanceled,
+        };
+
+        ANALYTICS_KAFKA_PRODUCE_TOTAL
+            .with_label_values(&[stream, outcome.metric_result()])
+            .inc();
+
+        outcome
     }
 }
 
@@ -246,9 +283,10 @@ impl KafkaAnalyticsStore {
 impl AnalyticsWriteStore for KafkaAnalyticsStore {
     async fn persist_domain_events(&self, events: &[DomainAnalyticsEvent]) -> Result<(), ApiError> {
         for event in events {
-            if let Err(error) = self.send_domain_event(event).await {
+            let outcome = self.send_domain_event(event).await;
+            if !outcome.is_success() {
                 crate::logger::warn!(
-                    error = %error,
+                    outcome = ?outcome,
                     event_id = event.event_id,
                     "Failed to publish analytics domain event"
                 );
@@ -259,9 +297,10 @@ impl AnalyticsWriteStore for KafkaAnalyticsStore {
 
     async fn persist_api_events(&self, events: &[ApiEvent]) -> Result<(), ApiError> {
         for event in events {
-            if let Err(error) = self.send_api_event(event).await {
+            let outcome = self.send_api_event(event).await;
+            if !outcome.is_success() {
                 crate::logger::warn!(
-                    error = %error,
+                    outcome = ?outcome,
                     event_id = event.event_id,
                     "Failed to publish analytics api event"
                 );
@@ -279,15 +318,16 @@ pub fn api_event_key(event: &ApiEvent) -> String {
     first_non_empty([
         Some(event.request_id.clone()),
         event.payment_id.clone(),
-        Some(event.event_id.to_string()),
+        Some(event.event_id.clone()),
     ])
 }
 
 pub fn domain_event_key(event: &DomainAnalyticsEvent) -> String {
     first_non_empty([
+        event.lookup_key.clone(),
         event.payment_id.clone(),
         event.request_id.clone(),
-        Some(event.event_id.to_string()),
+        Some(event.event_id.clone()),
     ])
 }
 
@@ -340,12 +380,13 @@ mod tests {
     #[test]
     fn domain_row_serializes_stably() {
         let event = DomainAnalyticsEvent {
-            event_id: 1,
+            event_id: "0195f4a8-bdf0-7f36-a227-c0ffefeed001".to_string(),
             api_flow: ApiFlow::DynamicRouting,
             flow_type: FlowType::DecideGatewayDecision,
             merchant_id: None,
             payment_id: Some("pay_1".to_string()),
             request_id: Some("req_1".to_string()),
+            lookup_key: Some("pay_1".to_string()),
             global_request_id: Some("global_1".to_string()),
             trace_id: Some("trace_1".to_string()),
             payment_method_type: None,
@@ -379,6 +420,7 @@ mod tests {
         assert!(json.contains("\"schema_version\":1"));
         assert!(json.contains("\"created_at_ms\":123"));
         assert!(json.contains("\"payment_id\":\"pay_1\""));
+        assert!(json.contains("\"lookup_key\":\"pay_1\""));
         assert!(json.contains("\"api_flow\":\"dynamic_routing\""));
         assert!(json.contains("\"flow_type\":\"decide_gateway_decision\""));
         assert!(json.contains("\"global_request_id\":\"global_1\""));
@@ -388,7 +430,7 @@ mod tests {
     #[test]
     fn api_row_serializes_json_fields_as_strings() {
         let event = ApiEvent {
-            event_id: 10,
+            event_id: "0195f4a8-bdf0-7f36-a227-c0ffefeed010".to_string(),
             merchant_id: None,
             payment_id: Some("pay_123".to_string()),
             api_flow: ApiFlow::DynamicRouting,
@@ -419,7 +461,7 @@ mod tests {
     #[test]
     fn message_keys_are_deterministic() {
         let api = ApiEvent {
-            event_id: 10,
+            event_id: "0195f4a8-bdf0-7f36-a227-c0ffefeed010".to_string(),
             merchant_id: None,
             payment_id: Some("pay_123".to_string()),
             api_flow: ApiFlow::DynamicRouting,
@@ -440,12 +482,13 @@ mod tests {
             http_method: "POST".to_string(),
         };
         let domain = DomainAnalyticsEvent {
-            event_id: 11,
+            event_id: "0195f4a8-bdf0-7f36-a227-c0ffefeed011".to_string(),
             api_flow: ApiFlow::DynamicRouting,
             flow_type: FlowType::DecideGatewayDecision,
             merchant_id: None,
             payment_id: Some("pay_456".to_string()),
             request_id: Some("req_456".to_string()),
+            lookup_key: Some("pay_456".to_string()),
             global_request_id: None,
             trace_id: None,
             payment_method_type: None,
@@ -474,5 +517,44 @@ mod tests {
 
         assert_eq!(api_event_key(&api), "req_123");
         assert_eq!(domain_event_key(&domain), "pay_456");
+    }
+
+    #[test]
+    fn domain_key_falls_back_to_request_lookup_key() {
+        let domain = DomainAnalyticsEvent {
+            event_id: "0195f4a8-bdf0-7f36-a227-c0ffefeed012".to_string(),
+            api_flow: ApiFlow::DynamicRouting,
+            flow_type: FlowType::DecideGatewayDecision,
+            merchant_id: None,
+            payment_id: None,
+            request_id: Some("req_only".to_string()),
+            lookup_key: Some("req_only".to_string()),
+            global_request_id: None,
+            trace_id: None,
+            payment_method_type: None,
+            payment_method: None,
+            card_network: None,
+            card_is_in: None,
+            currency: None,
+            country: None,
+            auth_type: None,
+            gateway: None,
+            event_stage: None,
+            routing_approach: None,
+            rule_name: None,
+            status: None,
+            error_code: None,
+            error_message: None,
+            score_value: None,
+            sigma_factor: None,
+            average_latency: None,
+            tp99_latency: None,
+            transaction_count: None,
+            route: None,
+            details: None,
+            created_at_ms: 3,
+        };
+
+        assert_eq!(domain_event_key(&domain), "req_only");
     }
 }

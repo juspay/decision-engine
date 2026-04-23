@@ -212,6 +212,25 @@ pub struct ResetGatewayScoreBulkRequest {
     pub reset_gateway_score_req_arr: Vec<ResetGatewayScoreRequest>,
 }
 
+#[derive(Debug, Serialize)]
+struct GatewayScoreAnalyticsDetails<'a> {
+    routing_approach: String,
+    gateway_scoring_type: String,
+    message: &'a str,
+}
+
+fn serialize_gateway_score_analytics_details(
+    routing_approach: &impl std::fmt::Debug,
+    gateway_scoring_type: &impl std::fmt::Debug,
+    message: &'static str,
+) -> Option<String> {
+    crate::analytics::serialize_details(&GatewayScoreAnalyticsDetails {
+        routing_approach: format!("{routing_approach:?}"),
+        gateway_scoring_type: format!("{gateway_scoring_type:?}"),
+        message,
+    })
+}
+
 pub fn default_gw_latency_check_in_mins() -> GatewayLatencyForScoring {
     GatewayLatencyForScoring {
         default_latency_threshold: 10.0,
@@ -760,12 +779,11 @@ pub async fn update_gateway_score(
                 Some(metric_entry.tp99_latency.into()),
                 Some(metric_entry.n_value as i64),
                 analytics_route,
-                serde_json::to_string(&serde_json::json!({
-                    "routing_approach": format!("{:?}", routing_approach),
-                    "gateway_scoring_type": format!("{:?}", gateway_scoring_type),
-                    "message": "Gateway score updated successfully",
-                }))
-                .ok(),
+                serialize_gateway_score_analytics_details(
+                    &routing_approach,
+                    &gateway_scoring_type,
+                    "Gateway score updated successfully",
+                ),
                 Some(txn_detail.txnUuid.clone()),
                 None,
                 None,
@@ -870,12 +888,11 @@ pub async fn update_gateway_score(
                         None,
                         Some(bucket_size as i64),
                         analytics_route,
-                        serde_json::to_string(&serde_json::json!({
-                            "routing_approach": format!("{:?}", routing_approach),
-                            "gateway_scoring_type": format!("{:?}", gateway_scoring_type),
-                            "message": "Gateway score snapshot derived from sr_v3 redis score",
-                        }))
-                        .ok(),
+                        serialize_gateway_score_analytics_details(
+                            &routing_approach,
+                            &gateway_scoring_type,
+                            "Gateway score snapshot derived from sr_v3 redis score",
+                        ),
                         Some(txn_detail.txnUuid.clone()),
                         None,
                         None,

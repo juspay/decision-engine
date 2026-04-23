@@ -5,12 +5,12 @@ use crate::analytics::models::{PaymentAuditEvent, PaymentAuditQuery};
 use crate::error::ApiError;
 
 use super::super::common::{fetch_all, DOMAIN_TABLE};
-use super::super::filters::payment_audit_filters;
+use super::super::filters::payment_audit_raw_filters;
 use super::super::query::{BoundQueryBuilder, FilterClause, OrderClause};
 
 #[derive(Debug, Clone, Deserialize, Row)]
 struct AuditEventRow {
-    event_id: u64,
+    event_id: String,
     flow_type: String,
     event_stage: Option<String>,
     route: Option<String>,
@@ -69,11 +69,8 @@ pub async fn load(
         "details".to_string(),
         "created_at_ms".to_string(),
     ]);
-    builder.extend_filters(payment_audit_filters(query, preview_only));
-    builder.add_filter(FilterClause::new(
-        "(payment_id = ? OR request_id = ?)",
-        vec![lookup_key.to_string().into(), lookup_key.to_string().into()],
-    ));
+    builder.extend_filters(payment_audit_raw_filters(query, preview_only));
+    builder.add_filter(FilterClause::eq("lookup_key", lookup_key.to_string()));
     builder.add_order_by(OrderClause::asc("created_at_ms"));
     builder.add_order_by(OrderClause::asc("event_id"));
 
@@ -81,7 +78,7 @@ pub async fn load(
     Ok(rows
         .into_iter()
         .map(|row| PaymentAuditEvent {
-            id: row.event_id as i64,
+            id: row.event_id,
             flow_type: row.flow_type,
             event_stage: row.event_stage,
             route: row.route,

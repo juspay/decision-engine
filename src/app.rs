@@ -186,7 +186,7 @@ async fn capture_api_event(
         let error = parse_response_error(status_code, &response_capture);
 
         runtime.enqueue_api_event(crate::analytics::ApiEvent {
-            event_id: crate::analytics::next_event_id(crate::analytics::now_ms()),
+            event_id: crate::analytics::next_event_id(),
             merchant_id,
             payment_id,
             api_flow: flow_context.api_flow,

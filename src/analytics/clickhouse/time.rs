@@ -9,6 +9,7 @@ const HOUR_MS: i64 = 60 * MINUTE_MS;
 const TWELVE_HOURS_MS: i64 = 12 * HOUR_MS;
 const DAY_MS: i64 = 24 * HOUR_MS;
 const WEEK_MS: i64 = 7 * DAY_MS;
+pub const PAYMENT_AUDIT_SUMMARY_BUCKET_MS: i64 = 15 * MINUTE_MS;
 const OVER_FIFTEEN_MINUTES_MS: i64 = FIFTEEN_MINUTES_MS + 1;
 const OVER_HOUR_MS: i64 = HOUR_MS + 1;
 const OVER_TWELVE_HOURS_MS: i64 = TWELVE_HOURS_MS + 1;
@@ -74,6 +75,14 @@ pub fn payment_audit_range(query: &PaymentAuditQuery) -> String {
         AnalyticsRange::D1 => "1d".to_string(),
         AnalyticsRange::W1 => "1w".to_string(),
     }
+}
+
+pub fn payment_audit_summary_bucket_bounds(query: &PaymentAuditQuery) -> (i64, i64) {
+    let (start_ms, end_ms) = effective_payment_audit_window_bounds(query);
+    (
+        start_ms.saturating_sub(PAYMENT_AUDIT_SUMMARY_BUCKET_MS.saturating_sub(1)),
+        end_ms,
+    )
 }
 
 #[cfg(test)]
