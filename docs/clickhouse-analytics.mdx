@@ -7,7 +7,7 @@ description: "ClickHouse setup notes for analytics"
 
 Decision Engine uses a Kafka to ClickHouse analytics pipeline:
 
-- API server captures bounded request and response prefixes
+- API server captures full request and response bodies for API analytics events
 - API server publishes analytics events to Kafka
 - ClickHouse Kafka engine queue tables consume Kafka and materialized views fan into the raw tables
 
@@ -18,8 +18,8 @@ ClickHouse remains the analytics read store for:
 
 The analytics read path uses the two raw tables:
 
-- `analytics_domain_events_v1`
-- `analytics_api_events_v1`
+- `analytics_domain_events`
+- `analytics_api_events`
 
 The ingestion path is explicit in ClickHouse too:
 
@@ -27,11 +27,6 @@ The ingestion path is explicit in ClickHouse too:
 - `analytics_api_events_queue`
 - `analytics_domain_events_mv`
 - `analytics_api_events_mv`
-
-Malformed Kafka payloads are retained for diagnostics in:
-
-- `analytics_domain_events_parse_errors`
-- `analytics_api_events_parse_errors`
 
 ## Local Bring-Up
 
@@ -43,11 +38,13 @@ docker compose --profile analytics-clickhouse up -d
 
 That profile now includes ClickHouse, Kafka, and topic creation. The full runtime profiles use the same ClickHouse-native ingestion path. There is no separate Rust worker process anymore.
 
-The bootstrap SQL now lives in:
+The bootstrap DDL now lives in:
 
 - `clickhouse/scripts/`
 
-ClickHouse loads those scripts on first boot through `/docker-entrypoint-initdb.d`. The analytics data volume is persistent, so normal restarts keep historical data.
+ClickHouse loads those shell scripts on first boot through `/docker-entrypoint-initdb.d`. They create the raw tables, recreate the Kafka queue tables and materialized views, and bind the queue tables to the configured Kafka brokers and topics.
+
+The analytics data volume is persistent, so normal restarts keep historical data.
 
 If you need a clean reset:
 
@@ -64,25 +61,22 @@ Relevant config lives under:
 enabled = true
 
 [analytics.capture]
-body_max_bytes = 65536
-request_body_limit_bytes = 1048576
 details_max_bytes = 65536
 
 [analytics.kafka]
 # container-to-container traffic uses the internal listener
 brokers = "kafka:19092"
 client_id = "decision-engine"
-api_topic = "decision-engine.analytics.api.v1"
-domain_topic = "decision-engine.analytics.domain.v1"
+api_topic = "api"
+domain_topic = "domain"
 acks = "all"
 compression = "lz4"
 message_timeout_ms = 5000
-max_message_bytes = 262144
 queue_capacity = 250
 
 [analytics.clickhouse]
 url = "http://clickhouse:8123"
-database = "decision_engine_analytics"
+database = "default"
 user = "decision_engine"
 password = "decision_engine"
 ```
@@ -93,8 +87,8 @@ There is no direct API-server write path to ClickHouse anymore. ClickHouse owns 
 
 The raw analytics tables retain data for 18 months:
 
-- `analytics_api_events_v1`
-- `analytics_domain_events_v1`
+- `analytics_api_events`
+- `analytics_domain_events`
 
 Custom query windows are normalized to the same 18-month lookback horizon.
 
@@ -103,10 +97,9 @@ Custom query windows are normalized to the same 18-month lookback horizon.
 Useful checks when ingestion looks stalled:
 
 ```sql
-SHOW TABLES FROM decision_engine_analytics;
-SELECT * FROM system.kafka_consumers WHERE database = 'decision_engine_analytics';
-SELECT count() FROM decision_engine_analytics.analytics_api_events_v1;
-SELECT count() FROM decision_engine_analytics.analytics_domain_events_v1;
-SELECT * FROM decision_engine_analytics.analytics_api_events_parse_errors ORDER BY offset DESC LIMIT 20;
-SELECT * FROM decision_engine_analytics.analytics_domain_events_parse_errors ORDER BY offset DESC LIMIT 20;
+SHOW TABLES FROM default;
+SELECT * FROM system.kafka_consumers WHERE database = 'default';
+SELECT count() FROM default.analytics_api_events;
+SELECT count() FROM default.analytics_domain_events;
+SELECT name, engine FROM system.tables WHERE database = 'default' AND name LIKE 'analytics_%';
 ```
