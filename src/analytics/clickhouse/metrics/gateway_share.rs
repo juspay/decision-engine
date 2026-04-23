@@ -13,7 +13,7 @@ use super::super::time::{effective_window_bounds, query_bucket_select_expr};
 #[derive(Debug, Clone, Deserialize, Row)]
 struct GatewaySharePointRow {
     bucket_ms: i64,
-    gateway: String,
+    gateway: Option<String>,
     count: u64,
 }
 
@@ -25,7 +25,7 @@ pub async fn load(
     let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
     builder.extend_selects([
         query_bucket_select_expr(query, start_ms, end_ms),
-        "ifNull(gateway, 'unknown') AS gateway".to_string(),
+        "gateway".to_string(),
         "count() AS count".to_string(),
     ]);
     builder.extend_filters(base_window_filters(start_ms, end_ms));

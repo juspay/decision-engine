@@ -1,8 +1,8 @@
 use crate::analytics::{
     decisions as fetch_decisions, gateway_scores as fetch_gateway_scores,
-    log_summaries as fetch_log_summaries, overview as fetch_overview, parse_payment_audit_query,
-    parse_query, payment_audit as fetch_payment_audit, preview_trace as fetch_preview_trace,
-    routing_stats as fetch_routing_stats,
+    log_summaries as fetch_log_summaries, overview as fetch_overview,
+    payment_audit as fetch_payment_audit, preview_trace as fetch_preview_trace,
+    routing_stats as fetch_routing_stats, AnalyticsQuery, PaymentAuditQuery,
 };
 use crate::custom_extractors::{AuthenticatedAnalyticsContext, TenantStateResolver};
 use crate::error;
@@ -52,7 +52,7 @@ pub async fn overview(
     Query(params): Query<AnalyticsQueryParams>,
 ) -> Result<Json<crate::analytics::AnalyticsOverviewResponse>, error::ContainerError<error::ApiError>>
 {
-    let query = parse_query(
+    let query = AnalyticsQuery::from_request(
         auth_context.merchant_id.clone(),
         params.range,
         params.start_ms,
@@ -80,7 +80,7 @@ pub async fn gateway_scores(
     Json<crate::analytics::AnalyticsGatewayScoresResponse>,
     error::ContainerError<error::ApiError>,
 > {
-    let query = parse_query(
+    let query = AnalyticsQuery::from_request(
         auth_context.merchant_id.clone(),
         params.range,
         params.start_ms,
@@ -105,7 +105,7 @@ pub async fn decisions(
     Query(params): Query<AnalyticsQueryParams>,
 ) -> Result<Json<crate::analytics::AnalyticsDecisionResponse>, error::ContainerError<error::ApiError>>
 {
-    let query = parse_query(
+    let query = AnalyticsQuery::from_request(
         auth_context.merchant_id.clone(),
         params.range,
         params.start_ms,
@@ -132,7 +132,7 @@ pub async fn routing_stats(
     Json<crate::analytics::AnalyticsRoutingStatsResponse>,
     error::ContainerError<error::ApiError>,
 > {
-    let query = parse_query(
+    let query = AnalyticsQuery::from_request(
         auth_context.merchant_id.clone(),
         params.range,
         params.start_ms,
@@ -159,7 +159,7 @@ pub async fn log_summaries(
     Json<crate::analytics::AnalyticsLogSummariesResponse>,
     error::ContainerError<error::ApiError>,
 > {
-    let query = parse_query(
+    let query = AnalyticsQuery::from_request(
         auth_context.merchant_id.clone(),
         params.range,
         params.start_ms,
@@ -183,7 +183,7 @@ pub async fn payment_audit(
     AuthenticatedAnalyticsContext(auth_context): AuthenticatedAnalyticsContext,
     Query(params): Query<AnalyticsQueryParams>,
 ) -> Result<Json<crate::analytics::PaymentAuditResponse>, error::ContainerError<error::ApiError>> {
-    let query = parse_payment_audit_query(
+    let query = PaymentAuditQuery::from_request(
         auth_context.merchant_id.clone(),
         params.range,
         params.start_ms,
@@ -206,7 +206,7 @@ pub async fn preview_trace(
     AuthenticatedAnalyticsContext(auth_context): AuthenticatedAnalyticsContext,
     Query(params): Query<AnalyticsQueryParams>,
 ) -> Result<Json<crate::analytics::PaymentAuditResponse>, error::ContainerError<error::ApiError>> {
-    let query = parse_payment_audit_query(
+    let query = PaymentAuditQuery::from_request(
         auth_context.merchant_id.clone(),
         params.range,
         params.start_ms,

@@ -21,9 +21,8 @@ pub struct ClickHouseAnalyticsStore {
 }
 
 #[derive(Debug, Clone, Deserialize, Row)]
-struct SingleValueRow {
-    #[serde(rename = "one")]
-    _one: u8,
+struct StartupProbeRow {
+    value: u8,
 }
 
 impl ClickHouseAnalyticsStore {
@@ -36,9 +35,10 @@ impl ClickHouseAnalyticsStore {
             client = client.with_password(password.peek().clone());
         }
 
-        common::fetch_one::<SingleValueRow>(client.query("SELECT 1 AS one"))
+        let probe = common::fetch_one::<StartupProbeRow>(client.query("SELECT 1 AS value"))
             .await
             .map_err(|_| ApiError::DatabaseError)?;
+        let _ = probe.value;
 
         Ok(Self { client })
     }

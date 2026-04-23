@@ -14,11 +14,11 @@ use super::super::time::{effective_window_bounds, query_bucket_select_expr};
 #[derive(Debug, Clone, Deserialize, Row)]
 struct ScoreSeriesRow {
     bucket_ms: i64,
-    merchant_id: String,
-    payment_method_type: String,
-    payment_method: String,
-    gateway: String,
-    score_value: f64,
+    merchant_id: Option<String>,
+    payment_method_type: Option<String>,
+    payment_method: Option<String>,
+    gateway: Option<String>,
+    score_value: Option<f64>,
 }
 
 pub async fn load(
@@ -29,11 +29,11 @@ pub async fn load(
     let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
     builder.extend_selects([
         query_bucket_select_expr(query, start_ms, end_ms),
-        "ifNull(merchant_id, '') AS merchant_id".to_string(),
-        "ifNull(payment_method_type, '') AS payment_method_type".to_string(),
-        "ifNull(payment_method, '') AS payment_method".to_string(),
-        "ifNull(gateway, '') AS gateway".to_string(),
-        "avg(ifNull(score_value, 0.0)) AS score_value".to_string(),
+        "merchant_id".to_string(),
+        "payment_method_type".to_string(),
+        "payment_method".to_string(),
+        "gateway".to_string(),
+        "avg(score_value) AS score_value".to_string(),
     ]);
     builder.extend_filters(score_filters(query, start_ms, end_ms));
     builder.add_filter(FilterClause::raw(format!(

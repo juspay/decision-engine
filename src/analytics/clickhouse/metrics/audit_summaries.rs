@@ -8,11 +8,11 @@ use super::super::common::{
     fetch_all, payment_audit_route_label, payment_audit_stage_label, DOMAIN_TABLE,
 };
 use super::super::filters::payment_audit_filters;
-use super::super::query::{BindArg, BoundQueryBuilder, SqlFragment};
+use super::super::query::{BoundQueryBuilder, FilterClause, OrderClause, SqlFragment};
 
 #[derive(Debug, Clone, Deserialize, Row)]
 struct AuditSummaryRow {
-    lookup_key: String,
+    lookup_key: Option<String>,
     payment_id: Option<String>,
     request_id: Option<String>,
     merchant_id: Option<String>,
@@ -29,7 +29,7 @@ struct AuditSummaryRow {
 fn inner_fragment(query: &PaymentAuditQuery, preview_only: bool) -> SqlFragment {
     let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
     builder.extend_selects([
-        "ifNull(if(payment_id != '' AND payment_id IS NOT NULL, payment_id, request_id), '') AS lookup_key".to_string(),
+        "coalesce(nullIf(payment_id, ''), request_id) AS lookup_key".to_string(),
         "payment_id".to_string(),
         "request_id".to_string(),
         "merchant_id".to_string(),
@@ -64,37 +64,39 @@ pub async fn load(
         "argMax(status, created_at_ms) AS latest_status".to_string(),
         "argMax(gateway, created_at_ms) AS latest_gateway".to_string(),
         "argMax(event_stage, created_at_ms) AS latest_stage".to_string(),
-        "arrayFilter(x -> x != '', groupUniqArray(ifNull(gateway, ''))) AS gateways".to_string(),
-        "arrayFilter(x -> x != '', groupUniqArray(ifNull(route, ''))) AS routes".to_string(),
+        "groupUniqArrayIf(assumeNotNull(gateway), isNotNull(gateway) AND gateway != '') AS gateways"
+            .to_string(),
+        "groupUniqArrayIf(assumeNotNull(route), isNotNull(route) AND route != '') AS routes"
+            .to_string(),
     ]);
-    outer.add_filter(super::super::query::FilterClause::new(
-        "lookup_key != ?",
-        vec![BindArg::from("")],
-    ));
+    outer.add_filter(FilterClause::raw("lookup_key IS NOT NULL".to_string()));
+    outer.add_filter(FilterClause::raw("lookup_key != ''".to_string()));
     outer.add_group_by("lookup_key");
-    outer.add_order_by(super::super::query::OrderClause::desc("last_seen_ms"));
-    outer.add_order_by(super::super::query::OrderClause::desc("event_count"));
+    outer.add_order_by(OrderClause::desc("last_seen_ms"));
+    outer.add_order_by(OrderClause::desc("event_count"));
 
     let rows = fetch_all::<AuditSummaryRow>(outer.build(client)).await?;
     Ok(rows
         .into_iter()
-        .map(|row| PaymentAuditSummary {
-            lookup_key: row.lookup_key,
-            payment_id: row.payment_id,
-            request_id: row.request_id,
-            merchant_id: row.merchant_id,
-            first_seen_ms: row.first_seen_ms,
-            last_seen_ms: row.last_seen_ms,
-            event_count: row.event_count as usize,
-            latest_status: row.latest_status,
-            latest_gateway: row.latest_gateway,
-            latest_stage: row.latest_stage.map(payment_audit_stage_label),
-            gateways: row.gateways,
-            routes: row
-                .routes
-                .into_iter()
-                .map(payment_audit_route_label)
-                .collect(),
+        .filter_map(|row| {
+            row.lookup_key.map(|lookup_key| PaymentAuditSummary {
+                lookup_key,
+                payment_id: row.payment_id,
+                request_id: row.request_id,
+                merchant_id: row.merchant_id,
+                first_seen_ms: row.first_seen_ms,
+                last_seen_ms: row.last_seen_ms,
+                event_count: row.event_count as usize,
+                latest_status: row.latest_status,
+                latest_gateway: row.latest_gateway,
+                latest_stage: row.latest_stage.map(payment_audit_stage_label),
+                gateways: row.gateways,
+                routes: row
+                    .routes
+                    .into_iter()
+                    .map(payment_audit_route_label)
+                    .collect(),
+            })
         })
         .collect())
 }

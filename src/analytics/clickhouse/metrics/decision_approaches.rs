@@ -12,7 +12,7 @@ use super::super::time::effective_window_bounds;
 
 #[derive(Debug, Clone, Deserialize, Row)]
 struct ApproachRow {
-    rule_name: String,
+    rule_name: Option<String>,
     count: u64,
 }
 
@@ -22,10 +22,7 @@ pub async fn load(
 ) -> Result<Vec<AnalyticsRuleHit>, ApiError> {
     let (start_ms, end_ms) = effective_window_bounds(query);
     let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
-    builder.extend_selects([
-        "ifNull(routing_approach, 'UNKNOWN') AS rule_name",
-        "count() AS count",
-    ]);
+    builder.extend_selects(["routing_approach AS rule_name", "count() AS count"]);
     builder.extend_filters(base_window_filters(start_ms, end_ms));
     builder.extend_filters(merchant_filter(&query.merchant_id));
     builder.add_filter(FilterClause::raw(format!(

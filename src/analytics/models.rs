@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::analytics::flow::AnalyticsRoute;
+
 pub const MAX_ANALYTICS_LOOKBACK_MS: i64 = 18 * 30 * 24 * 60 * 60 * 1000;
 pub const MIN_ANALYTICS_PAGE: usize = 1;
 pub const MIN_ANALYTICS_PAGE_SIZE: usize = 1;
@@ -19,6 +21,14 @@ pub fn normalise_page_size(page_size: Option<u32>, default: usize) -> usize {
     ) as usize
 }
 
+fn normalise_gateways(raw: Option<String>) -> Vec<String> {
+    raw.into_iter()
+        .flat_map(|value| value.split(',').map(str::to_owned).collect::<Vec<_>>())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsQuery {
     pub merchant_id: String,
@@ -35,6 +45,51 @@ pub struct AnalyticsQuery {
     pub country: Option<String>,
     pub auth_type: Option<String>,
     pub gateways: Vec<String>,
+}
+
+impl AnalyticsQuery {
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_request(
+        merchant_id: String,
+        range: Option<String>,
+        start_ms: Option<i64>,
+        end_ms: Option<i64>,
+        page: Option<u32>,
+        page_size: Option<u32>,
+        payment_method_type: Option<String>,
+        payment_method: Option<String>,
+        card_network: Option<String>,
+        card_is_in: Option<String>,
+        currency: Option<String>,
+        country: Option<String>,
+        auth_type: Option<String>,
+        gateways: Option<String>,
+    ) -> Self {
+        let range = AnalyticsRange::from_query(range.as_deref());
+        let (start_ms, end_ms) = match (start_ms, end_ms) {
+            (Some(start_ms), Some(end_ms)) if start_ms >= 0 && end_ms > start_ms => {
+                (Some(start_ms), Some(end_ms))
+            }
+            _ => (None, None),
+        };
+
+        Self {
+            merchant_id,
+            range,
+            start_ms,
+            end_ms,
+            page: normalise_page(page),
+            page_size: normalise_page_size(page_size, DEFAULT_ANALYTICS_PAGE_SIZE),
+            payment_method_type: payment_method_type.filter(|value| !value.is_empty()),
+            payment_method: payment_method.filter(|value| !value.is_empty()),
+            card_network: card_network.filter(|value| !value.is_empty()),
+            card_is_in: card_is_in.filter(|value| !value.is_empty()),
+            currency: currency.filter(|value| !value.is_empty()),
+            country: country.filter(|value| !value.is_empty()),
+            auth_type: auth_type.filter(|value| !value.is_empty()),
+            gateways: normalise_gateways(gateways),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -94,26 +149,26 @@ pub struct AnalyticsRouteHit {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GatewayScoreSnapshot {
-    pub merchant_id: String,
-    pub payment_method_type: String,
-    pub payment_method: String,
-    pub gateway: String,
-    pub score_value: f64,
-    pub sigma_factor: f64,
-    pub average_latency: f64,
-    pub tp99_latency: f64,
-    pub transaction_count: i64,
+    pub merchant_id: Option<String>,
+    pub payment_method_type: Option<String>,
+    pub payment_method: Option<String>,
+    pub gateway: Option<String>,
+    pub score_value: Option<f64>,
+    pub sigma_factor: Option<f64>,
+    pub average_latency: Option<f64>,
+    pub tp99_latency: Option<f64>,
+    pub transaction_count: Option<i64>,
     pub last_updated_ms: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GatewayScoreSeriesPoint {
     pub bucket_ms: i64,
-    pub merchant_id: String,
-    pub payment_method_type: String,
-    pub payment_method: String,
-    pub gateway: String,
-    pub score_value: f64,
+    pub merchant_id: Option<String>,
+    pub payment_method_type: Option<String>,
+    pub payment_method: Option<String>,
+    pub gateway: Option<String>,
+    pub score_value: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -127,7 +182,7 @@ pub struct AnalyticsGatewayScoresResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsDecisionPoint {
     pub bucket_ms: i64,
-    pub routing_approach: String,
+    pub routing_approach: Option<String>,
     pub count: i64,
 }
 
@@ -143,7 +198,7 @@ pub struct AnalyticsDecisionResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsGatewaySharePoint {
     pub bucket_ms: i64,
-    pub gateway: String,
+    pub gateway: Option<String>,
     pub count: i64,
 }
 
@@ -179,16 +234,16 @@ pub struct RoutingFilterDimensionHint {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsErrorSummary {
-    pub route: String,
-    pub error_code: String,
-    pub error_message: String,
+    pub route: Option<String>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
     pub count: i64,
     pub last_seen_ms: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsLogSample {
-    pub route: String,
+    pub route: Option<String>,
     pub merchant_id: Option<String>,
     pub payment_id: Option<String>,
     pub request_id: Option<String>,
@@ -216,7 +271,7 @@ pub struct AnalyticsLogSummariesResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsRuleHit {
-    pub rule_name: String,
+    pub rule_name: Option<String>,
     pub count: i64,
 }
 
@@ -235,6 +290,75 @@ pub struct PaymentAuditQuery {
     pub status: Option<String>,
     pub flow_type: Option<String>,
     pub error_code: Option<String>,
+}
+
+impl PaymentAuditQuery {
+    fn normalise_route_filter(route: Option<String>) -> Option<String> {
+        route.and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+
+            AnalyticsRoute::from_filter_value(trimmed).map(|route| route.as_str().to_string())
+        })
+    }
+
+    fn normalise_status_filter(status: Option<String>) -> Option<String> {
+        status.and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+
+            Some(match trimmed.to_ascii_lowercase().as_str() {
+                "success" => "success".to_string(),
+                "failure" => "FAILURE".to_string(),
+                _ => trimmed.to_string(),
+            })
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_request(
+        merchant_id: String,
+        range: Option<String>,
+        start_ms: Option<i64>,
+        end_ms: Option<i64>,
+        page: Option<u32>,
+        page_size: Option<u32>,
+        payment_id: Option<String>,
+        request_id: Option<String>,
+        gateway: Option<String>,
+        route: Option<String>,
+        status: Option<String>,
+        flow_type: Option<String>,
+        error_code: Option<String>,
+    ) -> Self {
+        let range = AnalyticsRange::from_query(range.as_deref());
+        let (start_ms, end_ms) = match (start_ms, end_ms) {
+            (Some(start_ms), Some(end_ms)) if start_ms >= 0 && end_ms > start_ms => {
+                (Some(start_ms), Some(end_ms))
+            }
+            _ => (None, None),
+        };
+
+        Self {
+            merchant_id,
+            range,
+            start_ms,
+            end_ms,
+            page: normalise_page(page),
+            page_size: normalise_page_size(page_size, DEFAULT_PAYMENT_AUDIT_PAGE_SIZE),
+            payment_id,
+            request_id,
+            gateway,
+            route: Self::normalise_route_filter(route),
+            status: Self::normalise_status_filter(status),
+            flow_type,
+            error_code,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

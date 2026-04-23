@@ -26,6 +26,18 @@ struct UpdateScoreRequest {
     txn_latency: Option<TransactionLatency>,
 }
 
+#[derive(Debug, Serialize)]
+struct UpdateScoreReadFailureDetail<'a> {
+    request_id: &'a str,
+    query_params: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+struct UpdateScoreValidationFailureDetail<'a> {
+    request_id: &'a str,
+    reason: &'static str,
+}
+
 #[axum::debug_handler]
 pub async fn update_score(
     req: axum::http::Request<axum::body::Body>,
@@ -88,11 +100,10 @@ pub async fn update_score(
                 None,
                 error_response.error_code.clone(),
                 error_response.error_message.clone(),
-                serde_json::to_string(&serde_json::json!({
-                    "request_id": x_request_id,
-                    "query_params": query_params,
-                }))
-                .ok(),
+                crate::analytics::serialize_details(&UpdateScoreReadFailureDetail {
+                    request_id: x_request_id,
+                    query_params: &query_params,
+                }),
                 Some(analytics_stage),
                 None,
             );
@@ -169,11 +180,10 @@ pub async fn update_score(
                     None,
                     error_response.error_code.clone(),
                     error_response.error_message.clone(),
-                    serde_json::to_string(&serde_json::json!({
-                        "request_id": x_request_id,
-                        "reason": "gateway_missing",
-                    }))
-                    .ok(),
+                    crate::analytics::serialize_details(&UpdateScoreValidationFailureDetail {
+                        request_id: x_request_id,
+                        reason: "gateway_missing",
+                    }),
                     Some("validation_failed".to_string()),
                     None,
                 );

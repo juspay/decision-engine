@@ -13,7 +13,7 @@ use super::super::time::effective_window_bounds;
 
 #[derive(Debug, Clone, Deserialize, Row)]
 struct LogSampleRow {
-    route: String,
+    route: Option<String>,
     merchant_id: Option<String>,
     payment_id: Option<String>,
     request_id: Option<String>,
@@ -39,7 +39,7 @@ pub async fn load(
 
     let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
     builder.extend_selects([
-        "ifNull(route, 'unknown') AS route".to_string(),
+        "route".to_string(),
         "merchant_id".to_string(),
         "payment_id".to_string(),
         "request_id".to_string(),
