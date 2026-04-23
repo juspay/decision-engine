@@ -83,277 +83,301 @@ fn truncate_domain_event_details(mut event: DomainAnalyticsEvent) -> DomainAnaly
     event
 }
 
-pub fn record_decision_event(
-    flow: AnalyticsFlowContext,
-    merchant_id: Option<String>,
-    routing_approach: Option<String>,
-    gateway: Option<String>,
-    status: Option<String>,
-    route: AnalyticsRoute,
-    rule_name: Option<String>,
-    details: Option<String>,
-    payment_id: Option<String>,
-    request_id: Option<String>,
-    global_request_id: Option<String>,
-    trace_id: Option<String>,
-    event_stage: Option<String>,
-    payment_method_type: Option<String>,
-    payment_method: Option<String>,
-    auth_type: Option<String>,
-) {
-    let approach = routing_approach
-        .clone()
-        .unwrap_or_else(|| "UNKNOWN".to_string());
-    let status_label = status.clone().unwrap_or_else(|| "success".to_string());
-    let created_at_ms = now_ms();
-    ROUTING_DECISION_COUNTER
-        .with_label_values(&[approach.as_str(), status_label.as_str()])
-        .inc();
-    enqueue_domain_event(DomainAnalyticsEvent::decision(
-        flow,
-        route,
-        merchant_id,
-        routing_approach,
-        gateway,
-        status,
-        rule_name,
-        details,
-        payment_id,
-        request_id,
-        global_request_id,
-        trace_id,
-        event_stage,
-        payment_method_type,
-        payment_method,
-        auth_type,
-        created_at_ms,
-    ));
-}
+impl DomainAnalyticsEvent {
+    fn emit(self) {
+        enqueue_domain_event(self);
+    }
 
-pub fn record_score_snapshot_event(
-    flow: AnalyticsFlowContext,
-    merchant_id: Option<String>,
-    payment_method_type: Option<String>,
-    payment_method: Option<String>,
-    card_network: Option<String>,
-    card_is_in: Option<String>,
-    currency: Option<String>,
-    country: Option<String>,
-    auth_type: Option<String>,
-    gateway: Option<String>,
-    score_value: Option<f64>,
-    sigma_factor: Option<f64>,
-    average_latency: Option<f64>,
-    tp99_latency: Option<f64>,
-    transaction_count: Option<i64>,
-    route: AnalyticsRoute,
-    details: Option<String>,
-    payment_id: Option<String>,
-    request_id: Option<String>,
-    global_request_id: Option<String>,
-    trace_id: Option<String>,
-    event_stage: Option<String>,
-) {
-    enqueue_domain_event(DomainAnalyticsEvent::score_snapshot(
-        flow,
-        route,
-        merchant_id,
-        payment_method_type,
-        payment_method,
-        card_network,
-        card_is_in,
-        currency,
-        country,
-        auth_type,
-        gateway,
-        score_value,
-        sigma_factor,
-        average_latency,
-        tp99_latency,
-        transaction_count,
-        details,
-        payment_id,
-        request_id,
-        global_request_id,
-        trace_id,
-        event_stage,
-        now_ms(),
-    ));
-}
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_decision(
+        flow: AnalyticsFlowContext,
+        merchant_id: Option<String>,
+        routing_approach: Option<String>,
+        gateway: Option<String>,
+        status: Option<String>,
+        route: AnalyticsRoute,
+        rule_name: Option<String>,
+        details: Option<String>,
+        payment_id: Option<String>,
+        request_id: Option<String>,
+        global_request_id: Option<String>,
+        trace_id: Option<String>,
+        event_stage: Option<String>,
+        payment_method_type: Option<String>,
+        payment_method: Option<String>,
+        auth_type: Option<String>,
+    ) {
+        let approach = routing_approach
+            .clone()
+            .unwrap_or_else(|| "UNKNOWN".to_string());
+        let status_label = status.clone().unwrap_or_else(|| "success".to_string());
+        let created_at_ms = now_ms();
+        ROUTING_DECISION_COUNTER
+            .with_label_values(&[approach.as_str(), status_label.as_str()])
+            .inc();
 
-pub fn record_gateway_update_event(
-    flow: AnalyticsFlowContext,
-    merchant_id: Option<String>,
-    gateway: Option<String>,
-    status: Option<String>,
-    route: AnalyticsRoute,
-    details: Option<String>,
-    payment_id: Option<String>,
-    request_id: Option<String>,
-    global_request_id: Option<String>,
-    trace_id: Option<String>,
-    event_stage: Option<String>,
-) {
-    enqueue_domain_event(DomainAnalyticsEvent::gateway_update(
-        flow,
-        route,
-        merchant_id,
-        gateway,
-        status,
-        details,
-        payment_id,
-        request_id,
-        global_request_id,
-        trace_id,
-        event_stage,
-        now_ms(),
-    ));
-}
+        Self::decision(
+            flow,
+            route,
+            merchant_id,
+            routing_approach,
+            gateway,
+            status,
+            rule_name,
+            details,
+            payment_id,
+            request_id,
+            global_request_id,
+            trace_id,
+            event_stage,
+            payment_method_type,
+            payment_method,
+            auth_type,
+            created_at_ms,
+        )
+        .emit();
+    }
 
-pub fn record_rule_hit_event(
-    flow: AnalyticsFlowContext,
-    route: AnalyticsRoute,
-    merchant_id: Option<String>,
-    rule_name: String,
-    gateway: Option<String>,
-    routing_approach: Option<String>,
-    details: Option<String>,
-    payment_id: Option<String>,
-    request_id: Option<String>,
-    global_request_id: Option<String>,
-    trace_id: Option<String>,
-    event_stage: Option<String>,
-) {
-    ROUTING_RULE_HIT_COUNTER
-        .with_label_values(&[rule_name.as_str()])
-        .inc();
-    enqueue_domain_event(DomainAnalyticsEvent::rule_hit(
-        flow,
-        route,
-        merchant_id,
-        rule_name,
-        gateway,
-        routing_approach,
-        details,
-        payment_id,
-        request_id,
-        global_request_id,
-        trace_id,
-        event_stage,
-        now_ms(),
-    ));
-}
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_score_snapshot(
+        flow: AnalyticsFlowContext,
+        merchant_id: Option<String>,
+        payment_method_type: Option<String>,
+        payment_method: Option<String>,
+        card_network: Option<String>,
+        card_is_in: Option<String>,
+        currency: Option<String>,
+        country: Option<String>,
+        auth_type: Option<String>,
+        gateway: Option<String>,
+        score_value: Option<f64>,
+        sigma_factor: Option<f64>,
+        average_latency: Option<f64>,
+        tp99_latency: Option<f64>,
+        transaction_count: Option<i64>,
+        route: AnalyticsRoute,
+        details: Option<String>,
+        payment_id: Option<String>,
+        request_id: Option<String>,
+        global_request_id: Option<String>,
+        trace_id: Option<String>,
+        event_stage: Option<String>,
+    ) {
+        Self::score_snapshot(
+            flow,
+            route,
+            merchant_id,
+            payment_method_type,
+            payment_method,
+            card_network,
+            card_is_in,
+            currency,
+            country,
+            auth_type,
+            gateway,
+            score_value,
+            sigma_factor,
+            average_latency,
+            tp99_latency,
+            transaction_count,
+            details,
+            payment_id,
+            request_id,
+            global_request_id,
+            trace_id,
+            event_stage,
+            now_ms(),
+        )
+        .emit();
+    }
 
-pub fn record_rule_evaluation_preview_event(
-    flow: AnalyticsFlowContext,
-    merchant_id: Option<String>,
-    payment_id: Option<String>,
-    gateway: Option<String>,
-    rule_name: Option<String>,
-    status: Option<String>,
-    details: Option<String>,
-    request_id: Option<String>,
-    global_request_id: Option<String>,
-    trace_id: Option<String>,
-) {
-    enqueue_domain_event(DomainAnalyticsEvent::rule_evaluation_preview(
-        flow,
-        merchant_id,
-        payment_id,
-        gateway,
-        rule_name,
-        status,
-        details,
-        request_id,
-        global_request_id,
-        trace_id,
-        now_ms(),
-    ));
-}
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_gateway_update(
+        flow: AnalyticsFlowContext,
+        merchant_id: Option<String>,
+        gateway: Option<String>,
+        status: Option<String>,
+        route: AnalyticsRoute,
+        details: Option<String>,
+        payment_id: Option<String>,
+        request_id: Option<String>,
+        global_request_id: Option<String>,
+        trace_id: Option<String>,
+        event_stage: Option<String>,
+    ) {
+        Self::gateway_update(
+            flow,
+            route,
+            merchant_id,
+            gateway,
+            status,
+            details,
+            payment_id,
+            request_id,
+            global_request_id,
+            trace_id,
+            event_stage,
+            now_ms(),
+        )
+        .emit();
+    }
 
-pub fn record_error_event(
-    flow: AnalyticsFlowContext,
-    route: AnalyticsRoute,
-    merchant_id: Option<String>,
-    payment_id: Option<String>,
-    request_id: Option<String>,
-    global_request_id: Option<String>,
-    trace_id: Option<String>,
-    gateway: Option<String>,
-    routing_approach: Option<String>,
-    error_code: String,
-    error_message: String,
-    details: Option<String>,
-    event_stage: Option<String>,
-    auth_type: Option<String>,
-) {
-    enqueue_domain_event(DomainAnalyticsEvent::error(
-        flow,
-        route,
-        merchant_id,
-        payment_id,
-        request_id,
-        global_request_id,
-        trace_id,
-        gateway,
-        routing_approach,
-        error_code,
-        error_message,
-        details,
-        event_stage,
-        auth_type,
-        now_ms(),
-    ));
-}
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_rule_hit(
+        flow: AnalyticsFlowContext,
+        route: AnalyticsRoute,
+        merchant_id: Option<String>,
+        rule_name: String,
+        gateway: Option<String>,
+        routing_approach: Option<String>,
+        details: Option<String>,
+        payment_id: Option<String>,
+        request_id: Option<String>,
+        global_request_id: Option<String>,
+        trace_id: Option<String>,
+        event_stage: Option<String>,
+    ) {
+        ROUTING_RULE_HIT_COUNTER
+            .with_label_values(&[rule_name.as_str()])
+            .inc();
 
-pub fn record_request_hit_event(
-    flow: AnalyticsFlowContext,
-    route: AnalyticsRoute,
-    merchant_id: Option<String>,
-    payment_id: Option<String>,
-    request_id: Option<String>,
-    global_request_id: Option<String>,
-    trace_id: Option<String>,
-    auth_type: Option<String>,
-) {
-    enqueue_domain_event(DomainAnalyticsEvent::request_hit(
-        flow,
-        route,
-        merchant_id,
-        payment_id,
-        request_id,
-        global_request_id,
-        trace_id,
-        auth_type,
-        now_ms(),
-    ));
-}
+        Self::rule_hit(
+            flow,
+            route,
+            merchant_id,
+            rule_name,
+            gateway,
+            routing_approach,
+            details,
+            payment_id,
+            request_id,
+            global_request_id,
+            trace_id,
+            event_stage,
+            now_ms(),
+        )
+        .emit();
+    }
 
-pub fn record_operation_event(
-    flow: AnalyticsFlowContext,
-    route: AnalyticsRoute,
-    merchant_id: Option<String>,
-    payment_id: Option<String>,
-    request_id: Option<String>,
-    global_request_id: Option<String>,
-    trace_id: Option<String>,
-    status: Option<String>,
-    details: Option<String>,
-    event_stage: Option<String>,
-) {
-    enqueue_domain_event(DomainAnalyticsEvent::operation(
-        flow,
-        route,
-        merchant_id,
-        payment_id,
-        request_id,
-        global_request_id,
-        trace_id,
-        status,
-        details,
-        event_stage,
-        now_ms(),
-    ));
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_rule_evaluation_preview(
+        flow: AnalyticsFlowContext,
+        merchant_id: Option<String>,
+        payment_id: Option<String>,
+        gateway: Option<String>,
+        rule_name: Option<String>,
+        status: Option<String>,
+        details: Option<String>,
+        request_id: Option<String>,
+        global_request_id: Option<String>,
+        trace_id: Option<String>,
+    ) {
+        Self::rule_evaluation_preview(
+            flow,
+            merchant_id,
+            payment_id,
+            gateway,
+            rule_name,
+            status,
+            details,
+            request_id,
+            global_request_id,
+            trace_id,
+            now_ms(),
+        )
+        .emit();
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_error(
+        flow: AnalyticsFlowContext,
+        route: AnalyticsRoute,
+        merchant_id: Option<String>,
+        payment_id: Option<String>,
+        request_id: Option<String>,
+        global_request_id: Option<String>,
+        trace_id: Option<String>,
+        gateway: Option<String>,
+        routing_approach: Option<String>,
+        error_code: String,
+        error_message: String,
+        details: Option<String>,
+        event_stage: Option<String>,
+        auth_type: Option<String>,
+    ) {
+        Self::error(
+            flow,
+            route,
+            merchant_id,
+            payment_id,
+            request_id,
+            global_request_id,
+            trace_id,
+            gateway,
+            routing_approach,
+            error_code,
+            error_message,
+            details,
+            event_stage,
+            auth_type,
+            now_ms(),
+        )
+        .emit();
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_request_hit(
+        flow: AnalyticsFlowContext,
+        route: AnalyticsRoute,
+        merchant_id: Option<String>,
+        payment_id: Option<String>,
+        request_id: Option<String>,
+        global_request_id: Option<String>,
+        trace_id: Option<String>,
+        auth_type: Option<String>,
+    ) {
+        Self::request_hit(
+            flow,
+            route,
+            merchant_id,
+            payment_id,
+            request_id,
+            global_request_id,
+            trace_id,
+            auth_type,
+            now_ms(),
+        )
+        .emit();
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_operation(
+        flow: AnalyticsFlowContext,
+        route: AnalyticsRoute,
+        merchant_id: Option<String>,
+        payment_id: Option<String>,
+        request_id: Option<String>,
+        global_request_id: Option<String>,
+        trace_id: Option<String>,
+        status: Option<String>,
+        details: Option<String>,
+        event_stage: Option<String>,
+    ) {
+        Self::operation(
+            flow,
+            route,
+            merchant_id,
+            payment_id,
+            request_id,
+            global_request_id,
+            trace_id,
+            status,
+            details,
+            event_stage,
+            now_ms(),
+        )
+        .emit();
+    }
 }
 
 pub async fn overview(
