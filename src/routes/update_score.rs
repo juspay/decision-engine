@@ -85,7 +85,7 @@ pub async fn update_score(
             let latency = start_time.elapsed().as_millis() as u64;
             let cpu_time = cpu_start.elapsed().as_millis() as u64;
 
-            crate::analytics::record_error_event(
+            crate::analytics::DomainAnalyticsEvent::record_error(
                 crate::analytics::AnalyticsFlowContext::new(
                     crate::analytics::ApiFlow::DynamicRouting,
                     crate::analytics::FlowType::UpdateScoreLegacyError,
@@ -165,7 +165,7 @@ pub async fn update_score(
                 let latency = start_time.elapsed().as_millis() as u64;
                 let cpu_time = cpu_start.elapsed().as_millis() as u64;
 
-                crate::analytics::record_error_event(
+                crate::analytics::DomainAnalyticsEvent::record_error(
                     crate::analytics::AnalyticsFlowContext::new(
                         crate::analytics::ApiFlow::DynamicRouting,
                         crate::analytics::FlowType::UpdateScoreLegacyError,

@@ -734,7 +734,7 @@ pub async fn update_gateway_score(
         && is_update_within_window;
     if !should_record_srv3_post_update {
         if let Some(metric_entry) = m_metric_entry.clone() {
-            crate::analytics::record_score_snapshot_event(
+            crate::analytics::DomainAnalyticsEvent::record_score_snapshot(
                 score_snapshot_flow,
                 Some(MID::merchant_id_to_text(txn_detail.clone().merchantId)),
                 Some(txn_card_info.paymentMethodType.to_string()),
@@ -853,7 +853,7 @@ pub async fn update_gateway_score(
                             redis_key,
                         )
                         .await;
-                    crate::analytics::record_score_snapshot_event(
+                    crate::analytics::DomainAnalyticsEvent::record_score_snapshot(
                         score_snapshot_flow,
                         Some(merchant_id),
                         Some(pmt_str),
