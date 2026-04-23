@@ -46,7 +46,7 @@ pub async fn decide_gateway(
 
     let headers = req.headers().clone();
     let x_request_id = headers
-        .get("x-request-id")
+        .get(crate::storage::consts::X_REQUEST_ID)
         .and_then(|value| value.to_str().ok())
         .unwrap_or("unknown")
         .to_string();
@@ -85,7 +85,7 @@ pub async fn decide_gateway(
                 trace_id.clone(),
                 None,
                 None,
-                error_code.to_string(),
+                error_code,
                 error_message.to_string(),
                 serde_json::to_string(&serde_json::json!({
                     "request_id": x_request_id,

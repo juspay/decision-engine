@@ -33,18 +33,18 @@ pub enum AnalyticsScope {
 pub enum AnalyticsRange {
     M15,
     H1,
-    H24,
-    D30,
-    M18,
+    H12,
+    D1,
+    W1,
 }
 
 impl AnalyticsRange {
     pub fn from_query(value: Option<&str>) -> Self {
         match value {
             Some("15m") => Self::M15,
-            Some("24h") => Self::H24,
-            Some("30d") => Self::D30,
-            Some("18mo") => Self::M18,
+            Some("12h") => Self::H12,
+            Some("1d") => Self::D1,
+            Some("1w") => Self::W1,
             _ => Self::H1,
         }
     }
@@ -53,19 +53,9 @@ impl AnalyticsRange {
         match self {
             Self::M15 => 15 * 60 * 1000,
             Self::H1 => 60 * 60 * 1000,
-            Self::H24 => 24 * 60 * 60 * 1000,
-            Self::D30 => 30 * 24 * 60 * 60 * 1000,
-            Self::M18 => MAX_ANALYTICS_LOOKBACK_MS,
-        }
-    }
-
-    pub fn bucket_ms(&self) -> i64 {
-        match self {
-            Self::M15 => 60 * 1000,
-            Self::H1 => 5 * 60 * 1000,
-            Self::H24 => 15 * 60 * 1000,
-            Self::D30 => 3 * 60 * 60 * 1000,
-            Self::M18 => 7 * 24 * 60 * 60 * 1000,
+            Self::H12 => 12 * 60 * 60 * 1000,
+            Self::D1 => 24 * 60 * 60 * 1000,
+            Self::W1 => 7 * 24 * 60 * 60 * 1000,
         }
     }
 }

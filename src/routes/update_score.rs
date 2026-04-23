@@ -43,7 +43,7 @@ pub async fn update_score(
     // let req_headers = serde_json::to_string(&headers).unwrap_or("{}".to_string());
     let original_url = req.uri().to_string();
     let x_request_id = headers
-        .get("x-request-id")
+        .get(crate::storage::consts::X_REQUEST_ID)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("unknown");
     let global_request_id = crate::analytics::global_request_id_from_headers(&headers);

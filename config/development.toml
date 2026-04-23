@@ -35,6 +35,7 @@ api_topic = "api"
 domain_topic = "domain"
 
 [analytics.clickhouse]
+url = "http://localhost:8123"
 user = "decision_engine"
 password = "decision_engine"
 

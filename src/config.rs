@@ -196,7 +196,7 @@ pub struct ClickHouseAnalyticsConfig {
 impl Default for ClickHouseAnalyticsConfig {
     fn default() -> Self {
         Self {
-            url: "http://localhost:8123".to_string(),
+            url: String::new(),
             database: "default".to_string(),
             user: "default".to_string(),
             password: None,
@@ -492,6 +492,13 @@ impl GlobalConfig {
             return Err(error_stack::report!(
                 error::ConfigurationError::InvalidConfigurationValueError(
                     "analytics.capture.details_max_bytes".to_string(),
+                )
+            ));
+        }
+        if self.analytics.enabled && self.analytics.clickhouse.url.trim().is_empty() {
+            return Err(error_stack::report!(
+                error::ConfigurationError::InvalidConfigurationValueError(
+                    "analytics.clickhouse.url".to_string(),
                 )
             ));
         }

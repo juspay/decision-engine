@@ -32,7 +32,7 @@ pub async fn update_gateway_score(
 ) -> Result<Json<UpdateScoreResponse>, ErrorResponse> {
     let x_request_id = req
         .headers()
-        .get("x-request-id")
+        .get(crate::storage::consts::X_REQUEST_ID)
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
     let global_request_id = crate::analytics::global_request_id_from_headers(req.headers());
@@ -70,7 +70,7 @@ pub async fn update_gateway_score(
                 trace_id.clone(),
                 None,
                 None,
-                error_code.to_string(),
+                error_code,
                 error_message.to_string(),
                 Some("request body parse failure".to_string()),
                 Some(e.analytics_stage().to_string()),
