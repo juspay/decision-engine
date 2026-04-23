@@ -1,4 +1,5 @@
 // All API calls use relative URLs so nginx/vite-proxy can handle routing
+import { tokenRef } from './tokenRef'
 
 const DEBUG_API = true
 
@@ -48,23 +49,48 @@ export async function apiFetch<T>(
   logRequest(method, path, body)
   
   try {
+    const token = tokenRef.get()
+    const authHeader: Record<string, string> = token
+      ? { Authorization: `Bearer ${token}` }
+      : {}
+
     const res = await fetch(path, {
-      headers: { 'Content-Type': 'application/json', ...options?.headers },
+      headers: { 'Content-Type': 'application/json', ...authHeader, ...options?.headers },
       ...options,
     })
-    
+
     const responseText = await res.text()
     let responseBody: string
-    
+
     try {
       const json = JSON.parse(responseText)
       responseBody = JSON.stringify(json, null, 2)
     } catch {
       responseBody = responseText
     }
-    
+
     logResponse(path, res.status, res.statusText, responseBody)
-    
+
+    // Only clear session when the JWT itself is confirmed invalid/expired.
+    // A generic 401 (e.g. missing API key on a protected route) must NOT wipe the session.
+    if (res.status === 401 && !path.startsWith('/auth/')) {
+      let isTokenExpiry = false
+      try {
+        const json = JSON.parse(responseText)
+        const msg: string = json.message ?? ''
+        isTokenExpiry = msg.toLowerCase().includes('expired') || msg.toLowerCase().includes('invalid or expired')
+      } catch { /* non-JSON 401, not a JWT error */ }
+
+      if (isTokenExpiry) {
+        tokenRef.set(null)
+        import('../store/authStore').then(({ useAuthStore }) => {
+          useAuthStore.getState().clearAuth()
+        })
+        window.location.href = '/dashboard/login'
+        throw new Error('Session expired')
+      }
+    }
+
     if (!res.ok) {
       const error = new Error(`API error ${res.status}: ${responseText}`)
       logError(path, error)

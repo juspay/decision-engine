@@ -64,7 +64,7 @@ where
     let headers = req.headers().clone();
     let original_url = req.uri().to_string();
     let x_request_id = headers
-        .get("x-request-id")
+        .get(crate::storage::consts::X_REQUEST_ID)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("unknown");
     let start_time = std::time::Instant::now();
@@ -83,7 +83,6 @@ where
     let body = match crate::routes::body::read_request_body(req.into_body()).await {
         Ok(body) => body,
         Err(e) => {
-            crate::routes::body::observe_request_body_error("decision_gateway", &e);
             let error_response = e.into_error_response();
 
             let latency = start_time.elapsed().as_millis() as u64;

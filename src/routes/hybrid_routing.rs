@@ -111,6 +111,7 @@ fn insert_evaluated_connectors(
 
 #[axum::debug_handler]
 pub async fn hybrid_routing_evaluate(
+    headers: axum::http::HeaderMap,
     Json(payload): Json<HybridRoutingRequest>,
 ) -> Result<axum::response::Response, ContainerError<EuclidErrors>> {
     let timer = API_LATENCY_HISTOGRAM
@@ -134,7 +135,7 @@ pub async fn hybrid_routing_evaluate(
                 // so dynamic can still run with a bounded candidate set.
                 let fallback_gateways = req.fallback_output.clone();
 
-                match routing_evaluate(Json(req)).await {
+                match routing_evaluate(headers.clone(), Json(req)).await {
                     Ok(response) => (Some(response.0), None, fallback_gateways),
                     Err(err) => (None, Some(err), fallback_gateways),
                 }

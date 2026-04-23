@@ -74,6 +74,7 @@ fred = { version = "7.1.2", features = [
 masking = { git = "https://github.com/juspay/hyperswitch", tag = "v1.111.1" }
 ring = { version = "0.17.8", features = ["std"] }
 hex = "0.4.3"
+bcrypt = "0.15"
 time = { version = "0.3.36", features = ["serde"] }
 uuid = { version = "1.10.0", features = ["v4", "v7", "fast-rng"] }
 reqwest = { version = "0.12.7", features = ["json", "__rustls"] }

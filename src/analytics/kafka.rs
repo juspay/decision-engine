@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 
 use crate::analytics::events::{ApiEvent, DomainAnalyticsEvent};
+use crate::analytics::flow::{ApiFlow, FlowType};
 use crate::analytics::store::AnalyticsWriteStore;
 use crate::config::KafkaAnalyticsConfig;
 use crate::error::{ApiError, ConfigurationError};
@@ -17,15 +18,17 @@ use crate::metrics::{
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KafkaDomainEventRowV1 {
+pub struct KafkaDomainEventRow {
     pub schema_version: u8,
     pub produced_at_ms: i64,
     pub event_id: u64,
-    pub tenant_id: String,
-    pub event_type: String,
+    pub api_flow: ApiFlow,
+    pub flow_type: FlowType,
     pub merchant_id: Option<String>,
     pub payment_id: Option<String>,
     pub request_id: Option<String>,
+    pub global_request_id: Option<String>,
+    pub trace_id: Option<String>,
     pub payment_method_type: Option<String>,
     pub payment_method: Option<String>,
     pub card_network: Option<String>,
@@ -51,18 +54,20 @@ pub struct KafkaDomainEventRowV1 {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KafkaApiEventRowV1 {
+pub struct KafkaApiEventRow {
     pub schema_version: u8,
     pub produced_at_ms: i64,
     pub event_id: u64,
-    pub tenant_id: String,
     pub merchant_id: Option<String>,
     pub payment_id: Option<String>,
-    pub api_flow: String,
+    pub api_flow: ApiFlow,
+    pub flow_type: FlowType,
     pub created_at_timestamp: i64,
     pub request_id: String,
+    pub global_request_id: Option<String>,
+    pub trace_id: Option<String>,
     pub latency: u64,
-    pub status_code: i64,
+    pub status_code: u16,
     pub auth_type: Option<String>,
     pub request: String,
     pub user_agent: Option<String>,
@@ -70,24 +75,22 @@ pub struct KafkaApiEventRowV1 {
     pub url_path: String,
     pub response: Option<String>,
     pub error: Option<String>,
-    pub event_type: String,
     pub http_method: String,
-    pub infra_components: Option<String>,
-    pub request_truncated: bool,
-    pub response_truncated: bool,
 }
 
-impl From<DomainAnalyticsEvent> for KafkaDomainEventRowV1 {
+impl From<DomainAnalyticsEvent> for KafkaDomainEventRow {
     fn from(event: DomainAnalyticsEvent) -> Self {
         Self {
             schema_version: 1,
             produced_at_ms: crate::analytics::now_ms(),
             event_id: event.event_id,
-            tenant_id: event.tenant_id,
-            event_type: event.event_type,
+            api_flow: event.api_flow,
+            flow_type: event.flow_type,
             merchant_id: event.merchant_id,
             payment_id: event.payment_id,
             request_id: event.request_id,
+            global_request_id: event.global_request_id,
+            trace_id: event.trace_id,
             payment_method_type: event.payment_method_type,
             payment_method: event.payment_method,
             card_network: event.card_network,
@@ -114,18 +117,20 @@ impl From<DomainAnalyticsEvent> for KafkaDomainEventRowV1 {
     }
 }
 
-impl From<ApiEvent> for KafkaApiEventRowV1 {
+impl From<ApiEvent> for KafkaApiEventRow {
     fn from(event: ApiEvent) -> Self {
         Self {
             schema_version: 1,
             produced_at_ms: crate::analytics::now_ms(),
             event_id: event.event_id,
-            tenant_id: event.tenant_id,
             merchant_id: event.merchant_id,
             payment_id: event.payment_id,
             api_flow: event.api_flow,
+            flow_type: event.flow_type,
             created_at_timestamp: event.created_at_timestamp,
             request_id: event.request_id,
+            global_request_id: event.global_request_id,
+            trace_id: event.trace_id,
             latency: event.latency,
             status_code: event.status_code,
             auth_type: event.auth_type,
@@ -137,13 +142,7 @@ impl From<ApiEvent> for KafkaApiEventRowV1 {
             error: event
                 .error
                 .and_then(|value| serde_json::to_string(&value).ok()),
-            event_type: event.event_type,
             http_method: event.http_method,
-            infra_components: event
-                .infra_components
-                .and_then(|value| serde_json::to_string(&value).ok()),
-            request_truncated: event.request_truncated,
-            response_truncated: event.response_truncated,
         }
     }
 }
@@ -175,7 +174,7 @@ impl KafkaAnalyticsStore {
     }
 
     async fn send_api_event(&self, event: &ApiEvent) -> Result<(), ApiError> {
-        let payload = serde_json::to_vec(&KafkaApiEventRowV1::from(event.clone()))
+        let payload = serde_json::to_vec(&KafkaApiEventRow::from(event.clone()))
             .map_err(|_| ApiError::EncodingError)?;
         let key = api_event_key(event);
         self.send_payload("api", &self.config.api_topic, &key, payload)
@@ -183,7 +182,7 @@ impl KafkaAnalyticsStore {
     }
 
     async fn send_domain_event(&self, event: &DomainAnalyticsEvent) -> Result<(), ApiError> {
-        let payload = serde_json::to_vec(&KafkaDomainEventRowV1::from(event.clone()))
+        let payload = serde_json::to_vec(&KafkaDomainEventRow::from(event.clone()))
             .map_err(|_| ApiError::EncodingError)?;
         let key = domain_event_key(event);
         self.send_payload("domain", &self.config.domain_topic, &key, payload)
@@ -197,16 +196,6 @@ impl KafkaAnalyticsStore {
         key: &str,
         payload: Vec<u8>,
     ) -> Result<(), ApiError> {
-        if payload.len() > self.config.max_message_bytes {
-            ANALYTICS_EVENTS_DROPPED_TOTAL
-                .with_label_values(&[stream, "message_too_large"])
-                .inc();
-            ANALYTICS_KAFKA_PRODUCE_TOTAL
-                .with_label_values(&[stream, "dropped"])
-                .inc();
-            return Err(ApiError::EncodingError);
-        }
-
         let started_at = Instant::now();
         let delivery = self
             .producer
@@ -281,27 +270,19 @@ impl AnalyticsWriteStore for KafkaAnalyticsStore {
 }
 
 pub fn api_event_key(event: &ApiEvent) -> String {
-    format!(
-        "{}:{}",
-        event.tenant_id,
-        first_non_empty([
-            Some(event.request_id.clone()),
-            event.payment_id.clone(),
-            Some(event.event_id.to_string()),
-        ])
-    )
+    first_non_empty([
+        Some(event.request_id.clone()),
+        event.payment_id.clone(),
+        Some(event.event_id.to_string()),
+    ])
 }
 
 pub fn domain_event_key(event: &DomainAnalyticsEvent) -> String {
-    format!(
-        "{}:{}",
-        event.tenant_id,
-        first_non_empty([
-            event.payment_id.clone(),
-            event.request_id.clone(),
-            Some(event.event_id.to_string()),
-        ])
-    )
+    first_non_empty([
+        event.payment_id.clone(),
+        event.request_id.clone(),
+        Some(event.event_id.to_string()),
+    ])
 }
 
 fn first_non_empty<I>(values: I) -> String
@@ -346,21 +327,21 @@ fn build_client_config(config: &KafkaAnalyticsConfig) -> ClientConfig {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used)]
+    use crate::analytics::{ApiEvent, ApiFlow, DomainAnalyticsEvent, FlowType};
 
-    use crate::analytics::{ApiEvent, DomainAnalyticsEvent};
-
-    use super::{api_event_key, domain_event_key, KafkaApiEventRowV1, KafkaDomainEventRowV1};
+    use super::{api_event_key, domain_event_key, KafkaApiEventRow, KafkaDomainEventRow};
 
     #[test]
     fn domain_row_serializes_stably() {
         let event = DomainAnalyticsEvent {
             event_id: 1,
-            tenant_id: "public".to_string(),
-            event_type: "decision".to_string(),
+            api_flow: ApiFlow::DynamicRouting,
+            flow_type: FlowType::DecideGatewayDecision,
             merchant_id: None,
             payment_id: Some("pay_1".to_string()),
             request_id: Some("req_1".to_string()),
+            global_request_id: Some("global_1".to_string()),
+            trace_id: Some("trace_1".to_string()),
             payment_method_type: None,
             payment_method: None,
             card_network: None,
@@ -384,23 +365,32 @@ mod tests {
             details: None,
             created_at_ms: 123,
         };
-        let row = KafkaDomainEventRowV1::from(event);
-        let json = serde_json::to_string(&row).unwrap();
+        let row = KafkaDomainEventRow::from(event);
+        let json = match serde_json::to_string(&row) {
+            Ok(json) => json,
+            Err(error) => panic!("domain analytics row should serialize: {error}"),
+        };
         assert!(json.contains("\"schema_version\":1"));
         assert!(json.contains("\"created_at_ms\":123"));
         assert!(json.contains("\"payment_id\":\"pay_1\""));
+        assert!(json.contains("\"api_flow\":\"dynamic_routing\""));
+        assert!(json.contains("\"flow_type\":\"decide_gateway_decision\""));
+        assert!(json.contains("\"global_request_id\":\"global_1\""));
+        assert!(json.contains("\"trace_id\":\"trace_1\""));
     }
 
     #[test]
     fn api_row_serializes_json_fields_as_strings() {
         let event = ApiEvent {
             event_id: 10,
-            tenant_id: "tenant".to_string(),
             merchant_id: None,
             payment_id: Some("pay_123".to_string()),
-            api_flow: "decide_gateway".to_string(),
+            api_flow: ApiFlow::DynamicRouting,
+            flow_type: FlowType::DecideGateway,
             created_at_timestamp: 1,
             request_id: "req_123".to_string(),
+            global_request_id: Some("global_123".to_string()),
+            trace_id: Some("trace_123".to_string()),
             latency: 1,
             status_code: 200,
             auth_type: None,
@@ -410,30 +400,28 @@ mod tests {
             url_path: "/decide-gateway".to_string(),
             response: None,
             error: Some(serde_json::json!({"code":"bad_request"})),
-            event_type: "success".to_string(),
             http_method: "POST".to_string(),
-            infra_components: Some(serde_json::json!({"db":"postgres"})),
-            request_truncated: false,
-            response_truncated: false,
         };
-        let row = KafkaApiEventRowV1::from(event);
+        let row = KafkaApiEventRow::from(event);
         assert_eq!(row.error.as_deref(), Some("{\"code\":\"bad_request\"}"));
-        assert_eq!(
-            row.infra_components.as_deref(),
-            Some("{\"db\":\"postgres\"}")
-        );
+        assert_eq!(row.api_flow, ApiFlow::DynamicRouting);
+        assert_eq!(row.flow_type, FlowType::DecideGateway);
+        assert_eq!(row.global_request_id.as_deref(), Some("global_123"));
+        assert_eq!(row.trace_id.as_deref(), Some("trace_123"));
     }
 
     #[test]
     fn message_keys_are_deterministic() {
         let api = ApiEvent {
             event_id: 10,
-            tenant_id: "tenant".to_string(),
             merchant_id: None,
             payment_id: Some("pay_123".to_string()),
-            api_flow: "decide_gateway".to_string(),
+            api_flow: ApiFlow::DynamicRouting,
+            flow_type: FlowType::DecideGateway,
             created_at_timestamp: 1,
             request_id: "req_123".to_string(),
+            global_request_id: None,
+            trace_id: None,
             latency: 1,
             status_code: 200,
             auth_type: None,
@@ -443,19 +431,17 @@ mod tests {
             url_path: "/decide-gateway".to_string(),
             response: None,
             error: None,
-            event_type: "success".to_string(),
             http_method: "POST".to_string(),
-            infra_components: None,
-            request_truncated: false,
-            response_truncated: false,
         };
         let domain = DomainAnalyticsEvent {
             event_id: 11,
-            tenant_id: "tenant".to_string(),
-            event_type: "decision".to_string(),
+            api_flow: ApiFlow::DynamicRouting,
+            flow_type: FlowType::DecideGatewayDecision,
             merchant_id: None,
             payment_id: Some("pay_456".to_string()),
             request_id: Some("req_456".to_string()),
+            global_request_id: None,
+            trace_id: None,
             payment_method_type: None,
             payment_method: None,
             card_network: None,
@@ -480,7 +466,7 @@ mod tests {
             created_at_ms: 2,
         };
 
-        assert_eq!(api_event_key(&api), "tenant:req_123");
-        assert_eq!(domain_event_key(&domain), "tenant:pay_456");
+        assert_eq!(api_event_key(&api), "req_123");
+        assert_eq!(domain_event_key(&domain), "pay_456");
     }
 }

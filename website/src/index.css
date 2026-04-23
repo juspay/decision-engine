@@ -34,16 +34,16 @@
     @apply text-slate-800 dark:text-slate-200 transition-colors duration-300;
   }
 
-  p.text-slate-500,
-  span.text-slate-500,
-  div.text-slate-500 {
-    @apply dark:text-slate-400;
+  .dark p.text-slate-500,
+  .dark span.text-slate-500,
+  .dark div.text-slate-500 {
+    color: #94a3b8;
   }
 
-  p.text-slate-600,
-  span.text-slate-600,
-  div.text-slate-600 {
-    @apply dark:text-slate-300;
+  .dark p.text-slate-600,
+  .dark span.text-slate-600,
+  .dark div.text-slate-600 {
+    color: #cbd5e1;
   }
 
   /* Automatic inversion for tailwind colors in dark mode */

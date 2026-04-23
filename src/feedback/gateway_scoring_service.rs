@@ -450,6 +450,11 @@ pub async fn check_and_update_gateway_score_(
                 enforce_failure,
                 api_payload.gateway_reference_id.clone(),
                 api_payload.txn_latency.clone(),
+                crate::analytics::AnalyticsRoute::UpdateGatewayScore,
+                crate::analytics::AnalyticsFlowContext::new(
+                    crate::analytics::ApiFlow::DynamicRouting,
+                    crate::analytics::FlowType::UpdateGatewayScoreScoreSnapshot,
+                ),
                 None,
             )
             .await;
@@ -487,6 +492,8 @@ pub async fn check_and_update_gateway_score(
     enforce_failure: bool,
     gateway_reference_id: Option<String>,
     txn_latency: Option<TransactionLatency>,
+    analytics_route: crate::analytics::AnalyticsRoute,
+    score_snapshot_flow: crate::analytics::AnalyticsFlowContext,
     redis_comp_config: Option<RedisCompressionConfigCombined>,
 ) -> () {
     // Get gateway scoring type
@@ -538,6 +545,8 @@ pub async fn check_and_update_gateway_score(
                 txn_card_info.clone(),
                 gateway_reference_id.clone(),
                 txn_latency.clone(),
+                analytics_route,
+                score_snapshot_flow,
                 redis_comp_config.clone(),
             )
             .await;
@@ -557,6 +566,8 @@ pub async fn check_and_update_gateway_score(
             txn_card_info.clone(),
             gateway_reference_id.clone(),
             txn_latency.clone(),
+            analytics_route,
+            score_snapshot_flow,
             redis_comp_config,
         )
         .await;
@@ -570,6 +581,8 @@ pub async fn update_gateway_score(
     txn_card_info: TxnCardInfo,
     gateway_reference_id: Option<String>,
     txn_latency: Option<TransactionLatency>,
+    analytics_route: crate::analytics::AnalyticsRoute,
+    score_snapshot_flow: crate::analytics::AnalyticsFlowContext,
     redis_compression_config: Option<RedisCompressionConfigCombined>,
 ) -> () {
     let mer_acc: MerchantAccount =
@@ -719,12 +732,10 @@ pub async fn update_gateway_score(
         && should_isolate_srv3_producer
         && should_update_explore_txn
         && is_update_within_window;
-    let tenant_id = get_tenant_app_state().await.config.tenant_id.clone();
-
     if !should_record_srv3_post_update {
         if let Some(metric_entry) = m_metric_entry.clone() {
             crate::analytics::record_score_snapshot_event(
-                tenant_id.clone(),
+                score_snapshot_flow,
                 Some(MID::merchant_id_to_text(txn_detail.clone().merchantId)),
                 Some(txn_card_info.paymentMethodType.to_string()),
                 Some(m_source_object.clone().unwrap_or_default()),
@@ -748,7 +759,7 @@ pub async fn update_gateway_score(
                 Some(metric_entry.average_latency.into()),
                 Some(metric_entry.tp99_latency.into()),
                 Some(metric_entry.n_value as i64),
-                "update_gateway_score",
+                analytics_route,
                 serde_json::to_string(&serde_json::json!({
                     "routing_approach": format!("{:?}", routing_approach),
                     "gateway_scoring_type": format!("{:?}", gateway_scoring_type),
@@ -756,6 +767,8 @@ pub async fn update_gateway_score(
                 }))
                 .ok(),
                 Some(txn_detail.txnUuid.clone()),
+                None,
+                None,
                 None,
                 Some("score_updated".to_string()),
             );
@@ -841,7 +854,7 @@ pub async fn update_gateway_score(
                         )
                         .await;
                     crate::analytics::record_score_snapshot_event(
-                        tenant_id.clone(),
+                        score_snapshot_flow,
                         Some(merchant_id),
                         Some(pmt_str),
                         Some(pm_str),
@@ -856,7 +869,7 @@ pub async fn update_gateway_score(
                         None,
                         None,
                         Some(bucket_size as i64),
-                        "update_gateway_score",
+                        analytics_route,
                         serde_json::to_string(&serde_json::json!({
                             "routing_approach": format!("{:?}", routing_approach),
                             "gateway_scoring_type": format!("{:?}", gateway_scoring_type),
@@ -864,6 +877,8 @@ pub async fn update_gateway_score(
                         }))
                         .ok(),
                         Some(txn_detail.txnUuid.clone()),
+                        None,
+                        None,
                         None,
                         Some("score_updated".to_string()),
                     );

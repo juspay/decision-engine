@@ -21,6 +21,9 @@ pub const UDF_CUSTOMER_ID: &str = "customer_id";
 pub const UDF_TXN_UUID: &str = "x-txn-uuid";
 /// Header key for global request ID
 pub const X_GLOBAL_REQUEST_ID: &str = "x-global-request-id";
+pub const TRACEPARENT: &str = "traceparent";
+pub const X_TRACE_ID: &str = "x-trace-id";
+pub const X_B3_TRACE_ID: &str = "x-b3-traceid";
 
 pub const EULER_REQUEST_ID: &str = "euler-request-id";
 

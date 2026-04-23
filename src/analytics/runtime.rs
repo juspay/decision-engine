@@ -74,14 +74,6 @@ impl AnalyticsRuntime {
         self.config.enabled
     }
 
-    pub fn body_max_bytes(&self) -> usize {
-        self.config.capture.body_max_bytes
-    }
-
-    pub fn request_body_limit_bytes(&self) -> usize {
-        self.config.capture.request_body_limit_bytes
-    }
-
     pub fn details_max_bytes(&self) -> usize {
         self.config.capture.details_max_bytes
     }

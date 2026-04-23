@@ -14,10 +14,8 @@ pub fn base_window_filters(start_ms: i64, end_ms: i64) -> Vec<FilterClause> {
     ]
 }
 
-pub fn merchant_filter(merchant_id: Option<&str>) -> Vec<FilterClause> {
-    merchant_id
-        .map(|value| vec![FilterClause::eq("merchant_id", value)])
-        .unwrap_or_default()
+pub fn merchant_filter(merchant_id: &str) -> Vec<FilterClause> {
+    vec![FilterClause::eq("merchant_id", merchant_id)]
 }
 
 pub fn analytics_dimension_filters(query: &AnalyticsQuery) -> Vec<FilterClause> {
@@ -53,7 +51,7 @@ pub fn analytics_dimension_filters(query: &AnalyticsQuery) -> Vec<FilterClause> 
 
 pub fn score_filters(query: &AnalyticsQuery, start_ms: i64, end_ms: i64) -> Vec<FilterClause> {
     let mut filters = base_window_filters(start_ms, end_ms);
-    filters.extend(merchant_filter(query.merchant_id.as_deref()));
+    filters.extend(merchant_filter(&query.merchant_id));
     filters.extend(analytics_dimension_filters(query));
     filters
 }
@@ -62,7 +60,7 @@ pub fn payment_audit_filters(query: &PaymentAuditQuery, preview_only: bool) -> V
     let (start_ms, end_ms) = effective_payment_audit_window_bounds(query);
     let mut filters = base_window_filters(start_ms, end_ms);
 
-    filters.extend(merchant_filter(query.merchant_id.as_deref()));
+    filters.extend(merchant_filter(&query.merchant_id));
 
     if preview_only {
         filters.push(FilterClause::raw(format!(
@@ -107,16 +105,13 @@ pub fn payment_audit_filters(query: &PaymentAuditQuery, preview_only: bool) -> V
 
 #[cfg(test)]
 mod tests {
-    use crate::analytics::models::{
-        AnalyticsQuery, AnalyticsRange, AnalyticsScope, PaymentAuditQuery,
-    };
+    use crate::analytics::models::{AnalyticsQuery, AnalyticsRange, PaymentAuditQuery};
 
     use super::{analytics_dimension_filters, merchant_filter, payment_audit_filters};
 
     fn analytics_query() -> AnalyticsQuery {
         AnalyticsQuery {
-            merchant_id: Some("m_123".to_string()),
-            scope: AnalyticsScope::Current,
+            merchant_id: "m_123".to_string(),
             range: AnalyticsRange::H1,
             start_ms: Some(100),
             end_ms: Some(200),
@@ -135,8 +130,7 @@ mod tests {
 
     fn payment_audit_query() -> PaymentAuditQuery {
         PaymentAuditQuery {
-            merchant_id: Some("m_123".to_string()),
-            scope: AnalyticsScope::Current,
+            merchant_id: "m_123".to_string(),
             range: AnalyticsRange::H1,
             start_ms: Some(100),
             end_ms: Some(200),
@@ -153,8 +147,13 @@ mod tests {
     }
 
     #[test]
-    fn merchant_filter_is_empty_when_absent() {
-        assert!(merchant_filter(None).is_empty());
+    fn merchant_filter_always_applies_merchant_scope() {
+        let filters = merchant_filter("m_123");
+        let predicates = filters
+            .iter()
+            .map(|filter| filter.predicate().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(predicates, vec!["merchant_id = ?".to_string()]);
     }
 
     #[test]
@@ -188,12 +187,10 @@ mod tests {
         assert!(predicates
             .iter()
             .any(|predicate| predicate.contains("route = 'routing_evaluate'")));
-        assert!(predicates
-            .iter()
-            .any(|predicate| {
-                predicate.contains("flow_type IN")
-                    && predicate.contains("routing_evaluate_advanced")
-                    && predicate.contains("routing_evaluate_preview")
-            }));
+        assert!(predicates.iter().any(|predicate| {
+            predicate.contains("flow_type IN")
+                && predicate.contains("routing_evaluate_advanced")
+                && predicate.contains("routing_evaluate_preview")
+        }));
     }
 }
