@@ -12,7 +12,6 @@ enum RequestBodyFailureKind {
 struct RequestBodyFailureSpec {
     analytics_stage: &'static str,
     status: StatusCode,
-    error_code: &'static str,
     error_message: &'static str,
     developer_error_code: &'static str,
     user_message: &'static str,
@@ -24,7 +23,6 @@ impl RequestBodyFailureKind {
             Self::ReadFailed => RequestBodyFailureSpec {
                 analytics_stage: "request_read_failed",
                 status: StatusCode::BAD_REQUEST,
-                error_code: "400",
                 error_message: "Error reading request body",
                 developer_error_code: "INVALID_INPUT",
                 user_message: "Invalid request params. Please verify your input.",
@@ -60,7 +58,7 @@ impl RequestBodyError {
         match self {
             Self::Read(error) => ErrorResponse {
                 status: spec.status.as_u16().to_string(),
-                error_code: spec.error_code.to_string(),
+                error_code: spec.status.as_u16().to_string(),
                 error_message: spec.error_message.to_string(),
                 priority_logic_tag: None,
                 routing_approach: None,
@@ -76,8 +74,8 @@ impl RequestBodyError {
         }
     }
 
-    pub fn analytics_code_and_message(&self) -> (&'static str, &'static str) {
+    pub fn analytics_code_and_message(&self) -> (String, &'static str) {
         let spec = self.kind().spec();
-        (spec.error_code, spec.error_message)
+        (spec.status.as_u16().to_string(), spec.error_message)
     }
 }

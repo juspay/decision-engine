@@ -85,7 +85,7 @@ pub async fn decide_gateway(
                 trace_id.clone(),
                 None,
                 None,
-                error_code.to_string(),
+                error_code,
                 error_message.to_string(),
                 serde_json::to_string(&serde_json::json!({
                     "request_id": x_request_id,

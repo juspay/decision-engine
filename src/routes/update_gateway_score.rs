@@ -70,7 +70,7 @@ pub async fn update_gateway_score(
                 trace_id.clone(),
                 None,
                 None,
-                error_code.to_string(),
+                error_code,
                 error_message.to_string(),
                 Some("request body parse failure".to_string()),
                 Some(e.analytics_stage().to_string()),
