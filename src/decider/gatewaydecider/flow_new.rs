@@ -110,8 +110,7 @@ pub async fn decider_full_payload_hs_function(
         dpRedisCompressionConfig: None,
     };
 
-    let is_hybrid_routing =
-        dreq_.ranking_algorithm == Some(RankingAlgorithm::NtwSrHybridRouting);
+    let is_hybrid_routing = dreq_.ranking_algorithm == Some(RankingAlgorithm::NtwSrHybridRouting);
 
     if dreq_.ranking_algorithm == Some(RankingAlgorithm::NtwBasedRouting) || is_hybrid_routing {
         let config_name = format!("DEBIT_ROUTING_ENABLED_{}", dreq_.merchant_id);
@@ -153,12 +152,7 @@ pub async fn decider_full_payload_hs_function(
 
         if is_hybrid_routing {
             logger::debug!("Performing hybrid routing (SR-based + debit routing)");
-            perform_hybrid_routing(
-                decider_params,
-                dreq_,
-                cpu_start,
-            )
-            .await
+            perform_hybrid_routing(decider_params, dreq_, cpu_start).await
         } else {
             logger::debug!("Performing debit routing");
             network_decider::debit_routing::perform_debit_routing(dreq_).await
