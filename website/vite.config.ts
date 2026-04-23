@@ -15,7 +15,9 @@ export default defineConfig(({ command }) => {
         console.log(`Forwarding: ${req.method} ${req.url} -> ${backendTarget}${req.url}`)
       })
       proxy.on('proxyRes', (proxyRes, req) => {
-        console.log(`[PROXY] Response: ${proxyRes.statusCode} ${proxyRes.statusMessage} for ${req.url}`)
+        console.log(
+          `[PROXY] Response: ${proxyRes.statusCode} ${proxyRes.statusMessage} for ${req.url}`
+        )
       })
       proxy.on('error', (err, req) => {
         console.log(`\n[PROXY ERROR] ${new Date().toISOString()}`)
@@ -30,14 +32,19 @@ export default defineConfig(({ command }) => {
     server: {
       proxy: {
         '/decide-gateway': createApiProxy(),
+        '/decision_gateway': createApiProxy(),
         '/merchant-account': createApiProxy(),
         '/config-sr-dimension': createApiProxy(),
         '^/config(?:/.*)?$': createApiProxy(),
         '/health': createApiProxy(),
         '/update-gateway-score': createApiProxy(),
-        '^/rule/(get|create|update|delete)$': createApiProxy(),
-        '^/routing/(create|activate|evaluate|list(?:/.*)?)$': createApiProxy(),
-        '^/analytics/(overview|routing-stats|preview-trace|payment-audit)(?:\\?.*)?$': createApiProxy(),
+        '/update-score': createApiProxy(),
+        '^/rule(?:/.*)?$': createApiProxy(),
+        '^/routing/(create|activate|evaluate|list(?:/.*)?|hybrid)$': createApiProxy(),
+        '^/analytics/(overview|gateway-scores|decisions|routing-stats|log-summaries|preview-trace|payment-audit)(?:\\?.*)?$':
+          createApiProxy(),
+        '^/auth(?:/.*)?$': createApiProxy(),
+        '^/api-key(?:/.*)?$': createApiProxy(),
       },
       fs: {
         strict: false,
