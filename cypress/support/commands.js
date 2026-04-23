@@ -35,6 +35,20 @@ function requestApi(method, path, options = {}) {
   })
 }
 
+function normalizeAnalyticsRequest(query = {}, options = {}) {
+  const normalizedQuery = { ...query }
+  const merchantId = options.merchantId || normalizedQuery.merchant_id
+
+  delete normalizedQuery.merchant_id
+  delete normalizedQuery.scope
+
+  if (!merchantId) {
+    throw new Error('Analytics requests require a merchantId to derive the auth context')
+  }
+
+  return { merchantId, normalizedQuery }
+}
+
 function merchantStoreState(merchantId) {
   return JSON.stringify({
     state: { merchantId },
@@ -293,31 +307,71 @@ Cypress.Commands.add('evaluateRoutingAlgorithm', (payload, options = {}) => {
 })
 
 Cypress.Commands.add('fetchAnalyticsOverview', (query = {}, options = {}) => {
-  return requestApi('GET', '/analytics/overview', {
-    ...options,
-    qs: query,
-  }).then((response) => cy.wrap({ query, response: response.body, status: response.status }))
+  const { merchantId, normalizedQuery } = normalizeAnalyticsRequest(query, options)
+
+  return cy.ensureDashboardSession(merchantId).then((session) =>
+    requestApi('GET', '/analytics/overview', {
+      ...options,
+      qs: normalizedQuery,
+      headers: {
+        ...(options.headers || {}),
+        Authorization: `Bearer ${session.token}`,
+      },
+    }).then((response) =>
+      cy.wrap({ merchantId, query: normalizedQuery, response: response.body, status: response.status }),
+    ),
+  )
 })
 
 Cypress.Commands.add('fetchAnalyticsRoutingStats', (query = {}, options = {}) => {
-  return requestApi('GET', '/analytics/routing-stats', {
-    ...options,
-    qs: query,
-  }).then((response) => cy.wrap({ query, response: response.body, status: response.status }))
+  const { merchantId, normalizedQuery } = normalizeAnalyticsRequest(query, options)
+
+  return cy.ensureDashboardSession(merchantId).then((session) =>
+    requestApi('GET', '/analytics/routing-stats', {
+      ...options,
+      qs: normalizedQuery,
+      headers: {
+        ...(options.headers || {}),
+        Authorization: `Bearer ${session.token}`,
+      },
+    }).then((response) =>
+      cy.wrap({ merchantId, query: normalizedQuery, response: response.body, status: response.status }),
+    ),
+  )
 })
 
 Cypress.Commands.add('fetchPaymentAudit', (query = {}, options = {}) => {
-  return requestApi('GET', '/analytics/payment-audit', {
-    ...options,
-    qs: query,
-  }).then((response) => cy.wrap({ query, response: response.body, status: response.status }))
+  const { merchantId, normalizedQuery } = normalizeAnalyticsRequest(query, options)
+
+  return cy.ensureDashboardSession(merchantId).then((session) =>
+    requestApi('GET', '/analytics/payment-audit', {
+      ...options,
+      qs: normalizedQuery,
+      headers: {
+        ...(options.headers || {}),
+        Authorization: `Bearer ${session.token}`,
+      },
+    }).then((response) =>
+      cy.wrap({ merchantId, query: normalizedQuery, response: response.body, status: response.status }),
+    ),
+  )
 })
 
 Cypress.Commands.add('fetchPreviewTrace', (query = {}, options = {}) => {
-  return requestApi('GET', '/analytics/preview-trace', {
-    ...options,
-    qs: query,
-  }).then((response) => cy.wrap({ query, response: response.body, status: response.status }))
+  const { merchantId, normalizedQuery } = normalizeAnalyticsRequest(query, options)
+
+  return cy.ensureDashboardSession(merchantId).then((session) =>
+    requestApi('GET', '/analytics/preview-trace', {
+      ...options,
+      qs: normalizedQuery,
+      headers: {
+        ...(options.headers || {}),
+        Authorization: `Bearer ${session.token}`,
+      },
+    }).then((response) =>
+      cy.wrap({ merchantId, query: normalizedQuery, response: response.body, status: response.status }),
+    ),
+  )
 })
 
 Cypress.Commands.add('pollRequest', (requestFactory, predicate, options = {}) => {

@@ -53,11 +53,12 @@ describe('Analytics UI', () => {
     seedAnalyticsUiData(merchantId)
     cy.pollRequest(
       () =>
-        cy.fetchAnalyticsOverview({
-          scope: 'current',
-          range: '1h',
-          merchant_id: merchantId,
-        }),
+        cy.fetchAnalyticsOverview(
+          {
+            range: '1h',
+          },
+          { merchantId },
+        ),
       ({ response }) =>
         response.route_hits.some((hit) => hit.route === '/decide_gateway') &&
         response.route_hits.some((hit) => hit.route === '/update_gateway'),

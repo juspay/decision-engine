@@ -64,11 +64,12 @@ describe('Analytics API', () => {
 
     cy.pollRequest(
       () =>
-        cy.fetchAnalyticsOverview({
-          scope: 'current',
-          range: '1h',
-          merchant_id: merchantId,
-        }),
+        cy.fetchAnalyticsOverview(
+          {
+            range: '1h',
+          },
+          { merchantId },
+        ),
       ({ response }) =>
         response.route_hits.some((hit) => hit.route === '/decide_gateway') &&
         response.route_hits.some((hit) => hit.route === '/update_gateway') &&
@@ -80,11 +81,12 @@ describe('Analytics API', () => {
 
     cy.pollRequest(
       () =>
-        cy.fetchAnalyticsRoutingStats({
-          scope: 'current',
-          range: '1h',
-          merchant_id: merchantId,
-        }),
+        cy.fetchAnalyticsRoutingStats(
+          {
+            range: '1h',
+          },
+          { merchantId },
+        ),
       ({ response }) =>
         Array.isArray(response.gateway_share) && response.gateway_share.length > 0,
       { errorMessage: 'Analytics routing stats did not populate gateway share' },
@@ -94,12 +96,13 @@ describe('Analytics API', () => {
 
     cy.pollRequest(
       () =>
-        cy.fetchPaymentAudit({
-          scope: 'current',
-          range: '1h',
-          merchant_id: merchantId,
-          payment_id: decisionPaymentId,
-        }),
+        cy.fetchPaymentAudit(
+          {
+            range: '1h',
+            payment_id: decisionPaymentId,
+          },
+          { merchantId },
+        ),
       ({ response }) =>
         response.timeline.some((event) => event.flow_type === 'decide_gateway_decision') &&
         response.timeline.some((event) => event.flow_type === 'update_gateway_score_update'),
@@ -110,12 +113,13 @@ describe('Analytics API', () => {
 
     cy.pollRequest(
       () =>
-        cy.fetchPreviewTrace({
-          scope: 'current',
-          range: '1h',
-          merchant_id: merchantId,
-          payment_id: previewPaymentId,
-        }),
+        cy.fetchPreviewTrace(
+          {
+            range: '1h',
+            payment_id: previewPaymentId,
+          },
+          { merchantId },
+        ),
       ({ response }) =>
         response.timeline.some((event) => event.flow_type === 'routing_evaluate_advanced'),
       { errorMessage: 'Preview trace did not include rule evaluation preview' },

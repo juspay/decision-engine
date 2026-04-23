@@ -33,11 +33,12 @@ describe('Dashboard Overview UI', () => {
     seedOverviewData(merchantId)
     cy.pollRequest(
       () =>
-        cy.fetchAnalyticsOverview({
-          scope: 'current',
-          range: '1h',
-          merchant_id: merchantId,
-        }),
+        cy.fetchAnalyticsOverview(
+          {
+            range: '1h',
+          },
+          { merchantId },
+        ),
       ({ response }) => response.route_hits.some((hit) => hit.route === '/decide_gateway'),
       { errorMessage: 'Overview seed data did not reach analytics in time' },
     )

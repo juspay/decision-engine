@@ -54,12 +54,13 @@ describe('Payment Audit UI', () => {
     seeded = seedAuditData(merchantId)
     cy.pollRequest(
       () =>
-        cy.fetchPaymentAudit({
-          scope: 'current',
-          range: '1h',
-          merchant_id: merchantId,
-          payment_id: seeded.decisionPaymentId,
-        }),
+        cy.fetchPaymentAudit(
+          {
+            range: '1h',
+            payment_id: seeded.decisionPaymentId,
+          },
+          { merchantId },
+        ),
       ({ response }) =>
         Array.isArray(response.timeline) &&
         response.timeline.some((event) => event.flow_type === 'decide_gateway_decision'),
@@ -67,12 +68,13 @@ describe('Payment Audit UI', () => {
     )
     cy.pollRequest(
       () =>
-        cy.fetchPreviewTrace({
-          scope: 'current',
-          range: '1h',
-          merchant_id: merchantId,
-          payment_id: seeded.previewPaymentId,
-        }),
+        cy.fetchPreviewTrace(
+          {
+            range: '1h',
+            payment_id: seeded.previewPaymentId,
+          },
+          { merchantId },
+        ),
       ({ response }) =>
         Array.isArray(response.timeline) &&
         response.timeline.some((event) => event.flow_type === 'routing_evaluate_advanced'),

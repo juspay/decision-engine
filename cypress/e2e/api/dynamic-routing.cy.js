@@ -69,12 +69,13 @@ describe('Dynamic Routing API', () => {
 
     cy.pollRequest(
       () =>
-        cy.fetchPaymentAudit({
-          scope: 'current',
-          range: '1h',
-          merchant_id: merchantId,
-          payment_id: firstPaymentId,
-        }),
+        cy.fetchPaymentAudit(
+          {
+            range: '1h',
+            payment_id: firstPaymentId,
+          },
+          { merchantId },
+        ),
       ({ response }) =>
         Array.isArray(response.timeline) &&
         response.timeline.some((event) => event.flow_type === 'decide_gateway_decision') &&
@@ -88,11 +89,12 @@ describe('Dynamic Routing API', () => {
 
     cy.pollRequest(
       () =>
-        cy.fetchAnalyticsOverview({
-          scope: 'current',
-          range: '1h',
-          merchant_id: merchantId,
-        }),
+        cy.fetchAnalyticsOverview(
+          {
+            range: '1h',
+          },
+          { merchantId },
+        ),
       ({ response }) =>
         Array.isArray(response.route_hits) &&
         response.route_hits.some((hit) => hit.route === '/decide_gateway' && hit.count >= 2) &&

@@ -76,7 +76,7 @@ chai.use(function (_chai, utils) {
   _chai.Assertion.addMethod('haveValidAnalyticsOverview', function () {
     const obj = utils.flag(this, 'object')
     assertObject(obj)
-    expect(obj).to.have.property('generated_at_ms')
+    expect(obj).to.have.property('merchant_id').that.is.a('string')
     expect(obj).to.have.property('kpis').that.is.an('array')
     expect(obj).to.have.property('route_hits').that.is.an('array')
   })
@@ -84,7 +84,7 @@ chai.use(function (_chai, utils) {
   _chai.Assertion.addMethod('haveValidRoutingStats', function () {
     const obj = utils.flag(this, 'object')
     assertObject(obj)
-    expect(obj).to.have.property('generated_at_ms')
+    expect(obj).to.have.property('merchant_id').that.is.a('string')
     expect(obj).to.have.property('gateway_share').that.is.an('array')
     expect(obj).to.have.property('sr_trend').that.is.an('array')
   })
