@@ -747,8 +747,8 @@ pub fn format_range(query: &AnalyticsQuery) -> String {
     match query.range {
         AnalyticsRange::M15 => "15m".to_string(),
         AnalyticsRange::H1 => "1h".to_string(),
-        AnalyticsRange::H24 => "24h".to_string(),
-        AnalyticsRange::D30 => "30d".to_string(),
-        AnalyticsRange::M18 => "18mo".to_string(),
+        AnalyticsRange::H12 => "12h".to_string(),
+        AnalyticsRange::D1 => "1d".to_string(),
+        AnalyticsRange::W1 => "1w".to_string(),
     }
 }

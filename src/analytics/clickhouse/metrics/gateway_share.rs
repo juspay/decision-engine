@@ -8,7 +8,7 @@ use crate::error::ApiError;
 use super::super::common::{fetch_all, DOMAIN_TABLE};
 use super::super::filters::{base_window_filters, merchant_filter};
 use super::super::query::{BoundQueryBuilder, FilterClause, OrderClause};
-use super::super::time::{effective_window_bounds, query_bucket_size_ms};
+use super::super::time::{effective_window_bounds, query_bucket_select_expr};
 
 #[derive(Debug, Clone, Deserialize, Row)]
 struct GatewaySharePointRow {
@@ -22,10 +22,9 @@ pub async fn load(
     query: &AnalyticsQuery,
 ) -> Result<Vec<AnalyticsGatewaySharePoint>, ApiError> {
     let (start_ms, end_ms) = effective_window_bounds(query);
-    let bucket = query_bucket_size_ms(start_ms, end_ms);
     let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
     builder.extend_selects([
-        format!("intDiv(created_at_ms, {bucket}) * {bucket} AS bucket_ms"),
+        query_bucket_select_expr(query, start_ms, end_ms),
         "ifNull(gateway, 'unknown') AS gateway".to_string(),
         "count() AS count".to_string(),
     ]);

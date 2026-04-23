@@ -3,6 +3,17 @@ use crate::analytics::models::{
 };
 use crate::analytics::service::now_ms;
 
+const MINUTE_MS: i64 = 60 * 1000;
+const FIFTEEN_MINUTES_MS: i64 = 15 * MINUTE_MS;
+const HOUR_MS: i64 = 60 * MINUTE_MS;
+const TWELVE_HOURS_MS: i64 = 12 * HOUR_MS;
+const DAY_MS: i64 = 24 * HOUR_MS;
+const WEEK_MS: i64 = 7 * DAY_MS;
+const OVER_FIFTEEN_MINUTES_MS: i64 = FIFTEEN_MINUTES_MS + 1;
+const OVER_HOUR_MS: i64 = HOUR_MS + 1;
+const OVER_TWELVE_HOURS_MS: i64 = TWELVE_HOURS_MS + 1;
+const OVER_DAY_MS: i64 = DAY_MS + 1;
+
 pub fn effective_window_bounds(query: &AnalyticsQuery) -> (i64, i64) {
     let now = now_ms();
     let end_ms = query.end_ms.unwrap_or(now).min(now);
@@ -27,26 +38,41 @@ pub fn effective_payment_audit_window_bounds(query: &PaymentAuditQuery) -> (i64,
     (start_ms, end_ms)
 }
 
-pub fn query_bucket_size_ms(start_ms: i64, end_ms: i64) -> i64 {
-    let window_ms = end_ms.saturating_sub(start_ms);
-    match window_ms {
-        0..=900_000 => 60 * 1000,
-        900_001..=3_600_000 => 5 * 60 * 1000,
-        3_600_001..=86_400_000 => 15 * 60 * 1000,
-        86_400_001..=259_200_000 => 60 * 60 * 1000,
-        259_200_001..=2_592_000_000 => 3 * 60 * 60 * 1000,
-        2_592_000_001..=15_552_000_000 => 24 * 60 * 60 * 1000,
-        _ => 7 * 24 * 60 * 60 * 1000,
+fn bucket_start_expr(query: &AnalyticsQuery, start_ms: i64, end_ms: i64) -> &'static str {
+    if query.start_ms.is_some() && query.end_ms.is_some() {
+        return match end_ms.saturating_sub(start_ms) {
+            0..=FIFTEEN_MINUTES_MS => "toStartOfInterval(created_at, INTERVAL 1 MINUTE)",
+            OVER_FIFTEEN_MINUTES_MS..=HOUR_MS => "toStartOfInterval(created_at, INTERVAL 5 MINUTE)",
+            OVER_HOUR_MS..=TWELVE_HOURS_MS => "toStartOfInterval(created_at, INTERVAL 1 HOUR)",
+            OVER_TWELVE_HOURS_MS..=DAY_MS => "toStartOfInterval(created_at, INTERVAL 1 HOUR)",
+            OVER_DAY_MS..=WEEK_MS => "toStartOfInterval(created_at, INTERVAL 1 DAY)",
+            _ => "toStartOfInterval(created_at, INTERVAL 7 DAY)",
+        };
     }
+
+    match query.range {
+        AnalyticsRange::M15 => "toStartOfMinute(created_at)",
+        AnalyticsRange::H1 => "toStartOfFiveMinutes(created_at)",
+        AnalyticsRange::H12 => "toStartOfHour(created_at)",
+        AnalyticsRange::D1 => "toStartOfHour(created_at)",
+        AnalyticsRange::W1 => "toStartOfDay(created_at)",
+    }
+}
+
+pub fn query_bucket_select_expr(query: &AnalyticsQuery, start_ms: i64, end_ms: i64) -> String {
+    format!(
+        "toUnixTimestamp64Milli({}) AS bucket_ms",
+        bucket_start_expr(query, start_ms, end_ms)
+    )
 }
 
 pub fn payment_audit_range(query: &PaymentAuditQuery) -> String {
     match query.range {
         AnalyticsRange::M15 => "15m".to_string(),
         AnalyticsRange::H1 => "1h".to_string(),
-        AnalyticsRange::H24 => "24h".to_string(),
-        AnalyticsRange::D30 => "30d".to_string(),
-        AnalyticsRange::M18 => "18mo".to_string(),
+        AnalyticsRange::H12 => "12h".to_string(),
+        AnalyticsRange::D1 => "1d".to_string(),
+        AnalyticsRange::W1 => "1w".to_string(),
     }
 }
 
@@ -54,7 +80,7 @@ pub fn payment_audit_range(query: &PaymentAuditQuery) -> String {
 mod tests {
     use crate::analytics::models::{AnalyticsQuery, AnalyticsRange, AnalyticsScope};
 
-    use super::{effective_window_bounds, query_bucket_size_ms};
+    use super::{effective_window_bounds, query_bucket_select_expr, HOUR_MS, MINUTE_MS};
 
     fn query() -> AnalyticsQuery {
         AnalyticsQuery {
@@ -85,9 +111,22 @@ mod tests {
     }
 
     #[test]
-    fn bucket_size_matches_existing_thresholds() {
-        assert_eq!(query_bucket_size_ms(0, 900_000), 60_000);
-        assert_eq!(query_bucket_size_ms(0, 3_600_000), 300_000);
-        assert_eq!(query_bucket_size_ms(0, 86_400_000), 900_000);
+    fn preset_bucket_uses_fixed_helper() {
+        let query = query();
+        assert_eq!(
+            query_bucket_select_expr(&query, 0, HOUR_MS),
+            "toUnixTimestamp64Milli(toStartOfFiveMinutes(created_at)) AS bucket_ms"
+        );
+    }
+
+    #[test]
+    fn custom_bucket_uses_interval_helper() {
+        let mut query = query();
+        query.start_ms = Some(0);
+        query.end_ms = Some(15 * MINUTE_MS);
+        assert_eq!(
+            query_bucket_select_expr(&query, 0, 15 * MINUTE_MS),
+            "toUnixTimestamp64Milli(toStartOfInterval(created_at, INTERVAL 1 MINUTE)) AS bucket_ms"
+        );
     }
 }

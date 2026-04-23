@@ -9,7 +9,7 @@ use super::super::common::{
 };
 use super::super::filters::score_filters;
 use super::super::query::{BoundQueryBuilder, FilterClause, OrderClause};
-use super::super::time::{effective_window_bounds, query_bucket_size_ms};
+use super::super::time::{effective_window_bounds, query_bucket_select_expr};
 
 #[derive(Debug, Clone, Deserialize, Row)]
 struct ScoreSeriesRow {
@@ -26,10 +26,9 @@ pub async fn load(
     query: &AnalyticsQuery,
 ) -> Result<Vec<GatewayScoreSeriesPoint>, ApiError> {
     let (start_ms, end_ms) = effective_window_bounds(query);
-    let bucket = query_bucket_size_ms(start_ms, end_ms);
     let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
     builder.extend_selects([
-        format!("intDiv(created_at_ms, {bucket}) * {bucket} AS bucket_ms"),
+        query_bucket_select_expr(query, start_ms, end_ms),
         "ifNull(merchant_id, '') AS merchant_id".to_string(),
         "ifNull(payment_method_type, '') AS payment_method_type".to_string(),
         "ifNull(payment_method, '') AS payment_method".to_string(),
