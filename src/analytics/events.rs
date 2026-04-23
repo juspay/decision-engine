@@ -15,6 +15,7 @@ pub struct DomainAnalyticsEvent {
     pub merchant_id: Option<String>,
     pub payment_id: Option<String>,
     pub request_id: Option<String>,
+    pub lookup_key: Option<String>,
     pub global_request_id: Option<String>,
     pub trace_id: Option<String>,
     pub payment_method_type: Option<String>,
@@ -50,6 +51,7 @@ impl DomainAnalyticsEvent {
             merchant_id: None,
             payment_id: None,
             request_id: None,
+            lookup_key: None,
             global_request_id: None,
             trace_id: None,
             payment_method_type: None,
@@ -97,10 +99,12 @@ impl DomainAnalyticsEvent {
         auth_type: Option<String>,
         created_at_ms: i64,
     ) -> Self {
+        let lookup_key = derive_lookup_key(payment_id.as_deref(), request_id.as_deref());
         Self {
             merchant_id,
             payment_id,
             request_id,
+            lookup_key,
             global_request_id,
             trace_id,
             payment_method_type,
@@ -142,10 +146,12 @@ impl DomainAnalyticsEvent {
         event_stage: Option<String>,
         created_at_ms: i64,
     ) -> Self {
+        let lookup_key = derive_lookup_key(payment_id.as_deref(), request_id.as_deref());
         Self {
             merchant_id,
             payment_id,
             request_id,
+            lookup_key,
             global_request_id,
             trace_id,
             payment_method_type,
@@ -183,10 +189,12 @@ impl DomainAnalyticsEvent {
         event_stage: Option<String>,
         created_at_ms: i64,
     ) -> Self {
+        let lookup_key = derive_lookup_key(payment_id.as_deref(), request_id.as_deref());
         Self {
             merchant_id,
             payment_id,
             request_id,
+            lookup_key,
             global_request_id,
             trace_id,
             gateway,
@@ -213,10 +221,12 @@ impl DomainAnalyticsEvent {
         event_stage: Option<String>,
         created_at_ms: i64,
     ) -> Self {
+        let lookup_key = derive_lookup_key(payment_id.as_deref(), request_id.as_deref());
         Self {
             merchant_id,
             payment_id,
             request_id,
+            lookup_key,
             global_request_id,
             trace_id,
             gateway,
@@ -243,10 +253,12 @@ impl DomainAnalyticsEvent {
         trace_id: Option<String>,
         created_at_ms: i64,
     ) -> Self {
+        let lookup_key = derive_lookup_key(payment_id.as_deref(), request_id.as_deref());
         Self {
             merchant_id,
             payment_id,
             request_id,
+            lookup_key,
             global_request_id,
             trace_id,
             gateway,
@@ -277,10 +289,12 @@ impl DomainAnalyticsEvent {
         auth_type: Option<String>,
         created_at_ms: i64,
     ) -> Self {
+        let lookup_key = derive_lookup_key(payment_id.as_deref(), request_id.as_deref());
         Self {
             merchant_id,
             payment_id,
             request_id,
+            lookup_key,
             global_request_id,
             trace_id,
             auth_type,
@@ -333,10 +347,12 @@ impl DomainAnalyticsEvent {
         event_stage: Option<String>,
         created_at_ms: i64,
     ) -> Self {
+        let lookup_key = derive_lookup_key(payment_id.as_deref(), request_id.as_deref());
         Self {
             merchant_id,
             payment_id,
             request_id,
+            lookup_key,
             global_request_id,
             trace_id,
             event_stage,
@@ -375,4 +391,41 @@ pub fn next_event_id(now_ms: i64) -> u64 {
     (now_ms.max(0) as u64)
         .saturating_mul(1000)
         .saturating_add(offset)
+}
+
+pub fn derive_lookup_key(payment_id: Option<&str>, request_id: Option<&str>) -> Option<String> {
+    payment_id
+        .filter(|value| !value.is_empty())
+        .or(request_id.filter(|value| !value.is_empty()))
+        .map(str::to_string)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::derive_lookup_key;
+
+    #[test]
+    fn lookup_key_prefers_payment_id() {
+        assert_eq!(
+            derive_lookup_key(Some("pay_123"), Some("req_123")),
+            Some("pay_123".to_string())
+        );
+    }
+
+    #[test]
+    fn lookup_key_falls_back_to_request_id() {
+        assert_eq!(
+            derive_lookup_key(None, Some("req_123")),
+            Some("req_123".to_string())
+        );
+    }
+
+    #[test]
+    fn lookup_key_ignores_empty_values() {
+        assert_eq!(derive_lookup_key(Some(""), Some("")), None);
+        assert_eq!(
+            derive_lookup_key(Some(""), Some("req_123")),
+            Some("req_123".to_string())
+        );
+    }
 }

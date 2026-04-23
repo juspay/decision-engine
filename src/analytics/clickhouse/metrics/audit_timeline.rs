@@ -5,7 +5,7 @@ use crate::analytics::models::{PaymentAuditEvent, PaymentAuditQuery};
 use crate::error::ApiError;
 
 use super::super::common::{fetch_all, DOMAIN_TABLE};
-use super::super::filters::payment_audit_filters;
+use super::super::filters::payment_audit_raw_filters;
 use super::super::query::{BoundQueryBuilder, FilterClause, OrderClause};
 
 #[derive(Debug, Clone, Deserialize, Row)]
@@ -69,11 +69,8 @@ pub async fn load(
         "details".to_string(),
         "created_at_ms".to_string(),
     ]);
-    builder.extend_filters(payment_audit_filters(query, preview_only));
-    builder.add_filter(FilterClause::new(
-        "(payment_id = ? OR request_id = ?)",
-        vec![lookup_key.to_string().into(), lookup_key.to_string().into()],
-    ));
+    builder.extend_filters(payment_audit_raw_filters(query, preview_only));
+    builder.add_filter(FilterClause::eq("lookup_key", lookup_key.to_string()));
     builder.add_order_by(OrderClause::asc("created_at_ms"));
     builder.add_order_by(OrderClause::asc("event_id"));
 

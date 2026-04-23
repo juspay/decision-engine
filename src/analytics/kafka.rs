@@ -27,6 +27,7 @@ pub struct KafkaDomainEventRow {
     pub merchant_id: Option<String>,
     pub payment_id: Option<String>,
     pub request_id: Option<String>,
+    pub lookup_key: Option<String>,
     pub global_request_id: Option<String>,
     pub trace_id: Option<String>,
     pub payment_method_type: Option<String>,
@@ -80,6 +81,12 @@ pub struct KafkaApiEventRow {
 
 impl From<DomainAnalyticsEvent> for KafkaDomainEventRow {
     fn from(event: DomainAnalyticsEvent) -> Self {
+        let lookup_key = event.lookup_key.clone().or_else(|| {
+            crate::analytics::derive_lookup_key(
+                event.payment_id.as_deref(),
+                event.request_id.as_deref(),
+            )
+        });
         Self {
             schema_version: 1,
             produced_at_ms: crate::analytics::now_ms(),
@@ -89,6 +96,7 @@ impl From<DomainAnalyticsEvent> for KafkaDomainEventRow {
             merchant_id: event.merchant_id,
             payment_id: event.payment_id,
             request_id: event.request_id,
+            lookup_key,
             global_request_id: event.global_request_id,
             trace_id: event.trace_id,
             payment_method_type: event.payment_method_type,
@@ -285,6 +293,7 @@ pub fn api_event_key(event: &ApiEvent) -> String {
 
 pub fn domain_event_key(event: &DomainAnalyticsEvent) -> String {
     first_non_empty([
+        event.lookup_key.clone(),
         event.payment_id.clone(),
         event.request_id.clone(),
         Some(event.event_id.to_string()),
@@ -346,6 +355,7 @@ mod tests {
             merchant_id: None,
             payment_id: Some("pay_1".to_string()),
             request_id: Some("req_1".to_string()),
+            lookup_key: Some("pay_1".to_string()),
             global_request_id: Some("global_1".to_string()),
             trace_id: Some("trace_1".to_string()),
             payment_method_type: None,
@@ -379,6 +389,7 @@ mod tests {
         assert!(json.contains("\"schema_version\":1"));
         assert!(json.contains("\"created_at_ms\":123"));
         assert!(json.contains("\"payment_id\":\"pay_1\""));
+        assert!(json.contains("\"lookup_key\":\"pay_1\""));
         assert!(json.contains("\"api_flow\":\"dynamic_routing\""));
         assert!(json.contains("\"flow_type\":\"decide_gateway_decision\""));
         assert!(json.contains("\"global_request_id\":\"global_1\""));
@@ -446,6 +457,7 @@ mod tests {
             merchant_id: None,
             payment_id: Some("pay_456".to_string()),
             request_id: Some("req_456".to_string()),
+            lookup_key: Some("pay_456".to_string()),
             global_request_id: None,
             trace_id: None,
             payment_method_type: None,
@@ -474,5 +486,44 @@ mod tests {
 
         assert_eq!(api_event_key(&api), "req_123");
         assert_eq!(domain_event_key(&domain), "pay_456");
+    }
+
+    #[test]
+    fn domain_key_falls_back_to_request_lookup_key() {
+        let domain = DomainAnalyticsEvent {
+            event_id: 12,
+            api_flow: ApiFlow::DynamicRouting,
+            flow_type: FlowType::DecideGatewayDecision,
+            merchant_id: None,
+            payment_id: None,
+            request_id: Some("req_only".to_string()),
+            lookup_key: Some("req_only".to_string()),
+            global_request_id: None,
+            trace_id: None,
+            payment_method_type: None,
+            payment_method: None,
+            card_network: None,
+            card_is_in: None,
+            currency: None,
+            country: None,
+            auth_type: None,
+            gateway: None,
+            event_stage: None,
+            routing_approach: None,
+            rule_name: None,
+            status: None,
+            error_code: None,
+            error_message: None,
+            score_value: None,
+            sigma_factor: None,
+            average_latency: None,
+            tp99_latency: None,
+            transaction_count: None,
+            route: None,
+            details: None,
+            created_at_ms: 3,
+        };
+
+        assert_eq!(domain_event_key(&domain), "req_only");
     }
 }

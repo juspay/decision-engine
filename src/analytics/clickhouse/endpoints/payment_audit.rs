@@ -10,22 +10,23 @@ pub async fn load(
     query: &PaymentAuditQuery,
     preview_only: bool,
 ) -> Result<PaymentAuditResponse, ApiError> {
-    let summary_rows = metrics::audit_summaries::load(client, query, preview_only).await?;
-    let total_results = summary_rows.len();
+    let requested_lookup_key = crate::analytics::derive_lookup_key(
+        query.payment_id.as_deref(),
+        query.request_id.as_deref(),
+    );
+    let (total_results, results) = if let Some(lookup_key) = requested_lookup_key.clone() {
+        let results =
+            metrics::audit_summaries::load_exact(client, query, preview_only, &lookup_key).await?;
+        (results.len(), results)
+    } else {
+        let total_results = metrics::audit_summaries::count(client, query, preview_only).await?;
+        let results = metrics::audit_summaries::load_page(client, query, preview_only).await?;
+        (total_results, results)
+    };
     let page = query.page;
     let page_size = query.page_size;
-    let offset = (page - 1) * page_size;
-    let results = summary_rows
-        .iter()
-        .skip(offset)
-        .take(page_size)
-        .cloned()
-        .collect::<Vec<_>>();
-    let selected_lookup_key = query
-        .payment_id
-        .clone()
-        .or_else(|| query.request_id.clone())
-        .or_else(|| results.first().map(|row| row.lookup_key.clone()));
+    let selected_lookup_key =
+        requested_lookup_key.or_else(|| results.first().map(|row| row.lookup_key.clone()));
 
     let timeline = if let Some(lookup_key) = selected_lookup_key.clone() {
         metrics::audit_timeline::load(client, query, preview_only, &lookup_key).await?
