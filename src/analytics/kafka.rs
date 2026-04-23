@@ -12,10 +12,7 @@ use crate::analytics::flow::{ApiFlow, FlowType};
 use crate::analytics::store::AnalyticsWriteStore;
 use crate::config::KafkaAnalyticsConfig;
 use crate::error::{ApiError, ConfigurationError};
-use crate::metrics::{
-    ANALYTICS_EVENTS_DROPPED_TOTAL, ANALYTICS_KAFKA_DELIVERY_LATENCY_HISTOGRAM,
-    ANALYTICS_KAFKA_PRODUCE_TOTAL,
-};
+use crate::metrics::{ANALYTICS_KAFKA_DELIVERY_LATENCY_HISTOGRAM, ANALYTICS_KAFKA_PRODUCE_TOTAL};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KafkaDomainEventRow {
@@ -209,25 +206,26 @@ impl KafkaAnalyticsStore {
             .producer
             .send_result(FutureRecord::to(topic).key(key).payload(&payload))
             .map_err(|(error, _message)| {
-                let reason = match error {
+                let result = match error {
                     KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull) => {
-                        "producer_queue_full"
+                        "enqueue_failed_queue_full"
                     }
-                    _ => "producer_error",
+                    _ => "enqueue_failed_producer_error",
                 };
-                ANALYTICS_EVENTS_DROPPED_TOTAL
-                    .with_label_values(&[stream, reason])
-                    .inc();
                 ANALYTICS_KAFKA_PRODUCE_TOTAL
-                    .with_label_values(&[stream, "dropped"])
+                    .with_label_values(&[stream, result])
                     .inc();
                 ApiError::UnknownError
             })?;
 
+        ANALYTICS_KAFKA_PRODUCE_TOTAL
+            .with_label_values(&[stream, "enqueued"])
+            .inc();
+
         match delivery.await {
             Ok(Ok(_)) => {
                 ANALYTICS_KAFKA_PRODUCE_TOTAL
-                    .with_label_values(&[stream, "success"])
+                    .with_label_values(&[stream, "delivery_success"])
                     .inc();
                 ANALYTICS_KAFKA_DELIVERY_LATENCY_HISTOGRAM
                     .with_label_values(&[stream])
@@ -236,13 +234,13 @@ impl KafkaAnalyticsStore {
             }
             Ok(Err((_error, _message))) => {
                 ANALYTICS_KAFKA_PRODUCE_TOTAL
-                    .with_label_values(&[stream, "failure"])
+                    .with_label_values(&[stream, "delivery_failed"])
                     .inc();
                 Err(ApiError::UnknownError)
             }
             Err(_canceled) => {
                 ANALYTICS_KAFKA_PRODUCE_TOTAL
-                    .with_label_values(&[stream, "failure"])
+                    .with_label_values(&[stream, "delivery_canceled"])
                     .inc();
                 Err(ApiError::UnknownError)
             }
