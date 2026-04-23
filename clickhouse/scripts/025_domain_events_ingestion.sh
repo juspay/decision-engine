@@ -16,7 +16,7 @@ fi
 
 clickhouse-client ${auth_args} --multiquery <<SQL
 CREATE TABLE analytics_domain_events (
-    event_id UInt64,
+    event_id String,
     api_flow LowCardinality(String),
     flow_type LowCardinality(String),
     merchant_id Nullable(String),
@@ -52,7 +52,7 @@ CREATE TABLE analytics_domain_events (
     details Nullable(String),
     created_at_ms Int64,
     created_at DateTime64(3, 'UTC') MATERIALIZED fromUnixTimestamp64Milli(created_at_ms)
-) ENGINE = ReplacingMergeTree(event_id)
+) ENGINE = ReplacingMergeTree
 PARTITION BY toYYYYMM(created_at)
 ORDER BY (
     merchant_id_key,
@@ -102,7 +102,7 @@ TTL bucket_start + INTERVAL 18 MONTH;
 CREATE TABLE analytics_domain_events_queue (
     schema_version UInt8,
     produced_at_ms Int64,
-    event_id UInt64,
+    event_id String,
     api_flow LowCardinality(String),
     flow_type LowCardinality(String),
     merchant_id Nullable(String),

@@ -16,7 +16,7 @@ fi
 
 clickhouse-client ${auth_args} --multiquery <<SQL
 CREATE TABLE analytics_api_events (
-    event_id UInt64,
+    event_id String,
     merchant_id Nullable(String),
     payment_id Nullable(String),
     api_flow LowCardinality(String),
@@ -36,7 +36,7 @@ CREATE TABLE analytics_api_events (
     response Nullable(String),
     error Nullable(String),
     http_method LowCardinality(String)
-) ENGINE = ReplacingMergeTree(event_id)
+) ENGINE = ReplacingMergeTree
 PARTITION BY toYYYYMM(created_at)
 ORDER BY (
     created_at_timestamp,
@@ -54,7 +54,7 @@ DROP TABLE IF EXISTS analytics_api_events_queue;
 CREATE TABLE analytics_api_events_queue (
     schema_version UInt8,
     produced_at_ms Int64,
-    event_id UInt64,
+    event_id String,
     merchant_id Nullable(String),
     payment_id Nullable(String),
     api_flow LowCardinality(String),

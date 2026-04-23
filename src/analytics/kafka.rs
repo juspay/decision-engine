@@ -21,7 +21,7 @@ use crate::metrics::{
 pub struct KafkaDomainEventRow {
     pub schema_version: u8,
     pub produced_at_ms: i64,
-    pub event_id: u64,
+    pub event_id: String,
     pub api_flow: ApiFlow,
     pub flow_type: FlowType,
     pub merchant_id: Option<String>,
@@ -58,7 +58,7 @@ pub struct KafkaDomainEventRow {
 pub struct KafkaApiEventRow {
     pub schema_version: u8,
     pub produced_at_ms: i64,
-    pub event_id: u64,
+    pub event_id: String,
     pub merchant_id: Option<String>,
     pub payment_id: Option<String>,
     pub api_flow: ApiFlow,
@@ -287,7 +287,7 @@ pub fn api_event_key(event: &ApiEvent) -> String {
     first_non_empty([
         Some(event.request_id.clone()),
         event.payment_id.clone(),
-        Some(event.event_id.to_string()),
+        Some(event.event_id.clone()),
     ])
 }
 
@@ -296,7 +296,7 @@ pub fn domain_event_key(event: &DomainAnalyticsEvent) -> String {
         event.lookup_key.clone(),
         event.payment_id.clone(),
         event.request_id.clone(),
-        Some(event.event_id.to_string()),
+        Some(event.event_id.clone()),
     ])
 }
 
@@ -349,7 +349,7 @@ mod tests {
     #[test]
     fn domain_row_serializes_stably() {
         let event = DomainAnalyticsEvent {
-            event_id: 1,
+            event_id: "0195f4a8-bdf0-7f36-a227-c0ffefeed001".to_string(),
             api_flow: ApiFlow::DynamicRouting,
             flow_type: FlowType::DecideGatewayDecision,
             merchant_id: None,
@@ -399,7 +399,7 @@ mod tests {
     #[test]
     fn api_row_serializes_json_fields_as_strings() {
         let event = ApiEvent {
-            event_id: 10,
+            event_id: "0195f4a8-bdf0-7f36-a227-c0ffefeed010".to_string(),
             merchant_id: None,
             payment_id: Some("pay_123".to_string()),
             api_flow: ApiFlow::DynamicRouting,
@@ -430,7 +430,7 @@ mod tests {
     #[test]
     fn message_keys_are_deterministic() {
         let api = ApiEvent {
-            event_id: 10,
+            event_id: "0195f4a8-bdf0-7f36-a227-c0ffefeed010".to_string(),
             merchant_id: None,
             payment_id: Some("pay_123".to_string()),
             api_flow: ApiFlow::DynamicRouting,
@@ -451,7 +451,7 @@ mod tests {
             http_method: "POST".to_string(),
         };
         let domain = DomainAnalyticsEvent {
-            event_id: 11,
+            event_id: "0195f4a8-bdf0-7f36-a227-c0ffefeed011".to_string(),
             api_flow: ApiFlow::DynamicRouting,
             flow_type: FlowType::DecideGatewayDecision,
             merchant_id: None,
@@ -491,7 +491,7 @@ mod tests {
     #[test]
     fn domain_key_falls_back_to_request_lookup_key() {
         let domain = DomainAnalyticsEvent {
-            event_id: 12,
+            event_id: "0195f4a8-bdf0-7f36-a227-c0ffefeed012".to_string(),
             api_flow: ApiFlow::DynamicRouting,
             flow_type: FlowType::DecideGatewayDecision,
             merchant_id: None,

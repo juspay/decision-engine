@@ -1,15 +1,12 @@
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::analytics::flow::{AnalyticsFlowContext, AnalyticsRoute};
 use crate::analytics::flow::{ApiFlow, FlowType};
 
-static EVENT_COUNTER: AtomicU64 = AtomicU64::new(0);
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DomainAnalyticsEvent {
-    pub event_id: u64,
+    pub event_id: String,
     pub api_flow: ApiFlow,
     pub flow_type: FlowType,
     pub merchant_id: Option<String>,
@@ -45,7 +42,7 @@ pub struct DomainAnalyticsEvent {
 impl DomainAnalyticsEvent {
     fn base(flow: AnalyticsFlowContext, route: AnalyticsRoute, created_at_ms: i64) -> Self {
         Self {
-            event_id: next_event_id(created_at_ms),
+            event_id: next_event_id(),
             api_flow: flow.api_flow,
             flow_type: flow.flow_type,
             merchant_id: None,
@@ -365,7 +362,7 @@ impl DomainAnalyticsEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiEvent {
-    pub event_id: u64,
+    pub event_id: String,
     pub merchant_id: Option<String>,
     pub payment_id: Option<String>,
     pub api_flow: ApiFlow,
@@ -386,11 +383,10 @@ pub struct ApiEvent {
     pub http_method: String,
 }
 
-pub fn next_event_id(now_ms: i64) -> u64 {
-    let offset = EVENT_COUNTER.fetch_add(1, Ordering::Relaxed) % 1000;
-    (now_ms.max(0) as u64)
-        .saturating_mul(1000)
-        .saturating_add(offset)
+/// Generates a sortable internal analytics row id used for Kafka key fallback,
+/// ClickHouse storage, and stable timeline ordering.
+pub fn next_event_id() -> String {
+    Uuid::now_v7().to_string()
 }
 
 pub fn derive_lookup_key(payment_id: Option<&str>, request_id: Option<&str>) -> Option<String> {
@@ -402,7 +398,9 @@ pub fn derive_lookup_key(payment_id: Option<&str>, request_id: Option<&str>) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::derive_lookup_key;
+    use uuid::{Uuid, Version};
+
+    use super::{derive_lookup_key, next_event_id};
 
     #[test]
     fn lookup_key_prefers_payment_id() {
@@ -427,5 +425,13 @@ mod tests {
             derive_lookup_key(Some(""), Some("req_123")),
             Some("req_123".to_string())
         );
+    }
+
+    #[test]
+    fn next_event_id_uses_uuid_v7() {
+        let event_id = next_event_id();
+        let parsed = Uuid::parse_str(&event_id).expect("event id should be a valid uuid");
+
+        assert_eq!(parsed.get_version(), Some(Version::SortRand));
     }
 }

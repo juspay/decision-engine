@@ -10,7 +10,7 @@ use super::super::query::{BoundQueryBuilder, FilterClause, OrderClause};
 
 #[derive(Debug, Clone, Deserialize, Row)]
 struct AuditEventRow {
-    event_id: u64,
+    event_id: String,
     flow_type: String,
     event_stage: Option<String>,
     route: Option<String>,
@@ -78,7 +78,7 @@ pub async fn load(
     Ok(rows
         .into_iter()
         .map(|row| PaymentAuditEvent {
-            id: row.event_id as i64,
+            id: row.event_id,
             flow_type: row.flow_type,
             event_stage: row.event_stage,
             route: row.route,
