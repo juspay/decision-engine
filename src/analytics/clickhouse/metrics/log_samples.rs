@@ -54,7 +54,7 @@ pub async fn load(
         "created_at_ms".to_string(),
     ]);
     builder.extend_filters(base_window_filters(start_ms, end_ms));
-    builder.extend_filters(merchant_filter(query.merchant_id.as_deref()));
+    builder.extend_filters(merchant_filter(&query.merchant_id));
     builder.extend_filters(analytics_dimension_filters(query));
     builder.add_filter(FilterClause::raw(format!(
         "flow_type IN {}",

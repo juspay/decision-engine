@@ -54,7 +54,7 @@ pub async fn load(
         ),
     ]);
     builder.extend_filters(base_window_filters(start_ms, end_ms));
-    builder.extend_filters(merchant_filter(query.merchant_id.as_deref()));
+    builder.extend_filters(merchant_filter(&query.merchant_id));
 
     let row = fetch_one::<OverviewCountRow>(builder.build(client)).await?;
     Ok(OverviewCounts {

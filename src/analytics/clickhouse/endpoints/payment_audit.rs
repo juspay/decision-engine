@@ -1,6 +1,5 @@
 use crate::analytics::flow::AnalyticsRoute;
-use crate::analytics::models::{AnalyticsScope, PaymentAuditQuery, PaymentAuditResponse};
-use crate::analytics::service::now_ms;
+use crate::analytics::models::{PaymentAuditQuery, PaymentAuditResponse};
 use crate::error::ApiError;
 
 use super::super::metrics;
@@ -11,35 +10,10 @@ pub async fn load(
     query: &PaymentAuditQuery,
     preview_only: bool,
 ) -> Result<PaymentAuditResponse, ApiError> {
-    if query.scope == AnalyticsScope::All {
-        return Ok(PaymentAuditResponse {
-            generated_at_ms: now_ms(),
-            scope: query.scope.as_str().to_string(),
-            merchant_id: query.merchant_id.clone(),
-            range: if query.start_ms.is_some() && query.end_ms.is_some() {
-                "custom".to_string()
-            } else {
-                payment_audit_range(query)
-            },
-            payment_id: query.payment_id.clone(),
-            request_id: query.request_id.clone(),
-            gateway: query.gateway.clone(),
-            route: query.route.clone(),
-            status: query.status.clone(),
-            flow_type: query.flow_type.clone(),
-            error_code: query.error_code.clone(),
-            page: query.page.max(1),
-            page_size: query.page_size.clamp(1, 50),
-            total_results: 0,
-            results: Vec::new(),
-            timeline: Vec::new(),
-        });
-    }
-
     let summary_rows = metrics::audit_summaries::load(client, query, preview_only).await?;
     let total_results = summary_rows.len();
-    let page = query.page.max(1);
-    let page_size = query.page_size.clamp(1, 50);
+    let page = query.page;
+    let page_size = query.page_size;
     let offset = (page - 1) * page_size;
     let results = summary_rows
         .iter()
@@ -60,8 +34,6 @@ pub async fn load(
     };
 
     Ok(PaymentAuditResponse {
-        generated_at_ms: now_ms(),
-        scope: query.scope.as_str().to_string(),
         merchant_id: query.merchant_id.clone(),
         range: if query.start_ms.is_some() && query.end_ms.is_some() {
             "custom".to_string()

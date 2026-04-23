@@ -33,7 +33,7 @@ pub async fn load(
         "countIf(lowerUTF8(ifNull(status, '')) = 'failure') AS failures",
     ]);
     builder.extend_filters(base_window_filters(start_ms, end_ms));
-    builder.extend_filters(merchant_filter(query.merchant_id.as_deref()));
+    builder.extend_filters(merchant_filter(&query.merchant_id));
     builder.add_filter(FilterClause::raw(format!(
         "flow_type = '{}'",
         FlowType::DecideGatewayDecision.as_str()

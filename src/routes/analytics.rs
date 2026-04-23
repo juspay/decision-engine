@@ -4,7 +4,7 @@ use crate::analytics::{
     parse_query, payment_audit as fetch_payment_audit, preview_trace as fetch_preview_trace,
     routing_stats as fetch_routing_stats,
 };
-use crate::custom_extractors::TenantStateResolver;
+use crate::custom_extractors::{AuthenticatedAnalyticsContext, TenantStateResolver};
 use crate::error;
 use axum::extract::Query;
 use axum::Json;
@@ -13,8 +13,6 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AnalyticsQueryParams {
-    pub merchant_id: Option<String>,
-    pub scope: Option<String>,
     pub range: Option<String>,
     pub start_ms: Option<i64>,
     pub end_ms: Option<i64>,
@@ -50,12 +48,12 @@ pub fn serve() -> axum::Router<Arc<crate::tenant::GlobalAppState>> {
 
 pub async fn overview(
     TenantStateResolver(state): TenantStateResolver,
+    AuthenticatedAnalyticsContext(auth_context): AuthenticatedAnalyticsContext,
     Query(params): Query<AnalyticsQueryParams>,
 ) -> Result<Json<crate::analytics::AnalyticsOverviewResponse>, error::ContainerError<error::ApiError>>
 {
     let query = parse_query(
-        params.merchant_id,
-        params.scope,
+        auth_context.merchant_id.clone(),
         params.range,
         params.start_ms,
         params.end_ms,
@@ -76,14 +74,14 @@ pub async fn overview(
 
 pub async fn gateway_scores(
     TenantStateResolver(state): TenantStateResolver,
+    AuthenticatedAnalyticsContext(auth_context): AuthenticatedAnalyticsContext,
     Query(params): Query<AnalyticsQueryParams>,
 ) -> Result<
     Json<crate::analytics::AnalyticsGatewayScoresResponse>,
     error::ContainerError<error::ApiError>,
 > {
     let query = parse_query(
-        params.merchant_id,
-        params.scope,
+        auth_context.merchant_id.clone(),
         params.range,
         params.start_ms,
         params.end_ms,
@@ -103,12 +101,12 @@ pub async fn gateway_scores(
 
 pub async fn decisions(
     TenantStateResolver(state): TenantStateResolver,
+    AuthenticatedAnalyticsContext(auth_context): AuthenticatedAnalyticsContext,
     Query(params): Query<AnalyticsQueryParams>,
 ) -> Result<Json<crate::analytics::AnalyticsDecisionResponse>, error::ContainerError<error::ApiError>>
 {
     let query = parse_query(
-        params.merchant_id,
-        params.scope,
+        auth_context.merchant_id.clone(),
         params.range,
         params.start_ms,
         params.end_ms,
@@ -128,14 +126,14 @@ pub async fn decisions(
 
 pub async fn routing_stats(
     TenantStateResolver(state): TenantStateResolver,
+    AuthenticatedAnalyticsContext(auth_context): AuthenticatedAnalyticsContext,
     Query(params): Query<AnalyticsQueryParams>,
 ) -> Result<
     Json<crate::analytics::AnalyticsRoutingStatsResponse>,
     error::ContainerError<error::ApiError>,
 > {
     let query = parse_query(
-        params.merchant_id,
-        params.scope,
+        auth_context.merchant_id.clone(),
         params.range,
         params.start_ms,
         params.end_ms,
@@ -155,14 +153,14 @@ pub async fn routing_stats(
 
 pub async fn log_summaries(
     TenantStateResolver(state): TenantStateResolver,
+    AuthenticatedAnalyticsContext(auth_context): AuthenticatedAnalyticsContext,
     Query(params): Query<AnalyticsQueryParams>,
 ) -> Result<
     Json<crate::analytics::AnalyticsLogSummariesResponse>,
     error::ContainerError<error::ApiError>,
 > {
     let query = parse_query(
-        params.merchant_id,
-        params.scope,
+        auth_context.merchant_id.clone(),
         params.range,
         params.start_ms,
         params.end_ms,
@@ -182,11 +180,11 @@ pub async fn log_summaries(
 
 pub async fn payment_audit(
     TenantStateResolver(state): TenantStateResolver,
+    AuthenticatedAnalyticsContext(auth_context): AuthenticatedAnalyticsContext,
     Query(params): Query<AnalyticsQueryParams>,
 ) -> Result<Json<crate::analytics::PaymentAuditResponse>, error::ContainerError<error::ApiError>> {
     let query = parse_payment_audit_query(
-        params.merchant_id,
-        params.scope,
+        auth_context.merchant_id.clone(),
         params.range,
         params.start_ms,
         params.end_ms,
@@ -205,11 +203,11 @@ pub async fn payment_audit(
 
 pub async fn preview_trace(
     TenantStateResolver(state): TenantStateResolver,
+    AuthenticatedAnalyticsContext(auth_context): AuthenticatedAnalyticsContext,
     Query(params): Query<AnalyticsQueryParams>,
 ) -> Result<Json<crate::analytics::PaymentAuditResponse>, error::ContainerError<error::ApiError>> {
     let query = parse_payment_audit_query(
-        params.merchant_id,
-        params.scope,
+        auth_context.merchant_id.clone(),
         params.range,
         params.start_ms,
         params.end_ms,

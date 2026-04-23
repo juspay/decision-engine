@@ -1,11 +1,27 @@
 use serde::{Deserialize, Serialize};
 
 pub const MAX_ANALYTICS_LOOKBACK_MS: i64 = 18 * 30 * 24 * 60 * 60 * 1000;
+pub const MIN_ANALYTICS_PAGE: usize = 1;
+pub const MIN_ANALYTICS_PAGE_SIZE: usize = 1;
+pub const MAX_ANALYTICS_PAGE_SIZE: usize = 50;
+pub const DEFAULT_ANALYTICS_PAGE_SIZE: usize = 10;
+pub const DEFAULT_PAYMENT_AUDIT_PAGE_SIZE: usize = 12;
+
+pub fn normalise_page(page: Option<u32>) -> usize {
+    page.unwrap_or(MIN_ANALYTICS_PAGE as u32)
+        .max(MIN_ANALYTICS_PAGE as u32) as usize
+}
+
+pub fn normalise_page_size(page_size: Option<u32>, default: usize) -> usize {
+    page_size.unwrap_or(default as u32).clamp(
+        MIN_ANALYTICS_PAGE_SIZE as u32,
+        MAX_ANALYTICS_PAGE_SIZE as u32,
+    ) as usize
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsQuery {
-    pub merchant_id: Option<String>,
-    pub scope: AnalyticsScope,
+    pub merchant_id: String,
     pub range: AnalyticsRange,
     pub start_ms: Option<i64>,
     pub end_ms: Option<i64>,
@@ -19,13 +35,6 @@ pub struct AnalyticsQuery {
     pub country: Option<String>,
     pub auth_type: Option<String>,
     pub gateways: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum AnalyticsScope {
-    Current,
-    All,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -60,22 +69,6 @@ impl AnalyticsRange {
     }
 }
 
-impl AnalyticsScope {
-    pub fn from_query(value: Option<&str>) -> Self {
-        match value {
-            Some("all") => Self::All,
-            _ => Self::Current,
-        }
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Current => "current",
-            Self::All => "all",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsKpi {
     pub label: String,
@@ -85,9 +78,7 @@ pub struct AnalyticsKpi {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsOverviewResponse {
-    pub generated_at_ms: i64,
-    pub scope: String,
-    pub merchant_id: Option<String>,
+    pub merchant_id: String,
     pub kpis: Vec<AnalyticsKpi>,
     pub route_hits: Vec<AnalyticsRouteHit>,
     pub top_scores: Vec<GatewayScoreSnapshot>,
@@ -127,9 +118,7 @@ pub struct GatewayScoreSeriesPoint {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsGatewayScoresResponse {
-    pub generated_at_ms: i64,
-    pub scope: String,
-    pub merchant_id: Option<String>,
+    pub merchant_id: String,
     pub range: String,
     pub snapshots: Vec<GatewayScoreSnapshot>,
     pub series: Vec<GatewayScoreSeriesPoint>,
@@ -144,9 +133,7 @@ pub struct AnalyticsDecisionPoint {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsDecisionResponse {
-    pub generated_at_ms: i64,
-    pub scope: String,
-    pub merchant_id: Option<String>,
+    pub merchant_id: String,
     pub range: String,
     pub tiles: Vec<AnalyticsKpi>,
     pub series: Vec<AnalyticsDecisionPoint>,
@@ -162,9 +149,7 @@ pub struct AnalyticsGatewaySharePoint {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsRoutingStatsResponse {
-    pub generated_at_ms: i64,
-    pub scope: String,
-    pub merchant_id: Option<String>,
+    pub merchant_id: String,
     pub range: String,
     pub gateway_share: Vec<AnalyticsGatewaySharePoint>,
     pub top_rules: Vec<AnalyticsRuleHit>,
@@ -220,9 +205,7 @@ pub struct AnalyticsLogSample {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsLogSummariesResponse {
-    pub generated_at_ms: i64,
-    pub scope: String,
-    pub merchant_id: Option<String>,
+    pub merchant_id: String,
     pub range: String,
     pub total_errors: i64,
     pub errors: Vec<AnalyticsErrorSummary>,
@@ -239,8 +222,7 @@ pub struct AnalyticsRuleHit {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaymentAuditQuery {
-    pub merchant_id: Option<String>,
-    pub scope: AnalyticsScope,
+    pub merchant_id: String,
     pub range: AnalyticsRange,
     pub start_ms: Option<i64>,
     pub end_ms: Option<i64>,
@@ -302,9 +284,7 @@ pub struct PaymentAuditEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaymentAuditResponse {
-    pub generated_at_ms: i64,
-    pub scope: String,
-    pub merchant_id: Option<String>,
+    pub merchant_id: String,
     pub range: String,
     pub payment_id: Option<String>,
     pub request_id: Option<String>,
@@ -318,4 +298,35 @@ pub struct PaymentAuditResponse {
     pub total_results: usize,
     pub results: Vec<PaymentAuditSummary>,
     pub timeline: Vec<PaymentAuditEvent>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        normalise_page, normalise_page_size, DEFAULT_ANALYTICS_PAGE_SIZE,
+        DEFAULT_PAYMENT_AUDIT_PAGE_SIZE, MAX_ANALYTICS_PAGE_SIZE, MIN_ANALYTICS_PAGE,
+    };
+
+    #[test]
+    fn normalise_page_defaults_and_bounds() {
+        assert_eq!(normalise_page(None), MIN_ANALYTICS_PAGE);
+        assert_eq!(normalise_page(Some(0)), MIN_ANALYTICS_PAGE);
+        assert_eq!(normalise_page(Some(3)), 3);
+    }
+
+    #[test]
+    fn normalise_page_size_uses_default_and_clamps_to_bounds() {
+        assert_eq!(
+            normalise_page_size(None, DEFAULT_ANALYTICS_PAGE_SIZE),
+            DEFAULT_ANALYTICS_PAGE_SIZE
+        );
+        assert_eq!(
+            normalise_page_size(Some(0), DEFAULT_PAYMENT_AUDIT_PAGE_SIZE),
+            1
+        );
+        assert_eq!(
+            normalise_page_size(Some(500), DEFAULT_ANALYTICS_PAGE_SIZE),
+            MAX_ANALYTICS_PAGE_SIZE
+        );
+    }
 }

@@ -33,10 +33,7 @@ pub async fn authenticate(
         Some(s) => s,
         None => return Ok((StatusCode::INTERNAL_SERVER_ERROR, "Server not ready").into_response()),
     };
-
-    if !app_state.global_config.api_key_auth_enabled {
-        return Ok(next.run(req).await);
-    }
+    let mut req = req;
 
     // Accept JWT Bearer token (dashboard sessions)
     if let Some(bearer) = req
@@ -47,11 +44,19 @@ pub async fn authenticate(
     {
         use crate::routes::user_auth::verify_jwt_not_revoked;
         match verify_jwt_not_revoked(bearer, &app_state.global_config.user_auth.jwt_secret).await {
-            Ok(_) => return Ok(next.run(req).await),
+            Ok(claims) => {
+                req.extensions_mut()
+                    .insert(auth::AuthContext::from_jwt(&claims));
+                return Ok(next.run(req).await);
+            }
             Err(_) => {
                 return Ok((StatusCode::UNAUTHORIZED, "Invalid or expired token").into_response())
             }
         }
+    }
+
+    if !app_state.global_config.api_key_auth_enabled {
+        return Ok(next.run(req).await);
     }
 
     let api_key = match req.headers().get("x-api-key").and_then(|v| v.to_str().ok()) {
@@ -79,6 +84,8 @@ pub async fn authenticate(
     // Check Redis cache first
     if let Ok(cached) = tenant_state.redis_conn.get_key_string(&cache_key).await {
         if !cached.is_empty() {
+            req.extensions_mut()
+                .insert(auth::AuthContext::from_api_key(cached));
             return Ok(next.run(req).await);
         }
     }
@@ -127,6 +134,8 @@ pub async fn authenticate(
                 .set_key_with_ttl(&cache_key, &record.merchant_id, API_KEY_CACHE_TTL)
                 .await;
 
+            req.extensions_mut()
+                .insert(auth::AuthContext::from_api_key(record.merchant_id));
             Ok(next.run(req).await)
         }
         None => Ok((StatusCode::UNAUTHORIZED, "Invalid API key").into_response()),
