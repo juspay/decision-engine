@@ -27,20 +27,20 @@ The current implementation uses these sources:
 
 ## Scope
 
-Analytics supports two views:
+Analytics is always merchant-scoped by the authenticated identity:
 
-- current merchant
-- all merchants
+- Bearer JWT requests derive the merchant from the token claims
+- API-key requests derive the merchant from the key binding
 
-The current-merchant view uses the merchant selected in the top bar. The all-merchants view aggregates across the stored analytics events.
+There is no all-merchants analytics mode. The analytics routes no longer accept `scope` or
+`merchant_id` query params, and changing the merchant selector in the top bar does not widen the
+backend query scope.
 
-Connector success-rate history is sourced from stored `score_snapshot` analytics events, not directly from Redis. Redis remains the live source for current score state. In the merchant-scoped view, the connector SR chart can be narrowed by:
+Connector success-rate history is sourced from stored `score_snapshot` analytics events, not directly from Redis. Redis remains the live source for current score state. The connector SR chart can be narrowed by:
 
 - `payment_method_type`
 - `payment_method`
 - connector
-
-In all-merchants mode, the chart intentionally stays connector-only so operators get a global SR trend without per-method slicing.
 
 ## Generating Demo Traffic
 
@@ -69,7 +69,8 @@ RULE_EVALUATIONS=40 bash scripts/generate-routing-traffic.sh
 CONNECTORS_CSV=stripe,adyen,checkout,paypal bash scripts/generate-routing-traffic.sh
 ```
 
-After the script finishes, open `/dashboard/analytics` or `/dashboard/audit` and select `merchant_space` in the merchant picker.
+After the script finishes, sign in as `merchant_space` and open `/dashboard/analytics` or
+`/dashboard/audit`. Analytics reads will resolve the merchant from your authenticated session.
 
 ## ClickHouse Setup
 
@@ -85,5 +86,5 @@ docker compose --profile analytics-clickhouse up -d
 - `website/src/components/layout/Sidebar.tsx`
 - `src/routes/analytics.rs`
 - `src/analytics/`
-- `clickhouse/migrations/`
+- `clickhouse/scripts/`
 - `src/metrics.rs`

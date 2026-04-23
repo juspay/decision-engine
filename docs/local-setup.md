@@ -227,7 +227,7 @@ Check the ClickHouse schema directly:
 
 ```bash
 curl --user decision_engine:decision_engine \
-  "http://localhost:8123/?query=SHOW%20TABLES%20FROM%20decision_engine_analytics"
+  "http://localhost:8123/?query=SHOW%20TABLES%20FROM%20default"
 ```
 
 ### Common next files to inspect
