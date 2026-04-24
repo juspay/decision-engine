@@ -43,6 +43,7 @@ export default defineConfig(({ command }) => {
         '^/routing/(create|activate|evaluate|list(?:/.*)?|hybrid)$': createApiProxy(),
         '^/analytics/(overview|gateway-scores|decisions|routing-stats|log-summaries|preview-trace|payment-audit)(?:\\?.*)?$':
           createApiProxy(),
+        '^/onboarding(?:/.*)?$': createApiProxy(),
         '^/auth(?:/.*)?$': createApiProxy(),
         '^/api-key(?:/.*)?$': createApiProxy(),
       },

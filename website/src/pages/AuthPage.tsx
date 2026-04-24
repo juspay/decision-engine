@@ -11,7 +11,7 @@ import {
   Mail,
   ShieldCheck,
 } from 'lucide-react'
-import { useAuthStore } from '../store/authStore'
+import { useAuthStore, MerchantInfo } from '../store/authStore'
 import { useMerchantStore } from '../store/merchantStore'
 import { apiFetch } from '../lib/api'
 import { ErrorMessage } from '../components/ui/ErrorMessage'
@@ -22,6 +22,7 @@ interface AuthResponse {
   email: string
   merchant_id: string
   role: string
+  merchants: MerchantInfo[]
 }
 
 type Tab = 'login' | 'signup'
@@ -53,7 +54,6 @@ export function AuthPage() {
   const [tab, setTab] = useState<Tab>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [merchantId, setMerchantIdInput] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -70,24 +70,23 @@ export function AuthPage() {
 
     try {
       const path = tab === 'login' ? '/auth/login' : '/auth/signup'
-      const body =
-        tab === 'login'
-          ? { email, password }
-          : { email, password, merchant_id: merchantId }
-
       const res = await apiFetch<AuthResponse>(path, {
         method: 'POST',
-        body: JSON.stringify(body),
+        body: JSON.stringify({ email, password }),
       })
 
-      setAuth(res.token, {
-        userId: res.user_id,
-        email: res.email,
-        merchantId: res.merchant_id,
-        role: res.role,
-      })
-      setMerchantId(res.merchant_id)
-      navigate('/', { replace: true })
+      setAuth(
+        res.token,
+        { userId: res.user_id, email: res.email, merchantId: res.merchant_id, role: res.role },
+        res.merchants,
+      )
+      if (res.merchant_id) setMerchantId(res.merchant_id)
+
+      if (!res.merchant_id || res.merchants.length === 0) {
+        navigate('/onboarding', { replace: true })
+      } else {
+        navigate('/', { replace: true })
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Something went wrong'
       const match = msg.match(/API error \d+: (.+)/)
@@ -240,12 +239,12 @@ export function AuthPage() {
                       <h3 className="text-[30px] font-semibold tracking-[-0.035em] text-slate-950">
                         {tab === 'login' ? 'Welcome back.' : 'Create operator access.'}
                       </h3>
-                      <p className="mt-2 text-sm leading-6 text-slate-500">
-                        {tab === 'login'
-                          ? 'Use the email and password tied to your Decision Engine merchant.'
-                          : 'Sign-up is for an existing merchant account. You will land directly in the dashboard after provisioning.'}
-                      </p>
-                    </div>
+                        <p className="mt-2 text-sm leading-6 text-slate-500">
+                          {tab === 'login'
+                            ? 'Use the email and password tied to your Decision Engine merchant.'
+                            : 'Create your operator account first. If no merchant is linked yet, you will be sent to onboarding.'}
+                        </p>
+                      </div>
 
                     <form onSubmit={handleSubmit} className="space-y-5">
                       <Field label="Email">
@@ -280,21 +279,6 @@ export function AuthPage() {
                           </button>
                         </div>
                       </Field>
-
-                      {tab === 'signup' && (
-                        <Field
-                          label="Merchant ID"
-                          footer="The merchant account must already exist before operator signup."
-                        >
-                          <FieldInput
-                            type="text"
-                            value={merchantId}
-                            onChange={(e) => setMerchantIdInput(e.target.value)}
-                            placeholder="merchant_123"
-                            required
-                          />
-                        </Field>
-                      )}
 
                       <ErrorMessage error={error} />
 
