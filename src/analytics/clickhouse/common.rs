@@ -47,20 +47,20 @@ pub async fn fetch_all<T>(query: Query) -> Result<Vec<T>, ApiError>
 where
     T: Row + for<'de> Deserialize<'de>,
 {
-    query
-        .fetch_all::<T>()
-        .await
-        .map_err(|_| ApiError::DatabaseError)
+    query.fetch_all::<T>().await.map_err(|error| {
+        crate::logger::error!(?error, "clickhouse fetch_all failed");
+        ApiError::DatabaseError
+    })
 }
 
 pub async fn fetch_one<T>(query: Query) -> Result<T, ApiError>
 where
     T: Row + for<'de> Deserialize<'de>,
 {
-    query
-        .fetch_one::<T>()
-        .await
-        .map_err(|_| ApiError::DatabaseError)
+    query.fetch_one::<T>().await.map_err(|error| {
+        crate::logger::error!(?error, "clickhouse fetch_one failed");
+        ApiError::DatabaseError
+    })
 }
 
 pub fn static_flow_type_in_sql(flow_types: &[FlowType]) -> String {

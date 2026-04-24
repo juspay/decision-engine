@@ -9,7 +9,7 @@ ENV RUSTUP_MAX_RETRIES=10
 ENV CARGO_INCREMENTAL=0
 
 RUN apt-get update \
-    && apt-get install -y libpq-dev libssl-dev pkg-config protobuf-compiler clang
+    && apt-get install -y cmake libpq-dev libssl-dev pkg-config protobuf-compiler clang
 
 COPY . .
 RUN RUSTFLAGS="-A warnings" cargo build --release --features release ${EXTRA_FEATURES}
