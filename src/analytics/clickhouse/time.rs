@@ -47,7 +47,7 @@ fn bucket_start_expr(query: &AnalyticsQuery, start_ms: i64, end_ms: i64) -> &'st
             OVER_HOUR_MS..=TWELVE_HOURS_MS => "toStartOfHour(created_at)",
             OVER_TWELVE_HOURS_MS..=DAY_MS => "toStartOfHour(created_at)",
             OVER_DAY_MS..=WEEK_MS => "toStartOfDay(created_at)",
-            _ => "toStartOfWeek(created_at)",
+            _ => "toStartOfDay(created_at)",
         };
     }
 
@@ -89,7 +89,7 @@ pub fn payment_audit_summary_bucket_bounds(query: &PaymentAuditQuery) -> (i64, i
 mod tests {
     use crate::analytics::models::{AnalyticsQuery, AnalyticsRange};
 
-    use super::{effective_window_bounds, query_bucket_select_expr, HOUR_MS, MINUTE_MS};
+    use super::{effective_window_bounds, query_bucket_select_expr, DAY_MS, HOUR_MS, MINUTE_MS};
 
     fn query() -> AnalyticsQuery {
         AnalyticsQuery {
@@ -135,6 +135,17 @@ mod tests {
         assert_eq!(
             query_bucket_select_expr(&query, 0, 15 * MINUTE_MS),
             "toUnixTimestamp(toStartOfMinute(created_at)) * 1000 AS bucket_ms"
+        );
+    }
+
+    #[test]
+    fn custom_long_bucket_stays_day_aligned() {
+        let mut query = query();
+        query.start_ms = Some(0);
+        query.end_ms = Some(10 * DAY_MS);
+        assert_eq!(
+            query_bucket_select_expr(&query, 0, 10 * DAY_MS),
+            "toUnixTimestamp(toStartOfDay(created_at)) * 1000 AS bucket_ms"
         );
     }
 }
