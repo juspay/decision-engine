@@ -10,6 +10,9 @@
     "test:ui": "cypress run --spec 'cypress/e2e/ui/**/*.cy.js'",
     "test:analytics": "cypress run --spec 'cypress/e2e/api/analytics-api.cy.js,cypress/e2e/ui/analytics-page.cy.js,cypress/e2e/ui/payment-audit.cy.js,cypress/e2e/ui/dashboard-overview.cy.js'",
     "test:all": "cypress run --spec 'cypress/e2e/**/*.cy.js'",
+    "test:e2e": "node cypress/scripts/run-e2e.js all",
+    "test:e2e:source": "node cypress/scripts/run-e2e.js source",
+    "test:e2e:docker": "node cypress/scripts/run-e2e.js docker",
     "test": "npm run test:all"
   },
   "devDependencies": {

@@ -7,40 +7,44 @@ function seedAuditData(merchantId) {
     name: factory.ruleName('audit_adv'),
   })
 
-  cy.ensureMerchantAccount(merchantId)
-  cy.createSuccessRateConfig(merchantId)
-  cy.createRoutingAlgorithm(advancedPayload).then(({ response }) => {
-    cy.activateRoutingAlgorithm(merchantId, response.rule_id)
-  })
+  const seeded = { decisionPaymentId, previewPaymentId }
 
-  cy.decideGateway(
-    factory.srDecideGatewayRequest({
-      merchantId,
-      paymentInfo: { paymentId: decisionPaymentId },
-    }),
-  ).then(({ response }) => {
-    cy.updateGatewayScore(
-      factory.updateGatewayScoreRequest({
-        merchantId,
-        gateway: response.decided_gateway,
-        paymentId: decisionPaymentId,
-        status: 'FAILURE',
-      }),
+  return cy
+    .ensureMerchantAccount(merchantId)
+    .then(() => cy.createSuccessRateConfig(merchantId))
+    .then(() => cy.createRoutingAlgorithm(advancedPayload))
+    .then(({ response }) => cy.activateRoutingAlgorithm(merchantId, response.rule_id))
+    .then(() =>
+      cy.decideGateway(
+        factory.srDecideGatewayRequest({
+          merchantId,
+          paymentInfo: { paymentId: decisionPaymentId },
+        }),
+      ),
     )
-  })
-
-  cy.evaluateRoutingAlgorithm(
-    factory.ruleEvaluatePayload(
-      merchantId,
-      {
-        payment_method: { type: 'enum_variant', value: 'card' },
-        amount: { type: 'number', value: 250 },
-      },
-      { payment_id: previewPaymentId },
-    ),
-  )
-
-  return { decisionPaymentId, previewPaymentId }
+    .then(({ response }) =>
+      cy.updateGatewayScore(
+        factory.updateGatewayScoreRequest({
+          merchantId,
+          gateway: response.decided_gateway,
+          paymentId: decisionPaymentId,
+          status: 'FAILURE',
+        }),
+      ),
+    )
+    .then(() =>
+      cy.evaluateRoutingAlgorithm(
+        factory.ruleEvaluatePayload(
+          merchantId,
+          {
+            payment_method: { type: 'enum_variant', value: 'card' },
+            amount: { type: 'number', value: 250 },
+          },
+          { payment_id: previewPaymentId },
+        ),
+      ),
+    )
+    .then(() => seeded)
 }
 
 describe('Payment Audit UI', () => {
@@ -51,35 +55,42 @@ describe('Payment Audit UI', () => {
     cy.waitForService()
     cy.viewport(1600, 1200)
     merchantId = factory.merchantId('audit_ui')
-    seeded = seedAuditData(merchantId)
-    cy.pollRequest(
-      () =>
-        cy.fetchPaymentAudit(
-          {
-            range: '1h',
-            payment_id: seeded.decisionPaymentId,
-          },
-          { merchantId },
+    seedAuditData(merchantId)
+      .then((data) => {
+        seeded = data
+      })
+      .then(() =>
+        cy.pollRequest(
+          () =>
+            cy.fetchPaymentAudit(
+              {
+                range: '1h',
+                payment_id: seeded.decisionPaymentId,
+              },
+              { merchantId },
+            ),
+          ({ response }) =>
+            Array.isArray(response.timeline) &&
+            response.timeline.some((event) => event.flow_type === 'decide_gateway_decision'),
+          { errorMessage: 'Transaction audit seed data did not reach payment audit in time' },
         ),
-      ({ response }) =>
-        Array.isArray(response.timeline) &&
-        response.timeline.some((event) => event.flow_type === 'decide_gateway_decision'),
-      { errorMessage: 'Transaction audit seed data did not reach payment audit in time' },
-    )
-    cy.pollRequest(
-      () =>
-        cy.fetchPreviewTrace(
-          {
-            range: '1h',
-            payment_id: seeded.previewPaymentId,
-          },
-          { merchantId },
+      )
+      .then(() =>
+        cy.pollRequest(
+          () =>
+            cy.fetchPreviewTrace(
+              {
+                range: '1h',
+                payment_id: seeded.previewPaymentId,
+              },
+              { merchantId },
+            ),
+          ({ response }) =>
+            Array.isArray(response.timeline) &&
+            response.timeline.some((event) => event.flow_type === 'routing_evaluate_advanced'),
+          { errorMessage: 'Preview audit seed data did not reach preview trace in time' },
         ),
-      ({ response }) =>
-        Array.isArray(response.timeline) &&
-        response.timeline.some((event) => event.flow_type === 'routing_evaluate_advanced'),
-      { errorMessage: 'Preview audit seed data did not reach preview trace in time' },
-    )
+      )
   })
 
   afterEach(() => {

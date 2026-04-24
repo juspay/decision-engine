@@ -86,6 +86,25 @@ For local source-run development with the full PostgreSQL analytics stack:
 ./oneclick.sh
 ```
 
+For the full end-to-end regression gate owned by the Cypress branch:
+
+```bash
+npm run test:e2e
+```
+
+That command runs:
+
+- source-run validation through `oneclick.sh`
+- Docker Compose validation through `dashboard-postgres-local`
+- the full Cypress API/UI/docs smoke contract against both modes
+
+Mode-specific entrypoints:
+
+```bash
+npm run test:e2e:source
+npm run test:e2e:docker
+```
+
 This flow:
 
 - starts PostgreSQL, Redis, Kafka, ClickHouse, and the analytics init jobs with Docker Compose

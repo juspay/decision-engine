@@ -1,4 +1,5 @@
 const factory = require('./test-data-factory')
+const dashboardSessionCache = new Map()
 
 function getApiBaseUrl() {
   return Cypress.env('API_BASE_URL') || 'http://localhost:8080'
@@ -6,6 +7,27 @@ function getApiBaseUrl() {
 
 function getUiBaseUrl() {
   return Cypress.env('UI_BASE_URL') || 'http://localhost:5173'
+}
+
+function getDocsBaseUrl() {
+  if (Cypress.env('DOCS_BASE_URL')) {
+    return Cypress.env('DOCS_BASE_URL')
+  }
+
+  return getRuntimeMode() === 'docker' ? 'http://localhost:8081' : 'http://localhost:3000'
+}
+
+function getRuntimeMode() {
+  return Cypress.env('RUNTIME_MODE') || 'manual'
+}
+
+function getClickHouseConfig() {
+  return {
+    baseUrl: Cypress.env('CLICKHOUSE_HTTP_URL') || 'http://localhost:8123',
+    database: Cypress.env('CLICKHOUSE_DATABASE') || 'default',
+    username: Cypress.env('CLICKHOUSE_USER') || 'decision_engine',
+    password: Cypress.env('CLICKHOUSE_PASSWORD') || 'decision_engine',
+  }
 }
 
 function getAdminSecret() {
@@ -17,22 +39,91 @@ function resolveApiUrl(path) {
   return `${getApiBaseUrl()}${path}`
 }
 
-function requestApi(method, path, options = {}) {
-  const { body, failOnStatusCode = true, headers = {}, qs } = options
+function resolveUiUrl(path) {
+  if (/^https?:\/\//.test(path)) return path
+  return `${getUiBaseUrl()}${path}`
+}
 
-  return cy.request({
-    method,
-    url: resolveApiUrl(path),
-    failOnStatusCode,
+function resolveDocsUrl(path = '/introduction') {
+  if (/^https?:\/\//.test(path)) return path
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+  return `${getDocsBaseUrl()}${normalizedPath}`
+}
+
+function requestApi(method, path, options = {}) {
+  const {
+    body,
+    failOnStatusCode = true,
+    headers = {},
     qs,
-    headers: {
+    timeout,
+    retries,
+    retryInterval,
+  } = options
+
+  const shouldRetryTransientAnalyticsError = (response) => {
+    if (!path.startsWith('/analytics/')) return false
+    if (!['source', 'docker'].includes(getRuntimeMode())) return false
+    if (response.status !== 500) return false
+    return response.body?.code === 'TE_01'
+  }
+
+  const maxRetries = retries ?? 0
+  const intervalMs = retryInterval ?? 2000
+  const useNodeHttpTask =
+    path.startsWith('/analytics/') && ['source', 'docker'].includes(getRuntimeMode())
+
+  function send(attempt = 0) {
+    const requestHeaders = {
       'Content-Type': 'application/json',
       'x-tenant-id': 'public',
       'x-admin-secret': getAdminSecret(),
       ...headers,
-    },
-    body,
-  })
+    }
+
+    const requestChain = useNodeHttpTask
+      ? cy.task('httpRequest', {
+          method,
+          url: resolveApiUrl(path),
+          qs,
+          timeout,
+          headers: requestHeaders,
+          body,
+        })
+      : cy.request({
+          method,
+          url: resolveApiUrl(path),
+          failOnStatusCode: false,
+          qs,
+          timeout,
+          headers: requestHeaders,
+          body,
+        })
+
+    return requestChain
+      .then((response) => {
+        if (attempt < maxRetries && shouldRetryTransientAnalyticsError(response)) {
+          return cy.wait(intervalMs).then(() => send(attempt + 1))
+        }
+
+        if (
+          failOnStatusCode &&
+          shouldRetryTransientAnalyticsError(response)
+        ) {
+          return response
+        }
+
+        if (failOnStatusCode && (response.status < 200 || response.status >= 400)) {
+          throw new Error(
+            `API request failed (${method} ${path}) with status ${response.status}: ${JSON.stringify(response.body)}`,
+          )
+        }
+
+        return response
+      })
+  }
+
+  return send()
 }
 
 function normalizeAnalyticsRequest(query = {}, options = {}) {
@@ -66,12 +157,69 @@ function authStoreState(session) {
   })
 }
 
+function seedDashboardStorage(win, merchantId, session) {
+  win.localStorage.setItem('merchant-store', merchantStoreState(merchantId))
+  win.localStorage.setItem('auth-store', authStoreState(session))
+}
+
 Cypress.Commands.add('waitForService', () => {
-  return requestApi('GET', '/health').its('status').should('eq', 200)
+  return requestApi('GET', '/health', {
+    timeout: Cypress.env('HEALTH_POLL_TIMEOUT_MS') || 120000,
+  }).its('status').should('eq', 200)
+})
+
+Cypress.Commands.add('waitForDocs', () => {
+  return cy
+    .request({
+      method: 'GET',
+      url: resolveDocsUrl('/introduction'),
+      timeout: Cypress.env('DOCS_POLL_TIMEOUT_MS') || 120000,
+    })
+    .its('status')
+    .should('eq', 200)
+})
+
+Cypress.Commands.add('waitForAnalyticsInfra', () => {
+  const expectedTables = Cypress.env('EXPECTED_CLICKHOUSE_TABLES') || []
+  const quotedTables = expectedTables.map((table) => `'${table}'`).join(', ')
+  const query = `SELECT name FROM system.tables WHERE database = currentDatabase() AND name IN (${quotedTables}) ORDER BY name FORMAT TSV`
+
+  return cy.task('clickhouseQuery', {
+    ...getClickHouseConfig(),
+    query,
+  }).then((result) => {
+    const foundTables = new Set(
+      `${result}`
+        .split('\n')
+        .map((value) => value.trim())
+        .filter(Boolean),
+    )
+
+    expectedTables.forEach((table) => {
+      expect(foundTables.has(table), `ClickHouse table ${table} should exist`).to.eq(true)
+    })
+  })
+})
+
+Cypress.Commands.add('waitForRuntimeSurface', () => {
+  return cy.waitForService().then(() => cy.waitForDocs()).then(() => cy.waitForAnalyticsInfra())
+})
+
+Cypress.Commands.add('fetchDocsPage', (path = '/introduction', options = {}) => {
+  return cy.request({
+    method: 'GET',
+    url: resolveDocsUrl(path),
+    ...options,
+  })
+})
+
+Cypress.Commands.add('runtimeContext', () => {
+  return cy.task('runtimeContext')
 })
 
 Cypress.Commands.add('cleanupTestData', (merchantId) => {
   if (!merchantId) return cy.wrap(null)
+  dashboardSessionCache.delete(merchantId)
   return requestApi('DELETE', `/merchant-account/${merchantId}`, { failOnStatusCode: false })
 })
 
@@ -378,15 +526,24 @@ Cypress.Commands.add('pollRequest', (requestFactory, predicate, options = {}) =>
   const timeout = options.timeout ?? Cypress.env('ANALYTICS_POLL_TIMEOUT_MS') ?? 30000
   const interval = options.interval ?? Cypress.env('ANALYTICS_POLL_INTERVAL_MS') ?? 2000
   const startedAt = Date.now()
+  let lastResult = null
 
   function poll() {
     return requestFactory().then((result) => {
+      lastResult = result
+
       if (predicate(result)) {
         return cy.wrap(result)
       }
 
       if (Date.now() - startedAt >= timeout) {
-        throw new Error(options.errorMessage || 'Timed out waiting for condition')
+        const context = lastResult
+          ? ` Last result: ${JSON.stringify({
+              status: lastResult.status,
+              response: lastResult.response,
+            }).slice(0, 1000)}`
+          : ''
+        throw new Error(`${options.errorMessage || 'Timed out waiting for condition'}.${context}`)
       }
 
       return cy.wait(interval).then(poll)
@@ -405,6 +562,11 @@ Cypress.Commands.add('setMerchantContext', (merchantId) => {
 Cypress.Commands.add('ensureDashboardSession', (merchantId) => {
   const email = `${merchantId}@example.com`
   const password = 'Password123!'
+  const cachedSession = dashboardSessionCache.get(merchantId)
+
+  if (cachedSession) {
+    return cy.wrap(cachedSession)
+  }
 
   return requestApi('POST', '/auth/signup', {
     failOnStatusCode: false,
@@ -415,7 +577,7 @@ Cypress.Commands.add('ensureDashboardSession', (merchantId) => {
     },
   }).then((response) => {
     if (response.status === 200) {
-      return cy.wrap({
+      const session = {
         token: response.body.token,
         user: {
           userId: response.body.user_id,
@@ -423,13 +585,15 @@ Cypress.Commands.add('ensureDashboardSession', (merchantId) => {
           merchantId: response.body.merchant_id,
           role: response.body.role,
         },
-      })
+      }
+      dashboardSessionCache.set(merchantId, session)
+      return cy.wrap(session)
     }
 
     return requestApi('POST', '/auth/login', {
       body: { email, password },
-    }).then((loginResponse) =>
-      cy.wrap({
+    }).then((loginResponse) => {
+      const session = {
         token: loginResponse.body.token,
         user: {
           userId: loginResponse.body.user_id,
@@ -437,22 +601,23 @@ Cypress.Commands.add('ensureDashboardSession', (merchantId) => {
           merchantId: loginResponse.body.merchant_id,
           role: loginResponse.body.role,
         },
-      }),
-    )
+      }
+      dashboardSessionCache.set(merchantId, session)
+      return cy.wrap(session)
+    })
   })
 })
 
 Cypress.Commands.add('visitWithMerchant', (path = '/', merchantId, options = {}) => {
   const id = merchantId || factory.merchantId('ui')
-  const targetUrl = /^https?:\/\//.test(path) ? path : `${getUiBaseUrl()}${path}`
+  const targetUrl = resolveUiUrl(path)
 
   return cy.ensureMerchantAccount(id).then(() =>
     cy.ensureDashboardSession(id).then((session) =>
       cy.visit(targetUrl, {
         ...options,
         onBeforeLoad(win) {
-          win.localStorage.setItem('merchant-store', merchantStoreState(id))
-          win.localStorage.setItem('auth-store', authStoreState(session))
+          seedDashboardStorage(win, id, session)
           if (typeof options.onBeforeLoad === 'function') {
             options.onBeforeLoad(win)
           }
@@ -460,6 +625,27 @@ Cypress.Commands.add('visitWithMerchant', (path = '/', merchantId, options = {})
       }),
     ),
   )
+})
+
+Cypress.Commands.add('visitWithSession', (path = '/', merchantId, options = {}) => {
+  const id = merchantId || factory.merchantId('ui')
+  const targetUrl = resolveUiUrl(path)
+
+  return cy.ensureDashboardSession(id).then((session) =>
+    cy.visit(targetUrl, {
+      ...options,
+      onBeforeLoad(win) {
+        seedDashboardStorage(win, id, session)
+        if (typeof options.onBeforeLoad === 'function') {
+          options.onBeforeLoad(win)
+        }
+      },
+    }),
+  )
+})
+
+Cypress.Commands.add('visitAppPath', (path = '/', options = {}) => {
+  return cy.visit(resolveUiUrl(path), options)
 })
 
 Cypress.Commands.add('setMerchantFromTopBar', (merchantId) => {
