@@ -29,13 +29,7 @@ Default tags used in this repo:
 
 ## Docker Compose Profiles
 
-The repository ships with a checked-in Docker Compose default:
-
-- plain `docker compose up -d` starts the PostgreSQL GHCR stack
-- that default stack already includes PostgreSQL, Redis, Kafka, Kafka topic init, and ClickHouse analytics
-
-If you want any non-default track such as MySQL, local-build, or dashboard profiles, clear the
-default first with `COMPOSE_PROFILES=`.
+You must pass at least one profile.
 
 ### Core runtime profiles
 
@@ -69,29 +63,19 @@ default first with `COMPOSE_PROFILES=`.
 ### API Only
 
 ```bash
-docker compose up -d
+docker compose --profile postgres-ghcr up -d
 ```
 
 ### API + Dashboard + Docs
 
 ```bash
-COMPOSE_PROFILES= docker compose --profile dashboard-postgres-ghcr up -d
+docker compose --profile dashboard-postgres-ghcr up -d
 ```
 
 ### With Monitoring
 
 ```bash
-COMPOSE_PROFILES= docker compose --profile postgres-ghcr --profile monitoring up -d
-```
-
-### Alternate Tracks
-
-Examples:
-
-```bash
-COMPOSE_PROFILES= docker compose --profile mysql-ghcr up -d
-COMPOSE_PROFILES= docker compose --profile postgres-local up -d --build
-COMPOSE_PROFILES= docker compose --profile dashboard-postgres-local up -d --build
+docker compose --profile postgres-ghcr --profile monitoring up -d
 ```
 
 ## One-Command Local Dev
@@ -100,6 +84,25 @@ For local source-run development with the full PostgreSQL analytics stack:
 
 ```bash
 ./oneclick.sh
+```
+
+For the full end-to-end regression gate owned by the Cypress branch:
+
+```bash
+npm run test:e2e
+```
+
+That command runs:
+
+- source-run validation through `oneclick.sh`
+- Docker Compose validation through `dashboard-postgres-local`
+- the full Cypress API/UI/docs smoke contract against both modes
+
+Mode-specific entrypoints:
+
+```bash
+npm run test:e2e:source
+npm run test:e2e:docker
 ```
 
 This flow:
@@ -221,8 +224,8 @@ Monitoring profile also exposes:
 ### Recreate a profile with clean volumes
 
 ```bash
-docker compose down -v
-docker compose up -d
+docker compose --profile postgres-ghcr down -v
+docker compose --profile postgres-ghcr up -d
 ```
 
 ### Inspect migration jobs
