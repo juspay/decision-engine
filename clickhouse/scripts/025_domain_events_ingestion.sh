@@ -62,7 +62,8 @@ ORDER BY (
     flow_type,
     event_id
 )
-TTL created_at + INTERVAL 18 MONTH;
+TTL created_at + INTERVAL 18 MONTH
+SETTINGS allow_nullable_key = 1;
 
 DROP TABLE IF EXISTS analytics_payment_audit_summary_buckets_mv;
 DROP TABLE IF EXISTS analytics_payment_audit_summary_buckets;
