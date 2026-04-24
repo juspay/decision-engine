@@ -22,13 +22,9 @@ CREATE TABLE analytics_domain_events (
     api_flow LowCardinality(String),
     flow_type LowCardinality(String),
     merchant_id Nullable(String),
-    merchant_id_key String MATERIALIZED ifNull(merchant_id, ''),
     payment_id Nullable(String),
-    payment_id_key String MATERIALIZED ifNull(payment_id, ''),
     request_id Nullable(String),
-    request_id_key String MATERIALIZED ifNull(request_id, ''),
     lookup_key Nullable(String),
-    lookup_key_key String MATERIALIZED ifNull(lookup_key, ''),
     global_request_id Nullable(String),
     trace_id Nullable(String),
     payment_method_type Nullable(String),
@@ -57,8 +53,8 @@ CREATE TABLE analytics_domain_events (
 ) ENGINE = ReplacingMergeTree
 PARTITION BY toYYYYMM(created_at)
 ORDER BY (
-    merchant_id_key,
-    lookup_key_key,
+    merchant_id,
+    lookup_key,
     created_at_ms,
     api_flow,
     flow_type,
