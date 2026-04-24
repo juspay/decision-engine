@@ -8,7 +8,9 @@ ENV CARGO_NET_RETRY=10
 ENV RUSTUP_MAX_RETRIES=10
 ENV CARGO_INCREMENTAL=0
 
-RUN apt-get update && apt-get install -y libmariadb-dev libssl-dev clang && rm -rf /var/lib/apt/lists/*
+RUN apt-get update \
+    && apt-get install -y cmake libmariadb-dev libssl-dev clang \
+    && rm -rf /var/lib/apt/lists/*
 
 
 COPY . .

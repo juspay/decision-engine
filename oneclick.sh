@@ -12,6 +12,7 @@ DOCS_HOME_URL="${DOCS_URL}/introduction"
 API_REF_URL="${DOCS_URL}/api-reference"
 API_EXAMPLES_URL="${DOCS_URL}/api-refs/api-ref"
 DOCS_LOG_PATH="$SCRIPT_DIR/.mintlify-dev.log"
+ONECLICK_AUTO_CONFIRM="${ONECLICK_AUTO_CONFIRM:-0}"
 
 POSTGRES_HOST="${POSTGRES_HOST:-localhost}"
 POSTGRES_PORT="${POSTGRES_PORT:-5432}"
@@ -64,8 +65,13 @@ check_and_kill_ports() {
         echo "  These processes will be killed to proceed."
         echo "=========================================="
         echo ""
-        echo "Press Enter to continue and kill these processes, or Ctrl+C to abort..."
-        read -r
+
+        if [ "$ONECLICK_AUTO_CONFIRM" = "1" ]; then
+            echo "Auto-confirm enabled. Continuing without prompt..."
+        else
+            echo "Press Enter to continue and kill these processes, or Ctrl+C to abort..."
+            read -r
+        fi
 
         echo ""
         echo "Killing processes..."
