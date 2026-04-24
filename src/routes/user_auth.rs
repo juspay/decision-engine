@@ -98,7 +98,9 @@ pub async fn signup(
     .map_err(|_| UserAuthError::StorageError)?;
 
     if !existing.is_empty() {
-        return Err(error::ContainerError::from(UserAuthError::EmailAlreadyExists));
+        return Err(error::ContainerError::from(
+            UserAuthError::EmailAlreadyExists,
+        ));
     }
 
     let password_hash =
@@ -118,7 +120,11 @@ pub async fn signup(
         #[cfg(feature = "postgres")]
         is_active: true,
         #[cfg(feature = "mysql")]
-        email_verified: if global_config.user_auth.email_verification_enabled { 0 } else { 1 },
+        email_verified: if global_config.user_auth.email_verification_enabled {
+            0
+        } else {
+            1
+        },
         #[cfg(feature = "postgres")]
         email_verified: !global_config.user_auth.email_verification_enabled,
         created_at: now,
@@ -173,9 +179,13 @@ pub async fn login(
 
     let is_active = {
         #[cfg(feature = "mysql")]
-        { user.is_active != 0 }
+        {
+            user.is_active != 0
+        }
         #[cfg(feature = "postgres")]
-        { user.is_active }
+        {
+            user.is_active
+        }
     };
     if !is_active {
         return Err(error::ContainerError::from(UserAuthError::AccountInactive));
@@ -183,9 +193,13 @@ pub async fn login(
 
     let email_verified = {
         #[cfg(feature = "mysql")]
-        { user.email_verified != 0 }
+        {
+            user.email_verified != 0
+        }
         #[cfg(feature = "postgres")]
-        { user.email_verified }
+        {
+            user.email_verified
+        }
     };
     if global_config.user_auth.email_verification_enabled && !email_verified {
         return Err(error::ContainerError::from(UserAuthError::EmailNotVerified));
@@ -198,12 +212,12 @@ pub async fn login(
     }
 
     let merchants = fetch_user_merchants(&app_state, &user.user_id).await?;
-    let active_merchant_id = user
-        .merchant_id
-        .clone()
-        .unwrap_or_else(|| {
-            merchants.first().map(|m| m.merchant_id.clone()).unwrap_or_default()
-        });
+    let active_merchant_id = user.merchant_id.clone().unwrap_or_else(|| {
+        merchants
+            .first()
+            .map(|m| m.merchant_id.clone())
+            .unwrap_or_default()
+    });
 
     let token = auth::generate_jwt(
         &user.user_id,
@@ -277,7 +291,11 @@ pub async fn create_merchant(
         #[cfg(feature = "postgres")]
         use crate::storage::schema_pg::users::dsl as u_dsl;
 
-        let conn = &app_state.db.get_conn().await.map_err(|_| UserAuthError::StorageError)?;
+        let conn = &app_state
+            .db
+            .get_conn()
+            .await
+            .map_err(|_| UserAuthError::StorageError)?;
         crate::generics::generic_update_if_present::<
             <User as diesel::associations::HasTable>::Table,
             UserMerchantIdUpdate,
@@ -285,7 +303,9 @@ pub async fn create_merchant(
         >(
             conn,
             u_dsl::user_id.eq(claims.user_id.clone()),
-            UserMerchantIdUpdate { merchant_id: Some(merchant_id.clone()) },
+            UserMerchantIdUpdate {
+                merchant_id: Some(merchant_id.clone()),
+            },
         )
         .await
         .map_err(|_| UserAuthError::StorageError)?;
@@ -396,7 +416,9 @@ pub async fn logout(
             .await;
     }
 
-    Ok(Json(serde_json::json!({ "message": "Logged out successfully" })))
+    Ok(Json(
+        serde_json::json!({ "message": "Logged out successfully" }),
+    ))
 }
 
 #[axum::debug_handler]
@@ -448,10 +470,7 @@ async fn fetch_user_merchants(
         <UserMerchant as HasTable>::Table,
         _,
         UserMerchant,
-    >(
-        &app_state.db,
-        um_dsl::user_id.eq(user_id.clone()),
-    )
+    >(&app_state.db, um_dsl::user_id.eq(user_id.clone()))
     .await
     .map_err(|_| UserAuthError::StorageError)?;
 
