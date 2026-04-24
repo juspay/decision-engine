@@ -131,7 +131,7 @@ async fn capture_api_event(
     request: Request<Body>,
     next: Next,
 ) -> Response {
-    if !global_state.analytics_runtime.is_enabled() {
+    if !global_state.analytics_runtime.write_enabled() {
         return next.run(request).await;
     }
 

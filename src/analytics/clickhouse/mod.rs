@@ -35,7 +35,16 @@ impl ClickHouseAnalyticsStore {
             client = client.with_password(password.peek().clone());
         }
 
-        verify_connectivity(&client).await?;
+        verify_connectivity(&client).await.map_err(|error| {
+            crate::logger::error!(
+                ?error,
+                clickhouse_url = %config.url,
+                clickhouse_database = %config.database,
+                clickhouse_user = %config.user,
+                "clickhouse analytics startup connectivity check failed"
+            );
+            error
+        })?;
 
         Ok(Self { client })
     }
@@ -45,7 +54,10 @@ async fn verify_connectivity(client: &Client) -> Result<(), ApiError> {
     // Fail fast on bad ClickHouse config instead of deferring the error to the first dashboard read.
     let probe = common::fetch_one::<StartupProbeRow>(client.query("SELECT 1 AS value"))
         .await
-        .map_err(|_| ApiError::DatabaseError)?;
+        .map_err(|error| {
+            crate::logger::error!(?error, "clickhouse startup probe failed");
+            ApiError::DatabaseError
+        })?;
     let _ = probe.value;
     Ok(())
 }
