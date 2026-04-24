@@ -92,6 +92,11 @@ config = "0.15.9"
 serde_path_to_error = "0.1.17"
 thiserror = "2.0.12"
 tracing = { version = "0.1.41" }
+opentelemetry = { version = "0.27", default-features = false, features = ["trace", "metrics"] }
+opentelemetry_sdk = { version = "0.27", features = ["rt-tokio", "trace", "metrics"] }
+opentelemetry-otlp = { version = "0.27", features = ["grpc-tonic", "trace", "metrics"] }
+tracing-opentelemetry = "0.28"
+opentelemetry-http = "0.27"
 rand = "0.8.5"
 tower-http = { version = "0.6.2", features = ["trace"] }
 bytes = "1.10.1"

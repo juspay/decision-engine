@@ -20,6 +20,7 @@ use super::env::get_env_var;
 use super::storage::Storage;
 use time::format_description::well_known::Iso8601;
 use tracing::{Event, Metadata, Subscriber};
+use tracing_opentelemetry::OtelData;
 use tracing_subscriber::{
     fmt::MakeWriter,
     layer::Context,
@@ -501,6 +502,19 @@ where
                 if !explicit_entries_set.contains(*key) {
                     map_serializer.serialize_entry(*key, &Value::Null)?;
                     explicit_entries_set.insert(*key); // optional, not needed beyond this
+                }
+            }
+        }
+
+        // Extract OTel trace_id and span_id from the current span's builder
+        if let Some(span) = span {
+            let extensions = span.extensions();
+            if let Some(otel_data) = extensions.get::<OtelData>() {
+                if let Some(trace_id) = otel_data.builder.trace_id {
+                    map_serializer.serialize_entry("trace_id", &trace_id.to_string())?;
+                }
+                if let Some(span_id) = otel_data.builder.span_id {
+                    map_serializer.serialize_entry("span_id", &span_id.to_string())?;
                 }
             }
         }

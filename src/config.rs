@@ -31,6 +31,8 @@ pub struct GlobalConfig {
     #[serde(default)]
     pub secrets_management: SecretsManagementConfig,
     pub log: Log,
+    #[serde(default)]
+    pub telemetry: logger::config::Telemetry,
     #[cfg(feature = "limit")]
     pub limit: Limit,
     pub redis: RedisSettings,
