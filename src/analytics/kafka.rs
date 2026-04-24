@@ -189,14 +189,28 @@ impl KafkaAnalyticsStore {
     pub async fn new(config: KafkaAnalyticsConfig) -> Result<Self, ConfigurationError> {
         let producer = build_client_config(&config)
             .create::<FutureProducer>()
-            .map_err(|_| {
+            .map_err(|error| {
+                crate::logger::error!(
+                    ?error,
+                    kafka_brokers = %config.brokers,
+                    api_topic = %config.api_topic,
+                    domain_topic = %config.domain_topic,
+                    "failed to create kafka analytics producer"
+                );
                 ConfigurationError::InvalidConfigurationValueError("analytics.kafka".to_string())
             })?;
 
         producer
             .client()
             .fetch_metadata(None, Timeout::After(std::time::Duration::from_secs(5)))
-            .map_err(|_| {
+            .map_err(|error| {
+                crate::logger::error!(
+                    ?error,
+                    kafka_brokers = %config.brokers,
+                    api_topic = %config.api_topic,
+                    domain_topic = %config.domain_topic,
+                    "failed to fetch kafka metadata during analytics startup"
+                );
                 ConfigurationError::InvalidConfigurationValueError(
                     "analytics.kafka.brokers".to_string(),
                 )
