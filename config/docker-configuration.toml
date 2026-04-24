@@ -68,6 +68,9 @@ client_idle_timeout = 90
 pool_max_idle_per_host = 10
 identity = ""
 
+[analytics]
+enabled = true
+
 [analytics.kafka]
 brokers = "kafka:19092"
 api_topic = "api"
