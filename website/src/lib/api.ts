@@ -2,7 +2,7 @@
 import { tokenRef } from './tokenRef'
 
 const DEBUG_API = true
-const DEFAULT_TENANT_ID = 'public'
+const DEFAULT_TENANT_ID = import.meta.env.VITE_DEFAULT_TENANT_ID ?? 'public'
 
 function logRequest(method: string, path: string, body?: unknown) {
   if (!DEBUG_API) return
