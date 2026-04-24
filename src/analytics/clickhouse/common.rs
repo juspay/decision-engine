@@ -7,6 +7,7 @@ use crate::error::ApiError;
 
 pub const DOMAIN_TABLE: &str = "analytics_domain_events";
 pub const PAYMENT_AUDIT_SUMMARY_BUCKET_TABLE: &str = "analytics_payment_audit_summary_buckets";
+pub const PAYMENT_AUDIT_LOOKUP_SUMMARY_TABLE: &str = "analytics_payment_audit_lookup_summaries";
 pub const PAYMENT_AUDIT_SUMMARY_KIND_DYNAMIC: &str = "dynamic";
 pub const PAYMENT_AUDIT_SUMMARY_KIND_PREVIEW: &str = "preview";
 pub const OVERVIEW_SCORE_FLOW_TYPES: &[FlowType] = &[
