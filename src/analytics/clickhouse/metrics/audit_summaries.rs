@@ -6,10 +6,10 @@ use crate::error::ApiError;
 
 use super::super::common::{
     fetch_all, fetch_one, payment_audit_route_label, payment_audit_stage_label,
-    PAYMENT_AUDIT_SUMMARY_BUCKET_TABLE,
+    payment_audit_summary_kind, PAYMENT_AUDIT_LOOKUP_SUMMARY_TABLE,
 };
-use super::super::filters::payment_audit_summary_bucket_filters;
 use super::super::query::{BoundQueryBuilder, FilterClause, OrderClause, SqlFragment};
+use super::super::time::effective_payment_audit_window_bounds;
 
 #[derive(Debug, Clone, Deserialize, Row)]
 struct AuditSummaryRow {
@@ -32,37 +32,43 @@ struct CountRow {
     total_results: u64,
 }
 
-fn grouped_summary_fragment(query: &PaymentAuditQuery, preview_only: bool) -> SqlFragment {
-    let mut builder = BoundQueryBuilder::new(PAYMENT_AUDIT_SUMMARY_BUCKET_TABLE);
+fn finalized_summary_fragment(query: &PaymentAuditQuery, preview_only: bool) -> SqlFragment {
+    let mut builder = BoundQueryBuilder::new(format!("{PAYMENT_AUDIT_LOOKUP_SUMMARY_TABLE} FINAL"));
     builder.extend_selects([
         "lookup_key".to_string(),
-        "argMaxMerge(payment_id_state) AS payment_id".to_string(),
-        "argMaxMerge(request_id_state) AS request_id".to_string(),
-        "argMaxMerge(merchant_id_state) AS merchant_id".to_string(),
-        "minMerge(first_seen_ms_state) AS first_seen_ms".to_string(),
-        "maxMerge(last_seen_ms_state) AS last_seen_ms".to_string(),
-        "sumMerge(event_count_state) AS event_count".to_string(),
-        "argMaxMerge(latest_status_state) AS latest_status".to_string(),
-        "argMaxMerge(latest_gateway_state) AS latest_gateway".to_string(),
-        "argMaxMerge(latest_stage_state) AS latest_stage".to_string(),
-        "arrayFilter(value -> value != '', groupUniqArrayMerge(gateways_state)) AS gateways"
+        "finalizeAggregation(payment_id_state) AS payment_id".to_string(),
+        "finalizeAggregation(request_id_state) AS request_id".to_string(),
+        "finalizeAggregation(merchant_id_state) AS merchant_id".to_string(),
+        "finalizeAggregation(first_seen_ms_state) AS first_seen_ms".to_string(),
+        "finalizeAggregation(last_seen_ms_state) AS last_seen_ms".to_string(),
+        "finalizeAggregation(event_count_state) AS event_count".to_string(),
+        "finalizeAggregation(latest_status_state) AS latest_status".to_string(),
+        "finalizeAggregation(latest_gateway_state) AS latest_gateway".to_string(),
+        "finalizeAggregation(latest_stage_state) AS latest_stage".to_string(),
+        "arrayFilter(value -> value != '', finalizeAggregation(gateways_state)) AS gateways"
             .to_string(),
-        "arrayFilter(value -> value != '', groupUniqArrayMerge(routes_state)) AS routes"
+        "arrayFilter(value -> value != '', finalizeAggregation(routes_state)) AS routes"
             .to_string(),
-        "arrayFilter(value -> value != '', groupUniqArrayMerge(statuses_state)) AS statuses"
+        "arrayFilter(value -> value != '', finalizeAggregation(statuses_state)) AS statuses"
             .to_string(),
-        "arrayFilter(value -> value != '', groupUniqArrayMerge(flow_types_state)) AS flow_types"
+        "arrayFilter(value -> value != '', finalizeAggregation(flow_types_state)) AS flow_types"
             .to_string(),
-        "arrayFilter(value -> value != '', groupUniqArrayMerge(error_codes_state)) AS error_codes"
+        "arrayFilter(value -> value != '', finalizeAggregation(error_codes_state)) AS error_codes"
             .to_string(),
     ]);
-    builder.extend_filters(payment_audit_summary_bucket_filters(query, preview_only));
-    builder.add_group_by("lookup_key");
+    builder.extend_filters([
+        FilterClause::eq("merchant_id", query.merchant_id.clone()),
+        FilterClause::eq("summary_kind", payment_audit_summary_kind(preview_only)),
+    ]);
     builder.into_fragment()
 }
 
 fn outer_summary_filters(query: &PaymentAuditQuery) -> Vec<FilterClause> {
-    let mut filters = Vec::new();
+    let (start_ms, end_ms) = effective_payment_audit_window_bounds(query);
+    let mut filters = vec![
+        FilterClause::lte("first_seen_ms", end_ms),
+        FilterClause::gte("last_seen_ms", start_ms),
+    ];
 
     if let Some(lookup_key) = crate::analytics::derive_lookup_key(
         query.payment_id.as_deref(),
@@ -155,10 +161,10 @@ pub async fn count(
     query: &PaymentAuditQuery,
     preview_only: bool,
 ) -> Result<usize, ApiError> {
-    let grouped = grouped_summary_fragment(query, preview_only);
+    let finalized = finalized_summary_fragment(query, preview_only);
     let mut builder = BoundQueryBuilder::from_fragment(SqlFragment::with_binds(
-        format!("({})", grouped.sql()),
-        grouped.binds().to_vec(),
+        format!("({})", finalized.sql()),
+        finalized.binds().to_vec(),
     ));
     builder.add_select("count() AS total_results");
     builder.extend_filters(outer_summary_filters(query));
@@ -171,8 +177,8 @@ pub async fn load_page(
     query: &PaymentAuditQuery,
     preview_only: bool,
 ) -> Result<Vec<PaymentAuditSummary>, ApiError> {
-    let grouped = grouped_summary_fragment(query, preview_only);
-    let mut builder = results_builder(grouped, query);
+    let finalized = finalized_summary_fragment(query, preview_only);
+    let mut builder = results_builder(finalized, query);
     builder.add_order_by(OrderClause::desc("last_seen_ms"));
     builder.add_order_by(OrderClause::desc("event_count"));
     builder.set_limit(Some(query.page_size as u64));
@@ -191,8 +197,8 @@ pub async fn load_exact(
     exact_query.payment_id = Some(lookup_key.to_string());
     exact_query.request_id = None;
 
-    let grouped = grouped_summary_fragment(&exact_query, preview_only);
-    let mut builder = results_builder(grouped, &exact_query);
+    let finalized = finalized_summary_fragment(&exact_query, preview_only);
+    let mut builder = results_builder(finalized, &exact_query);
     builder.add_order_by(OrderClause::desc("last_seen_ms"));
     builder.add_order_by(OrderClause::desc("event_count"));
     builder.set_limit(Some(1));
@@ -202,10 +208,10 @@ pub async fn load_exact(
 
 #[cfg(test)]
 mod tests {
-    use crate::analytics::clickhouse::common::PAYMENT_AUDIT_SUMMARY_BUCKET_TABLE;
+    use crate::analytics::clickhouse::common::PAYMENT_AUDIT_LOOKUP_SUMMARY_TABLE;
     use crate::analytics::models::{AnalyticsRange, PaymentAuditQuery};
 
-    use super::{grouped_summary_fragment, outer_summary_filters};
+    use super::{finalized_summary_fragment, outer_summary_filters};
 
     fn payment_audit_query() -> PaymentAuditQuery {
         PaymentAuditQuery {
@@ -226,11 +232,11 @@ mod tests {
     }
 
     #[test]
-    fn grouped_summary_fragment_uses_summary_bucket_table() {
-        let fragment = grouped_summary_fragment(&payment_audit_query(), false);
-        assert!(fragment.sql().contains(PAYMENT_AUDIT_SUMMARY_BUCKET_TABLE));
-        assert!(fragment.sql().contains("GROUP BY lookup_key"));
-        assert!(!fragment.sql().contains("analytics_domain_events"));
+    fn finalized_summary_fragment_uses_lookup_summary_table() {
+        let fragment = finalized_summary_fragment(&payment_audit_query(), false);
+        assert!(fragment.sql().contains(PAYMENT_AUDIT_LOOKUP_SUMMARY_TABLE));
+        assert!(fragment.sql().contains("FINAL"));
+        assert!(!fragment.sql().contains("GROUP BY lookup_key"));
     }
 
     #[test]
@@ -244,8 +250,11 @@ mod tests {
         assert!(predicates
             .iter()
             .any(|predicate| predicate == "lookup_key = ?"));
-        assert!(!predicates
+        assert!(predicates
             .iter()
-            .any(|predicate| predicate == "request_id = ?"));
+            .any(|predicate| predicate == "first_seen_ms <= ?"));
+        assert!(predicates
+            .iter()
+            .any(|predicate| predicate == "last_seen_ms >= ?"));
     }
 }
