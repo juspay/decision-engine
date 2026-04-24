@@ -285,6 +285,7 @@ pub struct MerchantAccount {
     pub tenant_account_id: Option<String>,
     pub priority_logic_config: Option<String>,
     pub merchant_category_code: Option<String>,
+    pub merchant_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -292,6 +293,7 @@ pub struct MerchantAccount {
 #[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::merchant_account))]
 pub struct MerchantAccountNew {
     pub merchant_id: Option<String>,
+    pub merchant_name: Option<String>,
     pub date_created: PrimitiveDateTime,
     pub use_code_for_gateway_priority: BitBoolWrite,
     pub gateway_success_rate_based_decider_input: Option<String>,
@@ -743,7 +745,7 @@ pub struct User {
     pub user_id: String,
     pub email: String,
     pub password_hash: String,
-    pub merchant_id: String,
+    pub merchant_id: Option<String>,
     pub role: String,
     #[cfg(feature = "mysql")]
     pub is_active: i8,
@@ -763,7 +765,7 @@ pub struct NewUser {
     pub user_id: String,
     pub email: String,
     pub password_hash: String,
-    pub merchant_id: String,
+    pub merchant_id: Option<String>,
     pub role: String,
     #[cfg(feature = "mysql")]
     pub is_active: i8,
@@ -774,4 +776,32 @@ pub struct NewUser {
     #[cfg(feature = "postgres")]
     pub email_verified: bool,
     pub created_at: PrimitiveDateTime,
+}
+
+#[derive(Debug, Clone, Identifiable, Queryable, Serialize, Deserialize)]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::user_merchants))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::user_merchants))]
+pub struct UserMerchant {
+    pub id: i64,
+    pub user_id: String,
+    pub merchant_id: String,
+    pub role: String,
+    pub created_at: PrimitiveDateTime,
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::user_merchants))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::user_merchants))]
+pub struct NewUserMerchant {
+    pub user_id: String,
+    pub merchant_id: String,
+    pub role: String,
+    pub created_at: PrimitiveDateTime,
+}
+
+#[derive(AsChangeset, Debug)]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::users))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::users))]
+pub struct UserMerchantIdUpdate {
+    pub merchant_id: Option<String>,
 }

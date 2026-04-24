@@ -2,6 +2,12 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { tokenRef } from '../lib/tokenRef'
 
+export interface MerchantInfo {
+  merchant_id: string
+  merchant_name: string
+  role: string
+}
+
 export interface AuthUser {
   userId: string
   email: string
@@ -12,7 +18,9 @@ export interface AuthUser {
 interface AuthStore {
   token: string | null
   user: AuthUser | null
-  setAuth: (token: string, user: AuthUser) => void
+  merchants: MerchantInfo[]
+  setAuth: (token: string, user: AuthUser, merchants?: MerchantInfo[]) => void
+  updateMerchant: (token: string, merchantId: string, merchants: MerchantInfo[]) => void
   clearAuth: () => void
 }
 
@@ -21,19 +29,27 @@ export const useAuthStore = create<AuthStore>()(
     (set) => ({
       token: null,
       user: null,
-      setAuth: (token, user) => {
+      merchants: [],
+      setAuth: (token, user, merchants = []) => {
         tokenRef.set(token)
-        set({ token, user })
+        set({ token, user, merchants })
+      },
+      updateMerchant: (token, merchantId, merchants) => {
+        tokenRef.set(token)
+        set((state) => ({
+          token,
+          merchants,
+          user: state.user ? { ...state.user, merchantId } : null,
+        }))
       },
       clearAuth: () => {
         tokenRef.set(null)
-        set({ token: null, user: null })
+        set({ token: null, user: null, merchants: [] })
       },
     }),
     {
       name: 'auth-store',
       onRehydrateStorage: () => (state) => {
-        // Restore token ref from persisted storage on page load
         if (state?.token) {
           tokenRef.set(state.token)
         }

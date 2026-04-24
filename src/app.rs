@@ -285,7 +285,16 @@ where
         .route("/auth/signup", post(routes::user_auth::signup))
         .route("/auth/login", post(routes::user_auth::login))
         .route("/auth/logout", post(routes::user_auth::logout))
-        .route("/auth/me", get(routes::user_auth::me));
+        .route("/auth/me", get(routes::user_auth::me))
+        .route("/auth/merchants", get(routes::user_auth::list_merchants))
+        .route(
+            "/auth/switch-merchant",
+            post(routes::user_auth::switch_merchant),
+        )
+        .route(
+            "/onboarding/merchant",
+            post(routes::user_auth::create_merchant),
+        );
 
     let router = axum::Router::new()
         .merge(protected_router)
