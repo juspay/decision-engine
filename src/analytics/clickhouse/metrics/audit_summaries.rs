@@ -6,17 +6,20 @@ use crate::error::ApiError;
 
 use super::super::common::{
     fetch_all, fetch_one, payment_audit_route_label, payment_audit_stage_label,
-    payment_audit_summary_kind, PAYMENT_AUDIT_LOOKUP_SUMMARY_TABLE,
+    payment_audit_summary_kind, DOMAIN_TABLE, PAYMENT_AUDIT_LOOKUP_SUMMARY_TABLE,
 };
+use super::super::filters::payment_audit_raw_filters;
 use super::super::query::{BoundQueryBuilder, FilterClause, OrderClause, SqlFragment};
 use super::super::time::effective_payment_audit_window_bounds;
 
 #[derive(Debug, Clone, Deserialize, Row)]
 struct AuditSummaryRow {
-    lookup_key: String,
+    #[serde(alias = "resolved_lookup_key")]
+    lookup_key: Option<String>,
     payment_id: Option<String>,
     request_id: Option<String>,
-    merchant_id: String,
+    #[serde(alias = "resolved_merchant_id")]
+    merchant_id: Option<String>,
     first_seen_ms: i64,
     last_seen_ms: i64,
     event_count: u64,
@@ -135,23 +138,30 @@ fn results_builder(fragment: SqlFragment, query: &PaymentAuditQuery) -> BoundQue
 
 fn map_rows(rows: Vec<AuditSummaryRow>) -> Vec<PaymentAuditSummary> {
     rows.into_iter()
-        .map(|row| PaymentAuditSummary {
-            lookup_key: row.lookup_key,
-            payment_id: row.payment_id,
-            request_id: row.request_id,
-            merchant_id: Some(row.merchant_id),
-            first_seen_ms: row.first_seen_ms,
-            last_seen_ms: row.last_seen_ms,
-            event_count: row.event_count as usize,
-            latest_status: row.latest_status,
-            latest_gateway: row.latest_gateway,
-            latest_stage: row.latest_stage.map(payment_audit_stage_label),
-            gateways: row.gateways,
-            routes: row
-                .routes
-                .into_iter()
-                .map(payment_audit_route_label)
-                .collect(),
+        .filter_map(|row| {
+            let lookup_key = row.lookup_key?;
+            if row.event_count == 0 {
+                return None;
+            }
+
+            Some(PaymentAuditSummary {
+                lookup_key,
+                payment_id: row.payment_id,
+                request_id: row.request_id,
+                merchant_id: row.merchant_id,
+                first_seen_ms: row.first_seen_ms,
+                last_seen_ms: row.last_seen_ms,
+                event_count: row.event_count as usize,
+                latest_status: row.latest_status,
+                latest_gateway: row.latest_gateway,
+                latest_stage: row.latest_stage.map(payment_audit_stage_label),
+                gateways: row.gateways,
+                routes: row
+                    .routes
+                    .into_iter()
+                    .map(payment_audit_route_label)
+                    .collect(),
+            })
         })
         .collect()
 }
@@ -194,14 +204,28 @@ pub async fn load_exact(
     lookup_key: &str,
 ) -> Result<Vec<PaymentAuditSummary>, ApiError> {
     let mut exact_query = query.clone();
-    exact_query.payment_id = Some(lookup_key.to_string());
+    exact_query.payment_id = None;
     exact_query.request_id = None;
 
-    let finalized = finalized_summary_fragment(&exact_query, preview_only);
-    let mut builder = results_builder(finalized, &exact_query);
-    builder.add_order_by(OrderClause::desc("last_seen_ms"));
-    builder.add_order_by(OrderClause::desc("event_count"));
-    builder.set_limit(Some(1));
+    let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
+    builder.extend_selects([
+        "any(lookup_key) AS resolved_lookup_key".to_string(),
+        "argMax(payment_id, created_at_ms) AS payment_id".to_string(),
+        "argMax(request_id, created_at_ms) AS request_id".to_string(),
+        "any(merchant_id) AS resolved_merchant_id".to_string(),
+        "min(created_at_ms) AS first_seen_ms".to_string(),
+        "max(created_at_ms) AS last_seen_ms".to_string(),
+        "count() AS event_count".to_string(),
+        "argMax(status, created_at_ms) AS latest_status".to_string(),
+        "argMax(gateway, created_at_ms) AS latest_gateway".to_string(),
+        "argMax(event_stage, created_at_ms) AS latest_stage".to_string(),
+        "arrayFilter(value -> value != '', groupUniqArray(ifNull(gateway, ''))) AS gateways"
+            .to_string(),
+        "arrayFilter(value -> value != '', groupUniqArray(ifNull(route, ''))) AS routes"
+            .to_string(),
+    ]);
+    builder.extend_filters(payment_audit_raw_filters(&exact_query, preview_only));
+    builder.add_filter(FilterClause::eq("lookup_key", lookup_key.to_string()));
     let rows = fetch_all::<AuditSummaryRow>(builder.build(client)).await?;
     Ok(map_rows(rows))
 }
