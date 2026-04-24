@@ -77,8 +77,7 @@ CREATE TABLE analytics_payment_audit_summary_buckets (
     merchant_id String,
     lookup_key String,
     summary_kind LowCardinality(String),
-    bucket_start_ms Int64,
-    bucket_start DateTime64(3, 'UTC') MATERIALIZED fromUnixTimestamp64Milli(bucket_start_ms),
+    bucket_start DateTime64(3, 'UTC'),
     first_seen_ms_state AggregateFunction(min, Int64),
     last_seen_ms_state AggregateFunction(max, Int64),
     event_count_state AggregateFunction(sum, UInt64),
@@ -98,7 +97,7 @@ PARTITION BY toYYYYMM(bucket_start)
 ORDER BY (
     merchant_id,
     summary_kind,
-    bucket_start_ms,
+    bucket_start,
     lookup_key
 )
 TTL bucket_start + INTERVAL 18 MONTH;
@@ -195,7 +194,7 @@ SELECT
     merchant_id,
     effective_lookup_key AS lookup_key,
     summary_kind,
-    bucket_start_ms,
+    bucket_start,
     minState(created_at_ms) AS first_seen_ms_state,
     maxState(created_at_ms) AS last_seen_ms_state,
     sumState(toUInt64(1)) AS event_count_state,
@@ -215,7 +214,7 @@ FROM (
         merchant_id,
         lookup_key AS effective_lookup_key,
         summary_kind,
-        toUnixTimestamp(toStartOfFifteenMinutes(fromUnixTimestamp64Milli(created_at_ms))) * 1000 AS bucket_start_ms,
+        toStartOfFifteenMinutes(fromUnixTimestamp64Milli(created_at_ms)) AS bucket_start,
         created_at_ms,
         payment_id,
         request_id,
@@ -232,7 +231,7 @@ FROM (
       AND lookup_key != ''
 ) AS source
 WHERE summary_kind != ''
-GROUP BY merchant_id, effective_lookup_key, summary_kind, bucket_start_ms;
+GROUP BY merchant_id, effective_lookup_key, summary_kind, bucket_start;
 
 CREATE MATERIALIZED VIEW analytics_payment_audit_lookup_summaries_mv
 TO analytics_payment_audit_lookup_summaries AS
