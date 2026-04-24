@@ -7,8 +7,20 @@
     <link rel="apple-touch-icon" href="favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Juspay Decision Engine Dashboard</title>
-    <script type="module" crossorigin src="/decision-engine/assets/index-CVLcvas3.js"></script>
-    <link rel="stylesheet" crossorigin href="/decision-engine/assets/index-B3hSXaF9.css">
+    <script>
+      (function () {
+        try {
+          var theme = localStorage.getItem('theme')
+          if (theme !== 'light') {
+            document.documentElement.classList.add('dark')
+          }
+        } catch (_) {
+          document.documentElement.classList.add('dark')
+        }
+      })()
+    </script>
+    <script type="module" crossorigin src="/decision-engine/assets/index-XX6ZIrnT.js"></script>
+    <link rel="stylesheet" crossorigin href="/decision-engine/assets/index-DOINHLoi.css">
   </head>
   <body>
     <div id="root"></div>

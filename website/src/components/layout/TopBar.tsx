@@ -16,7 +16,7 @@ export function TopBar() {
   const navigate = useNavigate()
   const { user, merchants, clearAuth, updateMerchant } = useAuthStore()
   const { setMerchantId } = useMerchantStore()
-  const [isDark, setIsDark] = useState(() => localStorage.getItem('theme') === 'dark')
+  const [isDark, setIsDark] = useState(() => localStorage.getItem('theme') !== 'light')
   const [merchantOpen, setMerchantOpen] = useState(false)
   const [switching, setSwitching] = useState<string | null>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
