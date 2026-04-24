@@ -29,7 +29,13 @@ Default tags used in this repo:
 
 ## Docker Compose Profiles
 
-You must pass at least one profile.
+The repository ships with a checked-in Docker Compose default:
+
+- plain `docker compose up -d` starts the PostgreSQL GHCR stack
+- that default stack already includes PostgreSQL, Redis, Kafka, Kafka topic init, and ClickHouse analytics
+
+If you want any non-default track such as MySQL, local-build, or dashboard profiles, clear the
+default first with `COMPOSE_PROFILES=`.
 
 ### Core runtime profiles
 
@@ -63,19 +69,29 @@ You must pass at least one profile.
 ### API Only
 
 ```bash
-docker compose --profile postgres-ghcr up -d
+docker compose up -d
 ```
 
 ### API + Dashboard + Docs
 
 ```bash
-docker compose --profile dashboard-postgres-ghcr up -d
+COMPOSE_PROFILES= docker compose --profile dashboard-postgres-ghcr up -d
 ```
 
 ### With Monitoring
 
 ```bash
-docker compose --profile postgres-ghcr --profile monitoring up -d
+COMPOSE_PROFILES= docker compose --profile postgres-ghcr --profile monitoring up -d
+```
+
+### Alternate Tracks
+
+Examples:
+
+```bash
+COMPOSE_PROFILES= docker compose --profile mysql-ghcr up -d
+COMPOSE_PROFILES= docker compose --profile postgres-local up -d --build
+COMPOSE_PROFILES= docker compose --profile dashboard-postgres-local up -d --build
 ```
 
 ## One-Command Local Dev
@@ -205,8 +221,8 @@ Monitoring profile also exposes:
 ### Recreate a profile with clean volumes
 
 ```bash
-docker compose --profile postgres-ghcr down -v
-docker compose --profile postgres-ghcr up -d
+docker compose down -v
+docker compose up -d
 ```
 
 ### Inspect migration jobs

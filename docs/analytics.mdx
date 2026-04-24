@@ -77,7 +77,7 @@ After the script finishes, sign in as `merchant_space` and open `/dashboard/anal
 ClickHouse is part of the standard local runtime stacks. To bring up only ClickHouse and its schema init job:
 
 ```bash
-docker compose --profile analytics-clickhouse up -d
+COMPOSE_PROFILES= docker compose --profile analytics-clickhouse up -d
 ```
 
 ## Related Files

@@ -377,7 +377,7 @@ fi
 
 if [ "${POSTGRES_READY}" -eq 0 ] || [ "${REDIS_READY}" -eq 0 ] || [ "${KAFKA_READY}" -eq 0 ] || [ "${CLICKHOUSE_READY}" -eq 0 ]; then
     echo "Starting infrastructure services..."
-    docker compose --profile postgres-ghcr --profile analytics-clickhouse up -d postgresql redis kafka kafka-init clickhouse
+    COMPOSE_PROFILES= docker compose --profile postgres-ghcr --profile analytics-clickhouse up -d postgresql redis kafka kafka-init clickhouse
     echo ""
 fi
 

@@ -36,14 +36,14 @@ Use the OpenAPI-backed endpoint pages for request and response schemas.
 For API only:
 
 ```bash
-docker compose --profile postgres-ghcr up -d
+docker compose up -d
 curl http://localhost:8080/health
 ```
 
 For API + dashboard + docs:
 
 ```bash
-docker compose --profile dashboard-postgres-ghcr up -d
+COMPOSE_PROFILES= docker compose --profile dashboard-postgres-ghcr up -d
 ```
 
 URLs:
