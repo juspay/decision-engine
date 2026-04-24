@@ -28,6 +28,7 @@ impl AnalyticsRuntime {
     pub async fn new(config: AnalyticsConfig) -> Result<Arc<Self>, ConfigurationError> {
         let (read_store, write_store): (Arc<dyn AnalyticsReadStore>, Arc<dyn AnalyticsWriteStore>) =
             if !config.enabled {
+                crate::logger::info!("analytics runtime disabled; using unavailable read store and noop write store");
                 (
                     Arc::new(UnavailableAnalyticsReadStore),
                     Arc::new(NoopAnalyticsWriteStore),
@@ -42,8 +43,21 @@ impl AnalyticsRuntime {
                             )
                         })?,
                 );
-                let kafka_store = Arc::new(KafkaAnalyticsStore::new(config.kafka.clone()).await?);
-                (clickhouse_store, kafka_store)
+                let write_store: Arc<dyn AnalyticsWriteStore> =
+                    match KafkaAnalyticsStore::new(config.kafka.clone()).await {
+                        Ok(kafka_store) => Arc::new(kafka_store),
+                        Err(error) => {
+                            crate::logger::warn!(
+                                ?error,
+                                kafka_brokers = %config.kafka.brokers,
+                                api_topic = %config.kafka.api_topic,
+                                domain_topic = %config.kafka.domain_topic,
+                                "analytics kafka startup failed; continuing with clickhouse read store and noop write store"
+                            );
+                            Arc::new(NoopAnalyticsWriteStore)
+                        }
+                    };
+                (clickhouse_store, write_store)
             };
 
         let queue_capacity = config.kafka.queue_capacity.max(1);
