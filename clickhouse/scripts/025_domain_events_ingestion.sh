@@ -21,6 +21,7 @@ CREATE TABLE analytics_domain_events (
     event_id String,
     api_flow LowCardinality(String),
     flow_type LowCardinality(String),
+    summary_kind Nullable(String),
     merchant_id Nullable(String),
     payment_id Nullable(String),
     request_id Nullable(String),
@@ -133,6 +134,7 @@ CREATE TABLE analytics_domain_events_queue (
     event_id String,
     api_flow LowCardinality(String),
     flow_type LowCardinality(String),
+    summary_kind Nullable(String),
     merchant_id Nullable(String),
     payment_id Nullable(String),
     request_id Nullable(String),
@@ -212,28 +214,7 @@ FROM (
     SELECT
         merchant_id,
         lookup_key AS effective_lookup_key,
-        multiIf(
-            route = 'routing_evaluate' AND flow_type IN (
-                'routing_evaluate_single',
-                'routing_evaluate_priority',
-                'routing_evaluate_volume_split',
-                'routing_evaluate_advanced',
-                'routing_evaluate_preview',
-                'routing_evaluate_error'
-            ),
-            'preview',
-            flow_type IN (
-                'decide_gateway_decision',
-                'update_gateway_score_update',
-                'update_score_legacy_score_snapshot',
-                'decide_gateway_rule_hit',
-                'decide_gateway_error',
-                'update_gateway_score_error',
-                'update_score_legacy_error'
-            ),
-            'dynamic',
-            ''
-        ) AS summary_kind,
+        summary_kind,
         toUnixTimestamp(toStartOfFifteenMinutes(fromUnixTimestamp64Milli(created_at_ms))) * 1000 AS bucket_start_ms,
         created_at_ms,
         payment_id,
@@ -277,28 +258,7 @@ FROM (
     SELECT
         merchant_id,
         lookup_key AS effective_lookup_key,
-        multiIf(
-            route = 'routing_evaluate' AND flow_type IN (
-                'routing_evaluate_single',
-                'routing_evaluate_priority',
-                'routing_evaluate_volume_split',
-                'routing_evaluate_advanced',
-                'routing_evaluate_preview',
-                'routing_evaluate_error'
-            ),
-            'preview',
-            flow_type IN (
-                'decide_gateway_decision',
-                'update_gateway_score_update',
-                'update_score_legacy_score_snapshot',
-                'decide_gateway_rule_hit',
-                'decide_gateway_error',
-                'update_gateway_score_error',
-                'update_score_legacy_error'
-            ),
-            'dynamic',
-            ''
-        ) AS summary_kind,
+        summary_kind,
         created_at_ms,
         payment_id,
         request_id,
@@ -323,6 +283,7 @@ SELECT
     event_id,
     api_flow,
     flow_type,
+    summary_kind,
     merchant_id,
     payment_id,
     request_id,
