@@ -77,7 +77,7 @@ CREATE TABLE analytics_payment_audit_summary_buckets (
     merchant_id String,
     lookup_key String,
     summary_kind LowCardinality(String),
-    bucket_start DateTime64(3, 'UTC'),
+    bucket_start DateTime64(3),
     first_seen_ms_state AggregateFunction(min, Int64),
     last_seen_ms_state AggregateFunction(max, Int64),
     event_count_state AggregateFunction(sum, UInt64),
