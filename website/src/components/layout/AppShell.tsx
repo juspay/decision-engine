@@ -4,12 +4,11 @@ import { TopBar } from './TopBar'
 
 export function AppShell() {
   return (
-    <div className="flex h-screen overflow-hidden bg-[#f8fafc] text-slate-900 dark:bg-[#000000] dark:text-white relative transition-colors duration-300">
-      <div className="aurora-top" />
+    <div className="flex h-screen overflow-hidden bg-[#f7f8fa] text-slate-800 dark:bg-[#0d0d14] dark:text-white">
       <Sidebar />
-      <div className="flex-1 flex flex-col overflow-hidden relative z-10">
+      <div className="flex-1 flex flex-col overflow-hidden">
         <TopBar />
-        <main className="flex-1 overflow-y-auto p-8 relative">
+        <main className="flex-1 overflow-y-auto p-6">
           <Outlet />
         </main>
       </div>
