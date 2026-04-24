@@ -24,6 +24,7 @@ CREATE TABLE analytics_domain_events (
     merchant_id Nullable(String),
     payment_id Nullable(String),
     request_id Nullable(String),
+    -- Populated by the analytics producer: payment_id first, else request_id.
     lookup_key Nullable(String),
     global_request_id Nullable(String),
     trace_id Nullable(String),
@@ -210,7 +211,7 @@ SELECT
 FROM (
     SELECT
         merchant_id,
-        coalesce(nullIf(lookup_key, ''), nullIf(payment_id, ''), request_id) AS effective_lookup_key,
+        lookup_key AS effective_lookup_key,
         multiIf(
             route = 'routing_evaluate' AND flow_type IN (
                 'routing_evaluate_single',
@@ -246,8 +247,8 @@ FROM (
     FROM analytics_payment_audit_summary_buckets_queue
     WHERE merchant_id IS NOT NULL
       AND merchant_id != ''
-      AND coalesce(nullIf(lookup_key, ''), nullIf(payment_id, ''), request_id) IS NOT NULL
-      AND coalesce(nullIf(lookup_key, ''), nullIf(payment_id, ''), request_id) != ''
+      AND lookup_key IS NOT NULL
+      AND lookup_key != ''
 ) AS source
 WHERE summary_kind != ''
 GROUP BY merchant_id, effective_lookup_key, summary_kind, bucket_start_ms;
@@ -275,7 +276,7 @@ SELECT
 FROM (
     SELECT
         merchant_id,
-        coalesce(nullIf(lookup_key, ''), nullIf(payment_id, ''), request_id) AS effective_lookup_key,
+        lookup_key AS effective_lookup_key,
         multiIf(
             route = 'routing_evaluate' AND flow_type IN (
                 'routing_evaluate_single',
@@ -310,75 +311,11 @@ FROM (
     FROM analytics_payment_audit_lookup_summaries_queue
     WHERE merchant_id IS NOT NULL
       AND merchant_id != ''
-      AND coalesce(nullIf(lookup_key, ''), nullIf(payment_id, ''), request_id) IS NOT NULL
-      AND coalesce(nullIf(lookup_key, ''), nullIf(payment_id, ''), request_id) != ''
-) AS source
-WHERE summary_kind != ''
-GROUP BY merchant_id, effective_lookup_key, summary_kind;
-
-CREATE MATERIALIZED VIEW analytics_payment_audit_lookup_summaries_mv
-TO analytics_payment_audit_lookup_summaries AS
-SELECT
-    merchant_id,
-    lookup_key,
-    summary_kind,
-    minState(created_at_ms) AS first_seen_ms_state,
-    maxState(created_at_ms) AS last_seen_ms_state,
-    sumState(toUInt64(1)) AS event_count_state,
-    argMaxState(payment_id, created_at_ms) AS payment_id_state,
-    argMaxState(request_id, created_at_ms) AS request_id_state,
-    argMaxState(merchant_id, created_at_ms) AS merchant_id_state,
-    argMaxState(status, created_at_ms) AS latest_status_state,
-    argMaxState(gateway, created_at_ms) AS latest_gateway_state,
-    argMaxState(event_stage, created_at_ms) AS latest_stage_state,
-    groupUniqArrayState(ifNull(gateway, '')) AS gateways_state,
-    groupUniqArrayState(ifNull(route, '')) AS routes_state,
-    groupUniqArrayState(ifNull(status, '')) AS statuses_state,
-    groupUniqArrayState(flow_type) AS flow_types_state,
-    groupUniqArrayState(ifNull(error_code, '')) AS error_codes_state
-FROM (
-    SELECT
-        merchant_id,
-        lookup_key,
-        multiIf(
-            route = 'routing_evaluate' AND flow_type IN (
-                'routing_evaluate_single',
-                'routing_evaluate_priority',
-                'routing_evaluate_volume_split',
-                'routing_evaluate_advanced',
-                'routing_evaluate_preview',
-                'routing_evaluate_error'
-            ),
-            'preview',
-            flow_type IN (
-                'decide_gateway_decision',
-                'update_gateway_score_update',
-                'update_score_legacy_score_snapshot',
-                'decide_gateway_rule_hit',
-                'decide_gateway_error',
-                'update_gateway_score_error',
-                'update_score_legacy_error'
-            ),
-            'dynamic',
-            ''
-        ) AS summary_kind,
-        created_at_ms,
-        payment_id,
-        request_id,
-        status,
-        gateway,
-        event_stage,
-        route,
-        flow_type,
-        error_code
-    FROM analytics_domain_events
-    WHERE merchant_id IS NOT NULL
-      AND merchant_id != ''
       AND lookup_key IS NOT NULL
       AND lookup_key != ''
 ) AS source
 WHERE summary_kind != ''
-GROUP BY merchant_id, lookup_key, summary_kind;
+GROUP BY merchant_id, effective_lookup_key, summary_kind;
 
 CREATE MATERIALIZED VIEW analytics_domain_events_mv
 TO analytics_domain_events AS
@@ -389,7 +326,7 @@ SELECT
     merchant_id,
     payment_id,
     request_id,
-    coalesce(nullIf(lookup_key, ''), nullIf(payment_id, ''), request_id) AS lookup_key,
+    lookup_key,
     global_request_id,
     trace_id,
     payment_method_type,
