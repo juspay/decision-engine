@@ -48,6 +48,7 @@ pub struct KafkaDomainEventRow {
     pub event_id: String,
     pub api_flow: ApiFlow,
     pub flow_type: FlowType,
+    pub summary_kind: Option<String>,
     pub merchant_id: Option<String>,
     pub payment_id: Option<String>,
     pub request_id: Option<String>,
@@ -117,6 +118,7 @@ impl From<DomainAnalyticsEvent> for KafkaDomainEventRow {
             event_id: event.event_id,
             api_flow: event.api_flow,
             flow_type: event.flow_type,
+            summary_kind: event.summary_kind,
             merchant_id: event.merchant_id,
             payment_id: event.payment_id,
             request_id: event.request_id,
@@ -189,14 +191,28 @@ impl KafkaAnalyticsStore {
     pub async fn new(config: KafkaAnalyticsConfig) -> Result<Self, ConfigurationError> {
         let producer = build_client_config(&config)
             .create::<FutureProducer>()
-            .map_err(|_| {
+            .map_err(|error| {
+                crate::logger::error!(
+                    ?error,
+                    kafka_brokers = %config.brokers,
+                    api_topic = %config.api_topic,
+                    domain_topic = %config.domain_topic,
+                    "failed to create kafka analytics producer"
+                );
                 ConfigurationError::InvalidConfigurationValueError("analytics.kafka".to_string())
             })?;
 
         producer
             .client()
             .fetch_metadata(None, Timeout::After(std::time::Duration::from_secs(5)))
-            .map_err(|_| {
+            .map_err(|error| {
+                crate::logger::error!(
+                    ?error,
+                    kafka_brokers = %config.brokers,
+                    api_topic = %config.api_topic,
+                    domain_topic = %config.domain_topic,
+                    "failed to fetch kafka metadata during analytics startup"
+                );
                 ConfigurationError::InvalidConfigurationValueError(
                     "analytics.kafka.brokers".to_string(),
                 )
@@ -383,6 +399,7 @@ mod tests {
             event_id: "0195f4a8-bdf0-7f36-a227-c0ffefeed001".to_string(),
             api_flow: ApiFlow::DynamicRouting,
             flow_type: FlowType::DecideGatewayDecision,
+            summary_kind: Some("dynamic".to_string()),
             merchant_id: None,
             payment_id: Some("pay_1".to_string()),
             request_id: Some("req_1".to_string()),
@@ -485,6 +502,7 @@ mod tests {
             event_id: "0195f4a8-bdf0-7f36-a227-c0ffefeed011".to_string(),
             api_flow: ApiFlow::DynamicRouting,
             flow_type: FlowType::DecideGatewayDecision,
+            summary_kind: Some("dynamic".to_string()),
             merchant_id: None,
             payment_id: Some("pay_456".to_string()),
             request_id: Some("req_456".to_string()),
@@ -525,6 +543,7 @@ mod tests {
             event_id: "0195f4a8-bdf0-7f36-a227-c0ffefeed012".to_string(),
             api_flow: ApiFlow::DynamicRouting,
             flow_type: FlowType::DecideGatewayDecision,
+            summary_kind: Some("dynamic".to_string()),
             merchant_id: None,
             payment_id: None,
             request_id: Some("req_only".to_string()),

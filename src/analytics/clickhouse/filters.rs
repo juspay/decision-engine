@@ -108,8 +108,14 @@ pub fn payment_audit_summary_bucket_filters(
     let (start_ms, end_ms) = payment_audit_summary_bucket_bounds(query);
     vec![
         FilterClause::eq("merchant_id", query.merchant_id.clone()),
-        FilterClause::gte("bucket_start_ms", start_ms),
-        FilterClause::lte("bucket_start_ms", end_ms),
+        FilterClause::new(
+            "bucket_start >= fromUnixTimestamp64Milli(?)",
+            vec![start_ms.into()],
+        ),
+        FilterClause::new(
+            "bucket_start <= fromUnixTimestamp64Milli(?)",
+            vec![end_ms.into()],
+        ),
         FilterClause::eq("summary_kind", payment_audit_summary_kind(preview_only)),
     ]
 }
@@ -220,10 +226,10 @@ mod tests {
             .any(|predicate| predicate == "merchant_id = ?"));
         assert!(predicates
             .iter()
-            .any(|predicate| predicate == "bucket_start_ms >= ?"));
+            .any(|predicate| predicate == "bucket_start >= fromUnixTimestamp64Milli(?)"));
         assert!(predicates
             .iter()
-            .any(|predicate| predicate == "bucket_start_ms <= ?"));
+            .any(|predicate| predicate == "bucket_start <= fromUnixTimestamp64Milli(?)"));
         assert!(predicates
             .iter()
             .any(|predicate| predicate == "summary_kind = ?"));
