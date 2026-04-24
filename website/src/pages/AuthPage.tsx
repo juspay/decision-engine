@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuthStore } from '../store/authStore'
+import { useAuthStore, MerchantInfo } from '../store/authStore'
 import { useMerchantStore } from '../store/merchantStore'
 import { apiFetch } from '../lib/api'
 import { Loader2, Eye, EyeOff, Lock } from 'lucide-react'
@@ -11,6 +11,7 @@ interface AuthResponse {
   email: string
   merchant_id: string
   role: string
+  merchants: MerchantInfo[]
 }
 
 type Tab = 'login' | 'signup'
@@ -23,7 +24,6 @@ export function AuthPage() {
   const [tab, setTab] = useState<Tab>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [merchantId, setMerchantIdInput] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -40,24 +40,23 @@ export function AuthPage() {
 
     try {
       const path = tab === 'login' ? '/auth/login' : '/auth/signup'
-      const body =
-        tab === 'login'
-          ? { email, password }
-          : { email, password, merchant_id: merchantId }
-
       const res = await apiFetch<AuthResponse>(path, {
         method: 'POST',
-        body: JSON.stringify(body),
+        body: JSON.stringify({ email, password }),
       })
 
-      setAuth(res.token, {
-        userId: res.user_id,
-        email: res.email,
-        merchantId: res.merchant_id,
-        role: res.role,
-      })
-      setMerchantId(res.merchant_id)
-      navigate('/', { replace: true })
+      setAuth(
+        res.token,
+        { userId: res.user_id, email: res.email, merchantId: res.merchant_id, role: res.role },
+        res.merchants,
+      )
+      if (res.merchant_id) setMerchantId(res.merchant_id)
+
+      if (!res.merchant_id || res.merchants.length === 0) {
+        navigate('/onboarding', { replace: true })
+      } else {
+        navigate('/', { replace: true })
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Something went wrong'
       const match = msg.match(/API error \d+: (.+)/)
@@ -332,54 +331,6 @@ export function AuthPage() {
               )}
             </div>
 
-            {/* Merchant ID (signup only) */}
-            {tab === 'signup' && (
-              <div>
-                <label
-                  style={{
-                    display: 'block',
-                    fontFamily: "'Inter', sans-serif",
-                    fontSize: 13,
-                    fontWeight: 500,
-                    color: '#000000',
-                    marginBottom: 6,
-                  }}
-                >
-                  Merchant ID
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={merchantId}
-                  onChange={(e) => setMerchantIdInput(e.target.value)}
-                  placeholder="Enter your Merchant ID"
-                  style={{
-                    width: '100%',
-                    height: 40,
-                    backgroundColor: 'rgb(255, 255, 255)',
-                    border: '1px solid rgba(204, 210, 226, 0.75)',
-                    borderRadius: 4,
-                    padding: '0 8px',
-                    fontSize: 14,
-                    color: 'rgba(51, 51, 51, 0.75)',
-                    outline: 'none',
-                    boxSizing: 'border-box',
-                    fontFamily: "'Inter', sans-serif",
-                  }}
-                  onFocus={(e) => {
-                    e.target.style.border = '1px solid rgb(0, 109, 249)'
-                    e.target.style.boxShadow = '0 0 0 2px rgba(0, 109, 249, 0.1)'
-                  }}
-                  onBlur={(e) => {
-                    e.target.style.border = '1px solid rgba(204, 210, 226, 0.75)'
-                    e.target.style.boxShadow = 'none'
-                  }}
-                />
-                <p style={{ marginTop: 4, fontSize: 12, color: 'rgb(107, 114, 128)' }}>
-                  The merchant account must already exist.
-                </p>
-              </div>
-            )}
 
             {/* Error */}
             {error && (
