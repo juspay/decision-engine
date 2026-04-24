@@ -33,6 +33,30 @@ interface CreateMerchantResponse {
 
 type Tab = 'login' | 'signup'
 
+function getPasswordPolicyError(password: string): string | null {
+  if (password.length < 10) {
+    return 'Use at least 10 characters.'
+  }
+
+  if (!/[A-Z]/.test(password)) {
+    return 'Add at least one uppercase letter.'
+  }
+
+  if (!/[a-z]/.test(password)) {
+    return 'Add at least one lowercase letter.'
+  }
+
+  if (!/[0-9]/.test(password)) {
+    return 'Add at least one number.'
+  }
+
+  if (!/[^A-Za-z0-9]/.test(password)) {
+    return 'Add at least one special character.'
+  }
+
+  return null
+}
+
 export function AuthPage() {
   const navigate = useNavigate()
   const { setAuth, updateMerchant } = useAuthStore()
@@ -55,6 +79,15 @@ export function AuthPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
+
+    if (tab === 'signup') {
+      const passwordPolicyError = getPasswordPolicyError(password)
+      if (passwordPolicyError) {
+        setError(passwordPolicyError)
+        return
+      }
+    }
+
     setLoading(true)
 
     try {
@@ -201,7 +234,7 @@ export function AuthPage() {
                     footer={
                       tab === 'login'
                         ? 'Password reset is managed by your internal operator admin.'
-                        : 'Your account is created first, then merchant onboarding is completed immediately with the name above.'
+                        : 'Use at least 10 characters with uppercase, lowercase, number, and special character.'
                     }
                   >
                     <div className="relative">
@@ -224,6 +257,13 @@ export function AuthPage() {
                       </button>
                     </div>
                   </Field>
+
+                  {tab === 'signup' ? (
+                    <p className="text-xs leading-5 text-slate-500 dark:text-[#7b8496]">
+                      Password policy: minimum 10 characters, including 1 uppercase letter, 1
+                      lowercase letter, 1 number, and 1 special character.
+                    </p>
+                  ) : null}
 
                   <ErrorMessage error={error} />
 
