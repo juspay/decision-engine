@@ -43,6 +43,7 @@ use crate::types::gateway_routing_input::GatewaySuccessRateBasedRoutingInput;
 use crate::types::merchant::id as MID;
 use crate::types::merchant::merchant_account as MA;
 use crate::types::merchant::merchant_account::MerchantAccount;
+use std::collections::HashMap;
 // use utils::redis::feature as cutover::is_feature_enabled;
 // use prelude::{from_integral, foldable::length, map_m, error};
 // use data::foldable::{for_, foldl};
@@ -209,6 +210,25 @@ pub struct ResetGatewayScoreBulkRequest {
 
     #[serde(rename = "resetGatewayScoreReqArr")]
     pub reset_gateway_score_req_arr: Vec<ResetGatewayScoreRequest>,
+}
+
+#[derive(Debug, Serialize)]
+struct GatewayScoreAnalyticsDetails<'a> {
+    routing_approach: String,
+    gateway_scoring_type: String,
+    message: &'a str,
+}
+
+fn serialize_gateway_score_analytics_details(
+    routing_approach: &impl std::fmt::Debug,
+    gateway_scoring_type: &impl std::fmt::Debug,
+    message: &'static str,
+) -> Option<String> {
+    crate::analytics::serialize_details(&GatewayScoreAnalyticsDetails {
+        routing_approach: format!("{routing_approach:?}"),
+        gateway_scoring_type: format!("{gateway_scoring_type:?}"),
+        message,
+    })
 }
 
 pub fn default_gw_latency_check_in_mins() -> GatewayLatencyForScoring {
@@ -449,6 +469,11 @@ pub async fn check_and_update_gateway_score_(
                 enforce_failure,
                 api_payload.gateway_reference_id.clone(),
                 api_payload.txn_latency.clone(),
+                crate::analytics::AnalyticsRoute::UpdateGatewayScore,
+                crate::analytics::AnalyticsFlowContext::new(
+                    crate::analytics::ApiFlow::DynamicRouting,
+                    crate::analytics::FlowType::UpdateGatewayScoreScoreSnapshot,
+                ),
                 None,
             )
             .await;
@@ -486,6 +511,8 @@ pub async fn check_and_update_gateway_score(
     enforce_failure: bool,
     gateway_reference_id: Option<String>,
     txn_latency: Option<TransactionLatency>,
+    analytics_route: crate::analytics::AnalyticsRoute,
+    score_snapshot_flow: crate::analytics::AnalyticsFlowContext,
     redis_comp_config: Option<RedisCompressionConfigCombined>,
 ) -> () {
     // Get gateway scoring type
@@ -537,6 +564,8 @@ pub async fn check_and_update_gateway_score(
                 txn_card_info.clone(),
                 gateway_reference_id.clone(),
                 txn_latency.clone(),
+                analytics_route,
+                score_snapshot_flow,
                 redis_comp_config.clone(),
             )
             .await;
@@ -556,6 +585,8 @@ pub async fn check_and_update_gateway_score(
             txn_card_info.clone(),
             gateway_reference_id.clone(),
             txn_latency.clone(),
+            analytics_route,
+            score_snapshot_flow,
             redis_comp_config,
         )
         .await;
@@ -569,6 +600,8 @@ pub async fn update_gateway_score(
     txn_card_info: TxnCardInfo,
     gateway_reference_id: Option<String>,
     txn_latency: Option<TransactionLatency>,
+    analytics_route: crate::analytics::AnalyticsRoute,
+    score_snapshot_flow: crate::analytics::AnalyticsFlowContext,
     redis_compression_config: Option<RedisCompressionConfigCombined>,
 ) -> () {
     let mer_acc: MerchantAccount =
@@ -674,7 +707,7 @@ pub async fn update_gateway_score(
             get_metric_entry_data(
                 merchant_id_str,
                 pmt_str,
-                m_source_object,
+                m_source_object.clone(),
                 txn_obj_type_str,
                 card_type_str,
                 false,
@@ -694,7 +727,7 @@ pub async fn update_gateway_score(
             get_metric_entry_data(
                 merchant_id_str,
                 pmt_str,
-                m_source_object,
+                m_source_object.clone(),
                 txn_obj_type_str,
                 card_type_str,
                 gateway_scoring_data.isGriEnabledForElimination,
@@ -710,15 +743,57 @@ pub async fn update_gateway_score(
         gateway_scoring_type.clone(),
         mer_acc.clone(),
         txn_latency.clone(),
-        m_metric_entry,
+        m_metric_entry.clone(),
     )
     .await;
 
-    if should_update_srv3_gateway_score
+    let should_record_srv3_post_update = should_update_srv3_gateway_score
         && should_isolate_srv3_producer
         && should_update_explore_txn
-        && is_update_within_window
-    {
+        && is_update_within_window;
+    if !should_record_srv3_post_update {
+        if let Some(metric_entry) = m_metric_entry.clone() {
+            crate::analytics::DomainAnalyticsEvent::record_score_snapshot(
+                score_snapshot_flow,
+                Some(MID::merchant_id_to_text(txn_detail.clone().merchantId)),
+                Some(txn_card_info.paymentMethodType.to_string()),
+                Some(m_source_object.clone().unwrap_or_default()),
+                txn_card_info
+                    .cardSwitchProvider
+                    .as_ref()
+                    .map(|provider| provider.peek().to_string()),
+                txn_card_info.card_isin.clone(),
+                Some(txn_detail.currency.to_string()),
+                txn_detail
+                    .country
+                    .as_ref()
+                    .map(|country| country.to_string()),
+                txn_card_info
+                    .authType
+                    .as_ref()
+                    .map(|auth_type| auth_type.to_string()),
+                txn_detail.gateway.clone().or(gateway_reference_id.clone()),
+                Some(metric_entry.success_rate.into()),
+                Some(metric_entry.sigma_factor.into()),
+                Some(metric_entry.average_latency.into()),
+                Some(metric_entry.tp99_latency.into()),
+                Some(metric_entry.n_value as i64),
+                analytics_route,
+                serialize_gateway_score_analytics_details(
+                    &routing_approach,
+                    &gateway_scoring_type,
+                    "Gateway score updated successfully",
+                ),
+                Some(txn_detail.txnUuid.clone()),
+                None,
+                None,
+                None,
+                Some("score_updated".to_string()),
+            );
+        }
+    }
+
+    if should_record_srv3_post_update {
         logger::debug!(
             action = "updateGatewayScore",
             tag = "updateGatewayScore",
@@ -741,6 +816,92 @@ pub async fn update_gateway_score(
             gateway_reference_id.clone(),
         )
         .await;
+
+        if let Some(gateway_scoring_data) = mb_gateway_scoring_data {
+            let gateway_name = txn_detail.gateway.clone().unwrap_or_default();
+            if !gateway_name.is_empty() {
+                let merchant_id = MID::merchant_id_to_text(txn_detail.clone().merchantId);
+                let pmt_str = txn_card_info.paymentMethodType.to_string();
+                let pm_str = m_source_object.clone().unwrap_or_default();
+                let sr_routing_dimensions = SrRoutingDimensions {
+                    card_network: txn_card_info
+                        .cardSwitchProvider
+                        .as_ref()
+                        .map(|s| s.peek().to_string()),
+                    card_isin: txn_card_info.card_isin.clone(),
+                    currency: Some(txn_detail.currency.to_string()),
+                    country: txn_detail.country.as_ref().map(|c| c.to_string()),
+                    auth_type: txn_card_info.authType.as_ref().map(|a| a.to_string()),
+                };
+                let merchant_sr_v3_input_config =
+                    findByNameFromRedis(SrV3InputConfig(merchant_id.clone()).get_key()).await;
+                let default_sr_v3_input_config =
+                    findByNameFromRedis(SR_V3_DEFAULT_INPUT_CONFIG.get_key()).await;
+                let bucket_size = GU::get_sr_v3_bucket_size(
+                    merchant_sr_v3_input_config,
+                    &pmt_str,
+                    &pm_str,
+                    &sr_routing_dimensions,
+                )
+                .or_else(|| {
+                    GU::get_sr_v3_bucket_size(
+                        default_sr_v3_input_config,
+                        &pmt_str,
+                        &pm_str,
+                        &sr_routing_dimensions,
+                    )
+                })
+                .unwrap_or(DC::DEFAULT_SR_V3_BASED_BUCKET_SIZE);
+
+                let gateway_ref_id_map =
+                    HashMap::from([(gateway_name.clone(), gateway_reference_id.clone())]);
+                let redis_key_map = GU::get_unified_key(
+                    gateway_scoring_data,
+                    None,
+                    T::ScoreKeyType::SrV3Key,
+                    false,
+                    gateway_ref_id_map,
+                )
+                .await;
+
+                if let Some(redis_key) = redis_key_map.get(&gateway_name) {
+                    let score_value =
+                        crate::decider::gatewaydecider::gw_scoring::get_score_from_redis(
+                            bucket_size,
+                            redis_key,
+                        )
+                        .await;
+                    crate::analytics::DomainAnalyticsEvent::record_score_snapshot(
+                        score_snapshot_flow,
+                        Some(merchant_id),
+                        Some(pmt_str),
+                        Some(pm_str),
+                        sr_routing_dimensions.card_network.clone(),
+                        sr_routing_dimensions.card_isin.clone(),
+                        sr_routing_dimensions.currency.clone(),
+                        sr_routing_dimensions.country.clone(),
+                        sr_routing_dimensions.auth_type.clone(),
+                        Some(gateway_name),
+                        Some(score_value),
+                        None,
+                        None,
+                        None,
+                        Some(bucket_size as i64),
+                        analytics_route,
+                        serialize_gateway_score_analytics_details(
+                            &routing_approach,
+                            &gateway_scoring_type,
+                            "Gateway score snapshot derived from sr_v3 redis score",
+                        ),
+                        Some(txn_detail.txnUuid.clone()),
+                        None,
+                        None,
+                        None,
+                        Some("score_updated".to_string()),
+                    );
+                }
+            }
+        }
     }
 
     if should_update_gateway_score && is_update_within_window {

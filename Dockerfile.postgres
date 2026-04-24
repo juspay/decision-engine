@@ -8,7 +8,9 @@ ENV CARGO_NET_RETRY=10
 ENV RUSTUP_MAX_RETRIES=10
 ENV CARGO_INCREMENTAL=0
 
-RUN apt-get update && apt-get install -y libmariadb-dev libssl-dev clang && rm -rf /var/lib/apt/lists/*
+RUN apt-get update \
+    && apt-get install -y cmake libmariadb-dev libssl-dev clang \
+    && rm -rf /var/lib/apt/lists/*
 
 
 COPY . .
@@ -21,6 +23,7 @@ FROM debian:bookworm
 ARG CONFIG_DIR=/local/config
 ARG BIN_DIR=/local
 ARG BINARY=open_router
+ENV BINARY=${BINARY}
 
 
 RUN apt-get update \
@@ -34,4 +37,4 @@ COPY --from=builder /open_router/target/release/${BINARY} ${BIN_DIR}/${BINARY}
 
 WORKDIR ${BIN_DIR}
 
-CMD ["./open_router"]
+CMD ["sh", "-c", "./${BINARY}"]

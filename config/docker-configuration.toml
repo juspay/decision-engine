@@ -68,6 +68,18 @@ client_idle_timeout = 90
 pool_max_idle_per_host = 10
 identity = ""
 
+[analytics.kafka]
+enabled = true
+brokers = "kafka:19092"
+api_topic = "api"
+domain_topic = "domain"
+
+[analytics.clickhouse]
+enabled = true
+url = "http://clickhouse:8123"
+user = "decision_engine"
+password = "decision_engine"
+
 [routing_config.keys]
 amount = { type = "integer", min = 0 }
 authentication_type = { type = "enum", values = "three_ds, no_three_ds" }

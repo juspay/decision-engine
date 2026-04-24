@@ -29,6 +29,18 @@ pg_host = "localhost"
 pg_port = 5432
 pg_dbname = "decision_engine_db"
 
+[analytics.kafka]
+enabled = true
+brokers = "localhost:9092"
+api_topic = "api"
+domain_topic = "domain"
+
+[analytics.clickhouse]
+enabled = true
+url = "http://localhost:8123"
+user = "decision_engine"
+password = "decision_engine"
+
 
 [redis]
 host = "127.0.0.1"

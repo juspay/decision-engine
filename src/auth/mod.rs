@@ -1,8 +1,12 @@
+pub mod context;
+
 use josekit::jws::JwsHeader;
 use josekit::jwt::{self, JwtPayload};
 use ring::digest;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
+
+pub use context::{AuthContext, AuthKind};
 
 const KEY_PREFIX: &str = "DE_";
 

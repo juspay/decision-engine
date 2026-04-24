@@ -9,7 +9,7 @@ ENV RUSTUP_MAX_RETRIES=10
 ENV CARGO_INCREMENTAL=0
 
 RUN apt-get update \
-    && apt-get install -y libpq-dev libssl-dev pkg-config protobuf-compiler clang
+    && apt-get install -y cmake libpq-dev libssl-dev pkg-config protobuf-compiler clang
 
 COPY . .
 RUN RUSTFLAGS="-A warnings" cargo build --release --features release ${EXTRA_FEATURES}
@@ -20,6 +20,7 @@ FROM debian:bookworm
 ARG CONFIG_DIR=/local/config
 ARG BIN_DIR=/local
 ARG BINARY=open_router
+ENV BINARY=${BINARY}
 
 RUN apt-get update \
     && apt-get install -y ca-certificates tzdata libpq-dev curl procps libmariadb-dev
@@ -32,5 +33,4 @@ COPY --from=builder /open_router/target/release/${BINARY} ${BIN_DIR}/${BINARY}
 
 WORKDIR ${BIN_DIR}
 
-CMD ./open_router
-
+CMD ["sh", "-c", "./${BINARY}"]

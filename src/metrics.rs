@@ -1,8 +1,8 @@
 use error_stack::ResultExt;
 use lazy_static::lazy_static;
 use prometheus::{
-    self, exponential_buckets, register_histogram_vec, register_int_counter_vec, Encoder,
-    HistogramVec, IntCounterVec, TextEncoder,
+    self, exponential_buckets, register_histogram_vec, register_int_counter_vec,
+    register_int_gauge_vec, Encoder, HistogramVec, IntCounterVec, IntGaugeVec, TextEncoder,
 };
 use tokio::signal::unix::{signal, SignalKind};
 lazy_static! {
@@ -28,6 +28,66 @@ lazy_static! {
         &["endpoint"],
         exponential_buckets(0.0005, 2.0, 10).unwrap()
     ).unwrap();
+
+    /// Count of routing decisions grouped by routing approach and result status
+    pub static ref ROUTING_DECISION_COUNTER: IntCounterVec = register_int_counter_vec!(
+        "routing_decisions_total",
+        "Count of routing decisions grouped by routing approach and result status",
+        &["approach", "status"]
+    ).unwrap();
+
+    /// Count of priority logic rule hits grouped by rule name
+    pub static ref ROUTING_RULE_HIT_COUNTER: IntCounterVec = register_int_counter_vec!(
+        "routing_rule_hits_total",
+        "Count of priority logic rule hits grouped by rule name",
+        &["rule_name"]
+    ).unwrap();
+
+    /// Count of analytics events captured by flow type
+    pub static ref ANALYTICS_EVENT_COUNTER: IntCounterVec = register_int_counter_vec!(
+        "analytics_events_total",
+        "Count of analytics events captured by flow type",
+        &["flow_type"]
+    ).unwrap();
+
+    pub static ref ANALYTICS_SINK_WRITES_TOTAL: IntCounterVec = register_int_counter_vec!(
+        "analytics_sink_writes_total",
+        "Count of analytics sink write attempts grouped by sink, stream and result",
+        &["sink", "stream", "result"]
+    ).unwrap();
+
+    pub static ref ANALYTICS_SINK_WRITE_LATENCY_HISTOGRAM: HistogramVec = register_histogram_vec!(
+        "analytics_sink_write_latency_seconds",
+        "Latency of analytics sink writes",
+        &["sink", "stream"],
+        exponential_buckets(0.001, 2.0, 12).unwrap()
+    ).unwrap();
+
+    pub static ref ANALYTICS_EVENTS_DROPPED_TOTAL: IntCounterVec = register_int_counter_vec!(
+        "analytics_events_dropped_total",
+        "Count of dropped analytics events",
+        &["stream", "reason"]
+    ).unwrap();
+
+    pub static ref ANALYTICS_SINK_QUEUE_DEPTH: IntGaugeVec = register_int_gauge_vec!(
+        "analytics_sink_queue_depth",
+        "Current analytics queue depth by stream",
+        &["stream"]
+    ).unwrap();
+
+    pub static ref ANALYTICS_KAFKA_PRODUCE_TOTAL: IntCounterVec = register_int_counter_vec!(
+        "analytics_kafka_produce_total",
+        "Count of Kafka analytics produce attempts grouped by stream and result",
+        &["stream", "result"]
+    ).unwrap();
+
+    pub static ref ANALYTICS_KAFKA_DELIVERY_LATENCY_HISTOGRAM: HistogramVec = register_histogram_vec!(
+        "analytics_kafka_delivery_latency_seconds",
+        "Latency of Kafka analytics delivery acknowledgements",
+        &["stream"],
+        exponential_buckets(0.001, 2.0, 12).unwrap()
+    ).unwrap();
+
 }
 
 pub async fn metrics_handler() -> error_stack::Result<String, MetricsError> {

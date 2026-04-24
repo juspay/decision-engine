@@ -25,7 +25,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     log_startup_configuration(&global_config);
 
-    let global_app_state = GlobalAppState::new(global_config.clone()).await;
+    let global_app_state = GlobalAppState::new(global_config.clone())
+        .await
+        .expect("Failed while configuring global application state");
 
     // Run both servers concurrently using tokio::spawn
     let main_server_handle = tokio::spawn(async move {

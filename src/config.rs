@@ -40,6 +40,8 @@ pub struct GlobalConfig {
     #[serde(default)]
     pub api_client: ApiClientConfig,
     #[serde(default)]
+    pub analytics: AnalyticsConfig,
+    #[serde(default)]
     pub routing_config: Option<TomlConfig>,
     #[serde(default)]
     pub pm_filters: ConnectorFilters,
@@ -110,6 +112,98 @@ pub struct TenantConfig {
     pub pm_filters: ConnectorFilters,
     pub debit_routing_config: network_decider::types::DebitRoutingConfig,
     pub cache_config: CacheConfig,
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(default)]
+pub struct AnalyticsConfig {
+    pub capture: AnalyticsCaptureConfig,
+    pub kafka: KafkaAnalyticsConfig,
+    pub clickhouse: ClickHouseAnalyticsConfig,
+}
+
+impl Default for AnalyticsConfig {
+    fn default() -> Self {
+        Self {
+            capture: AnalyticsCaptureConfig::default(),
+            kafka: KafkaAnalyticsConfig::default(),
+            clickhouse: ClickHouseAnalyticsConfig::default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(default)]
+pub struct AnalyticsCaptureConfig {
+    pub details_max_bytes: usize,
+}
+
+impl Default for AnalyticsCaptureConfig {
+    fn default() -> Self {
+        Self {
+            details_max_bytes: 65_536,
+        }
+    }
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(default)]
+pub struct KafkaAnalyticsConfig {
+    pub enabled: bool,
+    pub brokers: String,
+    pub client_id: String,
+    pub api_topic: String,
+    pub domain_topic: String,
+    pub acks: String,
+    pub compression: String,
+    pub message_timeout_ms: u64,
+    pub queue_capacity: usize,
+    pub security_protocol: Option<String>,
+    pub sasl_mechanism: Option<String>,
+    pub sasl_username: Option<String>,
+    pub sasl_password: Option<masking::Secret<String>>,
+}
+
+impl Default for KafkaAnalyticsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            brokers: "localhost:9092".to_string(),
+            client_id: "decision-engine".to_string(),
+            api_topic: "api".to_string(),
+            domain_topic: "domain".to_string(),
+            acks: "all".to_string(),
+            compression: "lz4".to_string(),
+            message_timeout_ms: 5_000,
+            queue_capacity: 250,
+            security_protocol: None,
+            sasl_mechanism: None,
+            sasl_username: None,
+            sasl_password: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(default)]
+pub struct ClickHouseAnalyticsConfig {
+    pub enabled: bool,
+    pub url: String,
+    pub database: String,
+    pub user: String,
+    pub password: Option<masking::Secret<String>>,
+}
+
+impl Default for ClickHouseAnalyticsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            url: String::new(),
+            database: "default".to_string(),
+            user: "default".to_string(),
+            password: None,
+        }
+    }
 }
 
 impl TenantConfig {
@@ -369,11 +463,54 @@ impl GlobalConfig {
                 ))?;
         }
 
+        if let Some(password) = self.analytics.clickhouse.password.clone() {
+            self.analytics.clickhouse.password = Some(
+                secret_management_client
+                    .get_secret(password)
+                    .await
+                    .change_context(error::ConfigurationError::KmsDecryptError(
+                        "analytics_clickhouse_password",
+                    ))?,
+            );
+        }
+
+        if let Some(password) = self.analytics.kafka.sasl_password.clone() {
+            self.analytics.kafka.sasl_password = Some(
+                secret_management_client
+                    .get_secret(password)
+                    .await
+                    .change_context(error::ConfigurationError::KmsDecryptError(
+                        "analytics_kafka_sasl_password",
+                    ))?,
+            );
+        }
+
         Ok(())
     }
 
     pub fn validate(&self) -> error_stack::Result<(), error::ConfigurationError> {
         self.secrets_management.validate()?;
+        if self.analytics.capture.details_max_bytes == 0 {
+            return Err(error_stack::report!(
+                error::ConfigurationError::InvalidConfigurationValueError(
+                    "analytics.capture.details_max_bytes".to_string(),
+                )
+            ));
+        }
+        if self.analytics.clickhouse.enabled && self.analytics.clickhouse.url.trim().is_empty() {
+            return Err(error_stack::report!(
+                error::ConfigurationError::InvalidConfigurationValueError(
+                    "analytics.clickhouse.url".to_string(),
+                )
+            ));
+        }
+        if self.analytics.kafka.enabled && self.analytics.kafka.queue_capacity == 0 {
+            return Err(error_stack::report!(
+                error::ConfigurationError::InvalidConfigurationValueError(
+                    "analytics.kafka.queue_capacity".to_string(),
+                )
+            ));
+        }
         Ok(())
     }
 }
