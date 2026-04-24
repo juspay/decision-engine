@@ -16,8 +16,7 @@ export function TopBar() {
   const navigate = useNavigate()
   const { user, merchants, clearAuth, updateMerchant } = useAuthStore()
   const { setMerchantId } = useMerchantStore()
-
-  const [isDark, setIsDark] = useState(() => localStorage.getItem('theme') === 'dark')
+  const [isDark, setIsDark] = useState(() => localStorage.getItem('theme') !== 'light')
   const [merchantOpen, setMerchantOpen] = useState(false)
   const [switching, setSwitching] = useState<string | null>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -47,7 +46,7 @@ export function TopBar() {
     try {
       await apiFetch('/auth/logout', { method: 'POST' })
     } catch {
-      // best-effort
+      // best-effort - clear locally regardless
     }
     clearAuth()
     navigate('/login', { replace: true })
@@ -145,7 +144,6 @@ export function TopBar() {
 
         <div className="w-px h-5 bg-[#e6e6ee] dark:bg-[#1a1a24] mx-1" />
 
-        {/* User profile */}
         {user && (
           <div className="flex items-center gap-2 pl-1">
             <div className="w-7 h-7 rounded-full bg-brand-600 flex items-center justify-center">
@@ -159,7 +157,6 @@ export function TopBar() {
           </div>
         )}
 
-        {/* Logout */}
         <button
           onClick={handleLogout}
           className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:bg-red-50 hover:text-red-500 dark:text-slate-400 dark:hover:bg-red-950/30 dark:hover:text-red-400 transition-colors ml-1"

@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import useSWR from 'swr'
 import { fetcher } from '../lib/api'
 
@@ -121,23 +122,29 @@ export function useDynamicRoutingConfig() {
     }
   )
 
-  const parsedKeys = parseRoutingConfig(data || null)
+  const parsedKeys = useMemo(() => parseRoutingConfig(data || null), [data])
 
-  // Build a lookup map for easy access
-  const keysByName = parsedKeys.reduce((acc, key) => {
-    acc[key.key] = key
-    return acc
-  }, {} as Record<string, ParsedRoutingKey>)
+  const keysByName = useMemo(
+    () =>
+      parsedKeys.reduce((acc, key) => {
+        acc[key.key] = key
+        return acc
+      }, {} as Record<string, ParsedRoutingKey>),
+    [parsedKeys]
+  )
 
-  // Convert to the format expected by components (matching old ROUTING_KEYS structure)
-  const routingKeysConfig: Record<string, RoutingKeyConfig> = {}
-  
-  parsedKeys.forEach((key) => {
-    routingKeysConfig[key.key] = {
-      type: key.type,
-      values: key.values || [],
-    }
-  })
+  const routingKeysConfig = useMemo(() => {
+    const nextConfig: Record<string, RoutingKeyConfig> = {}
+
+    parsedKeys.forEach((key) => {
+      nextConfig[key.key] = {
+        type: key.type,
+        values: key.values || [],
+      }
+    })
+
+    return nextConfig
+  }, [parsedKeys])
 
   return {
     config: data,

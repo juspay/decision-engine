@@ -1,211 +1,63 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-export default defineConfig({
-  plugins: [react()],
-  base: '/dashboard/',
-  server: {
-    proxy: {
-      '/decide-gateway': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-        configure: (proxy) => {
-          proxy.on('proxyReq', (proxyReq, req) => {
-            console.log(`\n[PROXY] ${new Date().toISOString()}`)
-            console.log(`Forwarding: ${req.method} ${req.url} -> http://localhost:8080${req.url}`)
-          })
-          proxy.on('proxyRes', (proxyRes, req) => {
-            console.log(`[PROXY] Response: ${proxyRes.statusCode} ${proxyRes.statusMessage} for ${req.url}`)
-          })
-          proxy.on('error', (err, req) => {
-            console.log(`\n[PROXY ERROR] ${new Date().toISOString()}`)
-            console.log(`Error forwarding ${req.url}:`, err.message)
-          })
-        },
-      },
-      '/routing': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-        configure: (proxy) => {
-          proxy.on('proxyReq', (proxyReq, req) => {
-            console.log(`\n[PROXY] ${new Date().toISOString()}`)
-            console.log(`Forwarding: ${req.method} ${req.url} -> http://localhost:8080${req.url}`)
-          })
-          proxy.on('proxyRes', (proxyRes, req) => {
-            console.log(`[PROXY] Response: ${proxyRes.statusCode} ${proxyRes.statusMessage} for ${req.url}`)
-          })
-          proxy.on('error', (err, req) => {
-            console.log(`\n[PROXY ERROR] ${new Date().toISOString()}`)
-            console.log(`Error forwarding ${req.url}:`, err.message)
-          })
-        },
-      },
-      '/rule': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-        configure: (proxy) => {
-          proxy.on('proxyReq', (proxyReq, req) => {
-            console.log(`\n[PROXY] ${new Date().toISOString()}`)
-            console.log(`Forwarding: ${req.method} ${req.url} -> http://localhost:8080${req.url}`)
-          })
-          proxy.on('proxyRes', (proxyRes, req) => {
-            console.log(`[PROXY] Response: ${proxyRes.statusCode} ${proxyRes.statusMessage} for ${req.url}`)
-          })
-          proxy.on('error', (err, req) => {
-            console.log(`\n[PROXY ERROR] ${new Date().toISOString()}`)
-            console.log(`Error forwarding ${req.url}:`, err.message)
-          })
-        },
-      },
-      '/merchant-account': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-        configure: (proxy) => {
-          proxy.on('proxyReq', (proxyReq, req) => {
-            console.log(`\n[PROXY] ${new Date().toISOString()}`)
-            console.log(`Forwarding: ${req.method} ${req.url} -> http://localhost:8080${req.url}`)
-          })
-          proxy.on('proxyRes', (proxyRes, req) => {
-            console.log(`[PROXY] Response: ${proxyRes.statusCode} ${proxyRes.statusMessage} for ${req.url}`)
-          })
-          proxy.on('error', (err, req) => {
-            console.log(`\n[PROXY ERROR] ${new Date().toISOString()}`)
-            console.log(`Error forwarding ${req.url}:`, err.message)
-          })
-        },
-      },
-      '/config-sr-dimension': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-        configure: (proxy) => {
-          proxy.on('proxyReq', (proxyReq, req) => {
-            console.log(`\n[PROXY] ${new Date().toISOString()}`)
-            console.log(`Forwarding: ${req.method} ${req.url} -> http://localhost:8080${req.url}`)
-          })
-          proxy.on('proxyRes', (proxyRes, req) => {
-            console.log(`[PROXY] Response: ${proxyRes.statusCode} ${proxyRes.statusMessage} for ${req.url}`)
-          })
-          proxy.on('error', (err, req) => {
-            console.log(`\n[PROXY ERROR] ${new Date().toISOString()}`)
-            console.log(`Error forwarding ${req.url}:`, err.message)
-          })
-        },
-      },
-      '/config': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-        configure: (proxy) => {
-          proxy.on('proxyReq', (proxyReq, req) => {
-            console.log(`\n[PROXY] ${new Date().toISOString()}`)
-            console.log(`Forwarding: ${req.method} ${req.url} -> http://localhost:8080${req.url}`)
-          })
-          proxy.on('proxyRes', (proxyRes, req) => {
-            console.log(`[PROXY] Response: ${proxyRes.statusCode} ${proxyRes.statusMessage} for ${req.url}`)
-          })
-          proxy.on('error', (err, req) => {
-            console.log(`\n[PROXY ERROR] ${new Date().toISOString()}`)
-            console.log(`Error forwarding ${req.url}:`, err.message)
-          })
-        },
-      },
-      '/health': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-        configure: (proxy) => {
-          proxy.on('proxyReq', (proxyReq, req) => {
-            console.log(`\n[PROXY] ${new Date().toISOString()}`)
-            console.log(`Forwarding: ${req.method} ${req.url} -> http://localhost:8080${req.url}`)
-          })
-          proxy.on('proxyRes', (proxyRes, req) => {
-            console.log(`[PROXY] Response: ${proxyRes.statusCode} ${proxyRes.statusMessage} for ${req.url}`)
-          })
-          proxy.on('error', (err, req) => {
-            console.log(`\n[PROXY ERROR] ${new Date().toISOString()}`)
-            console.log(`Error forwarding ${req.url}:`, err.message)
-          })
-        },
-      },
-      '/update-gateway-score': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-        configure: (proxy) => {
-          proxy.on('proxyReq', (proxyReq, req) => {
-            console.log(`\n[PROXY] ${new Date().toISOString()}`)
-            console.log(`Forwarding: ${req.method} ${req.url} -> http://localhost:8080${req.url}`)
-          })
-          proxy.on('proxyRes', (proxyRes, req) => {
-            console.log(`[PROXY] Response: ${proxyRes.statusCode} ${proxyRes.statusMessage} for ${req.url}`)
-          })
-          proxy.on('error', (err, req) => {
-            console.log(`\n[PROXY ERROR] ${new Date().toISOString()}`)
-            console.log(`Error forwarding ${req.url}:`, err.message)
-          })
-        },
-      },
-      '/auth': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-        configure: (proxy) => {
-          proxy.on('proxyReq', (proxyReq, req) => {
-            console.log(`\n[PROXY] ${new Date().toISOString()}`)
-            console.log(`Forwarding: ${req.method} ${req.url} -> http://localhost:8080${req.url}`)
-          })
-          proxy.on('proxyRes', (proxyRes, req) => {
-            console.log(`[PROXY] Response: ${proxyRes.statusCode} ${proxyRes.statusMessage} for ${req.url}`)
-          })
-          proxy.on('error', (err, req) => {
-            console.log(`\n[PROXY ERROR] ${new Date().toISOString()}`)
-            console.log(`Error forwarding ${req.url}:`, err.message)
-          })
-        },
-      },
-      '/api-key': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-        configure: (proxy) => {
-          proxy.on('proxyReq', (proxyReq, req) => {
-            console.log(`\n[PROXY] ${new Date().toISOString()}`)
-            console.log(`Forwarding: ${req.method} ${req.url} -> http://localhost:8080${req.url}`)
-          })
-          proxy.on('proxyRes', (proxyRes, req) => {
-            console.log(`[PROXY] Response: ${proxyRes.statusCode} ${proxyRes.statusMessage} for ${req.url}`)
-          })
-          proxy.on('error', (err, req) => {
-            console.log(`\n[PROXY ERROR] ${new Date().toISOString()}`)
-            console.log(`Error forwarding ${req.url}:`, err.message)
-          })
-        },
-      },
-      '/onboarding': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-        configure: (proxy) => {
-          proxy.on('proxyReq', (proxyReq, req) => {
-            console.log(`\n[PROXY] ${new Date().toISOString()}`)
-            console.log(`Forwarding: ${req.method} ${req.url} -> http://localhost:8080${req.url}`)
-          })
-          proxy.on('proxyRes', (proxyRes, req) => {
-            console.log(`[PROXY] Response: ${proxyRes.statusCode} ${proxyRes.statusMessage} for ${req.url}`)
-          })
-          proxy.on('error', (err, req) => {
-            console.log(`\n[PROXY ERROR] ${new Date().toISOString()}`)
-            console.log(`Error forwarding ${req.url}:`, err.message)
-          })
-        },
-      },
+export default defineConfig(({ command }) => {
+  const isDevServer = command === 'serve'
+  const publicBaseUrl = isDevServer ? '/' : '/decision-engine/'
+  const backendTarget = 'http://localhost:8080'
+  const apiProxyPrefix = '/decision-engine-api'
+
+  const createApiProxy = (rewritePrefix?: string) => ({
+    target: backendTarget,
+    changeOrigin: true,
+    rewrite: rewritePrefix ? (path) => path.replace(new RegExp(`^${rewritePrefix}`), '') : undefined,
+    configure: (proxy) => {
+      proxy.on('proxyReq', (_proxyReq, req) => {
+        console.log(`\n[PROXY] ${new Date().toISOString()}`)
+        console.log(`Forwarding: ${req.method} ${req.url} -> ${backendTarget}${req.url}`)
+      })
+      proxy.on('proxyRes', (proxyRes, req) => {
+        console.log(
+          `[PROXY] Response: ${proxyRes.statusCode} ${proxyRes.statusMessage} for ${req.url}`
+        )
+      })
+      proxy.on('error', (err, req) => {
+        console.log(`\n[PROXY ERROR] ${new Date().toISOString()}`)
+        console.log(`Error forwarding ${req.url}:`, err.message)
+      })
     },
-    fs: {
-      strict: false,
+  })
+
+  return {
+    plugins: [react()],
+    base: publicBaseUrl,
+    server: {
+      proxy: {
+        '^/decision-engine-api(?:/.*)?$': createApiProxy(apiProxyPrefix),
+        '/decide-gateway': createApiProxy(),
+        '/decision_gateway': createApiProxy(),
+        '/merchant-account': createApiProxy(),
+        '/config-sr-dimension': createApiProxy(),
+        '^/config(?:/.*)?$': createApiProxy(),
+        '/health': createApiProxy(),
+        '/update-gateway-score': createApiProxy(),
+        '/update-score': createApiProxy(),
+        '^/rule(?:/.*)?$': createApiProxy(),
+        '^/routing/(create|activate|evaluate|list(?:/.*)?|hybrid)$': createApiProxy(),
+        '^/analytics/(overview|gateway-scores|decisions|routing-stats|log-summaries|preview-trace|payment-audit)(?:\\?.*)?$':
+          createApiProxy(),
+        '^/onboarding(?:/.*)?$': createApiProxy(),
+        '^/auth(?:/.*)?$': createApiProxy(),
+        '^/api-key(?:/.*)?$': createApiProxy(),
+      },
+      fs: {
+        strict: false,
+      },
+      host: true,
+      port: 5173,
     },
-    historyApiFallback: {
-      rewrites: [
-        { from: /./, to: '/dashboard/index.html' }
-      ]
+    build: {
+      outDir: 'dist',
     },
-    host: true,
-    port: 5173,
-  },
-  build: {
-    outDir: 'dist',
-  },
+  }
 })

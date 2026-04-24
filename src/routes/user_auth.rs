@@ -103,6 +103,8 @@ pub async fn signup(
         ));
     }
 
+    auth::validate_password_strength(&payload.password).map_err(|_| UserAuthError::WeakPassword)?;
+
     let password_hash =
         auth::hash_password(&payload.password).map_err(|_| UserAuthError::PasswordHashingFailed)?;
 

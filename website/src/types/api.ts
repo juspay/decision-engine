@@ -143,3 +143,216 @@ export interface SRDimensionRequest {
     fields: string[]
   }
 }
+
+export type AnalyticsRange = '15m' | '1h' | '12h' | '1d' | '1w'
+export type AnalyticsRangeValue = AnalyticsRange | 'custom'
+
+export interface AnalyticsQuery {
+  range?: AnalyticsRange
+  start_ms?: number
+  end_ms?: number
+  page?: number
+  page_size?: number
+  payment_method_type?: string
+  payment_method?: string
+  card_network?: string
+  card_is_in?: string
+  currency?: string
+  country?: string
+  auth_type?: string
+  gateway?: string
+}
+
+export interface AnalyticsKpi {
+  label: string
+  value: string
+  subtitle?: string | null
+}
+
+export interface GatewayScoreSnapshot {
+  merchant_id: string
+  payment_method_type: string
+  payment_method: string
+  gateway: string
+  score_value: number
+  sigma_factor: number
+  average_latency: number
+  tp99_latency: number
+  transaction_count: number
+  last_updated_ms: number
+}
+
+export interface GatewayScoreSeriesPoint {
+  bucket_ms: number
+  merchant_id: string
+  payment_method_type: string
+  payment_method: string
+  gateway: string
+  score_value: number
+}
+
+export interface AnalyticsOverviewResponse {
+  merchant_id: string
+  kpis: AnalyticsKpi[]
+  route_hits: AnalyticsRouteHit[]
+  top_scores: GatewayScoreSnapshot[]
+  top_errors: AnalyticsErrorSummary[]
+  top_rules: AnalyticsRuleHit[]
+}
+
+export interface AnalyticsRouteHit {
+  route: string
+  count: number
+}
+
+export interface AnalyticsGatewayScoresResponse {
+  merchant_id: string
+  range: AnalyticsRangeValue
+  snapshots: GatewayScoreSnapshot[]
+  series: GatewayScoreSeriesPoint[]
+}
+
+export interface AnalyticsDecisionPoint {
+  bucket_ms: number
+  routing_approach: string
+  count: number
+}
+
+export interface AnalyticsDecisionResponse {
+  merchant_id: string
+  range: AnalyticsRangeValue
+  tiles: AnalyticsKpi[]
+  series: AnalyticsDecisionPoint[]
+  approaches: AnalyticsRuleHit[]
+}
+
+export interface AnalyticsGatewaySharePoint {
+  bucket_ms: number
+  gateway: string
+  count: number
+}
+
+export interface AnalyticsRoutingStatsResponse {
+  merchant_id: string
+  range: AnalyticsRangeValue
+  gateway_share: AnalyticsGatewaySharePoint[]
+  top_rules: AnalyticsRuleHit[]
+  sr_trend: GatewayScoreSeriesPoint[]
+  available_filters: RoutingFilterOptions
+}
+
+export interface RoutingFilterOptions {
+  dimensions: RoutingFilterDimension[]
+  missing_dimensions: RoutingFilterDimensionHint[]
+  gateways: string[]
+}
+
+export interface RoutingFilterDimension {
+  key: string
+  label: string
+  values: string[]
+}
+
+export interface RoutingFilterDimensionHint {
+  key: string
+  label: string
+}
+
+export interface AnalyticsErrorSummary {
+  route: string
+  error_code: string
+  error_message: string
+  count: number
+  last_seen_ms: number
+}
+
+export interface AnalyticsLogSample {
+  route: string
+  merchant_id?: string | null
+  payment_id?: string | null
+  request_id?: string | null
+  global_request_id?: string | null
+  trace_id?: string | null
+  gateway?: string | null
+  routing_approach?: string | null
+  status?: string | null
+  error_code?: string | null
+  error_message?: string | null
+  flow_type?: string | null
+  created_at_ms: number
+}
+
+export interface AnalyticsLogSummariesResponse {
+  merchant_id: string
+  range: AnalyticsRange
+  total_errors: number
+  errors: AnalyticsErrorSummary[]
+  samples: AnalyticsLogSample[]
+  page: number
+  page_size: number
+}
+
+export interface AnalyticsRuleHit {
+  rule_name: string
+  count: number
+}
+
+export interface PaymentAuditSummary {
+  lookup_key: string
+  payment_id?: string | null
+  request_id?: string | null
+  merchant_id?: string | null
+  first_seen_ms: number
+  last_seen_ms: number
+  event_count: number
+  latest_status?: string | null
+  latest_gateway?: string | null
+  latest_stage?: string | null
+  gateways: string[]
+  routes: string[]
+}
+
+export interface PaymentAuditEvent {
+  id: string
+  flow_type: string
+  event_stage?: string | null
+  route?: string | null
+  merchant_id?: string | null
+  payment_id?: string | null
+  request_id?: string | null
+  global_request_id?: string | null
+  trace_id?: string | null
+  payment_method_type?: string | null
+  payment_method?: string | null
+  gateway?: string | null
+  routing_approach?: string | null
+  rule_name?: string | null
+  status?: string | null
+  error_code?: string | null
+  error_message?: string | null
+  score_value?: number | null
+  sigma_factor?: number | null
+  average_latency?: number | null
+  tp99_latency?: number | null
+  transaction_count?: number | null
+  details?: string | null
+  details_json?: Record<string, unknown> | null
+  created_at_ms: number
+}
+
+export interface PaymentAuditResponse {
+  merchant_id: string
+  range: AnalyticsRangeValue
+  payment_id?: string | null
+  request_id?: string | null
+  gateway?: string | null
+  route?: string | null
+  status?: string | null
+  flow_type?: string | null
+  error_code?: string | null
+  page: number
+  page_size: number
+  total_results: number
+  results: PaymentAuditSummary[]
+  timeline: PaymentAuditEvent[]
+}

@@ -145,6 +145,26 @@ pub fn verify_password(password: &str, hash: &str) -> Result<bool, String> {
     bcrypt::verify(password, hash).map_err(|e| e.to_string())
 }
 
+pub fn validate_password_strength(password: &str) -> Result<(), String> {
+    if password.chars().count() < 10 {
+        return Err("Password must be at least 10 characters long".to_string());
+    }
+
+    let has_uppercase = password.chars().any(|c| c.is_ascii_uppercase());
+    let has_lowercase = password.chars().any(|c| c.is_ascii_lowercase());
+    let has_digit = password.chars().any(|c| c.is_ascii_digit());
+    let has_special = password.chars().any(|c| !c.is_ascii_alphanumeric());
+
+    if !(has_uppercase && has_lowercase && has_digit && has_special) {
+        return Err(
+            "Password must include an uppercase letter, a lowercase letter, a number, and a special character"
+                .to_string(),
+        );
+    }
+
+    Ok(())
+}
+
 pub fn generate_api_key() -> String {
     let random_bytes = Uuid::new_v4().as_bytes().to_vec();
     let second_bytes = Uuid::new_v4().as_bytes().to_vec();
@@ -250,5 +270,16 @@ mod tests {
     fn key_prefix_is_consistent() {
         let key = generate_api_key();
         assert_eq!(extract_key_prefix(&key), extract_key_prefix(&key));
+    }
+
+    #[test]
+    fn weak_password_is_rejected() {
+        assert!(validate_password_strength("1234").is_err());
+        assert!(validate_password_strength("abcdefghij").is_err());
+    }
+
+    #[test]
+    fn strong_password_is_accepted() {
+        assert!(validate_password_strength("StrongPass#1").is_ok());
     }
 }
