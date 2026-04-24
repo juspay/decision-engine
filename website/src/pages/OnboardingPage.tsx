@@ -16,6 +16,7 @@ export function OnboardingPage() {
   const navigate = useNavigate()
   const { updateMerchant } = useAuthStore()
   const { setMerchantId } = useMerchantStore()
+  const assetBaseUrl = import.meta.env.BASE_URL
 
   const [merchantName, setMerchantName] = useState('')
   const [loading, setLoading] = useState(false)
@@ -58,7 +59,7 @@ export function OnboardingPage() {
       className="min-h-screen flex flex-col items-center justify-center p-4"
       style={{
         backgroundColor: '#212e46',
-        backgroundImage: 'url(/dashboard/images/auth_bg.svg)',
+        backgroundImage: `url(${assetBaseUrl}images/auth_bg.svg)`,
         backgroundSize: 'cover',
         backgroundPosition: 'center',
         backgroundAttachment: 'fixed',
