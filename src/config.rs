@@ -126,7 +126,7 @@ pub struct AnalyticsConfig {
 impl Default for AnalyticsConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             capture: AnalyticsCaptureConfig::default(),
             kafka: KafkaAnalyticsConfig::default(),
             clickhouse: ClickHouseAnalyticsConfig::default(),
