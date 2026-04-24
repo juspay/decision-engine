@@ -9,6 +9,7 @@ pub struct DomainAnalyticsEvent {
     pub event_id: String,
     pub api_flow: ApiFlow,
     pub flow_type: FlowType,
+    pub summary_kind: Option<String>,
     pub merchant_id: Option<String>,
     pub payment_id: Option<String>,
     pub request_id: Option<String>,
@@ -45,6 +46,7 @@ impl DomainAnalyticsEvent {
             event_id: next_event_id(),
             api_flow: flow.api_flow,
             flow_type: flow.flow_type,
+            summary_kind: derive_payment_audit_summary_kind(route, flow.flow_type),
             merchant_id: None,
             payment_id: None,
             request_id: None,
@@ -396,11 +398,47 @@ pub fn derive_lookup_key(payment_id: Option<&str>, request_id: Option<&str>) -> 
         .map(str::to_string)
 }
 
+pub fn derive_payment_audit_summary_kind(
+    route: AnalyticsRoute,
+    flow_type: FlowType,
+) -> Option<String> {
+    if route == AnalyticsRoute::RoutingEvaluate
+        && matches!(
+            flow_type,
+            FlowType::RoutingEvaluateSingle
+                | FlowType::RoutingEvaluatePriority
+                | FlowType::RoutingEvaluateVolumeSplit
+                | FlowType::RoutingEvaluateAdvanced
+                | FlowType::RoutingEvaluatePreview
+                | FlowType::RoutingEvaluateError
+        )
+    {
+        return Some("preview".to_string());
+    }
+
+    if matches!(
+        flow_type,
+        FlowType::DecideGatewayDecision
+            | FlowType::UpdateGatewayScoreUpdate
+            | FlowType::UpdateScoreLegacyScoreSnapshot
+            | FlowType::DecideGatewayRuleHit
+            | FlowType::DecideGatewayError
+            | FlowType::UpdateGatewayScoreError
+            | FlowType::UpdateScoreLegacyError
+    ) {
+        return Some("dynamic".to_string());
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use uuid::{Uuid, Version};
 
-    use super::{derive_lookup_key, next_event_id};
+    use crate::analytics::flow::{AnalyticsRoute, FlowType};
+
+    use super::{derive_lookup_key, derive_payment_audit_summary_kind, next_event_id};
 
     #[test]
     fn lookup_key_prefers_payment_id() {
@@ -424,6 +462,39 @@ mod tests {
         assert_eq!(
             derive_lookup_key(Some(""), Some("req_123")),
             Some("req_123".to_string())
+        );
+    }
+
+    #[test]
+    fn summary_kind_uses_preview_for_routing_evaluate_preview_flows() {
+        assert_eq!(
+            derive_payment_audit_summary_kind(
+                AnalyticsRoute::RoutingEvaluate,
+                FlowType::RoutingEvaluatePreview,
+            ),
+            Some("preview".to_string())
+        );
+    }
+
+    #[test]
+    fn summary_kind_uses_dynamic_for_runtime_decision_flows() {
+        assert_eq!(
+            derive_payment_audit_summary_kind(
+                AnalyticsRoute::DecideGateway,
+                FlowType::DecideGatewayDecision,
+            ),
+            Some("dynamic".to_string())
+        );
+    }
+
+    #[test]
+    fn summary_kind_is_none_for_untracked_flows() {
+        assert_eq!(
+            derive_payment_audit_summary_kind(
+                AnalyticsRoute::RuleConfigCreate,
+                FlowType::RuleConfigCreate,
+            ),
+            None
         );
     }
 

@@ -117,7 +117,6 @@ pub struct TenantConfig {
 #[derive(Clone, Debug, serde::Deserialize)]
 #[serde(default)]
 pub struct AnalyticsConfig {
-    pub enabled: bool,
     pub capture: AnalyticsCaptureConfig,
     pub kafka: KafkaAnalyticsConfig,
     pub clickhouse: ClickHouseAnalyticsConfig,
@@ -126,7 +125,6 @@ pub struct AnalyticsConfig {
 impl Default for AnalyticsConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
             capture: AnalyticsCaptureConfig::default(),
             kafka: KafkaAnalyticsConfig::default(),
             clickhouse: ClickHouseAnalyticsConfig::default(),
@@ -151,6 +149,7 @@ impl Default for AnalyticsCaptureConfig {
 #[derive(Clone, Debug, serde::Deserialize)]
 #[serde(default)]
 pub struct KafkaAnalyticsConfig {
+    pub enabled: bool,
     pub brokers: String,
     pub client_id: String,
     pub api_topic: String,
@@ -168,6 +167,7 @@ pub struct KafkaAnalyticsConfig {
 impl Default for KafkaAnalyticsConfig {
     fn default() -> Self {
         Self {
+            enabled: false,
             brokers: "localhost:9092".to_string(),
             client_id: "decision-engine".to_string(),
             api_topic: "api".to_string(),
@@ -187,6 +187,7 @@ impl Default for KafkaAnalyticsConfig {
 #[derive(Clone, Debug, serde::Deserialize)]
 #[serde(default)]
 pub struct ClickHouseAnalyticsConfig {
+    pub enabled: bool,
     pub url: String,
     pub database: String,
     pub user: String,
@@ -196,6 +197,7 @@ pub struct ClickHouseAnalyticsConfig {
 impl Default for ClickHouseAnalyticsConfig {
     fn default() -> Self {
         Self {
+            enabled: false,
             url: String::new(),
             database: "default".to_string(),
             user: "default".to_string(),
@@ -495,14 +497,14 @@ impl GlobalConfig {
                 )
             ));
         }
-        if self.analytics.enabled && self.analytics.clickhouse.url.trim().is_empty() {
+        if self.analytics.clickhouse.enabled && self.analytics.clickhouse.url.trim().is_empty() {
             return Err(error_stack::report!(
                 error::ConfigurationError::InvalidConfigurationValueError(
                     "analytics.clickhouse.url".to_string(),
                 )
             ));
         }
-        if self.analytics.kafka.queue_capacity == 0 {
+        if self.analytics.kafka.enabled && self.analytics.kafka.queue_capacity == 0 {
             return Err(error_stack::report!(
                 error::ConfigurationError::InvalidConfigurationValueError(
                     "analytics.kafka.queue_capacity".to_string(),
