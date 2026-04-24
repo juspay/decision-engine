@@ -162,19 +162,34 @@ if [ -n "$NEW_KEY_ID" ]; then
     fi
 fi
 
-# ── 8. User signup ─────────────────────────────────────
+# ── 8. User signup (no merchant_id required) ───────────
 echo ""
 echo "[ User signup ]"
 SIGNUP_RESPONSE=$(curl -s -X POST "$BASE_URL/auth/signup" \
     -H "Content-Type: application/json" \
-    -d "{\"email\": \"$TEST_EMAIL\", \"password\": \"$TEST_PASSWORD\", \"merchant_id\": \"$MERCHANT_ID\"}")
+    -d "{\"email\": \"$TEST_EMAIL\", \"password\": \"$TEST_PASSWORD\"}")
 
 JWT_TOKEN=$(echo "$SIGNUP_RESPONSE" | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
+SIGNUP_MERCHANT_ID=$(echo "$SIGNUP_RESPONSE" | grep -o '"merchant_id":"[^"]*"' | cut -d'"' -f4)
+SIGNUP_MERCHANTS=$(echo "$SIGNUP_RESPONSE" | grep -o '"merchants":\[\]')
 if [ -n "$JWT_TOKEN" ]; then
     echo "  PASS  POST /auth/signup returns JWT token"
     PASS=$((PASS + 1))
 else
     echo "  FAIL  POST /auth/signup — unexpected response: $SIGNUP_RESPONSE"
+    FAIL=$((FAIL + 1))
+fi
+if [ -z "$SIGNUP_MERCHANT_ID" ] || [ "$SIGNUP_MERCHANT_ID" = '""' ]; then
+    echo "  PASS  POST /auth/signup — merchant_id is empty (onboarding pending)"
+    PASS=$((PASS + 1))
+else
+    echo "  INFO  POST /auth/signup — merchant_id: $SIGNUP_MERCHANT_ID"
+fi
+if [ -n "$SIGNUP_MERCHANTS" ]; then
+    echo "  PASS  POST /auth/signup — merchants list is empty"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL  POST /auth/signup — expected empty merchants list, got: $SIGNUP_RESPONSE"
     FAIL=$((FAIL + 1))
 fi
 
@@ -183,10 +198,111 @@ echo ""
 echo "[ Duplicate signup ]"
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/auth/signup" \
     -H "Content-Type: application/json" \
-    -d "{\"email\": \"$TEST_EMAIL\", \"password\": \"$TEST_PASSWORD\", \"merchant_id\": \"$MERCHANT_ID\"}")
+    -d "{\"email\": \"$TEST_EMAIL\", \"password\": \"$TEST_PASSWORD\"}")
 check "Duplicate email → 409" "409" "$STATUS"
 
-# ── 10. Login ──────────────────────────────────────────
+# ── 10. Onboarding: create first merchant ──────────────
+echo ""
+echo "[ Onboarding: create merchant ]"
+ONBOARD_RESPONSE=$(curl -s -X POST "$BASE_URL/onboarding/merchant" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $JWT_TOKEN" \
+    -d "{\"merchant_name\": \"Test Corp\"}")
+
+ONBOARD_TOKEN=$(echo "$ONBOARD_RESPONSE" | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
+ONBOARD_MID=$(echo "$ONBOARD_RESPONSE" | grep -o '"merchant_id":"[^"]*"' | head -1 | cut -d'"' -f4)
+ONBOARD_NAME=$(echo "$ONBOARD_RESPONSE" | grep -o '"merchant_name":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+if [ -n "$ONBOARD_TOKEN" ] && [ -n "$ONBOARD_MID" ]; then
+    echo "  PASS  POST /onboarding/merchant returns token + merchant_id"
+    echo "        merchant_id: $ONBOARD_MID"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL  POST /onboarding/merchant — unexpected response: $ONBOARD_RESPONSE"
+    FAIL=$((FAIL + 1))
+fi
+check "Merchant name stored correctly" "Test Corp" "$ONBOARD_NAME"
+
+ONBOARD_COUNT=$(echo "$ONBOARD_RESPONSE" | grep -o '"merchant_id"' | wc -l | tr -d ' ')
+if [ "$ONBOARD_COUNT" -ge "1" ]; then
+    echo "  PASS  POST /onboarding/merchant — merchants list has 1 entry"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL  POST /onboarding/merchant — merchants list empty: $ONBOARD_RESPONSE"
+    FAIL=$((FAIL + 1))
+fi
+
+# ── 11. Onboarding: create second merchant ─────────────
+echo ""
+echo "[ Onboarding: create second merchant ]"
+ONBOARD2_RESPONSE=$(curl -s -X POST "$BASE_URL/onboarding/merchant" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $ONBOARD_TOKEN" \
+    -d "{\"merchant_name\": \"Beta Inc\"}")
+
+ONBOARD2_MID=$(echo "$ONBOARD2_RESPONSE" | grep -o '"merchant_id":"[^"]*"' | head -1 | cut -d'"' -f4)
+ONBOARD2_COUNT=$(echo "$ONBOARD2_RESPONSE" | grep -o '"merchant_id"' | wc -l | tr -d ' ')
+ONBOARD2_TOKEN=$(echo "$ONBOARD2_RESPONSE" | grep -o '"token":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+if [ -n "$ONBOARD2_MID" ]; then
+    echo "  PASS  POST /onboarding/merchant — second merchant created"
+    echo "        merchant_id: $ONBOARD2_MID"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL  POST /onboarding/merchant (2nd) — unexpected: $ONBOARD2_RESPONSE"
+    FAIL=$((FAIL + 1))
+fi
+if [ "$ONBOARD2_COUNT" -ge "2" ]; then
+    echo "  PASS  merchants list now has $ONBOARD2_COUNT entries"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL  Expected 2+ merchants in list, got $ONBOARD2_COUNT: $ONBOARD2_RESPONSE"
+    FAIL=$((FAIL + 1))
+fi
+
+# ── 12. List merchants ─────────────────────────────────
+echo ""
+echo "[ List merchants ]"
+LIST_MERCHANTS=$(curl -s "$BASE_URL/auth/merchants" \
+    -H "Authorization: Bearer $ONBOARD2_TOKEN")
+LIST_COUNT=$(echo "$LIST_MERCHANTS" | grep -o '"merchant_id"' | wc -l | tr -d ' ')
+if [ "$LIST_COUNT" -ge "2" ]; then
+    echo "  PASS  GET /auth/merchants returns $LIST_COUNT merchants"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL  GET /auth/merchants — got: $LIST_MERCHANTS"
+    FAIL=$((FAIL + 1))
+fi
+
+# ── 13. Switch merchant ────────────────────────────────
+echo ""
+echo "[ Switch merchant ]"
+SWITCH_RESPONSE=$(curl -s --max-time 10 -X POST "$BASE_URL/auth/switch-merchant" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $ONBOARD2_TOKEN" \
+    -d "{\"merchant_id\": \"$ONBOARD_MID\"}")
+
+SWITCH_TOKEN=$(echo "$SWITCH_RESPONSE" | grep -o '"token":"[^"]*"' | head -1 | cut -d'"' -f4)
+SWITCH_MID=$(echo "$SWITCH_RESPONSE" | grep -o '"merchant_id":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+if [ -n "$SWITCH_TOKEN" ]; then
+    echo "  PASS  POST /auth/switch-merchant returns new token"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL  POST /auth/switch-merchant — unexpected: $SWITCH_RESPONSE"
+    FAIL=$((FAIL + 1))
+fi
+check "Switch sets correct active merchant_id" "$ONBOARD_MID" "$SWITCH_MID"
+
+echo ""
+echo "[ Switch to non-existent merchant → 404 ]"
+STATUS=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/auth/switch-merchant" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $ONBOARD2_TOKEN" \
+    -d '{"merchant_id": "merchant_doesnotexist"}')
+check "Switch to unknown merchant → 404" "404" "$STATUS"
+
+# ── 14. Login returns merchants list ──────────────────
 echo ""
 echo "[ User login ]"
 LOGIN_RESPONSE=$(curl -s -X POST "$BASE_URL/auth/login" \
@@ -194,6 +310,7 @@ LOGIN_RESPONSE=$(curl -s -X POST "$BASE_URL/auth/login" \
     -d "{\"email\": \"$TEST_EMAIL\", \"password\": \"$TEST_PASSWORD\"}")
 
 JWT_TOKEN=$(echo "$LOGIN_RESPONSE" | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
+LOGIN_MERCHANT_COUNT=$(echo "$LOGIN_RESPONSE" | grep -o '"merchant_id"' | wc -l | tr -d ' ')
 if [ -n "$JWT_TOKEN" ]; then
     echo "  PASS  POST /auth/login returns JWT token"
     PASS=$((PASS + 1))
@@ -201,8 +318,15 @@ else
     echo "  FAIL  POST /auth/login — unexpected response: $LOGIN_RESPONSE"
     FAIL=$((FAIL + 1))
 fi
+if [ "$LOGIN_MERCHANT_COUNT" -ge "2" ]; then
+    echo "  PASS  POST /auth/login — merchants list populated ($LOGIN_MERCHANT_COUNT entries)"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL  POST /auth/login — merchants list missing or empty: $LOGIN_RESPONSE"
+    FAIL=$((FAIL + 1))
+fi
 
-# ── 11. Wrong password → 401 ──────────────────────────
+# ── 15. Wrong password → 401 ──────────────────────────
 echo ""
 echo "[ Wrong password ]"
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/auth/login" \
@@ -210,7 +334,7 @@ STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/auth/login" \
     -d "{\"email\": \"$TEST_EMAIL\", \"password\": \"wrongpassword\"}")
 check "Wrong password → 401" "401" "$STATUS"
 
-# ── 12. JWT accesses protected route ──────────────────
+# ── 16. JWT accesses protected route ──────────────────
 if [ -n "$JWT_TOKEN" ]; then
     echo ""
     echo "[ JWT auth on protected routes ]"
@@ -230,7 +354,7 @@ if [ -n "$JWT_TOKEN" ]; then
         echo "  INFO  Auth not enforced — skipping invalid JWT check"
     fi
 
-    # ── 13. /auth/me ──────────────────────────────────
+    # ── 17. /auth/me ──────────────────────────────────
     echo ""
     echo "[ /auth/me ]"
     ME_RESPONSE=$(curl -s "$BASE_URL/auth/me" \
@@ -242,8 +366,16 @@ if [ -n "$JWT_TOKEN" ]; then
         echo "  FAIL  GET /auth/me — got: $ME_RESPONSE"
         FAIL=$((FAIL + 1))
     fi
+    ME_MERCHANT_COUNT=$(echo "$ME_RESPONSE" | grep -o '"merchant_id"' | wc -l | tr -d ' ')
+    if [ "$ME_MERCHANT_COUNT" -ge "2" ]; then
+        echo "  PASS  GET /auth/me — merchants list populated"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL  GET /auth/me — merchants list missing: $ME_RESPONSE"
+        FAIL=$((FAIL + 1))
+    fi
 
-    # ── 14. Logout ────────────────────────────────────
+    # ── 18. Logout ────────────────────────────────────
     echo ""
     echo "[ Logout ]"
     LOGOUT_RESPONSE=$(curl -s -X POST "$BASE_URL/auth/logout" \
@@ -256,7 +388,7 @@ if [ -n "$JWT_TOKEN" ]; then
         FAIL=$((FAIL + 1))
     fi
 
-    # ── 15. Revoked JWT rejected ──────────────────────
+    # ── 19. Revoked JWT rejected ──────────────────────
     echo ""
     echo "[ Revoked JWT rejected ]"
     sleep 1
@@ -270,7 +402,7 @@ if [ -n "$JWT_TOKEN" ]; then
         echo "  INFO  Auth not enforced — skipping revoked JWT check"
     fi
 
-    # ── 16. Re-login after logout ─────────────────────
+    # ── 20. Re-login after logout ─────────────────────
     echo ""
     echo "[ Re-login after logout ]"
     RELOGIN_RESPONSE=$(curl -s -X POST "$BASE_URL/auth/login" \
@@ -286,7 +418,7 @@ if [ -n "$JWT_TOKEN" ]; then
     fi
 fi
 
-# ── 17. Redis cache hit (API key) ──────────────────────
+# ── 21. Redis cache hit (API key) ──────────────────────
 echo ""
 echo "[ Redis cache hit ]"
 for i in 1 2; do
