@@ -7,6 +7,7 @@ import { Card, CardBody, CardHeader, SurfaceLabel } from '../ui/Card'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { Spinner } from '../ui/Spinner'
 import { useMerchantStore } from '../../store/merchantStore'
+import { useAuthStore } from '../../store/authStore'
 import { apiPost, fetcher } from '../../lib/api'
 import { DecideGatewayResponse, GatewayConnector, PaymentAuditEvent, PaymentAuditResponse } from '../../types/api'
 import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
@@ -540,6 +541,8 @@ function InspectorJsonPanel({
 
 export function DecisionExplorerPage() {
   const { merchantId } = useMerchantStore()
+  const authMerchantId = useAuthStore((state) => state.user?.merchantId || '')
+  const effectiveMerchantId = merchantId || authMerchantId
   const { routingKeysConfig, isLoading: routingKeysLoading, error: routingKeysError } = useDynamicRoutingConfig()
   const hasRoutingKeys = Object.keys(routingKeysConfig).length > 0
   const routingConfigUnavailable = !routingKeysLoading && (!hasRoutingKeys || Boolean(routingKeysError))
@@ -809,7 +812,7 @@ export function DecisionExplorerPage() {
   }
 
   async function run() {
-    if (!merchantId) return setError('Set a merchant ID in the top bar')
+    if (!effectiveMerchantId) return setError('Sign in with a merchant-linked account to continue')
     if (routingConfigUnavailable) return setError('Routing key config unavailable. Fix /config/routing-keys and retry.')
     setLoading(true); setError(null)
     setSingleRunPaymentId(null)
@@ -817,7 +820,7 @@ export function DecisionExplorerPage() {
     const paymentId = `explorer_${Date.now()}`
     try {
       const res = await apiPost<DecideGatewayResponse>('/decide-gateway', {
-        merchantId: merchantId,
+        merchantId: effectiveMerchantId,
         paymentInfo: {
           paymentId: paymentId,
           amount: parseFloat(form.amount) || 1000,
@@ -833,7 +836,7 @@ export function DecisionExplorerPage() {
         eliminationEnabled: form.elimination_enabled,
       })
       await apiPost('/update-gateway-score', {
-        merchantId: merchantId,
+        merchantId: effectiveMerchantId,
         gateway: res.decided_gateway,
         gatewayReferenceId: null,
         status: singleRunOutcome,
@@ -850,7 +853,7 @@ export function DecisionExplorerPage() {
   }
 
   async function runSimulation() {
-    if (!merchantId) return setError('Set a merchant ID in the top bar')
+    if (!effectiveMerchantId) return setError('Sign in with a merchant-linked account to continue')
     if (routingConfigUnavailable) return setError('Routing key config unavailable. Fix /config/routing-keys and retry.')
 
     const total = parseInt(simulationConfig.totalPayments) || 0
@@ -884,7 +887,7 @@ export function DecisionExplorerPage() {
         const paymentId = `sim_${Date.now()}_${i}`
 
         const decideRes = await apiPost<DecideGatewayResponse>('/decide-gateway', {
-          merchantId: merchantId,
+          merchantId: effectiveMerchantId,
           paymentInfo: {
             paymentId: paymentId,
             amount: parseFloat(form.amount) || 1000,
@@ -904,7 +907,7 @@ export function DecisionExplorerPage() {
         const outcome = outcomes[i]
 
         await apiPost('/update-gateway-score', {
-          merchantId: merchantId,
+          merchantId: effectiveMerchantId,
           gateway: decidedGateway,
           gatewayReferenceId: null,
           status: outcome,
@@ -956,7 +959,7 @@ export function DecisionExplorerPage() {
       })
 
       const res = await apiPost<RuleEvaluateResponse>('/routing/evaluate', {
-        created_by: merchantId || 'test_user',
+        created_by: effectiveMerchantId || 'test_user',
         payment_id: previewPaymentId,
         fallback_output: fallbackConnectors.filter(c => c.gateway_name),
         parameters,
@@ -981,7 +984,7 @@ export function DecisionExplorerPage() {
   }
 
   async function runVolumeSplit() {
-    if (!merchantId) return setError('Set a merchant ID in the top bar')
+    if (!effectiveMerchantId) return setError('Sign in with a merchant-linked account to continue')
     setLoading(true)
     setError(null)
     setRuleResult(null)
@@ -1009,7 +1012,7 @@ export function DecisionExplorerPage() {
             const index = start + offset
             const paymentId = `${basePaymentId}_${index}`
             const response = await apiPost<RuleEvaluateResponse>('/routing/evaluate', {
-              created_by: merchantId,
+              created_by: effectiveMerchantId,
               payment_id: paymentId,
               fallback_output: [
                 { gateway_name: 'stripe', gateway_id: 'gateway_001' },
@@ -1304,7 +1307,7 @@ export function DecisionExplorerPage() {
             </div>
           </CardHeader>
           <CardBody className="space-y-3">
-            {!merchantId && (
+            {!effectiveMerchantId && (
               <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-3 py-2">
                 Set a merchant ID in the top bar first.
               </p>
@@ -1596,7 +1599,7 @@ export function DecisionExplorerPage() {
                 {loading ? <><Spinner size={14} /> Evaluating…</> : <><Play size={14} /> Evaluate Rules</>}
               </Button>
             ) : activeTab === 'volume' ? (
-              <Button onClick={runVolumeSplit} disabled={loading || !merchantId} className="w-full justify-center">
+              <Button onClick={runVolumeSplit} disabled={loading || !effectiveMerchantId} className="w-full justify-center">
                 {loading ? (
                   <><Spinner size={14} /> Running {volumeProgress}/{volumePayments || 0} previews…</>
                 ) : (
@@ -1604,7 +1607,7 @@ export function DecisionExplorerPage() {
                 )}
               </Button>
             ) : activeTab === 'batch' ? (
-              <Button onClick={runSimulation} disabled={isSimulating || !merchantId || routingConfigUnavailable} className="w-full justify-center">
+              <Button onClick={runSimulation} disabled={isSimulating || !effectiveMerchantId || routingConfigUnavailable} className="w-full justify-center">
                 {isSimulating ? (
                   <>
                     <Spinner size={14} />
@@ -1617,7 +1620,7 @@ export function DecisionExplorerPage() {
                 )}
               </Button>
             ) : (
-              <Button onClick={run} disabled={loading || !merchantId || routingConfigUnavailable} className="w-full justify-center">
+              <Button onClick={run} disabled={loading || !effectiveMerchantId || routingConfigUnavailable} className="w-full justify-center">
                 {loading ? <><Spinner size={14} /> Running…</> : <><Play size={14} /> Run Single Transaction</>}
               </Button>
             )}
