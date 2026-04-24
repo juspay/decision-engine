@@ -37,9 +37,7 @@ impl AnalyticsRuntime {
                     })?,
             )
         } else {
-            crate::logger::info!(
-                "analytics clickhouse disabled; using unavailable read store"
-            );
+            crate::logger::info!("analytics clickhouse disabled; using unavailable read store");
             Arc::new(UnavailableAnalyticsReadStore)
         };
 
