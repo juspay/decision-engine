@@ -14,6 +14,7 @@ use super::super::time::effective_payment_audit_window_bounds;
 
 #[derive(Debug, Clone, Deserialize, Row)]
 struct AuditSummaryRow {
+    #[serde(alias = "resolved_lookup_key")]
     lookup_key: String,
     payment_id: Option<String>,
     request_id: Option<String>,
@@ -207,7 +208,7 @@ pub async fn load_exact(
 
     let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
     builder.extend_selects([
-        "assumeNotNull(any(lookup_key)) AS lookup_key".to_string(),
+        "assumeNotNull(any(lookup_key)) AS resolved_lookup_key".to_string(),
         "argMax(payment_id, created_at_ms) AS payment_id".to_string(),
         "argMax(request_id, created_at_ms) AS request_id".to_string(),
         "any(merchant_id) AS resolved_merchant_id".to_string(),
