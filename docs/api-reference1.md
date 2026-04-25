@@ -1,7 +1,8 @@
-# API Examples
+# API Reference Moved
 
-The curl examples have moved to the structured reference library:
+The API reference has moved to the canonical pages:
 
-- [Curl API References](api-refs/api-ref)
+- [API Overview](api-reference.md)
+- [API Examples](api-refs/api-ref.mdx)
 
-That section breaks the examples into dedicated pages by endpoint and use-case.
+Use the overview for schema-backed endpoint pages and the examples page for curl-first flows.

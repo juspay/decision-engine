@@ -5,13 +5,17 @@ description: "Curl example for creating a merchant account."
 
 # Create Merchant Account
 
+This public bootstrap route requires the configured admin secret.
+
 ## Request
 
 ```bash
-curl --location --request POST "$BASE_URL/merchant-account/create" \
+curl --location "$BASE_URL/merchant-account/create" \
+  --header "x-admin-secret: <admin_secret>" \
   --header "Content-Type: application/json" \
-  --data-raw '{
-    "merchant_id": "test_merchant_123423"
+  --data '{
+    "merchant_id": "merchant_demo",
+    "gateway_success_rate_based_decider_input": null
   }'
 ```
 
@@ -19,6 +23,9 @@ curl --location --request POST "$BASE_URL/merchant-account/create" \
 
 ```json
 {
-  "Merchant account created successfully"
+  "message": "Merchant account created successfully",
+  "merchant_id": "merchant_demo",
+  "gateway_success_rate_based_decider_input": null,
+  "api_key": "DE_..."
 }
 ```

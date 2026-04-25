@@ -1,84 +1,40 @@
 ---
 title: "Create Routing Algorithm"
-description: "Curl example for /routing/create."
+description: "Curl examples for /routing/create."
 ---
 
 # Create Routing Algorithm
 
-## Request
+Use `/routing/create` to persist a rule-based or volume-based routing algorithm. Use the dedicated shape pages for full examples.
+
+## Priority Rule
 
 ```bash
 curl --location "$BASE_URL/routing/create" \
+  --header "$AUTH_HEADER" \
   --header "Content-Type: application/json" \
   --data '{
-    "name": "Priority rule",
-    "created_by": "merchant_1234",
-    "description": "this is my priority rule",
+    "name": "priority rule",
+    "created_by": "merchant_demo",
+    "description": "try stripe before adyen",
     "algorithm_for": "payment",
     "algorithm": {
-      "type": "advanced",
-      "data": {
-        "globals": {},
-        "default_selection": {
-          "priority": [
-            { "gateway_name": "stripe", "gateway_id": "mca_111" },
-            { "gateway_name": "adyen", "gateway_id": "mca_112" },
-            { "gateway_name": "checkout", "gateway_id": "mca_113" }
-          ]
-        },
-        "rules": [
-          {
-            "name": "Card Rule",
-            "routingType": "priority",
-            "output": {
-              "priority": [
-                { "gateway_name": "Paytm", "gateway_id": "mca_114" },
-                { "gateway_name": "adyen", "gateway_id": "mca_112" }
-              ]
-            },
-            "statements": [
-              {
-                "condition": [
-                  {
-                    "lhs": "payment_method",
-                    "comparison": "equal",
-                    "value": {
-                      "type": "enum_variant",
-                      "value": "card"
-                    },
-                    "metadata": {}
-                  }
-                ]
-              },
-              {
-                "condition": [
-                  {
-                    "lhs": "amount",
-                    "comparison": "greater_than",
-                    "value": {
-                      "type": "number",
-                      "value": 100
-                    },
-                    "metadata": {}
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      }
-    },
-    "metadata": {}
+      "type": "priority",
+      "data": [
+        { "gateway_name": "stripe", "gateway_id": "mca_111" },
+        { "gateway_name": "adyen", "gateway_id": "mca_112" }
+      ]
+    }
   }'
 ```
 
-## Success Response
+## Response
 
 ```json
 {
   "rule_id": "routing_e641380c-6f24-4405-8454-5ae6cbceb7a0",
-  "name": "Priority rule",
-  "created_at": "2025-04-22 11:45:03.411134513",
-  "modified_at": "2025-04-22 11:45:03.411134513"
+  "name": "priority rule",
+  "created_at": "2026-04-25 11:45:03",
+  "modified_at": "2026-04-25 11:45:03"
 }
 ```

@@ -1,42 +1,20 @@
 ---
 title: "Get Success Rate Config"
-description: "Curl example for retrieving success-rate configuration."
+description: "Curl example for reading success-rate scoring config."
 ---
 
 # Get Success Rate Config
 
-## Request
-
 ```bash
-curl -X POST "$BASE_URL/rule/get" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "merchant_id": "test_merchant_123423",
+curl --location "$BASE_URL/rule/get" \
+  --header "$AUTH_HEADER" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "merchant_id": "merchant_demo",
     "algorithm": "successRate"
   }'
 ```
 
-## Response
-
 ```json
-{
-  "merchant_id": "test_merchant_123423",
-  "config": {
-    "type": "successRate",
-    "data": {
-      "defaultLatencyThreshold": 90,
-      "defaultSuccessRate": 0.5,
-      "defaultBucketSize": 200,
-      "defaultHedgingPercent": 5,
-      "subLevelInputConfig": [
-        {
-          "paymentMethodType": "upi",
-          "paymentMethod": "upi_collect",
-          "bucketSize": 250,
-          "hedgingPercent": 1
-        }
-      ]
-    }
-  }
-}
+{ "merchant_id": "merchant_demo", "config": { "type": "successRate" } }
 ```

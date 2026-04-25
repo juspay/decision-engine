@@ -1,31 +1,20 @@
 ---
 title: "Get Elimination Config"
-description: "Curl example for retrieving elimination configuration."
+description: "Curl example for reading elimination config."
 ---
 
 # Get Elimination Config
 
-## Request
-
 ```bash
-curl -X POST "$BASE_URL/rule/get" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "merchant_id": "test_merchant_123423",
+curl --location "$BASE_URL/rule/get" \
+  --header "$AUTH_HEADER" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "merchant_id": "merchant_demo",
     "algorithm": "elimination"
   }'
 ```
 
-## Response
-
 ```json
-{
-  "merchant_id": "test_merchant_123423",
-  "config": {
-    "type": "elimination",
-    "data": {
-      "threshold": 0.35
-    }
-  }
-}
+{ "merchant_id": "merchant_demo", "config": { "type": "elimination" } }
 ```

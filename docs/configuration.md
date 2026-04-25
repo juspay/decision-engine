@@ -66,4 +66,5 @@ For deployment-specific examples, see:
 ## Related Docs
 
 - [Local Setup Guide](local-setup.md)
-- [API Reference](api-reference1.md)
+- [API Reference](api-reference.md)
+- [API Examples](api-refs/api-ref.mdx)

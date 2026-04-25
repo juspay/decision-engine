@@ -111,7 +111,7 @@ This flow:
 - waits for infra health
 - runs PostgreSQL migrations
 - starts the API locally with `cargo run --no-default-features --features postgres`
-- starts the dashboard locally with Vite on `http://localhost:5173/dashboard/`
+- starts the dashboard locally with Vite on `http://localhost:5173/`
 
 By default, `Ctrl+C` stops the local API/dashboard processes and any infra services that `oneclick.sh`
 started itself. To keep infra running after exit:
@@ -213,6 +213,7 @@ Dashboard profiles also expose:
 
 - Dashboard: `http://localhost:8081/dashboard/`
 - Docs: `http://localhost:8081/introduction`
+- API examples: `http://localhost:8081/api-refs/api-ref`
 
 Monitoring profile also exposes:
 

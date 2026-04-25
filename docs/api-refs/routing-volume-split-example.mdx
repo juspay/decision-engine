@@ -5,29 +5,26 @@ description: "Volume-split routing create example."
 
 # Volume Split Example
 
-## Request
-
 ```bash
 curl --location "$BASE_URL/routing/create" \
+  --header "$AUTH_HEADER" \
   --header "Content-Type: application/json" \
   --data '{
-    "name": "volume split test rule",
-    "created_by": "merchant_31",
-    "algorithm_for": "payout",
+    "name": "volume split rule",
+    "created_by": "merchant_demo",
+    "algorithm_for": "payment",
     "algorithm": {
       "type": "volume_split",
       "data": [
         {
           "split": 70,
-          "output": { "gateway_name": "stripe", "gateway_id": "mca_001" }
+          "connectors": [{ "gateway_name": "stripe", "gateway_id": "mca_111" }]
         },
         {
           "split": 30,
-          "output": { "gateway_name": "paytm", "gateway_id": "mca_002" }
+          "connectors": [{ "gateway_name": "adyen", "gateway_id": "mca_112" }]
         }
       ]
     }
   }'
 ```
-
-Provides 70% of decisions as Stripe and 30% as Paytm.

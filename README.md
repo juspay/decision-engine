@@ -106,10 +106,23 @@ Decision Engine is a **high-performance payment gateway router** built in Rust t
 # Clone and run
 git clone https://github.com/juspay/decision-engine.git
 cd decision-engine
-docker compose up -d
+docker compose --profile postgres-ghcr up -d
 
 # That's it! API ready at http://localhost:8080
 ```
+
+For API + dashboard + docs:
+
+```bash
+docker compose --profile dashboard-postgres-ghcr up -d
+```
+
+Open:
+
+- API: `http://localhost:8080`
+- Dashboard: `http://localhost:8081/dashboard/`
+- Docs: `http://localhost:8081/introduction`
+- API examples: `http://localhost:8081/api-refs/api-ref`
 
 ### 🦀 From Source
 
@@ -145,7 +158,8 @@ curl http://localhost:8080/health
 | [Local Setup Guide](docs/local-setup.md) | Canonical guide for CLI, Docker, Compose profiles, and Helm |
 | [MySQL Setup Guide](docs/setup-guide-mysql.md) | MySQL-specific walkthrough |
 | [PostgreSQL Setup Guide](docs/setup-guide-postgres.md) | PostgreSQL-specific walkthrough |
-| [API Reference](docs/api-reference1.md) | Complete REST API documentation |
+| [API Reference](docs/api-reference.md) | OpenAPI-backed REST API documentation |
+| [API Examples](docs/api-refs/api-ref.mdx) | Curl examples for every route family and routing flavour |
 | [Configuration Guide](docs/configuration.md) | All config options explained |
 | [Deep Dive Blog](https://juspay.io/blog/juspay-orchestrator-and-merchant-controlled-routing-engine) | How routing logic works |
 

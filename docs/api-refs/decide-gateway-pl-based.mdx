@@ -1,0 +1,43 @@
+---
+title: "Decide Gateway: Priority List Based"
+description: "Curl example for /decide-gateway using PL_BASED_ROUTING."
+---
+
+# Decide Gateway: Priority List Based
+
+`PL_BASED_ROUTING` evaluates active priority logic and returns the selected connector order.
+
+```bash
+curl --location "$BASE_URL/decide-gateway" \
+  --header "$AUTH_HEADER" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "merchantId": "merchant_demo",
+    "eligibleGatewayList": ["stripe", "adyen", "checkout"],
+    "rankingAlgorithm": "PL_BASED_ROUTING",
+    "eliminationEnabled": false,
+    "paymentInfo": {
+      "paymentId": "pl_001",
+      "amount": 1000,
+      "currency": "USD",
+      "country": "US",
+      "paymentType": "ORDER_PAYMENT",
+      "paymentMethodType": "CARD",
+      "paymentMethod": "CREDIT",
+      "authType": "THREE_DS"
+    }
+  }'
+```
+
+```json
+{
+  "decided_gateway": "stripe",
+  "routing_approach": "PRIORITY_LOGIC",
+  "priority_logic_output": {
+    "isEnforcement": false,
+    "gws": ["stripe", "adyen", "checkout"],
+    "gatewayReferenceIds": {}
+  },
+  "reset_approach": "NO_RESET"
+}
+```
