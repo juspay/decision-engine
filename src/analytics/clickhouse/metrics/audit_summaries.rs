@@ -317,7 +317,10 @@ mod tests {
     use crate::analytics::clickhouse::common::PAYMENT_AUDIT_LOOKUP_SUMMARY_TABLE;
     use crate::analytics::models::{AnalyticsRange, PaymentAuditQuery};
 
-    use super::{finalized_summary_fragment, outer_summary_filters, raw_summary_fragment};
+    use super::{
+        exact_lookup_filter, finalized_summary_fragment, outer_summary_filters,
+        raw_summary_fragment,
+    };
 
     fn payment_audit_query() -> PaymentAuditQuery {
         PaymentAuditQuery {
