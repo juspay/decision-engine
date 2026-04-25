@@ -31,6 +31,25 @@ describe('Auth UI', () => {
     cy.contains(merchantId).should('be.visible')
   })
 
+  it('keeps the sign-up tab active across refresh', () => {
+    cy.visitAppPath('/login', {
+      onBeforeLoad(win) {
+        win.localStorage.removeItem('auth-store')
+        win.localStorage.removeItem('merchant-store')
+      },
+    })
+
+    cy.contains('button', 'Sign up').click()
+    cy.location('pathname').should('include', '/signup')
+    cy.contains('Create account').should('be.visible')
+
+    cy.reload()
+
+    cy.location('pathname').should('include', '/signup')
+    cy.contains('Create account').should('be.visible')
+    cy.contains('button', 'Create account').should('be.visible')
+  })
+
   it('switches duplicate sign-up attempts to sign-in with email preserved', () => {
     const duplicateEmail = `duplicate-${merchantId}@example.com`
 

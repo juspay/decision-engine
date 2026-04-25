@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   ArrowRight,
   Building2,
@@ -32,6 +32,16 @@ interface CreateMerchantResponse {
 }
 
 type Tab = 'login' | 'signup'
+
+interface AuthLocationState {
+  email?: string
+  focusPassword?: boolean
+  notice?: string
+}
+
+function getTabFromPath(pathname: string): Tab {
+  return pathname.endsWith('/signup') ? 'signup' : 'login'
+}
 
 function getPasswordPolicyError(password: string): string | null {
   if (password.length < 10) {
@@ -77,20 +87,45 @@ function isDuplicateEmailError(message: string): boolean {
 
 export function AuthPage() {
   const navigate = useNavigate()
-  const { setAuth, updateMerchant } = useAuthStore()
+  const location = useLocation()
+  const locationState = location.state as AuthLocationState | null
+  const { token, hasHydrated, setAuth, updateMerchant } = useAuthStore()
   const { setMerchantId } = useMerchantStore()
   const assetBaseUrl = import.meta.env.BASE_URL
   const passwordInputRef = useRef<HTMLInputElement>(null)
 
-  const [tab, setTab] = useState<Tab>('login')
-  const [email, setEmail] = useState('')
+  const [tab, setTab] = useState<Tab>(() => getTabFromPath(location.pathname))
+  const [email, setEmail] = useState(locationState?.email ?? '')
   const [password, setPassword] = useState('')
   const [merchantName, setMerchantName] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
-  const [focusPasswordOnLogin, setFocusPasswordOnLogin] = useState(false)
+  const [notice, setNotice] = useState<string | null>(locationState?.notice ?? null)
+  const [focusPasswordOnLogin, setFocusPasswordOnLogin] = useState(
+    Boolean(locationState?.focusPassword),
+  )
+
+  useEffect(() => {
+    if (!hasHydrated || !token || loading) return
+    navigate('/', { replace: true })
+  }, [hasHydrated, loading, navigate, token])
+
+  useEffect(() => {
+    setTab(getTabFromPath(location.pathname))
+
+    if (locationState?.email) {
+      setEmail(locationState.email)
+    }
+
+    if (locationState?.notice) {
+      setNotice(locationState.notice)
+    }
+
+    if (locationState?.focusPassword) {
+      setFocusPasswordOnLogin(true)
+    }
+  }, [location.pathname, locationState?.email, locationState?.focusPassword, locationState?.notice])
 
   useEffect(() => {
     if (tab !== 'login' || !focusPasswordOnLogin) return
@@ -102,6 +137,7 @@ export function AuthPage() {
     setTab(nextTab)
     setError(null)
     setNotice(null)
+    navigate(nextTab === 'login' ? '/login' : '/signup')
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -156,8 +192,17 @@ export function AuthPage() {
 
       if (tab === 'signup' && isDuplicateEmailError(msg)) {
         setTab('login')
-        setNotice('Account already exists. Sign in with this email.')
+        const duplicateEmailNotice = 'Account already exists. Sign in with this email.'
+        setNotice(duplicateEmailNotice)
         setFocusPasswordOnLogin(true)
+        navigate('/login', {
+          replace: true,
+          state: {
+            email,
+            focusPassword: true,
+            notice: duplicateEmailNotice,
+          } satisfies AuthLocationState,
+        })
         return
       }
 

@@ -19,9 +19,11 @@ interface AuthStore {
   token: string | null
   user: AuthUser | null
   merchants: MerchantInfo[]
+  hasHydrated: boolean
   setAuth: (token: string, user: AuthUser, merchants?: MerchantInfo[]) => void
   updateMerchant: (token: string, merchantId: string, merchants: MerchantInfo[]) => void
   clearAuth: () => void
+  setHasHydrated: (hasHydrated: boolean) => void
 }
 
 export const useAuthStore = create<AuthStore>()(
@@ -30,6 +32,7 @@ export const useAuthStore = create<AuthStore>()(
       token: null,
       user: null,
       merchants: [],
+      hasHydrated: false,
       setAuth: (token, user, merchants = []) => {
         tokenRef.set(token)
         set({ token, user, merchants })
@@ -46,6 +49,7 @@ export const useAuthStore = create<AuthStore>()(
         tokenRef.set(null)
         set({ token: null, user: null, merchants: [] })
       },
+      setHasHydrated: (hasHydrated) => set({ hasHydrated }),
     }),
     {
       name: 'auth-store',
@@ -53,6 +57,7 @@ export const useAuthStore = create<AuthStore>()(
         if (state?.token) {
           tokenRef.set(state.token)
         }
+        state?.setHasHydrated(true)
       },
     }
   )

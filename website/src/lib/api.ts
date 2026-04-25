@@ -51,6 +51,54 @@ function logError(path: string, error: unknown) {
   console.log('!'.repeat(80) + '\n')
 }
 
+function valueAsString(value: unknown): string | null {
+  if (typeof value === 'string' && value.trim()) return value.trim()
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  return null
+}
+
+function extractErrorMessageFromJson(value: unknown): string | null {
+  if (!value || typeof value !== 'object') return valueAsString(value)
+
+  const record = value as Record<string, unknown>
+  const directKeys = [
+    'message',
+    'error_message',
+    'user_message',
+    'developer_message',
+    'error',
+    'detail',
+    'details',
+  ]
+
+  for (const key of directKeys) {
+    const message = valueAsString(record[key])
+    if (message) return message
+  }
+
+  for (const key of ['data', 'error_info', 'context']) {
+    const nested = extractErrorMessageFromJson(record[key])
+    if (nested) return nested
+  }
+
+  return null
+}
+
+function buildApiErrorMessage(status: number, statusText: string, responseText: string) {
+  const trimmed = responseText.trim()
+  let detail = ''
+
+  if (trimmed) {
+    try {
+      detail = extractErrorMessageFromJson(JSON.parse(trimmed)) || trimmed
+    } catch {
+      detail = trimmed
+    }
+  }
+
+  return `API error ${status}: ${detail || statusText || 'Request failed'}`
+}
+
 export async function apiFetch<T>(
   path: string,
   options?: RequestInit
@@ -113,7 +161,12 @@ export async function apiFetch<T>(
     }
 
     if (!res.ok) {
-      const error = new Error(`API error ${res.status}: ${responseText}`)
+      const error = new Error(buildApiErrorMessage(res.status, res.statusText, responseText)) as Error & {
+        status?: number
+        responseText?: string
+      }
+      error.status = res.status
+      error.responseText = responseText
       logError(requestPath, error)
       throw error
     }

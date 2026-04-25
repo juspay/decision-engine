@@ -17,6 +17,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="login" element={<AuthPage />} />
+      <Route path="signup" element={<AuthPage />} />
       <Route element={<AuthGuard />}>
         <Route path="onboarding" element={<OnboardingPage />} />
         <Route element={<AppShell />}>

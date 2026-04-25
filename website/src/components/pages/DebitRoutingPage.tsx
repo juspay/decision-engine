@@ -126,7 +126,7 @@ export function DebitRoutingPage() {
         </CardHeader>
         <CardBody className="space-y-3 text-sm text-slate-600 dark:text-[#aab5c8]">
           <p>
-            This toggle controls the backend runtime gate for <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-brand-600 dark:bg-[#111118]">NtwBasedRouting</code> and hybrid debit routing.
+            This toggle controls the backend runtime gate for <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-brand-600 dark:bg-[#111118]">NTW_BASED_ROUTING</code> and hybrid debit routing.
           </p>
           <p>
             Detailed debit fee tables and network cost configuration are still backend configuration, not dashboard-editable rule config. This page only enables or disables merchant access to the runtime debit-routing flow.

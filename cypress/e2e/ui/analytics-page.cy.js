@@ -78,8 +78,8 @@ describe('Analytics UI', () => {
       .parents('div.space-y-6')
       .first()
       .within(() => {
-        cy.contains('button', /^Transactions$/).should('be.visible')
-        cy.contains('button', /^Rule-Based$/).should('be.visible')
+        cy.contains('button', /^Auth-rate based$/).should('be.visible')
+        cy.contains('button', /^Rule based \/ Volume based$/).should('be.visible')
       })
 
     cy.intercept('GET', '**/analytics/overview*', (req) => {
@@ -91,7 +91,7 @@ describe('Analytics UI', () => {
 
     cy.get('select').first().select('Last 1 week')
     cy.contains('button', 'Refresh').click()
-    cy.contains(/Refreshing transaction analytics for/i).should('be.visible')
+    cy.contains(/Refreshing auth-rate based analytics for/i).should('be.visible')
     cy.wait('@overviewRefresh')
     cy.wait('@routingRefresh')
 
@@ -102,10 +102,10 @@ describe('Analytics UI', () => {
       .parents('div.space-y-6')
       .first()
       .within(() => {
-        cy.contains('button', /^Rule-Based$/).scrollIntoView().click({ force: true })
+        cy.contains('button', /^Rule based \/ Volume based$/).scrollIntoView().click({ force: true })
       })
     cy.contains(
-      'Preview-only activity for rule-based routing, separate from transaction decisions and score updates.',
+      'Routing activity for rule-based and volume-based flows, separate from auth-rate score updates.',
     ).should('exist')
   })
 })

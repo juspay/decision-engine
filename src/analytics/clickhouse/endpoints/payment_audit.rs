@@ -62,8 +62,10 @@ pub async fn load(
     };
     let page = query.page;
     let page_size = query.page_size;
-    let selected_lookup_key =
-        requested_lookup_key.or_else(|| results.first().map(|row| row.lookup_key.clone()));
+    let selected_lookup_key = results
+        .first()
+        .map(|row| row.lookup_key.clone())
+        .or(requested_lookup_key);
 
     let timeline = if let Some(lookup_key) = selected_lookup_key.clone() {
         metrics::audit_timeline::load(client, query, preview_only, &lookup_key)
@@ -107,6 +109,7 @@ pub async fn load(
         },
         status: query.status.clone(),
         flow_type: query.flow_type.clone(),
+        routing_approach: query.routing_approach.clone(),
         error_code: query.error_code.clone(),
         page,
         page_size,

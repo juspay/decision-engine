@@ -1,4 +1,4 @@
-import { useLayoutEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard,
@@ -10,13 +10,27 @@ import {
   Network,
   BarChart3,
   Activity,
+  Moon,
+  Sun,
 } from 'lucide-react'
 
 export function Sidebar() {
   const location = useLocation()
   const [pendingPath, setPendingPath] = useState<string | null>(null)
+  const [isDark, setIsDark] = useState(() => localStorage.getItem('theme') !== 'light')
   const selectedPath = pendingPath ?? location.pathname
   const assetBaseUrl = import.meta.env.BASE_URL
+
+  useEffect(() => {
+    const root = window.document.documentElement
+    if (isDark) {
+      root.classList.add('dark')
+      localStorage.setItem('theme', 'dark')
+    } else {
+      root.classList.remove('dark')
+      localStorage.setItem('theme', 'light')
+    }
+  }, [isDark])
 
   useLayoutEffect(() => {
     if (!pendingPath) {
@@ -78,8 +92,17 @@ export function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div className="border-t border-slate-200 bg-white px-6 py-5 transition-colors duration-300 dark:border-[#22262f] dark:bg-[#0a0d12]">
+      <div className="flex items-center justify-between border-t border-slate-200 bg-white px-6 py-5 transition-colors duration-300 dark:border-[#22262f] dark:bg-[#0a0d12]">
         <span className="text-[11px] font-medium tracking-wide text-slate-500 dark:text-[#7d879b]">v1.4</span>
+        <button
+          type="button"
+          onClick={() => setIsDark((value) => !value)}
+          className="flex h-9 w-9 items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-[#1a1f2a] dark:hover:text-white"
+          aria-label="Toggle theme"
+          title="Toggle theme"
+        >
+          {isDark ? <Sun size={18} /> : <Moon size={18} />}
+        </button>
       </div>
     </aside>
   )

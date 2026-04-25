@@ -1077,7 +1077,7 @@
           "Analytics"
         ],
         "summary": "Preview trace",
-        "description": "ClickHouse-backed preview trace read endpoint.",
+        "description": "ClickHouse-backed rule preview trace read endpoint.",
         "security": [
           {
             "BearerAuth": []
@@ -1258,7 +1258,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Preview trace",
+            "description": "Decision trace",
             "content": {
               "application/json": {
                 "schema": {

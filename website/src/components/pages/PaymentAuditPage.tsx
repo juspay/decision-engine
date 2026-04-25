@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import useSWR from 'swr'
-import { useSearchParams } from 'react-router-dom'
+import { useLocation, useSearchParams } from 'react-router-dom'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useAuthStore } from '../../store/authStore'
 import { fetcher } from '../../lib/api'
@@ -30,6 +30,8 @@ const ROUTE_OPTIONS = [
   { value: 'routing_evaluate', label: 'Rule Evaluate' },
 ]
 const INSPECTOR_TABS = ['summary', 'input', 'response', 'raw'] as const
+const DEBIT_ROUTING_APPROACH = 'NTW_BASED_ROUTING'
+const CATCH_UP_REFRESH_DELAYS_MS = [750, 2000, 4000]
 
 type AuditFilters = {
   paymentId: string
@@ -42,7 +44,13 @@ type AuditFilters = {
 }
 
 type InspectorTab = (typeof INSPECTOR_TABS)[number]
-type AuditMode = 'transactions' | 'rule_based'
+type AuditMode = 'transactions' | 'rule_based' | 'debit_routing'
+const AUDIT_MODE_LABELS: Record<AuditMode, string> = {
+  transactions: 'Auth-rate based',
+  rule_based: 'Rule based / Volume based',
+  debit_routing: 'Debit routing',
+}
+
 type TimeWindow = {
   start_ms: number
   end_ms: number
@@ -59,8 +67,9 @@ const EMPTY_FILTERS: AuditFilters = {
 }
 
 function normalizeAuditFilters(filters: AuditFilters): AuditFilters {
-  const paymentId = filters.paymentId.trim()
-  const requestId = paymentId ? '' : filters.requestId.trim()
+  const lookupValue = filters.paymentId.trim() || filters.requestId.trim()
+  const requestId = looksLikeRequestIdentifier(lookupValue) ? lookupValue : ''
+  const paymentId = requestId ? '' : lookupValue
   return {
     paymentId,
     requestId,
@@ -70,6 +79,13 @@ function normalizeAuditFilters(filters: AuditFilters): AuditFilters {
     flowType: filters.flowType.trim(),
     errorCode: filters.errorCode.trim(),
   }
+}
+
+function looksLikeRequestIdentifier(value: string) {
+  return (
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value) ||
+    /^req[_-]/i.test(value)
+  )
 }
 
 function flowTypeValue(event: PaymentAuditEvent) {
@@ -113,6 +129,8 @@ function buildAuditUrl(
   pageSize: number,
   filters: AuditFilters,
   customWindow?: TimeWindow,
+  routingApproach?: string,
+  excludedRoutingApproach?: string,
 ) {
   const normalizedFilters = normalizeAuditFilters(filters)
   const params: Record<string, string | number | undefined> = {
@@ -127,6 +145,8 @@ function buildAuditUrl(
     route: normalizedFilters.route || undefined,
     status: normalizedFilters.status || undefined,
     flow_type: normalizedFilters.flowType || undefined,
+    routing_approach: routingApproach,
+    exclude_routing_approach: excludedRoutingApproach,
     error_code: normalizedFilters.errorCode || undefined,
   }
   const qs = queryString(params)
@@ -140,13 +160,22 @@ function parseRange(value: string | null): AnalyticsRangeValue {
 }
 
 function parseAuditMode(value: string | null): AuditMode {
+  if (value === 'debit_routing') return 'debit_routing'
   return value === 'rule_based' ? 'rule_based' : 'transactions'
+}
+
+function routingApproachForMode(mode: AuditMode): string | undefined {
+  return mode === 'debit_routing' ? DEBIT_ROUTING_APPROACH : undefined
+}
+
+function excludedRoutingApproachForMode(mode: AuditMode): string | undefined {
+  return mode === 'transactions' ? DEBIT_ROUTING_APPROACH : undefined
 }
 
 function parseFilters(searchParams: URLSearchParams): AuditFilters {
   return normalizeAuditFilters({
-    paymentId: searchParams.get('payment_id') || '',
-    requestId: searchParams.get('request_id') || '',
+    paymentId: searchParams.get('payment_id') || searchParams.get('request_id') || '',
+    requestId: '',
     gateway: searchParams.get('gateway') || '',
     route: searchParams.get('route') || '',
     status: searchParams.get('status') || '',
@@ -233,7 +262,7 @@ function stageLabel(event: PaymentAuditEvent) {
   if (event.event_stage === 'score_updated') return 'Update Gateway'
   if (event.event_stage === 'rule_applied') return 'Rule Evaluate'
   if (event.event_stage === 'preview_evaluated' || isPreviewFlow(flowType)) {
-    return 'Preview Result'
+    return 'Decision Result'
   }
   if (isErrorFlow(flowType)) return 'Errors'
   return humanizeAuditValue(event.event_stage || flowType)
@@ -244,7 +273,7 @@ function eventPhase(event: PaymentAuditEvent) {
   if (isDecisionFlow(flowType) || event.event_stage === 'gateway_decided') return 'Decide Gateway'
   if (isRuleHitFlow(flowType) || event.event_stage === 'rule_applied') return 'Rule Evaluate'
   if (isPreviewFlow(flowType) || event.event_stage === 'preview_evaluated') {
-    return 'Rule Preview'
+    return 'Rule Decision'
   }
   if (isUpdateFlow(flowType) || event.event_stage === 'score_updated') return 'Update Gateway'
   return 'Errors'
@@ -443,12 +472,15 @@ function buildInspectorModel(event: PaymentAuditEvent | null) {
 }
 
 export function PaymentAuditPage() {
+  const location = useLocation()
   const { merchantId } = useMerchantStore()
   const authMerchantId = useAuthStore((state) => state.user?.merchantId || '')
   const effectiveMerchantId = merchantId || authMerchantId
   const [searchParams, setSearchParams] = useSearchParams()
 
-  const initialMode = parseAuditMode(searchParams.get('mode'))
+  const initialMode = searchParams.get('routing_approach') === DEBIT_ROUTING_APPROACH
+    ? 'debit_routing'
+    : parseAuditMode(searchParams.get('mode'))
   const initialRange = searchParams.get('start_ms') && searchParams.get('end_ms')
     ? 'custom'
     : parseRange(searchParams.get('range'))
@@ -488,15 +520,26 @@ export function PaymentAuditPage() {
   }, [customEnd, customStart, range])
 
   const auditPath = mode === 'rule_based' ? '/analytics/preview-trace' : '/analytics/payment-audit'
+  const modeRoutingApproach = routingApproachForMode(mode)
+  const modeExcludedRoutingApproach = excludedRoutingApproachForMode(mode)
 
   const searchUrl =
     range !== 'custom' || customWindow
-      ? buildAuditUrl(auditPath, range, page, pageSize, appliedFilters, customWindow)
+      ? buildAuditUrl(
+          auditPath,
+          range,
+          page,
+          pageSize,
+          appliedFilters,
+          customWindow,
+          modeRoutingApproach,
+          modeExcludedRoutingApproach,
+        )
       : null
 
   const auditSearch = useSWR<PaymentAuditResponse>(searchUrl, fetcher, {
-    refreshInterval: 12000,
-    revalidateOnFocus: true,
+    revalidateOnFocus: false,
+    revalidateOnMount: true,
   })
 
   const selectedSummary = useMemo(() => {
@@ -517,10 +560,10 @@ export function PaymentAuditPage() {
 
   const detailFilters = useMemo<AuditFilters | null>(() => {
     if (!selectedSummary) return null
-    const paymentId = selectedSummary.payment_id || ''
+    const lookupValue = selectedSummary.payment_id || selectedSummary.request_id || ''
     return {
-      paymentId,
-      requestId: paymentId ? '' : (selectedSummary.request_id || ''),
+      paymentId: lookupValue,
+      requestId: '',
       gateway: '',
       route: '',
       status: '',
@@ -530,13 +573,38 @@ export function PaymentAuditPage() {
   }, [selectedSummary])
 
   const detailUrl = detailFilters
-    ? buildAuditUrl(auditPath, range, 1, 50, detailFilters, customWindow)
+    ? buildAuditUrl(
+        auditPath,
+        range,
+        1,
+        50,
+        detailFilters,
+        customWindow,
+        modeRoutingApproach,
+        modeExcludedRoutingApproach,
+      )
     : null
 
   const auditDetail = useSWR<PaymentAuditResponse>(detailUrl, fetcher, {
-    refreshInterval: 12000,
-    revalidateOnFocus: true,
+    revalidateOnFocus: false,
+    revalidateOnMount: true,
   })
+
+  useEffect(() => {
+    const revalidateAudit = () => {
+      void auditSearch.mutate()
+      void auditDetail.mutate()
+    }
+
+    revalidateAudit()
+    const timers = CATCH_UP_REFRESH_DELAYS_MS.map((delay) =>
+      window.setTimeout(revalidateAudit, delay),
+    )
+
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer))
+    }
+  }, [location.key, mode])
 
   const timeline = auditDetail.data?.timeline || []
 
@@ -575,30 +643,44 @@ export function PaymentAuditPage() {
   const content = mode === 'rule_based'
     ? {
         title: 'Decision Audit',
-        description: 'Inspect preview-only rule activity from /routing/evaluate without mixing it into transaction outcomes.',
-        merchantPrompt: 'Analytics is scoped to your signed-in merchant. The top-bar merchant selector is not used for preview-trace access.',
-        searchTitle: 'Search Rule Preview Trail',
-        searchDescription: 'Use preview payment IDs or request IDs when you have them. Gateway, status, and error code help narrow rule-preview activity quickly.',
-        matchingLabel: 'Matching previews',
-        matchingDescription: 'Scan the current result set and pick a preview to open its full trace.',
-        summaryLabel: 'Selected Preview Timeline',
-        summaryEmpty: 'Pick a preview from the left column to see the full rule evaluation trace.',
-        noMatchesTitle: 'No matching previews found',
-        noMatchesBody: 'Try widening the time range or searching by a preview payment ID, request ID, or gateway.',
+        description: 'Inspect rule decisions from /routing/evaluate without mixing them into auth-rate transaction outcomes.',
+        merchantPrompt: 'Analytics is scoped to your signed-in merchant. The top-bar merchant selector is not used for rule decision access.',
+        searchTitle: 'Search Rule Decision Trail',
+        searchDescription: 'Use decision payment IDs or request IDs when you have them. Gateway, status, and error code help narrow rule decision activity quickly.',
+        matchingLabel: 'Matching decisions',
+        matchingDescription: 'Scan the current result set and pick a decision to open its full trace.',
+        summaryLabel: 'Selected Decision Timeline',
+        summaryEmpty: 'Pick a decision from the left column to see the full rule evaluation trace.',
+        noMatchesTitle: 'No matching decisions found',
+        noMatchesBody: 'Try widening the time range or searching by a decision payment ID, request ID, or gateway.',
       }
-    : {
-        title: 'Decision Audit',
-        description: 'Search by payment or request, then inspect gateway decisions, gateway updates, rule evaluations, and errors with the exact payload captured at each step.',
-        merchantPrompt: 'Analytics is scoped to your signed-in merchant. The top-bar merchant selector is not used for payment-audit access.',
-        searchTitle: 'Search Decision Trail',
-        searchDescription: 'Use payment or request IDs when you have them. Error code, gateway, route, and status narrow operational noise quickly.',
-        matchingLabel: 'Matching payments',
-        matchingDescription: 'Scan the current result set and pick a payment to open its full event trail.',
-        summaryLabel: 'Selected Payment Timeline',
-        summaryEmpty: 'Pick a payment from the left column to see the full transaction trail.',
-        noMatchesTitle: 'No matching payments found',
-        noMatchesBody: 'Try widening the time range or searching by a single payment ID, request ID, or error code.',
-      }
+    : mode === 'debit_routing'
+      ? {
+          title: 'Decision Audit',
+          description: 'Search debit-routing decisions produced by /decide-gateway with NTW_BASED_ROUTING.',
+          merchantPrompt: 'Analytics is scoped to your signed-in merchant. The top-bar merchant selector is not used for debit-routing audit access.',
+          searchTitle: 'Search Debit Routing Trail',
+          searchDescription: 'Use payment or request IDs when you have them. Gateway, status, and error code help narrow debit-routing outcomes quickly.',
+          matchingLabel: 'Matching debit decisions',
+          matchingDescription: 'Scan the current result set and pick a debit-routing payment to open its full event trail.',
+          summaryLabel: 'Selected Debit Routing Timeline',
+          summaryEmpty: 'Pick a debit-routing payment from the left column to see the full decision trail.',
+          noMatchesTitle: 'No debit-routing decisions found',
+          noMatchesBody: 'Run the Debit Routing tab in Decision Explorer, or widen the time range.',
+        }
+      : {
+          title: 'Decision Audit',
+          description: 'Search by payment or request, then inspect gateway decisions, gateway updates, rule evaluations, and errors with the exact payload captured at each step.',
+          merchantPrompt: 'Analytics is scoped to your signed-in merchant. The top-bar merchant selector is not used for payment-audit access.',
+          searchTitle: 'Search Decision Trail',
+          searchDescription: 'Use payment or request IDs when you have them. Error code, gateway, route, and status narrow operational noise quickly.',
+          matchingLabel: 'Matching payments',
+          matchingDescription: 'Scan the current result set and pick a payment to open its full event trail.',
+          summaryLabel: 'Selected Payment Timeline',
+          summaryEmpty: 'Pick a payment from the left column to see the full transaction trail.',
+          noMatchesTitle: 'No matching payments found',
+          noMatchesBody: 'Try widening the time range or searching by a single payment ID, request ID, or error code.',
+        }
 
   function syncSearch(
     nextMode: AuditMode,
@@ -610,7 +692,7 @@ export function PaymentAuditPage() {
   ) {
     const normalizedFilters = normalizeAuditFilters(nextFilters)
     const nextQuery = queryString({
-      mode: nextMode === 'rule_based' ? nextMode : undefined,
+      mode: nextMode === 'transactions' ? undefined : nextMode,
       range: nextRange,
       page: nextPage > 1 ? nextPage : undefined,
       start_ms: nextRange === 'custom' ? nextCustomWindow?.start_ms : undefined,
@@ -621,6 +703,8 @@ export function PaymentAuditPage() {
       route: normalizedFilters.route || undefined,
       status: normalizedFilters.status || undefined,
       flow_type: normalizedFilters.flowType || undefined,
+      routing_approach: routingApproachForMode(nextMode),
+      exclude_routing_approach: excludedRoutingApproachForMode(nextMode),
       error_code: normalizedFilters.errorCode || undefined,
       selected: nextSelectedKey || undefined,
     })
@@ -635,7 +719,7 @@ export function PaymentAuditPage() {
     const nextPage = 1
     const normalizedFilters = normalizeAuditFilters({
       ...filters,
-      route: mode === 'rule_based' ? '' : filters.route,
+      route: mode === 'transactions' ? filters.route : '',
     })
     setPage(nextPage)
     setFilters(normalizedFilters)
@@ -647,7 +731,7 @@ export function PaymentAuditPage() {
     const nextPage = 1
     const clearedFilters = {
       ...EMPTY_FILTERS,
-      route: mode === 'rule_based' ? '' : EMPTY_FILTERS.route,
+      route: mode === 'transactions' ? EMPTY_FILTERS.route : '',
     }
     setPage(nextPage)
     setFilters(clearedFilters)
@@ -698,7 +782,7 @@ export function PaymentAuditPage() {
     const nextPage = 1
     const nextFilters = normalizeAuditFilters({
       ...filters,
-      route: nextMode === 'rule_based' ? '' : filters.route,
+      route: nextMode === 'transactions' ? filters.route : '',
     })
 
     setMode(nextMode)
@@ -721,10 +805,10 @@ export function PaymentAuditPage() {
 
   function openRelatedEvents() {
     if (!selectedEvent) return
-    const paymentId = selectedEvent.payment_id || ''
+    const lookupValue = selectedEvent.payment_id || selectedEvent.request_id || ''
     const nextFilters: AuditFilters = {
-      paymentId,
-      requestId: paymentId ? '' : (selectedEvent.request_id || ''),
+      paymentId: lookupValue,
+      requestId: '',
       gateway: selectedEvent.gateway || '',
       route: '',
       status: '',
@@ -747,8 +831,10 @@ export function PaymentAuditPage() {
           </div>
           <p className="max-w-3xl text-sm text-slate-500 dark:text-[#8a8a93]">
             {mode === 'rule_based'
-              ? 'Inspect preview traces, routing logic, and simulated rule outcomes for any request.'
-              : 'Inspect gateway decisions, routing logic, and connector scores for any payment.'}
+              ? 'Inspect rule-based and volume-based routing decisions, traces, and connector outcomes.'
+              : mode === 'debit_routing'
+                ? 'Inspect debit-routing network decisions and ranked co-badged card outcomes.'
+                : 'Inspect auth-rate routing decisions, routing logic, and connector scores for any payment.'}
           </p>
         </div>
 
@@ -806,7 +892,7 @@ export function PaymentAuditPage() {
             className={sectionButtonClass(mode === 'transactions')}
             onClick={() => updateMode('transactions')}
           >
-            Transactions
+            {AUDIT_MODE_LABELS.transactions}
           </Button>
           <Button
             size="sm"
@@ -814,22 +900,28 @@ export function PaymentAuditPage() {
             className={sectionButtonClass(mode === 'rule_based')}
             onClick={() => updateMode('rule_based')}
           >
-            Rule-Based
+            {AUDIT_MODE_LABELS.rule_based}
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            className={sectionButtonClass(mode === 'debit_routing')}
+            onClick={() => updateMode('debit_routing')}
+          >
+            {AUDIT_MODE_LABELS.debit_routing}
           </Button>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
           <input
-            className={`${controlClassName()} min-w-[280px] flex-1`}
-            value={filters.paymentId}
+            className={`${controlClassName()} min-w-[320px] flex-[1.4]`}
+            value={filters.paymentId || filters.requestId}
             onChange={(event) => updateFilter('paymentId', event.target.value)}
-            placeholder={mode === 'rule_based' ? 'Preview payment ID' : 'Payment ID or request ID'}
-          />
-          <input
-            className={`${controlClassName()} min-w-[240px] flex-1`}
-            value={filters.requestId}
-            onChange={(event) => updateFilter('requestId', event.target.value)}
-            placeholder="Request ID"
+            placeholder={
+              mode === 'rule_based'
+                ? 'Decision payment ID'
+                : 'Payment ID'
+            }
           />
           <input
             className={`${controlClassName()} min-w-[180px] flex-1`}
@@ -866,7 +958,7 @@ export function PaymentAuditPage() {
 
         {showAdvancedFilters ? (
           <GlassCard className="p-4">
-            <div className={`grid gap-3 md:grid-cols-2 ${mode === 'rule_based' ? 'xl:grid-cols-2' : 'xl:grid-cols-3'}`}>
+            <div className={`grid gap-3 md:grid-cols-2 ${mode === 'transactions' ? 'xl:grid-cols-3' : 'xl:grid-cols-2'}`}>
               {mode === 'transactions' ? (
                 <FilterField label="Route">
                   <select className={controlClassName()} value={filters.route} onChange={(event) => updateFilter('route', event.target.value)}>

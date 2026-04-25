@@ -14,10 +14,10 @@ export interface DecideGatewayResponse {
 }
 
 export type RoutingAlgorithmName =
-  | 'SrBasedRouting'
-  | 'PlBasedRouting'
-  | 'NtwBasedRouting'
-  | 'NtwSrHybridRouting'
+  | 'SR_BASED_ROUTING'
+  | 'PL_BASED_ROUTING'
+  | 'NTW_BASED_ROUTING'
+  | 'NTW_SR_HYBRID_ROUTING'
 
 export interface DebitRoutingNetworkSavingInfo {
   network: string
@@ -378,6 +378,7 @@ export interface PaymentAuditResponse {
   route?: string | null
   status?: string | null
   flow_type?: string | null
+  routing_approach?: string | null
   error_code?: string | null
   page: number
   page_size: number

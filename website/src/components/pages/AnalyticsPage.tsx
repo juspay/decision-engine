@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import useSWR from 'swr'
 import {
   Area,
@@ -46,6 +47,11 @@ type RoutingFilters = {
 }
 
 type AnalyticsView = 'transactions' | 'rule_based'
+const ANALYTICS_VIEW_LABELS: Record<AnalyticsView, string> = {
+  transactions: 'Auth-rate based',
+  rule_based: 'Rule based / Volume based',
+}
+
 type PreviewTraceKey = readonly [
   'preview-trace-analytics',
   AnalyticsRangeValue,
@@ -98,6 +104,7 @@ const MAX_VISIBLE_DIMENSIONS = 3
 const PREVIEW_TRACE_PAGE_SIZE = 50
 const MAX_PREVIEW_TRACE_PAGES = 5
 const PREVIEW_LIST_PAGE_SIZE = 10
+const CATCH_UP_REFRESH_DELAYS_MS = [750, 2000, 4000]
 const CARD_INFO: Record<'hits' | 'share' | 'sr' | 'preview_hits' | 'preview_activity' | 'preview_share', InfoContent> = {
   hits: {
     title: 'API call counts',
@@ -119,21 +126,21 @@ const CARD_INFO: Record<'hits' | 'share' | 'sr' | 'preview_hits' | 'preview_acti
   },
   preview_hits: {
     title: 'Rule-based summary',
-    purpose: 'Use these cards to distinguish preview request volume from the connector coverage produced by rule-based routing.',
-    calculation: 'Rule Evaluate counts come from request-hit analytics for `/routing/evaluate`. Gateway coverage counts the unique connectors selected in the fetched preview sample.',
-    source: 'Reads `request_hit` and `rule_evaluation_preview` analytics associated with preview routing activity.',
+    purpose: 'Use these cards to distinguish rule decision volume from the connector coverage produced by rule-based routing.',
+    calculation: 'Rule Evaluate counts come from request-hit analytics for `/routing/evaluate`. Gateway coverage counts the unique connectors selected in the fetched decision sample.',
+    source: 'Reads request-hit and rule decision analytics associated with rule-based routing activity.',
   },
   preview_activity: {
     title: 'Connector selections over time',
-    purpose: 'Use this to see which connectors were selected in each time bucket inside the selected preview window.',
-    calculation: 'Returned preview traces are bucketed by time using each trace\'s latest activity timestamp, then grouped by latest selected connector. The chart shows connector counts per bucket.',
-    source: 'Reads `rule_evaluation_preview` activity through `/analytics/preview-trace`.',
+    purpose: 'Use this to see which connectors were selected in each time bucket inside the selected decision window.',
+    calculation: 'Returned decision traces are bucketed by time using each trace\'s latest activity timestamp, then grouped by latest selected connector. The chart shows connector counts per bucket.',
+    source: 'Reads rule decision activity through `/analytics/preview-trace`.',
   },
   preview_share: {
     title: 'Rule-based gateway selection mix',
-    purpose: 'Use this to see which connectors dominate the fetched rule-preview sample, separate from real transaction decisions.',
-    calculation: 'Returned preview traces are grouped by latest selected connector and displayed as share of the fetched preview sample.',
-    source: 'Reads `rule_evaluation_preview` activity through `/analytics/preview-trace`.',
+    purpose: 'Use this to see which connectors dominate the fetched rule decision sample, separate from auth-rate transaction decisions.',
+    calculation: 'Returned decision traces are grouped by latest selected connector and displayed as share of the fetched decision sample.',
+    source: 'Reads rule decision activity through `/analytics/preview-trace`.',
   },
 }
 
@@ -299,6 +306,10 @@ function bucketTimestamp(ms: number, bucketSize: number) {
   return ms - (ms % Math.max(1, bucketSize))
 }
 
+function sortedGateways(values: string[]) {
+  return Array.from(new Set(values)).sort((left, right) => left.localeCompare(right)).slice(0, 6)
+}
+
 function buildBucketTimeline(window: TimeWindow, bucketSize: number) {
   const buckets: number[] = []
   const safeBucketSize = Math.max(1, bucketSize)
@@ -361,22 +372,6 @@ function PendingState({ title, body }: { title: string; body: string }) {
       </div>
       <p className="mt-4 text-sm font-semibold text-slate-900 dark:text-white">{title}</p>
       <p className="mt-2 text-sm text-slate-500 dark:text-[#8a8a93]">{body}</p>
-    </div>
-  )
-}
-
-function RefreshingState({ label }: { label: string }) {
-  return (
-    <div className="overflow-hidden rounded-[22px] border border-brand-500/20 bg-white shadow-[0_10px_30px_-24px_rgba(0,105,237,0.9)] dark:bg-[#0c0c0e]">
-      <div className="h-2 w-full bg-brand-500/15">
-        <div className="h-full origin-left animate-[analytics-progress_1.8s_ease-in-out_infinite] rounded-r-full bg-brand-500" />
-      </div>
-      <div className="flex items-center justify-between gap-3 px-4 py-3">
-        <p className="text-sm font-medium text-slate-900 dark:text-white">{label}</p>
-        <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-brand-600 dark:text-brand-300">
-          Loading
-        </span>
-      </div>
     </div>
   )
 }
@@ -532,12 +527,14 @@ function analyticsRouteLabel(route: string) {
 }
 
 export function AnalyticsPage() {
+  const location = useLocation()
   const { merchantId } = useMerchantStore()
   const authMerchantId = useAuthStore((state) => state.user?.merchantId || '')
   const effectiveMerchantId = merchantId || authMerchantId
   const [range, setRange] = useState<AnalyticsRangeValue>('1h')
   const [view, setView] = useState<AnalyticsView>('transactions')
   const [routingFilters, setRoutingFilters] = useState<RoutingFilters>(EMPTY_ROUTING_FILTERS)
+  const [connectorFiltersOpen, setConnectorFiltersOpen] = useState(false)
   const [showAllFilters, setShowAllFilters] = useState(false)
   const [previewListPage, setPreviewListPage] = useState(1)
   const [customStart, setCustomStart] = useState(() =>
@@ -589,10 +586,12 @@ export function AnalyticsPage() {
   const overviewSwrOptions = {
     revalidateOnFocus: false,
     revalidateIfStale: false,
+    revalidateOnMount: true,
   } as const
   const routingSwrOptions = {
     revalidateOnFocus: false,
     revalidateIfStale: false,
+    revalidateOnMount: true,
   } as const
   const filteredRoutingSwrOptions = {
     ...routingSwrOptions,
@@ -601,6 +600,7 @@ export function AnalyticsPage() {
   const previewListSwrOptions = {
     revalidateOnFocus: false,
     revalidateIfStale: false,
+    revalidateOnMount: true,
     keepPreviousData: true,
   } as const
 
@@ -625,6 +625,7 @@ export function AnalyticsPage() {
     {
       revalidateOnFocus: false,
       revalidateIfStale: false,
+      revalidateOnMount: true,
     },
   )
   const previewList = useSWR<PaymentAuditResponse>(
@@ -632,6 +633,28 @@ export function AnalyticsPage() {
     fetcher,
     previewListSwrOptions,
   )
+
+  useEffect(() => {
+    const revalidateCurrentView = () => {
+      void overview.mutate()
+      if (view === 'transactions') {
+        void routing.mutate()
+        void filteredRouting.mutate()
+        return
+      }
+      void previewTrace.mutate()
+      void previewList.mutate()
+    }
+
+    revalidateCurrentView()
+    const timers = CATCH_UP_REFRESH_DELAYS_MS.map((delay) =>
+      window.setTimeout(revalidateCurrentView, delay),
+    )
+
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer))
+    }
+  }, [location.key, view])
 
   const transactionLoading =
     (!overview.data && overview.isLoading) ||
@@ -652,13 +675,6 @@ export function AnalyticsPage() {
     null
   const loading = view === 'transactions' ? transactionLoading : ruleBasedLoading
   const error = view === 'transactions' ? transactionError : ruleBasedError
-  const transactionRefreshing =
-    !transactionLoading &&
-    (overview.isValidating || routing.isValidating || filteredRouting.isValidating)
-  const ruleBasedRefreshing =
-    !ruleBasedLoading &&
-    (overview.isValidating || previewTrace.isValidating || previewList.isValidating)
-  const refreshing = view === 'transactions' ? transactionRefreshing : ruleBasedRefreshing
 
   const availableFilters: RoutingFilterOptions = {
     dimensions:
@@ -877,7 +893,7 @@ export function AnalyticsPage() {
   }, [previewListPage, previewListTotalPages, previewListTotalResults])
 
   const gatewayShareData = useMemo(() => {
-    const gateways = Array.from(new Set((routing.data?.gateway_share || []).map((point) => point.gateway))).slice(0, 6)
+    const gateways = sortedGateways((routing.data?.gateway_share || []).map((point) => point.gateway))
     if (!gateways.length) {
       return {
         gateways,
@@ -922,7 +938,7 @@ export function AnalyticsPage() {
   }, [chartBucketSize, effectiveWindow, routing.data])
 
   const connectorTrendData = useMemo(() => {
-    const gateways = Array.from(new Set((filteredRouting.data?.sr_trend || []).map((point) => point.gateway))).slice(0, 6)
+    const gateways = sortedGateways((filteredRouting.data?.sr_trend || []).map((point) => point.gateway))
     if (!gateways.length) {
       return {
         gateways,
@@ -1001,6 +1017,13 @@ export function AnalyticsPage() {
         value: typeof latestRow[gateway] === 'number' ? latestRow[gateway] : null,
       }))
       .filter((item): item is { gateway: string; value: number } => item.value !== null)
+  }, [connectorTrendData])
+
+  const connectorTrendPointCounts = useMemo(() => {
+    return connectorTrendData.gateways.reduce<Record<string, number>>((counts, gateway) => {
+      counts[gateway] = connectorTrendData.rows.filter((row) => typeof row[gateway] === 'number').length
+      return counts
+    }, {})
   }, [connectorTrendData])
 
   const connectorTrendDomain = useMemo(() => {
@@ -1126,8 +1149,8 @@ export function AnalyticsPage() {
           </div>
           <p className="text-sm text-slate-500 dark:text-[#8a8a93]">
             {view === 'transactions'
-              ? 'One working surface for route volume, connector share, and historical connector success rate.'
-              : 'Preview-only activity for rule-based routing, separate from transaction decisions and score updates.'}
+              ? 'One working surface for auth-rate route volume, connector share, and historical connector success rate.'
+              : 'Routing activity for rule-based and volume-based flows, separate from auth-rate score updates.'}
           </p>
         </div>
 
@@ -1158,7 +1181,7 @@ export function AnalyticsPage() {
           className={sectionButtonClass(view === 'transactions')}
           onClick={() => setView('transactions')}
         >
-          Transactions
+          {ANALYTICS_VIEW_LABELS.transactions}
         </Button>
         <Button
           size="sm"
@@ -1166,7 +1189,7 @@ export function AnalyticsPage() {
           className={sectionButtonClass(view === 'rule_based')}
           onClick={() => setView('rule_based')}
         >
-          Rule-Based
+          {ANALYTICS_VIEW_LABELS.rule_based}
         </Button>
       </div>
 
@@ -1210,23 +1233,9 @@ export function AnalyticsPage() {
         </div>
       ) : null}
 
-      {refreshing ? (
-        <RefreshingState
-          label={
-            view === 'transactions'
-              ? `Refreshing transaction analytics for ${activeWindowLabel.toLowerCase()}`
-              : `Refreshing rule-based analytics for ${activeWindowLabel.toLowerCase()}`
-          }
-        />
-      ) : null}
-
       <div className="relative">
-        {refreshing ? (
-          <div className="pointer-events-none absolute inset-0 z-20 rounded-[28px] bg-white/45 backdrop-blur-[1px] dark:bg-[#050507]/45" />
-        ) : null}
-
       {view === 'transactions' ? (
-        <div className={refreshing ? 'transition-opacity duration-200 opacity-60 space-y-6' : 'transition-opacity duration-200 opacity-100 space-y-6'}>
+        <div className="space-y-6">
           <section className="space-y-5">
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -1283,10 +1292,10 @@ export function AnalyticsPage() {
                       key={gateway}
                       type="monotone"
                       dataKey={gateway}
-                      stackId="1"
                       stroke={CHART_COLORS[index % CHART_COLORS.length]}
+                      strokeWidth={3}
                       fill={CHART_COLORS[index % CHART_COLORS.length]}
-                      fillOpacity={0.24}
+                      fillOpacity={0.14}
                       name={gateway}
                     />
                   ))}
@@ -1316,10 +1325,20 @@ export function AnalyticsPage() {
                 Active filters: {activeFilterSummary}
               </p>
             </div>
-            <InfoButton content={CARD_INFO.sr} />
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => setConnectorFiltersOpen((value) => !value)}
+              >
+                {connectorFiltersOpen ? 'Hide filters' : 'Show filters'}
+              </Button>
+              <InfoButton content={CARD_INFO.sr} />
+            </div>
           </div>
         </CardHeader>
         <CardBody className="space-y-4">
+          {connectorFiltersOpen ? (
           <div className="rounded-[24px] border border-slate-200 bg-white p-4 dark:border-[#1d1d23] dark:bg-[#0c0c0e]">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -1454,6 +1473,7 @@ export function AnalyticsPage() {
               </div>
             </div>
           </div>
+          ) : null}
 
           {latestConnectorSummary.length ? (
             <div className="flex flex-wrap gap-2">
@@ -1492,7 +1512,7 @@ export function AnalyticsPage() {
                       dataKey={gateway}
                       stroke={CHART_COLORS[index % CHART_COLORS.length]}
                       strokeWidth={3}
-                      dot={false}
+                      dot={connectorTrendPointCounts[gateway] <= 1 ? { r: 4, strokeWidth: 2 } : false}
                       activeDot={{ r: 5 }}
                       connectNulls
                       name={gateway}
@@ -1511,13 +1531,13 @@ export function AnalyticsPage() {
       </Card>
         </div>
       ) : (
-        <div className={refreshing ? 'transition-opacity duration-200 opacity-60 space-y-6' : 'transition-opacity duration-200 opacity-100 space-y-6'}>
+        <div className="space-y-6">
           <section className="space-y-5">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Rule-based activity</h2>
                 <p className="mt-1 text-sm text-slate-500 dark:text-[#8a8a93]">
-                  Preview-only routing activity from <code>/routing/evaluate</code>, kept separate from transaction routing and gateway scoring.
+                  Routing decisions from <code>/routing/evaluate</code>, kept separate from auth-rate transaction routing and gateway scoring.
                 </p>
               </div>
               <InfoButton content={CARD_INFO.preview_hits} />
@@ -1532,8 +1552,8 @@ export function AnalyticsPage() {
               <HitsCard
                 label="Gateways touched"
                 value={previewGatewaysTouched}
-                subtitle="Across recent preview selections"
-                eyebrow="Preview coverage"
+                subtitle="Across recent rule decisions"
+                eyebrow="Decision coverage"
               />
             </div>
           </section>
@@ -1547,7 +1567,7 @@ export function AnalyticsPage() {
                       Connector selections over time
                     </h2>
                     <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                      Time-bucketed connector counts from the fetched rule-preview sample.
+                      Time-bucketed connector counts from the fetched rule decision sample.
                     </p>
                   </div>
                   <InfoButton content={CARD_INFO.preview_activity} />
@@ -1588,13 +1608,13 @@ export function AnalyticsPage() {
                   </div>
                 ) : previewIngestionPending ? (
                   <PendingState
-                    title="Processing recent rule previews"
-                    body="Rule evaluate calls have landed, but the preview sample has not been materialized yet. This panel is auto-refreshing and will fill in once analytics catches up."
+                    title="Processing recent rule decisions"
+                    body="Rule evaluate calls have landed, but the decision sample has not been materialized yet. It will populate once analytics catches up."
                   />
                 ) : (
                   <EmptyState
                     title="No connector selections yet"
-                    body="Send /routing/evaluate preview traffic in the selected window to populate connector time-series."
+                    body="Send /routing/evaluate decision traffic in the selected window to populate connector time-series."
                   />
                 )}
               </CardBody>
@@ -1608,7 +1628,7 @@ export function AnalyticsPage() {
                       Gateway selection mix
                     </h2>
                     <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                      Connector share across the fetched rule-preview sample.
+                      Connector share across the fetched rule decision sample.
                     </p>
                   </div>
                   <InfoButton content={CARD_INFO.preview_share} />
@@ -1622,7 +1642,7 @@ export function AnalyticsPage() {
                         <PieChart>
                           <Tooltip
                             formatter={(value: unknown, name: string | number, item: { payload?: { percentage?: number } }) => [
-                              `${formatNumber(value as number, 0)} previews`,
+                              `${formatNumber(value as number, 0)} decisions`,
                               `${String(name)} (${formatPercent(item.payload?.percentage || 0)})`,
                             ]}
                             contentStyle={CHART_TOOLTIP_STYLE}
@@ -1653,7 +1673,7 @@ export function AnalyticsPage() {
                           {previewRows.length}
                         </p>
                         <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                          preview groups
+                          decisions
                         </p>
                       </div>
                     </div>
@@ -1679,7 +1699,7 @@ export function AnalyticsPage() {
                             </p>
                           </div>
                           <p className="mt-2 text-xs text-slate-500 dark:text-[#8a8a93]">
-                            {formatPercent(item.percentage)} of fetched previews
+                            {formatPercent(item.percentage)} of fetched decisions
                           </p>
                         </div>
                       ))}
@@ -1687,27 +1707,27 @@ export function AnalyticsPage() {
                   </div>
                 ) : previewIngestionPending ? (
                   <PendingState
-                    title="Building preview connector mix"
-                    body="Recent rule-preview activity is still being folded into the fetched sample. This card will update automatically once the preview rows appear."
+                    title="Building decision connector mix"
+                    body="Recent rule decision activity is still being folded into the fetched sample. This card will update automatically once the decision rows appear."
                   />
                 ) : (
                   <EmptyState
-                    title="No preview connector mix yet"
-                    body="Rule previews need to return gateway selections before the mix chart can render."
+                    title="No decision connector mix yet"
+                    body="Rule decisions need to return gateway selections before the mix chart can render."
                   />
                 )}
               </CardBody>
             </Card>
           </div>
 
-          <div className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
-            <Card className="overflow-visible">
+          <div className="grid items-stretch gap-5 xl:grid-cols-2">
+            <Card className="h-full overflow-visible">
               <CardHeader>
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Recent rule previews</h2>
+                    <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Recent rule decisions</h2>
                     <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                      Preview-only evaluations captured from <code>/routing/evaluate</code>. This does not affect transaction scoring.
+                      Decisions captured from <code>/routing/evaluate</code>. This does not affect transaction scoring.
                     </p>
                   </div>
                   <Badge variant="purple">
@@ -1719,7 +1739,7 @@ export function AnalyticsPage() {
                 {!previewList.data && previewList.isLoading ? (
                   <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-[#8a8a93]">
                     <Spinner size={16} />
-                    Loading rule previews…
+                    Loading rule decisions…
                   </div>
                 ) : previewList.error && !previewList.data ? (
                   <ErrorMessage error={previewList.error.message} />
@@ -1736,7 +1756,7 @@ export function AnalyticsPage() {
                         </div>
                       ) : null}
                     </div>
-                    <div className="space-y-3">
+                    <div className="max-h-[520px] space-y-3 overflow-y-auto pr-1">
                       {previewListRows.map((row) => (
                         <div
                           key={row.lookup_key}
@@ -1752,7 +1772,7 @@ export function AnalyticsPage() {
                               </p>
                             </div>
                             <Badge variant="purple">
-                              {row.latest_status || 'preview'}
+                              {row.latest_status || 'decision'}
                             </Badge>
                           </div>
                           <div className="mt-3 flex flex-wrap gap-2">
@@ -1799,25 +1819,25 @@ export function AnalyticsPage() {
                   </div>
                 ) : previewIngestionPending ? (
                   <PendingState
-                    title="Waiting for preview rows"
-                    body="Recent /routing/evaluate calls were recorded, but the detailed rule-preview rows are still being flushed. This list is polling every few seconds."
+                    title="Waiting for decision rows"
+                    body="Recent /routing/evaluate calls were recorded, but the detailed rule decision rows are still being flushed."
                   />
                 ) : (
                   <EmptyState
                     title="No rule-based activity yet"
-                    body="Send /routing/evaluate preview traffic in the selected window to populate rule-based activity."
+                    body="Send /routing/evaluate decision traffic in the selected window to populate rule-based activity."
                   />
                 )}
               </CardBody>
             </Card>
 
-            <div className="space-y-5">
-              <Card className="overflow-visible">
+            <div className="grid h-full gap-5 xl:grid-rows-2">
+              <Card className="h-full overflow-visible">
                 <CardHeader>
                   <div>
                     <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Gateway activity</h2>
                     <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                      Recent preview selections grouped by latest chosen gateway.
+                      Recent decisions grouped by latest chosen gateway.
                     </p>
                   </div>
                 </CardHeader>
@@ -1845,23 +1865,23 @@ export function AnalyticsPage() {
                   ) : previewIngestionPending ? (
                     <PendingState
                       title="Waiting for gateway activity"
-                      body="The preview sample is still being assembled from recent rule-evaluate calls. Gateway activity will appear here automatically once the rows are available."
+                      body="The decision sample is still being assembled from recent rule-evaluate calls. Gateway activity will appear here automatically once the rows are available."
                     />
                   ) : (
                     <EmptyState
                       title="No gateway activity yet"
-                      body="Once rule previews are captured, this panel will show which connectors are being selected."
+                      body="Once rule decisions are captured, this panel will show which connectors are being selected."
                     />
                   )}
                 </CardBody>
               </Card>
 
-              <Card className="overflow-visible">
+              <Card className="h-full overflow-visible">
                 <CardHeader>
                   <div>
-                    <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Recent preview outcomes</h2>
+                    <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Recent decision outcomes</h2>
                     <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                      Status mix from the loaded preview sample.
+                      Status mix from the loaded decision sample.
                     </p>
                   </div>
                 </CardHeader>
@@ -1876,13 +1896,13 @@ export function AnalyticsPage() {
                     </div>
                   ) : previewIngestionPending ? (
                     <PendingState
-                      title="Waiting for preview outcomes"
-                      body="Recent preview traffic is still being ingested. Outcome summaries will appear here automatically once the preview rows land."
+                      title="Waiting for decision outcomes"
+                      body="Recent decision traffic is still being ingested. Outcome summaries will appear here automatically once the decision rows land."
                     />
                   ) : (
                     <EmptyState
-                      title="No preview outcomes yet"
-                      body="Recent rule preview results will appear here once preview traffic is recorded."
+                      title="No decision outcomes yet"
+                      body="Recent rule decision results will appear here once decision traffic is recorded."
                     />
                   )}
                 </CardBody>

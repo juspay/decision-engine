@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
 import { useMerchantStore } from '../../store/merchantStore'
 import { apiFetch } from '../../lib/api'
-import { Moon, Sun, LogOut, ChevronDown, Building2, Check, Plus } from 'lucide-react'
+import { LogOut, ChevronDown, Building2, Check, Plus } from 'lucide-react'
 
 interface SwitchMerchantResponse {
   token: string
@@ -16,21 +16,9 @@ export function TopBar() {
   const navigate = useNavigate()
   const { user, merchants, clearAuth, updateMerchant } = useAuthStore()
   const { setMerchantId } = useMerchantStore()
-  const [isDark, setIsDark] = useState(() => localStorage.getItem('theme') !== 'light')
   const [merchantOpen, setMerchantOpen] = useState(false)
   const [switching, setSwitching] = useState<string | null>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const root = window.document.documentElement
-    if (isDark) {
-      root.classList.add('dark')
-      localStorage.setItem('theme', 'dark')
-    } else {
-      root.classList.remove('dark')
-      localStorage.setItem('theme', 'light')
-    }
-  }, [isDark])
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -75,7 +63,7 @@ export function TopBar() {
   const initials = user?.email ? user.email.slice(0, 2).toUpperCase() : 'ME'
 
   return (
-    <header className="h-14 bg-white dark:bg-[#0c0c10] border-b border-[#e6e6ee] dark:border-[#1a1a24] flex items-center justify-between px-6 shrink-0 relative z-10">
+    <header className="flex h-[78px] shrink-0 items-center justify-between border-b border-slate-200 bg-white px-6 transition-colors duration-300 dark:border-[#22262f] dark:bg-[#06080d] relative z-10">
       <div />
 
       <div className="flex items-center gap-2">
@@ -132,17 +120,6 @@ export function TopBar() {
             )}
           </div>
         )}
-
-        {/* Theme toggle */}
-        <button
-          onClick={() => setIsDark(!isDark)}
-          className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-[#1a1a24] transition-colors"
-          aria-label="Toggle theme"
-        >
-          {isDark ? <Sun size={16} /> : <Moon size={16} />}
-        </button>
-
-        <div className="w-px h-5 bg-[#e6e6ee] dark:bg-[#1a1a24] mx-1" />
 
         {user && (
           <div className="flex items-center gap-2 pl-1">

@@ -9,6 +9,11 @@ const routerBaseName = import.meta.env.BASE_URL.endsWith('/')
   ? import.meta.env.BASE_URL.slice(0, -1)
   : import.meta.env.BASE_URL
 
+if (import.meta.env.DEV && window.location.hostname === '127.0.0.1') {
+  const nextUrl = new URL(window.location.href)
+  nextUrl.hostname = 'localhost'
+  window.location.replace(nextUrl.toString())
+} else {
 console.log('\n' + '='.repeat(80))
 console.log('[APP STARTUP] Dashboard initializing...')
 console.log(`Timestamp: ${new Date().toISOString()}`)
@@ -48,3 +53,4 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     </ErrorBoundary>
   </React.StrictMode>
 )
+}
