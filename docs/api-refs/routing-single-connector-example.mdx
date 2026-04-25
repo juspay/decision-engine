@@ -1,0 +1,23 @@
+---
+title: "Single Connector Example"
+description: "Single-connector routing create example."
+---
+
+# Single Connector Example
+
+## Request
+
+```bash
+curl --location "$BASE_URL/routing/create" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "name": "single connector rule",
+    "created_by": "merchant_123",
+    "algorithm": {
+      "type": "single",
+      "data": { "gateway_name": "stripe", "gateway_id": "mca_00123" }
+    }
+  }'
+```
+
+Regardless of parameters, routing decision will always be Stripe (`mca_00123`).

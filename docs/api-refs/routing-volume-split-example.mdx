@@ -1,0 +1,33 @@
+---
+title: "Volume Split Example"
+description: "Volume-split routing create example."
+---
+
+# Volume Split Example
+
+## Request
+
+```bash
+curl --location "$BASE_URL/routing/create" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "name": "volume split test rule",
+    "created_by": "merchant_31",
+    "algorithm_for": "payout",
+    "algorithm": {
+      "type": "volume_split",
+      "data": [
+        {
+          "split": 70,
+          "output": { "gateway_name": "stripe", "gateway_id": "mca_001" }
+        },
+        {
+          "split": 30,
+          "output": { "gateway_name": "paytm", "gateway_id": "mca_002" }
+        }
+      ]
+    }
+  }'
+```
+
+Provides 70% of decisions as Stripe and 30% as Paytm.

@@ -6,25 +6,25 @@ This page provides PostgreSQL-focused commands. The full end-to-end setup (CLI, 
 
 ```bash
 export DECISION_ENGINE_TAG=v1.4
-docker compose --profile postgres-ghcr up -d
+docker compose up -d
 ```
 
 With dashboard + docs:
 
 ```bash
-docker compose --profile dashboard-postgres-ghcr up -d
+COMPOSE_PROFILES= docker compose --profile dashboard-postgres-ghcr up -d
 ```
 
 ## Docker Compose (Local build track)
 
 ```bash
-docker compose --profile postgres-local up -d --build
+COMPOSE_PROFILES= docker compose --profile postgres-local up -d --build
 ```
 
 With dashboard + docs:
 
 ```bash
-docker compose --profile dashboard-postgres-local up -d --build
+COMPOSE_PROFILES= docker compose --profile dashboard-postgres-local up -d --build
 ```
 
 ## Make targets

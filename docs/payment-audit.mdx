@@ -25,11 +25,12 @@ The page supports these filters:
 - `gateway`
 - `route`
 - `status`
-- `event_type`
-- time window: `15m`, `1h`, `24h`, `30d`
-- scope: current merchant or all merchants
+- `flow_type`
+- time window: `15m`, `1h`, `12h`, `1d`, `1w`
 
 Use an exact `payment_id` when you have it. If you only have a request trace, use `request_id`.
+Payment Audit is always merchant-scoped by the authenticated JWT or API key. The route does not
+accept `scope` or `merchant_id` query params.
 
 ## Timeline Stages
 
@@ -40,19 +41,30 @@ Current stages include:
 - `gateway_decided`
 - `rule_applied`
 - `score_updated`
-- `request_failed`
+- `preview_evaluated`
+- `request_read_failed`
 - `validation_failed`
 - `request_parse_failed`
 - `score_update_failed`
 
-The raw event type remains visible as well, for example `decision`, `rule_hit`, `score_snapshot`, or `error`.
+The raw flow type remains visible as well, for example `decide_gateway_decision`,
+`decide_gateway_rule_hit`, `update_gateway_score_update`, or `routing_evaluate_advanced`.
 
 ## Data Sources
 
 Payment Audit reads from the same ClickHouse analytics store used by the analytics surface.
 
+The read path is split intentionally:
+
+- exact `payment_id` / `request_id` lookups read the raw `analytics_domain_events` timeline
+- broad search results read pre-aggregated `analytics_payment_audit_summary_buckets`
+
+Both views correlate events through the write-time `lookup_key`, which prefers `payment_id` and
+falls back to `request_id`.
+
 Relevant fields include:
 
+- `merchant_id`
 - `payment_id`
 - `request_id`
 - `event_stage`

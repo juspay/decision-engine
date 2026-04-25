@@ -1,0 +1,27 @@
+---
+title: "Update Gateway Score"
+description: "Curl example for /update-gateway-score."
+---
+
+# Update Gateway Score
+
+## Request
+
+```bash
+curl --location "$BASE_URL/update-gateway-score" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "merchantId": "test_merchant1",
+    "gateway": "RAZORPAY",
+    "gatewayReferenceId": null,
+    "status": "FAILURE",
+    "paymentId": "PAY12359",
+    "enforceDynamicRoutingFailure": null
+  }'
+```
+
+## Response
+
+```text
+Success
+```

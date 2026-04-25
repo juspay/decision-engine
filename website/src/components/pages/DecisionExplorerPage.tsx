@@ -2593,16 +2593,8 @@ export function DecisionExplorerPage() {
                     </div>
                   ) : selectedPreviewPaymentId ? (
                     <PendingAuditState
-                      title={
-                        previewSummary
-                          ? 'Preview summary available'
-                          : 'Preview trace still arriving'
-                      }
-                      body={
-                        previewSummary
-                          ? 'We already found the preview summary for this run, but the step-by-step timeline has not been flushed yet. The modal is still polling for detailed preview events.'
-                          : 'This preview was just logged. The modal is polling every second and will populate once the analytics writer flushes the trace.'
-                      }
+                      title="Preview trace still arriving"
+                      body="This preview was just logged. The modal is polling every second and will populate once the analytics writer flushes the trace."
                     />
                   ) : (
                     <EmptyAuditState
@@ -2694,16 +2686,8 @@ export function DecisionExplorerPage() {
                     </div>
                   ) : selectedPreviewPaymentId && !(previewTraceDetail.data?.timeline?.length || 0) ? (
                     <PendingAuditState
-                      title={
-                        previewSummary
-                          ? 'Waiting for detailed preview step'
-                          : 'Waiting for preview step'
-                      }
-                      body={
-                        previewSummary
-                          ? 'The preview record exists, but no inspectable step payload has arrived yet. The inspector will unlock as soon as the first timeline event is available.'
-                          : 'Inspector will unlock as soon as the first preview event is available.'
-                      }
+                      title="Waiting for preview step"
+                      body="Inspector will unlock as soon as the first preview event is available."
                     />
                   ) : (
                     <EmptyAuditState

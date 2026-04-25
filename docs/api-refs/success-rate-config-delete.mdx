@@ -1,0 +1,25 @@
+---
+title: "Delete Success Rate Config"
+description: "Curl example for deleting success-rate configuration."
+---
+
+# Delete Success Rate Config
+
+## Request
+
+```bash
+curl -X POST "$BASE_URL/rule/delete" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "merchant_id": "test_merchant_123423",
+    "algorithm": "successRate"
+  }'
+```
+
+## Response
+
+```json
+{
+  "Success Rate Configuration deleted successfully"
+}
+```

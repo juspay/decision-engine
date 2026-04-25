@@ -21,7 +21,23 @@
   "navigation": [
     {
       "group": "Overview",
-      "pages": ["introduction"]
+      "pages": [
+        "introduction",
+        "installation",
+        "local-setup",
+        "configuration",
+        "dashboard",
+        "api-reference",
+        "api-refs/api-ref",
+        "dual-protocol-layer"
+      ]
+    },
+    {
+      "group": "Database Setup",
+      "pages": [
+        "setup-guide-postgres",
+        "setup-guide-mysql"
+      ]
     },
     {
       "group": "Health",
@@ -29,15 +45,11 @@
     },
     {
       "group": "Gateway Decision",
-      "pages": [
-        "api-reference/endpoint/decideGateway"
-      ]
+      "pages": ["api-reference/endpoint/decideGateway"]
     },
     {
       "group": "Score Feedback",
-      "pages": [
-        "api-reference/endpoint/updateGatewayScore"
-      ]
+      "pages": ["api-reference/endpoint/updateGatewayScore"]
     },
     {
       "group": "Merchant Account",
