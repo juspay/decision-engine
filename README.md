@@ -10,11 +10,11 @@
 
 # ⚡ Decision Engine
 
-### **The Brain Behind Smarter Payments**
+### **Routing control plane for payment decisions**
 
-**Open-Source • High-Performance • Success Rate Based**
+**Open-Source • Rust • Rule-Based • Success-Rate Based**
 
-*Route payments intelligently. Maximize success rates. Zero vendor lock-in.*
+Configure routing rules, run gateway decisions, and inspect routing outcomes from APIs or the dashboard.
 
 ---
 
@@ -29,7 +29,7 @@
 
 ## 🎯 What is Decision Engine?
 
-Decision Engine is a **high-performance payment gateway router** built in Rust that intelligently selects the optimal payment gateway for each transaction — in real-time.
+Decision Engine is a payment gateway routing service built in Rust. It selects a gateway for each request using merchant-configured routing strategy, success-rate scores, rule-based policies, volume splits, and debit-routing gates.
 
 ```
 ┌─────────────┐     ┌──────────────────┐     ┌─────────────┐
@@ -38,14 +38,15 @@ Decision Engine is a **high-performance payment gateway router** built in Rust t
 └─────────────┘     └──────────────────┘     └─────────────┘
 ```
 
-### Why Teams Choose Decision Engine
+### Core Use Cases
 
-| 💥 The Problem | ✅ Our Solution |
-|----------------|-----------------|
-| Payment failures from gateway downtime | **Real-time health monitoring** with automatic failover |
-| Suboptimal routing = lost revenue | **SR-based routing** based on success rates & latency |
-| Vendor lock-in limits flexibility | **Modular design** — works with any orchestrator |
-| Complex rule management | **Flexible policies** — rule-based + SR-based hybrid |
+| Use case | Supported surface |
+|----------|-------------------|
+| Route by connector score | Auth-rate based routing |
+| Route by explicit business condition | Rule-based routing |
+| Roll out traffic by percentage | Volume split |
+| Gate debit-network routing per merchant | Debit routing toggle |
+| Inspect routing outcomes | Analytics and Decision Audit dashboard |
 
 ---
 
@@ -67,34 +68,19 @@ Decision Engine is a **high-performance payment gateway router** built in Rust t
 </td>
 <td width="50%">
 
-### 🛠 Built for Production
+### 🛠 Operational Surfaces
 
 | Capability | Details |
 |------------|---------|
-| **⚡ Blazing Fast** | Fast routing decisions |
-| **🔐 Memory Safe** | Built in Rust — no data races |
-| **📊 Multi-DB** | MySQL & PostgreSQL support |
-| **🐳 Docker Ready** | One-command deployment |
-| **☸️ K8s Native** | Helm charts included |
+| **Dashboard** | Configure routing and inspect analytics/audit views |
+| **API reference** | OpenAPI-backed route documentation and curl examples |
+| **Analytics storage** | ClickHouse-backed analytics tables for local and deployed environments |
+| **Multi-DB app storage** | MySQL and PostgreSQL support |
+| **Deployment artifacts** | Docker Compose and Helm configuration are included |
 
 </td>
 </tr>
 </table>
-
----
-
-## 📊 Performance at a Glance
-
-<div align="center">
-
-| Metric | Value |
-|--------|-------|
-| Routing Decision Time | **Low latency** |
-| Memory Footprint | **~50MB** |
-| Concurrent Requests | **100K+** |
-| Uptime SLA Support | **99.99%** |
-
-</div>
 
 ---
 
