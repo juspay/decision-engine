@@ -322,6 +322,8 @@ pub enum UserAuthError {
     UserNotFound,
     #[error("Invalid password")]
     InvalidPassword,
+    #[error("Password must be at least 10 characters long and include uppercase, lowercase, number, and special character")]
+    WeakPassword,
     #[error("Account is inactive")]
     AccountInactive,
     #[error("Email not verified")]
@@ -342,6 +344,7 @@ impl axum::response::IntoResponse for UserAuthError {
     fn into_response(self) -> axum::response::Response {
         let (status, message) = match &self {
             Self::EmailAlreadyExists => (hyper::StatusCode::CONFLICT, self.to_string()),
+            Self::WeakPassword => (hyper::StatusCode::BAD_REQUEST, self.to_string()),
             Self::UserNotFound | Self::InvalidPassword => (
                 hyper::StatusCode::UNAUTHORIZED,
                 "Invalid email or password".to_string(),

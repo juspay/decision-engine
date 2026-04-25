@@ -217,6 +217,8 @@ diesel::table! {
         tenant_account_id -> Nullable<Text>,
         priority_logic_config -> Nullable<Text>,
         merchant_category_code -> Nullable<Text>,
+        #[max_length = 255]
+        merchant_name -> Nullable<Varchar>,
     }
 }
 
@@ -532,6 +534,19 @@ diesel::table! {
 }
 
 diesel::table! {
+    user_merchants (id) {
+        id -> Int8,
+        #[max_length = 64]
+        user_id -> Varchar,
+        #[max_length = 255]
+        merchant_id -> Varchar,
+        #[max_length = 50]
+        role -> Varchar,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     users (id) {
         id -> Int8,
         #[max_length = 64]
@@ -541,7 +556,7 @@ diesel::table! {
         #[max_length = 255]
         password_hash -> Varchar,
         #[max_length = 255]
-        merchant_id -> Varchar,
+        merchant_id -> Nullable<Varchar>,
         #[max_length = 50]
         role -> Varchar,
         is_active -> Bool,
@@ -585,5 +600,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     txn_offer,
     txn_offer_detail,
     user_eligibility_info,
+    user_merchants,
     users,
 );
