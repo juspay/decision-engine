@@ -30,4 +30,32 @@ describe('Auth UI', () => {
     cy.contains(email, { timeout: 20000 }).should('be.visible')
     cy.contains(merchantId).should('be.visible')
   })
+
+  it('switches duplicate sign-up attempts to sign-in with email preserved', () => {
+    const duplicateEmail = `duplicate-${merchantId}@example.com`
+
+    cy.intercept('POST', '**/decision-engine-api/auth/signup', {
+      statusCode: 409,
+      body: { message: 'Email already registered' },
+    }).as('duplicateSignup')
+
+    cy.visitAppPath('/login', {
+      onBeforeLoad(win) {
+        win.localStorage.removeItem('auth-store')
+        win.localStorage.removeItem('merchant-store')
+      },
+    })
+
+    cy.contains('button', 'Sign up').click()
+    cy.get('input[type="email"]').clear().type(duplicateEmail)
+    cy.get('input[placeholder="e.g. Acme Corp"]').clear().type('Venom')
+    cy.get('input[placeholder="Enter your password"]').clear().type('ValidPass1!')
+    cy.contains('button', 'Create account').click()
+
+    cy.wait('@duplicateSignup')
+    cy.contains('Welcome back').should('be.visible')
+    cy.contains('Account already exists. Sign in with this email.').should('be.visible')
+    cy.get('input[type="email"]').should('have.value', duplicateEmail)
+    cy.get('input[placeholder="Enter your password"]').should('be.focused')
+  })
 })

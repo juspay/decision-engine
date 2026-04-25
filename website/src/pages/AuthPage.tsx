@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ArrowRight,
@@ -57,11 +57,30 @@ function getPasswordPolicyError(password: string): string | null {
   return null
 }
 
+function getApiErrorMessage(err: unknown): string {
+  const msg = err instanceof Error ? err.message : 'Something went wrong'
+  const match = msg.match(/API error \d+: (.+)/)
+
+  if (!match) return msg
+
+  try {
+    const parsed = JSON.parse(match[1])
+    return parsed.message ?? msg
+  } catch {
+    return match[1]
+  }
+}
+
+function isDuplicateEmailError(message: string): boolean {
+  return /email.*(already registered|already exists)|user.*already exists/i.test(message)
+}
+
 export function AuthPage() {
   const navigate = useNavigate()
   const { setAuth, updateMerchant } = useAuthStore()
   const { setMerchantId } = useMerchantStore()
   const assetBaseUrl = import.meta.env.BASE_URL
+  const passwordInputRef = useRef<HTMLInputElement>(null)
 
   const [tab, setTab] = useState<Tab>('login')
   const [email, setEmail] = useState('')
@@ -70,15 +89,25 @@ export function AuthPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [focusPasswordOnLogin, setFocusPasswordOnLogin] = useState(false)
+
+  useEffect(() => {
+    if (tab !== 'login' || !focusPasswordOnLogin) return
+    passwordInputRef.current?.focus()
+    setFocusPasswordOnLogin(false)
+  }, [focusPasswordOnLogin, tab])
 
   function switchTab(nextTab: Tab) {
     setTab(nextTab)
     setError(null)
+    setNotice(null)
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
+    setNotice(null)
 
     if (tab === 'signup') {
       const passwordPolicyError = getPasswordPolicyError(password)
@@ -123,18 +152,16 @@ export function AuthPage() {
         navigate('/', { replace: true })
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Something went wrong'
-      const match = msg.match(/API error \d+: (.+)/)
-      if (match) {
-        try {
-          const parsed = JSON.parse(match[1])
-          setError(parsed.message ?? msg)
-        } catch {
-          setError(match[1])
-        }
-      } else {
-        setError(msg)
+      const msg = getApiErrorMessage(err)
+
+      if (tab === 'signup' && isDuplicateEmailError(msg)) {
+        setTab('login')
+        setNotice('Account already exists. Sign in with this email.')
+        setFocusPasswordOnLogin(true)
+        return
       }
+
+      setError(msg)
     } finally {
       setLoading(false)
     }
@@ -245,6 +272,7 @@ export function AuthPage() {
                         placeholder="Enter your password"
                         required
                         icon={<LockKeyhole size={16} />}
+                        inputRef={passwordInputRef}
                         className="pr-12"
                       />
                       <button
@@ -266,6 +294,11 @@ export function AuthPage() {
                   ) : null}
 
                   <ErrorMessage error={error} />
+                  {notice ? (
+                    <div className="rounded-lg border border-sky-500/20 bg-sky-500/8 px-4 py-3 text-sm text-sky-300">
+                      {notice}
+                    </div>
+                  ) : null}
 
                   <button
                     type="submit"
@@ -347,9 +380,11 @@ function Field({
 function FieldInput({
   icon,
   className = '',
+  inputRef,
   ...props
 }: React.InputHTMLAttributes<HTMLInputElement> & {
   icon?: React.ReactNode
+  inputRef?: React.Ref<HTMLInputElement>
 }) {
   return (
     <div className="relative">
@@ -360,6 +395,7 @@ function FieldInput({
       ) : null}
       <input
         {...props}
+        ref={inputRef}
         className={`h-14 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-950 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.12)] outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-white dark:shadow-none ${icon ? 'pl-12' : ''} ${className}`}
       />
     </div>
