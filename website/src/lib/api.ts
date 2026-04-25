@@ -2,6 +2,18 @@
 import { tokenRef } from './tokenRef'
 
 const DEBUG_API = true
+const DEFAULT_TENANT_ID = import.meta.env.VITE_DEFAULT_TENANT_ID ?? 'public'
+const API_BASE_PATH = (import.meta.env.VITE_API_BASE_PATH ?? '/decision-engine-api').replace(/\/$/, '')
+const FEATURE_HEADER = import.meta.env.VITE_FEATURE_HEADER ?? 'decision-engine'
+
+function resolveApiPath(path: string) {
+  if (/^https?:\/\//.test(path)) return path
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+  if (normalizedPath.startsWith(`${API_BASE_PATH}/`) || normalizedPath === API_BASE_PATH) {
+    return normalizedPath
+  }
+  return `${API_BASE_PATH}${normalizedPath}`
+}
 
 function logRequest(method: string, path: string, body?: unknown) {
   if (!DEBUG_API) return
@@ -45,18 +57,23 @@ export async function apiFetch<T>(
 ): Promise<T> {
   const method = options?.method || 'GET'
   const body = options?.body ? JSON.parse(options.body as string) : undefined
-  
-  logRequest(method, path, body)
-  
+  const requestPath = resolveApiPath(path)
+
+  logRequest(method, requestPath, body)
+
   try {
     const token = tokenRef.get()
-    const authHeader: Record<string, string> = token
-      ? { Authorization: `Bearer ${token}` }
-      : {}
+    const headers = new Headers(options?.headers)
+    headers.set('Content-Type', 'application/json')
+    headers.set('x-tenant-id', DEFAULT_TENANT_ID)
+    headers.set('x-feature', FEATURE_HEADER)
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`)
+    }
 
-    const res = await fetch(path, {
-      headers: { 'Content-Type': 'application/json', ...authHeader, ...options?.headers },
+    const res = await fetch(requestPath, {
       ...options,
+      headers,
     })
 
     const responseText = await res.text()
@@ -69,7 +86,7 @@ export async function apiFetch<T>(
       responseBody = responseText
     }
 
-    logResponse(path, res.status, res.statusText, responseBody)
+    logResponse(requestPath, res.status, res.statusText, responseBody)
 
     // Only clear session when the JWT itself is confirmed invalid/expired.
     // A generic 401 (e.g. missing API key on a protected route) must NOT wipe the session.
@@ -77,34 +94,37 @@ export async function apiFetch<T>(
       let isTokenExpiry = false
       try {
         const json = JSON.parse(responseText)
-        const msg: string = json.message ?? ''
-        isTokenExpiry = msg.toLowerCase().includes('expired') || msg.toLowerCase().includes('invalid or expired')
-      } catch { /* non-JSON 401, not a JWT error */ }
+        const message = `${json.message ?? ''}`.toLowerCase()
+        isTokenExpiry =
+          message.includes('expired') ||
+          message.includes('invalid or expired')
+      } catch {
+        // Ignore non-JSON 401s; not every unauthorized response should clear the session.
+      }
 
       if (isTokenExpiry) {
         tokenRef.set(null)
         import('../store/authStore').then(({ useAuthStore }) => {
           useAuthStore.getState().clearAuth()
         })
-        window.location.href = '/dashboard/login'
+        window.location.href = `${import.meta.env.BASE_URL}login`
         throw new Error('Session expired')
       }
     }
 
     if (!res.ok) {
       const error = new Error(`API error ${res.status}: ${responseText}`)
-      logError(path, error)
+      logError(requestPath, error)
       throw error
     }
-    
-    // Handle empty response body
+
     if (!responseText.trim()) {
       return undefined as T
     }
-    
+
     return JSON.parse(responseText) as T
   } catch (error) {
-    logError(path, error)
+    logError(requestPath, error)
     throw error
   }
 }
@@ -116,7 +136,6 @@ export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   })
 }
 
-// Generic fetcher for SWR
 export async function fetcher<T>(url: string): Promise<T> {
   return apiFetch<T>(url)
 }

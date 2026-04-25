@@ -122,6 +122,7 @@ impl TryFrom<MerchantAccountCreateRequest> for MerchantAccountNew {
     fn try_from(value: MerchantAccountCreateRequest) -> Result<Self, ApiError> {
         Ok(Self {
             merchant_id: Some(value.merchant_id),
+            merchant_name: None,
             date_created: date_time::now(),
             use_code_for_gateway_priority: BitBoolWrite(true),
             gateway_success_rate_based_decider_input: value
