@@ -68,22 +68,6 @@ spec:
           env:
             - name: GROOVY_RUNNER_HOST
               value: "{{ include "decision-engine.groovyRunnerName" . }}:{{ .Values.groovyRunner.service.port }}"
-            - name: DECISION_ENGINE__ANALYTICS__ENABLED
-              value: {{ ternary "true" "false" .Values.analytics.enabled | quote }}
-            - name: DECISION_ENGINE__ANALYTICS__KAFKA__BROKERS
-              value: {{ .Values.analytics.kafka.brokers | quote }}
-            - name: DECISION_ENGINE__ANALYTICS__KAFKA__API_TOPIC
-              value: {{ .Values.analytics.kafka.apiTopic | quote }}
-            - name: DECISION_ENGINE__ANALYTICS__KAFKA__DOMAIN_TOPIC
-              value: {{ .Values.analytics.kafka.domainTopic | quote }}
-            - name: DECISION_ENGINE__ANALYTICS__CLICKHOUSE__URL
-              value: {{ printf "http://%s:%v" .Values.analytics.clickhouse.host .Values.analytics.clickhouse.httpPort | quote }}
-            - name: DECISION_ENGINE__ANALYTICS__CLICKHOUSE__DATABASE
-              value: {{ .Values.analytics.clickhouse.database | quote }}
-            - name: DECISION_ENGINE__ANALYTICS__CLICKHOUSE__USER
-              value: {{ .Values.analytics.clickhouse.user | quote }}
-            - name: DECISION_ENGINE__ANALYTICS__CLICKHOUSE__PASSWORD
-              value: {{ .Values.analytics.clickhouse.password | quote }}
           {{- range $name, $value := .Values.extraEnvVars }}
             - name: {{ $name }}
             {{- if and (kindIs "map" $value) $value.valueFrom }}

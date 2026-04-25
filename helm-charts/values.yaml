@@ -129,29 +129,6 @@ decisionEngine:
     labels:
       component: decision-engine
 
-analytics:
-  enabled: false
-  kafka:
-    brokers: "kafka:19092"
-    apiTopic: "decision-engine.analytics.api.v1"
-    domainTopic: "decision-engine.analytics.domain.v1"
-  clickhouse:
-    host: "clickhouse"
-    httpPort: 8123
-    nativePort: 9000
-    database: "decision_engine_analytics"
-    user: "decision_engine"
-    password: "decision_engine"
-    kafkaBrokerList: "kafka:19092"
-    apiConsumerGroup: "decision-engine-analytics-api-v1"
-    domainConsumerGroup: "decision-engine-analytics-domain-v1"
-    bootstrap:
-      enabled: false
-      image:
-        repository: "clickhouse/clickhouse-server"
-        tag: "26.1"
-        pullPolicy: "IfNotPresent"
-
 # MySQL configuration (used when decisionEngine.useMySQL is true)
 mysql:
   enabled: false
