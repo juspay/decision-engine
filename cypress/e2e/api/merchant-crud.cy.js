@@ -36,4 +36,36 @@ describe('Merchant CRUD API', () => {
       expect(status).to.not.eq(200)
     })
   })
+
+  it('gets and updates the debit routing feature flag', () => {
+    const missingMerchantId = factory.merchantId('merchant_missing_debit')
+
+    cy.createMerchantAccount(testMerchantId)
+
+    cy.getDebitRoutingFlag(testMerchantId).then(({ response }) => {
+      expect(response.merchant_id).to.eq(testMerchantId)
+      expect(response.debit_routing_enabled).to.eq(false)
+    })
+
+    cy.updateDebitRoutingFlag(testMerchantId, true).then(({ response }) => {
+      expect(response.merchant_id).to.eq(testMerchantId)
+      expect(response.debit_routing_enabled).to.eq(true)
+    })
+
+    cy.getDebitRoutingFlag(testMerchantId).then(({ response }) => {
+      expect(response.debit_routing_enabled).to.eq(true)
+    })
+
+    cy.updateDebitRoutingFlag(testMerchantId, false).then(({ response }) => {
+      expect(response.debit_routing_enabled).to.eq(false)
+    })
+
+    cy.getDebitRoutingFlag(testMerchantId).then(({ response }) => {
+      expect(response.debit_routing_enabled).to.eq(false)
+    })
+
+    cy.getDebitRoutingFlag(missingMerchantId, { failOnStatusCode: false }).then(({ status }) => {
+      expect(status).to.eq(404)
+    })
+  })
 })

@@ -16,7 +16,7 @@ import {
 } from 'lucide-react'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useAuthStore } from '../../store/authStore'
-import { apiPost, fetcher } from '../../lib/api'
+import { apiFetch, apiPost, fetcher } from '../../lib/api'
 import {
   AnalyticsRange,
   AnalyticsOverviewResponse,
@@ -46,8 +46,8 @@ function useHealth() {
   const [status, setStatus] = useState<'up' | 'down' | 'loading'>('loading')
 
   useEffect(() => {
-    fetch('/health')
-      .then((response) => setStatus(response.ok ? 'up' : 'down'))
+    apiFetch<{ message: string }>('/health')
+      .then(() => setStatus('up'))
       .catch(() => setStatus('down'))
   }, [])
 

@@ -3,12 +3,14 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig(({ command }) => {
   const isDevServer = command === 'serve'
-  const publicBaseUrl = isDevServer ? '/' : '/dashboard/'
+  const publicBaseUrl = isDevServer ? '/' : '/decision-engine/'
   const backendTarget = 'http://localhost:8080'
+  const apiProxyPrefix = '/decision-engine-api'
 
-  const createApiProxy = () => ({
+  const createApiProxy = (rewritePrefix?: string) => ({
     target: backendTarget,
     changeOrigin: true,
+    rewrite: rewritePrefix ? (path) => path.replace(new RegExp(`^${rewritePrefix}`), '') : undefined,
     configure: (proxy) => {
       proxy.on('proxyReq', (_proxyReq, req) => {
         console.log(`\n[PROXY] ${new Date().toISOString()}`)
@@ -31,6 +33,7 @@ export default defineConfig(({ command }) => {
     base: publicBaseUrl,
     server: {
       proxy: {
+        '^/decision-engine-api(?:/.*)?$': createApiProxy(apiProxyPrefix),
         '/decide-gateway': createApiProxy(),
         '/decision_gateway': createApiProxy(),
         '/merchant-account': createApiProxy(),
@@ -43,6 +46,7 @@ export default defineConfig(({ command }) => {
         '^/routing/(create|activate|evaluate|list(?:/.*)?|hybrid)$': createApiProxy(),
         '^/analytics/(overview|gateway-scores|decisions|routing-stats|log-summaries|preview-trace|payment-audit)(?:\\?.*)?$':
           createApiProxy(),
+        '^/onboarding(?:/.*)?$': createApiProxy(),
         '^/auth(?:/.*)?$': createApiProxy(),
         '^/api-key(?:/.*)?$': createApiProxy(),
       },

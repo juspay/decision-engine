@@ -3,13 +3,33 @@
 export interface DecideGatewayResponse {
   decided_gateway: string
   routing_approach: string
-  gateway_priority_map: Record<string, number>
-  routing_dimension: string
-  routing_dimension_level: string
+  gateway_priority_map: Record<string, number> | null
+  routing_dimension: string | null
+  routing_dimension_level: string | null
   filter_wise_gateways: Record<string, string[]> | null
   reset_approach: string
   is_scheduled_outage: boolean
-  latency: number
+  debit_routing_output?: DebitRoutingOutput | null
+  latency: number | null
+}
+
+export type RoutingAlgorithmName =
+  | 'SrBasedRouting'
+  | 'PlBasedRouting'
+  | 'NtwBasedRouting'
+  | 'NtwSrHybridRouting'
+
+export interface DebitRoutingNetworkSavingInfo {
+  network: string
+  saving_percentage: number
+}
+
+export interface DebitRoutingOutput {
+  co_badged_card_networks_info: DebitRoutingNetworkSavingInfo[]
+  issuer_country: string
+  is_regulated: boolean
+  regulated_name: string | null
+  card_type: string
 }
 
 export interface GatewayConnector {
@@ -130,6 +150,15 @@ export interface CreateRuleRequest {
 export interface DebitRoutingData {
   merchant_category_code: string
   acquirer_country: string
+}
+
+export interface DebitRoutingFlagRequest {
+  enabled: boolean
+}
+
+export interface DebitRoutingFlagResponse {
+  merchant_id: string
+  debit_routing_enabled: boolean
 }
 
 export interface CreateMerchantRequest {

@@ -259,6 +259,19 @@ Cypress.Commands.add('getMerchantAccount', (merchantId, options = {}) => {
   )
 })
 
+Cypress.Commands.add('getDebitRoutingFlag', (merchantId, options = {}) => {
+  return requestApi('GET', `/merchant-account/${merchantId}/debit-routing`, options).then((response) =>
+    cy.wrap({ merchantId, response: response.body, status: response.status }),
+  )
+})
+
+Cypress.Commands.add('updateDebitRoutingFlag', (merchantId, enabled, options = {}) => {
+  return requestApi('POST', `/merchant-account/${merchantId}/debit-routing`, {
+    ...options,
+    body: { enabled },
+  }).then((response) => cy.wrap({ merchantId, response: response.body, status: response.status }))
+})
+
 Cypress.Commands.add('deleteMerchantAccount', (merchantId, options = {}) => {
   return requestApi('DELETE', `/merchant-account/${merchantId}`, options).then((response) =>
     cy.wrap({ merchantId, response: response.body, status: response.status }),

@@ -33,6 +33,7 @@ import { Card, CardBody, CardHeader } from '../ui/Card'
 import { Badge } from '../ui/Badge'
 import { Spinner } from '../ui/Spinner'
 import { ErrorMessage } from '../ui/ErrorMessage'
+import { DateTimePicker } from '../ui/DateTimePicker'
 
 type TimeWindow = {
   start_ms: number
@@ -384,6 +385,12 @@ function controlClassName() {
   return 'h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 shadow-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-[#27272a] dark:bg-[#121214] dark:text-[#e5e7eb]'
 }
 
+function sectionButtonClass(active: boolean) {
+  return active
+    ? '!border-slate-200 !bg-white !text-slate-950 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.28)] dark:!border-[#2a303a] dark:!bg-[#161b24] dark:!text-white'
+    : '!border-transparent !bg-slate-100 !text-slate-600 hover:!bg-slate-200 hover:!text-slate-900 dark:!bg-[#161b24] dark:!text-[#a7b2c6] dark:hover:!bg-[#1c2330] dark:hover:!text-white'
+}
+
 function InfoButton({ content }: { content: InfoContent }) {
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -580,13 +587,11 @@ export function AnalyticsPage() {
       : null
 
   const overviewSwrOptions = {
-    refreshInterval: 10000,
-    revalidateOnFocus: true,
+    revalidateOnFocus: false,
     revalidateIfStale: false,
   } as const
   const routingSwrOptions = {
-    refreshInterval: 12000,
-    revalidateOnFocus: true,
+    revalidateOnFocus: false,
     revalidateIfStale: false,
   } as const
   const filteredRoutingSwrOptions = {
@@ -594,9 +599,7 @@ export function AnalyticsPage() {
     keepPreviousData: true,
   } as const
   const previewListSwrOptions = {
-    refreshInterval: (data?: PaymentAuditResponse) =>
-      data?.results?.length ? 12000 : 2000,
-    revalidateOnFocus: true,
+    revalidateOnFocus: false,
     revalidateIfStale: false,
     keepPreviousData: true,
   } as const
@@ -620,9 +623,7 @@ export function AnalyticsPage() {
       )
     },
     {
-      refreshInterval: (data?: PaymentAuditResponse) =>
-        data?.results?.length ? 12000 : 2000,
-      revalidateOnFocus: true,
+      revalidateOnFocus: false,
       revalidateIfStale: false,
     },
   )
@@ -959,11 +960,32 @@ export function AnalyticsPage() {
       buckets.set(point.bucket_ms, row)
     }
 
+    const rows = Array.from(buckets.values()).sort(
+      (left, right) => Number(left.bucket_ms) - Number(right.bucket_ms),
+    )
+
+    // Treat score snapshots as state updates: once a connector emits a score,
+    // keep that score in effect until a newer snapshot arrives.
+    for (const gateway of gateways) {
+      let lastKnownValue: number | null = null
+      let hasSeenSnapshot = false
+
+      for (const row of rows) {
+        if (typeof row[gateway] === 'number') {
+          lastKnownValue = row[gateway]
+          hasSeenSnapshot = true
+          continue
+        }
+
+        if (hasSeenSnapshot) {
+          row[gateway] = lastKnownValue
+        }
+      }
+    }
+
     return {
       gateways,
-      rows: Array.from(buckets.values()).sort(
-        (left, right) => Number(left.bucket_ms) - Number(right.bucket_ms),
-      ),
+      rows,
     }
   }, [chartBucketSize, effectiveWindow, filteredRouting.data])
 
@@ -1095,8 +1117,8 @@ export function AnalyticsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
+    <div className="space-y-8 px-5 sm:px-6 lg:px-8 xl:px-10">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Analytics</h1>
@@ -1109,10 +1131,23 @@ export function AnalyticsPage() {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 md:justify-end">
           <Button size="sm" variant="ghost" onClick={refreshAll}>
             Refresh
           </Button>
+          <div className="flex flex-wrap items-center gap-2 rounded-full border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#11151d]">
+            {PRESET_OPTIONS.map((option) => (
+              <Button
+                key={option.value}
+                size="sm"
+                variant="secondary"
+                className={sectionButtonClass(range === option.value)}
+                onClick={() => handleRangeChange(option.value)}
+              >
+                {option.value === 'custom' ? 'Custom' : option.value}
+              </Button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -1120,7 +1155,7 @@ export function AnalyticsPage() {
         <Button
           size="sm"
           variant="secondary"
-          className={view === 'transactions' ? '!border-slate-200 !bg-white !text-slate-950 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.28)] dark:!border-[#2a303a] dark:!bg-[#161b24] dark:!text-white' : '!border-transparent !bg-slate-100 !text-slate-600 hover:!bg-slate-200 hover:!text-slate-900 dark:!bg-[#161b24] dark:!text-[#a7b2c6] dark:hover:!bg-[#1c2330] dark:hover:!text-white'}
+          className={sectionButtonClass(view === 'transactions')}
           onClick={() => setView('transactions')}
         >
           Transactions
@@ -1128,71 +1163,43 @@ export function AnalyticsPage() {
         <Button
           size="sm"
           variant="secondary"
-          className={view === 'rule_based' ? '!border-slate-200 !bg-white !text-slate-950 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.28)] dark:!border-[#2a303a] dark:!bg-[#161b24] dark:!text-white' : '!border-transparent !bg-slate-100 !text-slate-600 hover:!bg-slate-200 hover:!text-slate-900 dark:!bg-[#161b24] dark:!text-[#a7b2c6] dark:hover:!bg-[#1c2330] dark:hover:!text-white'}
+          className={sectionButtonClass(view === 'rule_based')}
           onClick={() => setView('rule_based')}
         >
           Rule-Based
         </Button>
       </div>
 
-      <Card className="overflow-visible">
-        <CardBody className="flex flex-wrap items-end gap-4">
-          <label className="min-w-[220px] flex-1 space-y-2">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
-              Time window
-            </span>
-            <select
-              value={range}
-              onChange={(event) => handleRangeChange(event.target.value as AnalyticsRangeValue)}
-              className={controlClassName()}
-            >
-              {PRESET_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
+      {range === 'custom' ? (
+        <Card className="overflow-visible p-4">
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="space-y-2">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                Start time
+              </span>
+              <DateTimePicker
+                className="w-full"
+                value={customStart}
+                onChange={setCustomStart}
+              />
+            </label>
 
-          {range === 'custom' ? (
-            <>
-              <label className="min-w-[220px] flex-1 space-y-2">
-                <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
-                  Start time
-                </span>
-                <input
-                  type="datetime-local"
-                  value={customStart}
-                  onChange={(event) => setCustomStart(event.target.value)}
-                  className={controlClassName()}
-                />
-              </label>
-
-              <label className="min-w-[220px] flex-1 space-y-2">
-                <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
-                  End time
-                </span>
-                <input
-                  type="datetime-local"
-                  value={customEnd}
-                  onChange={(event) => setCustomEnd(event.target.value)}
-                  className={controlClassName()}
-                />
-              </label>
-            </>
-          ) : null}
-
-          <div className="min-w-[220px] flex-1 rounded-[24px] border border-slate-200 bg-white px-4 py-3 dark:border-[#1d1d23] dark:bg-[#0c0c0e]">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
-              Active window
-            </p>
-            <p className="mt-1 text-sm font-medium text-slate-900 dark:text-white">{activeWindowLabel}</p>
-            {range === 'custom' && !customWindow ? (
-              <p className="mt-1 text-xs text-red-500">Choose an end time after the start time.</p>
-            ) : null}
+            <label className="space-y-2">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                End time
+              </span>
+              <DateTimePicker
+                className="w-full"
+                value={customEnd}
+                onChange={setCustomEnd}
+              />
+            </label>
           </div>
-        </CardBody>
-      </Card>
+          {!customWindow ? (
+            <p className="mt-3 text-xs text-red-500">Choose an end time after the start time.</p>
+          ) : null}
+        </Card>
+      ) : null}
 
       <ErrorMessage error={error} />
 
@@ -1219,8 +1226,8 @@ export function AnalyticsPage() {
         ) : null}
 
       {view === 'transactions' ? (
-        <div className={refreshing ? 'transition-opacity duration-200 opacity-60' : 'transition-opacity duration-200 opacity-100'}>
-          <section className="space-y-4">
+        <div className={refreshing ? 'transition-opacity duration-200 opacity-60 space-y-6' : 'transition-opacity duration-200 opacity-100 space-y-6'}>
+          <section className="space-y-5">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900 dark:text-white">API calls</h2>
@@ -1231,7 +1238,7 @@ export function AnalyticsPage() {
               <InfoButton content={CARD_INFO.hits} />
             </div>
 
-            <div className="grid gap-4 lg:grid-cols-2">
+            <div className="grid gap-5 lg:grid-cols-2">
               {transactionRouteHits.map((item) => (
                 <HitsCard
                   key={item.route}
@@ -1485,8 +1492,9 @@ export function AnalyticsPage() {
                       dataKey={gateway}
                       stroke={CHART_COLORS[index % CHART_COLORS.length]}
                       strokeWidth={3}
-                      dot={{ r: 3, strokeWidth: 1, fill: CHART_COLORS[index % CHART_COLORS.length] }}
+                      dot={false}
                       activeDot={{ r: 5 }}
+                      connectNulls
                       name={gateway}
                     />
                   ))}
@@ -1503,8 +1511,8 @@ export function AnalyticsPage() {
       </Card>
         </div>
       ) : (
-        <div className={refreshing ? 'transition-opacity duration-200 opacity-60' : 'transition-opacity duration-200 opacity-100'}>
-          <section className="space-y-4">
+        <div className={refreshing ? 'transition-opacity duration-200 opacity-60 space-y-6' : 'transition-opacity duration-200 opacity-100 space-y-6'}>
+          <section className="space-y-5">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Rule-based activity</h2>
@@ -1515,7 +1523,7 @@ export function AnalyticsPage() {
               <InfoButton content={CARD_INFO.preview_hits} />
             </div>
 
-            <div className="grid gap-4 lg:grid-cols-2">
+            <div className="grid gap-5 lg:grid-cols-2">
               <HitsCard
                 label="Rule Evaluate"
                 value={ruleEvaluateHits}
@@ -1530,7 +1538,7 @@ export function AnalyticsPage() {
             </div>
           </section>
 
-          <div className="grid gap-4 xl:grid-cols-2">
+          <div className="grid gap-5 xl:grid-cols-2">
             <Card className="overflow-visible">
               <CardHeader>
                 <div className="flex items-start justify-between gap-3">
@@ -1692,7 +1700,7 @@ export function AnalyticsPage() {
             </Card>
           </div>
 
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+          <div className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
             <Card className="overflow-visible">
               <CardHeader>
                 <div className="flex items-start justify-between gap-3">
@@ -1803,7 +1811,7 @@ export function AnalyticsPage() {
               </CardBody>
             </Card>
 
-            <div className="space-y-4">
+            <div className="space-y-5">
               <Card className="overflow-visible">
                 <CardHeader>
                   <div>

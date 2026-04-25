@@ -32,6 +32,62 @@ pub struct DebitRoutingResponse {
     pub debit_routing_enabled: bool,
 }
 
+fn debit_routing_config_name(merchant_id: &str) -> String {
+    format!("DEBIT_ROUTING_ENABLED_{}", merchant_id)
+}
+
+#[axum::debug_handler]
+pub async fn get_debit_routing(
+    Path(merchant_id): Path<String>,
+) -> Result<
+    Json<DebitRoutingResponse>,
+    error::ContainerError<error::MerchantAccountConfigurationError>,
+> {
+    API_REQUEST_TOTAL_COUNTER
+        .with_label_values(&["merchant_debit_routing_get"])
+        .inc();
+    let timer = API_LATENCY_HISTOGRAM
+        .with_label_values(&["merchant_debit_routing_get"])
+        .start_timer();
+
+    logger::debug!(
+        "Received request to get debit routing flag for merchant {}",
+        merchant_id
+    );
+
+    let response = async {
+        ETM::merchant_account::load_merchant_by_merchant_id(merchant_id.clone())
+            .await
+            .ok_or(error::MerchantAccountConfigurationError::MerchantNotFound)?;
+
+        let config_name = debit_routing_config_name(&merchant_id);
+        let debit_routing_enabled = service_configuration::find_config_by_name(config_name)
+            .await
+            .change_context(error::MerchantAccountConfigurationError::StorageError)?
+            .and_then(|config| config.value)
+            .and_then(|value| value.parse::<bool>().ok())
+            .unwrap_or(false);
+
+        Ok(Json(DebitRoutingResponse {
+            merchant_id,
+            debit_routing_enabled,
+        }))
+    }
+    .await;
+
+    match &response {
+        Ok(_) => API_REQUEST_COUNTER
+            .with_label_values(&["merchant_debit_routing_get", "success"])
+            .inc(),
+        Err(_) => API_REQUEST_COUNTER
+            .with_label_values(&["merchant_debit_routing_get", "failure"])
+            .inc(),
+    }
+
+    timer.observe_duration();
+    response
+}
+
 #[axum::debug_handler]
 pub async fn get_merchant_config(
     Path(merchant_id): Path<String>,
@@ -184,7 +240,7 @@ pub async fn update_debit_routing(
         .await
         .ok_or(error::MerchantAccountConfigurationError::MerchantNotFound)?;
 
-    let config_name = format!("DEBIT_ROUTING_ENABLED_{}", merchant_id);
+    let config_name = debit_routing_config_name(&merchant_id);
     let config_value = payload.enabled.to_string();
 
     // Check if config already exists

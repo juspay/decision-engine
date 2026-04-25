@@ -276,6 +276,85 @@
         }
       }
     },
+    "/merchant-account/{merchantId}/debit-routing": {
+      "get": {
+        "operationId": "getMerchantDebitRouting",
+        "tags": ["Merchant Account"],
+        "summary": "Get debit routing flag",
+        "description": "Return whether debit/network routing is enabled for a merchant. Missing flag configuration is treated as disabled.",
+        "parameters": [
+          {
+            "name": "merchantId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "example": "my_merchant"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Debit routing flag",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DebitRoutingResponse" },
+                "example": { "merchant_id": "my_merchant", "debit_routing_enabled": false }
+              }
+            }
+          },
+          "404": {
+            "description": "Merchant not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "updateMerchantDebitRouting",
+        "tags": ["Merchant Account"],
+        "summary": "Update debit routing flag",
+        "description": "Enable or disable runtime debit/network routing for a merchant.",
+        "parameters": [
+          {
+            "name": "merchantId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "example": "my_merchant"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/DebitRoutingRequest" },
+              "example": { "enabled": true }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Debit routing flag updated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DebitRoutingResponse" },
+                "example": { "merchant_id": "my_merchant", "debit_routing_enabled": true }
+              }
+            }
+          },
+          "404": {
+            "description": "Merchant not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
     "/routing/create": {
       "post": {
         "operationId": "createRoutingRule",
@@ -719,7 +798,27 @@
           "reset_approach": { "type": "string" },
           "is_scheduled_outage": { "type": "boolean" },
           "is_rust_based_decider": { "type": "boolean" },
+          "debit_routing_output": { "$ref": "#/components/schemas/DebitRoutingOutput" },
           "latency": { "type": "number" }
+        }
+      },
+      "DebitRoutingOutput": {
+        "type": "object",
+        "properties": {
+          "co_badged_card_networks_info": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "network": { "type": "string", "example": "NYCE" },
+                "saving_percentage": { "type": "number", "example": 1.2 }
+              }
+            }
+          },
+          "issuer_country": { "type": "string", "example": "US" },
+          "is_regulated": { "type": "boolean", "example": false },
+          "regulated_name": { "type": "string", "nullable": true },
+          "card_type": { "type": "string", "example": "Debit" }
         }
       },
       "UpdateGatewayScoreRequest": {
@@ -761,6 +860,20 @@
           "message": { "type": "string" },
           "merchant_id": { "type": "string", "example": "my_merchant" },
           "gateway_success_rate_based_decider_input": { "type": "string", "nullable": true }
+        }
+      },
+      "DebitRoutingRequest": {
+        "type": "object",
+        "required": ["enabled"],
+        "properties": {
+          "enabled": { "type": "boolean", "example": true }
+        }
+      },
+      "DebitRoutingResponse": {
+        "type": "object",
+        "properties": {
+          "merchant_id": { "type": "string", "example": "my_merchant" },
+          "debit_routing_enabled": { "type": "boolean", "example": true }
         }
       },
       "CreateRoutingRuleRequest": {
