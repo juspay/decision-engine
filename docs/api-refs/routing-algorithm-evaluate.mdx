@@ -5,36 +5,35 @@ description: "Curl example for /routing/evaluate."
 
 # Evaluate Routing Algorithm
 
+`/routing/evaluate` evaluates the active routing algorithm for a payment context. It does not update SR scores.
+
 ## Request
 
 ```bash
 curl --location "$BASE_URL/routing/evaluate" \
+  --header "$AUTH_HEADER" \
   --header "Content-Type: application/json" \
   --data '{
-    "created_by": "merchant_1234",
-    "parameters": {
-      "payment_method": { "type": "enum_variant", "value": "upi" },
-      "amount": { "type": "number", "value": 10 }
+    "merchantId": "merchant_demo",
+    "paymentInfo": {
+      "paymentId": "eval_001",
+      "amount": 1000,
+      "currency": "USD",
+      "paymentType": "ORDER_PAYMENT",
+      "paymentMethodType": "CARD",
+      "paymentMethod": "CREDIT",
+      "authType": "THREE_DS"
     }
   }'
 ```
 
-## Example Response
+## Response
 
 ```json
 {
-  "status": "default_selection",
-  "output": {
-    "type": "priority",
-    "connectors": [
-      { "gateway_name": "stripe", "gateway_id": "mca_111" },
-      { "gateway_name": "adyen", "gateway_id": "mca_112" },
-      { "gateway_name": "checkout", "gateway_id": "mca_113" }
-    ]
-  },
-  "evaluated_output": [
-    { "gateway_name": "stripe", "gateway_id": "mca_111" }
-  ],
-  "eligible_connectors": []
+  "priority": [
+    { "gateway_name": "stripe", "gateway_id": "mca_111" },
+    { "gateway_name": "adyen", "gateway_id": "mca_112" }
+  ]
 }
 ```

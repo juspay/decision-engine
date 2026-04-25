@@ -8,9 +8,18 @@ description: "Curl example for listing routing algorithms."
 ## Request
 
 ```bash
-curl --request POST "$BASE_URL/routing/list/merchant_1234"
+curl --request POST "$BASE_URL/routing/list/merchant_demo" \
+  --header "$AUTH_HEADER"
 ```
 
-## Notes
+## Response
 
-Returns an array of algorithms for `merchant_1234`.
+```json
+[
+  {
+    "rule_id": "routing_e641380c-6f24-4405-8454-5ae6cbceb7a0",
+    "name": "priority rule",
+    "algorithm_for": "payment"
+  }
+]
+```

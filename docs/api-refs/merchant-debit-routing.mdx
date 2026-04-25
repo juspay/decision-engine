@@ -1,0 +1,40 @@
+---
+title: "Merchant Debit Routing Flag"
+description: "Curl examples for reading and updating the merchant debit-routing feature flag."
+---
+
+# Merchant Debit Routing Flag
+
+Debit/network routing is gated per merchant. Missing config defaults to disabled.
+
+## Read Flag
+
+```bash
+curl "$BASE_URL/merchant-account/merchant_demo/debit-routing" \
+  --header "$AUTH_HEADER"
+```
+
+```json
+{
+  "merchant_id": "merchant_demo",
+  "debit_routing_enabled": false
+}
+```
+
+## Enable Flag
+
+```bash
+curl --location "$BASE_URL/merchant-account/merchant_demo/debit-routing" \
+  --header "$AUTH_HEADER" \
+  --header "Content-Type: application/json" \
+  --data '{ "enabled": true }'
+```
+
+## Disable Flag
+
+```bash
+curl --location "$BASE_URL/merchant-account/merchant_demo/debit-routing" \
+  --header "$AUTH_HEADER" \
+  --header "Content-Type: application/json" \
+  --data '{ "enabled": false }'
+```

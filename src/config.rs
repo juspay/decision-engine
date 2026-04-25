@@ -114,22 +114,12 @@ pub struct TenantConfig {
     pub cache_config: CacheConfig,
 }
 
-#[derive(Clone, Debug, serde::Deserialize)]
+#[derive(Clone, Debug, Default, serde::Deserialize)]
 #[serde(default)]
 pub struct AnalyticsConfig {
     pub capture: AnalyticsCaptureConfig,
     pub kafka: KafkaAnalyticsConfig,
     pub clickhouse: ClickHouseAnalyticsConfig,
-}
-
-impl Default for AnalyticsConfig {
-    fn default() -> Self {
-        Self {
-            capture: AnalyticsCaptureConfig::default(),
-            kafka: KafkaAnalyticsConfig::default(),
-            clickhouse: ClickHouseAnalyticsConfig::default(),
-        }
-    }
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]

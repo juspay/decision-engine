@@ -26,10 +26,49 @@
         "installation",
         "local-setup",
         "configuration",
-        "dashboard",
+        "dashboard-guide",
         "api-reference",
-        "api-refs/api-ref",
         "dual-protocol-layer"
+      ]
+    },
+    {
+      "group": "API Examples",
+      "pages": [
+        "api-refs/api-ref",
+        "api-refs/health-check",
+        "api-refs/auth-and-onboarding",
+        "api-refs/api-keys",
+        "api-refs/merchant-account-create",
+        "api-refs/merchant-account-get",
+        "api-refs/merchant-account-delete",
+        "api-refs/merchant-debit-routing",
+        "api-refs/decide-gateway-sr-based",
+        "api-refs/decide-gateway-pl-based",
+        "api-refs/decide-gateway-debit-routing",
+        "api-refs/decide-gateway-hybrid-routing",
+        "api-refs/decision-gateway-legacy",
+        "api-refs/update-gateway-score",
+        "api-refs/update-score-legacy",
+        "api-refs/routing-algorithm-create",
+        "api-refs/routing-algorithm-evaluate",
+        "api-refs/routing-hybrid",
+        "api-refs/routing-algorithm-list",
+        "api-refs/routing-algorithm-list-active",
+        "api-refs/routing-algorithm-activate",
+        "api-refs/routing-single-connector-example",
+        "api-refs/routing-priority-example",
+        "api-refs/routing-volume-split-example",
+        "api-refs/routing-advanced-example",
+        "api-refs/success-rate-config-create",
+        "api-refs/success-rate-config-get",
+        "api-refs/success-rate-config-update",
+        "api-refs/success-rate-config-delete",
+        "api-refs/elimination-config-create",
+        "api-refs/elimination-config-get",
+        "api-refs/elimination-config-update",
+        "api-refs/elimination-config-delete",
+        "api-refs/config-endpoints",
+        "api-refs/analytics-endpoints"
       ]
     },
     {
@@ -40,8 +79,20 @@
       ]
     },
     {
+      "group": "Operations",
+      "pages": [
+        "analytics",
+        "payment-audit",
+        "clickhouse-analytics"
+      ]
+    },
+    {
       "group": "Health",
-      "pages": ["api-reference/endpoint/healthCheck"]
+      "pages": [
+        "api-reference/endpoint/healthCheck",
+        "api-reference/endpoint/healthReady",
+        "api-reference/endpoint/healthDiagnostics"
+      ]
     },
     {
       "group": "Gateway Decision",
@@ -56,7 +107,9 @@
       "pages": [
         "api-reference/endpoint/createMerchant",
         "api-reference/endpoint/getMerchant",
-        "api-reference/endpoint/deleteMerchant"
+        "api-reference/endpoint/deleteMerchant",
+        "api-reference/endpoint/getMerchantDebitRouting",
+        "api-reference/endpoint/updateMerchantDebitRouting"
       ]
     },
     {
@@ -66,7 +119,8 @@
         "api-reference/endpoint/activateRoutingRule",
         "api-reference/endpoint/listRoutingRules",
         "api-reference/endpoint/getActiveRoutingRule",
-        "api-reference/endpoint/evaluateRoutingRule"
+        "api-reference/endpoint/evaluateRoutingRule",
+        "api-reference/endpoint/hybridRouting"
       ]
     },
     {
@@ -76,6 +130,42 @@
         "api-reference/endpoint/getRuleConfig",
         "api-reference/endpoint/updateRuleConfig",
         "api-reference/endpoint/deleteRuleConfig"
+      ]
+    },
+    {
+      "group": "Auth And API Keys",
+      "pages": [
+        "api-reference/endpoint/signup",
+        "api-reference/endpoint/login",
+        "api-reference/endpoint/logout",
+        "api-reference/endpoint/me",
+        "api-reference/endpoint/listUserMerchants",
+        "api-reference/endpoint/switchMerchant",
+        "api-reference/endpoint/onboardMerchant",
+        "api-reference/endpoint/createApiKey",
+        "api-reference/endpoint/listApiKeys",
+        "api-reference/endpoint/revokeApiKey"
+      ]
+    },
+    {
+      "group": "Analytics",
+      "pages": [
+        "api-reference/endpoint/analyticsOverview",
+        "api-reference/endpoint/analyticsGatewayScores",
+        "api-reference/endpoint/analyticsDecisions",
+        "api-reference/endpoint/analyticsRoutingStats",
+        "api-reference/endpoint/analyticsLogSummaries",
+        "api-reference/endpoint/analyticsPaymentAudit",
+        "api-reference/endpoint/analyticsPreviewTrace"
+      ]
+    },
+    {
+      "group": "Compatibility And Config",
+      "pages": [
+        "api-reference/endpoint/legacyDecisionGateway",
+        "api-reference/endpoint/legacyUpdateScore",
+        "api-reference/endpoint/getRoutingConfig",
+        "api-reference/endpoint/configSrDimension"
       ]
     }
   ],

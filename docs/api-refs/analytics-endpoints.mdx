@@ -1,0 +1,71 @@
+---
+title: "Analytics Endpoints"
+description: "Curl examples for ClickHouse-backed analytics, charts, payment audit, and decision trace."
+---
+
+# Analytics Endpoints
+
+Analytics routes derive the merchant from the authenticated user/API key context. Common query parameters:
+
+| Parameter | Values |
+| --- | --- |
+| `range` | `15m`, `1h`, `12h`, `1d`, `1w` |
+| `start_ms`, `end_ms` | custom epoch-millisecond window |
+| `page`, `page_size` | paginated list endpoints |
+| `gateway`, `status`, `route`, `flow_type`, `routing_approach` | filters |
+
+## Overview
+
+```bash
+curl "$BASE_URL/analytics/overview?range=1d" \
+  --header "$AUTH_HEADER"
+```
+
+## Gateway Scores
+
+```bash
+curl "$BASE_URL/analytics/gateway-scores?range=1d&gateway=stripe,adyen" \
+  --header "$AUTH_HEADER"
+```
+
+## Decisions
+
+```bash
+curl "$BASE_URL/analytics/decisions?range=1d" \
+  --header "$AUTH_HEADER"
+```
+
+## Routing Stats
+
+```bash
+curl "$BASE_URL/analytics/routing-stats?range=1d&payment_method_type=CARD" \
+  --header "$AUTH_HEADER"
+```
+
+## Log Summaries
+
+```bash
+curl "$BASE_URL/analytics/log-summaries?range=1d&status=failure" \
+  --header "$AUTH_HEADER"
+```
+
+## Payment Audit
+
+```bash
+curl "$BASE_URL/analytics/payment-audit?range=1d&page=1&page_size=12&payment_id=pay_001" \
+  --header "$AUTH_HEADER"
+```
+
+## Preview Trace
+
+```bash
+curl "$BASE_URL/analytics/preview-trace?range=1d&page=1&page_size=12&route=routing_evaluate" \
+  --header "$AUTH_HEADER"
+```
+
+## Debit Routing Audit
+
+```bash
+curl "$BASE_URL/analytics/payment-audit?range=1d&routing_approach=NTW_BASED_ROUTING" \
+  --header "$AUTH_HEADER"
+```

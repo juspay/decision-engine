@@ -1,4 +1,4 @@
-import type { ElementType } from 'react'
+import type { ElementType, ReactNode } from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useSWR from 'swr'
@@ -10,13 +10,14 @@ import {
   CheckCircle2,
   Clock3,
   GitBranch,
+  Network,
   ShieldCheck,
   Sparkles,
   XCircle,
 } from 'lucide-react'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useAuthStore } from '../../store/authStore'
-import { apiPost, fetcher } from '../../lib/api'
+import { apiFetch, apiPost, fetcher } from '../../lib/api'
 import {
   AnalyticsRange,
   AnalyticsOverviewResponse,
@@ -27,6 +28,7 @@ import {
 import { Badge } from '../ui/Badge'
 import { Card as GlassCard, SurfaceLabel } from '../ui/Card'
 import { Spinner } from '../ui/Spinner'
+import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
 
 const OVERVIEW_RANGE_OPTIONS: {
   value: AnalyticsRange
@@ -46,8 +48,8 @@ function useHealth() {
   const [status, setStatus] = useState<'up' | 'down' | 'loading'>('loading')
 
   useEffect(() => {
-    fetch('/health')
-      .then((response) => setStatus(response.ok ? 'up' : 'down'))
+    apiFetch<{ message: string }>('/health')
+      .then(() => setStatus('up'))
       .catch(() => setStatus('down'))
   }, [])
 
@@ -67,7 +69,7 @@ function formatPercent(value: number | undefined) {
 }
 
 function healthLabel(status: 'up' | 'down' | 'loading') {
-  if (status === 'up') return 'Healthy'
+  if (status === 'up') return 'Live'
   if (status === 'down') return 'Needs attention'
   return 'Checking'
 }
@@ -100,7 +102,7 @@ function MetricCard({
 }: {
   icon: ElementType
   label: string
-  value: string
+  value: ReactNode
   detail: string
 }) {
   return (
@@ -119,6 +121,14 @@ function MetricCard({
       </div>
     </GlassCard>
   )
+}
+
+function formatRouteLabel(route: string) {
+  return route
+    .replace(/_/g, '-')
+    .replace(/^\/routing-evaluate$/, '/routing/evaluate')
+    .replace(/^\/decide-gateway$/, '/decide-gateway')
+    .replace(/^\/update-gateway$/, '/update-gateway')
 }
 
 function EmptyWorkspace() {
@@ -190,6 +200,11 @@ function RefreshingState({ label }: { label: string }) {
   )
 }
 
+type RuleConfigResponse = {
+  merchant_id: string
+  config: RuleConfig
+}
+
 export function OverviewPage() {
   const navigate = useNavigate()
   const { merchantId } = useMerchantStore()
@@ -204,24 +219,21 @@ export function OverviewPage() {
     { shouldRetryOnError: false },
   )
 
-  const { data: srConfig } = useSWR<RuleConfig>(
+  const { data: srConfig } = useSWR<RuleConfigResponse>(
     effectiveMerchantId ? ['/rule/get', 'successRate', effectiveMerchantId] : null,
     () => apiPost('/rule/get', { merchant_id: effectiveMerchantId, algorithm: 'successRate' }),
     { shouldRetryOnError: false },
   )
+  const debitRoutingFlag = useDebitRoutingFlag(effectiveMerchantId)
 
   const analyticsOverviewUrl = `/analytics/overview?range=${range}`
   const analyticsRoutingUrl = `/analytics/routing-stats?range=${range}`
 
   const analyticsOverview = useSWR<AnalyticsOverviewResponse>(analyticsOverviewUrl, fetcher, {
-    refreshInterval: 15000,
-    revalidateOnFocus: true,
     shouldRetryOnError: false,
     keepPreviousData: true,
   })
   const analyticsRouting = useSWR<AnalyticsRoutingStatsResponse>(analyticsRoutingUrl, fetcher, {
-    refreshInterval: 15000,
-    revalidateOnFocus: true,
     shouldRetryOnError: false,
     keepPreviousData: true,
   })
@@ -257,18 +269,24 @@ export function OverviewPage() {
   const topGateway = gatewayUsage[0]?.gateway || analyticsOverview.data?.top_scores?.[0]?.gateway
   const selectedWindow =
     OVERVIEW_RANGE_OPTIONS.find((option) => option.value === range) || OVERVIEW_RANGE_OPTIONS[1]
+  const hasAuthRateConfig = Boolean(srConfig?.config?.data)
+  const hasDebitRouting = debitRoutingFlag.isEnabled
+  const totalRouteHits = routeHits.reduce((sum, item) => sum + item.count, 0)
+  const topRouteHit = [...routeHits].sort((left, right) => right.count - left.count)[0] || null
+  const topRouteShare = topRouteHit && totalRouteHits ? (topRouteHit.count / totalRouteHits) * 100 : 0
   const configuredBasics = [
     health === 'up',
     Boolean(activeRouting),
-    Boolean(srConfig?.data),
+    hasAuthRateConfig,
     hasRuleBasedRouting,
+    hasDebitRouting,
   ].filter(Boolean).length
 
   const setupItems = [
     {
       label: 'Service health',
       description: health === 'up' ? 'Service is reachable.' : 'Please verify service health.',
-      state: health === 'up' ? 'Healthy' : health === 'down' ? 'Issue' : 'Checking',
+      state: health === 'up' ? 'Live' : health === 'down' ? 'Issue' : 'Checking',
       icon: health === 'up' ? CheckCircle2 : health === 'down' ? XCircle : AlertCircle,
       route: undefined,
     },
@@ -281,8 +299,8 @@ export function OverviewPage() {
     },
     {
       label: 'Auth-rate config',
-      description: srConfig?.data ? 'Configured and available.' : 'Not configured yet.',
-      state: srConfig?.data ? 'Configured' : 'Not set',
+      description: hasAuthRateConfig ? 'Configured and available.' : 'Not configured yet.',
+      state: hasAuthRateConfig ? 'Configured' : 'Not set',
       icon: ShieldCheck,
       route: '/routing/sr',
     },
@@ -292,6 +310,17 @@ export function OverviewPage() {
       state: hasRuleBasedRouting ? 'Enabled' : 'Optional',
       icon: Sparkles,
       route: '/routing/rules',
+    },
+    {
+      label: 'Debit routing',
+      description: debitRoutingFlag.isLoading
+        ? 'Checking merchant debit-routing flag.'
+        : hasDebitRouting
+          ? 'Enabled for this merchant.'
+          : 'Not enabled yet.',
+      state: debitRoutingFlag.isLoading ? 'Checking' : hasDebitRouting ? 'Enabled' : 'Not set',
+      icon: Network,
+      route: '/routing/debit',
     },
   ]
 
@@ -327,13 +356,36 @@ export function OverviewPage() {
             ) : null}
           </div>
           <div>
-            <h1 className="text-4xl font-semibold tracking-tight text-slate-950 md:text-[4rem] dark:text-white">
-              Overview
-            </h1>
-            <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-600 dark:text-[#a6b0c3]">
-              Basic business-facing view of system status, setup, request volume, and gateway activity.
-            </p>
-            <div className="mt-4 inline-flex rounded-2xl border border-slate-200 bg-slate-50 p-1 dark:border-[#2a303a] dark:bg-[#121720]">
+              <h1 className="text-4xl font-semibold tracking-tight text-slate-950 md:text-[4rem] dark:text-white">
+                Overview
+              </h1>
+              <div className="mt-2 flex items-start justify-between gap-4">
+                <p className="max-w-2xl text-sm leading-7 text-slate-600 dark:text-[#a6b0c3]">
+                  Basic business-facing view of system status, setup, request volume, and gateway activity.
+                </p>
+                <span
+                  className={`inline-flex flex-shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium ${
+                    health === 'up'
+                      ? 'border-emerald-300/35 bg-emerald-500/12 text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/15 dark:text-emerald-200'
+                      : health === 'down'
+                        ? 'border-red-300/35 bg-red-500/12 text-red-700 dark:border-red-400/35 dark:bg-red-500/15 dark:text-red-200'
+                        : 'border-amber-300/35 bg-amber-500/12 text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/15 dark:text-amber-200'
+                  }`}
+                >
+                  <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
+                    <span
+                      className={`absolute h-2 w-2 rounded-full ${health === 'up' ? 'bg-emerald-500' : health === 'down' ? 'bg-red-500' : 'bg-amber-500'} ${
+                        health === 'up' ? 'animate-ping' : ''
+                      }`}
+                    />
+                    <span
+                      className={`relative h-2 w-2 rounded-full ${health === 'up' ? 'bg-emerald-500' : health === 'down' ? 'bg-red-500' : 'bg-amber-500'}`}
+                    />
+                  </span>
+                  {healthLabel(health)}
+                </span>
+              </div>
+              <div className="mt-4 inline-flex rounded-2xl border border-slate-200 bg-slate-50 p-1 dark:border-[#2a303a] dark:bg-[#121720]">
               {OVERVIEW_RANGE_OPTIONS.map((option) => {
                 const active = option.value === range
                 return (
@@ -371,7 +423,7 @@ export function OverviewPage() {
               </div>
             ) : null}
 
-            <div className={`grid gap-5 pt-8 xl:grid-cols-[1.15fr_0.85fr] transition-opacity duration-200 ${analyticsRefreshing ? 'opacity-60' : 'opacity-100'}`}>
+              <div className={`grid gap-5 pt-8 xl:grid-cols-[1.15fr_0.85fr] transition-opacity duration-200 ${analyticsRefreshing ? 'opacity-60' : 'opacity-100'}`}>
               <GlassCard className="p-6 md:p-7">
                 <div className="flex h-full flex-col justify-between">
                   <div>
@@ -402,7 +454,7 @@ export function OverviewPage() {
                       value={formatCompactNumber(decideHits)}
                       detail={selectedWindow.detail}
                     />
-                    <HeroStat label="Setup ready" value={`${configuredBasics}/4`} detail="Core basics configured" />
+                    <HeroStat label="Setup ready" value={`${configuredBasics}/5`} detail="Core basics configured" />
                     <HeroStat label="Window" value={selectedWindow.label} detail={selectedWindow.detail} />
                   </div>
                 </div>
@@ -410,16 +462,14 @@ export function OverviewPage() {
 
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
                 <MetricCard
-                  icon={Activity}
-                  label="System status"
-                  value={healthLabel(health)}
-                  detail={health === 'up' ? 'Service is reachable' : 'Please verify service health'}
-                />
-                <MetricCard
                   icon={GitBranch}
-                  label="Active routing"
-                  value={activeRouting?.name || 'Not set'}
-                  detail={activeRouting ? 'Currently selected strategy' : 'No routing configured yet'}
+                  label="Primary traffic path"
+                  value={topRouteHit ? formatRouteLabel(topRouteHit.route) : 'No traffic yet'}
+                  detail={
+                    topRouteHit
+                      ? `${formatCompactNumber(topRouteHit.count)} requests · ${topRouteShare.toFixed(topRouteShare >= 100 ? 0 : 1)}% of tracked routes`
+                      : 'No routing endpoint activity in this window'
+                  }
                 />
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-2">
                   <MetricCard
@@ -430,9 +480,9 @@ export function OverviewPage() {
                   />
                   <MetricCard
                     icon={BarChart3}
-                    label="Top gateway"
-                    value={topGateway?.toUpperCase() || '--'}
-                    detail={gatewayUsage[0] ? `${formatPercent(gatewayUsage[0].share)} of traffic` : 'No activity yet'}
+                    label="Errors"
+                    value={formatCompactNumber(totalErrors)}
+                    detail={totalErrors ? 'Issues in selected window' : 'No issues in selected window'}
                   />
                 </div>
               </div>
@@ -448,7 +498,7 @@ export function OverviewPage() {
                     </p>
                   </div>
                   <Badge variant={configuredBasics >= 3 ? 'green' : 'orange'}>
-                    {configuredBasics}/4 ready
+                    {configuredBasics}/5 ready
                   </Badge>
                 </div>
 
@@ -466,7 +516,7 @@ export function OverviewPage() {
                           </div>
                           <Badge
                             variant={
-                              item.state === 'Healthy' || item.state === 'Configured' || item.state === 'Enabled'
+                              item.state === 'Live' || item.state === 'Configured' || item.state === 'Enabled'
                                 ? 'green'
                                 : item.state === 'Issue'
                                   ? 'red'

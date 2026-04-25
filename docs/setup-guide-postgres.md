@@ -6,7 +6,7 @@ This page provides PostgreSQL-focused commands. The full end-to-end setup (CLI, 
 
 ```bash
 export DECISION_ENGINE_TAG=v1.4
-docker compose up -d
+COMPOSE_PROFILES= docker compose --profile postgres-ghcr up -d
 ```
 
 With dashboard + docs:

@@ -9,7 +9,7 @@ use crate::{
         flow_new::decider_full_payload_hs_function,
         types::{
             DecidedGateway, DomainDeciderRequestForApiCallV2, ErrorResponse,
-            GatewayDeciderApproach, ResetApproach, UnifiedError,
+            GatewayDeciderApproach, RankingAlgorithm, ResetApproach, UnifiedError,
         },
     },
     logger, metrics,
@@ -65,6 +65,15 @@ struct DecideGatewayParseFailureDetail<'a> {
     request_id: &'a str,
     raw_request: Cow<'a, str>,
     response: &'a ErrorResponse,
+}
+
+fn requested_routing_approach(
+    ranking_algorithm: Option<&RankingAlgorithm>,
+    response_routing_approach: Option<&GatewayDeciderApproach>,
+) -> Option<String> {
+    response_routing_approach
+        .map(ToString::to_string)
+        .or_else(|| ranking_algorithm.map(ToString::to_string))
 }
 
 fn request_parse_error_response(error: impl ToString) -> ErrorResponse {
@@ -218,6 +227,10 @@ pub async fn decide_gateway(
                 }
                 Err(e) => {
                     logger::debug!(tag = "DecideGateway", "Error: {:?}", e);
+                    let routing_approach = requested_routing_approach(
+                        payload.ranking_algorithm.as_ref(),
+                        e.routing_approach.as_ref(),
+                    );
                     DomainAnalyticsEvent::record_error(
                         AnalyticsFlowContext::new(
                             ApiFlow::DynamicRouting,
@@ -230,7 +243,7 @@ pub async fn decide_gateway(
                         global_request_id.clone(),
                         trace_id.clone(),
                         None,
-                        e.routing_approach.as_ref().map(ToString::to_string),
+                        routing_approach,
                         e.error_code.clone(),
                         e.error_message.clone(),
                         serialize_details(&DecideGatewayFailureDetail {

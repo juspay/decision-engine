@@ -8,13 +8,15 @@ description: "Curl example for deleting a merchant account."
 ## Request
 
 ```bash
-curl -X DELETE "$BASE_URL/merchant-account/test_merchant_123423"
+curl --request DELETE "$BASE_URL/merchant-account/merchant_demo" \
+  --header "$AUTH_HEADER"
 ```
 
 ## Response
 
 ```json
 {
-  "Merchant account deleted successfully"
+  "message": "Merchant account deleted successfully",
+  "merchant_id": "merchant_demo"
 }
 ```

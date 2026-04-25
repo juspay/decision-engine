@@ -1,57 +1,104 @@
 ---
-title: "Curl API References"
-description: "Structured curl examples split into dedicated docs pages."
+title: "API Examples"
+description: "Human-friendly Decision Engine API map with curl examples for every route family and routing flavour."
 ---
 
-# Curl API References
+# API Examples
 
-Use this section for request-first examples. For schema details, keep using [API Overview](../api-reference) and the OpenAPI-backed endpoint pages.
+Use this page as the route map for local smoke tests, dashboard integration, and sandbox debugging. For schema-level details, use [API Overview](/api-reference) and the OpenAPI-backed endpoint pages.
 
-Base URL used in the examples:
+## Environment
 
 ```bash
+# Local source or Docker Compose
 export BASE_URL=http://localhost:8080
+
+# Sandbox, when routed through Hyperswitch
+# export BASE_URL=https://sandbox.hyperswitch.io
+
+# Protected endpoints accept either a dashboard JWT or an API key.
+export AUTH_HEADER="Authorization: Bearer <jwt_token>"
+# export AUTH_HEADER="x-api-key: DE_<api_key>"
+
+# Sandbox-only routing header.
+export FEATURE_HEADER="x-feature: decision-engine"
 ```
 
-## Decision Gateway
+Public routes do not need `AUTH_HEADER`. Protected routes should include it:
 
-- [Health Check](health-check)
-- [Decide Gateway: SR Based Routing](decide-gateway-sr-based)
-- [Decide Gateway: Debit Routing](decide-gateway-debit-routing)
-- [Update Gateway Score](update-gateway-score)
+```bash
+curl "$BASE_URL/analytics/overview?range=1d" \
+  --header "$AUTH_HEADER" \
+  --header "$FEATURE_HEADER"
+```
 
-## Rule Configuration
+## Contents
 
-### Success Rate Config
+### Health
 
-- [Create Success Rate Config](success-rate-config-create)
-- [Get Success Rate Config](success-rate-config-get)
-- [Update Success Rate Config](success-rate-config-update)
-- [Delete Success Rate Config](success-rate-config-delete)
+- [Health, readiness, and diagnostics](/api-refs/health-check): `GET /health`, `GET /health/ready`, `GET /health/diagnostics`
 
-### Elimination Config
+### Auth, onboarding, and API keys
 
-- [Create Elimination Config](elimination-config-create)
-- [Get Elimination Config](elimination-config-get)
-- [Update Elimination Config](elimination-config-update)
-- [Delete Elimination Config](elimination-config-delete)
+- [Auth and onboarding](/api-refs/auth-and-onboarding): `POST /auth/signup`, `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`, `GET /auth/merchants`, `POST /auth/switch-merchant`, `POST /onboarding/merchant`
+- [API keys](/api-refs/api-keys): `POST /api-key/create`, `GET /api-key/list/:merchant_id`, `DELETE /api-key/:key_id`
 
-## Merchant Account
+### Merchant account
 
-- [Create Merchant Account](merchant-account-create)
-- [Get Merchant Account](merchant-account-get)
-- [Delete Merchant Account](merchant-account-delete)
+- [Create merchant account](/api-refs/merchant-account-create): `POST /merchant-account/create`
+- [Get merchant account](/api-refs/merchant-account-get): `GET /merchant-account/:merchant-id`
+- [Delete merchant account](/api-refs/merchant-account-delete): `DELETE /merchant-account/:merchant-id`
+- [Debit-routing merchant flag](/api-refs/merchant-debit-routing): `GET|POST /merchant-account/:merchant-id/debit-routing`
 
-## Routing Algorithm
+### Gateway decisions
 
-- [Create Routing Algorithm](routing-algorithm-create)
-- [Evaluate Routing Algorithm](routing-algorithm-evaluate)
-- [List Routing Algorithms](routing-algorithm-list)
-- [Activate Routing Algorithm](routing-algorithm-activate)
-- [List Active Routing Algorithms](routing-algorithm-list-active)
+- [SR-based routing](/api-refs/decide-gateway-sr-based): `POST /decide-gateway` with `SR_BASED_ROUTING`
+- [Priority-list routing](/api-refs/decide-gateway-pl-based): `POST /decide-gateway` with `PL_BASED_ROUTING`
+- [Debit/network routing](/api-refs/decide-gateway-debit-routing): `POST /decide-gateway` with `NTW_BASED_ROUTING`
+- [Network + SR hybrid routing](/api-refs/decide-gateway-hybrid-routing): `POST /decide-gateway` with `NTW_SR_HYBRID_ROUTING`
+- [Legacy decision endpoint](/api-refs/decision-gateway-legacy): `POST /decision_gateway`
+- [Update gateway score](/api-refs/update-gateway-score): `POST /update-gateway-score`
+- [Legacy update score](/api-refs/update-score-legacy): `POST /update-score`
 
-## Algorithm Shape Examples
+### Routing rules
 
-- [Priority Routing Example](routing-priority-example)
-- [Single Connector Example](routing-single-connector-example)
-- [Volume Split Example](routing-volume-split-example)
+- [Create routing algorithm](/api-refs/routing-algorithm-create): `POST /routing/create`
+- [Evaluate routing algorithm](/api-refs/routing-algorithm-evaluate): `POST /routing/evaluate`
+- [Hybrid routing evaluation](/api-refs/routing-hybrid): `POST /routing/hybrid`
+- [List routing algorithms](/api-refs/routing-algorithm-list): `POST /routing/list/:created_by`
+- [List active routing algorithms](/api-refs/routing-algorithm-list-active): `POST /routing/list/active/:created_by`
+- [Activate routing algorithm](/api-refs/routing-algorithm-activate): `POST /routing/activate`
+
+### Routing algorithm shapes
+
+- [Single connector](/api-refs/routing-single-connector-example): `algorithm.type = single`
+- [Priority list](/api-refs/routing-priority-example): `algorithm.type = priority`
+- [Volume split](/api-refs/routing-volume-split-example): `algorithm.type = volume_split`
+- [Advanced rule tree](/api-refs/routing-advanced-example): `algorithm.type = advanced`
+
+### Rule configuration
+
+- [Create success-rate config](/api-refs/success-rate-config-create): `POST /rule/create`
+- [Get success-rate config](/api-refs/success-rate-config-get): `POST /rule/get`
+- [Update success-rate config](/api-refs/success-rate-config-update): `POST /rule/update`
+- [Delete success-rate config](/api-refs/success-rate-config-delete): `POST /rule/delete`
+- [Create elimination config](/api-refs/elimination-config-create): `POST /rule/create`
+- [Get elimination config](/api-refs/elimination-config-get): `POST /rule/get`
+- [Update elimination config](/api-refs/elimination-config-update): `POST /rule/update`
+- [Delete elimination config](/api-refs/elimination-config-delete): `POST /rule/delete`
+
+### Config and analytics
+
+- [Routing config endpoints](/api-refs/config-endpoints): `GET /config/routing-keys`, `POST /config-sr-dimension`
+- [Analytics endpoints](/api-refs/analytics-endpoints): `/analytics/overview`, `/analytics/gateway-scores`, `/analytics/decisions`, `/analytics/routing-stats`, `/analytics/log-summaries`, `/analytics/payment-audit`, `/analytics/preview-trace`
+
+## Routing Algorithm Values
+
+Use backend enum strings in requests:
+
+| UI label | Request value | Route family |
+| --- | --- | --- |
+| Auth-rate based | `SR_BASED_ROUTING` | `/decide-gateway` |
+| Priority-list based | `PL_BASED_ROUTING` | `/decide-gateway` |
+| Debit/network based | `NTW_BASED_ROUTING` | `/decide-gateway` |
+| Network + SR hybrid | `NTW_SR_HYBRID_ROUTING` | `/decide-gateway` |

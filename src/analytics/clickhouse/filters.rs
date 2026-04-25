@@ -8,6 +8,9 @@ use super::common::{
 use super::query::FilterClause;
 use super::time::{effective_payment_audit_window_bounds, payment_audit_summary_bucket_bounds};
 
+const DEBIT_ROUTING_APPROACH: &str = "NTW_BASED_ROUTING";
+const DEBIT_ROUTING_DETAILS_MATCH: &str = r#"(positionCaseInsensitive(ifNull(details, ''), '"rankingAlgorithm":"NTW_BASED_ROUTING"') > 0 OR positionCaseInsensitive(ifNull(details, ''), '"routing_approach":"NTW_BASED_ROUTING"') > 0)"#;
+
 pub fn base_window_filters(start_ms: i64, end_ms: i64) -> Vec<FilterClause> {
     vec![
         FilterClause::gte("created_at_ms", start_ms),
@@ -94,6 +97,12 @@ pub fn payment_audit_raw_filters(
     if let Some(flow_type) = &query.flow_type {
         filters.push(FilterClause::eq("flow_type", flow_type.clone()));
     }
+    if let Some(routing_approach) = &query.routing_approach {
+        filters.push(routing_approach_match_filter(routing_approach));
+    }
+    if let Some(routing_approach) = &query.exclude_routing_approach {
+        filters.push(routing_approach_exclusion_filter(routing_approach));
+    }
     if let Some(error_code) = &query.error_code {
         filters.push(FilterClause::eq("error_code", error_code.clone()));
     }
@@ -118,6 +127,33 @@ pub fn payment_audit_summary_bucket_filters(
         ),
         FilterClause::eq("summary_kind", payment_audit_summary_kind(preview_only)),
     ]
+}
+
+fn routing_approach_match_filter(routing_approach: &str) -> FilterClause {
+    if routing_approach == DEBIT_ROUTING_APPROACH {
+        FilterClause::new(
+            format!("(routing_approach = ? OR {DEBIT_ROUTING_DETAILS_MATCH})"),
+            vec![routing_approach.to_string().into()],
+        )
+    } else {
+        FilterClause::eq("routing_approach", routing_approach.to_string())
+    }
+}
+
+fn routing_approach_exclusion_filter(routing_approach: &str) -> FilterClause {
+    if routing_approach == DEBIT_ROUTING_APPROACH {
+        FilterClause::new(
+            format!(
+                "((routing_approach IS NULL OR routing_approach != ?) AND NOT {DEBIT_ROUTING_DETAILS_MATCH})"
+            ),
+            vec![routing_approach.to_string().into()],
+        )
+    } else {
+        FilterClause::new(
+            "(routing_approach IS NULL OR routing_approach != ?)",
+            vec![routing_approach.to_string().into()],
+        )
+    }
 }
 
 #[cfg(test)]
@@ -162,6 +198,8 @@ mod tests {
             route: None,
             status: None,
             flow_type: None,
+            routing_approach: None,
+            exclude_routing_approach: None,
             error_code: None,
         }
     }
@@ -233,5 +271,40 @@ mod tests {
         assert!(predicates
             .iter()
             .any(|predicate| predicate == "summary_kind = ?"));
+    }
+
+    #[test]
+    fn payment_audit_filters_include_debit_rows_without_explicit_routing_approach() {
+        let mut query = payment_audit_query();
+        query.routing_approach = Some("NTW_BASED_ROUTING".to_string());
+
+        let predicates = payment_audit_raw_filters(&query, false)
+            .iter()
+            .map(|filter| filter.predicate().to_string())
+            .collect::<Vec<_>>();
+
+        assert!(predicates.iter().any(|predicate| {
+            predicate.contains("routing_approach = ?")
+                && predicate.contains("rankingAlgorithm")
+                && predicate.contains("NTW_BASED_ROUTING")
+        }));
+    }
+
+    #[test]
+    fn payment_audit_filters_exclude_debit_rows_without_explicit_routing_approach() {
+        let mut query = payment_audit_query();
+        query.exclude_routing_approach = Some("NTW_BASED_ROUTING".to_string());
+
+        let predicates = payment_audit_raw_filters(&query, false)
+            .iter()
+            .map(|filter| filter.predicate().to_string())
+            .collect::<Vec<_>>();
+
+        assert!(predicates.iter().any(|predicate| {
+            predicate.contains("routing_approach IS NULL")
+                && predicate.contains("AND NOT")
+                && predicate.contains("rankingAlgorithm")
+                && predicate.contains("NTW_BASED_ROUTING")
+        }));
     }
 }

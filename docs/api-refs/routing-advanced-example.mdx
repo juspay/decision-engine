@@ -1,0 +1,63 @@
+---
+title: "Advanced Routing Example"
+description: "Advanced Euclid rule tree example for /routing/create."
+---
+
+# Advanced Routing Example
+
+Use `algorithm.type = advanced` when the rule needs conditions, fallback output, and default selection.
+
+```bash
+curl --location "$BASE_URL/routing/create" \
+  --header "$AUTH_HEADER" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "name": "card metadata rule",
+    "created_by": "merchant_demo",
+    "description": "Route Visa card traffic by priority",
+    "algorithm_for": "payment",
+    "algorithm": {
+      "type": "advanced",
+      "data": {
+        "globals": {},
+        "default_selection": {
+          "priority": [
+            { "gateway_name": "stripe", "gateway_id": "mca_111" }
+          ]
+        },
+        "rules": [
+          {
+            "name": "visa_card_rule",
+            "routing_type": "priority",
+            "output": {
+              "priority": [
+                { "gateway_name": "adyen", "gateway_id": "mca_112" },
+                { "gateway_name": "stripe", "gateway_id": "mca_111" }
+              ]
+            },
+            "statements": [
+              {
+                "condition": [
+                  {
+                    "lhs": "payment_method_type",
+                    "comparison": "equal",
+                    "value": { "type": "enum_variant", "value": "CARD" },
+                    "metadata": {}
+                  },
+                  {
+                    "lhs": "card_network",
+                    "comparison": "equal",
+                    "value": { "type": "enum_variant", "value": "Visa" },
+                    "metadata": {}
+                  }
+                ],
+                "nested": null
+              }
+            ]
+          }
+        ],
+        "metadata": {}
+      }
+    }
+  }'
+```

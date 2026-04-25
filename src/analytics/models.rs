@@ -289,6 +289,8 @@ pub struct PaymentAuditQuery {
     pub route: Option<String>,
     pub status: Option<String>,
     pub flow_type: Option<String>,
+    pub routing_approach: Option<String>,
+    pub exclude_routing_approach: Option<String>,
     pub error_code: Option<String>,
 }
 
@@ -333,6 +335,8 @@ impl PaymentAuditQuery {
         route: Option<String>,
         status: Option<String>,
         flow_type: Option<String>,
+        routing_approach: Option<String>,
+        exclude_routing_approach: Option<String>,
         error_code: Option<String>,
     ) -> Self {
         let range = AnalyticsRange::from_query(range.as_deref());
@@ -356,6 +360,8 @@ impl PaymentAuditQuery {
             route: Self::normalise_route_filter(route),
             status: Self::normalise_status_filter(status),
             flow_type,
+            routing_approach,
+            exclude_routing_approach,
             error_code,
         }
     }
@@ -416,6 +422,7 @@ pub struct PaymentAuditResponse {
     pub route: Option<String>,
     pub status: Option<String>,
     pub flow_type: Option<String>,
+    pub routing_approach: Option<String>,
     pub error_code: Option<String>,
     pub page: usize,
     pub page_size: usize,

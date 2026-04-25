@@ -8,14 +8,15 @@ description: "Curl example for retrieving a merchant account."
 ## Request
 
 ```bash
-curl -X GET "$BASE_URL/merchant-account/test_merchant_123423"
+curl "$BASE_URL/merchant-account/merchant_demo" \
+  --header "$AUTH_HEADER"
 ```
 
 ## Response
 
 ```json
 {
-  "merchant_id": "test_merchant_123423",
+  "merchant_id": "merchant_demo",
   "gateway_success_rate_based_decider_input": null
 }
 ```

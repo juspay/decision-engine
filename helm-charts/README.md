@@ -149,6 +149,24 @@ helm delete my-release
 | `redis.replica.persistence.enabled` | Enable Redis replica persistence                      | `true`          |
 | `redis.replica.persistence.size` | Redis replica PVC size                                   | `8Gi`           |
 
+### Analytics Configuration
+
+The chart can wire Decision Engine to external Kafka and ClickHouse analytics infrastructure. It does not deploy a production Kafka or ClickHouse cluster by default.
+
+| Name | Description | Value |
+|------|-------------|-------|
+| `analytics.enabled` | Enable analytics config in the Decision Engine deployment | `false` |
+| `analytics.kafka.brokers` | Kafka bootstrap brokers used by the API server producer | `"kafka:19092"` |
+| `analytics.kafka.apiTopic` | Raw API event topic | `"decision-engine.analytics.api.v1"` |
+| `analytics.kafka.domainTopic` | Domain analytics event topic | `"decision-engine.analytics.domain.v1"` |
+| `analytics.clickhouse.host` | External ClickHouse host | `"clickhouse"` |
+| `analytics.clickhouse.httpPort` | ClickHouse HTTP port used by readers | `8123` |
+| `analytics.clickhouse.nativePort` | ClickHouse native port used by init jobs | `9000` |
+| `analytics.clickhouse.database` | ClickHouse analytics database | `"decision_engine_analytics"` |
+| `analytics.clickhouse.user` | ClickHouse user | `"decision_engine"` |
+| `analytics.clickhouse.password` | ClickHouse password | `"decision_engine"` |
+| `analytics.clickhouse.bootstrap.enabled` | Run the ClickHouse schema bootstrap job | `false` |
+
 ### Groovy Runner Configuration
 
 | Name                                    | Description                                                | Value           |
@@ -227,6 +245,26 @@ postgresql:
 redis:
   enabled: false
   hostname: "external-redis-host"
+```
+
+### Using External Kafka And ClickHouse Analytics
+
+```yaml
+analytics:
+  enabled: true
+  kafka:
+    brokers: "kafka-bootstrap.analytics.svc.cluster.local:9092"
+    apiTopic: "decision-engine.analytics.api.v1"
+    domainTopic: "decision-engine.analytics.domain.v1"
+  clickhouse:
+    host: "clickhouse.analytics.svc.cluster.local"
+    httpPort: 8123
+    nativePort: 9000
+    database: "decision_engine_analytics"
+    user: "decision_engine"
+    password: "<from-secret>"
+    bootstrap:
+      enabled: true
 ```
 
 ## Upgrading

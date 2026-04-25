@@ -390,6 +390,10 @@ where
         )
         .route(
             "/merchant-account/:merchant-id/debit-routing",
+            get(routes::merchant_account_config::get_debit_routing),
+        )
+        .route(
+            "/merchant-account/:merchant-id/debit-routing",
             post(routes::merchant_account_config::update_debit_routing),
         )
         .route(

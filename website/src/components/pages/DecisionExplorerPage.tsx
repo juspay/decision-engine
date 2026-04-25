@@ -9,20 +9,27 @@ import { Spinner } from '../ui/Spinner'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useAuthStore } from '../../store/authStore'
 import { apiPost, fetcher } from '../../lib/api'
-import { DecideGatewayResponse, GatewayConnector, PaymentAuditEvent, PaymentAuditResponse } from '../../types/api'
+import { DecideGatewayResponse, GatewayConnector, PaymentAuditEvent, PaymentAuditResponse, RoutingAlgorithmName } from '../../types/api'
 import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
 import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
-import { Play, RefreshCw, ChevronDown, ChevronUp, Activity, Code, Plus, Trash2, PieChart as PieChartIcon, X } from 'lucide-react'
+import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
+import { Play, RefreshCw, ChevronDown, ChevronUp, Activity, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network } from 'lucide-react'
 
-const ALGORITHMS = ['SR_BASED_ROUTING', 'PL_BASED_ROUTING', 'NTW_BASED_ROUTING']
+const ALGORITHMS: RoutingAlgorithmName[] = [
+  'SR_BASED_ROUTING',
+  'PL_BASED_ROUTING',
+  'NTW_BASED_ROUTING',
+  'NTW_SR_HYBRID_ROUTING',
+]
 
-const ALGORITHM_LABELS: Record<string, string> = {
-  'SR_BASED_ROUTING': 'Success Rate Based',
-  'PL_BASED_ROUTING': 'Priority List Based',
-  'NTW_BASED_ROUTING': 'Network Based'
+const ALGORITHM_LABELS: Record<RoutingAlgorithmName, string> = {
+  SR_BASED_ROUTING: 'Success Rate Based',
+  PL_BASED_ROUTING: 'Priority List Based',
+  NTW_BASED_ROUTING: 'Network Based',
+  NTW_SR_HYBRID_ROUTING: 'Network + SR Hybrid',
 }
 
-type TabType = 'single' | 'batch' | 'rule' | 'volume'
+type TabType = 'single' | 'batch' | 'rule' | 'volume' | 'debit'
 
 interface FormState {
   amount: string
@@ -32,8 +39,22 @@ interface FormState {
   card_brand: string
   auth_type: string
   eligible_gateways: string
-  ranking_algorithm: string
+  ranking_algorithm: RoutingAlgorithmName
   elimination_enabled: boolean
+}
+
+interface DebitRoutingFormState {
+  amount: string
+  currency: string
+  auth_type: string
+  eligible_gateways: string
+  merchant_category_code: string
+  acquirer_country: string
+  co_badged_networks: string
+  issuer_country: string
+  is_regulated: boolean
+  regulated_name: string
+  card_type: 'debit' | 'credit'
 }
 
 interface SimulationConfig {
@@ -87,7 +108,7 @@ type VolumePaymentEntry = {
   connector: string
 }
 
-const EXPLORER_STORAGE_KEY = 'decision-explorer-state-v1'
+const EXPLORER_STORAGE_KEY = 'decision-explorer-state-v2'
 
 const DEFAULT_FORM: FormState = {
   amount: '1000',
@@ -99,6 +120,20 @@ const DEFAULT_FORM: FormState = {
   eligible_gateways: 'stripe, adyen',
   ranking_algorithm: 'SR_BASED_ROUTING',
   elimination_enabled: false,
+}
+
+const DEFAULT_DEBIT_FORM: DebitRoutingFormState = {
+  amount: '1000',
+  currency: 'USD',
+  auth_type: 'THREE_DS',
+  eligible_gateways: 'stripe, adyen',
+  merchant_category_code: 'merchant_category_code_0001',
+  acquirer_country: 'US',
+  co_badged_networks: 'VISA, NYCE, PULSE, STAR',
+  issuer_country: 'US',
+  is_regulated: false,
+  regulated_name: '',
+  card_type: 'debit',
 }
 
 const DEFAULT_SIMULATION_CONFIG: SimulationConfig = {
@@ -121,10 +156,13 @@ interface ExplorerPersistedState {
   activeTab: TabType
   form: FormState
   simulationConfig: SimulationConfig
+  debitForm: DebitRoutingFormState
   ruleParams: RuleEvaluateParams[]
   fallbackConnectors: GatewayConnector[]
   volumePayments: string
   result: DecideGatewayResponse | null
+  debitResult: DecideGatewayResponse | null
+  debitPaymentId: string | null
   singleRunPaymentId: string | null
   singleRunOutcome: TransactionOutcome
   ruleResult: RuleEvaluateResponse | null
@@ -133,6 +171,7 @@ interface ExplorerPersistedState {
   volumeProgress: number
   simulationResults: SimulationResult[]
   responseOpen: boolean
+  debitResponseOpen: boolean
   volumeResponseOpen: boolean
 }
 
@@ -144,15 +183,32 @@ function cloneConnectors(connectors: GatewayConnector[]) {
   return connectors.map((connector) => ({ ...connector }))
 }
 
+function normalizeRankingAlgorithm(value: unknown): RoutingAlgorithmName {
+  if (value === 'SrBasedRouting') return 'SR_BASED_ROUTING'
+  if (value === 'PlBasedRouting') return 'PL_BASED_ROUTING'
+  if (value === 'NtwBasedRouting') return 'NTW_BASED_ROUTING'
+  if (value === 'NtwSrHybridRouting') return 'NTW_SR_HYBRID_ROUTING'
+  return ALGORITHMS.includes(value as RoutingAlgorithmName)
+    ? value as RoutingAlgorithmName
+    : DEFAULT_FORM.ranking_algorithm
+}
+
+function normalizeDebitCardType(value: unknown): DebitRoutingFormState['card_type'] {
+  return `${value || ''}`.toLowerCase() === 'credit' ? 'credit' : 'debit'
+}
+
 function getDefaultExplorerState(): ExplorerPersistedState {
   return {
     activeTab: 'batch',
     form: { ...DEFAULT_FORM },
     simulationConfig: { ...DEFAULT_SIMULATION_CONFIG },
+    debitForm: { ...DEFAULT_DEBIT_FORM },
     ruleParams: cloneRuleParams(DEFAULT_RULE_PARAMS),
     fallbackConnectors: cloneConnectors(DEFAULT_FALLBACK_CONNECTORS),
     volumePayments: '100',
     result: null,
+    debitResult: null,
+    debitPaymentId: null,
     singleRunPaymentId: null,
     singleRunOutcome: 'CHARGED',
     ruleResult: null,
@@ -161,6 +217,7 @@ function getDefaultExplorerState(): ExplorerPersistedState {
     volumeProgress: 0,
     simulationResults: [],
     responseOpen: false,
+    debitResponseOpen: false,
     volumeResponseOpen: false,
   }
 }
@@ -180,8 +237,17 @@ function loadExplorerState(): ExplorerPersistedState {
         parsed.activeTab && parsed.activeTab !== 'single'
           ? parsed.activeTab
           : defaults.activeTab,
-      form: { ...defaults.form, ...(parsed.form || {}) },
+      form: {
+        ...defaults.form,
+        ...(parsed.form || {}),
+        ranking_algorithm: normalizeRankingAlgorithm(parsed.form?.ranking_algorithm),
+      },
       simulationConfig: { ...defaults.simulationConfig, ...(parsed.simulationConfig || {}) },
+      debitForm: {
+        ...defaults.debitForm,
+        ...(parsed.debitForm || {}),
+        card_type: normalizeDebitCardType(parsed.debitForm?.card_type),
+      },
       ruleParams: parsed.ruleParams?.length ? cloneRuleParams(parsed.ruleParams) : defaults.ruleParams,
       fallbackConnectors: parsed.fallbackConnectors?.length ? cloneConnectors(parsed.fallbackConnectors) : defaults.fallbackConnectors,
       volumeDistribution: parsed.volumeDistribution || defaults.volumeDistribution,
@@ -264,7 +330,7 @@ function eventTypeLabel(eventType?: string | null) {
     eventType === 'update_score_legacy_score_snapshot'
   ) return 'Update Gateway'
   if (eventType === 'decide_gateway_rule_hit') return 'Rule Evaluate'
-  if (eventType.startsWith('routing_evaluate_') && eventType !== 'routing_evaluate_request_hit') return 'Preview Result'
+  if (eventType.startsWith('routing_evaluate_') && eventType !== 'routing_evaluate_request_hit') return 'Decision Result'
   if (eventType.endsWith('_error')) return 'Errors'
   return humanizeAuditValue(eventType)
 }
@@ -278,7 +344,7 @@ function stageLabel(event: PaymentAuditEvent) {
   if (event.event_stage === 'gateway_decided') return 'Decide Gateway'
   if (event.event_stage === 'score_updated') return 'Update Gateway'
   if (event.event_stage === 'rule_applied') return 'Rule Evaluate'
-  if (event.event_stage === 'preview_evaluated' || (flowType.startsWith('routing_evaluate_') && flowType !== 'routing_evaluate_request_hit')) return 'Preview Result'
+  if (event.event_stage === 'preview_evaluated' || (flowType.startsWith('routing_evaluate_') && flowType !== 'routing_evaluate_request_hit')) return 'Decision Result'
   if (flowType.endsWith('_error')) return 'Errors'
   return humanizeAuditValue(event.event_stage || flowType)
 }
@@ -288,7 +354,7 @@ function eventPhase(event: PaymentAuditEvent) {
   if ((flowType.startsWith('decide_gateway_') && flowType !== 'decide_gateway_rule_hit') || event.event_stage === 'gateway_decided') return 'Decide Gateway'
   if (flowType === 'decide_gateway_rule_hit' || event.event_stage === 'rule_applied') return 'Rule Evaluate'
   if (flowType.startsWith('update_gateway_score_') || flowType.startsWith('update_score_legacy_') || event.event_stage === 'score_updated') return 'Update Gateway'
-  if ((flowType.startsWith('routing_evaluate_') && flowType !== 'routing_evaluate_request_hit') || event.event_stage === 'preview_evaluated') return 'Preview'
+  if ((flowType.startsWith('routing_evaluate_') && flowType !== 'routing_evaluate_request_hit') || event.event_stage === 'preview_evaluated') return 'Decision'
   return 'Errors'
 }
 
@@ -331,10 +397,16 @@ function summaryBadgeVariant(status?: string | null): 'blue' | 'green' | 'purple
 function phaseBadgeVariant(phase: string): 'blue' | 'green' | 'purple' | 'red' | 'orange' | 'gray' {
   if (phase === 'Decide Gateway') return 'blue'
   if (phase === 'Rule Evaluate') return 'purple'
-  if (phase === 'Preview') return 'purple'
+  if (phase === 'Decision') return 'purple'
   if (phase === 'Update Gateway') return 'green'
   if (phase === 'Errors') return 'red'
   return 'gray'
+}
+
+function isTraceIndexingError(error: unknown) {
+  const status = typeof error === 'object' && error ? (error as { status?: number }).status : undefined
+  const message = error instanceof Error ? error.message : String(error || '')
+  return status === 404 || message.includes('API error 404')
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -488,7 +560,7 @@ function PendingAuditState({ title, body }: { title: string; body: string }) {
         <div className="h-full w-1/3 animate-pulse rounded-full bg-brand-500" />
       </div>
       <p className="mt-3 text-[11px] uppercase tracking-[0.16em] text-slate-400 dark:text-[#8390a7]">
-        Polling every second
+        Waiting for analytics
       </p>
     </div>
   )
@@ -543,6 +615,7 @@ export function DecisionExplorerPage() {
   const { merchantId } = useMerchantStore()
   const authMerchantId = useAuthStore((state) => state.user?.merchantId || '')
   const effectiveMerchantId = merchantId || authMerchantId
+  const debitRoutingFlag = useDebitRoutingFlag(effectiveMerchantId)
   const { routingKeysConfig, isLoading: routingKeysLoading, error: routingKeysError } = useDynamicRoutingConfig()
   const hasRoutingKeys = Object.keys(routingKeysConfig).length > 0
   const routingConfigUnavailable = !routingKeysLoading && (!hasRoutingKeys || Boolean(routingKeysError))
@@ -553,6 +626,8 @@ export function DecisionExplorerPage() {
 
   const [simulationConfig, setSimulationConfig] = useState<SimulationConfig>(initialState.simulationConfig)
 
+  const [debitForm, setDebitForm] = useState<DebitRoutingFormState>(initialState.debitForm)
+
   const [ruleParams, setRuleParams] = useState<RuleEvaluateParams[]>(initialState.ruleParams)
 
   const [fallbackConnectors, setFallbackConnectors] = useState<GatewayConnector[]>(initialState.fallbackConnectors)
@@ -560,6 +635,8 @@ export function DecisionExplorerPage() {
   const [volumePayments, setVolumePayments] = useState<string>(initialState.volumePayments)
 
   const [result, setResult] = useState<DecideGatewayResponse | null>(initialState.result)
+  const [debitResult, setDebitResult] = useState<DecideGatewayResponse | null>(initialState.debitResult)
+  const [debitPaymentId, setDebitPaymentId] = useState<string | null>(initialState.debitPaymentId)
   const [singleRunPaymentId, setSingleRunPaymentId] = useState<string | null>(initialState.singleRunPaymentId)
   const [singleRunOutcome, setSingleRunOutcome] = useState<TransactionOutcome>(initialState.singleRunOutcome)
   const [ruleResult, setRuleResult] = useState<RuleEvaluateResponse | null>(initialState.ruleResult)
@@ -572,6 +649,7 @@ export function DecisionExplorerPage() {
   const [loading, setLoading] = useState(false)
   const [filterOpen, setFilterOpen] = useState(false)
   const [responseOpen, setResponseOpen] = useState(initialState.responseOpen)
+  const [debitResponseOpen, setDebitResponseOpen] = useState(initialState.debitResponseOpen)
   const [volumeResponseOpen, setVolumeResponseOpen] = useState(initialState.volumeResponseOpen)
   const [selectedAuditPaymentId, setSelectedAuditPaymentId] = useState<string | null>(null)
   const [selectedAuditEventId, setSelectedAuditEventId] = useState<string | null>(null)
@@ -579,7 +657,7 @@ export function DecisionExplorerPage() {
   const [selectedPreviewPaymentId, setSelectedPreviewPaymentId] = useState<string | null>(null)
   const [selectedPreviewEventId, setSelectedPreviewEventId] = useState<string | null>(null)
   const [previewInspectorTab, setPreviewInspectorTab] = useState<AuditInspectorTab>('summary')
-  const [previewTraceLabel, setPreviewTraceLabel] = useState('Rule Evaluation Preview')
+  const [previewTraceLabel, setPreviewTraceLabel] = useState('Rule Evaluation Decision')
   const deferredSimulationResults = useDeferredValue(simulationResults)
 
   const routingKeyNames = useMemo(
@@ -617,8 +695,7 @@ export function DecisionExplorerPage() {
     : null
 
   const auditDetail = useSWR<PaymentAuditResponse>(auditUrl, fetcher, {
-    refreshInterval: selectedAuditPaymentId ? 12000 : 0,
-    revalidateOnFocus: true,
+    revalidateOnFocus: false,
   })
 
   const previewTraceUrl = selectedPreviewPaymentId
@@ -626,11 +703,7 @@ export function DecisionExplorerPage() {
     : null
 
   const previewTraceDetail = useSWR<PaymentAuditResponse>(previewTraceUrl, fetcher, {
-    refreshInterval: (data) => {
-      if (!selectedPreviewPaymentId) return 0
-      return (data?.timeline?.length || 0) > 0 ? 12000 : 1000
-    },
-    revalidateOnFocus: true,
+    revalidateOnFocus: false,
   })
 
   useEffect(() => {
@@ -728,10 +801,13 @@ export function DecisionExplorerPage() {
       activeTab,
       form,
       simulationConfig,
+      debitForm,
       ruleParams,
       fallbackConnectors,
       volumePayments,
       result,
+      debitResult,
+      debitPaymentId,
       singleRunPaymentId,
       singleRunOutcome,
       ruleResult,
@@ -740,6 +816,7 @@ export function DecisionExplorerPage() {
       volumeProgress,
       simulationResults,
       responseOpen,
+      debitResponseOpen,
       volumeResponseOpen,
     }
 
@@ -750,10 +827,13 @@ export function DecisionExplorerPage() {
     activeTab,
     form,
     simulationConfig,
+    debitForm,
     ruleParams,
     fallbackConnectors,
     volumePayments,
     result,
+    debitResult,
+    debitPaymentId,
     singleRunPaymentId,
     singleRunOutcome,
     ruleResult,
@@ -762,11 +842,37 @@ export function DecisionExplorerPage() {
     volumeProgress,
     simulationResults,
     responseOpen,
+    debitResponseOpen,
     volumeResponseOpen,
   ])
 
-  function set(field: keyof FormState, value: string | boolean) {
+  function set<K extends keyof FormState>(field: K, value: FormState[K]) {
     setForm(f => ({ ...f, [field]: value }))
+  }
+
+  function setDebitField<K extends keyof DebitRoutingFormState>(field: K, value: DebitRoutingFormState[K]) {
+    setDebitForm(f => ({ ...f, [field]: value }))
+  }
+
+  function buildDebitRoutingMetadata() {
+    const networks = debitForm.co_badged_networks
+      .split(',')
+      .map(network => network.trim().toUpperCase())
+      .filter(Boolean)
+
+    return JSON.stringify({
+      merchant_category_code: debitForm.merchant_category_code.trim(),
+      acquirer_country: debitForm.acquirer_country.trim().toUpperCase(),
+      co_badged_card_data: {
+        co_badged_card_networks: networks,
+        issuer_country: debitForm.issuer_country.trim().toUpperCase(),
+        is_regulated: debitForm.is_regulated,
+        regulated_name: debitForm.is_regulated && debitForm.regulated_name.trim()
+          ? debitForm.regulated_name.trim()
+          : null,
+        card_type: normalizeDebitCardType(debitForm.card_type),
+      },
+    })
   }
 
   function addRuleParam() {
@@ -847,6 +953,64 @@ export function DecisionExplorerPage() {
       setSingleRunPaymentId(paymentId)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Request failed')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function enableDebitRoutingForExplorer() {
+    if (!effectiveMerchantId) return setError('Sign in with a merchant-linked account to continue')
+    setLoading(true)
+    setError(null)
+
+    try {
+      await debitRoutingFlag.setDebitRoutingEnabled(true)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to enable debit routing')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function runDebitRouting() {
+    if (!effectiveMerchantId) return setError('Sign in with a merchant-linked account to continue')
+    if (!debitRoutingFlag.isEnabled) return setError('Debit routing is disabled for this merchant. Enable it before running network routing.')
+
+    const gateways = debitForm.eligible_gateways.split(',').map(s => s.trim()).filter(Boolean)
+    if (gateways.length === 0) return setError('Add at least one eligible gateway')
+
+    setLoading(true)
+    setError(null)
+    setDebitResult(null)
+    const paymentId = `debit_${Date.now()}`
+
+    try {
+      const res = await apiPost<DecideGatewayResponse>('/decide-gateway', {
+        merchantId: effectiveMerchantId,
+        paymentInfo: {
+          paymentId,
+          amount: parseFloat(debitForm.amount) || 1000,
+          currency: debitForm.currency,
+          paymentType: 'ORDER_PAYMENT',
+          paymentMethodType: 'CARD',
+          paymentMethod: 'DEBIT',
+          authType: debitForm.auth_type,
+          metadata: buildDebitRoutingMetadata(),
+        },
+        eligibleGatewayList: gateways,
+        rankingAlgorithm: 'NTW_BASED_ROUTING',
+        eliminationEnabled: false,
+      })
+
+      setDebitResult(res)
+      setDebitPaymentId(paymentId)
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Request failed'
+      setError(
+        message.includes('debit_routing_not_enabled')
+          ? 'Debit routing is disabled for this merchant. Enable it and retry.'
+          : message,
+      )
     } finally {
       setLoading(false)
     }
@@ -939,7 +1103,7 @@ export function DecisionExplorerPage() {
     setVolumeDistribution([])
     setVolumeEvaluationLog([])
     setVolumeProgress(0)
-    const previewPaymentId = `rule_preview_${Date.now()}`
+    const previewPaymentId = `rule_decision_${Date.now()}`
 
     try {
       const parameters: Record<string, { type: string; value: string | number | { key: string; value: string } }> = {}
@@ -1000,10 +1164,18 @@ export function DecisionExplorerPage() {
 
     try {
       const batchSize = 10
-      const basePaymentId = `volume_preview_${Date.now()}`
+      const basePaymentId = `volume_decision_${Date.now()}`
       const logEntries: VolumePaymentEntry[] = []
       const counts = new Map<string, number>()
-      let latestResponse: RuleEvaluateResponse | null = null
+      let firstDecision: RuleEvaluateResponse | null = null
+      const buildDistribution = (completedPayments: number) =>
+        Array.from(counts.entries())
+          .map(([name, count]) => ({
+            name,
+            count,
+            percentage: Number(((count / Math.max(1, completedPayments)) * 100).toFixed(1)),
+          }))
+          .sort((left, right) => right.count - left.count)
 
       for (let start = 0; start < totalPayments; start += batchSize) {
         const chunkSize = Math.min(batchSize, totalPayments - start)
@@ -1035,27 +1207,18 @@ export function DecisionExplorerPage() {
             throw new Error('Volume split evaluation did not return a connector.')
           }
 
+          if (!firstDecision) {
+            firstDecision = response
+            setRuleResult(response)
+          }
+
           counts.set(connector, (counts.get(connector) || 0) + 1)
           logEntries.push({ paymentId, connector })
-          latestResponse = response
         }
 
         setVolumeProgress(logEntries.length)
-      }
-
-      if (latestResponse) {
-        const distribution = Array.from(counts.entries())
-          .map(([name, count]) => ({
-            name,
-            count,
-            percentage: Number(((count / totalPayments) * 100).toFixed(1)),
-          }))
-          .sort((left, right) => right.count - left.count)
-
-        setRuleResult(latestResponse)
         setVolumeEvaluationLog(logEntries)
-        setVolumeDistribution(distribution)
-        setSelectedPreviewPaymentId(latestResponse.payment_id)
+        setVolumeDistribution(buildDistribution(logEntries.length))
       }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Request failed')
@@ -1089,6 +1252,7 @@ export function DecisionExplorerPage() {
   }, {} as Record<string, { total: number; success: number; failure: number }>)
 
   const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
+  const debitNetworkRows = debitResult?.debit_routing_output?.co_badged_card_networks_info || []
   const volumeColorIndex = useMemo(
     () => new Map(volumeDistribution.map((item, index) => [item.name, index] as const)),
     [volumeDistribution],
@@ -1225,7 +1389,7 @@ export function DecisionExplorerPage() {
       setSelectedPreviewPaymentId(null)
       setSelectedPreviewEventId(null)
       setPreviewInspectorTab('summary')
-      setPreviewTraceLabel('Rule Evaluation Preview')
+      setPreviewTraceLabel('Rule Evaluation Decision')
     } else if (activeTab === 'volume') {
       setVolumePayments(defaults.volumePayments)
       setRuleResult(defaults.ruleResult)
@@ -1236,7 +1400,15 @@ export function DecisionExplorerPage() {
       setSelectedPreviewPaymentId(null)
       setSelectedPreviewEventId(null)
       setPreviewInspectorTab('summary')
-      setPreviewTraceLabel('Volume Split Preview')
+      setPreviewTraceLabel('Volume Split Decision')
+    } else if (activeTab === 'debit') {
+      setDebitForm(defaults.debitForm)
+      setDebitResult(defaults.debitResult)
+      setDebitPaymentId(defaults.debitPaymentId)
+      setDebitResponseOpen(defaults.debitResponseOpen)
+      setSelectedAuditPaymentId(null)
+      setSelectedAuditEventId(null)
+      setAuditInspectorTab('summary')
     }
 
     setError(null)
@@ -1252,14 +1424,16 @@ export function DecisionExplorerPage() {
       ? 'Reset Auth-Rate Based Routing'
       : activeTab === 'rule'
         ? 'Reset Rule Based Routing'
-        : 'Reset Volume Based Routing'
+        : activeTab === 'volume'
+          ? 'Reset Volume Based Routing'
+          : 'Reset Debit Routing'
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Decision Explorer</h1>
         <p className="mt-1 text-sm text-slate-500 dark:text-[#b2bdd1]">
-          Simulate payment routing across auth-rate based, rule based, and volume based strategies.
+          Run payment routing checks across auth-rate based, rule based, volume based, and debit network strategies.
         </p>
       </div>
 
@@ -1283,6 +1457,12 @@ export function DecisionExplorerPage() {
           >
             Volume Based Routing
           </button>
+          <button
+            onClick={() => setActiveTab('debit')}
+            className={`rounded-full border px-4 py-2 text-sm font-medium transition ${sectionButtonClass(activeTab === 'debit')}`}
+          >
+            Debit Routing
+          </button>
         </div>
         <Button size="sm" variant="secondary" onClick={resetCurrentTabState}>
           <RefreshCw size={14} />
@@ -1297,12 +1477,14 @@ export function DecisionExplorerPage() {
               <SurfaceLabel>
                 {activeTab === 'rule' ? 'Rule Evaluation' :
                   activeTab === 'volume' ? 'Volume Split' :
-                    'Simulation'}
+                    activeTab === 'debit' ? 'Network Routing' :
+                      'Simulation'}
               </SurfaceLabel>
               <h2 className="mt-3 font-medium text-slate-800 dark:text-white">
                 {activeTab === 'rule' ? 'Rule Evaluation Parameters' :
                   activeTab === 'volume' ? 'Volume Split Configuration' :
-                    'Auth-Rate Based Routing Parameters'}
+                    activeTab === 'debit' ? 'Debit Routing Parameters' :
+                      'Auth-Rate Based Routing Parameters'}
               </h2>
             </div>
           </CardHeader>
@@ -1312,12 +1494,12 @@ export function DecisionExplorerPage() {
                 Set a merchant ID in the top bar first.
               </p>
             )}
-            {activeTab !== 'volume' && routingKeysLoading && (
+            {activeTab !== 'volume' && activeTab !== 'debit' && routingKeysLoading && (
               <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded px-3 py-2">
                 Loading routing config from backend...
               </p>
             )}
-            {activeTab !== 'volume' && routingConfigUnavailable && (
+            {activeTab !== 'volume' && activeTab !== 'debit' && routingConfigUnavailable && (
               <ErrorMessage error="Routing config unavailable from /config/routing-keys. Parameter forms are disabled." />
             )}
 
@@ -1452,6 +1634,147 @@ export function DecisionExplorerPage() {
                   </button>
                 </div>
               </>
+            ) : activeTab === 'debit' ? (
+              <div className="space-y-4">
+                {debitRoutingFlag.isLoading ? (
+                  <p className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-[#222226] dark:bg-[#10131a] dark:text-[#aab5c8]">
+                    <Spinner size={14} />
+                    Loading debit routing flag...
+                  </p>
+                ) : debitRoutingFlag.isEnabled ? (
+                  <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
+                    Debit routing is enabled for this merchant. This tab will call /decide-gateway with NTW_BASED_ROUTING.
+                  </p>
+                ) : (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <span>Debit routing is disabled for this merchant.</span>
+                      <Button size="sm" variant="secondary" onClick={enableDebitRoutingForExplorer} disabled={!effectiveMerchantId || loading}>
+                        Enable Debit Routing
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Amount</label>
+                    <input
+                      value={debitForm.amount}
+                      onChange={e => setDebitField('amount', e.target.value)}
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Currency</label>
+                    <input
+                      value={debitForm.currency}
+                      onChange={e => setDebitField('currency', e.target.value.toUpperCase())}
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Auth Type</label>
+                    <select
+                      value={debitForm.auth_type}
+                      onChange={e => setDebitField('auth_type', e.target.value)}
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    >
+                      <option value="THREE_DS">THREE_DS</option>
+                      <option value="NO_THREE_DS">NO_THREE_DS</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Card Type</label>
+                    <select
+                      value={debitForm.card_type}
+                      onChange={e => setDebitField('card_type', e.target.value as DebitRoutingFormState['card_type'])}
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    >
+                      <option value="debit">Debit</option>
+                      <option value="credit">Credit</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Eligible Gateways (comma-separated)</label>
+                  <input
+                    value={debitForm.eligible_gateways}
+                    onChange={e => setDebitField('eligible_gateways', e.target.value)}
+                    placeholder="stripe, adyen"
+                    className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Merchant Category Code</label>
+                    <input
+                      value={debitForm.merchant_category_code}
+                      onChange={e => setDebitField('merchant_category_code', e.target.value)}
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Acquirer Country</label>
+                    <input
+                      value={debitForm.acquirer_country}
+                      onChange={e => setDebitField('acquirer_country', e.target.value.toUpperCase())}
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Co-badged Networks (comma-separated)</label>
+                  <input
+                    value={debitForm.co_badged_networks}
+                    onChange={e => setDebitField('co_badged_networks', e.target.value)}
+                    placeholder="VISA, NYCE, PULSE, STAR"
+                    className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Issuer Country</label>
+                    <input
+                      value={debitForm.issuer_country}
+                      onChange={e => setDebitField('issuer_country', e.target.value.toUpperCase())}
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 pt-6">
+                    <input
+                      id="debit-is-regulated"
+                      type="checkbox"
+                      checked={debitForm.is_regulated}
+                      onChange={e => setDebitField('is_regulated', e.target.checked)}
+                      className="h-4 w-4 rounded border-slate-300"
+                    />
+                    <label htmlFor="debit-is-regulated" className="text-sm text-slate-600 dark:text-[#aab5c8]">
+                      Regulated debit card
+                    </label>
+                  </div>
+                </div>
+
+                {debitForm.is_regulated && (
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Regulated Name</label>
+                    <input
+                      value={debitForm.regulated_name}
+                      onChange={e => setDebitField('regulated_name', e.target.value)}
+                      placeholder="GOVERNMENT NON-EXEMPT INTERCHANGE FEE (WITH FRAUD)"
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    />
+                  </div>
+                )}
+
+                <p className="text-xs text-slate-500">
+                  The request sends debit details inside paymentInfo.metadata because the backend debit router parses co-badged card data from metadata.
+                </p>
+              </div>
             ) : activeTab === 'volume' ? (
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">Number of Payments</label>
@@ -1462,7 +1785,7 @@ export function DecisionExplorerPage() {
                   className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
                 />
                 <p className="text-xs text-slate-500 mt-1">
-                  Enter how many preview evaluations to run against the active volume split rule.
+                  Enter how many decision evaluations to run against the active volume split rule.
                 </p>
               </div>
             ) : (
@@ -1525,7 +1848,7 @@ export function DecisionExplorerPage() {
                 <div>
                   <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1">Algorithm</label>
-                    <select value={form.ranking_algorithm} onChange={e => set('ranking_algorithm', e.target.value)}
+                    <select value={form.ranking_algorithm} onChange={e => set('ranking_algorithm', e.target.value as RoutingAlgorithmName)}
                       className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
                       {ALGORITHMS.map(a => <option key={a} value={a}>{ALGORITHM_LABELS[a]}</option>)}
                     </select>
@@ -1598,10 +1921,18 @@ export function DecisionExplorerPage() {
               <Button onClick={runRuleEvaluation} disabled={loading || routingConfigUnavailable} className="w-full justify-center">
                 {loading ? <><Spinner size={14} /> Evaluating…</> : <><Play size={14} /> Evaluate Rules</>}
               </Button>
+            ) : activeTab === 'debit' ? (
+              <Button
+                onClick={runDebitRouting}
+                disabled={loading || !effectiveMerchantId || debitRoutingFlag.isLoading || !debitRoutingFlag.isEnabled}
+                className="w-full justify-center"
+              >
+                {loading ? <><Spinner size={14} /> Running Debit Routing…</> : <><Network size={14} /> Run Debit Routing</>}
+              </Button>
             ) : activeTab === 'volume' ? (
               <Button onClick={runVolumeSplit} disabled={loading || !effectiveMerchantId} className="w-full justify-center">
                 {loading ? (
-                  <><Spinner size={14} /> Running {volumeProgress}/{volumePayments || 0} previews…</>
+                  <><Spinner size={14} /> Running {volumeProgress}/{volumePayments || 0} decisions…</>
                 ) : (
                   <><PieChartIcon size={14} /> Run Volume Evaluation</>
                 )}
@@ -1627,10 +1958,120 @@ export function DecisionExplorerPage() {
           </CardBody>
         </Card>
 
-        <div className="space-y-4">
-          {activeTab === 'volume' ? (
-            volumeDistribution.length > 0 ? (
+        <div
+          className={
+            activeTab === 'volume' && volumeDistribution.length > 0
+              ? 'space-y-4 lg:col-span-2'
+              : 'space-y-4'
+          }
+        >
+          {activeTab === 'debit' ? (
+            debitResult ? (
               <>
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-medium text-slate-800 dark:text-white">Debit Routing Result</h3>
+                        <p className="mt-1 text-xs text-slate-500 dark:text-[#9ca7ba]">
+                          Real response from <code>/decide-gateway</code> using <code>NTW_BASED_ROUTING</code>.
+                        </p>
+                      </div>
+                      {debitPaymentId ? (
+                        <Button size="sm" variant="secondary" onClick={() => openAuditModal(debitPaymentId)}>
+                          View audit
+                        </Button>
+                      ) : null}
+                    </div>
+                  </CardHeader>
+                  <CardBody className="space-y-4">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="rounded-lg bg-slate-50 p-3 dark:bg-[#111114]">
+                        <p className="text-xs text-slate-500">routing_approach</p>
+                        <p className="mt-1 font-semibold text-slate-900 dark:text-white">{debitResult.routing_approach}</p>
+                      </div>
+                      <div className="rounded-lg bg-slate-50 p-3 dark:bg-[#111114]">
+                        <p className="text-xs text-slate-500">request payment_id</p>
+                        <p className="mt-1 font-mono text-xs text-slate-900 dark:text-white">{debitPaymentId}</p>
+                      </div>
+                    </div>
+
+                    {debitResult.debit_routing_output ? (
+                      <>
+                        <div className="grid grid-cols-3 gap-3">
+                          <div className="rounded-lg border border-slate-200 p-3 dark:border-[#222226]">
+                            <p className="text-xs text-slate-500">Issuer country</p>
+                            <p className="mt-1 text-lg font-semibold text-slate-900 dark:text-white">{debitResult.debit_routing_output.issuer_country}</p>
+                          </div>
+                          <div className="rounded-lg border border-slate-200 p-3 dark:border-[#222226]">
+                            <p className="text-xs text-slate-500">Regulated</p>
+                            <p className="mt-1 text-lg font-semibold text-slate-900 dark:text-white">{debitResult.debit_routing_output.is_regulated ? 'Yes' : 'No'}</p>
+                          </div>
+                          <div className="rounded-lg border border-slate-200 p-3 dark:border-[#222226]">
+                            <p className="text-xs text-slate-500">Card type</p>
+                            <p className="mt-1 text-lg font-semibold text-slate-900 dark:text-white">{debitResult.debit_routing_output.card_type}</p>
+                          </div>
+                        </div>
+
+                        <Card>
+                          <CardHeader>
+                            <h3 className="text-sm font-medium text-slate-800 dark:text-white">Ranked Debit Networks</h3>
+                          </CardHeader>
+                          <CardBody className="p-0">
+                            <table className="w-full text-sm">
+                              <thead className="bg-slate-50 text-xs text-slate-500 dark:bg-[#111114]">
+                                <tr>
+                                  <th className="px-4 py-2 text-left">Rank</th>
+                                  <th className="px-4 py-2 text-left">Network</th>
+                                  <th className="px-4 py-2 text-right">Saving %</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 dark:divide-[#222226]">
+                                {debitNetworkRows.map((row, idx) => (
+                                  <tr key={`${row.network}-${idx}`} className="hover:bg-slate-50 dark:hover:bg-[#111114]">
+                                    <td className="px-4 py-2 font-mono text-xs text-slate-500">#{idx + 1}</td>
+                                    <td className="px-4 py-2 font-medium text-slate-900 dark:text-white">{row.network}</td>
+                                    <td className="px-4 py-2 text-right text-slate-700 dark:text-[#d8e1ef]">{row.saving_percentage.toFixed(2)}%</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </CardBody>
+                        </Card>
+                      </>
+                    ) : (
+                      <ErrorMessage error="Debit routing output was not returned. Check the raw response for backend details." />
+                    )}
+
+                    <div className="border-t border-slate-200 pt-3 dark:border-[#222226]">
+                      <button
+                        type="button"
+                        onClick={() => setDebitResponseOpen(!debitResponseOpen)}
+                        className="flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-700"
+                      >
+                        {debitResponseOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                        Raw response
+                      </button>
+                      {debitResponseOpen && (
+                        <pre className="mt-3 max-h-96 overflow-auto rounded-lg bg-slate-950 p-4 text-xs text-slate-200">
+                          {JSON.stringify(debitResult, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+                  </CardBody>
+                </Card>
+              </>
+            ) : (
+              <Card>
+                <CardBody className="py-12 text-center">
+                  <Network size={32} className="mx-auto mb-3 text-slate-300" />
+                  <p className="text-sm text-slate-500">Enable debit routing, keep the default debit metadata, and click "Run Debit Routing" to inspect ranked networks.</p>
+                </CardBody>
+              </Card>
+            )
+          ) : activeTab === 'volume' ? (
+            volumeDistribution.length > 0 ? (
+              <div className="grid gap-4 xl:grid-cols-2">
                 <Card>
                   <CardHeader>
                     <div className="flex items-center justify-between gap-3">
@@ -1644,9 +2085,9 @@ export function DecisionExplorerPage() {
                         <Button
                           size="sm"
                           variant="secondary"
-                          onClick={() => openPreviewModal(ruleResult.payment_id!, 'Volume Split Preview')}
+                          onClick={() => openPreviewModal(ruleResult.payment_id!, 'Volume Split Decision')}
                         >
-                          View latest preview trace
+                          View first decision trace
                         </Button>
                       ) : null}
                     </div>
@@ -1703,29 +2144,6 @@ export function DecisionExplorerPage() {
                           contentStyle={document.documentElement.classList.contains('dark') ? { backgroundColor: '#111114', border: '1px solid #222226', borderRadius: '8px', color: '#fff' } : { backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px', color: '#1f2937' }}
                         />
                       </PieChart>
-                    </ResponsiveContainer>
-                  </CardBody>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <h3 className="text-sm font-medium text-slate-800">Bar Chart</h3>
-                  </CardHeader>
-                  <CardBody>
-                    <ResponsiveContainer width="100%" height={volumeDistribution.length * 50 + 40}>
-                      <BarChart data={volumeDistribution} layout="vertical" margin={{ left: 20, right: 40 }}>
-                        <XAxis type="number" tick={{ fontSize: 12, fill: '#666' }} axisLine={{ stroke: '#e5e7eb' }} tickLine={false} />
-                        <YAxis type="category" dataKey="name" tick={{ fontSize: 12, fill: '#666' }} width={80} axisLine={false} tickLine={false} />
-                        <Tooltip
-                          formatter={(value: number) => [`${value} payments`, 'Count']}
-                          contentStyle={document.documentElement.classList.contains('dark') ? { backgroundColor: '#111114', border: '1px solid #222226', borderRadius: '8px', color: '#fff' } : { backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px', color: '#1f2937' }}
-                        />
-                        <Bar dataKey="count" radius={[0, 6, 6, 0]}>
-                          {volumeDistribution.map((_, index) => (
-                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                          ))}
-                        </Bar>
-                      </BarChart>
                     </ResponsiveContainer>
                   </CardBody>
                 </Card>
@@ -1826,7 +2244,7 @@ export function DecisionExplorerPage() {
                           <tr
                             key={entry.paymentId}
                             className="cursor-pointer hover:bg-slate-50 dark:bg-[#111114]"
-                            onClick={() => openPreviewModal(entry.paymentId, 'Volume Split Preview')}
+                            onClick={() => openPreviewModal(entry.paymentId, 'Volume Split Decision')}
                           >
                             <td className="px-4 py-1.5 text-slate-500 font-mono text-xs">{idx + 1}</td>
                             <td className="px-4 py-1.5 font-mono text-xs text-slate-500">{entry.paymentId}</td>
@@ -1848,7 +2266,7 @@ export function DecisionExplorerPage() {
                                 className="text-xs font-medium text-brand-600 hover:text-brand-700"
                                 onClick={(event) => {
                                   event.stopPropagation()
-                                  openPreviewModal(entry.paymentId, 'Volume Split Preview')
+                                  openPreviewModal(entry.paymentId, 'Volume Split Decision')
                                 }}
                               >
                                 View trace
@@ -1882,7 +2300,7 @@ export function DecisionExplorerPage() {
                     </CardBody>
                   )}
                 </Card>
-              </>
+              </div>
             ) : (
               <Card>
                 <CardBody className="py-16 text-center">
@@ -1906,9 +2324,9 @@ export function DecisionExplorerPage() {
                         <Button
                           size="sm"
                           variant="secondary"
-                          onClick={() => openPreviewModal(ruleResult.payment_id!, 'Rule Evaluation Preview')}
+                          onClick={() => openPreviewModal(ruleResult.payment_id!, 'Rule Evaluation Decision')}
                         >
-                          View preview trace
+                          View decision trace
                         </Button>
                       ) : null}
                     </div>
@@ -2486,7 +2904,7 @@ export function DecisionExplorerPage() {
         <div className="fixed bottom-0 left-64 right-0 top-[76px] z-[130] p-8">
           <button
             type="button"
-            aria-label="Close preview trace"
+            aria-label="Close decision trace"
             className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm"
             onClick={closePreviewModal}
           />
@@ -2499,7 +2917,7 @@ export function DecisionExplorerPage() {
             <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 bg-slate-50/90 px-6 py-5 dark:border-[#1c1c23] dark:bg-[#0b0b10]">
               <div className="min-w-0">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-[#8a8a93]">
-                  Preview Trace
+                  Decision Trace
                 </p>
                 <h2
                   id="decision-explorer-preview-title"
@@ -2508,7 +2926,7 @@ export function DecisionExplorerPage() {
                   {selectedPreviewPaymentId}
                 </h2>
                 <p className="mt-2 max-w-3xl text-sm text-slate-500 dark:text-[#8a8a93]">
-                  {previewTraceLabel}. This is a preview-only trace captured from <code className="font-mono text-xs">/routing/evaluate</code>, not a transaction outcome.
+                  {previewTraceLabel}. This trace was captured from <code className="font-mono text-xs">/routing/evaluate</code> and is kept separate from auth-rate transaction outcomes.
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -2533,17 +2951,22 @@ export function DecisionExplorerPage() {
             <div className="grid min-h-0 flex-1 gap-0 xl:grid-cols-[340px_minmax(0,1fr)]">
               <div className="flex min-h-0 flex-col border-b border-slate-200 bg-slate-50/70 xl:border-b-0 xl:border-r dark:border-[#1c1c23] dark:bg-[#08080b]">
                 <div className="border-b border-slate-200 px-6 py-4 dark:border-[#1c1c23]">
-                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Preview Timeline</h3>
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Decision Timeline</h3>
                   <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                    Choose a preview step to inspect its request, response, and routing output.
+                    Choose a decision step to inspect its request, response, and routing output.
                   </p>
                 </div>
                 <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
                   {previewTraceDetail.isLoading && !previewTraceDetail.data ? (
                     <div className="flex items-center gap-2 px-2 text-sm text-slate-500 dark:text-[#8a8a93]">
                       <Spinner size={16} />
-                      Loading preview trace…
+                      Loading decision trace…
                     </div>
+                  ) : previewTraceDetail.error && isTraceIndexingError(previewTraceDetail.error) && selectedPreviewPaymentId ? (
+                    <PendingAuditState
+                      title="Decision trace still indexing"
+                      body="The routing decision succeeded, but the trace row is still being processed. The modal will update once the analytics event is available."
+                    />
                   ) : previewTraceDetail.error ? (
                     <ErrorMessage error={previewTraceDetail.error.message} />
                   ) : groupedPreviewTimeline.length ? (
@@ -2593,13 +3016,21 @@ export function DecisionExplorerPage() {
                     </div>
                   ) : selectedPreviewPaymentId ? (
                     <PendingAuditState
-                      title="Preview trace still arriving"
-                      body="This preview was just logged. The modal is polling every second and will populate once the analytics writer flushes the trace."
+                      title={
+                        previewSummary
+                          ? 'Decision summary available'
+                          : 'Decision trace still arriving'
+                      }
+                      body={
+                        previewSummary
+                          ? 'We already found the decision summary for this run, but the step-by-step timeline has not been flushed yet. Waiting for the latest events.'
+                          : 'This decision was just logged. Waiting for the decision trace details to become available.'
+                      }
                     />
                   ) : (
                     <EmptyAuditState
-                      title="No preview trace captured yet"
-                      body="Run Rule-Based or Volume Split evaluation first, then open the preview trace once the request has been logged."
+                      title="No decision trace captured yet"
+                      body="Run Rule-Based or Volume Split evaluation first, then open the decision trace once the request has been logged."
                     />
                   )}
                 </div>
@@ -2610,12 +3041,12 @@ export function DecisionExplorerPage() {
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
-                        {selectedPreviewEvent ? stageLabel(selectedPreviewEvent) : 'Preview Inspector'}
+                        {selectedPreviewEvent ? stageLabel(selectedPreviewEvent) : 'Decision Inspector'}
                       </h3>
                       <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
                         {selectedPreviewEvent
                           ? `${routeLabel(selectedPreviewEvent.route)} · ${formatDateTime(selectedPreviewEvent.created_at_ms)}`
-                          : 'Select an event from the left to inspect the preview payload.'}
+                          : 'Select an event from the left to inspect the decision payload.'}
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -2645,7 +3076,7 @@ export function DecisionExplorerPage() {
                   {previewTraceDetail.isLoading && !previewTraceDetail.data ? (
                     <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-[#8a8a93]">
                       <Spinner size={16} />
-                      Loading preview inspector…
+                      Loading decision inspector…
                     </div>
                   ) : previewInspectorModel ? (
                     <div className="space-y-5">
@@ -2653,9 +3084,9 @@ export function DecisionExplorerPage() {
                         <>
                           <InspectorKeyValueGrid rows={previewInspectorModel.summaryRows} />
                           <InspectorJsonPanel
-                            title="Preview Signals"
+                            title="Decision Signals"
                             value={previewInspectorModel.signalRecord}
-                            emptyMessage="No extra preview metadata was captured for this evaluation."
+                            emptyMessage="No extra decision metadata was captured for this evaluation."
                           />
                         </>
                       ) : null}
@@ -2664,7 +3095,7 @@ export function DecisionExplorerPage() {
                         <InspectorJsonPanel
                           title="Request Payload"
                           value={previewInspectorModel.requestPayload}
-                          emptyMessage="No request payload was captured for this preview."
+                          emptyMessage="No request payload was captured for this decision."
                         />
                       ) : null}
 
@@ -2672,7 +3103,7 @@ export function DecisionExplorerPage() {
                         <InspectorJsonPanel
                           title="Response Payload"
                           value={previewInspectorModel.responsePayload}
-                          emptyMessage="No response payload was captured for this preview."
+                          emptyMessage="No response payload was captured for this decision."
                         />
                       ) : null}
 
@@ -2680,19 +3111,27 @@ export function DecisionExplorerPage() {
                         <InspectorJsonPanel
                           title="Raw Event JSON"
                           value={previewInspectorModel.rawEvent}
-                          emptyMessage="No raw event payload is available for this preview."
+                          emptyMessage="No raw event payload is available for this decision."
                         />
                       ) : null}
                     </div>
                   ) : selectedPreviewPaymentId && !(previewTraceDetail.data?.timeline?.length || 0) ? (
                     <PendingAuditState
-                      title="Waiting for preview step"
-                      body="Inspector will unlock as soon as the first preview event is available."
+                      title={
+                        previewSummary
+                          ? 'Waiting for detailed decision step'
+                          : 'Waiting for decision step'
+                      }
+                      body={
+                        previewSummary
+                          ? 'The decision record exists, but no inspectable step payload has arrived yet. The inspector will unlock as soon as the first timeline event is available.'
+                          : 'Inspector will unlock as soon as the first decision event is available.'
+                      }
                     />
                   ) : (
                     <EmptyAuditState
-                      title="Select a preview step"
-                      body="Choose one of the preview events on the left to inspect its request and response payload."
+                      title="Select a decision step"
+                      body="Choose one of the decision events on the left to inspect its request and response payload."
                     />
                   )}
                 </div>

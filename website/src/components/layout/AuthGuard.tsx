@@ -20,6 +20,7 @@ interface MeResponse {
 
 export function AuthGuard() {
   const token = useAuthStore((s) => s.token)
+  const hasHydrated = useAuthStore((s) => s.hasHydrated)
   const setAuth = useAuthStore((s) => s.setAuth)
   const clearAuth = useAuthStore((s) => s.clearAuth)
   const setMerchantId = useMerchantStore((s) => s.setMerchantId)
@@ -29,6 +30,11 @@ export function AuthGuard() {
 
   useEffect(() => {
     let cancelled = false
+
+    if (!hasHydrated) {
+      setStatus('checking')
+      return
+    }
 
     if (!token) {
       setStatus('invalid')
@@ -57,18 +63,37 @@ export function AuthGuard() {
         setMerchantId(activeMerchantId)
         setStatus('ready')
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (cancelled) return
-        clearAuth()
-        setMerchantId('')
-        setStatus('invalid')
+        const statusCode = typeof error === 'object' && error ? (error as { status?: number }).status : undefined
+
+        if (statusCode === 401 || statusCode === 403) {
+          clearAuth()
+          setMerchantId('')
+          setStatus('invalid')
+          return
+        }
+
+        // Keep the local session on transient backend/network failures. A refresh
+        // should not log the operator out unless the token is actually rejected.
+        setStatus('ready')
       })
 
     return () => {
       cancelled = true
     }
-  }, [token, setAuth, clearAuth, setMerchantId])
+  }, [hasHydrated, token, setAuth, clearAuth, setMerchantId])
 
+  if (!hasHydrated) {
+    return (
+      <div className="dark flex min-h-screen items-center justify-center bg-[#030507] text-white">
+        <div className="flex items-center gap-3 rounded-2xl border border-[#1d1d23] bg-[#111318] px-5 py-4 text-sm text-[#c7cfdb]">
+          <Loader2 size={16} className="animate-spin text-[#7ea4ff]" />
+          Restoring session
+        </div>
+      </div>
+    )
+  }
   if (!token) return <Navigate to="/login" replace />
   if (status === 'checking') {
     return (

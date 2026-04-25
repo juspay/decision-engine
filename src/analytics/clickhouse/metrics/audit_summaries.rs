@@ -9,7 +9,7 @@ use super::super::common::{
     payment_audit_summary_kind, DOMAIN_TABLE, PAYMENT_AUDIT_LOOKUP_SUMMARY_TABLE,
 };
 use super::super::filters::payment_audit_raw_filters;
-use super::super::query::{BoundQueryBuilder, FilterClause, OrderClause, SqlFragment};
+use super::super::query::{BindArg, BoundQueryBuilder, FilterClause, OrderClause, SqlFragment};
 use super::super::time::effective_payment_audit_window_bounds;
 
 #[derive(Debug, Clone, Deserialize, Row)]
@@ -66,6 +66,70 @@ fn finalized_summary_fragment(query: &PaymentAuditQuery, preview_only: bool) -> 
     builder.into_fragment()
 }
 
+fn raw_summary_fragment(query: &PaymentAuditQuery, preview_only: bool) -> SqlFragment {
+    let mut source = BoundQueryBuilder::new(DOMAIN_TABLE);
+    source.extend_selects([
+        "lookup_key".to_string(),
+        "payment_id".to_string(),
+        "request_id".to_string(),
+        "merchant_id".to_string(),
+        "created_at_ms".to_string(),
+        "status".to_string(),
+        "gateway".to_string(),
+        "event_stage".to_string(),
+        "route".to_string(),
+        "flow_type".to_string(),
+        "error_code".to_string(),
+    ]);
+    source.extend_filters(payment_audit_raw_filters(query, preview_only));
+    source.add_filter(FilterClause::raw("lookup_key IS NOT NULL"));
+    source.add_filter(FilterClause::raw("lookup_key != ''"));
+
+    let source = source.into_fragment();
+    let mut builder = BoundQueryBuilder::from_fragment(SqlFragment::with_binds(
+        format!("({})", source.sql()),
+        source.binds().to_vec(),
+    ));
+    builder.extend_selects([
+        "assumeNotNull(lookup_key) AS lookup_key".to_string(),
+        "argMax(payment_id, created_at_ms) AS payment_id".to_string(),
+        "argMax(request_id, created_at_ms) AS request_id".to_string(),
+        "any(merchant_id) AS merchant_id".to_string(),
+        "min(created_at_ms) AS first_seen_ms".to_string(),
+        "max(created_at_ms) AS last_seen_ms".to_string(),
+        "count() AS event_count".to_string(),
+        "argMax(status, created_at_ms) AS latest_status".to_string(),
+        "argMax(gateway, created_at_ms) AS latest_gateway".to_string(),
+        "argMax(event_stage, created_at_ms) AS latest_stage".to_string(),
+        "arrayFilter(value -> value != '', groupUniqArray(ifNull(gateway, ''))) AS gateways"
+            .to_string(),
+        "arrayFilter(value -> value != '', groupUniqArray(ifNull(route, ''))) AS routes"
+            .to_string(),
+        "arrayFilter(value -> value != '', groupUniqArray(ifNull(status, ''))) AS statuses"
+            .to_string(),
+        "arrayFilter(value -> value != '', groupUniqArray(flow_type)) AS flow_types".to_string(),
+        "arrayFilter(value -> value != '', groupUniqArray(ifNull(error_code, ''))) AS error_codes"
+            .to_string(),
+    ]);
+    builder.add_group_by("lookup_key");
+    builder.into_fragment()
+}
+
+fn summary_fragment(query: &PaymentAuditQuery, preview_only: bool) -> SqlFragment {
+    if query.routing_approach.is_some() || query.exclude_routing_approach.is_some() {
+        return raw_summary_fragment(query, preview_only);
+    }
+
+    finalized_summary_fragment(query, preview_only)
+}
+
+fn exact_lookup_filter(lookup_key: &str) -> FilterClause {
+    FilterClause::new(
+        "(lookup_key = ? OR payment_id = ? OR request_id = ? OR global_request_id = ? OR event_id = ?)",
+        std::iter::repeat_n(BindArg::from(lookup_key), 5).collect(),
+    )
+}
+
 fn outer_summary_filters(query: &PaymentAuditQuery) -> Vec<FilterClause> {
     let (start_ms, end_ms) = effective_payment_audit_window_bounds(query);
     let mut filters = vec![
@@ -103,6 +167,8 @@ fn outer_summary_filters(query: &PaymentAuditQuery) -> Vec<FilterClause> {
             vec![flow_type.clone().into()],
         ));
     }
+    // The lookup summary table intentionally does not carry routing_approach state.
+    // When routing_approach is included or excluded, callers use raw_summary_fragment instead.
     if let Some(error_code) = &query.error_code {
         filters.push(FilterClause::new(
             "has(error_codes, ?)",
@@ -170,7 +236,7 @@ pub async fn count(
     query: &PaymentAuditQuery,
     preview_only: bool,
 ) -> Result<usize, ApiError> {
-    let finalized = finalized_summary_fragment(query, preview_only);
+    let finalized = summary_fragment(query, preview_only);
     let mut builder = BoundQueryBuilder::from_fragment(SqlFragment::with_binds(
         format!("({})", finalized.sql()),
         finalized.binds().to_vec(),
@@ -186,7 +252,7 @@ pub async fn load_page(
     query: &PaymentAuditQuery,
     preview_only: bool,
 ) -> Result<Vec<PaymentAuditSummary>, ApiError> {
-    let finalized = finalized_summary_fragment(query, preview_only);
+    let finalized = summary_fragment(query, preview_only);
     let mut builder = results_builder(finalized, query);
     builder.add_order_by(OrderClause::desc("last_seen_ms"));
     builder.add_order_by(OrderClause::desc("event_count"));
@@ -206,12 +272,31 @@ pub async fn load_exact(
     exact_query.payment_id = None;
     exact_query.request_id = None;
 
-    let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
+    let mut source = BoundQueryBuilder::new(DOMAIN_TABLE);
+    source.extend_selects([
+        "lookup_key".to_string(),
+        "payment_id".to_string(),
+        "request_id".to_string(),
+        "merchant_id".to_string(),
+        "created_at_ms".to_string(),
+        "status".to_string(),
+        "gateway".to_string(),
+        "event_stage".to_string(),
+        "route".to_string(),
+    ]);
+    source.extend_filters(payment_audit_raw_filters(&exact_query, preview_only));
+    source.add_filter(exact_lookup_filter(lookup_key));
+
+    let source = source.into_fragment();
+    let mut builder = BoundQueryBuilder::from_fragment(SqlFragment::with_binds(
+        format!("({})", source.sql()),
+        source.binds().to_vec(),
+    ));
     builder.extend_selects([
-        "assumeNotNull(any(lookup_key)) AS resolved_lookup_key".to_string(),
+        "assumeNotNull(any(lookup_key)) AS lookup_key".to_string(),
         "argMax(payment_id, created_at_ms) AS payment_id".to_string(),
         "argMax(request_id, created_at_ms) AS request_id".to_string(),
-        "any(merchant_id) AS resolved_merchant_id".to_string(),
+        "any(merchant_id) AS merchant_id".to_string(),
         "min(created_at_ms) AS first_seen_ms".to_string(),
         "max(created_at_ms) AS last_seen_ms".to_string(),
         "count() AS event_count".to_string(),
@@ -223,8 +308,6 @@ pub async fn load_exact(
         "arrayFilter(value -> value != '', groupUniqArray(ifNull(route, ''))) AS routes"
             .to_string(),
     ]);
-    builder.extend_filters(payment_audit_raw_filters(&exact_query, preview_only));
-    builder.add_filter(FilterClause::eq("lookup_key", lookup_key.to_string()));
     let rows = fetch_all::<AuditSummaryRow>(builder.build(client)).await?;
     Ok(map_rows(rows))
 }
@@ -234,7 +317,10 @@ mod tests {
     use crate::analytics::clickhouse::common::PAYMENT_AUDIT_LOOKUP_SUMMARY_TABLE;
     use crate::analytics::models::{AnalyticsRange, PaymentAuditQuery};
 
-    use super::{finalized_summary_fragment, outer_summary_filters};
+    use super::{
+        exact_lookup_filter, finalized_summary_fragment, outer_summary_filters,
+        raw_summary_fragment,
+    };
 
     fn payment_audit_query() -> PaymentAuditQuery {
         PaymentAuditQuery {
@@ -250,6 +336,8 @@ mod tests {
             route: None,
             status: None,
             flow_type: None,
+            routing_approach: None,
+            exclude_routing_approach: None,
             error_code: None,
         }
     }
@@ -260,6 +348,25 @@ mod tests {
         assert!(fragment.sql().contains(PAYMENT_AUDIT_LOOKUP_SUMMARY_TABLE));
         assert!(fragment.sql().contains("FINAL"));
         assert!(!fragment.sql().contains("GROUP BY lookup_key"));
+    }
+
+    #[test]
+    fn raw_summary_fragment_exposes_outer_summary_column_names() {
+        let fragment = raw_summary_fragment(&payment_audit_query(), false);
+        assert!(fragment.sql().contains("AS lookup_key"));
+        assert!(fragment.sql().contains("AS merchant_id"));
+        assert!(!fragment.sql().contains("resolved_lookup_key"));
+        assert!(!fragment.sql().contains("resolved_merchant_id"));
+    }
+
+    #[test]
+    fn exact_lookup_filter_matches_every_visible_identifier() {
+        let filter = exact_lookup_filter("id_123");
+        assert_eq!(
+            filter.predicate(),
+            "(lookup_key = ? OR payment_id = ? OR request_id = ? OR global_request_id = ? OR event_id = ?)"
+        );
+        assert_eq!(filter.binds().len(), 5);
     }
 
     #[test]

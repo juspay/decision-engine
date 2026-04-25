@@ -50,6 +50,12 @@ COMPOSE_PROFILES= docker compose --profile analytics-clickhouse up -d
 
 That profile now includes ClickHouse, Kafka, and topic creation. The full runtime profiles use the same ClickHouse-native ingestion path. There is no separate Rust worker process anymore.
 
+Local Compose versions:
+
+- ClickHouse: `clickhouse/clickhouse-server:26.1`
+- Kafka: `apache/kafka:3.8.1`
+- ClickHouse database: `default`
+
 The bootstrap DDL now lives in:
 
 - `clickhouse/scripts/`

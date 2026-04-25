@@ -31,6 +31,8 @@ pub struct AnalyticsQueryParams {
     pub route: Option<String>,
     pub status: Option<String>,
     pub flow_type: Option<String>,
+    pub routing_approach: Option<String>,
+    pub exclude_routing_approach: Option<String>,
     pub error_code: Option<String>,
 }
 
@@ -73,6 +75,8 @@ fn payment_audit_query_from_params(
         params.route.clone(),
         params.status.clone(),
         params.flow_type.clone(),
+        params.routing_approach.clone(),
+        params.exclude_routing_approach.clone(),
         params.error_code.clone(),
     )
 }
