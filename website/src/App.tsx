@@ -11,14 +11,12 @@ import { VolumeSplitPage } from './components/pages/VolumeSplitPage'
 import { AppShell } from './components/layout/AppShell'
 import { AuthGuard } from './components/layout/AuthGuard'
 import { AuthPage } from './pages/AuthPage'
-import { OnboardingPage } from './pages/OnboardingPage'
 
 export default function App() {
   return (
     <Routes>
       <Route path="login" element={<AuthPage />} />
       <Route element={<AuthGuard />}>
-        <Route path="onboarding" element={<OnboardingPage />} />
         <Route element={<AppShell />}>
           <Route index element={<OverviewPage />} />
           <Route path="routing" element={<RoutingHubPage />} />

@@ -18,9 +18,9 @@
 
 ---
 
-**[🚀 Quick Start](#-quick-start)** • 
-**[📚 Documentation](#-documentation)** • 
-**[🏗 Architecture](#-architecture)** • 
+**[🚀 Quick Start](#-quick-start)** •
+**[📚 Documentation](#-documentation)** •
+**[🏗 Architecture](#-architecture)** •
 **[🤝 Contributing](#-contributing)**
 
 </div>
@@ -106,7 +106,7 @@ Decision Engine is a **high-performance payment gateway router** built in Rust t
 # Clone and run
 git clone https://github.com/juspay/decision-engine.git
 cd decision-engine
-docker compose --profile postgres-ghcr up -d
+docker compose up -d
 
 # That's it! API ready at http://localhost:8080
 ```

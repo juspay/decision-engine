@@ -2,18 +2,7 @@
 import { tokenRef } from './tokenRef'
 
 const DEBUG_API = true
-const DEFAULT_TENANT_ID = import.meta.env.VITE_DEFAULT_TENANT_ID ?? 'public'
-const API_BASE_PATH = (import.meta.env.VITE_API_BASE_PATH ?? '/decision-engine-api').replace(/\/$/, '')
-const FEATURE_HEADER = import.meta.env.VITE_FEATURE_HEADER ?? 'decision-engine'
-
-function resolveApiPath(path: string) {
-  if (/^https?:\/\//.test(path)) return path
-  const normalizedPath = path.startsWith('/') ? path : `/${path}`
-  if (normalizedPath.startsWith(`${API_BASE_PATH}/`) || normalizedPath === API_BASE_PATH) {
-    return normalizedPath
-  }
-  return `${API_BASE_PATH}${normalizedPath}`
-}
+const DEFAULT_TENANT_ID = 'public'
 
 function logRequest(method: string, path: string, body?: unknown) {
   if (!DEBUG_API) return
@@ -57,21 +46,19 @@ export async function apiFetch<T>(
 ): Promise<T> {
   const method = options?.method || 'GET'
   const body = options?.body ? JSON.parse(options.body as string) : undefined
-  const requestPath = resolveApiPath(path)
 
-  logRequest(method, requestPath, body)
+  logRequest(method, path, body)
 
   try {
     const token = tokenRef.get()
     const headers = new Headers(options?.headers)
     headers.set('Content-Type', 'application/json')
     headers.set('x-tenant-id', DEFAULT_TENANT_ID)
-    headers.set('x-feature', FEATURE_HEADER)
     if (token) {
       headers.set('Authorization', `Bearer ${token}`)
     }
 
-    const res = await fetch(requestPath, {
+    const res = await fetch(path, {
       ...options,
       headers,
     })
@@ -86,7 +73,7 @@ export async function apiFetch<T>(
       responseBody = responseText
     }
 
-    logResponse(requestPath, res.status, res.statusText, responseBody)
+    logResponse(path, res.status, res.statusText, responseBody)
 
     // Only clear session when the JWT itself is confirmed invalid/expired.
     // A generic 401 (e.g. missing API key on a protected route) must NOT wipe the session.
@@ -107,14 +94,14 @@ export async function apiFetch<T>(
         import('../store/authStore').then(({ useAuthStore }) => {
           useAuthStore.getState().clearAuth()
         })
-        window.location.href = `${import.meta.env.BASE_URL}login`
+        window.location.href = '/dashboard/login'
         throw new Error('Session expired')
       }
     }
 
     if (!res.ok) {
       const error = new Error(`API error ${res.status}: ${responseText}`)
-      logError(requestPath, error)
+      logError(path, error)
       throw error
     }
 
@@ -124,7 +111,7 @@ export async function apiFetch<T>(
 
     return JSON.parse(responseText) as T
   } catch (error) {
-    logError(requestPath, error)
+    logError(path, error)
     throw error
   }
 }

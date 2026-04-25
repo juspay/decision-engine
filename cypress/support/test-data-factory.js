@@ -1,220 +1,343 @@
-// Test Data Factory for Decision Engine Tests
-// This file provides utilities to generate test data for different routing scenarios
+const CONNECTORS = {
+  stripe: { gateway_name: 'stripe', gateway_id: 'mca_stripe' },
+  adyen: { gateway_name: 'adyen', gateway_id: 'mca_adyen' },
+  checkout: { gateway_name: 'checkout', gateway_id: 'mca_checkout' },
+  paytm: { gateway_name: 'paytm', gateway_id: 'mca_paytm' },
+  razorpay: { gateway_name: 'razorpay', gateway_id: 'mca_razorpay' },
+}
 
-const { v4: uuidv4 } = require('uuid')
+function uniqueSuffix() {
+  return `${Date.now()}_${Math.floor(Math.random() * 100000)}`
+}
 
-class TestDataFactory {
-  static generateMerchantId(prefix = 'merc_test_') {
-    return `${prefix}${Date.now()}_${Math.floor(Math.random() * 1000)}`
-  }
+function merchantId(suite = 'merchant') {
+  return `cy_${suite}_${uniqueSuffix()}`
+}
 
-  static generatePaymentId(prefix = 'PAY_test_') {
-    return `${prefix}${Date.now()}_${Math.floor(Math.random() * 1000)}`
-  }
+function paymentId(prefix = 'pay') {
+  return `${prefix}_${uniqueSuffix()}`
+}
 
-  static generateCustomerId(prefix = 'CUST_test_') {
-    return `${prefix}${Date.now()}_${Math.floor(Math.random() * 1000)}`
-  }
+function customerId(prefix = 'cust') {
+  return `${prefix}_${uniqueSuffix()}`
+}
 
-  // Success Rate Rule Configurations
-  static getSuccessRateRuleConfig(options = {}) {
+function ruleName(prefix = 'rule') {
+  return `${prefix}_${uniqueSuffix()}`
+}
+
+function gatewayConnector(name, gatewayId = null) {
+  const connector = CONNECTORS[name]
+  if (connector) {
     return {
-      type: "successRate",
-      data: {
-        defaultLatencyThreshold: options.latencyThreshold || 90,
-        defaultSuccessRate: options.successRate || 0.5,
-        defaultBucketSize: options.bucketSize || 200,
-        defaultHedgingPercent: options.hedgingPercent || 5,
-        txnLatency: {
-          gatewayLatency: options.gatewayLatency || 5000
-        },
-        subLevelInputConfig: options.subLevelConfig || [
-          {
-            paymentMethodType: "upi",
-            paymentMethod: "upi_collect",
-            bucketSize: 250,
-            hedgingPercent: 1
-          }
-        ]
-      }
+      gateway_name: connector.gateway_name,
+      gateway_id: gatewayId ?? connector.gateway_id,
     }
   }
 
-  // Payment Latency Rule Configurations
-  static getPaymentLatencyRuleConfig(options = {}) {
-    return {
-      type: "paymentLatency",
-      data: {
-        defaultLatencyThreshold: options.latencyThreshold || 90,
-        defaultBucketSize: options.bucketSize || 200,
-        defaultHedgingPercent: options.hedgingPercent || 5,
-        txnLatency: {
-          gatewayLatency: options.gatewayLatency || 3000,
-          paymentLatency: options.paymentLatency || 5000
-        },
-        subLevelInputConfig: options.subLevelConfig || []
-      }
-    }
-  }
-
-  // Cost Based Rule Configurations (if supported)
-  static getCostBasedRuleConfig(options = {}) {
-    return {
-      type: "costBased",
-      data: {
-        defaultCostThreshold: options.costThreshold || 2.5,
-        defaultBucketSize: options.bucketSize || 200,
-        defaultHedgingPercent: options.hedgingPercent || 5,
-        costConfig: {
-          baseCost: options.baseCost || 1.0,
-          variableCost: options.variableCost || 0.5
-        },
-        subLevelInputConfig: options.subLevelConfig || []
-      }
-    }
-  }
-
-  // Payment Info Configurations
-  static getPaymentInfo(options = {}) {
-    return {
-      paymentId: options.paymentId || this.generatePaymentId(),
-      amount: options.amount || 100.50,
-      currency: options.currency || "USD",
-      customerId: options.customerId || this.generateCustomerId(),
-      udfs: options.udfs || null,
-      preferredGateway: options.preferredGateway || null,
-      paymentType: options.paymentType || "ORDER_PAYMENT",
-      metadata: options.metadata || null,
-      internalMetadata: options.internalMetadata || null,
-      isEmi: options.isEmi || false,
-      emiBank: options.emiBank || null,
-      emiTenure: options.emiTenure || null,
-      paymentMethodType: options.paymentMethodType || "UPI",
-      paymentMethod: options.paymentMethod || "UPI_PAY",
-      paymentSource: options.paymentSource || null,
-      authType: options.authType || null,
-      cardIssuerBankName: options.cardIssuerBankName || null,
-      cardIsin: options.cardIsin || null,
-      cardType: options.cardType || null,
-      cardSwitchProvider: options.cardSwitchProvider || null
-    }
-  }
-
-  // Gateway Decision Request
-  static getGatewayDecisionRequest(options = {}) {
-    return {
-      merchantId: options.merchantId || this.generateMerchantId(),
-      eligibleGatewayList: options.eligibleGatewayList || ["GatewayA", "GatewayB", "GatewayC"],
-      rankingAlgorithm: options.rankingAlgorithm || "SR_BASED_ROUTING",
-      eliminationEnabled: options.eliminationEnabled !== undefined ? options.eliminationEnabled : true,
-      paymentInfo: this.getPaymentInfo(options.paymentInfo || {})
-    }
-  }
-
-  // Score Update Request
-  static getScoreUpdateRequest(options = {}) {
-    return {
-      merchantId: options.merchantId || this.generateMerchantId(),
-      gateway: options.gateway || "GatewayA",
-      gatewayReferenceId: options.gatewayReferenceId || null,
-      status: options.status || "AUTHORIZED",
-      paymentId: options.paymentId || this.generatePaymentId(),
-      enforceDynamicRoutingFailure: options.enforceDynamicRoutingFailure || null,
-      txnLatency: {
-        gatewayLatency: options.gatewayLatency || 3000,
-        paymentLatency: options.paymentLatency || 4000,
-        ...options.txnLatency
-      }
-    }
-  }
-
-  // Test Scenarios
-  static getLatencyTestScenarios() {
-    return [
-      { name: "Low Latency", gatewayLatency: 1000, paymentLatency: 1500, status: "AUTHORIZED" },
-      { name: "Medium Latency", gatewayLatency: 3000, paymentLatency: 4000, status: "AUTHORIZED" },
-      { name: "High Latency", gatewayLatency: 6000, paymentLatency: 8000, status: "AUTHORIZED" },
-      { name: "Failed Transaction", gatewayLatency: 2000, paymentLatency: 3000, status: "FAILED" },
-      { name: "Timeout", gatewayLatency: 10000, paymentLatency: 12000, status: "TIMEOUT" }
-    ]
-  }
-
-  static getSuccessRateTestScenarios() {
-    return [
-      { name: "High Success", transactions: Array(8).fill("AUTHORIZED").concat(Array(2).fill("FAILED")) },
-      { name: "Medium Success", transactions: Array(6).fill("AUTHORIZED").concat(Array(4).fill("FAILED")) },
-      { name: "Low Success", transactions: Array(3).fill("AUTHORIZED").concat(Array(7).fill("FAILED")) },
-      { name: "All Success", transactions: Array(10).fill("AUTHORIZED") },
-      { name: "All Failed", transactions: Array(10).fill("FAILED") }
-    ]
-  }
-
-  static getPaymentMethodTestCases() {
-    return [
-      { type: "UPI", method: "UPI_PAY", description: "UPI Payment" },
-      { type: "upi", method: "upi_collect", description: "UPI Collect" },
-      { type: "CARD", method: "CARD_PAY", description: "Card Payment" },
-      { type: "NETBANKING", method: "NETBANKING_PAY", description: "Net Banking" },
-      { type: "WALLET", method: "WALLET_PAY", description: "Wallet Payment" }
-    ]
-  }
-
-  static getRoutingAlgorithmTestCases() {
-    return [
-      { algorithm: "SR_BASED_ROUTING", description: "Success Rate Based Routing" },
-      { algorithm: "PL_BASED_ROUTING", description: "Payment Latency Based Routing" },
-      { algorithm: "COST_BASED_ROUTING", description: "Cost Based Routing" }
-    ]
-  }
-
-  // Edge Case Scenarios
-  static getEdgeCaseScenarios() {
-    return {
-      extremeLatency: {
-        gatewayLatency: 30000,
-        paymentLatency: 45000,
-        status: "TIMEOUT"
-      },
-      zeroLatency: {
-        gatewayLatency: 0,
-        paymentLatency: 0,
-        status: "AUTHORIZED"
-      },
-      negativeAmount: {
-        amount: -100,
-        currency: "USD"
-      },
-      largeAmount: {
-        amount: 999999.99,
-        currency: "USD"
-      },
-      invalidCurrency: {
-        amount: 100,
-        currency: "INVALID"
-      }
-    }
-  }
-
-  // Load Testing Data
-  static generateLoadTestData(count = 100) {
-    return Array.from({ length: count }, (_, index) => ({
-      merchantId: this.generateMerchantId(`load_test_${index}_`),
-      paymentId: this.generatePaymentId(`load_pay_${index}_`),
-      customerId: this.generateCustomerId(`load_cust_${index}_`),
-      amount: Math.floor(Math.random() * 1000) + 1,
-      latency: Math.floor(Math.random() * 5000) + 500
-    }))
-  }
-
-  // Performance Test Configurations
-  static getPerformanceTestConfig() {
-    return {
-      concurrentUsers: [1, 5, 10, 20, 50],
-      requestsPerSecond: [1, 5, 10, 25, 50],
-      testDuration: [30, 60, 120, 300], // seconds
-      latencyThresholds: [1000, 2000, 3000, 5000] // milliseconds
-    }
+  return {
+    gateway_name: name,
+    gateway_id: gatewayId,
   }
 }
 
-module.exports = TestDataFactory
+function connectorNames(...names) {
+  return names.map((name) => gatewayConnector(name).gateway_name)
+}
+
+function srConfigData(overrides = {}) {
+  return {
+    defaultLatencyThreshold: 90,
+    defaultSuccessRate: 0.5,
+    defaultBucketSize: 200,
+    defaultHedgingPercent: 5,
+    subLevelInputConfig: [
+      {
+        paymentMethodType: 'upi',
+        paymentMethod: 'upi_collect',
+        bucketSize: 250,
+        hedgingPercent: 1,
+        latencyThreshold: null,
+      },
+    ],
+    ...overrides,
+  }
+}
+
+function eliminationConfigData(overrides = {}) {
+  return {
+    threshold: 0.35,
+    txnLatency: {
+      gatewayLatency: 5000,
+    },
+    ...overrides,
+  }
+}
+
+function debitRoutingConfigData(overrides = {}) {
+  return {
+    merchant_category_code: '5411',
+    acquirer_country: 'US',
+    ...overrides,
+  }
+}
+
+function paymentInfo(overrides = {}) {
+  return {
+    paymentId: paymentId(),
+    amount: 100.5,
+    currency: 'USD',
+    customerId: customerId(),
+    udfs: null,
+    preferredGateway: null,
+    paymentType: 'ORDER_PAYMENT',
+    metadata: null,
+    internalMetadata: null,
+    isEmi: false,
+    emiBank: null,
+    emiTenure: null,
+    paymentMethodType: 'UPI',
+    paymentMethod: 'UPI_PAY',
+    paymentSource: null,
+    authType: null,
+    cardIssuerBankName: null,
+    cardIsin: null,
+    cardType: null,
+    cardSwitchProvider: null,
+    ...overrides,
+  }
+}
+
+function srDecideGatewayRequest(overrides = {}) {
+  const paymentInfoOverrides = overrides.paymentInfo || {}
+
+  return {
+    merchantId: overrides.merchantId || merchantId('dynamic'),
+    eligibleGatewayList:
+      overrides.eligibleGatewayList || connectorNames('stripe', 'adyen', 'checkout'),
+    rankingAlgorithm: overrides.rankingAlgorithm || 'SR_BASED_ROUTING',
+    eliminationEnabled:
+      overrides.eliminationEnabled === undefined ? true : overrides.eliminationEnabled,
+    paymentInfo: paymentInfo(paymentInfoOverrides),
+  }
+}
+
+function updateGatewayScoreRequest(overrides = {}) {
+  const latency = overrides.txnLatency || {}
+
+  return {
+    merchantId: overrides.merchantId || merchantId('dynamic'),
+    gateway: overrides.gateway || gatewayConnector('stripe').gateway_name,
+    gatewayReferenceId:
+      overrides.gatewayReferenceId === undefined ? null : overrides.gatewayReferenceId,
+    status: overrides.status || 'AUTHORIZED',
+    paymentId: overrides.paymentId || paymentId('update'),
+    enforceDynamicRoutingFailure:
+      overrides.enforceDynamicRoutingFailure === undefined
+        ? null
+        : overrides.enforceDynamicRoutingFailure,
+    txnLatency: {
+      gatewayLatency: latency.gatewayLatency ?? 3000,
+      ...latency,
+    },
+  }
+}
+
+function singleRoutingPayload(createdBy, overrides = {}) {
+  return {
+    name: overrides.name || ruleName('single'),
+    description: overrides.description || 'single connector routing rule',
+    created_by: createdBy,
+    algorithm_for: overrides.algorithm_for || 'payment',
+    algorithm: {
+      type: 'single',
+      data: gatewayConnector(overrides.gateway || 'stripe', overrides.gateway_id || undefined),
+    },
+    metadata: overrides.metadata || {},
+  }
+}
+
+function priorityRoutingPayload(createdBy, overrides = {}) {
+  const connectors = overrides.connectors || [
+    gatewayConnector('stripe'),
+    gatewayConnector('razorpay'),
+  ]
+
+  return {
+    name: overrides.name || ruleName('priority'),
+    description: overrides.description || 'priority routing rule',
+    created_by: createdBy,
+    algorithm_for: overrides.algorithm_for || 'payment',
+    algorithm: {
+      type: 'priority',
+      data: connectors,
+    },
+    metadata: overrides.metadata || {},
+  }
+}
+
+function volumeSplitRoutingPayload(createdBy, overrides = {}) {
+  const data = overrides.data || [
+    { split: 70, output: gatewayConnector('stripe') },
+    { split: 30, output: gatewayConnector('paytm') },
+  ]
+
+  return {
+    name: overrides.name || ruleName('volume_split'),
+    description: overrides.description || 'volume split routing rule',
+    created_by: createdBy,
+    algorithm_for: overrides.algorithm_for || 'payment',
+    algorithm: {
+      type: 'volume_split',
+      data,
+    },
+    metadata: overrides.metadata || {},
+  }
+}
+
+function advancedRoutingPayload(createdBy, overrides = {}) {
+  return {
+    name: overrides.name || ruleName('advanced'),
+    description: overrides.description || 'advanced routing rule',
+    created_by: createdBy,
+    algorithm_for: overrides.algorithm_for || 'payment',
+    algorithm: {
+      type: 'advanced',
+      data: {
+        globals: overrides.globals || {},
+        default_selection:
+          overrides.default_selection || {
+            priority: [gatewayConnector('stripe'), gatewayConnector('adyen')],
+          },
+        rules:
+          overrides.rules || [
+            {
+              name: 'Card Rule',
+              routing_type: 'priority',
+              output: {
+                priority: [gatewayConnector('checkout'), gatewayConnector('adyen')],
+              },
+              statements: [
+                {
+                  condition: [
+                    {
+                      lhs: 'payment_method',
+                      comparison: 'equal',
+                      value: { type: 'enum_variant', value: 'card' },
+                      metadata: {},
+                    },
+                    {
+                      lhs: 'amount',
+                      comparison: 'greater_than',
+                      value: { type: 'number', value: 100 },
+                      metadata: {},
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+      },
+    },
+    metadata: overrides.metadata || {},
+  }
+}
+
+function advancedNestedAndOrRoutingPayload(createdBy, overrides = {}) {
+  return {
+    name: overrides.name || ruleName('advanced_nested'),
+    description: overrides.description || 'advanced nested routing rule',
+    created_by: createdBy,
+    algorithm_for: overrides.algorithm_for || 'payment',
+    algorithm: {
+      type: 'advanced',
+      data: {
+        globals: overrides.globals || {},
+        default_selection:
+          overrides.default_selection || {
+            priority: [gatewayConnector('checkout'), gatewayConnector('adyen')],
+          },
+        rules:
+          overrides.rules || [
+            {
+              name: 'Nested Network Rule',
+              routing_type: 'priority',
+              output: {
+                priority: [gatewayConnector('stripe'), gatewayConnector('razorpay')],
+              },
+              statements: [
+                {
+                  condition: [
+                    {
+                      lhs: 'payment_method',
+                      comparison: 'equal',
+                      value: { type: 'enum_variant', value: 'card' },
+                      metadata: {},
+                    },
+                  ],
+                  nested: [
+                    {
+                      condition: [
+                        {
+                          lhs: 'card_network',
+                          comparison: 'equal',
+                          value: { type: 'enum_variant', value: 'visa' },
+                          metadata: {},
+                        },
+                      ],
+                    },
+                    {
+                      condition: [
+                        {
+                          lhs: 'currency',
+                          comparison: 'equal',
+                          value: { type: 'enum_variant', value: 'USD' },
+                          metadata: {},
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+      },
+    },
+    metadata: overrides.metadata || {},
+  }
+}
+
+function ruleEvaluatePayload(createdBy, parameters = {}, overrides = {}) {
+  return {
+    created_by: createdBy,
+    parameters: {
+      payment_method: { type: 'enum_variant', value: 'upi' },
+      amount: { type: 'number', value: 10 },
+      ...parameters,
+    },
+    ...(overrides.fallback_output ? { fallback_output: overrides.fallback_output } : {}),
+    ...(overrides.payment_id ? { payment_id: overrides.payment_id } : {}),
+  }
+}
+
+module.exports = {
+  CONNECTORS,
+  merchantId,
+  paymentId,
+  customerId,
+  ruleName,
+  gatewayConnector,
+  connectorNames,
+  srConfigData,
+  eliminationConfigData,
+  debitRoutingConfigData,
+  paymentInfo,
+  srDecideGatewayRequest,
+  updateGatewayScoreRequest,
+  singleRoutingPayload,
+  priorityRoutingPayload,
+  advancedRoutingPayload,
+  advancedNestedAndOrRoutingPayload,
+  volumeSplitRoutingPayload,
+  ruleEvaluatePayload,
+}

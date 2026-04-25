@@ -27,6 +27,7 @@ const JWT_DENYLIST_PREFIX: &str = "jwt_revoked:";
 pub struct SignupRequest {
     pub email: String,
     pub password: String,
+    pub merchant_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -111,11 +112,40 @@ pub async fn signup(
     let user_id = uuid::Uuid::new_v4().to_string();
     let now = date_time::now();
 
+    let requested_merchant_id = payload
+        .merchant_id
+        .as_ref()
+        .map(|merchant_id| merchant_id.trim())
+        .filter(|merchant_id| !merchant_id.is_empty())
+        .map(str::to_string);
+
+    if let Some(merchant_id) = requested_merchant_id.as_ref() {
+        #[cfg(feature = "mysql")]
+        use crate::storage::schema::merchant_account::dsl as ma_dsl;
+        #[cfg(feature = "postgres")]
+        use crate::storage::schema_pg::merchant_account::dsl as ma_dsl;
+
+        let existing_merchant = crate::generics::generic_find_all::<
+            <crate::storage::types::MerchantAccount as HasTable>::Table,
+            _,
+            crate::storage::types::MerchantAccount,
+        >(
+            &app_state.db,
+            ma_dsl::merchant_id.eq(Some(merchant_id.clone())),
+        )
+        .await
+        .map_err(|_| UserAuthError::StorageError)?;
+
+        if existing_merchant.is_empty() {
+            return Err(error::ContainerError::from(UserAuthError::MerchantNotFound));
+        }
+    }
+
     let new_user = NewUser {
         user_id: user_id.clone(),
         email: payload.email.clone(),
         password_hash,
-        merchant_id: None,
+        merchant_id: requested_merchant_id.clone(),
         role: "admin".to_string(),
         #[cfg(feature = "mysql")]
         is_active: 1,
@@ -136,6 +166,19 @@ pub async fn signup(
         .await
         .map_err(|_| UserAuthError::StorageError)?;
 
+    if let Some(merchant_id) = requested_merchant_id.as_ref() {
+        let new_user_merchant = NewUserMerchant {
+            user_id: user_id.clone(),
+            merchant_id: merchant_id.clone(),
+            role: "admin".to_string(),
+            created_at: now,
+        };
+
+        crate::generics::generic_insert(&app_state.db, new_user_merchant)
+            .await
+            .map_err(|_| UserAuthError::StorageError)?;
+    }
+
     if global_config.user_auth.email_verification_enabled {
         return Err(error::ContainerError::from(UserAuthError::EmailNotVerified));
     }
@@ -143,7 +186,7 @@ pub async fn signup(
     let token = auth::generate_jwt(
         &user_id,
         &payload.email,
-        "",
+        requested_merchant_id.as_deref().unwrap_or(""),
         "admin",
         &global_config.user_auth.jwt_secret,
         global_config.user_auth.jwt_expiry_seconds,
@@ -152,11 +195,11 @@ pub async fn signup(
 
     Ok(Json(AuthResponse {
         token,
-        user_id,
+        user_id: user_id.clone(),
         email: payload.email,
-        merchant_id: String::new(),
+        merchant_id: requested_merchant_id.unwrap_or_default(),
         role: "admin".to_string(),
-        merchants: vec![],
+        merchants: fetch_user_merchants(&app_state, &user_id).await?,
     }))
 }
 
