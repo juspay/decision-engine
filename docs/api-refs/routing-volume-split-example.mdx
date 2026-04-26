@@ -18,11 +18,11 @@ curl --location "$BASE_URL/routing/create" \
       "data": [
         {
           "split": 70,
-          "connectors": [{ "gateway_name": "stripe", "gateway_id": "mca_111" }]
+          "output": { "gateway_name": "stripe", "gateway_id": "mca_111" }
         },
         {
           "split": 30,
-          "connectors": [{ "gateway_name": "adyen", "gateway_id": "mca_112" }]
+          "output": { "gateway_name": "adyen", "gateway_id": "mca_112" }
         }
       ]
     }

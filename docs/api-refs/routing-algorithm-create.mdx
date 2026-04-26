@@ -5,7 +5,18 @@ description: "Curl examples for /routing/create."
 
 # Create Routing Algorithm
 
-Use `/routing/create` to persist a rule-based or volume-based routing algorithm. Use the dedicated shape pages for full examples.
+Use `/routing/create` to persist a merchant-scoped routing algorithm. Creating an algorithm does not make it active; call [`/routing/activate`](./routing-algorithm-activate.mdx) after creation.
+
+Supported `algorithm.type` values:
+
+| Type | Use case | Full example |
+| --- | --- | --- |
+| `single` | Always return one connector. | [Single connector](./routing-single-connector-example.mdx) |
+| `priority` | Return connectors in the configured order. | [Priority routing](./routing-priority-example.mdx) |
+| `volume_split` | Split decisions by percentage. | [Volume split](./routing-volume-split-example.mdx) |
+| `advanced` | Evaluate AND/OR/nested conditions before returning an output. | [Advanced routing](./routing-advanced-example.mdx) |
+
+There is no public deactivate route in the current API. To change active behavior, create or select another algorithm and activate it.
 
 ## Priority Rule
 
@@ -28,6 +39,102 @@ curl --location "$BASE_URL/routing/create" \
   }'
 ```
 
+## Single Connector Rule
+
+```bash
+curl --location "$BASE_URL/routing/create" \
+  --header "$AUTH_HEADER" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "name": "single connector rule",
+    "created_by": "merchant_demo",
+    "description": "always route to stripe",
+    "algorithm_for": "payment",
+    "algorithm": {
+      "type": "single",
+      "data": { "gateway_name": "stripe", "gateway_id": "mca_111" }
+    }
+  }'
+```
+
+## Volume Split Rule
+
+```bash
+curl --location "$BASE_URL/routing/create" \
+  --header "$AUTH_HEADER" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "name": "volume split rule",
+    "created_by": "merchant_demo",
+    "description": "split traffic between stripe and adyen",
+    "algorithm_for": "payment",
+    "algorithm": {
+      "type": "volume_split",
+      "data": [
+        {
+          "split": 70,
+          "output": { "gateway_name": "stripe", "gateway_id": "mca_111" }
+        },
+        {
+          "split": 30,
+          "output": { "gateway_name": "adyen", "gateway_id": "mca_112" }
+        }
+      ]
+    }
+  }'
+```
+
+## Advanced Rule
+
+Use `advanced` for conditional routing. The complete AND/OR/nested reference is in [Advanced Routing Example](./routing-advanced-example.mdx).
+
+```bash
+curl --location "$BASE_URL/routing/create" \
+  --header "$AUTH_HEADER" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "name": "advanced card rule",
+    "created_by": "merchant_demo",
+    "description": "route Visa cards to adyen first",
+    "algorithm_for": "payment",
+    "algorithm": {
+      "type": "advanced",
+      "data": {
+        "globals": {},
+        "default_selection": {
+          "priority": [{ "gateway_name": "stripe", "gateway_id": "mca_111" }]
+        },
+        "rules": [
+          {
+            "name": "visa_card_rule",
+            "routing_type": "priority",
+            "output": {
+              "priority": [
+                { "gateway_name": "adyen", "gateway_id": "mca_112" },
+                { "gateway_name": "stripe", "gateway_id": "mca_111" }
+              ]
+            },
+            "statements": [
+              {
+                "condition": [
+                  {
+                    "lhs": "card_network",
+                    "comparison": "equal",
+                    "value": { "type": "enum_variant", "value": "Visa" },
+                    "metadata": {}
+                  }
+                ],
+                "nested": null
+              }
+            ]
+          }
+        ],
+        "metadata": {}
+      }
+    }
+  }'
+```
+
 ## Response
 
 ```json
@@ -38,3 +145,10 @@ curl --location "$BASE_URL/routing/create" \
   "modified_at": "2026-04-25 11:45:03"
 }
 ```
+
+## Related
+
+- [Activate Routing Algorithm](./routing-algorithm-activate.mdx)
+- [List Routing Algorithms](./routing-algorithm-list.mdx)
+- [Evaluate Routing Algorithm](./routing-algorithm-evaluate.mdx)
+- [Advanced Routing Example](./routing-advanced-example.mdx)

@@ -108,7 +108,9 @@ Open:
 - API: `http://localhost:8080`
 - Dashboard: `http://localhost:8081/dashboard/`
 - Docs: `http://localhost:8081/introduction`
-- API examples: `http://localhost:8081/api-refs/api-ref`
+- API documentation map: `http://localhost:8081/api-overview`
+
+For deployed docs or dashboard environments, use the same docs paths under the deployed host, for example `https://<docs-host>/api-overview`. That page links to the API examples and OpenAPI reference sections.
 
 ### 🦀 From Source
 
@@ -144,8 +146,7 @@ curl http://localhost:8080/health
 | [Local Setup Guide](docs/local-setup.md) | Canonical guide for CLI, Docker, Compose profiles, and Helm |
 | [MySQL Setup Guide](docs/setup-guide-mysql.md) | MySQL-specific walkthrough |
 | [PostgreSQL Setup Guide](docs/setup-guide-postgres.md) | PostgreSQL-specific walkthrough |
-| [API Reference](docs/api-reference.md) | OpenAPI-backed REST API documentation |
-| [API Examples](docs/api-refs/api-ref.mdx) | Curl examples for every route family and routing flavour |
+| [API Documentation Map](docs/api-overview.md) | Main API entrypoint with embedded links to API examples, OpenAPI schema pages, route access rules, local URLs, and deployed docs paths |
 | [Configuration Guide](docs/configuration.md) | All config options explained |
 | [Deep Dive Blog](https://juspay.io/blog/juspay-orchestrator-and-merchant-controlled-routing-engine) | How routing logic works |
 

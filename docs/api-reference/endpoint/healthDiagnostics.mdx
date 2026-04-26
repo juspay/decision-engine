@@ -1,4 +1,61 @@
 ---
 title: "Health Diagnostics"
-openapi: "GET /health/diagnostics"
+description: "Database diagnostics for local and deployment troubleshooting."
+openapi: "openapi.json GET /health/diagnostics"
 ---
+
+# Health Diagnostics
+
+## Use case
+
+Returns a deeper diagnostic snapshot for operators debugging local or sandbox environments.
+
+## Authentication
+
+Public. No JWT or API key is required. Sandbox traffic may still include `x-feature: decision-engine` when routed through Hyperswitch.
+
+For local development, start with:
+
+```bash
+export BASE_URL=http://localhost:8080
+export AUTH_HEADER="Authorization: Bearer <jwt_token>"
+# Sandbox only:
+# export BASE_URL=https://sandbox.hyperswitch.io
+# export FEATURE_HEADER="x-feature: decision-engine"
+```
+
+## Request
+
+- Method and path: `GET /health/diagnostics`
+- Parameters: none.
+- Body: No parameters or request body.
+
+## Example
+
+### Diagnostics
+
+```bash
+curl "$BASE_URL/health/diagnostics"
+```
+
+## Response
+
+```json
+{
+  "service": "decision-engine",
+  "database": "ok",
+  "redis": "ok",
+  "clickhouse": "ok",
+  "version": "v1.4"
+}
+```
+
+## Notes
+
+- Diagnostics may expose operational details, so production gateways can restrict access at the edge.
+- Use it during setup before testing routing APIs.
+
+## Related
+
+- [Health Check](./healthCheck.mdx)
+- [Health Ready](./healthReady.mdx)
