@@ -11,7 +11,6 @@
     "light": "#4D9CFF",
     "dark": "#0050B4"
   },
-  "openapi": ["openapi.json"],
   "api": {
     "baseUrl": "http://localhost:8080",
     "playground": {

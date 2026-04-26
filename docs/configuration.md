@@ -61,7 +61,7 @@ Use environment variables to override selected runtime values when needed (for e
 For deployment-specific examples, see:
 
 - [Local Setup Guide](local-setup.md)
-- [Helm Chart README](../helm-charts/README.md)
+- [Helm Chart README](https://github.com/juspay/decision-engine/blob/main/helm-charts/README.md)
 
 ## Related Docs
 

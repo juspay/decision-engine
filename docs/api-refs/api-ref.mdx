@@ -5,7 +5,7 @@ description: "Human-friendly Decision Engine API map with curl examples for ever
 
 # API Examples
 
-Use this page as the route map for local smoke tests, dashboard integration, and sandbox debugging. For schema-level details, use [API Overview](/api-reference) and the OpenAPI-backed endpoint pages.
+Use this page as the route map for local smoke tests, dashboard integration, and sandbox debugging. For schema-level details, use [API Overview](../api-reference.md) and the OpenAPI-backed endpoint pages.
 
 ## Environment
 
@@ -36,61 +36,61 @@ curl "$BASE_URL/analytics/overview?range=1d" \
 
 ### Health
 
-- [Health, readiness, and diagnostics](/api-refs/health-check): `GET /health`, `GET /health/ready`, `GET /health/diagnostics`
+- [Health, readiness, and diagnostics](./health-check.mdx): `GET /health`, `GET /health/ready`, `GET /health/diagnostics`
 
 ### Auth, onboarding, and API keys
 
-- [Auth and onboarding](/api-refs/auth-and-onboarding): `POST /auth/signup`, `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`, `GET /auth/merchants`, `POST /auth/switch-merchant`, `POST /onboarding/merchant`
-- [API keys](/api-refs/api-keys): `POST /api-key/create`, `GET /api-key/list/:merchant_id`, `DELETE /api-key/:key_id`
+- [Auth and onboarding](./auth-and-onboarding.mdx): `POST /auth/signup`, `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`, `GET /auth/merchants`, `POST /auth/switch-merchant`, `POST /onboarding/merchant`
+- [API keys](./api-keys.mdx): `POST /api-key/create`, `GET /api-key/list/:merchant_id`, `DELETE /api-key/:key_id`
 
 ### Merchant account
 
-- [Create merchant account](/api-refs/merchant-account-create): `POST /merchant-account/create`
-- [Get merchant account](/api-refs/merchant-account-get): `GET /merchant-account/:merchant-id`
-- [Delete merchant account](/api-refs/merchant-account-delete): `DELETE /merchant-account/:merchant-id`
-- [Debit-routing merchant flag](/api-refs/merchant-debit-routing): `GET|POST /merchant-account/:merchant-id/debit-routing`
+- [Create merchant account](./merchant-account-create.mdx): `POST /merchant-account/create`
+- [Get merchant account](./merchant-account-get.mdx): `GET /merchant-account/:merchant-id`
+- [Delete merchant account](./merchant-account-delete.mdx): `DELETE /merchant-account/:merchant-id`
+- [Debit-routing merchant flag](./merchant-debit-routing.mdx): `GET|POST /merchant-account/:merchant-id/debit-routing`
 
 ### Gateway decisions
 
-- [SR-based routing](/api-refs/decide-gateway-sr-based): `POST /decide-gateway` with `SR_BASED_ROUTING`
-- [Priority-list routing](/api-refs/decide-gateway-pl-based): `POST /decide-gateway` with `PL_BASED_ROUTING`
-- [Debit/network routing](/api-refs/decide-gateway-debit-routing): `POST /decide-gateway` with `NTW_BASED_ROUTING`
-- [Network + SR hybrid routing](/api-refs/decide-gateway-hybrid-routing): `POST /decide-gateway` with `NTW_SR_HYBRID_ROUTING`
-- [Legacy decision endpoint](/api-refs/decision-gateway-legacy): `POST /decision_gateway`
-- [Update gateway score](/api-refs/update-gateway-score): `POST /update-gateway-score`
-- [Legacy update score](/api-refs/update-score-legacy): `POST /update-score`
+- [SR-based routing](./decide-gateway-sr-based.mdx): `POST /decide-gateway` with `SR_BASED_ROUTING`
+- [Priority-list routing](./decide-gateway-pl-based.mdx): `POST /decide-gateway` with `PL_BASED_ROUTING`
+- [Debit/network routing](./decide-gateway-debit-routing.mdx): `POST /decide-gateway` with `NTW_BASED_ROUTING`
+- [Network + SR hybrid routing](./decide-gateway-hybrid-routing.mdx): `POST /decide-gateway` with `NTW_SR_HYBRID_ROUTING`
+- [Legacy decision endpoint](./decision-gateway-legacy.mdx): `POST /decision_gateway`
+- [Update gateway score](./update-gateway-score.mdx): `POST /update-gateway-score`
+- [Legacy update score](./update-score-legacy.mdx): `POST /update-score`
 
 ### Routing rules
 
-- [Create routing algorithm](/api-refs/routing-algorithm-create): `POST /routing/create`
-- [Evaluate routing algorithm](/api-refs/routing-algorithm-evaluate): `POST /routing/evaluate`
-- [Hybrid routing evaluation](/api-refs/routing-hybrid): `POST /routing/hybrid`
-- [List routing algorithms](/api-refs/routing-algorithm-list): `POST /routing/list/:created_by`
-- [List active routing algorithms](/api-refs/routing-algorithm-list-active): `POST /routing/list/active/:created_by`
-- [Activate routing algorithm](/api-refs/routing-algorithm-activate): `POST /routing/activate`
+- [Create routing algorithm](./routing-algorithm-create.mdx): `POST /routing/create`
+- [Evaluate routing algorithm](./routing-algorithm-evaluate.mdx): `POST /routing/evaluate`
+- [Hybrid routing evaluation](./routing-hybrid.mdx): `POST /routing/hybrid`
+- [List routing algorithms](./routing-algorithm-list.mdx): `POST /routing/list/:created_by`
+- [List active routing algorithms](./routing-algorithm-list-active.mdx): `POST /routing/list/active/:created_by`
+- [Activate routing algorithm](./routing-algorithm-activate.mdx): `POST /routing/activate`
 
 ### Routing algorithm shapes
 
-- [Single connector](/api-refs/routing-single-connector-example): `algorithm.type = single`
-- [Priority list](/api-refs/routing-priority-example): `algorithm.type = priority`
-- [Volume split](/api-refs/routing-volume-split-example): `algorithm.type = volume_split`
-- [Advanced rule tree](/api-refs/routing-advanced-example): `algorithm.type = advanced`
+- [Single connector](./routing-single-connector-example.mdx): `algorithm.type = single`
+- [Priority list](./routing-priority-example.mdx): `algorithm.type = priority`
+- [Volume split](./routing-volume-split-example.mdx): `algorithm.type = volume_split`
+- [Advanced rule tree](./routing-advanced-example.mdx): `algorithm.type = advanced`
 
 ### Rule configuration
 
-- [Create success-rate config](/api-refs/success-rate-config-create): `POST /rule/create`
-- [Get success-rate config](/api-refs/success-rate-config-get): `POST /rule/get`
-- [Update success-rate config](/api-refs/success-rate-config-update): `POST /rule/update`
-- [Delete success-rate config](/api-refs/success-rate-config-delete): `POST /rule/delete`
-- [Create elimination config](/api-refs/elimination-config-create): `POST /rule/create`
-- [Get elimination config](/api-refs/elimination-config-get): `POST /rule/get`
-- [Update elimination config](/api-refs/elimination-config-update): `POST /rule/update`
-- [Delete elimination config](/api-refs/elimination-config-delete): `POST /rule/delete`
+- [Create success-rate config](./success-rate-config-create.mdx): `POST /rule/create`
+- [Get success-rate config](./success-rate-config-get.mdx): `POST /rule/get`
+- [Update success-rate config](./success-rate-config-update.mdx): `POST /rule/update`
+- [Delete success-rate config](./success-rate-config-delete.mdx): `POST /rule/delete`
+- [Create elimination config](./elimination-config-create.mdx): `POST /rule/create`
+- [Get elimination config](./elimination-config-get.mdx): `POST /rule/get`
+- [Update elimination config](./elimination-config-update.mdx): `POST /rule/update`
+- [Delete elimination config](./elimination-config-delete.mdx): `POST /rule/delete`
 
 ### Config and analytics
 
-- [Routing config endpoints](/api-refs/config-endpoints): `GET /config/routing-keys`, `POST /config-sr-dimension`
-- [Analytics endpoints](/api-refs/analytics-endpoints): `/analytics/overview`, `/analytics/gateway-scores`, `/analytics/decisions`, `/analytics/routing-stats`, `/analytics/log-summaries`, `/analytics/payment-audit`, `/analytics/preview-trace`
+- [Routing config endpoints](./config-endpoints.mdx): `GET /config/routing-keys`, `POST /config-sr-dimension`
+- [Analytics endpoints](./analytics-endpoints.mdx): `/analytics/overview`, `/analytics/gateway-scores`, `/analytics/decisions`, `/analytics/routing-stats`, `/analytics/log-summaries`, `/analytics/payment-audit`, `/analytics/preview-trace`
 
 ## Routing Algorithm Values
 
