@@ -26,6 +26,7 @@ use crate::redis::feature::RedisDataStruct;
 use crate::types::card::txn_card_info::TxnCardInfo;
 use crate::types::merchant as ETM;
 use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
+use crate::types::service_configuration;
 
 pub async fn decider_full_payload_hs_function(
     dreq_: T::DomainDeciderRequestForApiCallV2,
@@ -109,9 +110,53 @@ pub async fn decider_full_payload_hs_function(
         dpRedisCompressionConfig: None,
     };
 
-    if dreq_.ranking_algorithm == Some(RankingAlgorithm::NtwBasedRouting) {
-        logger::debug!("Performing debit routing");
-        network_decider::debit_routing::perform_debit_routing(dreq_).await
+    let is_hybrid_routing = dreq_.ranking_algorithm == Some(RankingAlgorithm::NtwSrHybridRouting);
+
+    if dreq_.ranking_algorithm == Some(RankingAlgorithm::NtwBasedRouting) || is_hybrid_routing {
+        let config_name = format!("DEBIT_ROUTING_ENABLED_{}", dreq_.merchant_id);
+        let debit_routing_enabled = service_configuration::find_config_by_name(config_name)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|c| c.value)
+            .and_then(|v| v.parse::<bool>().ok())
+            .unwrap_or(false);
+
+        if !debit_routing_enabled {
+            logger::warn!(
+                "Debit routing requested but not enabled for merchant: {}",
+                dreq_.merchant_id
+            );
+            return Err(T::ErrorResponse {
+                status: "Forbidden".to_string(),
+                error_code: "debit_routing_not_enabled".to_string(),
+                error_message: format!(
+                    "Debit routing is not enabled for merchant: {}",
+                    dreq_.merchant_id
+                ),
+                priority_logic_tag: None,
+                routing_approach: None,
+                filter_wise_gateways: None,
+                error_info: UnifiedError {
+                    code: crate::error::error_codes::TE_05.to_string(),
+                    user_message: "Debit routing is not enabled for this merchant".to_string(),
+                    developer_message: format!(
+                        "Merchant {} does not have debit routing enabled. Enable it via the /merchant-account/:merchant-id/debit-routing API.",
+                        dreq_.merchant_id
+                    ),
+                },
+                priority_logic_output: None,
+                is_dynamic_mga_enabled: false,
+            });
+        }
+
+        if is_hybrid_routing {
+            logger::debug!("Performing hybrid routing (SR-based + debit routing)");
+            perform_hybrid_routing(decider_params, dreq_, cpu_start).await
+        } else {
+            logger::debug!("Performing debit routing");
+            network_decider::debit_routing::perform_debit_routing(dreq_).await
+        }
     } else {
         logger::debug!("Performing gateway routing");
         run_decider_flow(
@@ -122,6 +167,41 @@ pub async fn decider_full_payload_hs_function(
             cpu_start,
         )
         .await
+    }
+}
+
+async fn perform_hybrid_routing(
+    decider_params: T::DeciderParams,
+    dreq_: T::DomainDeciderRequestForApiCallV2,
+    cpu_start: Instant,
+) -> Result<T::DecidedGateway, T::ErrorResponse> {
+    // Run SR-based routing first to get gateway priority map and decided gateway
+    let sr_result = run_decider_flow(
+        decider_params,
+        Some(RankingAlgorithm::SrBasedRouting),
+        dreq_.clone().elimination_enabled,
+        false,
+        cpu_start,
+    )
+    .await;
+
+    // Get debit routing output
+    let debit_routing_result = network_decider::debit_routing::perform_debit_routing(dreq_).await;
+
+    match (sr_result, debit_routing_result) {
+        (Ok(mut sr_gateway), Ok(debit_gateway)) => {
+            // Merge results: keep SR-based gateway selection but add debit routing output
+            sr_gateway.debit_routing_output = debit_gateway.debit_routing_output;
+            Ok(sr_gateway)
+        }
+        (Ok(sr_gateway), Err(_)) => {
+            logger::warn!("Debit routing failed in hybrid mode, returning SR-based result only");
+            Ok(sr_gateway)
+        }
+        (Err(e), _) => {
+            logger::warn!("SR-based routing failed in hybrid mode, propagating error");
+            Err(e)
+        }
     }
 }
 
@@ -434,6 +514,52 @@ pub async fn run_decider_flow(
                         &currentGatewayScoreMap,
                         decider_flow.writer.gwDeciderApproach.clone(),
                     );
+                    if let Some(rule_name) = updatedPriorityLogicOutput.priority_logic_tag.clone() {
+                        crate::analytics::DomainAnalyticsEvent::record_rule_hit(
+                            crate::analytics::AnalyticsFlowContext::new(
+                                crate::analytics::ApiFlow::DynamicRouting,
+                                crate::analytics::FlowType::DecideGatewayRuleHit,
+                            ),
+                            crate::analytics::AnalyticsRoute::DecideGateway,
+                            Some(crate::types::merchant::id::merchant_id_to_text(
+                                deciderParams.dpMerchantAccount.merchantId.clone(),
+                            )),
+                            rule_name,
+                            decidedGateway.clone(),
+                            Some(format!("{:?}", finalDeciderApproach.clone())),
+                            serde_json::to_string(&serde_json::json!({
+                                "functional_gateways": uniqueFunctionalGateways.clone(),
+                                "experiment_tag": experimentTag.clone(),
+                            }))
+                            .ok(),
+                            Some(deciderParams.dpTxnDetail.txnUuid.clone()),
+                            decider_flow
+                                .logger
+                                .get(crate::storage::consts::X_REQUEST_ID)
+                                .cloned(),
+                            decider_flow
+                                .logger
+                                .get(crate::storage::consts::X_GLOBAL_REQUEST_ID)
+                                .cloned(),
+                            decider_flow
+                                .logger
+                                .get(crate::storage::consts::TRACEPARENT)
+                                .and_then(|value| crate::analytics::normalize_trace_id(value))
+                                .or_else(|| {
+                                    decider_flow
+                                        .logger
+                                        .get(crate::storage::consts::X_TRACE_ID)
+                                        .cloned()
+                                })
+                                .or_else(|| {
+                                    decider_flow
+                                        .logger
+                                        .get(crate::storage::consts::X_B3_TRACE_ID)
+                                        .cloned()
+                                }),
+                            Some("rule_applied".to_string()),
+                        );
+                    }
                     Utils::log_gateway_decider_approach(
                         &mut decider_flow,
                         decidedGateway.clone(),

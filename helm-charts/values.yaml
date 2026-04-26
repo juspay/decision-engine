@@ -5,7 +5,7 @@ image:
   # Updated to include the registry URL
   repository: ghcr.io/juspay/decision-engine/postgres
   pullPolicy: Always
-  version: "v1.2.0"
+  version: "v1.4"
 
 # Configure these if your images are in a private registry
 imagePullSecrets:
@@ -129,6 +129,29 @@ decisionEngine:
     labels:
       component: decision-engine
 
+analytics:
+  enabled: false
+  kafka:
+    brokers: "kafka:19092"
+    apiTopic: "decision-engine.analytics.api.v1"
+    domainTopic: "decision-engine.analytics.domain.v1"
+  clickhouse:
+    host: "clickhouse"
+    httpPort: 8123
+    nativePort: 9000
+    database: "decision_engine_analytics"
+    user: "decision_engine"
+    password: "decision_engine"
+    kafkaBrokerList: "kafka:19092"
+    apiConsumerGroup: "decision-engine-analytics-api-v1"
+    domainConsumerGroup: "decision-engine-analytics-domain-v1"
+    bootstrap:
+      enabled: false
+      image:
+        repository: "clickhouse/clickhouse-server"
+        tag: "26.1"
+        pullPolicy: "IfNotPresent"
+
 # MySQL configuration (used when decisionEngine.useMySQL is true)
 mysql:
   enabled: false
@@ -172,7 +195,7 @@ groovyRunner:
   enabled: true
   image:
     repository: "ghcr.io/juspay/decision-engine/groovy-runner"
-    version: "v1.0.0"
+    version: "v1.4"
     pullPolicy: "Always"
   service:
     port: 8085

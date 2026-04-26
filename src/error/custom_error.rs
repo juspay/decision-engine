@@ -104,6 +104,8 @@ pub enum RuleConfigurationError {
     ConfigurationAlreadyExists,
     #[error("Failed to deserialize configuration")]
     DeserializationError,
+    #[error("Debit routing not enabled for merchant")]
+    DebitRoutingNotEnabled,
 }
 
 impl axum::response::IntoResponse for RuleConfigurationError {
@@ -163,6 +165,15 @@ impl axum::response::IntoResponse for RuleConfigurationError {
                 )),
             )
                 .into_response(),
+            Self::DebitRoutingNotEnabled => (
+                hyper::StatusCode::FORBIDDEN,
+                axum::Json(crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_05,
+                    "Debit routing not enabled for merchant".to_string(),
+                    None,
+                )),
+            )
+                .into_response(),
         }
     }
 }
@@ -175,12 +186,14 @@ pub enum MerchantAccountConfigurationError {
     InvalidConfiguration,
     #[error("Merchant account not found")]
     MerchantNotFound,
-    #[error(" Merchant account already exists")]
+    #[error("Merchant account already exists")]
     MerchantAlreadyExists,
-    #[error(" Merchant account deletion failed")]
+    #[error("Merchant account deletion failed")]
     MerchantDeletionFailed,
-    #[error(" Merchant account insertion failed")]
+    #[error("Merchant account insertion failed")]
     MerchantInsertionFailed,
+    #[error("Unauthorized")]
+    Unauthorized,
 }
 
 impl axum::response::IntoResponse for MerchantAccountConfigurationError {
@@ -240,7 +253,119 @@ impl axum::response::IntoResponse for MerchantAccountConfigurationError {
                 )),
             )
                 .into_response(),
+            Self::Unauthorized => (
+                hyper::StatusCode::UNAUTHORIZED,
+                axum::Json(crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_04,
+                    "Invalid or missing x-admin-secret header".to_string(),
+                    None,
+                )),
+            )
+                .into_response(),
         }
+    }
+}
+
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum ApiKeyError {
+    #[error("API key not found")]
+    NotFound,
+    #[error("API key creation failed")]
+    CreationFailed,
+    #[error("API key revocation failed")]
+    RevocationFailed,
+    #[error("Merchant not found")]
+    MerchantNotFound,
+    #[error("Storage error")]
+    StorageError,
+}
+
+impl axum::response::IntoResponse for ApiKeyError {
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            Self::NotFound => (
+                hyper::StatusCode::NOT_FOUND,
+                axum::Json(crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_04,
+                    "API key not found".to_string(),
+                    None,
+                )),
+            )
+                .into_response(),
+            Self::MerchantNotFound => (
+                hyper::StatusCode::NOT_FOUND,
+                axum::Json(crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_04,
+                    "Merchant not found".to_string(),
+                    None,
+                )),
+            )
+                .into_response(),
+            Self::CreationFailed | Self::RevocationFailed | Self::StorageError => (
+                hyper::StatusCode::INTERNAL_SERVER_ERROR,
+                axum::Json(crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_04,
+                    self.to_string(),
+                    None,
+                )),
+            )
+                .into_response(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum UserAuthError {
+    #[error("Email already registered")]
+    EmailAlreadyExists,
+    #[error("User not found")]
+    UserNotFound,
+    #[error("Invalid password")]
+    InvalidPassword,
+    #[error("Password must be at least 10 characters long and include uppercase, lowercase, number, and special character")]
+    WeakPassword,
+    #[error("Account is inactive")]
+    AccountInactive,
+    #[error("Email not verified")]
+    EmailNotVerified,
+    #[error("Invalid or expired token")]
+    InvalidToken,
+    #[error("Storage error")]
+    StorageError,
+    #[error("Token generation failed")]
+    TokenGenerationFailed,
+    #[error("Password hashing failed")]
+    PasswordHashingFailed,
+    #[error("Merchant not found")]
+    MerchantNotFound,
+}
+
+impl axum::response::IntoResponse for UserAuthError {
+    fn into_response(self) -> axum::response::Response {
+        let (status, message) = match &self {
+            Self::EmailAlreadyExists => (hyper::StatusCode::CONFLICT, self.to_string()),
+            Self::WeakPassword => (hyper::StatusCode::BAD_REQUEST, self.to_string()),
+            Self::UserNotFound | Self::InvalidPassword => (
+                hyper::StatusCode::UNAUTHORIZED,
+                "Invalid email or password".to_string(),
+            ),
+            Self::AccountInactive => (hyper::StatusCode::FORBIDDEN, self.to_string()),
+            Self::EmailNotVerified => (hyper::StatusCode::FORBIDDEN, self.to_string()),
+            Self::InvalidToken => (hyper::StatusCode::UNAUTHORIZED, self.to_string()),
+            Self::MerchantNotFound => (hyper::StatusCode::NOT_FOUND, self.to_string()),
+            Self::StorageError | Self::TokenGenerationFailed | Self::PasswordHashingFailed => {
+                (hyper::StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
+            }
+        };
+        (
+            status,
+            axum::Json(crate::error::ApiErrorResponse::new(
+                crate::error::error_codes::TE_04,
+                message,
+                None,
+            )),
+        )
+            .into_response()
     }
 }
 

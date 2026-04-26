@@ -79,4 +79,6 @@ extend-exclude = [
     # Exclude non-source files
     "*.groovy",
     "**/Untitled*",
+    # Exclude build artifacts
+    "website/dist/**",
 ]

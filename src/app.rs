@@ -2,7 +2,7 @@ use crate::redis::commands::RedisConnectionWrapper;
 use axum::http::HeaderValue;
 use axum::{
     body::Body,
-    extract::Request,
+    extract::{Request, State},
     middleware::{self, Next},
     response::Response,
     routing::{delete, get, post},
@@ -10,6 +10,7 @@ use axum::{
 use axum_server::{tls_rustls::RustlsConfig, Handle};
 use error_stack::ResultExt;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::OnceCell as TokioOnceCell;
 use tower::ServiceBuilder;
@@ -18,7 +19,7 @@ use tower_http::trace as tower_trace;
 use crate::{
     api_client::ApiClient,
     config::{self, GlobalConfig, TenantConfig},
-    error, logger, routes, storage,
+    error, logger, middleware as custom_middleware, routes, storage,
     tenant::GlobalAppState,
     utils,
 };
@@ -64,6 +65,150 @@ fn generate_request_id_header_value() -> HeaderValue {
             return value;
         }
     }
+}
+
+fn extract_json_path(value: &serde_json::Value, path: &[&str]) -> Option<String> {
+    let nested_value = path
+        .iter()
+        .try_fold(value, |current, key| current.get(*key))?;
+
+    nested_value.as_str().map(str::to_string)
+}
+
+fn parse_request_metadata(
+    captured: &crate::analytics::CapturedBody,
+) -> (Option<String>, Option<String>, Option<String>) {
+    let request_json = serde_json::from_slice::<serde_json::Value>(&captured.bytes).ok();
+    let merchant_id = request_json.as_ref().and_then(|value| {
+        [
+            &["merchant_id"][..],
+            &["merchantId"][..],
+            &["created_by"][..],
+            &["createdBy"][..],
+        ]
+        .into_iter()
+        .find_map(|path| extract_json_path(value, path))
+    });
+    let payment_id = request_json.as_ref().and_then(|value| {
+        [
+            &["payment_id"][..],
+            &["paymentId"][..],
+            &["payment_info", "payment_id"][..],
+            &["paymentInfo", "paymentId"][..],
+        ]
+        .into_iter()
+        .find_map(|path| extract_json_path(value, path))
+    });
+    let auth_type = request_json.as_ref().and_then(|value| {
+        [
+            &["authentication_type"][..],
+            &["authenticationType"][..],
+            &["auth_type"][..],
+            &["authType"][..],
+            &["payment_info", "authentication_type"][..],
+            &["payment_info", "auth_type"][..],
+            &["paymentInfo", "authenticationType"][..],
+            &["paymentInfo", "authType"][..],
+        ]
+        .into_iter()
+        .find_map(|path| extract_json_path(value, path))
+    });
+    (merchant_id, payment_id, auth_type)
+}
+
+fn parse_response_error(
+    status_code: u16,
+    captured: &crate::analytics::CapturedBody,
+) -> Option<serde_json::Value> {
+    if status_code < 400 {
+        return None;
+    }
+    serde_json::from_slice::<serde_json::Value>(&captured.bytes).ok()
+}
+
+async fn capture_api_event(
+    State(global_state): State<Arc<GlobalAppState>>,
+    request: Request<Body>,
+    next: Next,
+) -> Response {
+    if !global_state.analytics_runtime.write_enabled() {
+        return next.run(request).await;
+    }
+
+    let path = request.uri().path().to_string();
+    let Some(flow_context) = crate::analytics::classify_request(request.method(), &path) else {
+        return next.run(request).await;
+    };
+
+    let started_at = Instant::now();
+    let (parts, body) = request.into_parts();
+    let (request_body, request_handle) = crate::analytics::CaptureBody::new(body);
+
+    let request_id = parts
+        .headers
+        .get(crate::storage::consts::X_REQUEST_ID)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
+    let global_request_id = crate::analytics::global_request_id_from_headers(&parts.headers);
+    let trace_id = crate::analytics::trace_id_from_headers(&parts.headers);
+    let user_agent = parts
+        .headers
+        .get(axum::http::header::USER_AGENT)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let ip_addr = parts
+        .headers
+        .get("x-forwarded-for")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.split(',').next().unwrap_or(value).trim().to_string())
+        .or_else(|| {
+            parts
+                .headers
+                .get("x-real-ip")
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_string)
+        });
+    let method = parts.method.to_string();
+
+    let response = next
+        .run(Request::from_parts(parts, Body::new(request_body)))
+        .await;
+    let status_code = response.status().as_u16();
+    let (response_parts, response_body) = response.into_parts();
+    let (response_body, response_handle) = crate::analytics::CaptureBody::new(response_body);
+
+    let runtime = global_state.analytics_runtime.clone();
+    tokio::spawn(async move {
+        let request_capture = request_handle.wait().await;
+        let response_capture = response_handle.wait().await;
+        let (merchant_id, payment_id, auth_type) = parse_request_metadata(&request_capture);
+        let error = parse_response_error(status_code, &response_capture);
+
+        runtime.enqueue_api_event(crate::analytics::ApiEvent {
+            event_id: crate::analytics::next_event_id(),
+            merchant_id,
+            payment_id,
+            api_flow: flow_context.api_flow,
+            flow_type: flow_context.flow_type,
+            created_at_timestamp: crate::analytics::now_ms(),
+            request_id,
+            global_request_id,
+            trace_id,
+            latency: started_at.elapsed().as_millis() as u64,
+            status_code,
+            auth_type,
+            request: String::from_utf8_lossy(&request_capture.bytes).to_string(),
+            user_agent,
+            ip_addr,
+            url_path: path,
+            response: Some(String::from_utf8_lossy(&response_capture.bytes).to_string()),
+            error,
+            http_method: method,
+        });
+    });
+
+    Response::from_parts(response_parts, Body::new(response_body))
 }
 
 ///
@@ -189,11 +334,8 @@ where
         handle_clone.shutdown(); // Trigger axum_server shutdown
     });
 
-    let router = axum::Router::new()
-        // .layer(middleware::from_fn_with_state(
-        //     global_app_state.clone(),
-        //     custom_middleware::authenticate,
-        // ))
+    // Routes that require API key authentication
+    let protected_router = axum::Router::new()
         .route(
             "/routing/create",
             axum::routing::post(crate::euclid::handlers::routing_rules::routing_create),
@@ -243,10 +385,6 @@ where
             post(routes::rule_configuration::delete_rule_config),
         )
         .route(
-            "/merchant-account/create",
-            post(routes::merchant_account_config::create_merchant_config),
-        )
-        .route(
             "/merchant-account/:merchant-id",
             get(routes::merchant_account_config::get_merchant_config),
         )
@@ -255,25 +393,73 @@ where
             delete(routes::merchant_account_config::delete_merchant_config),
         )
         .route(
+            "/merchant-account/:merchant-id/debit-routing",
+            get(routes::merchant_account_config::get_debit_routing),
+        )
+        .route(
+            "/merchant-account/:merchant-id/debit-routing",
+            post(routes::merchant_account_config::update_debit_routing),
+        )
+        .route(
             "/config-sr-dimension",
             axum::routing::post(crate::euclid::handlers::routing_rules::config_sr_dimensions),
+        )
+        .route(
+            "/config/routing-keys",
+            axum::routing::get(crate::euclid::handlers::routing_rules::get_routing_config),
+        )
+        .route("/update-score", post(routes::update_score::update_score))
+        .route(
+            "/decide-gateway",
+            post(routes::decide_gateway::decide_gateway),
+        )
+        .route(
+            "/routing/hybrid",
+            post(routes::hybrid_routing::hybrid_routing_evaluate),
+        )
+        .route(
+            "/update-gateway-score",
+            post(routes::update_gateway_score::update_gateway_score),
+        )
+        .route("/api-key/create", post(routes::api_key::create_api_key))
+        .route(
+            "/api-key/list/:merchant_id",
+            get(routes::api_key::list_api_keys),
+        )
+        .route("/api-key/:key_id", delete(routes::api_key::revoke_api_key))
+        .nest("/analytics", routes::analytics::serve())
+        .layer(middleware::from_fn(custom_middleware::authenticate));
+
+    // Routes that do not require authentication (public)
+    let public_router = axum::Router::new()
+        .route(
+            "/merchant-account/create",
+            post(routes::merchant_account_config::create_merchant_config),
+        )
+        .route("/auth/signup", post(routes::user_auth::signup))
+        .route("/auth/login", post(routes::user_auth::login))
+        .route("/auth/logout", post(routes::user_auth::logout))
+        .route("/auth/me", get(routes::user_auth::me))
+        .route("/auth/merchants", get(routes::user_auth::list_merchants))
+        .route(
+            "/auth/switch-merchant",
+            post(routes::user_auth::switch_merchant),
+        )
+        .route(
+            "/onboarding/merchant",
+            post(routes::user_auth::create_merchant),
         );
-    let router = router.route("/update-score", post(routes::update_score::update_score));
-    let router = router.route(
-        "/decide-gateway",
-        post(routes::decide_gateway::decide_gateway),
-    );
-    let router = router.route(
-        "/routing/hybrid",
-        post(routes::hybrid_routing::hybrid_routing_evaluate),
-    );
-    let router = router.route(
-        "/update-gateway-score",
-        post(routes::update_gateway_score::update_gateway_score),
-    );
+
+    let router = axum::Router::new()
+        .merge(protected_router)
+        .merge(public_router);
 
     let middleware = ServiceBuilder::new()
         .layer(middleware::from_fn(ensure_request_id))
+        .layer(middleware::from_fn_with_state(
+            global_app_state.clone(),
+            capture_api_event,
+        ))
         .layer(
             tower_trace::TraceLayer::new_for_http()
                 .make_span_with(|request: &Request<_>| utils::record_fields_from_header(request))
@@ -323,4 +509,53 @@ where
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use axum::body::Bytes;
+
+    use super::parse_request_metadata;
+
+    #[test]
+    fn parse_request_metadata_supports_decide_gateway_shape() {
+        let captured = crate::analytics::CapturedBody {
+            bytes: Bytes::from_static(
+                br#"{
+                    "merchantId":"demo_merchant",
+                    "paymentInfo":{
+                        "paymentId":"pay_001",
+                        "authType":"THREE_DS"
+                    }
+                }"#,
+            ),
+        };
+
+        let (merchant_id, payment_id, auth_type) = parse_request_metadata(&captured);
+
+        assert_eq!(merchant_id.as_deref(), Some("demo_merchant"));
+        assert_eq!(payment_id.as_deref(), Some("pay_001"));
+        assert_eq!(auth_type.as_deref(), Some("THREE_DS"));
+    }
+
+    #[test]
+    fn parse_request_metadata_keeps_snake_case_support() {
+        let captured = crate::analytics::CapturedBody {
+            bytes: Bytes::from_static(
+                br#"{
+                    "merchant_id":"demo_merchant",
+                    "payment_id":"pay_002",
+                    "authentication_type":"NO_THREE_DS"
+                }"#,
+            ),
+        };
+
+        let (merchant_id, payment_id, auth_type) = parse_request_metadata(&captured);
+
+        assert_eq!(merchant_id.as_deref(), Some("demo_merchant"));
+        assert_eq!(payment_id.as_deref(), Some("pay_002"));
+        assert_eq!(auth_type.as_deref(), Some("NO_THREE_DS"));
+    }
 }

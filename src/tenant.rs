@@ -1,9 +1,11 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{collections::HashSet, sync::Arc};
 
+use error_stack::ResultExt;
 use rustc_hash::FxHashMap;
 use tokio::sync::RwLock;
 
+use crate::analytics::AnalyticsRuntime;
 use crate::config::TenantConfig;
 use crate::{api_client::ApiClient, app::TenantAppState, config::GlobalConfig, error::ApiError};
 
@@ -13,6 +15,7 @@ pub struct GlobalAppState {
     pub known_tenants: HashSet<String>,
     pub global_config: GlobalConfig,
     pub readiness_flag: Arc<AtomicBool>,
+    pub analytics_runtime: Arc<AnalyticsRuntime>,
 }
 
 impl GlobalAppState {
@@ -21,7 +24,9 @@ impl GlobalAppState {
     ///
     /// If tenant specific AppState construction fails when `key_custodian` feature is disabled
     ///
-    pub async fn new(global_config: GlobalConfig) -> Arc<Self> {
+    pub async fn new(
+        global_config: GlobalConfig,
+    ) -> error_stack::Result<Arc<Self>, crate::error::ConfigurationError> {
         let known_tenants = global_config
             .tenant_secrets
             .keys()
@@ -48,13 +53,23 @@ impl GlobalAppState {
             }
         };
 
-        Arc::new(Self {
+        let analytics_runtime =
+            crate::analytics::AnalyticsRuntime::new(global_config.analytics.clone())
+                .await
+                .change_context(
+                    crate::error::ConfigurationError::InvalidConfigurationValueError(
+                        "analytics".to_string(),
+                    ),
+                )?;
+
+        Ok(Arc::new(Self {
             tenants_app_state: RwLock::new(tenants_app_state),
             api_client: api_client.clone(),
             known_tenants: HashSet::<String>::from_iter(known_tenants),
             global_config,
             readiness_flag: Arc::new(AtomicBool::new(true)),
-        })
+            analytics_runtime,
+        }))
     }
 
     pub fn set_not_ready(&self) {

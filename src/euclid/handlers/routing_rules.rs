@@ -21,10 +21,11 @@ use crate::{
 
 use crate::euclid::{
     errors::EuclidErrors,
+    errors::ValidationErrorDetails,
     types::{RoutingAlgorithmMapper, RoutingAlgorithmMapperUpdate},
 };
 use crate::{euclid::types::RoutingAlgorithm, logger, metrics};
-use axum::{extract::Path, Json};
+use axum::{extract::Path, response::IntoResponse, Json};
 use diesel::{associations::HasTable, BoolExpressionMethods, ExpressionMethods};
 use error_stack::ResultExt;
 
@@ -32,10 +33,94 @@ use crate::app::get_tenant_app_state;
 
 use crate::error::ContainerError;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
+use serde::Serialize;
 use serde_json::{json, Value};
 
 #[allow(dead_code)]
 const DEFAULT_FALLBACK_IDENTIFIER: &str = "default_fallback_enabled";
+
+#[derive(Debug, Serialize)]
+struct RoutingCreateAnalyticsDetails<'a> {
+    request: &'a Value,
+    response: &'a RoutingDictionaryRecord,
+    algorithm_name: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+struct RoutingEvaluateAnalyticsDetails<'a> {
+    request: &'a RoutingRequest,
+    response: &'a RoutingEvaluateResponse,
+    rule_name: Option<&'a str>,
+    preview_kind: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct RoutingEvaluateErrorResponseDetails<'a> {
+    status: &'a str,
+    error_message: &'a str,
+    api_error: &'a Option<Value>,
+}
+
+#[derive(Debug, Serialize)]
+struct RoutingEvaluateErrorAnalyticsDetails<'a> {
+    request: &'a RoutingRequest,
+    response: RoutingEvaluateErrorResponseDetails<'a>,
+    preview_kind: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct ValidationErrorsPayload<'a> {
+    validation_errors: &'a [ValidationErrorDetails],
+}
+
+fn serialize_routing_create_analytics_details(
+    request: &Value,
+    response: &RoutingDictionaryRecord,
+    algorithm_name: &str,
+) -> Option<String> {
+    crate::analytics::serialize_details(&RoutingCreateAnalyticsDetails {
+        request,
+        response,
+        algorithm_name,
+    })
+}
+
+fn serialize_routing_evaluate_analytics_details(
+    request: &RoutingRequest,
+    response: &RoutingEvaluateResponse,
+    rule_name: Option<&str>,
+) -> Option<String> {
+    crate::analytics::serialize_details(&RoutingEvaluateAnalyticsDetails {
+        request,
+        response,
+        rule_name,
+        preview_kind: "routing_evaluate",
+    })
+}
+
+fn serialize_routing_evaluate_error_analytics_details(
+    request: &RoutingRequest,
+    status: &str,
+    error_message: &str,
+    api_error: &Option<Value>,
+) -> Option<String> {
+    crate::analytics::serialize_details(&RoutingEvaluateErrorAnalyticsDetails {
+        request,
+        response: RoutingEvaluateErrorResponseDetails {
+            status,
+            error_message,
+            api_error,
+        },
+        preview_kind: "routing_evaluate",
+    })
+}
+
+fn validation_errors_payload(
+    validation_errors: &[ValidationErrorDetails],
+) -> Option<serde_json::Value> {
+    serde_json::to_value(ValidationErrorsPayload { validation_errors }).ok()
+}
+
 pub async fn config_sr_dimensions(
     Json(payload): Json<SrDimensionConfig>,
 ) -> Result<Json<String>, ContainerError<EuclidErrors>> {
@@ -131,6 +216,7 @@ pub async fn config_sr_dimensions(
 }
 
 pub async fn routing_create(
+    headers: axum::http::HeaderMap,
     Json(payload): Json<Value>,
 ) -> Result<Json<RoutingDictionaryRecord>, ContainerError<EuclidErrors>> {
     let timer = metrics::API_LATENCY_HISTOGRAM
@@ -141,9 +227,18 @@ pub async fn routing_create(
         .inc();
 
     let state = get_tenant_app_state().await;
+    let request_id = headers
+        .get(crate::storage::consts::X_REQUEST_ID)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
+    let trace_id = crate::analytics::trace_id_from_headers(&headers);
 
     let config: RoutingRule = serde_json::from_value(payload.clone())
         .change_context(EuclidErrors::InvalidRuleConfiguration)?;
+    let create_flow_type = crate::analytics::refine_routing_create_flow_type(&config.algorithm);
+    let analytics_created_by = config.created_by.clone();
+    let analytics_config_name = config.name.clone();
 
     logger::debug!("Received routing config: {:?}", config);
 
@@ -159,18 +254,6 @@ pub async fn routing_create(
                     );
                 }
 
-                let error_details: Vec<serde_json::Value> = validation_result
-                    .errors
-                    .iter()
-                    .map(|e| {
-                        serde_json::json!({
-                            "field": e.field,
-                            "error_type": e.error_type,
-                            "message": e.message,
-                        })
-                    })
-                    .collect();
-
                 let detailed_error = validation_result.to_error_message();
 
                 metrics::API_REQUEST_COUNTER
@@ -184,7 +267,7 @@ pub async fn routing_create(
                     ApiErrorResponse::new(
                         "FIELD_VALIDATION_FAILED",
                         format!("Routing rule validation failed: {}", detailed_error),
-                        Some(serde_json::json!({ "validation_errors": error_details })),
+                        validation_errors_payload(&validation_result.errors),
                     ),
                 ));
             }
@@ -241,6 +324,21 @@ pub async fn routing_create(
         timestamp,
     );
     logger::debug!("Response: {response:?}");
+    crate::analytics::DomainAnalyticsEvent::record_operation(
+        crate::analytics::AnalyticsFlowContext::new(
+            crate::analytics::ApiFlow::RuleBasedRouting,
+            create_flow_type,
+        ),
+        crate::analytics::AnalyticsRoute::RoutingCreate,
+        Some(analytics_created_by),
+        None,
+        request_id,
+        global_request_id,
+        trace_id,
+        Some("success".to_string()),
+        serialize_routing_create_analytics_details(&payload, &response, &analytics_config_name),
+        Some("routing_created".to_string()),
+    );
 
     metrics::API_REQUEST_COUNTER
         .with_label_values(&["routing_create", "success"])
@@ -250,26 +348,64 @@ pub async fn routing_create(
 }
 
 pub async fn routing_evaluate(
+    headers: axum::http::HeaderMap,
     Json(payload): Json<RoutingRequest>,
 ) -> Result<Json<RoutingEvaluateResponse>, ContainerError<EuclidErrors>> {
-    let timer = metrics::API_LATENCY_HISTOGRAM
-        .with_label_values(&["routing_evaluate"])
-        .start_timer();
+    let mut timer = Some(
+        metrics::API_LATENCY_HISTOGRAM
+            .with_label_values(&["routing_evaluate"])
+            .start_timer(),
+    );
 
     API_REQUEST_TOTAL_COUNTER
         .with_label_values(&["routing_evaluate"])
         .inc();
 
     let state = get_tenant_app_state().await;
+    let request_id = headers
+        .get(crate::storage::consts::X_REQUEST_ID)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
+    let trace_id = crate::analytics::trace_id_from_headers(&headers);
     logger::debug!(
-        "Received routing evaluation request for ID: {}",
-        payload.created_by
+        payment_id = ?payload.payment_id,
+        created_by = %payload.created_by,
+        "Received routing evaluation request"
+    );
+    crate::analytics::DomainAnalyticsEvent::record_request_hit(
+        crate::analytics::AnalyticsFlowContext::new(
+            crate::analytics::ApiFlow::RuleBasedRouting,
+            crate::analytics::FlowType::RoutingEvaluateRequestHit,
+        ),
+        crate::analytics::AnalyticsRoute::RoutingEvaluate,
+        Some(payload.created_by.clone()),
+        payload.payment_id.clone(),
+        request_id.clone(),
+        global_request_id.clone(),
+        trace_id.clone(),
+        None,
     );
 
     let update_failure_metrics = || {
         API_REQUEST_COUNTER
             .with_label_values(&["routing_evaluate", "failure"])
             .inc();
+    };
+    let mut fail_preview = |err: ContainerError<EuclidErrors>, stage: &'static str| {
+        record_routing_evaluate_preview_error(
+            &payload,
+            &err,
+            stage,
+            request_id.clone(),
+            global_request_id.clone(),
+            trace_id.clone(),
+        );
+        update_failure_metrics();
+        if let Some(timer) = timer.take() {
+            timer.observe_duration();
+        }
+        Err(err)
     };
 
     // Check for the fallback_output in evaluate request:
@@ -292,11 +428,7 @@ pub async fn routing_evaluate(
         payload.created_by.clone(),
     )) {
         Ok(mapper) => mapper.routing_algorithm_id,
-        Err(e) => {
-            update_failure_metrics();
-            timer.observe_duration();
-            return Err(e.into());
-        }
+        Err(e) => return fail_preview(e.into(), "active_routing_lookup_failed"),
     };
 
     let parameters = payload.parameters.clone();
@@ -308,42 +440,41 @@ pub async fn routing_evaluate(
         .ok_or(EuclidErrors::GlobalRoutingConfigsUnavailable)
     {
         Ok(config) => config,
-        Err(e) => {
-            update_failure_metrics();
-            timer.observe_duration();
-            return Err(e.into());
-        }
+        Err(e) => return fail_preview(e.into(), "routing_config_unavailable"),
     };
 
     for (key, value) in &parameters {
         if !routing_config.keys.keys.contains_key(key)
             && value.as_ref().is_some_and(|val| !val.is_metadata())
         {
-            update_failure_metrics();
-            timer.observe_duration();
-            return Err(EuclidErrors::InvalidRequestParameter(key.clone()).into());
+            return fail_preview(
+                EuclidErrors::InvalidRequestParameter(key.clone()).into(),
+                "parameter_validation_failed",
+            );
         }
 
         if let Some(key_config) = routing_config.keys.keys.get(key) {
             if key_config.data_type == KeyDataType::Enum {
                 if let Some(Some(ValueType::EnumVariant(value))) = parameters.get(key) {
                     if !is_valid_enum_value(routing_config, key, value) {
-                        update_failure_metrics();
-                        timer.observe_duration();
-                        return Err(EuclidErrors::InvalidRequest(format!(
-                            "Invalid enum value '{}' for key '{}'",
-                            value, key
-                        ))
-                        .into());
+                        return fail_preview(
+                            EuclidErrors::InvalidRequest(format!(
+                                "Invalid enum value '{}' for key '{}'",
+                                value, key
+                            ))
+                            .into(),
+                            "parameter_validation_failed",
+                        );
                     }
                 } else {
-                    update_failure_metrics();
-                    timer.observe_duration();
-                    return Err(EuclidErrors::InvalidRequest(format!(
-                        "Expected enum value for key '{}'",
-                        key
-                    ))
-                    .into());
+                    return fail_preview(
+                        EuclidErrors::InvalidRequest(format!(
+                            "Expected enum value for key '{}'",
+                            key
+                        ))
+                        .into(),
+                        "parameter_validation_failed",
+                    );
                 }
             }
         }
@@ -365,11 +496,7 @@ pub async fn routing_evaluate(
     .change_context(EuclidErrors::StorageError)
     {
         Ok(algo) => algo,
-        Err(e) => {
-            update_failure_metrics();
-            timer.observe_duration();
-            return Err(e.into());
-        }
+        Err(e) => return fail_preview(e.into(), "routing_algorithm_fetch_failed"),
     };
 
     logger::debug!("Fetched routing algorithm: {:?}", algorithm);
@@ -383,12 +510,9 @@ pub async fn routing_evaluate(
             EuclidErrors::InvalidRequest(format!("Invalid algorithm data format: {}", e))
         }) {
             Ok(data) => data,
-            Err(e) => {
-                update_failure_metrics();
-                timer.observe_duration();
-                return Err(e.into());
-            }
+            Err(e) => return fail_preview(e.into(), "routing_algorithm_parse_failed"),
         };
+    let preview_flow_type = crate::analytics::refine_routing_evaluate_flow_type(&algorithm_data);
 
     let (output, evaluated_output, rule_name): (Output, Vec<ConnectorInfo>, Option<String>) =
         match algorithm_data {
@@ -401,11 +525,7 @@ pub async fn routing_evaluate(
                     ))
                 }) {
                     Ok((_, eval)) => (out_enum, eval, Some("straight_through_rule".into())),
-                    Err(e) => {
-                        update_failure_metrics();
-                        timer.observe_duration();
-                        return Err(e.into());
-                    }
+                    Err(e) => return fail_preview(e.into(), "preview_output_evaluation_failed"),
                 }
             }
 
@@ -418,11 +538,7 @@ pub async fn routing_evaluate(
                     ))
                 }) {
                     Ok((_, eval)) => (out_enum, eval, Some("priority_rule".into())),
-                    Err(e) => {
-                        update_failure_metrics();
-                        timer.observe_duration();
-                        return Err(e.into());
-                    }
+                    Err(e) => return fail_preview(e.into(), "preview_output_evaluation_failed"),
                 }
             }
 
@@ -435,11 +551,7 @@ pub async fn routing_evaluate(
                     ))
                 }) {
                     Ok((_, eval)) => (out_enum, eval, Some("volume_split_rule".into())),
-                    Err(e) => {
-                        update_failure_metrics();
-                        timer.observe_duration();
-                        return Err(e.into());
-                    }
+                    Err(e) => return fail_preview(e.into(), "preview_output_evaluation_failed"),
                 }
             }
 
@@ -467,11 +579,7 @@ pub async fn routing_evaluate(
                         }
                         (ir.output, ir.evaluated_output, ir.rule_name)
                     }
-                    Err(e) => {
-                        update_failure_metrics();
-                        timer.observe_duration();
-                        return Err(e.into());
-                    }
+                    Err(e) => return fail_preview(e.into(), "preview_interpreter_failed"),
                 }
             }
         };
@@ -490,6 +598,7 @@ pub async fn routing_evaluate(
     );
 
     let response = RoutingEvaluateResponse {
+        payment_id: payload.payment_id.clone(),
         status: match rule_name.as_deref() {
             Some("default_selection") | Some("default_fallback") => "default_selection".into(),
             Some(_) => "success".into(),
@@ -501,12 +610,86 @@ pub async fn routing_evaluate(
     };
 
     logger::debug!("Response: {response:?}");
+    crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
+        crate::analytics::AnalyticsFlowContext::new(
+            crate::analytics::ApiFlow::RuleBasedRouting,
+            preview_flow_type,
+        ),
+        Some(payload.created_by.clone()),
+        payload.payment_id.clone(),
+        preview_gateway(&response),
+        rule_name.clone(),
+        Some(response.status.clone()),
+        serialize_routing_evaluate_analytics_details(&payload, &response, rule_name.as_deref()),
+        request_id,
+        global_request_id,
+        trace_id,
+    );
 
     API_REQUEST_COUNTER
         .with_label_values(&["routing_evaluate", "success"])
         .inc();
-    timer.observe_duration();
+    if let Some(timer) = timer.take() {
+        timer.observe_duration();
+    }
     Ok(Json(response))
+}
+
+fn record_routing_evaluate_preview_error(
+    payload: &RoutingRequest,
+    error: &ContainerError<EuclidErrors>,
+    event_stage: &str,
+    request_id: Option<String>,
+    global_request_id: Option<String>,
+    trace_id: Option<String>,
+) {
+    let response_payload = error
+        .downcast_ref::<ApiErrorResponse>()
+        .and_then(|payload| serde_json::to_value(payload).ok());
+    let status = error
+        .get_inner()
+        .clone()
+        .into_response()
+        .status()
+        .as_u16()
+        .to_string();
+    let error_code = response_payload
+        .as_ref()
+        .and_then(|value| value.get("code"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("ROUTING_EVALUATE_FAILED")
+        .to_string();
+    let error_message = response_payload
+        .as_ref()
+        .and_then(|value| value.get("message"))
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| error.get_inner().to_string());
+
+    crate::analytics::DomainAnalyticsEvent::record_error(
+        crate::analytics::AnalyticsFlowContext::new(
+            crate::analytics::ApiFlow::RuleBasedRouting,
+            crate::analytics::FlowType::RoutingEvaluateError,
+        ),
+        crate::analytics::AnalyticsRoute::RoutingEvaluate,
+        Some(payload.created_by.clone()),
+        payload.payment_id.clone(),
+        request_id,
+        global_request_id,
+        trace_id,
+        None,
+        Some("RULE_EVALUATE_PREVIEW".to_string()),
+        error_code,
+        error_message.clone(),
+        serialize_routing_evaluate_error_analytics_details(
+            payload,
+            &status,
+            &error_message,
+            &response_payload,
+        ),
+        Some(event_stage.to_string()),
+        None,
+    );
 }
 
 #[cfg(feature = "mysql")]
@@ -904,6 +1087,19 @@ fn format_output(output: &Output) -> Value {
     }
 }
 
+fn preview_gateway(response: &RoutingEvaluateResponse) -> Option<String> {
+    response
+        .evaluated_output
+        .first()
+        .map(|connector| connector.gateway_name.clone())
+        .or_else(|| {
+            response
+                .eligible_connectors
+                .first()
+                .map(|connector| connector.gateway_name.clone())
+        })
+}
+
 pub(crate) fn eligibility_for_output(
     pm_filter_bundle: Option<&pm_filter_graph::PmFilterGraphBundle>,
     parameters: &std::collections::HashMap<String, Option<ValueType>>,
@@ -968,4 +1164,35 @@ pub(crate) fn extract_connectors_for_eligibility(output: &Output) -> Vec<Connect
     }
 
     connectors
+}
+
+/// GET endpoint to serve routing keys configuration
+/// Returns the routing config with all available keys and their enum values
+/// This allows the dashboard to dynamically fetch valid routing keys
+pub async fn get_routing_config(
+) -> Result<Json<crate::euclid::types::TomlConfig>, ContainerError<EuclidErrors>> {
+    let timer = metrics::API_LATENCY_HISTOGRAM
+        .with_label_values(&["get_routing_config"])
+        .start_timer();
+    metrics::API_REQUEST_TOTAL_COUNTER
+        .with_label_values(&["get_routing_config"])
+        .inc();
+
+    let tenant_state = get_tenant_app_state().await;
+
+    // Clone the routing config to return it
+    let config = tenant_state
+        .config
+        .routing_config
+        .clone()
+        .ok_or(EuclidErrors::GlobalRoutingConfigsUnavailable)?;
+
+    metrics::API_REQUEST_COUNTER
+        .with_label_values(&["get_routing_config", "success"])
+        .inc();
+    timer.observe_duration();
+
+    logger::info!("Successfully served routing config");
+
+    Ok(Json(config))
 }

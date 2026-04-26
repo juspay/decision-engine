@@ -10,7 +10,6 @@ use crate::redis::feature::{
     check_redis_comp_merchant_flag, is_feature_enabled, RedisCompressionConfig,
     RedisCompressionConfigCombined,
 };
-use axum::body::to_bytes;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use serde::{Deserialize, Serialize};
@@ -65,7 +64,7 @@ where
     let headers = req.headers().clone();
     let original_url = req.uri().to_string();
     let x_request_id = headers
-        .get("x-request-id")
+        .get(crate::storage::consts::X_REQUEST_ID)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("unknown");
     let start_time = std::time::Instant::now();
@@ -81,24 +80,10 @@ where
     // let req_headers = serde_json::to_string(&headers).unwrap_or("{}".to_string());
 
     // Now consume `req` to get the body
-    let body = match to_bytes(req.into_body(), usize::MAX).await {
+    let body = match crate::routes::body::read_request_body(req.into_body()).await {
         Ok(body) => body,
         Err(e) => {
-            let error_response = ErrorResponse {
-                status: "400".to_string(),
-                error_code: "400".to_string(),
-                error_message: "Error parsing request".to_string(),
-                priority_logic_tag: None,
-                routing_approach: None,
-                filter_wise_gateways: None,
-                error_info: UnifiedError {
-                    code: "INVALID_INPUT".to_string(),
-                    user_message: "Invalid request params. Please verify your input.".to_string(),
-                    developer_message: e.to_string(),
-                },
-                priority_logic_output: None,
-                is_dynamic_mga_enabled: false,
-            };
+            let error_response = e.into_error_response();
 
             let latency = start_time.elapsed().as_millis() as u64;
             let cpu_time = cpu_start.elapsed().as_millis() as u64;
@@ -116,10 +101,10 @@ where
                 request_cputime = cpu_time.to_string(),
                 env = std::env::var("APP_ENV").unwrap_or_else(|_| "development".to_string()),
                 action = "POST",
-                error_code = error_response.error_code,
-                error_message = error_response.error_message,
-                developer_message = error_response.error_info.developer_message,
-                user_message = error_response.error_info.user_message,
+                error_code = error_response.error_code.clone(),
+                error_message = error_response.error_message.clone(),
+                developer_message = error_response.error_info.developer_message.clone(),
+                user_message = error_response.error_info.user_message.clone(),
                 req_body = "",
                 // req_headers = req_headers,
                 category = "INCOMING_API",
@@ -185,7 +170,6 @@ where
                         filter_list,
                         latency: Some(cpu_time),
                     };
-
                     // Serialize response body and headers for logging
                     let res_body = serde_json::to_string(&response).unwrap_or("{}".to_string());
                     // let res_headers = r#"{"Content-Type": "application/json"}"#;
@@ -223,6 +207,7 @@ where
                 Err(e) => {
                     let latency = start_time.elapsed().as_millis() as u64;
                     let cpu_time = cpu_start.elapsed().as_millis() as u64;
+
                     logger::error!(
                         url = original_url,
                         method = "POST",

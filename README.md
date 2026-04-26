@@ -10,17 +10,17 @@
 
 # ⚡ Decision Engine
 
-### **The Brain Behind Smarter Payments**
+### **Routing control plane for payment decisions**
 
-**Open-Source • High-Performance • ML-Powered**
+**Open-Source • Rust • Rule-Based • Success-Rate Based**
 
-*Route payments intelligently. Maximize success rates. Zero vendor lock-in.*
+Configure routing rules, run gateway decisions, and inspect routing outcomes from APIs or the dashboard.
 
 ---
 
-**[🚀 Quick Start](#-quick-start)** • 
-**[📚 Documentation](#-documentation)** • 
-**[🏗 Architecture](#-architecture)** • 
+**[🚀 Quick Start](#-quick-start)** •
+**[📚 Documentation](#-documentation)** •
+**[🏗 Architecture](#-architecture)** •
 **[🤝 Contributing](#-contributing)**
 
 </div>
@@ -29,23 +29,24 @@
 
 ## 🎯 What is Decision Engine?
 
-Decision Engine is a **high-performance payment gateway router** built in Rust that intelligently selects the optimal payment gateway for each transaction — in real-time.
+Decision Engine is a payment gateway routing service built in Rust. It selects a gateway for each request using merchant-configured routing strategy, success-rate scores, rule-based policies, volume splits, and debit-routing gates.
 
 ```
 ┌─────────────┐     ┌──────────────────┐     ┌─────────────┐
 │  Payment    │────▶│  Decision Engine │────▶│  Best       │
-│  Request    │     │  (Routes in <1ms)│     │  Gateway    │
+│  Request    │     │  (Fast routing)  │     │  Gateway    │
 └─────────────┘     └──────────────────┘     └─────────────┘
 ```
 
-### Why Teams Choose Decision Engine
+### Core Use Cases
 
-| 💥 The Problem | ✅ Our Solution |
-|----------------|-----------------|
-| Payment failures from gateway downtime | **Real-time health monitoring** with automatic failover |
-| Suboptimal routing = lost revenue | **ML-driven routing** based on success rates & latency |
-| Vendor lock-in limits flexibility | **Modular design** — works with any orchestrator |
-| Complex rule management | **Flexible policies** — rule-based + ML hybrid |
+| Use case | Supported surface |
+|----------|-------------------|
+| Route by connector score | Auth-rate based routing |
+| Route by explicit business condition | Rule-based routing |
+| Roll out traffic by percentage | Volume split |
+| Gate debit-network routing per merchant | Debit routing toggle |
+| Inspect routing outcomes | Analytics and Decision Audit dashboard |
 
 ---
 
@@ -61,40 +62,25 @@ Decision Engine is a **high-performance payment gateway router** built in Rust t
 |---------|--------------|
 | **Eligibility Check** | Filters out ineligible gateways before routing |
 | **Rule-Based Ordering** | Apply merchant-specific priority rules |
-| **Dynamic Ordering** | ML optimizes gateway selection in real-time |
+| **Dynamic Ordering** | Success rate based gateway optimization |
 | **Downtime Detection** | Auto-pause failing gateways |
 
 </td>
 <td width="50%">
 
-### 🛠 Built for Production
+### 🛠 Operational Surfaces
 
 | Capability | Details |
 |------------|---------|
-| **⚡ Blazing Fast** | Sub-millisecond routing decisions |
-| **🔐 Memory Safe** | Built in Rust — no data races |
-| **📊 Multi-DB** | MySQL & PostgreSQL support |
-| **🐳 Docker Ready** | One-command deployment |
-| **☸️ K8s Native** | Helm charts included |
+| **Dashboard** | Configure routing and inspect analytics/audit views |
+| **API reference** | OpenAPI-backed route documentation and curl examples |
+| **Analytics storage** | ClickHouse-backed analytics tables for local and deployed environments |
+| **Multi-DB app storage** | MySQL and PostgreSQL support |
+| **Deployment artifacts** | Docker Compose and Helm configuration are included |
 
 </td>
 </tr>
 </table>
-
----
-
-## 📊 Performance at a Glance
-
-<div align="center">
-
-| Metric | Value |
-|--------|-------|
-| Routing Decision Time | **< 1ms** |
-| Memory Footprint | **~50MB** |
-| Concurrent Requests | **100K+** |
-| Uptime SLA Support | **99.99%** |
-
-</div>
 
 ---
 
@@ -106,10 +92,25 @@ Decision Engine is a **high-performance payment gateway router** built in Rust t
 # Clone and run
 git clone https://github.com/juspay/decision-engine.git
 cd decision-engine
-docker compose up -d
+docker compose --profile postgres-ghcr up -d
 
 # That's it! API ready at http://localhost:8080
 ```
+
+For API + dashboard + docs:
+
+```bash
+docker compose --profile dashboard-postgres-ghcr up -d
+```
+
+Open:
+
+- API: `http://localhost:8080`
+- Dashboard: `http://localhost:8081/dashboard/`
+- Docs: `http://localhost:8081/introduction`
+- API documentation map: `http://localhost:8081/api-overview`
+
+For deployed docs or dashboard environments, use the same docs paths under the deployed host, for example `https://<docs-host>/api-overview`. That page links to the API examples and OpenAPI reference sections.
 
 ### 🦀 From Source
 
@@ -133,7 +134,7 @@ diesel migration run
 
 ```bash
 curl http://localhost:8080/health
-# → {"status":"ok"}
+# → {"message":"Health is good"}
 ```
 
 ---
@@ -142,9 +143,10 @@ curl http://localhost:8080/health
 
 | 📘 Resource | Description |
 |-------------|-------------|
-| [MySQL Setup Guide](docs/setup-guide-mysql.md) | Step-by-step MySQL configuration |
-| [PostgreSQL Setup Guide](docs/setup-guide-postgres.md) | Step-by-step PostgreSQL configuration |
-| [API Reference](docs/api-reference1.md) | Complete REST API documentation |
+| [Local Setup Guide](docs/local-setup.md) | Canonical guide for CLI, Docker, Compose profiles, and Helm |
+| [MySQL Setup Guide](docs/setup-guide-mysql.md) | MySQL-specific walkthrough |
+| [PostgreSQL Setup Guide](docs/setup-guide-postgres.md) | PostgreSQL-specific walkthrough |
+| [API Documentation Map](docs/api-overview.md) | Main API entrypoint with embedded links to API examples, OpenAPI schema pages, route access rules, local URLs, and deployed docs paths |
 | [Configuration Guide](docs/configuration.md) | All config options explained |
 | [Deep Dive Blog](https://juspay.io/blog/juspay-orchestrator-and-merchant-controlled-routing-engine) | How routing logic works |
 
@@ -191,10 +193,10 @@ Decision Engine integrates seamlessly into your existing payment stack:
 | Status | Feature | Description |
 |:------:|---------|-------------|
 | ✅ | Rule-based routing | Merchant-defined priority rules |
-| ✅ | Dynamic ordering | ML-driven gateway selection |
+| ✅ | Dynamic ordering | SR-based gateway selection |
 | ✅ | Downtime detection | Automatic health monitoring |
 | ✅ | Multi-database | MySQL & PostgreSQL support |
-| 🔄 | Enhanced ML models | Better success rate prediction |
+| 🔄 | Enhanced routing models | Better success rate prediction |
 | 🔄 | Admin dashboard | Visual rule management UI |
 | 📋 | Multi-tenant analytics | Per-tenant routing insights |
 | 📋 | GraphQL API | Alternative query interface |

@@ -1,0 +1,572 @@
+use crate::app::{get_tenant_app_state, APP_STATE};
+use crate::auth;
+use crate::error::{self, UserAuthError};
+use crate::storage::types::{
+    MerchantAccountNew, NewUser, NewUserMerchant, User, UserMerchant, UserMerchantIdUpdate,
+};
+use crate::utils::date_time;
+use axum::http::HeaderMap;
+use axum::Json;
+use diesel::associations::HasTable;
+use diesel::ExpressionMethods;
+use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "mysql")]
+use crate::storage::schema::users::dsl;
+#[cfg(feature = "postgres")]
+use crate::storage::schema_pg::users::dsl;
+
+#[cfg(feature = "mysql")]
+use crate::storage::schema::user_merchants::dsl as um_dsl;
+#[cfg(feature = "postgres")]
+use crate::storage::schema_pg::user_merchants::dsl as um_dsl;
+
+const JWT_DENYLIST_PREFIX: &str = "jwt_revoked:";
+
+#[derive(Debug, Deserialize)]
+pub struct SignupRequest {
+    pub email: String,
+    pub password: String,
+    pub merchant_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LoginRequest {
+    pub email: String,
+    pub password: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateMerchantRequest {
+    pub merchant_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SwitchMerchantRequest {
+    pub merchant_id: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct MerchantInfo {
+    pub merchant_id: String,
+    pub merchant_name: String,
+    pub role: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AuthResponse {
+    pub token: String,
+    pub user_id: String,
+    pub email: String,
+    pub merchant_id: String,
+    pub role: String,
+    pub merchants: Vec<MerchantInfo>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MeResponse {
+    pub user_id: String,
+    pub email: String,
+    pub merchant_id: String,
+    pub role: String,
+    pub email_verified: bool,
+    pub merchants: Vec<MerchantInfo>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CreateMerchantResponse {
+    pub token: String,
+    pub merchant_id: String,
+    pub merchant_name: String,
+    pub merchants: Vec<MerchantInfo>,
+}
+
+#[axum::debug_handler]
+pub async fn signup(
+    Json(payload): Json<SignupRequest>,
+) -> Result<Json<AuthResponse>, error::ContainerError<UserAuthError>> {
+    let app_state = get_tenant_app_state().await;
+    let global_config = APP_STATE
+        .get()
+        .map(|s| s.global_config.clone())
+        .ok_or(UserAuthError::StorageError)?;
+
+    let existing = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
+        &app_state.db,
+        dsl::email.eq(payload.email.clone()),
+    )
+    .await
+    .map_err(|_| UserAuthError::StorageError)?;
+
+    if !existing.is_empty() {
+        return Err(error::ContainerError::from(
+            UserAuthError::EmailAlreadyExists,
+        ));
+    }
+
+    auth::validate_password_strength(&payload.password).map_err(|_| UserAuthError::WeakPassword)?;
+
+    let password_hash =
+        auth::hash_password(&payload.password).map_err(|_| UserAuthError::PasswordHashingFailed)?;
+
+    let user_id = uuid::Uuid::new_v4().to_string();
+    let now = date_time::now();
+
+    let requested_merchant_id = payload
+        .merchant_id
+        .as_ref()
+        .map(|merchant_id| merchant_id.trim())
+        .filter(|merchant_id| !merchant_id.is_empty())
+        .map(str::to_string);
+
+    if let Some(merchant_id) = requested_merchant_id.as_ref() {
+        #[cfg(feature = "mysql")]
+        use crate::storage::schema::merchant_account::dsl as ma_dsl;
+        #[cfg(feature = "postgres")]
+        use crate::storage::schema_pg::merchant_account::dsl as ma_dsl;
+
+        let existing_merchant = crate::generics::generic_find_all::<
+            <crate::storage::types::MerchantAccount as HasTable>::Table,
+            _,
+            crate::storage::types::MerchantAccount,
+        >(
+            &app_state.db,
+            ma_dsl::merchant_id.eq(Some(merchant_id.clone())),
+        )
+        .await
+        .map_err(|_| UserAuthError::StorageError)?;
+
+        if existing_merchant.is_empty() {
+            return Err(error::ContainerError::from(UserAuthError::MerchantNotFound));
+        }
+    }
+
+    let new_user = NewUser {
+        user_id: user_id.clone(),
+        email: payload.email.clone(),
+        password_hash,
+        merchant_id: requested_merchant_id.clone(),
+        role: "admin".to_string(),
+        #[cfg(feature = "mysql")]
+        is_active: 1,
+        #[cfg(feature = "postgres")]
+        is_active: true,
+        #[cfg(feature = "mysql")]
+        email_verified: if global_config.user_auth.email_verification_enabled {
+            0
+        } else {
+            1
+        },
+        #[cfg(feature = "postgres")]
+        email_verified: !global_config.user_auth.email_verification_enabled,
+        created_at: now,
+    };
+
+    crate::generics::generic_insert(&app_state.db, new_user)
+        .await
+        .map_err(|_| UserAuthError::StorageError)?;
+
+    if let Some(merchant_id) = requested_merchant_id.as_ref() {
+        let new_user_merchant = NewUserMerchant {
+            user_id: user_id.clone(),
+            merchant_id: merchant_id.clone(),
+            role: "admin".to_string(),
+            created_at: now,
+        };
+
+        crate::generics::generic_insert(&app_state.db, new_user_merchant)
+            .await
+            .map_err(|_| UserAuthError::StorageError)?;
+    }
+
+    if global_config.user_auth.email_verification_enabled {
+        return Err(error::ContainerError::from(UserAuthError::EmailNotVerified));
+    }
+
+    let token = auth::generate_jwt(
+        &user_id,
+        &payload.email,
+        requested_merchant_id.as_deref().unwrap_or(""),
+        "admin",
+        &global_config.user_auth.jwt_secret,
+        global_config.user_auth.jwt_expiry_seconds,
+    )
+    .map_err(|_| UserAuthError::TokenGenerationFailed)?;
+
+    Ok(Json(AuthResponse {
+        token,
+        user_id: user_id.clone(),
+        email: payload.email,
+        merchant_id: requested_merchant_id.unwrap_or_default(),
+        role: "admin".to_string(),
+        merchants: fetch_user_merchants(&app_state, &user_id).await?,
+    }))
+}
+
+#[axum::debug_handler]
+pub async fn login(
+    Json(payload): Json<LoginRequest>,
+) -> Result<Json<AuthResponse>, error::ContainerError<UserAuthError>> {
+    let app_state = get_tenant_app_state().await;
+    let global_config = APP_STATE
+        .get()
+        .map(|s| s.global_config.clone())
+        .ok_or(UserAuthError::StorageError)?;
+
+    let mut users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
+        &app_state.db,
+        dsl::email.eq(payload.email.clone()),
+    )
+    .await
+    .map_err(|_| UserAuthError::StorageError)?;
+
+    let user = users.pop().ok_or(UserAuthError::UserNotFound)?;
+
+    let is_active = {
+        #[cfg(feature = "mysql")]
+        {
+            user.is_active != 0
+        }
+        #[cfg(feature = "postgres")]
+        {
+            user.is_active
+        }
+    };
+    if !is_active {
+        return Err(error::ContainerError::from(UserAuthError::AccountInactive));
+    }
+
+    let email_verified = {
+        #[cfg(feature = "mysql")]
+        {
+            user.email_verified != 0
+        }
+        #[cfg(feature = "postgres")]
+        {
+            user.email_verified
+        }
+    };
+    if global_config.user_auth.email_verification_enabled && !email_verified {
+        return Err(error::ContainerError::from(UserAuthError::EmailNotVerified));
+    }
+
+    if !auth::verify_password(&payload.password, &user.password_hash)
+        .map_err(|_| UserAuthError::StorageError)?
+    {
+        return Err(error::ContainerError::from(UserAuthError::InvalidPassword));
+    }
+
+    let merchants = fetch_user_merchants(&app_state, &user.user_id).await?;
+    let active_merchant_id = user.merchant_id.clone().unwrap_or_else(|| {
+        merchants
+            .first()
+            .map(|m| m.merchant_id.clone())
+            .unwrap_or_default()
+    });
+
+    let token = auth::generate_jwt(
+        &user.user_id,
+        &user.email,
+        &active_merchant_id,
+        &user.role,
+        &global_config.user_auth.jwt_secret,
+        global_config.user_auth.jwt_expiry_seconds,
+    )
+    .map_err(|_| UserAuthError::TokenGenerationFailed)?;
+
+    Ok(Json(AuthResponse {
+        token,
+        user_id: user.user_id,
+        email: user.email,
+        merchant_id: active_merchant_id,
+        role: user.role,
+        merchants,
+    }))
+}
+
+#[axum::debug_handler]
+pub async fn create_merchant(
+    headers: HeaderMap,
+    Json(payload): Json<CreateMerchantRequest>,
+) -> Result<Json<CreateMerchantResponse>, error::ContainerError<UserAuthError>> {
+    let token = extract_bearer_token(&headers)?;
+    let global_config = APP_STATE
+        .get()
+        .map(|s| s.global_config.clone())
+        .ok_or(UserAuthError::StorageError)?;
+
+    let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
+    let app_state = get_tenant_app_state().await;
+
+    let merchant_id = format!(
+        "merchant_{}",
+        &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]
+    );
+    let now = date_time::now();
+
+    let new_merchant = MerchantAccountNew {
+        merchant_id: Some(merchant_id.clone()),
+        merchant_name: Some(payload.merchant_name.clone()),
+        date_created: now,
+        use_code_for_gateway_priority: crate::storage::types::BitBoolWrite(false),
+        gateway_success_rate_based_decider_input: None,
+        internal_metadata: None,
+        enabled: crate::storage::types::BitBoolWrite(true),
+    };
+
+    crate::generics::generic_insert(&app_state.db, new_merchant)
+        .await
+        .map_err(|_| UserAuthError::StorageError)?;
+
+    let new_user_merchant = NewUserMerchant {
+        user_id: claims.user_id.clone(),
+        merchant_id: merchant_id.clone(),
+        role: "admin".to_string(),
+        created_at: now,
+    };
+
+    crate::generics::generic_insert(&app_state.db, new_user_merchant)
+        .await
+        .map_err(|_| UserAuthError::StorageError)?;
+
+    // Update users.merchant_id to the newly created merchant
+    {
+        #[cfg(feature = "mysql")]
+        use crate::storage::schema::users::dsl as u_dsl;
+        #[cfg(feature = "postgres")]
+        use crate::storage::schema_pg::users::dsl as u_dsl;
+
+        let conn = &app_state
+            .db
+            .get_conn()
+            .await
+            .map_err(|_| UserAuthError::StorageError)?;
+        crate::generics::generic_update_if_present::<
+            <User as diesel::associations::HasTable>::Table,
+            UserMerchantIdUpdate,
+            _,
+        >(
+            conn,
+            u_dsl::user_id.eq(claims.user_id.clone()),
+            UserMerchantIdUpdate {
+                merchant_id: Some(merchant_id.clone()),
+            },
+        )
+        .await
+        .map_err(|_| UserAuthError::StorageError)?;
+    }
+
+    let merchants = fetch_user_merchants(&app_state, &claims.user_id).await?;
+
+    let new_token = auth::generate_jwt(
+        &claims.user_id,
+        &claims.email,
+        &merchant_id,
+        &claims.role,
+        &global_config.user_auth.jwt_secret,
+        global_config.user_auth.jwt_expiry_seconds,
+    )
+    .map_err(|_| UserAuthError::TokenGenerationFailed)?;
+
+    Ok(Json(CreateMerchantResponse {
+        token: new_token,
+        merchant_id,
+        merchant_name: payload.merchant_name,
+        merchants,
+    }))
+}
+
+#[axum::debug_handler]
+pub async fn list_merchants(
+    headers: HeaderMap,
+) -> Result<Json<Vec<MerchantInfo>>, error::ContainerError<UserAuthError>> {
+    let token = extract_bearer_token(&headers)?;
+    let global_config = APP_STATE
+        .get()
+        .map(|s| s.global_config.clone())
+        .ok_or(UserAuthError::StorageError)?;
+
+    let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
+    let app_state = get_tenant_app_state().await;
+
+    let merchants = fetch_user_merchants(&app_state, &claims.user_id).await?;
+    Ok(Json(merchants))
+}
+
+#[axum::debug_handler]
+pub async fn switch_merchant(
+    headers: HeaderMap,
+    Json(payload): Json<SwitchMerchantRequest>,
+) -> Result<Json<AuthResponse>, error::ContainerError<UserAuthError>> {
+    let token = extract_bearer_token(&headers)?;
+    let global_config = APP_STATE
+        .get()
+        .map(|s| s.global_config.clone())
+        .ok_or(UserAuthError::StorageError)?;
+
+    let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
+    let app_state = get_tenant_app_state().await;
+
+    let merchants = fetch_user_merchants(&app_state, &claims.user_id).await?;
+    let target = merchants
+        .iter()
+        .find(|m| m.merchant_id == payload.merchant_id)
+        .ok_or_else(|| error::ContainerError::from(UserAuthError::MerchantNotFound))?;
+
+    let new_token = auth::generate_jwt(
+        &claims.user_id,
+        &claims.email,
+        &target.merchant_id,
+        &target.role,
+        &global_config.user_auth.jwt_secret,
+        global_config.user_auth.jwt_expiry_seconds,
+    )
+    .map_err(|_| UserAuthError::TokenGenerationFailed)?;
+
+    Ok(Json(AuthResponse {
+        token: new_token,
+        user_id: claims.user_id,
+        email: claims.email,
+        merchant_id: target.merchant_id.clone(),
+        role: target.role.clone(),
+        merchants,
+    }))
+}
+
+#[axum::debug_handler]
+pub async fn logout(
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, error::ContainerError<UserAuthError>> {
+    let token = extract_bearer_token(&headers)?;
+    let global_config = APP_STATE
+        .get()
+        .map(|s| s.global_config.clone())
+        .ok_or(UserAuthError::StorageError)?;
+
+    let claims = auth::verify_jwt(token, &global_config.user_auth.jwt_secret)
+        .map_err(|_| UserAuthError::InvalidToken)?;
+
+    let app_state = get_tenant_app_state().await;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| UserAuthError::StorageError)?
+        .as_secs();
+    let remaining_ttl = claims.exp.saturating_sub(now) as i64;
+
+    if remaining_ttl > 0 {
+        let deny_key = format!("{}{}", JWT_DENYLIST_PREFIX, claims.jti);
+        let _ = app_state
+            .redis_conn
+            .set_key_with_ttl(&deny_key, "1", remaining_ttl)
+            .await;
+    }
+
+    Ok(Json(
+        serde_json::json!({ "message": "Logged out successfully" }),
+    ))
+}
+
+#[axum::debug_handler]
+pub async fn me(
+    headers: HeaderMap,
+) -> Result<Json<MeResponse>, error::ContainerError<UserAuthError>> {
+    let token = extract_bearer_token(&headers)?;
+    let global_config = APP_STATE
+        .get()
+        .map(|s| s.global_config.clone())
+        .ok_or(UserAuthError::StorageError)?;
+
+    let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
+    let app_state = get_tenant_app_state().await;
+
+    let mut users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
+        &app_state.db,
+        dsl::user_id.eq(claims.user_id.clone()),
+    )
+    .await
+    .map_err(|_| UserAuthError::StorageError)?;
+
+    let user = users.pop().ok_or(UserAuthError::UserNotFound)?;
+    let merchants = fetch_user_merchants(&app_state, &user.user_id).await?;
+
+    Ok(Json(MeResponse {
+        user_id: user.user_id,
+        email: user.email,
+        merchant_id: claims.merchant_id,
+        role: user.role,
+        #[cfg(feature = "mysql")]
+        email_verified: user.email_verified != 0,
+        #[cfg(feature = "postgres")]
+        email_verified: user.email_verified,
+        merchants,
+    }))
+}
+
+async fn fetch_user_merchants(
+    app_state: &crate::app::TenantAppState,
+    user_id: &String,
+) -> Result<Vec<MerchantInfo>, UserAuthError> {
+    #[cfg(feature = "mysql")]
+    use crate::storage::schema::merchant_account::dsl as ma_dsl;
+    #[cfg(feature = "postgres")]
+    use crate::storage::schema_pg::merchant_account::dsl as ma_dsl;
+
+    let user_merchant_rows = crate::generics::generic_find_all::<
+        <UserMerchant as HasTable>::Table,
+        _,
+        UserMerchant,
+    >(&app_state.db, um_dsl::user_id.eq(user_id.clone()))
+    .await
+    .map_err(|_| UserAuthError::StorageError)?;
+
+    let mut result = Vec::new();
+    for um in user_merchant_rows {
+        let mut accounts = crate::generics::generic_find_all::<
+            <crate::storage::types::MerchantAccount as HasTable>::Table,
+            _,
+            crate::storage::types::MerchantAccount,
+        >(
+            &app_state.db,
+            ma_dsl::merchant_id.eq(Some(um.merchant_id.clone())),
+        )
+        .await
+        .map_err(|_| UserAuthError::StorageError)?;
+
+        let name = accounts
+            .pop()
+            .and_then(|a| a.merchant_name)
+            .unwrap_or_else(|| um.merchant_id.clone());
+
+        result.push(MerchantInfo {
+            merchant_id: um.merchant_id,
+            merchant_name: name,
+            role: um.role,
+        });
+    }
+    Ok(result)
+}
+
+fn extract_bearer_token(headers: &HeaderMap) -> Result<&str, error::ContainerError<UserAuthError>> {
+    headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .ok_or_else(|| error::ContainerError::from(UserAuthError::InvalidToken))
+}
+
+pub async fn verify_jwt_not_revoked(
+    token: &str,
+    secret: &str,
+) -> Result<auth::JwtClaims, UserAuthError> {
+    let claims = auth::verify_jwt(token, secret).map_err(|_| UserAuthError::InvalidToken)?;
+
+    let app_state = get_tenant_app_state().await;
+    let deny_key = format!("{}{}", JWT_DENYLIST_PREFIX, claims.jti);
+    if let Ok(val) = app_state.redis_conn.get_key_string(&deny_key).await {
+        if !val.is_empty() {
+            return Err(UserAuthError::InvalidToken);
+        }
+    }
+
+    Ok(claims)
+}

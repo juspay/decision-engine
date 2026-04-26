@@ -1,0 +1,46 @@
+---
+title: "Health Checks"
+description: "Curl examples for /health, /health/ready, and /health/diagnostics."
+---
+
+# Health Checks
+
+Health routes are public and do not require `AUTH_HEADER`.
+
+## Liveness
+
+```bash
+curl "$BASE_URL/health"
+```
+
+```json
+{ "message": "Health is good" }
+```
+
+## Readiness
+
+```bash
+curl "$BASE_URL/health/ready"
+```
+
+```json
+{ "message": "Up" }
+```
+
+## Diagnostics
+
+```bash
+curl "$BASE_URL/health/diagnostics"
+```
+
+```json
+{
+  "key_custodian_locked": false,
+  "database": {
+    "database_connection": "Working",
+    "database_read": "Working",
+    "database_write": "Working",
+    "database_delete": "Working"
+  }
+}
+```

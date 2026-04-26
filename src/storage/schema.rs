@@ -222,6 +222,7 @@ diesel::table! {
         tenant_account_id -> Nullable<Text>,
         priority_logic_config -> Nullable<Text>,
         merchant_category_code -> Nullable<Text>,
+        merchant_name -> Nullable<Text>,
     }
 }
 
@@ -520,6 +521,57 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    use diesel::sql_types::*;
+    users (id) {
+        id -> Bigint,
+        #[max_length = 64]
+        user_id -> Varchar,
+        #[max_length = 255]
+        email -> Varchar,
+        #[max_length = 255]
+        password_hash -> Varchar,
+        merchant_id -> Nullable<Varchar>,
+        #[max_length = 50]
+        role -> Varchar,
+        is_active -> TinyInt,
+        email_verified -> TinyInt,
+        created_at -> Datetime,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    user_merchants (id) {
+        id -> Bigint,
+        #[max_length = 64]
+        user_id -> Varchar,
+        #[max_length = 255]
+        merchant_id -> Varchar,
+        #[max_length = 50]
+        role -> Varchar,
+        created_at -> Datetime,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    merchant_api_keys (id) {
+        id -> Bigint,
+        #[max_length = 64]
+        key_id -> Varchar,
+        #[max_length = 255]
+        merchant_id -> Varchar,
+        #[max_length = 64]
+        key_hash -> Varchar,
+        #[max_length = 16]
+        key_prefix -> Varchar,
+        description -> Nullable<Varchar>,
+        is_active -> TinyInt,
+        created_at -> Datetime,
+    }
+}
+
 diesel::allow_tables_to_appear_in_same_query!(
     card_brand_routes,
     card_info,
@@ -550,4 +602,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     txn_offer,
     txn_offer_detail,
     user_eligibility_info,
+    merchant_api_keys,
+    users,
+    user_merchants,
 );

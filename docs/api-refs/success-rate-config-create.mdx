@@ -1,0 +1,32 @@
+---
+title: "Create Success Rate Config"
+description: "Curl example for creating success-rate scoring config."
+---
+
+# Create Success Rate Config
+
+```bash
+curl --location "$BASE_URL/rule/create" \
+  --header "$AUTH_HEADER" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "merchant_id": "merchant_demo",
+    "config": {
+      "type": "successRate",
+      "data": {
+        "defaultBucketSize": 20,
+        "defaultLatencyThreshold": null,
+        "defaultHedgingPercent": null,
+        "subLevelInputConfig": {
+          "paymentMethodType": {
+            "CARD": { "bucketSize": 30, "hedgingPercent": 0.05 }
+          }
+        }
+      }
+    }
+  }'
+```
+
+```json
+{ "merchant_id": "merchant_demo", "config": { "type": "successRate" } }
+```

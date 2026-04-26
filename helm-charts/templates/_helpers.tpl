@@ -90,6 +90,20 @@ Create the name for the Routing Config Job
 {{- end }}
 
 {{/*
+Create the name for the analytics ClickHouse bootstrap configmap
+*/}}
+{{- define "decision-engine.analyticsClickhouseConfigName" -}}
+{{- printf "%s-analytics-clickhouse" (include "decision-engine.fullname" .) }}
+{{- end }}
+
+{{/*
+Create the name for the analytics ClickHouse bootstrap job
+*/}}
+{{- define "decision-engine.analyticsClickhouseJobName" -}}
+{{- printf "%s-analytics-clickhouse-init" (include "decision-engine.fullname" .) }}
+{{- end }}
+
+{{/*
 Define the PostgreSQL hostname
 */}}
 {{- define "decision-engine.postgresqlHost" -}}

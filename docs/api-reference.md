@@ -1,160 +1,96 @@
-# Dynamo API Reference
+# API Overview
 
-## Overview
+The canonical OpenAPI contract for the docs site is `docs/openapi.json`. Use this page for schema-oriented navigation. Use [API Examples](./api-refs/api-ref.mdx) for curl-first flows, valid payloads, and route variants.
 
-Dynamo provides both gRPC and HTTP APIs for its dynamic payment routing services. This reference documents the available endpoints, their parameters, and example usage.
+## Docs surfaces
 
----
+| Surface | What it is for | Path |
+| --- | --- | --- |
+| API Examples | Public integration guide with cURL flows, variants, and working payloads. | [`docs/api-refs/`](./api-refs/api-ref.mdx) |
+| OpenAPI Endpoint Reference | Schema-backed endpoint pages generated around `docs/openapi.json`. | [`docs/api-reference/endpoint/`](./api-reference/endpoint/createRoutingRule.mdx) |
+| OpenAPI contract | Machine-readable contract consumed by Mintlify and tooling. | [`docs/openapi.json`](./openapi.json) |
 
-## Authentication and Headers
+If you need rule examples such as AND, OR, nested AND+OR, `volume_split_priority`, enum arrays, or number-array matching, start with [Advanced Routing Example](./api-refs/routing-advanced-example.mdx). If you need the exact `POST /routing/create` schema and playground metadata, use [Create Routing Rule](./api-reference/endpoint/createRoutingRule.mdx).
 
-All API requests require appropriate authentication:
+## Access classes
 
-| Header | Required | Description |
-|:-------|:--------:|:------------|
-| `x-api-key` | ✅ | API key for authentication |
-| `x-tenant-id` | ✅ | Tenant identifier (*required if multi-tenancy is enabled) |
+| Class | Routes | Authentication |
+| --- | --- | --- |
+| Public | `GET /health`, `GET /health/ready`, `GET /health/diagnostics`, `POST /auth/signup`, `POST /auth/login` | None |
+| Admin bootstrap | `POST /merchant-account/create` | Admin secret |
+| Protected | All routing, decision, score update, rule config, API key, merchant read/delete, analytics, audit, config, and authenticated auth routes | `Authorization: Bearer <jwt_token>` or `x-api-key: <api_key>` |
+| Sandbox | Any Decision Engine route served through `https://sandbox.hyperswitch.io` | Same auth rules plus `x-feature: decision-engine` |
 
----
+## Endpoint Families
 
-## Available Services
+### Health
 
-Dynamo offers three main routing services:
+- [Health Check](./api-reference/endpoint/healthCheck.mdx)
+- [Health Ready](./api-reference/endpoint/healthReady.mdx)
+- [Health Diagnostics](./api-reference/endpoint/healthDiagnostics.mdx)
 
-### 1. **[Success Rate Calculator](api-reference/success-rate.md)**
+### Auth And Onboarding
 
-Routes payments to processors with the highest historical success rates.
+- [Signup](./api-reference/endpoint/signup.mdx)
+- [Login](./api-reference/endpoint/login.mdx)
+- [Logout](./api-reference/endpoint/logout.mdx)
+- [Current User](./api-reference/endpoint/me.mdx)
+- [List User Merchants](./api-reference/endpoint/listUserMerchants.mdx)
+- [Switch Merchant](./api-reference/endpoint/switchMerchant.mdx)
+- [Onboard Merchant](./api-reference/endpoint/onboardMerchant.mdx)
 
-| Endpoint | Description |
-|:---------|:------------|
-| **`FetchSuccessRate`** | Get success rates for processors |
-| **`UpdateSuccessRateWindow`** | Update success/failure data |
-| **`InvalidateWindows`** | Reset success rate data |
-| **`FetchEntityAndGlobalSuccessRate`** | Get both entity and global success rates |
+### API Keys
 
-### 2. **[Elimination Analyser](api-reference/elimination.md)**
+- [Create API Key](./api-reference/endpoint/createApiKey.mdx)
+- [List API Keys](./api-reference/endpoint/listApiKeys.mdx)
+- [Revoke API Key](./api-reference/endpoint/revokeApiKey.mdx)
 
-Prevents routing to processors that meet failure criteria.
+### Merchant Account
 
-| Endpoint | Description |
-|:---------|:------------|
-| **`GetEliminationStatus`** | Check if processors should be eliminated |
-| **`UpdateEliminationBucket`** | Update failure data |
-| **`InvalidateBucket`** | Reset elimination data |
+- [Create Merchant](./api-reference/endpoint/createMerchant.mdx)
+- [Get Merchant](./api-reference/endpoint/getMerchant.mdx)
+- [Delete Merchant](./api-reference/endpoint/deleteMerchant.mdx)
+- [Get Merchant Debit Routing](./api-reference/endpoint/getMerchantDebitRouting.mdx)
+- [Update Merchant Debit Routing](./api-reference/endpoint/updateMerchantDebitRouting.mdx)
 
-### 3. **[Contract Score Calculator](api-reference/contract.md)**
+### Gateway Decision
 
-Routes based on contractual obligations and targets.
+- [Decide Gateway](./api-reference/endpoint/decideGateway.mdx)
+- [Legacy Decision Gateway](./api-reference/endpoint/legacyDecisionGateway.mdx)
+- [Update Gateway Score](./api-reference/endpoint/updateGatewayScore.mdx)
+- [Legacy Update Score](./api-reference/endpoint/legacyUpdateScore.mdx)
 
-| Endpoint | Description |
-|:---------|:------------|
-| **`FetchContractScore`** | Get contract-based scores |
-| **`UpdateContract`** | Update contract fulfillment data |
-| **`InvalidateContract`** | Reset contract data |
+### Routing Rules
 
-### 4. **Health**
+- [Create Routing Rule](./api-reference/endpoint/createRoutingRule.mdx)
+- [Activate Routing Rule](./api-reference/endpoint/activateRoutingRule.mdx)
+- [List Routing Rules](./api-reference/endpoint/listRoutingRules.mdx)
+- [Get Active Routing Rule](./api-reference/endpoint/getActiveRoutingRule.mdx)
+- [Evaluate Routing Rule](./api-reference/endpoint/evaluateRoutingRule.mdx)
+- [Hybrid Routing](./api-reference/endpoint/hybridRouting.mdx)
 
-System health checks.
+### Rule Configuration
 
-| Endpoint | Description |
-|:---------|:------------|
-| **`Check`** | Verify system health status |
+- [Create Rule Config](./api-reference/endpoint/createRuleConfig.mdx)
+- [Get Rule Config](./api-reference/endpoint/getRuleConfig.mdx)
+- [Update Rule Config](./api-reference/endpoint/updateRuleConfig.mdx)
+- [Delete Rule Config](./api-reference/endpoint/deleteRuleConfig.mdx)
 
-**gRPC Method**: `grpc.health.v1.Health/Check`
+### Config
 
-**HTTP Endpoint**: `POST /grpc.health.v1.Health/Check`
+- [Get Routing Config](./api-reference/endpoint/getRoutingConfig.mdx)
+- [Configure SR Dimensions](./api-reference/endpoint/configSrDimension.mdx)
 
-**Request**:
+### Analytics
 
-```json
-{
-  "service": "dynamo"
-}
-```
+- [Overview](./api-reference/endpoint/analyticsOverview.mdx)
+- [Gateway Scores](./api-reference/endpoint/analyticsGatewayScores.mdx)
+- [Decisions](./api-reference/endpoint/analyticsDecisions.mdx)
+- [Routing Stats](./api-reference/endpoint/analyticsRoutingStats.mdx)
+- [Log Summaries](./api-reference/endpoint/analyticsLogSummaries.mdx)
+- [Payment Audit](./api-reference/endpoint/analyticsPaymentAudit.mdx)
+- [Preview Trace](./api-reference/endpoint/analyticsPreviewTrace.mdx)
 
-**Response**:
+## Curl Examples
 
-```json
-{
-  "status": 1  // 1 = SERVING
-}
-```
-
----
-
-## Protocol Support
-
-All services are available via both:
-
-<table>
-  <tr>
-    <td width="150px"><strong>gRPC</strong></td>
-    <td>Efficient binary protocol for direct integration</td>
-  </tr>
-  <tr>
-    <td><strong>HTTP/JSON</strong></td>
-    <td>RESTful interface for broader compatibility</td>
-  </tr>
-</table>
-
----
-
-## Quick Start Examples
-
-### 🔹 gRPC Example (using grpcurl)
-
-```bash
-grpcurl -d '{
-  "id": "merchant_123",
-  "params": "{\"payment_method\":\"card\"}",
-  "labels": ["processor_A", "processor_B"],
-  "config": {
-    "min_aggregates_size": 10,
-    "default_success_rate": 0.5
-  }
-}' \
--H 'x-api-key: YOUR_API_KEY' \
--H 'x-tenant-id: tenant_001' \
--plaintext localhost:9000 success_rate.SuccessRateCalculator/FetchSuccessRate
-```
-
-### 🔹 HTTP Example (using curl)
-
-```bash
-curl -X POST \
-  -H "Content-Type: application/json" \
-  -H "x-api-key: YOUR_API_KEY" \
-  -H "x-tenant-id: tenant_001" \
-  -d '{
-    "id": "merchant_123",
-    "params": "{\"payment_method\":\"card\"}",
-    "labels": ["processor_A", "processor_B"],
-    "config": {
-      "min_aggregates_size": 10,
-      "default_success_rate": 0.5
-    }
-  }' \
-  http://localhost:8080/success_rate.SuccessRateCalculator/FetchSuccessRate
-```
-
----
-
-## Error Handling
-
-All services use standard gRPC status codes:
-
-| Status Code | Description | Common Causes |
-|:------------|:------------|:--------------|
-| <code>OK (0)</code> | ✅ Operation completed successfully | Normal successful operation |
-| <code>INVALID_ARGUMENT (3)</code> | ⚠️ Validation failed | Missing required fields, invalid parameters |
-| <code>NOT_FOUND (5)</code> | 🔍 Required resource not found | Entity or configuration not found |
-| <code>UNAUTHENTICATED (16)</code> | 🔒 Authentication failed | Invalid API key |
-| <code>PERMISSION_DENIED (7)</code> | 🚫 Unauthorized access | Insufficient permissions |
-| <code>INTERNAL (13)</code> | ❌ Internal server error | Unexpected server-side errors |
-
----
-
-## Related Documentation
-
-📥 [**Installation**](installation.md)  ⚙️ [**Configuration**](configuration.md)  🔄 [**Dual Protocol**](dual-protocol-layer.md)
-
+For local and sandbox smoke-test examples, use [API Examples](./api-refs/api-ref.mdx).

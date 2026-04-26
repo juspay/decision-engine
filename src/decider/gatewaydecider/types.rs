@@ -674,6 +674,18 @@ pub enum RankingAlgorithm {
     SrBasedRouting,
     PlBasedRouting,
     NtwBasedRouting,
+    NtwSrHybridRouting,
+}
+
+impl fmt::Display for RankingAlgorithm {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SrBasedRouting => write!(f, "SR_BASED_ROUTING"),
+            Self::PlBasedRouting => write!(f, "PL_BASED_ROUTING"),
+            Self::NtwBasedRouting => write!(f, "NTW_BASED_ROUTING"),
+            Self::NtwSrHybridRouting => write!(f, "NTW_SR_HYBRID_ROUTING"),
+        }
+    }
 }
 
 // pub type DeciderFlow<R> = for<'a> fn(&'a mut (dyn MonadFlow + 'a)) -> ReaderT<DeciderParams, StateT<DeciderState, &'a mut (dyn MonadFlow + 'a)>, R>;
@@ -991,6 +1003,25 @@ pub struct PaymentInfo {
 // write a function to transfer DomainDeciderRequestForApiCallV2 to DomainDeciderRequest
 
 impl DomainDeciderRequestForApiCallV2 {
+    pub fn payment_id(&self) -> &str {
+        &self.payment_info.payment_id
+    }
+
+    pub fn payment_method_type(&self) -> &str {
+        &self.payment_info.payment_method_type
+    }
+
+    pub fn payment_method(&self) -> &str {
+        &self.payment_info.payment_method
+    }
+
+    pub fn auth_type(&self) -> Option<String> {
+        self.payment_info
+            .auth_type
+            .as_ref()
+            .map(ToString::to_string)
+    }
+
     pub async fn to_domain_decider_request(&self) -> DomainDeciderRequest {
         DomainDeciderRequest {
             orderReference: ETO::Order {

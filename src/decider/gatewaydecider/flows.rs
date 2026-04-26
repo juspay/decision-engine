@@ -605,6 +605,52 @@ pub async fn run_decider_flow(
                         &currentGatewayScoreMap,
                         decider_flow.writer.gwDeciderApproach.clone(),
                     );
+                    if let Some(rule_name) = updatedPriorityLogicOutput.priority_logic_tag.clone() {
+                        crate::analytics::DomainAnalyticsEvent::record_rule_hit(
+                            crate::analytics::AnalyticsFlowContext::new(
+                                crate::analytics::ApiFlow::DynamicRouting,
+                                crate::analytics::FlowType::DecideGatewayRuleHit,
+                            ),
+                            crate::analytics::AnalyticsRoute::DecideGateway,
+                            Some(crate::types::merchant::id::merchant_id_to_text(
+                                deciderParams.dpMerchantAccount.merchantId.clone(),
+                            )),
+                            rule_name,
+                            decidedGateway.clone(),
+                            Some(format!("{:?}", finalDeciderApproach.clone())),
+                            serde_json::to_string(&serde_json::json!({
+                                "functional_gateways": uniqueFunctionalGateways.clone(),
+                                "experiment_tag": experimentTag.clone(),
+                            }))
+                            .ok(),
+                            Some(deciderParams.dpTxnDetail.txnUuid.clone()),
+                            decider_flow
+                                .logger
+                                .get(crate::storage::consts::X_REQUEST_ID)
+                                .cloned(),
+                            decider_flow
+                                .logger
+                                .get(crate::storage::consts::X_GLOBAL_REQUEST_ID)
+                                .cloned(),
+                            decider_flow
+                                .logger
+                                .get(crate::storage::consts::TRACEPARENT)
+                                .and_then(|value| crate::analytics::normalize_trace_id(value))
+                                .or_else(|| {
+                                    decider_flow
+                                        .logger
+                                        .get(crate::storage::consts::X_TRACE_ID)
+                                        .cloned()
+                                })
+                                .or_else(|| {
+                                    decider_flow
+                                        .logger
+                                        .get(crate::storage::consts::X_B3_TRACE_ID)
+                                        .cloned()
+                                }),
+                            Some("rule_applied".to_string()),
+                        );
+                    }
                     Utils::log_gateway_decider_approach(
                         &mut decider_flow,
                         decidedGateway.clone(),

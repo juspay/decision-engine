@@ -1,0 +1,3 @@
+# Local profile variants are now defined directly in docker-compose.yaml.
+# This override file is intentionally kept minimal for backward compatibility.
+services: {}
