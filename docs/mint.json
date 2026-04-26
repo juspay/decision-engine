@@ -26,6 +26,7 @@
         "local-setup",
         "configuration",
         "dashboard-guide",
+        "api-overview",
         "api-reference",
         "dual-protocol-layer"
       ]
