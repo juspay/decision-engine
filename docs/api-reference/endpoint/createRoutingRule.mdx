@@ -128,6 +128,138 @@ curl --location "$BASE_URL/routing/create" \
 }'
 ```
 
+### Advanced AND rule
+
+In `advanced` routing, conditions inside the same `condition` array are evaluated as an AND group. Add this rule object inside `algorithm.data.rules`.
+
+```json
+{
+  "name": "high_value_netherlands_rule",
+  "routing_type": "volume_split",
+  "output": {
+    "volume_split": [
+      { "split": 60, "output": { "gateway_name": "hdfc", "gateway_id": "mca_hdfc" } },
+      { "split": 40, "output": { "gateway_name": "instamojo", "gateway_id": "mca_instamojo" } }
+    ]
+  },
+  "statements": [
+    {
+      "condition": [
+        {
+          "lhs": "amount",
+          "comparison": "greater_than",
+          "value": { "type": "number", "value": 100 },
+          "metadata": {}
+        },
+        {
+          "lhs": "billing_country",
+          "comparison": "equal",
+          "value": { "type": "enum_variant", "value": "Netherlands" },
+          "metadata": {}
+        }
+      ],
+      "nested": null
+    }
+  ]
+}
+```
+
+### Advanced OR rule
+
+Use multiple `statements` when any one branch can trigger the rule. This behaves like OR across statements.
+
+```json
+{
+  "name": "card_or_high_value_rule",
+  "routing_type": "priority",
+  "output": {
+    "priority": [
+      { "gateway_name": "stripe", "gateway_id": "mca_stripe" },
+      { "gateway_name": "adyen", "gateway_id": "mca_adyen" }
+    ]
+  },
+  "statements": [
+    {
+      "condition": [
+        {
+          "lhs": "payment_method_type",
+          "comparison": "equal",
+          "value": { "type": "enum_variant", "value": "CARD" },
+          "metadata": {}
+        }
+      ],
+      "nested": null
+    },
+    {
+      "condition": [
+        {
+          "lhs": "amount",
+          "comparison": "greater_than",
+          "value": { "type": "number", "value": 5000 },
+          "metadata": {}
+        }
+      ],
+      "nested": null
+    }
+  ]
+}
+```
+
+### Advanced nested AND + OR rule
+
+Use `nested` when a parent condition must match first, and then one of multiple nested branches should match.
+
+```json
+{
+  "name": "nested_card_rule",
+  "routing_type": "priority",
+  "output": {
+    "priority": [
+      { "gateway_name": "bankofamerica", "gateway_id": "mca_bankofamerica" },
+      { "gateway_name": "gigadat", "gateway_id": "mca_gigadat" }
+    ]
+  },
+  "statements": [
+    {
+      "condition": [
+        {
+          "lhs": "payment_method_type",
+          "comparison": "equal",
+          "value": { "type": "enum_variant", "value": "CARD" },
+          "metadata": {}
+        }
+      ],
+      "nested": [
+        {
+          "condition": [
+            {
+              "lhs": "card_bin",
+              "comparison": "equal",
+              "value": { "type": "str_value", "value": "424242" },
+              "metadata": {}
+            }
+          ],
+          "nested": null
+        },
+        {
+          "condition": [
+            {
+              "lhs": "card_network",
+              "comparison": "equal",
+              "value": { "type": "enum_variant", "value": "Visa" },
+              "metadata": {}
+            }
+          ],
+          "nested": null
+        }
+      ]
+    }
+  ]
+}
+```
+
+For more advanced rule examples, including `volume_split_priority`, `enum_variant_array`, `number_array`, and `number_comparison_array`, see [Advanced Routing Example](../../api-refs/routing-advanced-example.mdx).
+
 ## Response
 
 ```json
@@ -148,5 +280,6 @@ curl --location "$BASE_URL/routing/create" \
 
 - [Activate Routing Rule](./activateRoutingRule.mdx)
 - [Evaluate Routing Rule](./evaluateRoutingRule.mdx)
+- [Advanced Routing Example](../../api-refs/routing-advanced-example.mdx)
 - [Priority Routing](../../api-refs/routing-priority-example.mdx)
 - [Volume Split Routing](../../api-refs/routing-volume-split-example.mdx)
