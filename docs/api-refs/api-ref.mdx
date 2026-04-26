@@ -5,7 +5,7 @@ description: "Human-friendly Decision Engine API map with curl examples for ever
 
 # API Examples
 
-Use this page as the route map for local smoke tests, dashboard integration, and sandbox debugging. For schema-level details, use [API Overview](../api-reference.md) and the OpenAPI-backed endpoint pages.
+Use this page as the main route map for local smoke tests, dashboard integration, and sandbox debugging. It groups the APIs by the flows an operator usually performs: create merchant, create API key, configure routing, run transactions, send feedback, inspect analytics, and audit decisions. For schema-level details, use [API Overview](../api-reference.md) and the OpenAPI-backed endpoint pages.
 
 ## Environment
 
@@ -32,65 +32,74 @@ curl "$BASE_URL/analytics/overview?range=1d" \
   --header "$FEATURE_HEADER"
 ```
 
-## Contents
+## Main Contents
 
 ### Health
 
-- [Health, readiness, and diagnostics](./health-check.mdx): `GET /health`, `GET /health/ready`, `GET /health/diagnostics`
+- [Health, readiness, and diagnostics](./health-check.mdx): service liveness, dependency readiness, and local diagnostics with `GET /health`, `GET /health/ready`, and `GET /health/diagnostics`.
 
-### Auth, onboarding, and API keys
+### Auth And Onboarding
 
-- [Auth and onboarding](./auth-and-onboarding.mdx): `POST /auth/signup`, `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`, `GET /auth/merchants`, `POST /auth/switch-merchant`, `POST /onboarding/merchant`
-- [API keys](./api-keys.mdx): `POST /api-key/create`, `GET /api-key/list/:merchant_id`, `DELETE /api-key/:key_id`
+- [Auth and onboarding](./auth-and-onboarding.mdx): dashboard operator signup, login, logout, current user, merchant list, merchant switch, and dashboard merchant onboarding.
 
-### Merchant account
+### Merchant CRUD
 
-- [Create merchant account](./merchant-account-create.mdx): `POST /merchant-account/create`
-- [Get merchant account](./merchant-account-get.mdx): `GET /merchant-account/:merchant-id`
-- [Delete merchant account](./merchant-account-delete.mdx): `DELETE /merchant-account/:merchant-id`
-- [Debit-routing merchant flag](./merchant-debit-routing.mdx): `GET|POST /merchant-account/:merchant-id/debit-routing`
+- [Create merchant account](./merchant-account-create.mdx): create the merchant record used by routing, API keys, and analytics.
+- [Get merchant account](./merchant-account-get.mdx): inspect the merchant account and setup state.
+- [Delete merchant account](./merchant-account-delete.mdx): remove a test merchant from Decision Engine local state.
 
-### Gateway decisions
+### API Key CRUD
 
-- [SR-based routing](./decide-gateway-sr-based.mdx): `POST /decide-gateway` with `SR_BASED_ROUTING`
-- [Priority-list routing](./decide-gateway-pl-based.mdx): `POST /decide-gateway` with `PL_BASED_ROUTING`
-- [Debit/network routing](./decide-gateway-debit-routing.mdx): `POST /decide-gateway` with `NTW_BASED_ROUTING`
-- [Network + SR hybrid routing](./decide-gateway-hybrid-routing.mdx): `POST /decide-gateway` with `NTW_SR_HYBRID_ROUTING`
-- [Legacy decision endpoint](./decision-gateway-legacy.mdx): `POST /decision_gateway`
-- [Update gateway score](./update-gateway-score.mdx): `POST /update-gateway-score`
-- [Legacy update score](./update-score-legacy.mdx): `POST /update-score`
+- [API keys](./api-keys.mdx): create, list, and revoke server-to-server API keys with `POST /api-key/create`, `GET /api-key/list/:merchant_id`, and `DELETE /api-key/:key_id`.
 
-### Routing rules
+### Rule-Based Routing CRUD And Lifecycle
 
-- [Create routing algorithm](./routing-algorithm-create.mdx): `POST /routing/create`
-- [Evaluate routing algorithm](./routing-algorithm-evaluate.mdx): `POST /routing/evaluate`
-- [Hybrid routing evaluation](./routing-hybrid.mdx): `POST /routing/hybrid`
-- [List routing algorithms](./routing-algorithm-list.mdx): `POST /routing/list/:created_by`
-- [List active routing algorithms](./routing-algorithm-list-active.mdx): `POST /routing/list/active/:created_by`
-- [Activate routing algorithm](./routing-algorithm-activate.mdx): `POST /routing/activate`
+- [Create routing algorithm](./routing-algorithm-create.mdx): create `single`, `priority`, `volume_split`, and `advanced` routing algorithms.
+- [Single connector](./routing-single-connector-example.mdx): always return one configured connector.
+- [Priority list](./routing-priority-example.mdx): return connectors in a fixed ordered priority.
+- [Volume split](./routing-volume-split-example.mdx): distribute decisions across connectors by configured percentages.
+- [Advanced rule tree](./routing-advanced-example.mdx): AND, OR, nested AND+OR rules plus value variants such as enum arrays and number ranges.
+- [Activate routing algorithm](./routing-algorithm-activate.mdx): make a created algorithm active for a merchant.
+- [List routing algorithms](./routing-algorithm-list.mdx): list created algorithms.
+- [List active routing algorithms](./routing-algorithm-list-active.mdx): read the active algorithm.
+- [Evaluate routing algorithm](./routing-algorithm-evaluate.mdx): run a rule/volume decision through `/routing/evaluate`.
+- [Hybrid routing evaluation](./routing-hybrid.mdx): evaluate the hybrid routing surface when rule output must be combined with runtime scoring.
 
-### Routing algorithm shapes
+There is no public deactivate route in the current API contract. To change active behavior, create or select another algorithm and call `/routing/activate`.
 
-- [Single connector](./routing-single-connector-example.mdx): `algorithm.type = single`
-- [Priority list](./routing-priority-example.mdx): `algorithm.type = priority`
-- [Volume split](./routing-volume-split-example.mdx): `algorithm.type = volume_split`
-- [Advanced rule tree](./routing-advanced-example.mdx): `algorithm.type = advanced`
+### Rule Config CRUD
 
-### Rule configuration
+- [Create success-rate config](./success-rate-config-create.mdx), [get](./success-rate-config-get.mdx), [update](./success-rate-config-update.mdx), and [delete](./success-rate-config-delete.mdx): manage auth-rate scoring config.
+- [Create elimination config](./elimination-config-create.mdx), [get](./elimination-config-get.mdx), [update](./elimination-config-update.mdx), and [delete](./elimination-config-delete.mdx): manage downtime/elimination config.
 
-- [Create success-rate config](./success-rate-config-create.mdx): `POST /rule/create`
-- [Get success-rate config](./success-rate-config-get.mdx): `POST /rule/get`
-- [Update success-rate config](./success-rate-config-update.mdx): `POST /rule/update`
-- [Delete success-rate config](./success-rate-config-delete.mdx): `POST /rule/delete`
-- [Create elimination config](./elimination-config-create.mdx): `POST /rule/create`
-- [Get elimination config](./elimination-config-get.mdx): `POST /rule/get`
-- [Update elimination config](./elimination-config-update.mdx): `POST /rule/update`
-- [Delete elimination config](./elimination-config-delete.mdx): `POST /rule/delete`
+### Decide Gateway Transactions
 
-### Config and analytics
+- [SR-based routing](./decide-gateway-sr-based.mdx): transact with `SR_BASED_ROUTING`.
+- [Priority-list routing](./decide-gateway-pl-based.mdx): transact with `PL_BASED_ROUTING`.
+- [Debit/network routing](./decide-gateway-debit-routing.mdx): transact with `NTW_BASED_ROUTING`.
+- [Network + SR hybrid routing](./decide-gateway-hybrid-routing.mdx): transact with `NTW_SR_HYBRID_ROUTING`.
 
-- [Routing config endpoints](./config-endpoints.mdx): `GET /config/routing-keys`, `POST /config-sr-dimension`
-- [Analytics endpoints](./analytics-endpoints.mdx): `/analytics/overview`, `/analytics/gateway-scores`, `/analytics/decisions`, `/analytics/routing-stats`, `/analytics/log-summaries`, `/analytics/payment-audit`, `/analytics/preview-trace`
+### Update Gateway Score
+
+- [Update gateway score](./update-gateway-score.mdx): send post-authorization feedback to update auth-rate analytics and scoring.
+
+### Debit Routing
+
+- [Debit-routing merchant flag](./merchant-debit-routing.mdx): read, enable, and disable merchant-level debit routing.
+- [Debit/network routing transaction](./decide-gateway-debit-routing.mdx): run `/decide-gateway` with debit metadata after the flag is enabled.
+
+### Config
+
+- [Routing config endpoints](./config-endpoints.mdx): get supported routing keys and configure SR dimensions.
+
+### Analytics And Audit
+
+- [Analytics endpoints](./analytics-endpoints.mdx): overview, gateway scores, decisions, routing stats, logs, payment audit, preview trace, pagination, filters, and debit-routing audit.
+
+### Compatibility
+
+- [Legacy decision endpoint](./decision-gateway-legacy.mdx): old `/decision_gateway` compatibility route.
+- [Legacy update score](./update-score-legacy.mdx): old `/update-score` compatibility route.
 
 ## Routing Algorithm Values
 

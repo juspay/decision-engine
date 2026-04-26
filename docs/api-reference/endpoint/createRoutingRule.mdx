@@ -83,8 +83,8 @@ curl --location "$BASE_URL/routing/create" \
   "algorithm": {
     "type": "volume_split",
     "data": [
-      { "split": 70, "connectors": [{ "gateway_name": "stripe", "gateway_id": "mca_stripe" }] },
-      { "split": 30, "connectors": [{ "gateway_name": "adyen", "gateway_id": "mca_adyen" }] }
+      { "split": 70, "output": { "gateway_name": "stripe", "gateway_id": "mca_stripe" } },
+      { "split": 30, "output": { "gateway_name": "adyen", "gateway_id": "mca_adyen" } }
     ]
   }
 }'
