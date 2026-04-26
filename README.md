@@ -108,11 +108,9 @@ Open:
 - API: `http://localhost:8080`
 - Dashboard: `http://localhost:8081/dashboard/`
 - Docs: `http://localhost:8081/introduction`
-- API docs map: `http://localhost:8081/api-overview`
-- API examples: `http://localhost:8081/api-refs/api-ref`
-- OpenAPI reference: `http://localhost:8081/api-reference`
+- API documentation map: `http://localhost:8081/api-overview`
 
-For deployed docs or dashboard environments, use the same docs paths under the deployed host, for example `https://<docs-host>/api-overview`, `https://<docs-host>/api-refs/api-ref`, and `https://<docs-host>/api-reference`.
+For deployed docs or dashboard environments, use the same docs paths under the deployed host, for example `https://<docs-host>/api-overview`. That page links to the API examples and OpenAPI reference sections.
 
 ### 🦀 From Source
 
