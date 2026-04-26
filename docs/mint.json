@@ -31,7 +31,7 @@
       ]
     },
     {
-      "group": "API Examples",
+      "group": "API Examples (curl flows)",
       "pages": [
         "api-refs/api-ref",
         "api-refs/health-check",
@@ -86,7 +86,7 @@
       ]
     },
     {
-      "group": "Health",
+      "group": "OpenAPI: Health",
       "pages": [
         "api-reference/endpoint/healthCheck",
         "api-reference/endpoint/healthReady",
@@ -94,15 +94,15 @@
       ]
     },
     {
-      "group": "Gateway Decision",
+      "group": "OpenAPI: Gateway Decision",
       "pages": ["api-reference/endpoint/decideGateway"]
     },
     {
-      "group": "Score Feedback",
+      "group": "OpenAPI: Score Feedback",
       "pages": ["api-reference/endpoint/updateGatewayScore"]
     },
     {
-      "group": "Merchant Account",
+      "group": "OpenAPI: Merchant Account",
       "pages": [
         "api-reference/endpoint/createMerchant",
         "api-reference/endpoint/getMerchant",
@@ -112,7 +112,7 @@
       ]
     },
     {
-      "group": "Routing Rules",
+      "group": "OpenAPI: Routing Rules",
       "pages": [
         "api-reference/endpoint/createRoutingRule",
         "api-reference/endpoint/activateRoutingRule",
@@ -123,7 +123,7 @@
       ]
     },
     {
-      "group": "Rule Configuration",
+      "group": "OpenAPI: Rule Configuration",
       "pages": [
         "api-reference/endpoint/createRuleConfig",
         "api-reference/endpoint/getRuleConfig",
@@ -132,7 +132,7 @@
       ]
     },
     {
-      "group": "Auth And API Keys",
+      "group": "OpenAPI: Auth And API Keys",
       "pages": [
         "api-reference/endpoint/signup",
         "api-reference/endpoint/login",
@@ -147,7 +147,7 @@
       ]
     },
     {
-      "group": "Analytics",
+      "group": "OpenAPI: Analytics",
       "pages": [
         "api-reference/endpoint/analyticsOverview",
         "api-reference/endpoint/analyticsGatewayScores",
@@ -159,7 +159,7 @@
       ]
     },
     {
-      "group": "Compatibility And Config",
+      "group": "OpenAPI: Compatibility And Config",
       "pages": [
         "api-reference/endpoint/legacyDecisionGateway",
         "api-reference/endpoint/legacyUpdateScore",

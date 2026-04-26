@@ -2,6 +2,25 @@
 
 The canonical OpenAPI contract for the docs site is `docs/openapi.json`. Use this page for schema-oriented navigation. Use [API Examples](./api-refs/api-ref.mdx) for curl-first flows, valid payloads, and route variants.
 
+## Docs surfaces
+
+| Surface | What it is for | Path |
+| --- | --- | --- |
+| API Examples | Public integration guide with cURL flows, variants, and working payloads. | [`docs/api-refs/`](./api-refs/api-ref.mdx) |
+| OpenAPI Endpoint Reference | Schema-backed endpoint pages generated around `docs/openapi.json`. | [`docs/api-reference/endpoint/`](./api-reference/endpoint/createRoutingRule.mdx) |
+| OpenAPI contract | Machine-readable contract consumed by Mintlify and tooling. | [`docs/openapi.json`](./openapi.json) |
+
+If you need rule examples such as AND, OR, nested AND+OR, `volume_split_priority`, enum arrays, or number-array matching, start with [Advanced Routing Example](./api-refs/routing-advanced-example.mdx). If you need the exact `POST /routing/create` schema and playground metadata, use [Create Routing Rule](./api-reference/endpoint/createRoutingRule.mdx).
+
+## Access classes
+
+| Class | Routes | Authentication |
+| --- | --- | --- |
+| Public | `GET /health`, `GET /health/ready`, `GET /health/diagnostics`, `POST /auth/signup`, `POST /auth/login` | None |
+| Admin bootstrap | `POST /merchant-account/create` | Admin secret |
+| Protected | All routing, decision, score update, rule config, API key, merchant read/delete, analytics, audit, config, and authenticated auth routes | `Authorization: Bearer <jwt_token>` or `x-api-key: <api_key>` |
+| Sandbox | Any Decision Engine route served through `https://sandbox.hyperswitch.io` | Same auth rules plus `x-feature: decision-engine` |
+
 ## Endpoint Families
 
 ### Health

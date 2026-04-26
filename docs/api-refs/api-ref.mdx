@@ -7,6 +7,27 @@ description: "Human-friendly Decision Engine API map with curl examples for ever
 
 Use this page as the main route map for local smoke tests, dashboard integration, and sandbox debugging. It groups the APIs by the flows an operator usually performs: create merchant, create API key, configure routing, run transactions, send feedback, inspect analytics, and audit decisions. For schema-level details, use [API Overview](../api-reference.md) and the OpenAPI-backed endpoint pages.
 
+## Which API docs should I use?
+
+There are two API documentation surfaces:
+
+| Surface | Location | Purpose |
+| --- | --- | --- |
+| API Examples | `docs/api-refs/*.mdx` | Human-facing curl examples, complete flows, request variants, and practical payloads. Start here when testing or integrating. |
+| OpenAPI Endpoint Reference | `docs/api-reference/endpoint/*.mdx` | One page per OpenAPI operation, backed by `docs/openapi.json` for schema/playground rendering. Use this when checking exact request/response schema. |
+
+The advanced AND, OR, nested, and value-variant routing examples live in [Advanced rule tree](./routing-advanced-example.mdx). The `/routing/create` OpenAPI page also includes a shorter version for quick schema-page lookup.
+
+## Route access model
+
+| Access class | Routes | Required headers |
+| --- | --- | --- |
+| Public health | `GET /health`, `GET /health/ready`, `GET /health/diagnostics` | None |
+| Public auth entrypoint | `POST /auth/signup`, `POST /auth/login` | None |
+| Admin bootstrap | `POST /merchant-account/create` | Admin secret as configured for the deployment |
+| Protected operator/API-key APIs | Auth session, API keys, merchant reads/deletes, routing, rule config, decision, score update, config, analytics, and audit routes | `Authorization: Bearer <jwt_token>` or `x-api-key: <api_key>` |
+| Sandbox Hyperswitch routing | Same protected/public route rules, routed through `https://sandbox.hyperswitch.io` | Add `x-feature: decision-engine` |
+
 ## Environment
 
 ```bash
