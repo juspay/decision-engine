@@ -46,11 +46,18 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: image=moby/buildkit:master
 
       - name: Build Decision Engine from PR source
-        run: docker build -f Dockerfile.postgres -t ${{ env.IMAGE_NAME }} .
-        env:
-          DOCKER_BUILDKIT: 1
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.postgres
+          tags: ${{ env.IMAGE_NAME }}
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Save Docker image to tar
         run: docker save ${{ env.IMAGE_NAME }} | gzip > ${{ env.IMAGE_ARTIFACT }}.tar.gz
