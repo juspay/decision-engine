@@ -46,12 +46,7 @@ curl --location "$BASE_URL/routing/activate" \
 
 ## Response
 
-```json
-{
-  "message": "routing rule activated",
-  "routing_algorithm_id": "routing_e641380c-6f24-4405-8454-5ae6cbceb7a0"
-}
-```
+Success returns HTTP `200` with an empty response body.
 
 ## Notes
 
@@ -61,5 +56,6 @@ curl --location "$BASE_URL/routing/activate" \
 ## Related
 
 - [Create Routing Rule](./createRoutingRule.mdx)
+- [Deactivate Routing Rule](./deactivateRoutingRule.mdx)
 - [Get Active Routing Rule](./getActiveRoutingRule.mdx)
 - [Activate Routing Algorithm](../../api-refs/routing-algorithm-activate.mdx)

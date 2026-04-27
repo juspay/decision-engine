@@ -1,0 +1,119 @@
+name: API Reference Pages
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "docs/openapi.json"
+      - "docs/api-reference/**"
+      - "docs/api-refs/**"
+      - "docs/api-overview.md"
+      - ".github/workflows/api-reference-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build API reference
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate OpenAPI contract
+        run: jq empty docs/openapi.json
+
+      - name: Build static Pages artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf public
+          mkdir -p public
+
+          cp docs/openapi.json public/openapi.json
+          cp docs/favicon.svg public/favicon.svg
+          touch public/.nojekyll
+
+          cat > public/index.html <<'HTML'
+          <!doctype html>
+          <html lang="en">
+            <head>
+              <meta charset="utf-8" />
+              <meta name="viewport" content="width=device-width, initial-scale=1" />
+              <title>Decision Engine API Reference</title>
+              <link rel="icon" href="./favicon.svg" />
+              <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+              <style>
+                body {
+                  margin: 0;
+                  background: #f8fafc;
+                }
+                header {
+                  align-items: center;
+                  background: #05070d;
+                  color: #fff;
+                  display: flex;
+                  justify-content: space-between;
+                  padding: 16px 24px;
+                }
+                header h1 {
+                  font: 600 18px/1.3 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                  margin: 0;
+                }
+                header a {
+                  color: #93c5fd;
+                  font: 500 13px/1.3 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                  text-decoration: none;
+                }
+                #swagger-ui {
+                  max-width: 1280px;
+                  margin: 0 auto;
+                }
+              </style>
+            </head>
+            <body>
+              <header>
+                <h1>Decision Engine API Reference</h1>
+                <a href="./openapi.json">OpenAPI JSON</a>
+              </header>
+              <div id="swagger-ui"></div>
+              <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" crossorigin></script>
+              <script>
+                window.ui = SwaggerUIBundle({
+                  url: "./openapi.json",
+                  dom_id: "#swagger-ui",
+                  deepLinking: true,
+                  presets: [SwaggerUIBundle.presets.apis],
+                  layout: "BaseLayout"
+                });
+              </script>
+            </body>
+          </html>
+          HTML
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    name: Deploy API reference
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

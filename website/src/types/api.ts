@@ -50,12 +50,14 @@ export type RoutingAlgorithmData =
 
 export interface EuclidRule {
   name: string
-  connectorSelection: EuclidOutput
+  routing_type?: 'priority' | 'volume_split' | 'volume_split_priority'
+  output?: EuclidOutput
   statements: EuclidStatement[]
 }
 
 export interface EuclidStatement {
   condition: EuclidCondition[]
+  nested?: EuclidStatement[]
 }
 
 export interface EuclidCondition {
@@ -72,7 +74,8 @@ export interface EuclidOutput {
 
 export interface EuclidAlgorithmData {
   globals: Record<string, unknown>
-  defaultSelection: EuclidOutput
+  default_selection?: EuclidOutput
+  defaultSelection?: EuclidOutput
   rules: EuclidRule[]
 }
 
@@ -108,6 +111,11 @@ export interface CreateRoutingRequest {
 }
 
 export interface ActivateRoutingRequest {
+  created_by: string
+  routing_algorithm_id: string
+}
+
+export interface DeactivateRoutingRequest {
   created_by: string
   routing_algorithm_id: string
 }

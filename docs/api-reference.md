@@ -64,6 +64,7 @@ If you need rule examples such as AND, OR, nested AND+OR, `volume_split_priority
 
 - [Create Routing Rule](./api-reference/endpoint/createRoutingRule.mdx)
 - [Activate Routing Rule](./api-reference/endpoint/activateRoutingRule.mdx)
+- [Deactivate Routing Rule](./api-reference/endpoint/deactivateRoutingRule.mdx)
 - [List Routing Rules](./api-reference/endpoint/listRoutingRules.mdx)
 - [Get Active Routing Rule](./api-reference/endpoint/getActiveRoutingRule.mdx)
 - [Evaluate Routing Rule](./api-reference/endpoint/evaluateRoutingRule.mdx)

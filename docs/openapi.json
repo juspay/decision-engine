@@ -2443,11 +2443,51 @@
         },
         "responses": {
           "200": {
-            "description": "Rule activated",
+            "description": "Rule activated. The response body is empty."
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          }
+        ]
+      }
+    },
+    "/routing/deactivate": {
+      "post": {
+        "operationId": "deactivateRoutingRule",
+        "tags": [
+          "Routing Rules"
+        ],
+        "summary": "Deactivate routing rule",
+        "description": "Deactivate an active routing rule mapping by routing algorithm ID for a merchant. The call is idempotent: if the algorithm exists but is already inactive for the merchant, the API returns success.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeactivateRoutingRuleRequest"
+              },
+              "example": {
+                "created_by": "test_merchant",
+                "routing_algorithm_id": "rule_abc123"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rule deactivated. The response body is empty."
+          },
+          "400": {
+            "description": "Routing algorithm ID was not found.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RoutingRule"
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -3487,6 +3527,23 @@
         }
       },
       "ActivateRoutingRuleRequest": {
+        "type": "object",
+        "required": [
+          "created_by",
+          "routing_algorithm_id"
+        ],
+        "properties": {
+          "created_by": {
+            "type": "string",
+            "example": "test_merchant"
+          },
+          "routing_algorithm_id": {
+            "type": "string",
+            "example": "rule_abc123"
+          }
+        }
+      },
+      "DeactivateRoutingRuleRequest": {
         "type": "object",
         "required": [
           "created_by",

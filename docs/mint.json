@@ -55,6 +55,7 @@
         "api-refs/routing-algorithm-list",
         "api-refs/routing-algorithm-list-active",
         "api-refs/routing-algorithm-activate",
+        "api-refs/routing-algorithm-deactivate",
         "api-refs/routing-single-connector-example",
         "api-refs/routing-priority-example",
         "api-refs/routing-volume-split-example",
@@ -117,6 +118,7 @@
       "pages": [
         "api-reference/endpoint/createRoutingRule",
         "api-reference/endpoint/activateRoutingRule",
+        "api-reference/endpoint/deactivateRoutingRule",
         "api-reference/endpoint/listRoutingRules",
         "api-reference/endpoint/getActiveRoutingRule",
         "api-reference/endpoint/evaluateRoutingRule",
