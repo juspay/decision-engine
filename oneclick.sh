@@ -27,7 +27,7 @@ CLICKHOUSE_PASSWORD="${CLICKHOUSE_PASSWORD:-decision_engine}"
 KAFKA_HOST="${KAFKA_HOST:-localhost}"
 KAFKA_PORT="${KAFKA_PORT:-9092}"
 
-PORTS=(8080 5173 "$DOCS_PORT")
+PORTS=(8080 5173 "$DOCS_PORT" 9094)
 EXPECTED_CLICKHOUSE_TABLES=(
     analytics_api_events_queue
     analytics_domain_events_queue
@@ -51,6 +51,7 @@ is_protected_process() {
 check_and_kill_ports() {
     local pids_to_kill=()
     local ports_in_use=()
+    local killable_ports=()
     local protected_ports=()
 
     echo "Checking for processes on ports ${PORTS[*]}..."
@@ -72,6 +73,7 @@ check_and_kill_ports() {
                     continue
                 fi
                 pids_to_kill+=("$pid")
+                killable_ports+=("$port")
                 echo "  [!] Port $port is in use by PID $pid"
                 echo "      Command: $cmd"
             done <<< "$pids"
@@ -81,7 +83,7 @@ check_and_kill_ports() {
     if [ ${#pids_to_kill[@]} -gt 0 ]; then
         echo ""
         echo "=========================================="
-        echo "  WARNING: Found processes on ports ${ports_in_use[*]}"
+        echo "  WARNING: Found killable processes on ports ${killable_ports[*]}"
         echo "  These processes will be killed to proceed."
         echo "=========================================="
         echo ""

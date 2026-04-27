@@ -108,6 +108,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+function gatewayName(value: unknown) {
+  return isRecord(value) ? String(value.gateway_name || '').trim() : ''
+}
+
 function createCondition(routingKeys: Record<string, RoutingKeyConfig>): ConditionRow {
   const firstKey = Object.keys(routingKeys)[0] || 'payment_method'
   const firstKeyValues = routingKeys[firstKey]?.values || []
@@ -123,7 +127,8 @@ function createCondition(routingKeys: Record<string, RoutingKeyConfig>): Conditi
 function mapRoutingKeyTypeToEuclidValueType(keyType?: RoutingKeyConfig['type']) {
   if (keyType === 'integer') return 'number'
   if (keyType === 'enum') return 'enum_variant'
-  if (keyType === 'udf' || keyType === 'global_ref') return 'metadata_variant'
+  if (keyType === 'udf') return 'metadata_variant'
+  if (keyType === 'global_ref') return 'global_ref'
   return 'str_value'
 }
 
@@ -143,6 +148,7 @@ function createStatementGroup(routingKeys: Record<string, RoutingKeyConfig>): St
 function formatConditionValue(condition: ConditionRow, routingKeys: Record<string, RoutingKeyConfig>) {
   const keyType = routingKeys[condition.lhs]?.type
   if (keyType === 'integer') return condition.value || 'number'
+  if (keyType === 'global_ref') return condition.value || 'global reference'
   return condition.value ? `'${condition.value}'` : 'value'
 }
 
@@ -271,9 +277,29 @@ function summarizeRuleBlock(block: RuleBlock, routingKeys: Record<string, Routin
 }
 
 function formatEuclidConditionValue(condition: EuclidCondition) {
+  const value = condition.value
   const rawValue = condition.value?.value
   if (typeof rawValue === 'number') return String(rawValue)
-  return rawValue ? `'${rawValue}'` : 'value'
+  if (typeof rawValue === 'string') {
+    if (value?.type === 'global_ref') return rawValue || 'global reference'
+    return rawValue ? `'${rawValue}'` : 'value'
+  }
+  if (Array.isArray(rawValue)) {
+    const values = rawValue.map((item) => {
+      if (typeof item === 'number') return String(item)
+      if (typeof item === 'string') return `'${item}'`
+      return JSON.stringify(item)
+    })
+    return `[${values.join(', ')}]`
+  }
+  if (value?.type === 'metadata_variant' && isRecord(rawValue)) {
+    const metadataKey = typeof rawValue.key === 'string' ? rawValue.key : condition.lhs
+    const metadataValue = rawValue.value
+    if (typeof metadataValue === 'number') return `${metadataKey} = ${metadataValue}`
+    if (typeof metadataValue === 'string') return `${metadataKey} = '${metadataValue}'`
+    return `${metadataKey} = ${JSON.stringify(metadataValue)}`
+  }
+  return isRecord(rawValue) ? JSON.stringify(rawValue) : 'value'
 }
 
 function summarizeEuclidCondition(condition: EuclidCondition) {
@@ -350,14 +376,47 @@ function countEuclidStatementStats(statement: EuclidStatement): RuleGroupStats {
 
 function summarizeEuclidOutput(output: unknown) {
   const outputRecord = isRecord(output) ? output : {}
+  const single = outputRecord.single
+  if (isRecord(single)) {
+    const name = gatewayName(single)
+    return name ? `choose ${name}` : 'choose configured gateway'
+  }
+
   const priority = Array.isArray(outputRecord.priority) ? outputRecord.priority : []
   const names = priority
-    .map((gateway) => (isRecord(gateway) ? String(gateway.gateway_name || '').trim() : ''))
+    .map(gatewayName)
     .filter(Boolean)
 
-  if (names.length === 0) return 'choose configured output'
   if (names.length === 1) return `choose ${names[0]}`
-  return `try ${names.join(' -> ')}`
+  if (names.length > 1) return `try ${names.join(' -> ')}`
+
+  const volumeSplit = Array.isArray(outputRecord.volume_split) ? outputRecord.volume_split : []
+  const splitSummaries = volumeSplit
+    .map((split) => {
+      if (!isRecord(split)) return null
+      const splitPercent = typeof split.split === 'number' ? split.split : Number(split.split)
+      const name = gatewayName(split.output)
+      if (!name) return null
+      return Number.isFinite(splitPercent) ? `${splitPercent}% to ${name}` : `to ${name}`
+    })
+    .filter(Boolean)
+  if (splitSummaries.length > 0) return `split ${splitSummaries.join(', ')}`
+
+  const volumeSplitPriority = Array.isArray(outputRecord.volume_split_priority) ? outputRecord.volume_split_priority : []
+  const prioritySplitSummaries = volumeSplitPriority
+    .map((split) => {
+      if (!isRecord(split)) return null
+      const splitPercent = typeof split.split === 'number' ? split.split : Number(split.split)
+      const gatewaySummary = Array.isArray(split.output)
+        ? split.output.map(gatewayName).filter(Boolean).join(' -> ')
+        : ''
+      if (!gatewaySummary) return null
+      return Number.isFinite(splitPercent) ? `${splitPercent}% to ${gatewaySummary}` : `to ${gatewaySummary}`
+    })
+    .filter(Boolean)
+  if (prioritySplitSummaries.length > 0) return `split priority ${prioritySplitSummaries.join(', ')}`
+
+  return 'choose configured output'
 }
 
 function summarizeExistingRule(rule: EuclidRule) {
@@ -858,6 +917,14 @@ function buildAlgorithmData(rules: RuleBlock[], defaultOutput: DefaultOutput, ro
     }
   }
 
+  function buildConditionValue(c: ConditionRow, valueType: string) {
+    if (valueType === 'number') return Number(c.value)
+    if (valueType === 'metadata_variant') {
+      return { key: c.lhs, value: c.value }
+    }
+    return c.value
+  }
+
   function buildCondition(c: ConditionRow) {
     const keyType = routingKeys[c.lhs]?.type
     const valueType = mapRoutingKeyTypeToEuclidValueType(keyType)
@@ -867,7 +934,7 @@ function buildAlgorithmData(rules: RuleBlock[], defaultOutput: DefaultOutput, ro
       comparison: OPERATOR_TO_API[c.operator] || c.operator,
       value: {
         type: valueType,
-        value: valueType === 'number' ? Number(c.value) : c.value,
+        value: buildConditionValue(c, valueType),
       },
       metadata: {},
     }
