@@ -115,10 +115,24 @@ jobs:
       - name: Start services with local build
         run: docker compose --profile postgres-local up -d
 
-      - name: Wait for API
+      - name: Debug - Show service status
+        run: |
+          sleep 5
+          docker compose ps
+          echo "---"
+          docker compose logs --tail=20 open-router-pg-local || true
+
+      - name: Wait for API (basic health)
+        run: |
+          timeout 60 bash -c \
+            'until curl -sf http://localhost:8080/health; do sleep 2; done'
+          echo "✓ Basic health check passed"
+
+      - name: Wait for API (ready check)
         run: |
           timeout 180 bash -c \
             'until curl -sf http://localhost:8080/health/ready; do sleep 3; done'
+          echo "✓ Ready check passed"
 
       - uses: actions/setup-node@v4
         with:
