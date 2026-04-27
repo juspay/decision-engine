@@ -445,10 +445,7 @@ where
             "/onboarding/merchant",
             post(routes::user_auth::create_merchant),
         )
-        .route(
-            "/merchant/members",
-            get(routes::user_auth::list_members),
-        )
+        .route("/merchant/members", get(routes::user_auth::list_members))
         .route(
             "/merchant/members/invite",
             post(routes::user_auth::invite_member),

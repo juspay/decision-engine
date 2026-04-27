@@ -471,13 +471,12 @@ pub async fn invite_member(
 
     let role = payload.role.unwrap_or_else(|| "member".to_string());
 
-    let existing_users =
-        crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
-            &app_state.db,
-            dsl::email.eq(payload.email.clone()),
-        )
-        .await
-        .map_err(|_| UserAuthError::StorageError)?;
+    let existing_users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
+        &app_state.db,
+        dsl::email.eq(payload.email.clone()),
+    )
+    .await
+    .map_err(|_| UserAuthError::StorageError)?;
 
     let now = date_time::now();
 
@@ -583,26 +582,22 @@ pub async fn list_members(
     let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
     let app_state = get_tenant_app_state().await;
 
-    let memberships = crate::generics::generic_find_all::<
-        <UserMerchant as HasTable>::Table,
-        _,
-        UserMerchant,
-    >(
-        &app_state.db,
-        um_dsl::merchant_id.eq(claims.merchant_id.clone()),
-    )
-    .await
-    .map_err(|_| UserAuthError::StorageError)?;
+    let memberships =
+        crate::generics::generic_find_all::<<UserMerchant as HasTable>::Table, _, UserMerchant>(
+            &app_state.db,
+            um_dsl::merchant_id.eq(claims.merchant_id.clone()),
+        )
+        .await
+        .map_err(|_| UserAuthError::StorageError)?;
 
     let mut members = Vec::new();
     for membership in memberships {
-        let mut users =
-            crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
-                &app_state.db,
-                dsl::user_id.eq(membership.user_id.clone()),
-            )
-            .await
-            .map_err(|_| UserAuthError::StorageError)?;
+        let mut users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
+            &app_state.db,
+            dsl::user_id.eq(membership.user_id.clone()),
+        )
+        .await
+        .map_err(|_| UserAuthError::StorageError)?;
 
         if let Some(user) = users.pop() {
             members.push(MemberInfo {
@@ -631,7 +626,13 @@ fn generate_random_password() -> String {
         special[rng.gen_range(0..special.len())] as char,
     ];
 
-    let all: Vec<u8> = [uppercase.as_ref(), lowercase.as_ref(), digits.as_ref(), special.as_ref()].concat();
+    let all: Vec<u8> = [
+        uppercase.as_ref(),
+        lowercase.as_ref(),
+        digits.as_ref(),
+        special.as_ref(),
+    ]
+    .concat();
     for _ in 0..12 {
         password.push(all[rng.gen_range(0..all.len())] as char);
     }
