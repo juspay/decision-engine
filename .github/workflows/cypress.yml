@@ -112,13 +112,15 @@ jobs:
       - name: Wait for API
         run: |
           timeout 180 bash -c \
-            'until curl -sf http://localhost:8080/health; do sleep 3; done'
+            'until curl -sf http://localhost:8080/health/ready; do sleep 3; done'
 
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: website/package-lock.json
+          cache-dependency-path: |
+            website/package-lock.json
+            package-lock.json
 
       - name: Install UI deps
         run: npm ci
@@ -128,7 +130,7 @@ jobs:
         run: npm run build
         working-directory: website
         env:
-          VITE_API_BASE_URL: http://localhost:8080
+          VITE_API_BASE_PATH: http://localhost:8080/decision-engine-api
 
       - name: Serve UI
         run: npx vite preview --port 5173 &
