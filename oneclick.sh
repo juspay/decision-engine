@@ -27,7 +27,7 @@ CLICKHOUSE_PASSWORD="${CLICKHOUSE_PASSWORD:-decision_engine}"
 KAFKA_HOST="${KAFKA_HOST:-localhost}"
 KAFKA_PORT="${KAFKA_PORT:-9092}"
 
-PORTS=(8080 5173 "$DOCS_PORT" 9094)
+PORTS=(8080 5173 "$DOCS_PORT")
 EXPECTED_CLICKHOUSE_TABLES=(
     analytics_api_events_queue
     analytics_domain_events_queue
@@ -35,9 +35,23 @@ EXPECTED_CLICKHOUSE_TABLES=(
     analytics_domain_events
 )
 
+is_protected_process() {
+    local cmd="$1"
+
+    case "$cmd" in
+        *"OrbStack.app"*|*"OrbStack Helper"*|*"Docker.app"*|*"Docker Desktop"*|*"com.docker"*|*"colima"*|*"Colima"*|*"lima"*|*"Lima"*|*"containerd"*|*"dockerd"*|*"docker-proxy"*)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
 check_and_kill_ports() {
     local pids_to_kill=()
     local ports_in_use=()
+    local protected_ports=()
 
     echo "Checking for processes on ports ${PORTS[*]}..."
     echo ""
@@ -51,6 +65,12 @@ check_and_kill_ports() {
                 [ -z "$pid" ] && continue
                 local cmd
                 cmd=$(ps -p "$pid" -o command= 2>/dev/null || echo "unknown process")
+                if is_protected_process "$cmd"; then
+                    protected_ports+=("$port")
+                    echo "  [skip] Port $port is in use by protected infrastructure PID $pid"
+                    echo "         Command: $cmd"
+                    continue
+                fi
                 pids_to_kill+=("$pid")
                 echo "  [!] Port $port is in use by PID $pid"
                 echo "      Command: $cmd"
@@ -86,8 +106,17 @@ check_and_kill_ports() {
             local pid
             pid=$(lsof -t -iTCP:$port -sTCP:LISTEN 2>/dev/null || true)
             if [ -n "$pid" ]; then
-                kill -9 "$pid" 2>/dev/null || true
-                echo "  Force killed PID $pid on port $port"
+                while IFS= read -r force_pid; do
+                    [ -z "$force_pid" ] && continue
+                    local force_cmd
+                    force_cmd=$(ps -p "$force_pid" -o command= 2>/dev/null || echo "unknown process")
+                    if is_protected_process "$force_cmd"; then
+                        echo "  Skipped protected PID $force_pid on port $port during force-kill pass"
+                        continue
+                    fi
+                    kill -9 "$force_pid" 2>/dev/null || true
+                    echo "  Force killed PID $force_pid on port $port"
+                done <<< "$pid"
             fi
         done
 
@@ -95,6 +124,12 @@ check_and_kill_ports() {
         echo ""
     else
         echo "No processes found on ports ${PORTS[*]}."
+        echo ""
+    fi
+
+    if [ ${#protected_ports[@]} -gt 0 ]; then
+        echo "Protected infrastructure processes were detected on ports ${protected_ports[*]} and were not killed."
+        echo "If one of these ports is still unavailable after Docker/OrbStack is healthy, stop the owning service manually."
         echo ""
     fi
 }
