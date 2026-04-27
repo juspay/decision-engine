@@ -340,6 +340,8 @@ pub enum UserAuthError {
     MerchantNotFound,
     #[error("User is already a member of this merchant")]
     AlreadyMember,
+    #[error("Insufficient permissions")]
+    Forbidden,
 }
 
 impl axum::response::IntoResponse for UserAuthError {
@@ -356,6 +358,7 @@ impl axum::response::IntoResponse for UserAuthError {
             Self::InvalidToken => (hyper::StatusCode::UNAUTHORIZED, self.to_string()),
             Self::MerchantNotFound => (hyper::StatusCode::NOT_FOUND, self.to_string()),
             Self::AlreadyMember => (hyper::StatusCode::CONFLICT, self.to_string()),
+            Self::Forbidden => (hyper::StatusCode::FORBIDDEN, self.to_string()),
             Self::StorageError | Self::TokenGenerationFailed | Self::PasswordHashingFailed => {
                 (hyper::StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
             }

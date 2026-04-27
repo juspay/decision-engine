@@ -467,9 +467,17 @@ pub async fn invite_member(
         .ok_or(UserAuthError::StorageError)?;
 
     let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
-    let app_state = get_tenant_app_state().await;
 
-    let role = payload.role.unwrap_or_else(|| "member".to_string());
+    if claims.role != "admin" {
+        return Err(error::ContainerError::from(UserAuthError::Forbidden));
+    }
+
+    let role = match payload.role.as_deref().unwrap_or("member") {
+        "admin" => "admin".to_string(),
+        _ => "member".to_string(),
+    };
+
+    let app_state = get_tenant_app_state().await;
 
     let existing_users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
         &app_state.db,
@@ -520,9 +528,6 @@ pub async fn invite_member(
         // Create new user with generated password
         let generated_password = generate_random_password();
 
-        auth::validate_password_strength(&generated_password)
-            .map_err(|_| UserAuthError::PasswordHashingFailed)?;
-
         let password_hash = auth::hash_password(&generated_password)
             .map_err(|_| UserAuthError::PasswordHashingFailed)?;
 
@@ -556,9 +561,21 @@ pub async fn invite_member(
             created_at: now,
         };
 
-        crate::generics::generic_insert(&app_state.db, new_user_merchant)
+        if crate::generics::generic_insert(&app_state.db, new_user_merchant)
             .await
-            .map_err(|_| UserAuthError::StorageError)?;
+            .is_err()
+        {
+            // Compensating delete: remove orphaned user if membership insert fails
+            let conn = app_state.db.get_conn().await.ok();
+            if let Some(conn) = conn {
+                let _ = crate::generics::generic_delete::<
+                    <User as diesel::associations::HasTable>::Table,
+                    _,
+                >(&conn, dsl::user_id.eq(user_id.clone()))
+                .await;
+            }
+            return Err(error::ContainerError::from(UserAuthError::StorageError));
+        }
 
         Ok(Json(InviteMemberResponse {
             email: payload.email,
@@ -590,23 +607,32 @@ pub async fn list_members(
         .await
         .map_err(|_| UserAuthError::StorageError)?;
 
-    let mut members = Vec::new();
-    for membership in memberships {
-        let mut users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
+    let user_ids: Vec<String> = memberships.iter().map(|m| m.user_id.clone()).collect();
+
+    let users = if user_ids.is_empty() {
+        Vec::new()
+    } else {
+        crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
             &app_state.db,
-            dsl::user_id.eq(membership.user_id.clone()),
+            dsl::user_id.eq_any(user_ids),
         )
         .await
-        .map_err(|_| UserAuthError::StorageError)?;
+        .map_err(|_| UserAuthError::StorageError)?
+    };
 
-        if let Some(user) = users.pop() {
-            members.push(MemberInfo {
-                user_id: user.user_id,
-                email: user.email,
+    let users_by_id: std::collections::HashMap<String, User> =
+        users.into_iter().map(|u| (u.user_id.clone(), u)).collect();
+
+    let members = memberships
+        .into_iter()
+        .filter_map(|membership| {
+            users_by_id.get(&membership.user_id).map(|user| MemberInfo {
+                user_id: user.user_id.clone(),
+                email: user.email.clone(),
                 role: membership.role,
-            });
-        }
-    }
+            })
+        })
+        .collect();
 
     Ok(Json(members))
 }

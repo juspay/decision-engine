@@ -625,6 +625,7 @@ export function DecisionExplorerPage() {
   const [form, setForm] = useState<FormState>(initialState.form)
 
   const [simulationConfig, setSimulationConfig] = useState<SimulationConfig>(initialState.simulationConfig)
+  const [successRate, setSuccessRate] = useState(70)
 
   const [debitForm, setDebitForm] = useState<DebitRoutingFormState>(initialState.debitForm)
 
@@ -1380,6 +1381,7 @@ export function DecisionExplorerPage() {
     } else if (activeTab === 'batch') {
       setForm(defaults.form)
       setSimulationConfig(defaults.simulationConfig)
+      setSuccessRate(70)
       setSimulationResults(defaults.simulationResults)
       setIsSimulating(false)
     } else if (activeTab === 'rule') {
@@ -1874,42 +1876,51 @@ export function DecisionExplorerPage() {
 
                 {activeTab === 'batch' && (
                   <div className="border-t border-slate-200 dark:border-[#1c1c24] pt-4 mt-4 space-y-3">
-                    <h3 className="text-sm font-medium text-slate-800 flex items-center gap-2">
+                    <h3 className="text-sm font-medium text-slate-800 dark:text-slate-200 flex items-center gap-2">
                       <Activity size={14} />
-                      Simulation Configuration
+                      Simulation
                     </h3>
-                    <div className="grid grid-cols-3 gap-3">
-                      <div>
-                        <label className="block text-xs font-medium text-slate-600 mb-1">Total Payments</label>
+                    <div className="flex items-end gap-3">
+                      <div className="w-28">
+                        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Payments</label>
                         <input
-                          type="text"
+                          type="number"
+                          min={1}
+                          max={1000}
                           value={simulationConfig.totalPayments}
-                          onChange={e => setSimulationConfig(s => ({ ...s, totalPayments: e.target.value }))}
+                          onChange={e => {
+                            const total = Math.max(1, parseInt(e.target.value) || 1)
+                            const s = Math.round(total * successRate / 100)
+                            setSimulationConfig({ totalPayments: String(total), successCount: String(s), failureCount: String(total - s) })
+                          }}
                           className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
                         />
                       </div>
-                      <div>
-                        <label className="block text-xs font-medium text-slate-600 mb-1">Success Count</label>
+                      <div className="flex-1">
+                        <div className="flex justify-between mb-1">
+                          <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Success Rate</label>
+                          <span className="text-xs font-semibold text-brand-600 dark:text-sky-400">{successRate}%</span>
+                        </div>
                         <input
-                          type="text"
-                          value={simulationConfig.successCount}
-                          onChange={e => setSimulationConfig(s => ({ ...s, successCount: e.target.value }))}
-                          className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                          type="range"
+                          min={0}
+                          max={100}
+                          value={successRate}
+                          onChange={e => {
+                            const rate = parseInt(e.target.value)
+                            const total = parseInt(simulationConfig.totalPayments) || 10
+                            const s = Math.round(total * rate / 100)
+                            setSuccessRate(rate)
+                            setSimulationConfig({ totalPayments: String(total), successCount: String(s), failureCount: String(total - s) })
+                          }}
+                          className="w-full accent-brand-600"
                         />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-slate-600 mb-1">Failure Count</label>
-                        <input
-                          type="text"
-                          value={simulationConfig.failureCount}
-                          onChange={e => setSimulationConfig(s => ({ ...s, failureCount: e.target.value }))}
-                          className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-                        />
+                        <div className="flex justify-between mt-1 text-[10px] text-slate-400">
+                          <span>{simulationConfig.successCount} success</span>
+                          <span>{simulationConfig.failureCount} failure</span>
+                        </div>
                       </div>
                     </div>
-                    <p className="text-xs text-slate-500">
-                      Will run {simulationConfig.totalPayments || 0} payments: {simulationConfig.successCount || 0} SUCCESS, {simulationConfig.failureCount || 0} FAILURE
-                    </p>
                   </div>
                 )}
               </>

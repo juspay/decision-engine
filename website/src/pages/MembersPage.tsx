@@ -30,17 +30,22 @@ function RoleBadge({ role }: { role: string }) {
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
-  function copy() {
-    navigator.clipboard.writeText(text).then(() => {
+  async function copy() {
+    if (!navigator.clipboard) return
+    try {
+      await navigator.clipboard.writeText(text)
       setCopied(true)
       setTimeout(() => setCopied(false), 1800)
-    })
+    } catch {
+      // clipboard unavailable or denied — fail silently
+    }
   }
   return (
     <button
       onClick={copy}
       className="ml-1.5 inline-flex items-center justify-center w-6 h-6 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
-      title="Copy"
+      title={copied ? 'Copied' : 'Copy'}
+      aria-label={copied ? 'Copied' : 'Copy'}
     >
       {copied ? <Check size={13} className="text-green-500" /> : <Copy size={13} />}
     </button>
@@ -178,6 +183,7 @@ export function MembersPage() {
                       onClick={() => setShowPassword((v) => !v)}
                       className="ml-1.5 inline-flex items-center justify-center w-6 h-6 rounded text-amber-600 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-200 transition-colors"
                       title={showPassword ? 'Hide password' : 'Show password'}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
                     >
                       {showPassword ? <EyeOff size={13} /> : <Eye size={13} />}
                     </button>
