@@ -23,7 +23,13 @@ import { Button } from '../ui/Button'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { useMerchantStore } from '../../store/merchantStore'
 import { apiPost } from '../../lib/api'
-import { RoutingAlgorithm } from '../../types/api'
+import {
+  EuclidAlgorithmData,
+  EuclidCondition,
+  EuclidRule,
+  EuclidStatement,
+  RoutingAlgorithm,
+} from '../../types/api'
 import { useDynamicRoutingConfig, RoutingKeyConfig } from '../../hooks/useDynamicRoutingConfig'
 import { Plus, Trash2, GripVertical, ChevronDown, ChevronUp, Eye, PowerOff, CornerDownRight } from 'lucide-react'
 
@@ -43,6 +49,15 @@ const OPERATOR_LABELS: Record<string, string> = {
   '<': 'less than',
   '>=': 'greater than or equal',
   '<=': 'less than or equal',
+}
+
+const API_COMPARISON_LABELS: Record<string, string> = {
+  equal: 'equals',
+  not_equal: 'does not equal',
+  greater_than: 'greater than',
+  less_than: 'less than',
+  greater_than_equal: 'greater than or equal',
+  less_than_equal: 'less than or equal',
 }
 
 // ---- Types for builder ----
@@ -72,8 +87,14 @@ interface RuleBlock {
   priorityGateways: GatewayEntry[]
 }
 
+type RuleViewMode = 'readable' | 'json'
+
 type DefaultOutput = {
   priorityGateways: GatewayEntry[]
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function createCondition(routingKeys: Record<string, RoutingKeyConfig>): ConditionRow {
@@ -88,12 +109,285 @@ function createCondition(routingKeys: Record<string, RoutingKeyConfig>): Conditi
   }
 }
 
+function mapRoutingKeyTypeToEuclidValueType(keyType?: RoutingKeyConfig['type']) {
+  if (keyType === 'integer') return 'number'
+  if (keyType === 'enum') return 'enum_variant'
+  if (keyType === 'udf' || keyType === 'global_ref') return 'metadata_variant'
+  return 'str_value'
+}
+
+function initialValueForKey(key: string, routingKeys: Record<string, RoutingKeyConfig>) {
+  const keyInfo = routingKeys[key]
+  return keyInfo?.type === 'enum' ? (keyInfo.values[0] || '') : ''
+}
+
 function createStatementGroup(routingKeys: Record<string, RoutingKeyConfig>): StatementGroup {
   return {
     id: crypto.randomUUID(),
     conditions: [createCondition(routingKeys)],
     nested: [],
   }
+}
+
+function formatConditionValue(condition: ConditionRow, routingKeys: Record<string, RoutingKeyConfig>) {
+  const keyType = routingKeys[condition.lhs]?.type
+  if (keyType === 'integer') return condition.value || 'number'
+  return condition.value ? `'${condition.value}'` : 'value'
+}
+
+function summarizeCondition(condition: ConditionRow, routingKeys: Record<string, RoutingKeyConfig>) {
+  const operator = OPERATOR_LABELS[condition.operator] || condition.operator
+  return `${condition.lhs} ${operator} ${formatConditionValue(condition, routingKeys)}`
+}
+
+function wrapTopLevelGroup(expression: string) {
+  return `{ ${expression} }`
+}
+
+function wrapNestedGroup(expression: string) {
+  return `(${expression})`
+}
+
+function indent(level: number) {
+  return '  '.repeat(level)
+}
+
+function summarizeStatementGroup(group: StatementGroup, routingKeys: Record<string, RoutingKeyConfig>): string {
+  const conditions = group.conditions.map((condition) => summarizeCondition(condition, routingKeys))
+  const parentExpression = conditions.length > 1 ? wrapNestedGroup(conditions.join(' AND ')) : conditions[0] || 'no condition'
+
+  if (group.nested.length === 0) {
+    return parentExpression
+  }
+
+  const nestedExpression = group.nested
+    .map((nested) => wrapNestedGroup(summarizeStatementGroup(nested, routingKeys)))
+    .join(' OR ')
+
+  return `${parentExpression} AND NESTED ANY ${wrapNestedGroup(nestedExpression)}`
+}
+
+function formatStatementGroupBlock(group: StatementGroup, routingKeys: Record<string, RoutingKeyConfig>, depth = 0): string[] {
+  const lines = [`${indent(depth)}{`]
+  group.conditions.forEach((condition, index) => {
+    const prefix = index > 0 ? 'AND ' : ''
+    lines.push(`${indent(depth + 1)}${prefix}${summarizeCondition(condition, routingKeys)}`)
+  })
+
+  if (group.nested.length > 0) {
+    const prefix = group.conditions.length > 0 ? 'AND ' : ''
+    lines.push(`${indent(depth + 1)}${prefix}NESTED ANY {`)
+    group.nested.forEach((nested, index) => {
+      if (index > 0) {
+        lines.push(`${indent(depth + 2)}OR`)
+      }
+      lines.push(...formatStatementGroupBlock(nested, routingKeys, depth + 2))
+    })
+    lines.push(`${indent(depth + 1)}}`)
+  }
+
+  lines.push(`${indent(depth)}}`)
+  return lines
+}
+
+function formatRuleBlockExpression(block: RuleBlock, routingKeys: Record<string, RoutingKeyConfig>) {
+  if (block.statements.length === 0) {
+    return 'Add at least one condition group'
+  }
+
+  const lines = ['IF {']
+  block.statements.forEach((group, index) => {
+    if (index > 0) {
+      lines.push(`${indent(1)}OR`)
+    }
+    lines.push(...formatStatementGroupBlock(group, routingKeys, 1))
+  })
+  lines.push('}')
+  return lines.join('\n')
+}
+
+type RuleGroupStats = {
+  conditions: number
+  nestedBranches: number
+}
+
+function countGroupStats(group: StatementGroup): RuleGroupStats {
+  return group.nested.reduce(
+    (stats, nested) => {
+      const nestedStats = countGroupStats(nested)
+      return {
+        conditions: stats.conditions + nestedStats.conditions,
+        nestedBranches: stats.nestedBranches + 1 + nestedStats.nestedBranches,
+      }
+    },
+    { conditions: group.conditions.length, nestedBranches: 0 }
+  )
+}
+
+function summarizePriorityOutput(gateways: GatewayEntry[]) {
+  const names = gateways.map((gateway) => gateway.gatewayName.trim()).filter(Boolean)
+  if (names.length === 0) return 'Then choose configured priority output'
+  if (names.length === 1) return `Then choose ${names[0]}`
+  return `Then try ${names.join(' → ')}`
+}
+
+function summarizeRuleBlock(block: RuleBlock, routingKeys: Record<string, RoutingKeyConfig>) {
+  const groupExpressions = block.statements.map((group) => summarizeStatementGroup(group, routingKeys))
+  const expression = groupExpressions.length > 0
+    ? groupExpressions.length > 1
+      ? groupExpressions.map(wrapTopLevelGroup).join(' OR ')
+      : wrapTopLevelGroup(groupExpressions[0])
+    : 'Add at least one condition group'
+  const stats = block.statements.reduce(
+    (acc, group) => {
+      const groupStats = countGroupStats(group)
+      return {
+        conditions: acc.conditions + groupStats.conditions,
+        nestedBranches: acc.nestedBranches + groupStats.nestedBranches,
+      }
+    },
+    { conditions: 0, nestedBranches: 0 }
+  )
+
+  return {
+    expression,
+    formattedExpression: formatRuleBlockExpression(block, routingKeys),
+    action: summarizePriorityOutput(block.priorityGateways),
+    topLevelGroups: block.statements.length,
+    conditions: stats.conditions,
+    nestedBranches: stats.nestedBranches,
+  }
+}
+
+function formatEuclidConditionValue(condition: EuclidCondition) {
+  const rawValue = condition.value?.value
+  if (typeof rawValue === 'number') return String(rawValue)
+  return rawValue ? `'${rawValue}'` : 'value'
+}
+
+function summarizeEuclidCondition(condition: EuclidCondition) {
+  const comparison = API_COMPARISON_LABELS[condition.comparison] || condition.comparison
+  return `${condition.lhs} ${comparison} ${formatEuclidConditionValue(condition)}`
+}
+
+function summarizeEuclidStatement(statement: EuclidStatement): string {
+  const conditions = statement.condition?.map(summarizeEuclidCondition) || []
+  const parentExpression = conditions.length > 1 ? wrapNestedGroup(conditions.join(' AND ')) : conditions[0] || 'no condition'
+  const nested = statement.nested || []
+
+  if (nested.length === 0) {
+    return parentExpression
+  }
+
+  const nestedExpression = nested.map((nestedStatement) => wrapNestedGroup(summarizeEuclidStatement(nestedStatement))).join(' OR ')
+  return `${parentExpression} AND NESTED ANY ${wrapNestedGroup(nestedExpression)}`
+}
+
+function formatEuclidStatementBlock(statement: EuclidStatement, depth = 0): string[] {
+  const lines = [`${indent(depth)}{`]
+  const conditions = statement.condition || []
+  conditions.forEach((condition, index) => {
+    const prefix = index > 0 ? 'AND ' : ''
+    lines.push(`${indent(depth + 1)}${prefix}${summarizeEuclidCondition(condition)}`)
+  })
+
+  const nested = statement.nested || []
+  if (nested.length > 0) {
+    const prefix = conditions.length > 0 ? 'AND ' : ''
+    lines.push(`${indent(depth + 1)}${prefix}NESTED ANY {`)
+    nested.forEach((nestedStatement, index) => {
+      if (index > 0) {
+        lines.push(`${indent(depth + 2)}OR`)
+      }
+      lines.push(...formatEuclidStatementBlock(nestedStatement, depth + 2))
+    })
+    lines.push(`${indent(depth + 1)}}`)
+  }
+
+  lines.push(`${indent(depth)}}`)
+  return lines
+}
+
+function formatEuclidRuleExpression(rule: EuclidRule) {
+  if (!rule.statements || rule.statements.length === 0) {
+    return 'No condition groups configured'
+  }
+
+  const lines = ['IF {']
+  rule.statements.forEach((statement, index) => {
+    if (index > 0) {
+      lines.push(`${indent(1)}OR`)
+    }
+    lines.push(...formatEuclidStatementBlock(statement, 1))
+  })
+  lines.push('}')
+  return lines.join('\n')
+}
+
+function countEuclidStatementStats(statement: EuclidStatement): RuleGroupStats {
+  return (statement.nested || []).reduce(
+    (stats, nested) => {
+      const nestedStats = countEuclidStatementStats(nested)
+      return {
+        conditions: stats.conditions + nestedStats.conditions,
+        nestedBranches: stats.nestedBranches + 1 + nestedStats.nestedBranches,
+      }
+    },
+    { conditions: statement.condition?.length || 0, nestedBranches: 0 }
+  )
+}
+
+function summarizeEuclidOutput(output: unknown) {
+  const outputRecord = isRecord(output) ? output : {}
+  const priority = Array.isArray(outputRecord.priority) ? outputRecord.priority : []
+  const names = priority
+    .map((gateway) => (isRecord(gateway) ? String(gateway.gateway_name || '').trim() : ''))
+    .filter(Boolean)
+
+  if (names.length === 0) return 'choose configured output'
+  if (names.length === 1) return `choose ${names[0]}`
+  return `try ${names.join(' -> ')}`
+}
+
+function summarizeExistingRule(rule: EuclidRule) {
+  const statementExpressions = (rule.statements || []).map(summarizeEuclidStatement)
+  const expression = statementExpressions.length > 0
+    ? statementExpressions.length > 1
+      ? statementExpressions.map(wrapTopLevelGroup).join(' OR ')
+      : wrapTopLevelGroup(statementExpressions[0])
+    : 'No condition groups configured'
+  const stats = (rule.statements || []).reduce(
+    (acc, statement) => {
+      const statementStats = countEuclidStatementStats(statement)
+      return {
+        conditions: acc.conditions + statementStats.conditions,
+        nestedBranches: acc.nestedBranches + statementStats.nestedBranches,
+      }
+    },
+    { conditions: 0, nestedBranches: 0 }
+  )
+
+  return {
+    expression,
+    formattedExpression: formatEuclidRuleExpression(rule),
+    action: summarizeEuclidOutput(rule.output),
+    conditions: stats.conditions,
+    nestedBranches: stats.nestedBranches,
+    topLevelGroups: rule.statements?.length || 0,
+  }
+}
+
+function getAdvancedAlgorithmData(algorithm: RoutingAlgorithm['algorithm_data'] | RoutingAlgorithm['algorithm']) {
+  if (algorithm?.type !== 'advanced' || !isRecord(algorithm.data)) {
+    return null
+  }
+
+  const data = algorithm.data as Partial<EuclidAlgorithmData>
+  if (!Array.isArray(data.rules)) {
+    return null
+  }
+
+  return data as EuclidAlgorithmData
 }
 
 // ---- Sortable gateway item ----
@@ -215,6 +509,7 @@ function ConditionRowEditor({
   const keyInfo = routingKeys[row.lhs]
   const isEnum = keyInfo?.type === 'enum'
   const isInt = keyInfo?.type === 'integer'
+  const isText = !isEnum && !isInt
 
   const operators = isInt
     ? ['>', '<', '>=', '<=', '==', '!=']
@@ -224,7 +519,15 @@ function ConditionRowEditor({
     <div className="flex items-center gap-2 flex-wrap">
       <select
         value={row.lhs}
-        onChange={(e) => onChange({ ...row, lhs: e.target.value, value: '', operator: '==' })}
+        onChange={(e) => {
+          const nextKey = e.target.value
+          onChange({
+            ...row,
+            lhs: nextKey,
+            value: initialValueForKey(nextKey, routingKeys),
+            operator: '==',
+          })
+        }}
         className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-xs focus:outline-none"
       >
         {Object.keys(routingKeys).map((k) => (
@@ -260,7 +563,7 @@ function ConditionRowEditor({
         </select>
       ) : (
         <input
-          type="number"
+          type={isText ? 'text' : 'number'}
           value={row.value}
           onChange={(e) => onChange({ ...row, value: e.target.value })}
           placeholder="value"
@@ -312,7 +615,11 @@ function StatementGroupEditor({
           {depth > 0 && <CornerDownRight size={14} className="text-slate-400" />}
           <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8490a5]">{label}</span>
           <Badge variant="gray">{group.conditions.length} AND</Badge>
-          {group.nested.length > 0 && <Badge variant="blue">{group.nested.length} nested OR</Badge>}
+          {group.nested.length > 0 && (
+            <Badge variant="blue">
+              {group.nested.length} nested IF branch{group.nested.length === 1 ? '' : 'es'}
+            </Badge>
+          )}
         </div>
         <button
           type="button"
@@ -369,7 +676,7 @@ function StatementGroupEditor({
         <div className="space-y-2">
           {group.nested.length > 0 && (
             <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">
-              Nested branches. Any nested branch can satisfy this group after the parent conditions match.
+              Nested IF branches are joined to the parent with AND. If there are multiple nested branches, any one branch can match.
             </p>
           )}
           {group.nested.map((nested, idx) => (
@@ -401,7 +708,7 @@ function StatementGroupEditor({
             </div>
           ))}
           <Button type="button" variant="secondary" size="sm" onClick={addNestedGroup}>
-            <Plus size={12} /> Add nested OR group
+            <Plus size={12} /> Add nested IF branch
           </Button>
         </div>
       </div>
@@ -422,6 +729,7 @@ function RuleBlockEditor({
   routingKeys: Record<string, RoutingKeyConfig>
 }) {
   const [collapsed, setCollapsed] = useState(false)
+  const summary = summarizeRuleBlock(block, routingKeys)
 
   return (
     <div className="border border-slate-200 dark:border-[#1c1c24] rounded-xl">
@@ -448,6 +756,27 @@ function RuleBlockEditor({
       </div>
       {!collapsed && (
         <div className="px-4 py-3 space-y-3">
+          <div className="rounded-xl border border-sky-500/15 bg-sky-500/[0.04] px-3 py-3 dark:border-sky-400/18 dark:bg-sky-400/[0.06]">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <Badge variant="blue">{summary.topLevelGroups} OR group{summary.topLevelGroups === 1 ? '' : 's'}</Badge>
+              <Badge variant="green">{summary.conditions} AND condition{summary.conditions === 1 ? '' : 's'}</Badge>
+              {summary.nestedBranches > 0 && (
+                <Badge variant="purple">{summary.nestedBranches} nested IF branch{summary.nestedBranches === 1 ? '' : 'es'}</Badge>
+              )}
+            </div>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8792a8]">
+              Rule summary
+            </p>
+            <pre className="mt-2 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-200/70 bg-white/60 px-3 py-3 font-mono text-xs leading-6 text-sky-700 dark:border-[#273244] dark:bg-[#0d1118] dark:text-sky-200">
+              {summary.formattedExpression}
+            </pre>
+            <p className="mt-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
+              {summary.action}.
+            </p>
+            <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-[#8d96a8]">
+              Nested relation: parent group conditions must match first, then nested branches are evaluated. Multiple nested branches are alternatives.
+            </p>
+          </div>
           {/* Conditions */}
           <div>
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -529,12 +858,15 @@ function buildAlgorithmData(rules: RuleBlock[], defaultOutput: DefaultOutput, ro
   }
 
   function buildCondition(c: ConditionRow) {
+    const keyType = routingKeys[c.lhs]?.type
+    const valueType = mapRoutingKeyTypeToEuclidValueType(keyType)
+
     return {
       lhs: c.lhs,
       comparison: OPERATOR_TO_API[c.operator] || c.operator,
       value: {
-        type: routingKeys[c.lhs]?.type === 'integer' ? 'number' : 'enum_variant',
-        value: routingKeys[c.lhs]?.type === 'integer' ? Number(c.value) : c.value,
+        type: valueType,
+        value: valueType === 'number' ? Number(c.value) : c.value,
       },
       metadata: {},
     }
@@ -588,6 +920,7 @@ export function EuclidRulesPage() {
   const [deactivateError, setDeactivateError] = useState<string | null>(null)
   const [deactivateSuccess, setDeactivateSuccess] = useState(false)
   const [expandedRuleIds, setExpandedRuleIds] = useState<Set<string>>(new Set())
+  const [ruleViewModes, setRuleViewModes] = useState<Record<string, RuleViewMode>>({})
 
   const { data: allAlgorithms, mutate: mutateAlgorithms } = useSWR<RoutingAlgorithm[]>(
     merchantId ? `/routing/list/${merchantId}` : null,
@@ -699,6 +1032,10 @@ export function EuclidRulesPage() {
     })
   }
 
+  function setRuleViewMode(id: string, mode: RuleViewMode) {
+    setRuleViewModes((prev) => ({ ...prev, [id]: mode }))
+  }
+
   function addRuleBlock() {
     setRuleBlocks((prev) => [
       ...prev,
@@ -738,6 +1075,8 @@ export function EuclidRulesPage() {
                     const isActive = activeIds.has(algo.id)
                     const isExpanded = expandedRuleIds.has(algo.id)
                     const algorithm = algo.algorithm_data || algo.algorithm
+                    const advancedData = getAdvancedAlgorithmData(algorithm)
+                    const viewMode = ruleViewModes[algo.id] || 'readable'
 
                     return (
                       <div key={algo.id}>
@@ -785,20 +1124,82 @@ export function EuclidRulesPage() {
 
                         {isExpanded && (
                           <div className="bg-slate-50 px-4 py-3 dark:bg-[#151518]">
-                            <div className="space-y-2 text-xs text-slate-600">
-                              <p><strong>ID:</strong> {algo.id}</p>
-                              <p><strong>Description:</strong> {algo.description || 'N/A'}</p>
-                              <p><strong>Algorithm For:</strong> {algo.algorithm_for}</p>
-                              {algo.created_at && (
-                                <p><strong>Created:</strong> {new Date(algo.created_at).toLocaleString()}</p>
-                              )}
-                              <div>
-                                <strong>Configuration:</strong>
-                                <pre className="mt-1 max-h-48 overflow-auto rounded border border-transparent bg-slate-100 p-2 text-xs dark:border-[#222226] dark:bg-[#0f0f11]">
-                                  {JSON.stringify(algorithm, null, 2)}
-                                </pre>
+                            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                              <div className="space-y-1 text-xs text-slate-600 dark:text-[#9aa3b5]">
+                                <p><strong>ID:</strong> {algo.id}</p>
+                                <p><strong>Description:</strong> {algo.description || 'N/A'}</p>
+                                <p><strong>Algorithm For:</strong> {algo.algorithm_for}</p>
+                                {algo.created_at && (
+                                  <p><strong>Created:</strong> {new Date(algo.created_at).toLocaleString()}</p>
+                                )}
+                              </div>
+                              <div className="flex rounded-full border border-slate-200 bg-white p-1 text-xs dark:border-[#252531] dark:bg-[#0f0f11]">
+                                <button
+                                  type="button"
+                                  onClick={() => setRuleViewMode(algo.id, 'readable')}
+                                  className={`rounded-full px-3 py-1 font-semibold transition ${
+                                    viewMode === 'readable'
+                                      ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-950'
+                                      : 'text-slate-500 hover:text-slate-900 dark:text-[#8d96a8] dark:hover:text-white'
+                                  }`}
+                                >
+                                  Rule view
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setRuleViewMode(algo.id, 'json')}
+                                  className={`rounded-full px-3 py-1 font-semibold transition ${
+                                    viewMode === 'json'
+                                      ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-950'
+                                      : 'text-slate-500 hover:text-slate-900 dark:text-[#8d96a8] dark:hover:text-white'
+                                  }`}
+                                >
+                                  JSON
+                                </button>
                               </div>
                             </div>
+
+                            {viewMode === 'readable' && advancedData ? (
+                              <div className="space-y-3">
+                                {advancedData.rules.map((rule, ruleIndex) => {
+                                  const summary = summarizeExistingRule(rule)
+                                  return (
+                                    <div
+                                      key={`${algo.id}-${rule.name || ruleIndex}`}
+                                      className="rounded-xl border border-sky-500/15 bg-sky-500/[0.04] px-3 py-3 dark:border-sky-400/18 dark:bg-sky-400/[0.06]"
+                                    >
+                                      <div className="mb-2 flex flex-wrap items-center gap-2">
+                                        <Badge variant="blue">{summary.topLevelGroups} OR group{summary.topLevelGroups === 1 ? '' : 's'}</Badge>
+                                        <Badge variant="green">{summary.conditions} AND condition{summary.conditions === 1 ? '' : 's'}</Badge>
+                                        {summary.nestedBranches > 0 && (
+                                          <Badge variant="purple">{summary.nestedBranches} nested IF branch{summary.nestedBranches === 1 ? '' : 'es'}</Badge>
+                                        )}
+                                      </div>
+                                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8792a8]">
+                                        {rule.name || `Rule ${ruleIndex + 1}`}
+                                      </p>
+                                      <pre className="mt-2 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-200/70 bg-white/60 px-3 py-3 font-mono text-xs leading-6 text-sky-700 dark:border-[#273244] dark:bg-[#0d1118] dark:text-sky-200">
+                                        {summary.formattedExpression}
+                                      </pre>
+                                      <p className="mt-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                                        Then {summary.action}.
+                                      </p>
+                                      <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-[#8d96a8]">
+                                        Top-level groups are OR. Conditions inside a group are AND. Nested branches are checked only after their parent group matches; multiple nested branches are alternatives.
+                                      </p>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            ) : viewMode === 'readable' ? (
+                              <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-500 dark:border-[#252531] dark:bg-[#0f0f11] dark:text-[#8d96a8]">
+                                Readable view is available for advanced rule-based algorithms. Switch to JSON for this algorithm payload.
+                              </div>
+                            ) : (
+                              <pre className="max-h-80 overflow-auto rounded border border-transparent bg-slate-100 p-3 text-xs text-slate-600 dark:border-[#222226] dark:bg-[#0f0f11] dark:text-[#d7dce8]">
+                                {JSON.stringify(algorithm, null, 2)}
+                              </pre>
+                            )}
                           </div>
                         )}
                       </div>
