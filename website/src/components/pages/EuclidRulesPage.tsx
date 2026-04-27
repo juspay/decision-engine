@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import useSWR from 'swr'
 import {
   DndContext,
@@ -31,7 +31,7 @@ import {
   RoutingAlgorithm,
 } from '../../types/api'
 import { useDynamicRoutingConfig, RoutingKeyConfig } from '../../hooks/useDynamicRoutingConfig'
-import { Plus, Trash2, GripVertical, ChevronDown, ChevronUp, Eye, PowerOff, CornerDownRight } from 'lucide-react'
+import { Plus, Trash2, GripVertical, ChevronDown, ChevronUp, Eye, PowerOff, CornerDownRight, Loader2, CheckCircle2, X } from 'lucide-react'
 
 const OPERATOR_TO_API: Record<string, string> = {
   '==': 'equal',
@@ -91,6 +91,17 @@ type RuleViewMode = 'readable' | 'json'
 
 type DefaultOutput = {
   priorityGateways: GatewayEntry[]
+}
+
+interface RoutingCreateResponse {
+  rule_id?: string
+  id?: string
+  name?: string
+}
+
+interface CreatedRuleNotice {
+  id: string | null
+  name: string
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -757,24 +768,15 @@ function RuleBlockEditor({
       {!collapsed && (
         <div className="px-4 py-3 space-y-3">
           <div className="rounded-xl border border-sky-500/15 bg-sky-500/[0.04] px-3 py-3 dark:border-sky-400/18 dark:bg-sky-400/[0.06]">
-            <div className="mb-2 flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Badge variant="blue">{summary.topLevelGroups} OR group{summary.topLevelGroups === 1 ? '' : 's'}</Badge>
               <Badge variant="green">{summary.conditions} AND condition{summary.conditions === 1 ? '' : 's'}</Badge>
               {summary.nestedBranches > 0 && (
                 <Badge variant="purple">{summary.nestedBranches} nested IF branch{summary.nestedBranches === 1 ? '' : 'es'}</Badge>
               )}
             </div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8792a8]">
-              Rule summary
-            </p>
-            <pre className="mt-2 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-200/70 bg-white/60 px-3 py-3 font-mono text-xs leading-6 text-sky-700 dark:border-[#273244] dark:bg-[#0d1118] dark:text-sky-200">
-              {summary.formattedExpression}
-            </pre>
-            <p className="mt-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
-              {summary.action}.
-            </p>
             <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-[#8d96a8]">
-              Nested relation: parent group conditions must match first, then nested branches are evaluated. Multiple nested branches are alternatives.
+              Detailed rule view is available after saving from the Existing Rules panel.
             </p>
           </div>
           {/* Conditions */}
@@ -786,7 +788,6 @@ function RuleBlockEditor({
                   Rule groups are evaluated top-to-bottom. Sibling groups are OR; conditions inside a group are AND.
                 </p>
               </div>
-              <Badge variant="blue">Nested supported</Badge>
             </div>
             <div className="space-y-2">
               {block.statements.map((group, idx) => (
@@ -911,8 +912,9 @@ export function EuclidRulesPage() {
   })
   const [showJson, setShowJson] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const submittingRef = useRef(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
-  const [createdId, setCreatedId] = useState<string | null>(null)
+  const [createdRule, setCreatedRule] = useState<CreatedRuleNotice | null>(null)
   const [activating, setActivating] = useState(false)
   const [activateError, setActivateError] = useState<string | null>(null)
   const [activateSuccess, setActivateSuccess] = useState(false)
@@ -940,30 +942,46 @@ export function EuclidRulesPage() {
 
   const algorithmData = buildAlgorithmData(ruleBlocks, defaultOutput, routingKeys)
 
+  function resetRuleDraft() {
+    setRuleName('')
+    setRuleDesc('')
+    setRuleBlocks([])
+    setDefaultOutput({ priorityGateways: [] })
+    setShowJson(false)
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    if (submittingRef.current) return
     if (!merchantId) { setSubmitError('Set a Merchant ID first.'); return }
     if (routingKeysUnavailable) {
       setSubmitError('Routing key config is unavailable. Ensure backend /config/routing-keys is reachable and valid.')
       return
     }
     if (!ruleName.trim()) { setSubmitError('Rule name is required.'); return }
+    submittingRef.current = true
     setSubmitting(true)
     setSubmitError(null)
-    setCreatedId(null)
+    const trimmedRuleName = ruleName.trim()
+    setCreatedRule(null)
     try {
-      const result = await apiPost<RoutingAlgorithm>('/routing/create', {
-        name: ruleName.trim(),
+      const result = await apiPost<RoutingCreateResponse>('/routing/create', {
+        name: trimmedRuleName,
         description: ruleDesc,
         created_by: merchantId,
         algorithm_for: 'payment',
         algorithm: { type: 'advanced', data: algorithmData },
       })
-      setCreatedId(result.id)
+      setCreatedRule({
+        id: result.rule_id || result.id || null,
+        name: result.name || trimmedRuleName,
+      })
+      resetRuleDraft()
       mutateAlgorithms()
     } catch (err) {
       setSubmitError(String(err))
     } finally {
+      submittingRef.current = false
       setSubmitting(false)
     }
   }
@@ -1231,6 +1249,47 @@ export function EuclidRulesPage() {
                 <h2 className="text-sm font-semibold text-slate-800">Rule Builder</h2>
               </CardHeader>
               <CardBody className="space-y-4">
+                {createdRule && (
+                  <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/10 p-4 text-sm text-emerald-700 shadow-[0_20px_50px_-35px_rgba(16,185,129,0.7)] dark:text-emerald-200">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="flex gap-3">
+                        <CheckCircle2 size={20} className="mt-0.5 shrink-0 text-emerald-500" />
+                        <div>
+                          <p className="font-semibold">Rule successfully created</p>
+                          <p className="mt-1 text-xs leading-5 text-emerald-700/80 dark:text-emerald-200/75">
+                            Saved <span className="font-semibold">{createdRule.name}</span>
+                            {createdRule.id ? (
+                              <>
+                                {' '}as <span className="font-mono">{createdRule.id}</span>
+                              </>
+                            ) : null}
+                            . The builder has been reset for the next rule.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        {createdRule.id ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => handleActivate(createdRule.id!)}
+                            disabled={activating}
+                          >
+                            {activating ? 'Activating' : 'Activate Now'}
+                          </Button>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() => setCreatedRule(null)}
+                          className="rounded-full p-1 text-emerald-700/70 transition hover:bg-emerald-500/10 hover:text-emerald-800 dark:text-emerald-200/70 dark:hover:text-emerald-100"
+                          aria-label="Dismiss rule created message"
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs text-slate-500 mb-1">Rule Name *</label>
@@ -1304,28 +1363,33 @@ export function EuclidRulesPage() {
                 </div>
 
                 <ErrorMessage error={submitError} />
-                {createdId && (
-                  <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-3 py-2 text-sm text-emerald-400 flex items-center justify-between">
-                    <span>Rule created (ID: {createdId})</span>
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={() => handleActivate(createdId)}
-                      disabled={activating}
-                    >
-                      Activate Now
-                    </Button>
+                {submitting && (
+                  <div className="flex items-center gap-2 rounded-lg border border-sky-500/20 bg-sky-500/8 px-3 py-2 text-sm text-sky-600 dark:text-sky-300">
+                    <Loader2 size={14} className="animate-spin" />
+                    Creating rule. Please wait, this action is locked to prevent duplicate rules.
                   </div>
                 )}
                 <div className="flex gap-3">
-                  <Button type="submit" disabled={submitting || routingKeysUnavailable}>
-                    {submitting ? 'Creating...' : 'Create Rule'}
+                  <Button
+                    type="submit"
+                    disabled={submitting || routingKeysUnavailable}
+                    aria-busy={submitting}
+                  >
+                    {submitting ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin" />
+                        Creating rule
+                      </>
+                    ) : (
+                      'Create Rule'
+                    )}
                   </Button>
                   <Button
                     type="button"
                     variant="secondary"
                     size="sm"
                     onClick={() => setShowJson(!showJson)}
+                    disabled={submitting}
                   >
                     {showJson ? 'Hide JSON' : 'Preview JSON'}
                   </Button>
