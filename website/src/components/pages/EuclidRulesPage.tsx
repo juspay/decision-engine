@@ -23,15 +23,10 @@ import { Button } from '../ui/Button'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { useMerchantStore } from '../../store/merchantStore'
 import { apiPost } from '../../lib/api'
-import {
-  EuclidAlgorithmData,
-  EuclidCondition,
-  EuclidRule,
-  EuclidStatement,
-  RoutingAlgorithm,
-} from '../../types/api'
+import { RoutingAlgorithm } from '../../types/api'
 import { useDynamicRoutingConfig, RoutingKeyConfig } from '../../hooks/useDynamicRoutingConfig'
-import { Plus, Trash2, GripVertical, ChevronDown, ChevronUp, Eye, PowerOff, CornerDownRight, Loader2, CheckCircle2, X } from 'lucide-react'
+import { EuclidAlgorithmData } from '../../types/api'
+import { Plus, Trash2, GripVertical, ChevronDown, ChevronUp, Eye, PowerOff, CornerDownRight } from 'lucide-react'
 
 const OPERATOR_TO_API: Record<string, string> = {
   '==': 'equal',
@@ -40,6 +35,8 @@ const OPERATOR_TO_API: Record<string, string> = {
   '<': 'less_than',
   '>=': 'greater_than_equal',
   '<=': 'less_than_equal',
+  'in': 'equal',
+  'not_in': 'not_equal',
 }
 
 const OPERATOR_LABELS: Record<string, string> = {
@@ -49,18 +46,15 @@ const OPERATOR_LABELS: Record<string, string> = {
   '<': 'less than',
   '>=': 'greater than or equal',
   '<=': 'less than or equal',
+  'in': 'is one of',
+  'not_in': 'is not one of',
 }
 
-const API_COMPARISON_LABELS: Record<string, string> = {
-  equal: 'equals',
-  not_equal: 'does not equal',
-  greater_than: 'greater than',
-  less_than: 'less than',
-  greater_than_equal: 'greater than or equal',
-  less_than_equal: 'less than or equal',
+function toLabel(key: string): string {
+  return key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
-// ---- Types for builder ----
+// ---- Types ----
 interface GatewayEntry {
   id: string
   gatewayName: string
@@ -71,7 +65,7 @@ interface ConditionRow {
   id: string
   lhs: string
   operator: string
-  value: string
+  value: string | string[]
 }
 
 interface StatementGroup {
@@ -80,47 +74,49 @@ interface StatementGroup {
   nested: StatementGroup[]
 }
 
+interface VolumeSplitEntry {
+  id: string
+  split: number
+  gatewayName: string
+  gatewayId: string
+}
+
+interface VolumeSplitPriorityEntry {
+  id: string
+  split: number
+  gateways: GatewayEntry[]
+}
+
 interface RuleBlock {
   id: string
   name: string
   statements: StatementGroup[]
+  outputType: 'priority' | 'volume_split' | 'volume_split_priority'
   priorityGateways: GatewayEntry[]
+  volumeSplitEntries: VolumeSplitEntry[]
+  volumeSplitPriorityEntries: VolumeSplitPriorityEntry[]
 }
-
-type RuleViewMode = 'readable' | 'json'
 
 type DefaultOutput = {
   priorityGateways: GatewayEntry[]
 }
 
-interface RoutingCreateResponse {
-  rule_id?: string
-  id?: string
-  name?: string
-}
-
-interface CreatedRuleNotice {
-  id: string | null
-  name: string
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function gatewayName(value: unknown) {
-  return isRecord(value) ? String(value.gateway_name || '').trim() : ''
-}
-
 function createCondition(routingKeys: Record<string, RoutingKeyConfig>): ConditionRow {
   const firstKey = Object.keys(routingKeys)[0] || 'payment_method'
   const firstKeyValues = routingKeys[firstKey]?.values || []
-
   return {
     id: crypto.randomUUID(),
     lhs: firstKey,
     operator: '==',
     value: firstKeyValues[0] || '',
+  }
+}
+
+function createStatementGroup(routingKeys: Record<string, RoutingKeyConfig>): StatementGroup {
+  return {
+    id: crypto.randomUUID(),
+    conditions: [createCondition(routingKeys)],
+    nested: [],
   }
 }
 
@@ -132,332 +128,23 @@ function mapRoutingKeyTypeToEuclidValueType(keyType?: RoutingKeyConfig['type']) 
   return 'str_value'
 }
 
-function initialValueForKey(key: string, routingKeys: Record<string, RoutingKeyConfig>) {
-  const keyInfo = routingKeys[key]
-  return keyInfo?.type === 'enum' ? (keyInfo.values[0] || '') : ''
+function mapRoutingKeyTypeToEuclidArrayValueType(keyType?: RoutingKeyConfig['type']) {
+  if (keyType === 'integer') return 'number_array'
+  return 'enum_variant_array'
 }
 
-function createStatementGroup(routingKeys: Record<string, RoutingKeyConfig>): StatementGroup {
-  return {
-    id: crypto.randomUUID(),
-    conditions: [createCondition(routingKeys)],
-    nested: [],
-  }
-}
-
-function formatConditionValue(condition: ConditionRow, routingKeys: Record<string, RoutingKeyConfig>) {
-  const keyType = routingKeys[condition.lhs]?.type
-  if (keyType === 'integer') return condition.value || 'number'
-  if (keyType === 'global_ref') return condition.value || 'global reference'
-  return condition.value ? `'${condition.value}'` : 'value'
-}
-
-function summarizeCondition(condition: ConditionRow, routingKeys: Record<string, RoutingKeyConfig>) {
-  const operator = OPERATOR_LABELS[condition.operator] || condition.operator
-  return `${condition.lhs} ${operator} ${formatConditionValue(condition, routingKeys)}`
-}
-
-function wrapTopLevelGroup(expression: string) {
-  return `{ ${expression} }`
-}
-
-function wrapNestedGroup(expression: string) {
-  return `(${expression})`
-}
-
-function indent(level: number) {
-  return '  '.repeat(level)
-}
-
-function summarizeStatementGroup(group: StatementGroup, routingKeys: Record<string, RoutingKeyConfig>): string {
-  const conditions = group.conditions.map((condition) => summarizeCondition(condition, routingKeys))
-  const parentExpression = conditions.length > 1 ? wrapNestedGroup(conditions.join(' AND ')) : conditions[0] || 'no condition'
-
-  if (group.nested.length === 0) {
-    return parentExpression
-  }
-
-  const nestedExpression = group.nested
-    .map((nested) => wrapNestedGroup(summarizeStatementGroup(nested, routingKeys)))
-    .join(' OR ')
-
-  return `${parentExpression} AND NESTED ANY ${wrapNestedGroup(nestedExpression)}`
-}
-
-function formatStatementGroupBlock(group: StatementGroup, routingKeys: Record<string, RoutingKeyConfig>, depth = 0): string[] {
-  const lines = [`${indent(depth)}{`]
-  group.conditions.forEach((condition, index) => {
-    const prefix = index > 0 ? 'AND ' : ''
-    lines.push(`${indent(depth + 1)}${prefix}${summarizeCondition(condition, routingKeys)}`)
-  })
-
-  if (group.nested.length > 0) {
-    const prefix = group.conditions.length > 0 ? 'AND ' : ''
-    lines.push(`${indent(depth + 1)}${prefix}NESTED ANY {`)
-    group.nested.forEach((nested, index) => {
-      if (index > 0) {
-        lines.push(`${indent(depth + 2)}OR`)
-      }
-      lines.push(...formatStatementGroupBlock(nested, routingKeys, depth + 2))
-    })
-    lines.push(`${indent(depth + 1)}}`)
-  }
-
-  lines.push(`${indent(depth)}}`)
-  return lines
-}
-
-function formatRuleBlockExpression(block: RuleBlock, routingKeys: Record<string, RoutingKeyConfig>) {
-  if (block.statements.length === 0) {
-    return 'Add at least one condition group'
-  }
-
-  const lines = ['IF {']
-  block.statements.forEach((group, index) => {
-    if (index > 0) {
-      lines.push(`${indent(1)}OR`)
-    }
-    lines.push(...formatStatementGroupBlock(group, routingKeys, 1))
-  })
-  lines.push('}')
-  return lines.join('\n')
-}
-
-type RuleGroupStats = {
-  conditions: number
-  nestedBranches: number
-}
-
-function countGroupStats(group: StatementGroup): RuleGroupStats {
-  return group.nested.reduce(
-    (stats, nested) => {
-      const nestedStats = countGroupStats(nested)
-      return {
-        conditions: stats.conditions + nestedStats.conditions,
-        nestedBranches: stats.nestedBranches + 1 + nestedStats.nestedBranches,
-      }
-    },
-    { conditions: group.conditions.length, nestedBranches: 0 }
-  )
-}
-
-function summarizePriorityOutput(gateways: GatewayEntry[]) {
-  const names = gateways.map((gateway) => gateway.gatewayName.trim()).filter(Boolean)
-  if (names.length === 0) return 'Then choose configured priority output'
-  if (names.length === 1) return `Then choose ${names[0]}`
-  return `Then try ${names.join(' → ')}`
-}
-
-function summarizeRuleBlock(block: RuleBlock, routingKeys: Record<string, RoutingKeyConfig>) {
-  const groupExpressions = block.statements.map((group) => summarizeStatementGroup(group, routingKeys))
-  const expression = groupExpressions.length > 0
-    ? groupExpressions.length > 1
-      ? groupExpressions.map(wrapTopLevelGroup).join(' OR ')
-      : wrapTopLevelGroup(groupExpressions[0])
-    : 'Add at least one condition group'
-  const stats = block.statements.reduce(
-    (acc, group) => {
-      const groupStats = countGroupStats(group)
-      return {
-        conditions: acc.conditions + groupStats.conditions,
-        nestedBranches: acc.nestedBranches + groupStats.nestedBranches,
-      }
-    },
-    { conditions: 0, nestedBranches: 0 }
-  )
-
-  return {
-    expression,
-    formattedExpression: formatRuleBlockExpression(block, routingKeys),
-    action: summarizePriorityOutput(block.priorityGateways),
-    topLevelGroups: block.statements.length,
-    conditions: stats.conditions,
-    nestedBranches: stats.nestedBranches,
-  }
-}
-
-function formatEuclidConditionValue(condition: EuclidCondition) {
-  const value = condition.value
-  const rawValue = condition.value?.value
-  if (typeof rawValue === 'number') return String(rawValue)
-  if (typeof rawValue === 'string') {
-    if (value?.type === 'global_ref') return rawValue || 'global reference'
-    return rawValue ? `'${rawValue}'` : 'value'
-  }
-  if (Array.isArray(rawValue)) {
-    const values = rawValue.map((item) => {
-      if (typeof item === 'number') return String(item)
-      if (typeof item === 'string') return `'${item}'`
-      return JSON.stringify(item)
-    })
-    return `[${values.join(', ')}]`
-  }
-  if (value?.type === 'metadata_variant' && isRecord(rawValue)) {
-    const metadataKey = typeof rawValue.key === 'string' ? rawValue.key : condition.lhs
-    const metadataValue = rawValue.value
-    if (typeof metadataValue === 'number') return `${metadataKey} = ${metadataValue}`
-    if (typeof metadataValue === 'string') return `${metadataKey} = '${metadataValue}'`
-    return `${metadataKey} = ${JSON.stringify(metadataValue)}`
-  }
-  return isRecord(rawValue) ? JSON.stringify(rawValue) : 'value'
-}
-
-function summarizeEuclidCondition(condition: EuclidCondition) {
-  const comparison = API_COMPARISON_LABELS[condition.comparison] || condition.comparison
-  return `${condition.lhs} ${comparison} ${formatEuclidConditionValue(condition)}`
-}
-
-function summarizeEuclidStatement(statement: EuclidStatement): string {
-  const conditions = statement.condition?.map(summarizeEuclidCondition) || []
-  const parentExpression = conditions.length > 1 ? wrapNestedGroup(conditions.join(' AND ')) : conditions[0] || 'no condition'
-  const nested = statement.nested || []
-
-  if (nested.length === 0) {
-    return parentExpression
-  }
-
-  const nestedExpression = nested.map((nestedStatement) => wrapNestedGroup(summarizeEuclidStatement(nestedStatement))).join(' OR ')
-  return `${parentExpression} AND NESTED ANY ${wrapNestedGroup(nestedExpression)}`
-}
-
-function formatEuclidStatementBlock(statement: EuclidStatement, depth = 0): string[] {
-  const lines = [`${indent(depth)}{`]
-  const conditions = statement.condition || []
-  conditions.forEach((condition, index) => {
-    const prefix = index > 0 ? 'AND ' : ''
-    lines.push(`${indent(depth + 1)}${prefix}${summarizeEuclidCondition(condition)}`)
-  })
-
-  const nested = statement.nested || []
-  if (nested.length > 0) {
-    const prefix = conditions.length > 0 ? 'AND ' : ''
-    lines.push(`${indent(depth + 1)}${prefix}NESTED ANY {`)
-    nested.forEach((nestedStatement, index) => {
-      if (index > 0) {
-        lines.push(`${indent(depth + 2)}OR`)
-      }
-      lines.push(...formatEuclidStatementBlock(nestedStatement, depth + 2))
-    })
-    lines.push(`${indent(depth + 1)}}`)
-  }
-
-  lines.push(`${indent(depth)}}`)
-  return lines
-}
-
-function formatEuclidRuleExpression(rule: EuclidRule) {
-  if (!rule.statements || rule.statements.length === 0) {
-    return 'No condition groups configured'
-  }
-
-  const lines = ['IF {']
-  rule.statements.forEach((statement, index) => {
-    if (index > 0) {
-      lines.push(`${indent(1)}OR`)
-    }
-    lines.push(...formatEuclidStatementBlock(statement, 1))
-  })
-  lines.push('}')
-  return lines.join('\n')
-}
-
-function countEuclidStatementStats(statement: EuclidStatement): RuleGroupStats {
-  return (statement.nested || []).reduce(
-    (stats, nested) => {
-      const nestedStats = countEuclidStatementStats(nested)
-      return {
-        conditions: stats.conditions + nestedStats.conditions,
-        nestedBranches: stats.nestedBranches + 1 + nestedStats.nestedBranches,
-      }
-    },
-    { conditions: statement.condition?.length || 0, nestedBranches: 0 }
-  )
-}
-
-function summarizeEuclidOutput(output: unknown) {
-  const outputRecord = isRecord(output) ? output : {}
-  const single = outputRecord.single
-  if (isRecord(single)) {
-    const name = gatewayName(single)
-    return name ? `choose ${name}` : 'choose configured gateway'
-  }
-
-  const priority = Array.isArray(outputRecord.priority) ? outputRecord.priority : []
-  const names = priority
-    .map(gatewayName)
-    .filter(Boolean)
-
-  if (names.length === 1) return `choose ${names[0]}`
-  if (names.length > 1) return `try ${names.join(' -> ')}`
-
-  const volumeSplit = Array.isArray(outputRecord.volume_split) ? outputRecord.volume_split : []
-  const splitSummaries = volumeSplit
-    .map((split) => {
-      if (!isRecord(split)) return null
-      const splitPercent = typeof split.split === 'number' ? split.split : Number(split.split)
-      const name = gatewayName(split.output)
-      if (!name) return null
-      return Number.isFinite(splitPercent) ? `${splitPercent}% to ${name}` : `to ${name}`
-    })
-    .filter(Boolean)
-  if (splitSummaries.length > 0) return `split ${splitSummaries.join(', ')}`
-
-  const volumeSplitPriority = Array.isArray(outputRecord.volume_split_priority) ? outputRecord.volume_split_priority : []
-  const prioritySplitSummaries = volumeSplitPriority
-    .map((split) => {
-      if (!isRecord(split)) return null
-      const splitPercent = typeof split.split === 'number' ? split.split : Number(split.split)
-      const gatewaySummary = Array.isArray(split.output)
-        ? split.output.map(gatewayName).filter(Boolean).join(' -> ')
-        : ''
-      if (!gatewaySummary) return null
-      return Number.isFinite(splitPercent) ? `${splitPercent}% to ${gatewaySummary}` : `to ${gatewaySummary}`
-    })
-    .filter(Boolean)
-  if (prioritySplitSummaries.length > 0) return `split priority ${prioritySplitSummaries.join(', ')}`
-
-  return 'choose configured output'
-}
-
-function summarizeExistingRule(rule: EuclidRule) {
-  const statementExpressions = (rule.statements || []).map(summarizeEuclidStatement)
-  const expression = statementExpressions.length > 0
-    ? statementExpressions.length > 1
-      ? statementExpressions.map(wrapTopLevelGroup).join(' OR ')
-      : wrapTopLevelGroup(statementExpressions[0])
-    : 'No condition groups configured'
-  const stats = (rule.statements || []).reduce(
-    (acc, statement) => {
-      const statementStats = countEuclidStatementStats(statement)
-      return {
-        conditions: acc.conditions + statementStats.conditions,
-        nestedBranches: acc.nestedBranches + statementStats.nestedBranches,
-      }
-    },
-    { conditions: 0, nestedBranches: 0 }
-  )
-
-  return {
-    expression,
-    formattedExpression: formatEuclidRuleExpression(rule),
-    action: summarizeEuclidOutput(rule.output),
-    conditions: stats.conditions,
-    nestedBranches: stats.nestedBranches,
-    topLevelGroups: rule.statements?.length || 0,
-  }
-}
-
-function getAdvancedAlgorithmData(algorithm: RoutingAlgorithm['algorithm_data'] | RoutingAlgorithm['algorithm']) {
-  if (algorithm?.type !== 'advanced' || !isRecord(algorithm.data)) {
-    return null
-  }
-
-  const data = algorithm.data as Partial<EuclidAlgorithmData>
-  if (!Array.isArray(data.rules)) {
-    return null
-  }
-
-  return data as EuclidAlgorithmData
+function getRuleSummary(algo: RoutingAlgorithm): string {
+  const algorithm = algo.algorithm_data || algo.algorithm
+  const rules = (algorithm?.data as EuclidAlgorithmData | undefined)?.rules
+  if (!rules || rules.length === 0) return ''
+  const first = rules[0]
+  const cond = first?.statements?.[0]?.condition?.[0]
+  if (!cond) return ''
+  const field = toLabel(String(cond.lhs ?? ''))
+  const op = String(cond.comparison ?? '').replace(/_/g, ' ')
+  const val = toLabel(String(cond.value?.value ?? ''))
+  const summary = [field, op, val].filter(Boolean).join(' ')
+  return rules.length > 1 ? `${summary} · +${rules.length - 1} more` : summary
 }
 
 // ---- Sortable gateway item ----
@@ -493,12 +180,15 @@ function SortableGatewayItem({
 function PriorityEditor({
   gateways,
   onChange,
+  suggestions = [],
 }: {
   gateways: GatewayEntry[]
   onChange: (gws: GatewayEntry[]) => void
+  suggestions?: string[]
 }) {
   const [newGatewayName, setNewGatewayName] = useState('')
   const [newGatewayId, setNewGatewayId] = useState('')
+  const listId = `gateway-suggestions-${Math.random().toString(36).slice(2)}`
   const sensors = useSensors(
     useSensor(PointerSensor),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -517,15 +207,13 @@ function PriorityEditor({
     if (!newGatewayName.trim()) return
     onChange([
       ...gateways,
-      {
-        id: crypto.randomUUID(),
-        gatewayName: newGatewayName.trim(),
-        gatewayId: newGatewayId.trim(),
-      },
+      { id: crypto.randomUUID(), gatewayName: newGatewayName.trim(), gatewayId: newGatewayId.trim() },
     ])
     setNewGatewayName('')
     setNewGatewayId('')
   }
+
+  const unusedSuggestions = suggestions.filter((s) => !gateways.some((g) => g.gatewayName === s))
 
   return (
     <div className="space-y-2">
@@ -541,23 +229,192 @@ function PriorityEditor({
           ))}
         </SortableContext>
       </DndContext>
+      <datalist id={listId}>
+        {unusedSuggestions.map((s) => <option key={s} value={s} />)}
+      </datalist>
       <div className="flex gap-2">
         <input
           value={newGatewayName}
           onChange={(e) => setNewGatewayName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
-          placeholder="gateway_name"
+          list={listId}
+          placeholder="Gateway name"
           className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm flex-1 focus:outline-none focus:ring-1 focus:ring-brand-500"
         />
         <input
           value={newGatewayId}
           onChange={(e) => setNewGatewayId(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
-          placeholder="gateway_id"
+          placeholder="Gateway ID (optional)"
           className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm flex-1 focus:outline-none focus:ring-1 focus:ring-brand-500"
         />
         <Button type="button" size="sm" variant="secondary" onClick={add}>
           <Plus size={13} /> Add
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ---- Volume split editor ----
+function VolumeSplitEditor({
+  entries,
+  onChange,
+  suggestions = [],
+}: {
+  entries: VolumeSplitEntry[]
+  onChange: (e: VolumeSplitEntry[]) => void
+  suggestions?: string[]
+}) {
+  const [newSplit, setNewSplit] = useState('')
+  const [newName, setNewName] = useState('')
+  const [newId, setNewId] = useState('')
+  const listId = `vs-suggestions-${Math.random().toString(36).slice(2)}`
+
+  const total = entries.reduce((s, e) => s + e.split, 0)
+
+  function add() {
+    if (!newName.trim() || !newSplit) return
+    onChange([
+      ...entries,
+      { id: crypto.randomUUID(), split: Number(newSplit), gatewayName: newName.trim(), gatewayId: newId.trim() },
+    ])
+    setNewSplit('')
+    setNewName('')
+    setNewId('')
+  }
+
+  const unusedSuggestions = suggestions.filter((s) => !entries.some((e) => e.gatewayName === s))
+
+  return (
+    <div className="space-y-2">
+      {entries.map((e) => (
+        <div
+          key={e.id}
+          className="flex items-center gap-2 bg-slate-100 dark:bg-[#111118] border border-slate-200 dark:border-[#1c1c24] rounded-lg px-2 py-1.5"
+        >
+          <span className="text-xs font-bold text-brand-500 w-10 shrink-0 tabular-nums">{e.split}%</span>
+          <span className="text-sm flex-1 font-mono">
+            {e.gatewayName}{e.gatewayId ? ` (${e.gatewayId})` : ''}
+          </span>
+          <button type="button" onClick={() => onChange(entries.filter((x) => x.id !== e.id))} className="text-red-400 hover:text-red-600">
+            <Trash2 size={12} />
+          </button>
+        </div>
+      ))}
+      {entries.length > 0 && (
+        <p className={`text-xs font-medium ${total === 100 ? 'text-emerald-500' : 'text-amber-500'}`}>
+          Total: {total}%{total !== 100 ? ' (must equal 100%)' : ' ✓'}
+        </p>
+      )}
+      <datalist id={listId}>
+        {unusedSuggestions.map((s) => <option key={s} value={s} />)}
+      </datalist>
+      <div className="flex gap-2">
+        <input
+          type="number"
+          value={newSplit}
+          onChange={(e) => setNewSplit(e.target.value)}
+          placeholder="Split %"
+          className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm w-20 focus:outline-none focus:ring-1 focus:ring-brand-500"
+        />
+        <input
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
+          list={listId}
+          placeholder="Gateway name"
+          className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm flex-1 focus:outline-none focus:ring-1 focus:ring-brand-500"
+        />
+        <input
+          value={newId}
+          onChange={(e) => setNewId(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
+          placeholder="Gateway ID (optional)"
+          className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm flex-1 focus:outline-none focus:ring-1 focus:ring-brand-500"
+        />
+        <Button type="button" size="sm" variant="secondary" onClick={add}>
+          <Plus size={13} /> Add
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ---- Volume split priority editor ----
+function VolumeSplitPriorityEditor({
+  entries,
+  onChange,
+  suggestions = [],
+}: {
+  entries: VolumeSplitPriorityEntry[]
+  onChange: (e: VolumeSplitPriorityEntry[]) => void
+  suggestions?: string[]
+}) {
+  const [newSplit, setNewSplit] = useState('')
+
+  const total = entries.reduce((s, e) => s + e.split, 0)
+
+  function addSplit() {
+    if (!newSplit) return
+    onChange([...entries, { id: crypto.randomUUID(), split: Number(newSplit), gateways: [] }])
+    setNewSplit('')
+  }
+
+  function updateEntry(id: string, patch: Partial<VolumeSplitPriorityEntry>) {
+    onChange(entries.map((e) => (e.id === id ? { ...e, ...patch } : e)))
+  }
+
+  return (
+    <div className="space-y-3">
+      {entries.length > 0 && (
+        <p className={`text-xs font-medium ${total === 100 ? 'text-emerald-500' : 'text-amber-500'}`}>
+          Total: {total}%{total !== 100 ? ' (must equal 100%)' : ' ✓'}
+        </p>
+      )}
+      {entries.map((entry, idx) => (
+        <div
+          key={entry.id}
+          className="rounded-lg border border-slate-200 dark:border-[#222226] overflow-hidden"
+        >
+          <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 dark:bg-[#111118] border-b border-slate-200 dark:border-[#1c1c24]">
+            <span className="text-xs text-slate-400 font-medium shrink-0">Split {idx + 1}:</span>
+            <input
+              type="number"
+              value={entry.split}
+              onChange={(e) => updateEntry(entry.id, { split: Number(e.target.value) })}
+              className="border border-slate-200 dark:border-[#222226] bg-transparent rounded px-2 py-0.5 text-xs w-16 focus:outline-none"
+            />
+            <span className="text-xs text-slate-400">%</span>
+            <button
+              type="button"
+              onClick={() => onChange(entries.filter((e) => e.id !== entry.id))}
+              className="ml-auto text-red-400 hover:text-red-600"
+            >
+              <Trash2 size={12} />
+            </button>
+          </div>
+          <div className="p-3">
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400 mb-2">Priority list for this split</p>
+            <PriorityEditor
+              gateways={entry.gateways}
+              suggestions={suggestions}
+              onChange={(gws) => updateEntry(entry.id, { gateways: gws })}
+            />
+          </div>
+        </div>
+      ))}
+      <div className="flex gap-2 items-center">
+        <input
+          type="number"
+          value={newSplit}
+          onChange={(e) => setNewSplit(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addSplit())}
+          placeholder="Split %"
+          className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm w-24 focus:outline-none focus:ring-1 focus:ring-brand-500"
+        />
+        <Button type="button" size="sm" variant="secondary" onClick={addSplit}>
+          <Plus size={13} /> Add split
         </Button>
       </div>
     </div>
@@ -579,211 +436,239 @@ function ConditionRowEditor({
   const keyInfo = routingKeys[row.lhs]
   const isEnum = keyInfo?.type === 'enum'
   const isInt = keyInfo?.type === 'integer'
-  const isText = !isEnum && !isInt
+  const isStr = keyInfo?.type === 'str_value' || keyInfo?.type === 'udf'
+  const isMulti = row.operator === 'in' || row.operator === 'not_in'
 
   const operators = isInt
     ? ['>', '<', '>=', '<=', '==', '!=']
+    : isEnum
+    ? ['==', '!=', 'in', 'not_in']
     : ['==', '!=']
 
+  const selectedValues = Array.isArray(row.value) ? row.value : []
+
+  function toggleEnumValue(v: string) {
+    const updated = selectedValues.includes(v)
+      ? selectedValues.filter((x) => x !== v)
+      : [...selectedValues, v]
+    onChange({ ...row, value: updated })
+  }
+
+  function handleOperatorChange(op: string) {
+    const switchingToMulti = op === 'in' || op === 'not_in'
+    const switchingFromMulti = row.operator === 'in' || row.operator === 'not_in'
+    let newValue: string | string[] = row.value
+    if (switchingToMulti && !Array.isArray(row.value)) {
+      newValue = row.value ? [row.value] : []
+    } else if (!switchingToMulti && switchingFromMulti) {
+      newValue = Array.isArray(row.value) ? (row.value[0] ?? '') : ''
+    }
+    onChange({ ...row, operator: op, value: newValue })
+  }
+
   return (
-    <div className="flex items-center gap-2 flex-wrap">
+    <div className="flex items-start gap-2 flex-wrap">
       <select
         value={row.lhs}
         onChange={(e) => {
-          const nextKey = e.target.value
-          onChange({
-            ...row,
-            lhs: nextKey,
-            value: initialValueForKey(nextKey, routingKeys),
-            operator: '==',
-          })
+          const newKey = e.target.value
+          const newConfig = routingKeys[newKey]
+          const defaultValue = newConfig?.type === 'enum' ? (newConfig.values?.[0] ?? '') : ''
+          onChange({ ...row, lhs: newKey, value: defaultValue, operator: '==' })
         }}
-        className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-xs focus:outline-none"
+        className="cond-select"
       >
         {Object.keys(routingKeys).map((k) => (
-          <option key={k} value={k}>
-            {k}
-          </option>
+          <option key={k} value={k}>{toLabel(k)}</option>
         ))}
       </select>
       <select
         value={row.operator}
-        onChange={(e) => onChange({ ...row, operator: e.target.value })}
+        onChange={(e) => handleOperatorChange(e.target.value)}
         aria-label="Condition operator"
-        className="min-w-[9.5rem] border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2.5 py-1 text-xs focus:outline-none"
+        className="cond-select min-w-[9.5rem]"
       >
         {operators.map((op) => (
-          <option key={op} value={op}>
-            {OPERATOR_LABELS[op] || op}
-          </option>
+          <option key={op} value={op}>{OPERATOR_LABELS[op] || op}</option>
         ))}
       </select>
-      {isEnum ? (
+      {isEnum && isMulti ? (
+        <div className="flex flex-wrap gap-x-3 gap-y-1 rounded-lg border border-slate-200 dark:border-[#222226] px-2 py-1.5 min-w-[8rem]">
+          {(keyInfo?.values || []).map((v: string) => (
+            <label key={v} className="flex items-center gap-1 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={selectedValues.includes(v)}
+                onChange={() => toggleEnumValue(v)}
+                className="accent-brand-500"
+              />
+              <span className="text-xs">{toLabel(v)}</span>
+            </label>
+          ))}
+          {(keyInfo?.values || []).length === 0 && (
+            <span className="text-xs text-slate-400">No enum values</span>
+          )}
+        </div>
+      ) : isEnum ? (
         <select
-          value={row.value}
+          value={row.value as string}
           onChange={(e) => onChange({ ...row, value: e.target.value })}
-          className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-xs focus:outline-none"
+          className="cond-select"
         >
           <option value="">select...</option>
-          {(routingKeys[row.lhs]?.values || []).map((v: string) => (
-            <option key={v} value={v}>
-              {v}
-            </option>
+          {(keyInfo?.values || []).map((v: string) => (
+            <option key={v} value={v}>{toLabel(v)}</option>
           ))}
         </select>
-      ) : (
+      ) : isInt ? (
         <input
-          type={isText ? 'text' : 'number'}
-          value={row.value}
+          type="number"
+          value={row.value as string}
           onChange={(e) => onChange({ ...row, value: e.target.value })}
           placeholder="value"
           className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-xs w-24 focus:outline-none"
         />
+      ) : isStr ? (
+        <input
+          type="text"
+          value={row.value as string}
+          onChange={(e) => onChange({ ...row, value: e.target.value })}
+          placeholder="value"
+          className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-xs w-32 focus:outline-none"
+        />
+      ) : (
+        <input
+          type="text"
+          value={row.value as string}
+          onChange={(e) => onChange({ ...row, value: e.target.value })}
+          placeholder="value"
+          className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-xs w-32 focus:outline-none"
+        />
       )}
-      <button type="button" onClick={onRemove} className="text-red-400 hover:text-red-600">
+      <button type="button" onClick={onRemove} className="text-red-400 hover:text-red-600 mt-1">
         <Trash2 size={12} />
       </button>
     </div>
   )
 }
 
-// ---- Statement group ----
-function StatementGroupEditor({
+// ---- Condition group ----
+function ConditionGroupEditor({
   group,
   onChange,
   onRemove,
+  canRemove,
   routingKeys,
   depth = 0,
 }: {
   group: StatementGroup
   onChange: (g: StatementGroup) => void
   onRemove: () => void
+  canRemove: boolean
   routingKeys: Record<string, RoutingKeyConfig>
   depth?: number
 }) {
-  const canRemove = depth > 0 || group.conditions.length > 1 || group.nested.length > 0
-  const label = depth === 0 ? 'IF group' : 'Nested IF group'
-
   function addCondition() {
-    onChange({
-      ...group,
-      conditions: [...group.conditions, createCondition(routingKeys)],
-    })
+    onChange({ ...group, conditions: [...group.conditions, createCondition(routingKeys)] })
   }
 
-  function addNestedGroup() {
-    onChange({
-      ...group,
-      nested: [...group.nested, createStatementGroup(routingKeys)],
-    })
+  function addNestedBranch() {
+    onChange({ ...group, nested: [...group.nested, createStatementGroup(routingKeys)] })
   }
 
   return (
-    <div className={`rounded-xl border border-slate-200 bg-slate-50/40 dark:border-[#222733] dark:bg-[#0f141d] ${depth > 0 ? 'ml-4' : ''}`}>
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-3 py-2 dark:border-[#222733]">
-        <div className="flex items-center gap-2">
-          {depth > 0 && <CornerDownRight size={14} className="text-slate-400" />}
-          <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8490a5]">{label}</span>
-          <Badge variant="gray">{group.conditions.length} AND</Badge>
-          {group.nested.length > 0 && (
-            <Badge variant="blue">
-              {group.nested.length} nested IF branch{group.nested.length === 1 ? '' : 'es'}
-            </Badge>
-          )}
-        </div>
-        <button
-          type="button"
-          onClick={onRemove}
-          disabled={!canRemove}
-          className="text-red-400 transition hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30"
-          aria-label="Remove condition group"
-        >
-          <Trash2 size={12} />
-        </button>
+    <div className="rounded-lg border border-slate-200 dark:border-[#222733] bg-white dark:bg-[#0f141d]">
+      <div className="space-y-0 divide-y divide-slate-100 dark:divide-[#1c1c24]">
+        {group.conditions.map((cond, idx) => (
+          <div key={cond.id} className="flex items-start gap-2 px-3 py-2.5 flex-wrap">
+            {group.conditions.length > 1 && (
+              <span className="w-8 shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400 select-none mt-1.5">
+                {idx === 0 ? 'IF' : 'AND'}
+              </span>
+            )}
+            <ConditionRowEditor
+              row={cond}
+              routingKeys={routingKeys}
+              onChange={(updated) =>
+                onChange({ ...group, conditions: group.conditions.map((c) => (c.id === cond.id ? updated : c)) })
+              }
+              onRemove={() =>
+                onChange({
+                  ...group,
+                  conditions: group.conditions.length > 1
+                    ? group.conditions.filter((c) => c.id !== cond.id)
+                    : group.conditions,
+                })
+              }
+            />
+          </div>
+        ))}
       </div>
 
-      <div className="space-y-3 px-3 py-3">
-        <div>
-          <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">
-            All conditions in this group must match
-          </p>
-          <div className="space-y-2">
-            {group.conditions.map((cond, idx) => (
-              <div key={cond.id} className="space-y-2">
-                {idx > 0 && (
-                  <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-500">
-                    <span className="h-px flex-1 bg-emerald-500/20" />
-                    AND
-                    <span className="h-px flex-1 bg-emerald-500/20" />
-                  </div>
-                )}
-                <ConditionRowEditor
-                  row={cond}
-                  routingKeys={routingKeys}
-                  onChange={(updated) =>
-                    onChange({
-                      ...group,
-                      conditions: group.conditions.map((c) => (c.id === cond.id ? updated : c)),
-                    })
-                  }
-                  onRemove={() =>
-                    onChange({
-                      ...group,
-                      conditions: group.conditions.length > 1
-                        ? group.conditions.filter((c) => c.id !== cond.id)
-                        : group.conditions,
-                    })
-                  }
-                />
-              </div>
-            ))}
-            <Button type="button" variant="ghost" size="sm" onClick={addCondition}>
-              <Plus size={12} /> Add AND condition
-            </Button>
+      {/* Nested OR branches — shown only at depth 0 */}
+      {depth === 0 && group.nested.length > 0 && (
+        <div className="border-t border-slate-100 dark:border-[#1c1c24] px-3 pt-3 pb-2 space-y-2">
+          <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-slate-400">
+            <CornerDownRight size={11} />
+            Then match any of (nested OR)
           </div>
-        </div>
-
-        <div className="space-y-2">
-          {group.nested.length > 0 && (
-            <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">
-              Nested IF branches are joined to the parent with AND. If there are multiple nested branches, any one branch can match.
-            </p>
-          )}
-          {group.nested.map((nested, idx) => (
-            <div key={nested.id} className="space-y-2">
-              {idx > 0 && (
-                <div className="flex items-center gap-2 pl-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-400">
-                  <span className="h-px flex-1 bg-sky-400/20" />
-                  OR
-                  <span className="h-px flex-1 bg-sky-400/20" />
-                </div>
+          {group.nested.map((nestedGroup, nIdx) => (
+            <div key={nestedGroup.id} className="pl-3 border-l-2 border-sky-200 dark:border-sky-800">
+              {nIdx > 0 && (
+                <p className="text-[10px] font-bold text-sky-500 mb-1">OR</p>
               )}
-              <StatementGroupEditor
-                group={nested}
+              <ConditionGroupEditor
+                group={nestedGroup}
                 routingKeys={routingKeys}
-                depth={depth + 1}
+                canRemove={true}
+                depth={1}
                 onChange={(updated) =>
-                  onChange({
-                    ...group,
-                    nested: group.nested.map((item) => (item.id === nested.id ? updated : item)),
-                  })
+                  onChange({ ...group, nested: group.nested.map((n) => (n.id === nestedGroup.id ? updated : n)) })
                 }
                 onRemove={() =>
-                  onChange({
-                    ...group,
-                    nested: group.nested.filter((item) => item.id !== nested.id),
-                  })
+                  onChange({ ...group, nested: group.nested.filter((n) => n.id !== nestedGroup.id) })
                 }
               />
             </div>
           ))}
-          <Button type="button" variant="secondary" size="sm" onClick={addNestedGroup}>
-            <Plus size={12} /> Add nested IF branch
-          </Button>
         </div>
+      )}
+
+      <div className="flex items-center gap-3 border-t border-slate-100 dark:border-[#1c1c24] px-3 py-2 flex-wrap">
+        <button
+          type="button"
+          onClick={addCondition}
+          className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+        >
+          <Plus size={12} /> Add condition
+        </button>
+        {depth === 0 && (
+          <button
+            type="button"
+            onClick={addNestedBranch}
+            className="flex items-center gap-1 text-xs text-sky-400 hover:text-sky-600 transition-colors"
+          >
+            <CornerDownRight size={12} /> Add nested branch
+          </button>
+        )}
+        {canRemove && (
+          <button
+            type="button"
+            onClick={onRemove}
+            className="ml-auto flex items-center gap-1 text-xs text-red-400 hover:text-red-600 transition-colors"
+          >
+            <Trash2 size={12} /> Remove group
+          </button>
+        )}
       </div>
     </div>
   )
+}
+
+const OUTPUT_TYPE_LABELS: Record<RuleBlock['outputType'], string> = {
+  priority: 'Priority',
+  volume_split: 'Volume Split',
+  volume_split_priority: 'Split + Priority',
 }
 
 // ---- Rule block ----
@@ -792,116 +677,123 @@ function RuleBlockEditor({
   onChange,
   onRemove,
   routingKeys,
+  gatewaySuggestions = [],
 }: {
   block: RuleBlock
   onChange: (b: RuleBlock) => void
   onRemove: () => void
   routingKeys: Record<string, RoutingKeyConfig>
+  gatewaySuggestions?: string[]
 }) {
   const [collapsed, setCollapsed] = useState(false)
-  const summary = summarizeRuleBlock(block, routingKeys)
+
+  function addGroup() {
+    onChange({ ...block, statements: [...block.statements, createStatementGroup(routingKeys)] })
+  }
 
   return (
-    <div className="border border-slate-200 dark:border-[#1c1c24] rounded-xl">
-      <div
-        className="flex items-center justify-between px-4 py-2.5 bg-[#0d0d12] rounded-t-xl cursor-pointer"
-        onClick={() => setCollapsed(!collapsed)}
-      >
+    <div className="border border-slate-200 dark:border-[#1c1c24] rounded-xl overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-2.5 bg-slate-50 dark:bg-[#111118] border-b border-slate-200 dark:border-[#1c1c24]">
         <input
           value={block.name}
-          onChange={(e) => {
-            e.stopPropagation()
-            onChange({ ...block, name: e.target.value })
-          }}
-          onClick={(e) => e.stopPropagation()}
+          onChange={(e) => onChange({ ...block, name: e.target.value })}
           placeholder="Rule name"
-          className="bg-transparent text-sm font-medium focus:outline-none border-b border-transparent focus:border-[#28282f] text-slate-900"
+          className="bg-transparent text-sm font-semibold focus:outline-none text-slate-700 dark:text-slate-200 w-full"
         />
-        <div className="flex items-center gap-2">
-          <button type="button" onClick={(e) => { e.stopPropagation(); onRemove() }} className="text-red-400 hover:text-red-600">
+        <div className="flex items-center gap-2 ml-2 shrink-0">
+          <button type="button" onClick={onRemove} aria-label="Delete rule" className="text-red-400 hover:text-red-600">
             <Trash2 size={14} />
           </button>
-          {collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+          <button
+            type="button"
+            onClick={() => setCollapsed(!collapsed)}
+            aria-label={collapsed ? 'Expand rule' : 'Collapse rule'}
+            className="text-slate-400 hover:text-slate-600"
+          >
+            {collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+          </button>
         </div>
       </div>
+
       {!collapsed && (
-        <div className="px-4 py-3 space-y-3">
-          <div className="rounded-xl border border-sky-500/15 bg-sky-500/[0.04] px-3 py-3 dark:border-sky-400/18 dark:bg-sky-400/[0.06]">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="blue">{summary.topLevelGroups} OR group{summary.topLevelGroups === 1 ? '' : 's'}</Badge>
-              <Badge variant="green">{summary.conditions} AND condition{summary.conditions === 1 ? '' : 's'}</Badge>
-              {summary.nestedBranches > 0 && (
-                <Badge variant="purple">{summary.nestedBranches} nested IF branch{summary.nestedBranches === 1 ? '' : 'es'}</Badge>
-              )}
-            </div>
-            <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-[#8d96a8]">
-              Detailed rule view is available after saving from the Existing Rules panel.
-            </p>
-          </div>
-          {/* Conditions */}
-          <div>
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <p className="text-xs font-medium text-slate-500">CONDITION LOGIC</p>
-                <p className="mt-1 text-xs text-slate-500 dark:text-[#8d96a8]">
-                  Rule groups are evaluated top-to-bottom. Sibling groups are OR; conditions inside a group are AND.
-                </p>
+        <div className="divide-y divide-slate-100 dark:divide-[#1c1c24]">
+          {/* IF section */}
+          <div className="px-4 py-4 space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-400 mb-3">If</p>
+            {block.statements.map((group, idx) => (
+              <div key={group.id} className="space-y-2">
+                {idx > 0 && (
+                  <div className="flex items-center gap-3">
+                    <span className="h-px flex-1 bg-slate-200 dark:bg-[#222]" />
+                    <span className="text-[11px] font-bold uppercase tracking-widest text-sky-500 px-1">or</span>
+                    <span className="h-px flex-1 bg-slate-200 dark:bg-[#222]" />
+                  </div>
+                )}
+                <ConditionGroupEditor
+                  group={group}
+                  routingKeys={routingKeys}
+                  canRemove={block.statements.length > 1}
+                  onChange={(updated) =>
+                    onChange({ ...block, statements: block.statements.map((s) => (s.id === group.id ? updated : s)) })
+                  }
+                  onRemove={() =>
+                    onChange({ ...block, statements: block.statements.filter((s) => s.id !== group.id) })
+                  }
+                />
               </div>
-            </div>
-            <div className="space-y-2">
-              {block.statements.map((group, idx) => (
-                <div key={group.id} className="space-y-2">
-                  {idx > 0 && (
-                    <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-400">
-                      <span className="h-px flex-1 bg-sky-400/20" />
-                      OR
-                      <span className="h-px flex-1 bg-sky-400/20" />
-                    </div>
-                  )}
-                  <StatementGroupEditor
-                    group={group}
-                    routingKeys={routingKeys}
-                    onChange={(updated) =>
-                      onChange({
-                        ...block,
-                        statements: block.statements.map((statement) =>
-                          statement.id === group.id ? updated : statement
-                        ),
-                      })
-                    }
-                    onRemove={() =>
-                      onChange({
-                        ...block,
-                        statements: block.statements.length > 1
-                          ? block.statements.filter((statement) => statement.id !== group.id)
-                          : block.statements,
-                      })
-                    }
-                  />
-                </div>
-              ))}
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() =>
-                  onChange({
-                    ...block,
-                    statements: [...block.statements, createStatementGroup(routingKeys)],
-                  })
-                }
-              >
-                <Plus size={12} /> Add OR group
-              </Button>
-            </div>
+            ))}
+            <button
+              type="button"
+              onClick={addGroup}
+              className="flex items-center gap-1 text-xs text-sky-500 hover:text-sky-600 font-medium transition-colors mt-1"
+            >
+              <Plus size={12} /> Add OR group
+            </button>
           </div>
 
-          <div>
-            <p className="text-xs font-medium text-slate-500 mb-2">PRIORITY OUTPUT</p>
-            <PriorityEditor
-              gateways={block.priorityGateways}
-              onChange={(gws) => onChange({ ...block, priorityGateways: gws })}
-            />
+          {/* THEN section */}
+          <div className="px-4 py-4">
+            <div className="flex items-center gap-3 mb-3">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-400 shrink-0">Then route</p>
+              <div className="flex rounded-lg border border-slate-200 dark:border-[#222226] overflow-hidden text-[11px]">
+                {(Object.keys(OUTPUT_TYPE_LABELS) as RuleBlock['outputType'][]).map((type) => (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => onChange({ ...block, outputType: type })}
+                    className={`px-2.5 py-1 transition-colors ${
+                      block.outputType === type
+                        ? 'bg-brand-500 text-white font-semibold'
+                        : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-[#1c1c24]'
+                    }`}
+                  >
+                    {OUTPUT_TYPE_LABELS[type]}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {block.outputType === 'priority' && (
+              <PriorityEditor
+                gateways={block.priorityGateways}
+                suggestions={gatewaySuggestions}
+                onChange={(gws) => onChange({ ...block, priorityGateways: gws })}
+              />
+            )}
+            {block.outputType === 'volume_split' && (
+              <VolumeSplitEditor
+                entries={block.volumeSplitEntries}
+                suggestions={gatewaySuggestions}
+                onChange={(entries) => onChange({ ...block, volumeSplitEntries: entries })}
+              />
+            )}
+            {block.outputType === 'volume_split_priority' && (
+              <VolumeSplitPriorityEditor
+                entries={block.volumeSplitPriorityEntries}
+                suggestions={gatewaySuggestions}
+                onChange={(entries) => onChange({ ...block, volumeSplitPriorityEntries: entries })}
+              />
+            )}
           </div>
         </div>
       )}
@@ -917,24 +809,58 @@ function buildAlgorithmData(rules: RuleBlock[], defaultOutput: DefaultOutput, ro
     }
   }
 
+  function buildOutput(block: RuleBlock): Record<string, unknown> {
+    if (block.outputType === 'volume_split') {
+      return {
+        volume_split: block.volumeSplitEntries.map((e) => ({
+          split: e.split,
+          output: { gateway_name: e.gatewayName, gateway_id: e.gatewayId || null },
+        })),
+      }
+    }
+    if (block.outputType === 'volume_split_priority') {
+      return {
+        volume_split_priority: block.volumeSplitPriorityEntries.map((e) => ({
+          split: e.split,
+          output: e.gateways.map((g) => ({ gateway_name: g.gatewayName, gateway_id: g.gatewayId || null })),
+        })),
+      }
+    }
+    return buildPriorityOutput(block.priorityGateways)
+  }
+
   function buildConditionValue(c: ConditionRow, valueType: string) {
     if (valueType === 'number') return Number(c.value)
+    if (valueType === 'number_array') {
+      return Array.isArray(c.value) ? c.value.map(Number) : [Number(c.value)]
+    }
     if (valueType === 'metadata_variant') {
-      return { key: c.lhs, value: c.value }
+      return { key: c.lhs, value: Array.isArray(c.value) ? c.value.join(',') : c.value }
     }
     return c.value
   }
 
   function buildCondition(c: ConditionRow) {
     const keyType = routingKeys[c.lhs]?.type
-    const valueType = mapRoutingKeyTypeToEuclidValueType(keyType)
+    const isMulti = c.operator === 'in' || c.operator === 'not_in'
 
+    if (isMulti && Array.isArray(c.value)) {
+      const arrayValueType = mapRoutingKeyTypeToEuclidArrayValueType(keyType)
+      return {
+        lhs: c.lhs,
+        comparison: OPERATOR_TO_API[c.operator],
+        value: { type: arrayValueType, value: buildConditionValue(c, arrayValueType) },
+        metadata: {},
+      }
+    }
+
+    const apiValueType = mapRoutingKeyTypeToEuclidValueType(keyType)
     return {
       lhs: c.lhs,
       comparison: OPERATOR_TO_API[c.operator] || c.operator,
       value: {
-        type: valueType,
-        value: buildConditionValue(c, valueType),
+        type: apiValueType,
+        value: buildConditionValue(c, apiValueType),
       },
       metadata: {},
     }
@@ -943,12 +869,8 @@ function buildAlgorithmData(rules: RuleBlock[], defaultOutput: DefaultOutput, ro
   function buildStatement(group: StatementGroup): Record<string, unknown> {
     const statement: Record<string, unknown> = {
       condition: group.conditions.map(buildCondition),
+      nested: group.nested.length > 0 ? group.nested.map(buildStatement) : null,
     }
-
-    if (group.nested.length > 0) {
-      statement.nested = group.nested.map(buildStatement)
-    }
-
     return statement
   }
 
@@ -957,8 +879,8 @@ function buildAlgorithmData(rules: RuleBlock[], defaultOutput: DefaultOutput, ro
     default_selection: buildPriorityOutput(defaultOutput.priorityGateways),
     rules: rules.map((r) => ({
       name: r.name,
-      routing_type: 'priority',
-      output: buildPriorityOutput(r.priorityGateways),
+      routing_type: r.outputType,
+      output: buildOutput(r),
       statements: r.statements.map(buildStatement),
     })),
   }
@@ -974,14 +896,12 @@ export function EuclidRulesPage() {
   const [ruleName, setRuleName] = useState('')
   const [ruleDesc, setRuleDesc] = useState('')
   const [ruleBlocks, setRuleBlocks] = useState<RuleBlock[]>([])
-  const [defaultOutput, setDefaultOutput] = useState<DefaultOutput>({
-    priorityGateways: [],
-  })
+  const [defaultOutput, setDefaultOutput] = useState<DefaultOutput>({ priorityGateways: [] })
   const [showJson, setShowJson] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const submittingRef = useRef(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
-  const [createdRule, setCreatedRule] = useState<CreatedRuleNotice | null>(null)
+  const [createdId, setCreatedId] = useState<string | null>(null)
   const [activating, setActivating] = useState(false)
   const [activateError, setActivateError] = useState<string | null>(null)
   const [activateSuccess, setActivateSuccess] = useState(false)
@@ -989,7 +909,6 @@ export function EuclidRulesPage() {
   const [deactivateError, setDeactivateError] = useState<string | null>(null)
   const [deactivateSuccess, setDeactivateSuccess] = useState(false)
   const [expandedRuleIds, setExpandedRuleIds] = useState<Set<string>>(new Set())
-  const [ruleViewModes, setRuleViewModes] = useState<Record<string, RuleViewMode>>({})
 
   const { data: allAlgorithms, mutate: mutateAlgorithms } = useSWR<RoutingAlgorithm[]>(
     merchantId ? `/routing/list/${merchantId}` : null,
@@ -1007,15 +926,16 @@ export function EuclidRulesPage() {
     return algorithm?.type !== 'volume_split'
   })
 
-  const algorithmData = buildAlgorithmData(ruleBlocks, defaultOutput, routingKeys)
+  const gatewaySuggestions = Array.from(new Set([
+    ...ruleBlocks.flatMap((b) => [
+      ...b.priorityGateways.map((g) => g.gatewayName),
+      ...b.volumeSplitEntries.map((e) => e.gatewayName),
+      ...b.volumeSplitPriorityEntries.flatMap((e) => e.gateways.map((g) => g.gatewayName)),
+    ]),
+    ...defaultOutput.priorityGateways.map((g) => g.gatewayName),
+  ].filter(Boolean)))
 
-  function resetRuleDraft() {
-    setRuleName('')
-    setRuleDesc('')
-    setRuleBlocks([])
-    setDefaultOutput({ priorityGateways: [] })
-    setShowJson(false)
-  }
+  const algorithmData = buildAlgorithmData(ruleBlocks, defaultOutput, routingKeys)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -1029,21 +949,21 @@ export function EuclidRulesPage() {
     submittingRef.current = true
     setSubmitting(true)
     setSubmitError(null)
-    const trimmedRuleName = ruleName.trim()
-    setCreatedRule(null)
+    setCreatedId(null)
     try {
-      const result = await apiPost<RoutingCreateResponse>('/routing/create', {
-        name: trimmedRuleName,
+      const result = await apiPost<RoutingAlgorithm>('/routing/create', {
+        name: ruleName.trim(),
         description: ruleDesc,
         created_by: merchantId,
         algorithm_for: 'payment',
         algorithm: { type: 'advanced', data: algorithmData },
       })
-      setCreatedRule({
-        id: result.rule_id || result.id || null,
-        name: result.name || trimmedRuleName,
-      })
-      resetRuleDraft()
+      setCreatedId(result.rule_id ?? result.id)
+      setRuleName('')
+      setRuleDesc('')
+      setRuleBlocks([])
+      setDefaultOutput({ priorityGateways: [] })
+      setShowJson(false)
       mutateAlgorithms()
     } catch (err) {
       setSubmitError(String(err))
@@ -1061,15 +981,9 @@ export function EuclidRulesPage() {
     setDeactivateError(null)
     setDeactivateSuccess(false)
     try {
-      await apiPost('/routing/activate', {
-        created_by: merchantId,
-        routing_algorithm_id: id,
-      })
+      await apiPost('/routing/activate', { created_by: merchantId, routing_algorithm_id: id })
       setActivateSuccess(true)
-      await Promise.all([
-        mutateAlgorithms(),
-        mutateActiveAlgorithms(),
-      ])
+      await Promise.all([mutateAlgorithms(), mutateActiveAlgorithms()])
     } catch (err) {
       setActivateError(String(err))
     } finally {
@@ -1082,22 +996,15 @@ export function EuclidRulesPage() {
     if (!window.confirm('Deactivate this routing rule for the selected merchant? The saved rule will remain available.')) {
       return
     }
-
     setDeactivatingId(id)
     setDeactivateError(null)
     setDeactivateSuccess(false)
     setActivateError(null)
     setActivateSuccess(false)
     try {
-      await apiPost('/routing/deactivate', {
-        created_by: merchantId,
-        routing_algorithm_id: id,
-      })
+      await apiPost('/routing/deactivate', { created_by: merchantId, routing_algorithm_id: id })
       setDeactivateSuccess(true)
-      await Promise.all([
-        mutateAlgorithms(),
-        mutateActiveAlgorithms(),
-      ])
+      await Promise.all([mutateAlgorithms(), mutateActiveAlgorithms()])
     } catch (err) {
       setDeactivateError(String(err))
     } finally {
@@ -1108,27 +1015,22 @@ export function EuclidRulesPage() {
   function toggleRuleExpand(id: string) {
     setExpandedRuleIds(prev => {
       const newSet = new Set(prev)
-      if (newSet.has(id)) {
-        newSet.delete(id)
-      } else {
-        newSet.add(id)
-      }
+      if (newSet.has(id)) { newSet.delete(id) } else { newSet.add(id) }
       return newSet
     })
-  }
-
-  function setRuleViewMode(id: string, mode: RuleViewMode) {
-    setRuleViewModes((prev) => ({ ...prev, [id]: mode }))
   }
 
   function addRuleBlock() {
     setRuleBlocks((prev) => [
       ...prev,
-        {
-          id: crypto.randomUUID(),
-          name: `Rule ${prev.length + 1}`,
-          statements: [createStatementGroup(routingKeys)],
-          priorityGateways: [],
+      {
+        id: crypto.randomUUID(),
+        name: `Rule ${prev.length + 1}`,
+        statements: [createStatementGroup(routingKeys)],
+        outputType: 'priority',
+        priorityGateways: [],
+        volumeSplitEntries: [],
+        volumeSplitPriorityEntries: [],
       },
     ])
   }
@@ -1160,36 +1062,28 @@ export function EuclidRulesPage() {
                     const isActive = activeIds.has(algo.id)
                     const isExpanded = expandedRuleIds.has(algo.id)
                     const algorithm = algo.algorithm_data || algo.algorithm
-                    const advancedData = getAdvancedAlgorithmData(algorithm)
-                    const viewMode = ruleViewModes[algo.id] || 'readable'
+                    const summary = getRuleSummary(algo)
 
                     return (
                       <div key={algo.id}>
                         <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
                           <div className="min-w-0 flex-1">
                             <p className="truncate font-medium">{algo.name}</p>
-                            <p className="text-xs text-slate-400 capitalize">{algorithm?.type}</p>
+                            {summary && (
+                              <p className="text-xs text-slate-400 mt-0.5 truncate" title={summary}>{summary}</p>
+                            )}
                           </div>
 
                           <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
                             <Badge variant={isActive ? 'green' : 'gray'}>
                               {isActive ? 'Active' : 'Inactive'}
                             </Badge>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => toggleRuleExpand(algo.id)}
-                            >
+                            <Button size="sm" variant="ghost" onClick={() => toggleRuleExpand(algo.id)}>
                               <Eye size={14} className="mr-1" />
                               {isExpanded ? 'Hide' : 'View'}
                             </Button>
                             {!isActive && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => handleActivate(algo.id)}
-                                disabled={activating}
-                              >
+                              <Button size="sm" variant="ghost" onClick={() => handleActivate(algo.id)} disabled={activating}>
                                 Activate
                               </Button>
                             )}
@@ -1209,82 +1103,20 @@ export function EuclidRulesPage() {
 
                         {isExpanded && (
                           <div className="bg-slate-50 px-4 py-3 dark:bg-[#151518]">
-                            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                              <div className="space-y-1 text-xs text-slate-600 dark:text-[#9aa3b5]">
-                                <p><strong>ID:</strong> {algo.id}</p>
-                                <p><strong>Description:</strong> {algo.description || 'N/A'}</p>
-                                <p><strong>Algorithm For:</strong> {algo.algorithm_for}</p>
-                                {algo.created_at && (
-                                  <p><strong>Created:</strong> {new Date(algo.created_at).toLocaleString()}</p>
-                                )}
-                              </div>
-                              <div className="flex rounded-full border border-slate-200 bg-white p-1 text-xs dark:border-[#252531] dark:bg-[#0f0f11]">
-                                <button
-                                  type="button"
-                                  onClick={() => setRuleViewMode(algo.id, 'readable')}
-                                  className={`rounded-full px-3 py-1 font-semibold transition ${
-                                    viewMode === 'readable'
-                                      ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-950'
-                                      : 'text-slate-500 hover:text-slate-900 dark:text-[#8d96a8] dark:hover:text-white'
-                                  }`}
-                                >
-                                  Rule view
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setRuleViewMode(algo.id, 'json')}
-                                  className={`rounded-full px-3 py-1 font-semibold transition ${
-                                    viewMode === 'json'
-                                      ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-950'
-                                      : 'text-slate-500 hover:text-slate-900 dark:text-[#8d96a8] dark:hover:text-white'
-                                  }`}
-                                >
-                                  JSON
-                                </button>
+                            <div className="space-y-2 text-xs text-slate-600">
+                              <p><strong>ID:</strong> {algo.id}</p>
+                              <p><strong>Description:</strong> {algo.description || 'N/A'}</p>
+                              <p><strong>Algorithm For:</strong> {algo.algorithm_for}</p>
+                              {algo.created_at && (
+                                <p><strong>Created:</strong> {new Date(algo.created_at).toLocaleString()}</p>
+                              )}
+                              <div>
+                                <strong>Configuration:</strong>
+                                <pre className="mt-1 max-h-48 overflow-auto rounded border border-transparent bg-slate-100 p-2 text-xs dark:border-[#222226] dark:bg-[#0f0f11]">
+                                  {JSON.stringify(algorithm, null, 2)}
+                                </pre>
                               </div>
                             </div>
-
-                            {viewMode === 'readable' && advancedData ? (
-                              <div className="space-y-3">
-                                {advancedData.rules.map((rule, ruleIndex) => {
-                                  const summary = summarizeExistingRule(rule)
-                                  return (
-                                    <div
-                                      key={`${algo.id}-${rule.name || ruleIndex}`}
-                                      className="rounded-xl border border-sky-500/15 bg-sky-500/[0.04] px-3 py-3 dark:border-sky-400/18 dark:bg-sky-400/[0.06]"
-                                    >
-                                      <div className="mb-2 flex flex-wrap items-center gap-2">
-                                        <Badge variant="blue">{summary.topLevelGroups} OR group{summary.topLevelGroups === 1 ? '' : 's'}</Badge>
-                                        <Badge variant="green">{summary.conditions} AND condition{summary.conditions === 1 ? '' : 's'}</Badge>
-                                        {summary.nestedBranches > 0 && (
-                                          <Badge variant="purple">{summary.nestedBranches} nested IF branch{summary.nestedBranches === 1 ? '' : 'es'}</Badge>
-                                        )}
-                                      </div>
-                                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8792a8]">
-                                        {rule.name || `Rule ${ruleIndex + 1}`}
-                                      </p>
-                                      <pre className="mt-2 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-200/70 bg-white/60 px-3 py-3 font-mono text-xs leading-6 text-sky-700 dark:border-[#273244] dark:bg-[#0d1118] dark:text-sky-200">
-                                        {summary.formattedExpression}
-                                      </pre>
-                                      <p className="mt-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
-                                        Then {summary.action}.
-                                      </p>
-                                      <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-[#8d96a8]">
-                                        Top-level groups are OR. Conditions inside a group are AND. Nested branches are checked only after their parent group matches; multiple nested branches are alternatives.
-                                      </p>
-                                    </div>
-                                  )
-                                })}
-                              </div>
-                            ) : viewMode === 'readable' ? (
-                              <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-500 dark:border-[#252531] dark:bg-[#0f0f11] dark:text-[#8d96a8]">
-                                Readable view is available for advanced rule-based algorithms. Switch to JSON for this algorithm payload.
-                              </div>
-                            ) : (
-                              <pre className="max-h-80 overflow-auto rounded border border-transparent bg-slate-100 p-3 text-xs text-slate-600 dark:border-[#222226] dark:bg-[#0f0f11] dark:text-[#d7dce8]">
-                                {JSON.stringify(algorithm, null, 2)}
-                              </pre>
-                            )}
                           </div>
                         )}
                       </div>
@@ -1316,47 +1148,6 @@ export function EuclidRulesPage() {
                 <h2 className="text-sm font-semibold text-slate-800">Rule Builder</h2>
               </CardHeader>
               <CardBody className="space-y-4">
-                {createdRule && (
-                  <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/10 p-4 text-sm text-emerald-700 shadow-[0_20px_50px_-35px_rgba(16,185,129,0.7)] dark:text-emerald-200">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="flex gap-3">
-                        <CheckCircle2 size={20} className="mt-0.5 shrink-0 text-emerald-500" />
-                        <div>
-                          <p className="font-semibold">Rule successfully created</p>
-                          <p className="mt-1 text-xs leading-5 text-emerald-700/80 dark:text-emerald-200/75">
-                            Saved <span className="font-semibold">{createdRule.name}</span>
-                            {createdRule.id ? (
-                              <>
-                                {' '}as <span className="font-mono">{createdRule.id}</span>
-                              </>
-                            ) : null}
-                            . The builder has been reset for the next rule.
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-2">
-                        {createdRule.id ? (
-                          <Button
-                            type="button"
-                            size="sm"
-                            onClick={() => handleActivate(createdRule.id!)}
-                            disabled={activating}
-                          >
-                            {activating ? 'Activating' : 'Activate Now'}
-                          </Button>
-                        ) : null}
-                        <button
-                          type="button"
-                          onClick={() => setCreatedRule(null)}
-                          className="rounded-full p-1 text-emerald-700/70 transition hover:bg-emerald-500/10 hover:text-emerald-800 dark:text-emerald-200/70 dark:hover:text-emerald-100"
-                          aria-label="Dismiss rule created message"
-                        >
-                          <X size={16} />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs text-slate-500 mb-1">Rule Name *</label>
@@ -1392,10 +1183,9 @@ export function EuclidRulesPage() {
                       key={block.id}
                       block={block}
                       routingKeys={routingKeys}
+                      gatewaySuggestions={gatewaySuggestions}
                       onChange={(updated) =>
-                        setRuleBlocks((prev) =>
-                          prev.map((b) => (b.id === block.id ? updated : b))
-                        )
+                        setRuleBlocks((prev) => prev.map((b) => (b.id === block.id ? updated : b)))
                       }
                       onRemove={() =>
                         setRuleBlocks((prev) => prev.filter((b) => b.id !== block.id))
@@ -1409,55 +1199,37 @@ export function EuclidRulesPage() {
                     onClick={addRuleBlock}
                     disabled={routingKeysUnavailable}
                   >
-                    <Plus size={14} /> Add Rule Block
+                    <Plus size={14} /> Add Rule
                   </Button>
                 </div>
 
                 {/* Default selection */}
                 <div className="border border-slate-200 dark:border-[#1c1c24] rounded-xl px-4 py-3">
-                  <p className="text-xs font-medium text-slate-500 mb-2">DEFAULT PRIORITY SELECTION (Stored no-match output)</p>
-                  <p className="mb-3 text-xs leading-5 text-slate-500 dark:text-[#8d96a8]">
-                    Backend uses this configured default when no rule matches. If an evaluate request sends a non-empty
-                    <code className="mx-1 font-mono">fallback_output</code>, that request fallback overrides this default for that evaluation.
-                    Configure percentage-based split behavior from its dedicated routing page.
+                  <p className="text-xs font-medium text-slate-500 mb-1">Default Fallback</p>
+                  <p className="mb-3 text-xs text-slate-400 dark:text-[#8d96a8]">
+                    Used when no rule matches. Per-request overrides are possible via <code className="font-mono">fallback_output</code>.
                   </p>
                   <PriorityEditor
                     gateways={defaultOutput.priorityGateways}
-                    onChange={(gws) =>
-                      setDefaultOutput({ ...defaultOutput, priorityGateways: gws })
-                    }
+                    suggestions={gatewaySuggestions}
+                    onChange={(gws) => setDefaultOutput({ ...defaultOutput, priorityGateways: gws })}
                   />
                 </div>
 
                 <ErrorMessage error={submitError} />
-                {submitting && (
-                  <div className="flex items-center gap-2 rounded-lg border border-sky-500/20 bg-sky-500/8 px-3 py-2 text-sm text-sky-600 dark:text-sky-300">
-                    <Loader2 size={14} className="animate-spin" />
-                    Creating rule. Please wait, this action is locked to prevent duplicate rules.
+                {createdId && (
+                  <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-3 py-2 text-sm text-emerald-400 flex items-center justify-between">
+                    <span>Rule created (ID: {createdId})</span>
+                    <Button type="button" size="sm" onClick={() => handleActivate(createdId)} disabled={activating}>
+                      Activate Now
+                    </Button>
                   </div>
                 )}
                 <div className="flex gap-3">
-                  <Button
-                    type="submit"
-                    disabled={submitting || routingKeysUnavailable}
-                    aria-busy={submitting}
-                  >
-                    {submitting ? (
-                      <>
-                        <Loader2 size={14} className="animate-spin" />
-                        Creating rule
-                      </>
-                    ) : (
-                      'Create Rule'
-                    )}
+                  <Button type="submit" disabled={submitting || routingKeysUnavailable}>
+                    {submitting ? 'Creating...' : 'Create Rule'}
                   </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setShowJson(!showJson)}
-                    disabled={submitting}
-                  >
+                  <Button type="button" variant="secondary" size="sm" onClick={() => setShowJson(!showJson)}>
                     {showJson ? 'Hide JSON' : 'Preview JSON'}
                   </Button>
                 </div>
