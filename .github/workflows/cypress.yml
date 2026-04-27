@@ -32,11 +32,13 @@ concurrency:
 
 permissions:
   contents: read
-  actions: read
+  # actions:write is required for:
+  #   - cache-to: type=gha (GHA cache saves in build job)
+  #   - actions/upload-artifact and actions/download-artifact
+  # Without this, all cache saves fail silently and artifact uploads fail.
+  actions: write
 
 env:
-  CARGO_NET_RETRY: 10
-  RUSTUP_MAX_RETRIES: 10
   IMAGE_NAME: decision-engine-pg:local
   IMAGE_ARTIFACT: decision-engine-image
 
@@ -47,13 +49,12 @@ jobs:
   build:
     name: Build Decision Engine
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-        with:
-          driver-opts: image=moby/buildkit:master
 
       - name: Build Decision Engine from PR source
         uses: docker/build-push-action@v5
@@ -87,6 +88,7 @@ jobs:
     name: "cypress / ${{ matrix.spec }}"
     runs-on: ubuntu-latest
     needs: build
+    timeout-minutes: 20
 
     strategy:
       fail-fast: false
@@ -128,9 +130,9 @@ jobs:
       # docker compose up -d returns immediately; health checks wait later.
       - name: Start services (using pre-built image)
         run: |
-          # Override config to use service names instead of host.docker.internal
+          # On Linux CI runners host.docker.internal is not available — rewrite
+          # the Redis host in the mounted config to the Docker service name.
           sed -i 's/host = "host.docker.internal"/host = "redis"/' config/docker-configuration.toml
-          sed -i 's/pg_host = "postgresql"/pg_host = "postgresql"/' config/docker-configuration.toml
           docker compose --profile postgres-local up -d --no-build
 
       # ── npm caches ────────────────────────────────────────────────────────
@@ -169,19 +171,25 @@ jobs:
         run: npm run build
         working-directory: website
         env:
-          VITE_API_BASE_PATH: http://localhost:8080/decision-engine-api
+          # In CI, vite preview serves the built files with no dev proxy, so
+          # VITE_API_BASE_PATH must be an absolute URL pointing directly at the
+          # API. The default ('/decision-engine-api') is a relative path for use
+          # with the Vite dev proxy or nginx — neither of which run here.
+          VITE_API_BASE_PATH: http://localhost:8080
 
       # ── Wait for services (Docker has had ~2-3 min to start by now) ───────
       - name: Wait for API (basic health)
         run: |
           timeout 60 bash -c \
-            'until curl -sf http://localhost:8080/health; do sleep 2; done'
+            'until curl -sf http://localhost:8080/health; do sleep 2; done' \
+            || { echo "❌ Basic health timed out"; docker compose logs --tail=50; exit 1; }
           echo "✓ Basic health check passed"
 
       - name: Wait for API (ready check)
         run: |
           timeout 180 bash -c \
-            'until curl -sf http://localhost:8080/health/ready; do sleep 3; done'
+            'until curl -sf http://localhost:8080/health/ready; do sleep 3; done' \
+            || { echo "❌ Ready check timed out"; docker compose logs --tail=50; exit 1; }
           echo "✓ Ready check passed"
 
       - name: Serve UI
@@ -189,16 +197,22 @@ jobs:
         working-directory: website
 
       - name: Wait for UI
+        # The production build has base '/decision-engine/', so the app lives at
+        # /decision-engine/ not /. Health-check that exact path.
         run: |
           timeout 60 bash -c \
-            'until curl -sf http://localhost:5173; do sleep 2; done'
+            'until curl -sf http://localhost:5173/decision-engine/; do sleep 2; done'
 
       # ── Run Cypress ───────────────────────────────────────────────────────
       - name: Run ${{ matrix.spec }}
         run: npx cypress run --spec "${{ matrix.file }}" --headless
         env:
           CYPRESS_API_BASE_URL: http://localhost:8080
-          CYPRESS_UI_BASE_URL: http://localhost:5173
+          # Include the Vite base path so resolveUiUrl() in commands.js builds
+          # the correct URL: http://localhost:5173/decision-engine/routing/rules
+          # Without this, visits to '/routing/rules' skip the base prefix and
+          # React Router can't match any route → blank page.
+          CYPRESS_UI_BASE_URL: http://localhost:5173/decision-engine
           CYPRESS_RUNTIME_MODE: ci
 
       - name: Upload screenshots on failure
