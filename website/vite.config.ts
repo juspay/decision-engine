@@ -49,6 +49,7 @@ export default defineConfig(({ command }) => {
         '^/onboarding(?:/.*)?$': createApiProxy(),
         '^/auth(?:/.*)?$': createApiProxy(),
         '^/api-key(?:/.*)?$': createApiProxy(),
+        '^/merchant(?:/.*)?$': createApiProxy(),
       },
       fs: {
         strict: false,

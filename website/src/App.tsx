@@ -12,6 +12,7 @@ import { AppShell } from './components/layout/AppShell'
 import { AuthGuard } from './components/layout/AuthGuard'
 import { AuthPage } from './pages/AuthPage'
 import { OnboardingPage } from './pages/OnboardingPage'
+import { MembersPage } from './pages/MembersPage'
 
 export default function App() {
   return (
@@ -30,6 +31,7 @@ export default function App() {
           <Route path="decisions" element={<DecisionExplorerPage />} />
           <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="audit" element={<PaymentAuditPage />} />
+          <Route path="members" element={<MembersPage />} />
           <Route path="*" element={<Navigate to="." replace />} />
         </Route>
       </Route>
