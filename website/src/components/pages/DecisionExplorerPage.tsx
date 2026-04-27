@@ -1,4 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import useSWR from 'swr'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts'
 import { Button } from '../ui/Button'
@@ -13,7 +14,7 @@ import { DecideGatewayResponse, GatewayConnector, PaymentAuditEvent, PaymentAudi
 import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
 import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
-import { Play, RefreshCw, ChevronDown, ChevronUp, Activity, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network } from 'lucide-react'
+import { Play, RefreshCw, ChevronDown, ChevronUp, Activity, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings, ArrowRight } from 'lucide-react'
 
 const ALGORITHMS: RoutingAlgorithmName[] = [
   'SR_BASED_ROUTING',
@@ -73,6 +74,14 @@ interface SimulationResult {
 type TransactionOutcome = 'CHARGED' | 'FAILURE'
 
 type AuditInspectorTab = 'summary' | 'input' | 'response' | 'raw'
+
+interface SetupPromptState {
+  title: string
+  body: string
+  cta: string
+  route: string
+  detail?: string
+}
 
 interface RuleEvaluateParams {
   key: string
@@ -539,6 +548,60 @@ function sectionButtonClass(active: boolean) {
     : '!border-transparent !bg-slate-100 !text-slate-600 hover:!bg-slate-200 hover:!text-slate-900 dark:!bg-[#161b24] dark:!text-[#a7b2c6] dark:hover:!bg-[#1c2330] dark:hover:!text-white'
 }
 
+function explorerModeButtonClass(active: boolean) {
+  return active
+    ? 'border-slate-300 bg-white text-slate-950 shadow-sm dark:border-[#3b82f6]/45 dark:bg-[#182131] dark:text-white'
+    : 'border-transparent text-slate-500 hover:border-slate-200 hover:bg-white/70 hover:text-slate-900 dark:text-[#8d9ab2] dark:hover:border-[#2a303a] dark:hover:bg-[#151b24] dark:hover:text-white'
+}
+
+function isMissingRoutingSetupError(message: string) {
+  const normalized = message.toLowerCase()
+  return normalized.includes('no active routing algorithm')
+    || normalized.includes('active routing algorithm is not a volume split')
+    || normalized.includes('debit_routing_not_enabled')
+    || normalized.includes('debit routing is disabled')
+}
+
+function setupPromptForTab(tab: TabType, detail?: string): SetupPromptState {
+  if (tab === 'volume') {
+    return {
+      title: 'Configure volume split first',
+      body: 'Volume evaluation needs an active volume split rule for this merchant before it can sample distribution.',
+      cta: 'Configure volume split',
+      route: '/routing/volume',
+      detail,
+    }
+  }
+
+  if (tab === 'rule') {
+    return {
+      title: 'Configure rule-based routing first',
+      body: 'Rule evaluation needs an active rule-based strategy for this merchant before it can return a policy decision.',
+      cta: 'Configure rule',
+      route: '/routing/rules',
+      detail,
+    }
+  }
+
+  if (tab === 'debit') {
+    return {
+      title: 'Enable debit routing first',
+      body: 'Debit network decisions need the merchant debit routing flag enabled before this explorer can run network routing.',
+      cta: 'Configure debit routing',
+      route: '/routing/debit',
+      detail,
+    }
+  }
+
+  return {
+    title: 'Configure auth-rate routing first',
+    body: 'Auth-rate simulation needs success-rate routing configured for this merchant before it can run gateway decisions.',
+    cta: 'Configure auth-rate',
+    route: '/routing/sr',
+    detail,
+  }
+}
+
 function EmptyAuditState({ title, body }: { title: string; body: string }) {
   return (
     <div className="rounded-[22px] border border-dashed border-slate-200 bg-slate-50/80 px-6 py-12 text-center dark:border-[#2a303a] dark:bg-[#161b24]/80">
@@ -612,6 +675,7 @@ function InspectorJsonPanel({
 }
 
 export function DecisionExplorerPage() {
+  const navigate = useNavigate()
   const { merchantId } = useMerchantStore()
   const authMerchantId = useAuthStore((state) => state.user?.merchantId || '')
   const effectiveMerchantId = merchantId || authMerchantId
@@ -646,6 +710,7 @@ export function DecisionExplorerPage() {
   const [simulationResults, setSimulationResults] = useState<SimulationResult[]>(initialState.simulationResults)
   const [isSimulating, setIsSimulating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [setupPrompt, setSetupPrompt] = useState<SetupPromptState | null>(null)
   const [loading, setLoading] = useState(false)
   const [filterOpen, setFilterOpen] = useState(false)
   const [responseOpen, setResponseOpen] = useState(initialState.responseOpen)
@@ -773,7 +838,7 @@ export function DecisionExplorerPage() {
   ])
 
   useEffect(() => {
-    if (!selectedAuditPaymentId && !selectedPreviewPaymentId) return
+    if (!selectedAuditPaymentId && !selectedPreviewPaymentId && !setupPrompt) return
 
     const previousOverflow = document.body.style.overflow
     const onKeyDown = (event: KeyboardEvent) => {
@@ -784,6 +849,7 @@ export function DecisionExplorerPage() {
         setSelectedPreviewPaymentId(null)
         setSelectedPreviewEventId(null)
         setPreviewInspectorTab('summary')
+        setSetupPrompt(null)
       }
     }
 
@@ -794,7 +860,7 @@ export function DecisionExplorerPage() {
       document.body.style.overflow = previousOverflow
       window.removeEventListener('keydown', onKeyDown)
     }
-  }, [selectedAuditPaymentId, selectedPreviewPaymentId])
+  }, [selectedAuditPaymentId, selectedPreviewPaymentId, setupPrompt])
 
   useEffect(() => {
     const nextState: ExplorerPersistedState = {
@@ -852,6 +918,20 @@ export function DecisionExplorerPage() {
 
   function setDebitField<K extends keyof DebitRoutingFormState>(field: K, value: DebitRoutingFormState[K]) {
     setDebitForm(f => ({ ...f, [field]: value }))
+  }
+
+  function openSetupPrompt(tab: TabType, detail?: string) {
+    setError(null)
+    setSetupPrompt(setupPromptForTab(tab, detail))
+  }
+
+  function handleRunError(errorValue: unknown, tab: TabType, fallback = 'Request failed') {
+    const message = errorValue instanceof Error ? errorValue.message : fallback
+    if (isMissingRoutingSetupError(message)) {
+      openSetupPrompt(tab, message)
+      return
+    }
+    setError(message)
   }
 
   function buildDebitRoutingMetadata() {
@@ -920,7 +1000,7 @@ export function DecisionExplorerPage() {
   async function run() {
     if (!effectiveMerchantId) return setError('Sign in with a merchant-linked account to continue')
     if (routingConfigUnavailable) return setError('Routing key config unavailable. Fix /config/routing-keys and retry.')
-    setLoading(true); setError(null)
+    setLoading(true); setError(null); setSetupPrompt(null)
     setSingleRunPaymentId(null)
     const gateways = form.eligible_gateways.split(',').map(s => s.trim()).filter(Boolean)
     const paymentId = `explorer_${Date.now()}`
@@ -952,7 +1032,7 @@ export function DecisionExplorerPage() {
       setResult(res)
       setSingleRunPaymentId(paymentId)
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Request failed')
+      handleRunError(e, 'single')
     } finally {
       setLoading(false)
     }
@@ -962,11 +1042,12 @@ export function DecisionExplorerPage() {
     if (!effectiveMerchantId) return setError('Sign in with a merchant-linked account to continue')
     setLoading(true)
     setError(null)
+    setSetupPrompt(null)
 
     try {
       await debitRoutingFlag.setDebitRoutingEnabled(true)
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to enable debit routing')
+      handleRunError(e, 'debit', 'Failed to enable debit routing')
     } finally {
       setLoading(false)
     }
@@ -974,13 +1055,14 @@ export function DecisionExplorerPage() {
 
   async function runDebitRouting() {
     if (!effectiveMerchantId) return setError('Sign in with a merchant-linked account to continue')
-    if (!debitRoutingFlag.isEnabled) return setError('Debit routing is disabled for this merchant. Enable it before running network routing.')
+    if (!debitRoutingFlag.isEnabled) return openSetupPrompt('debit', 'Debit routing is disabled for this merchant.')
 
     const gateways = debitForm.eligible_gateways.split(',').map(s => s.trim()).filter(Boolean)
     if (gateways.length === 0) return setError('Add at least one eligible gateway')
 
     setLoading(true)
     setError(null)
+    setSetupPrompt(null)
     setDebitResult(null)
     const paymentId = `debit_${Date.now()}`
 
@@ -1005,12 +1087,7 @@ export function DecisionExplorerPage() {
       setDebitResult(res)
       setDebitPaymentId(paymentId)
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : 'Request failed'
-      setError(
-        message.includes('debit_routing_not_enabled')
-          ? 'Debit routing is disabled for this merchant. Enable it and retry.'
-          : message,
-      )
+      handleRunError(e, 'debit')
     } finally {
       setLoading(false)
     }
@@ -1031,6 +1108,7 @@ export function DecisionExplorerPage() {
 
     setIsSimulating(true)
     setError(null)
+    setSetupPrompt(null)
     setSimulationResults([])
 
     const gateways = form.eligible_gateways.split(',').map(s => s.trim()).filter(Boolean)
@@ -1089,7 +1167,7 @@ export function DecisionExplorerPage() {
         setSimulationResults([...results])
       }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Simulation failed')
+      handleRunError(e, 'batch', 'Simulation failed')
     } finally {
       setIsSimulating(false)
     }
@@ -1099,6 +1177,7 @@ export function DecisionExplorerPage() {
     if (routingConfigUnavailable) return setError('Routing key config unavailable. Fix /config/routing-keys and retry.')
     setLoading(true)
     setError(null)
+    setSetupPrompt(null)
     setRuleResult(null)
     setVolumeDistribution([])
     setVolumeEvaluationLog([])
@@ -1141,7 +1220,7 @@ export function DecisionExplorerPage() {
         setVolumeDistribution(distribution)
       }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Request failed')
+      handleRunError(e, 'rule')
     } finally {
       setLoading(false)
     }
@@ -1151,6 +1230,7 @@ export function DecisionExplorerPage() {
     if (!effectiveMerchantId) return setError('Sign in with a merchant-linked account to continue')
     setLoading(true)
     setError(null)
+    setSetupPrompt(null)
     setRuleResult(null)
     setVolumeDistribution([])
     setVolumeEvaluationLog([])
@@ -1221,7 +1301,7 @@ export function DecisionExplorerPage() {
         setVolumeDistribution(buildDistribution(logEntries.length))
       }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Request failed')
+      handleRunError(e, 'volume')
     } finally {
       setLoading(false)
     }
@@ -1257,6 +1337,15 @@ export function DecisionExplorerPage() {
     () => new Map(volumeDistribution.map((item, index) => [item.name, index] as const)),
     [volumeDistribution],
   )
+  const sortedVolumeDistribution = useMemo(
+    () => [...volumeDistribution].sort((a, b) => b.count - a.count),
+    [volumeDistribution],
+  )
+  const volumeLeader = sortedVolumeDistribution[0]
+  const volumeEvaluationCount = volumeEvaluationLog.length
+  const volumeRunTarget = Number.parseInt(volumePayments, 10) || 0
+  const volumeProgressPercentage =
+    volumeRunTarget > 0 ? Math.min(100, Math.round((volumeProgress / volumeRunTarget) * 100)) : 0
 
   const auditSummary = useMemo(() => {
     const results = auditDetail.data?.results || []
@@ -1412,6 +1501,7 @@ export function DecisionExplorerPage() {
     }
 
     setError(null)
+    setSetupPrompt(null)
     setLoading(false)
     setFilterOpen(false)
     setSelectedAuditPaymentId(null)
@@ -1429,40 +1519,17 @@ export function DecisionExplorerPage() {
           : 'Reset Debit Routing'
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Decision Explorer</h1>
-        <p className="mt-1 text-sm text-slate-500 dark:text-[#b2bdd1]">
-          Run payment routing checks across auth-rate based, rule based, volume based, and debit network strategies.
-        </p>
-      </div>
-
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => setActiveTab('batch')}
-            className={`rounded-full border px-4 py-2 text-sm font-medium transition ${sectionButtonClass(activeTab === 'batch')}`}
-          >
-            Auth-Rate Based Routing
-          </button>
-          <button
-            onClick={() => setActiveTab('rule')}
-            className={`rounded-full border px-4 py-2 text-sm font-medium transition ${sectionButtonClass(activeTab === 'rule')}`}
-          >
-            Rule Based Routing
-          </button>
-          <button
-            onClick={() => setActiveTab('volume')}
-            className={`rounded-full border px-4 py-2 text-sm font-medium transition ${sectionButtonClass(activeTab === 'volume')}`}
-          >
-            Volume Based Routing
-          </button>
-          <button
-            onClick={() => setActiveTab('debit')}
-            className={`rounded-full border px-4 py-2 text-sm font-medium transition ${sectionButtonClass(activeTab === 'debit')}`}
-          >
-            Debit Routing
-          </button>
+    <div className="mx-auto max-w-[1500px] space-y-5">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <SurfaceLabel>Simulation console</SurfaceLabel>
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <h1 className="text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">Decision Explorer</h1>
+            <Badge variant="blue">{effectiveMerchantId || 'No merchant'}</Badge>
+          </div>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500 dark:text-[#9aa6bb]">
+            Run routing decisions, inspect distribution, and open the exact decision trace from one workspace.
+          </p>
         </div>
         <Button size="sm" variant="secondary" onClick={resetCurrentTabState}>
           <RefreshCw size={14} />
@@ -1470,9 +1537,45 @@ export function DecisionExplorerPage() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
+      <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-1 dark:border-[#242b36] dark:bg-[#0c1118]">
+        <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-4">
+          <button
+            onClick={() => setActiveTab('batch')}
+            className={`rounded-xl border px-4 py-3 text-left text-sm font-semibold transition ${explorerModeButtonClass(activeTab === 'batch')}`}
+          >
+            <span className="block">Auth-rate</span>
+            <span className="mt-1 block text-[11px] font-medium text-slate-400 dark:text-[#738097]">Score simulation</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('rule')}
+            className={`rounded-xl border px-4 py-3 text-left text-sm font-semibold transition ${explorerModeButtonClass(activeTab === 'rule')}`}
+          >
+            <span className="block">Rule based</span>
+            <span className="mt-1 block text-[11px] font-medium text-slate-400 dark:text-[#738097]">Policy evaluator</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('volume')}
+            className={`rounded-xl border px-4 py-3 text-left text-sm font-semibold transition ${explorerModeButtonClass(activeTab === 'volume')}`}
+          >
+            <span className="block">Volume split</span>
+            <span className="mt-1 block text-[11px] font-medium text-slate-400 dark:text-[#738097]">Distribution run</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('debit')}
+            className={`rounded-xl border px-4 py-3 text-left text-sm font-semibold transition ${explorerModeButtonClass(activeTab === 'debit')}`}
+          >
+            <span className="block">Debit routing</span>
+            <span className="mt-1 block text-[11px] font-medium text-slate-400 dark:text-[#738097]">Network decision</span>
+          </button>
+        </div>
+      </div>
+
+      <div className={activeTab === 'volume'
+        ? 'grid grid-cols-1 gap-5 xl:grid-cols-[minmax(340px,420px)_minmax(0,1fr)]'
+        : 'grid grid-cols-1 gap-6 lg:grid-cols-2'
+      }>
+        <Card className="!rounded-2xl self-start">
+          <CardHeader className="!px-5 !py-4">
             <div>
               <SurfaceLabel>
                 {activeTab === 'rule' ? 'Rule Evaluation' :
@@ -1488,7 +1591,7 @@ export function DecisionExplorerPage() {
               </h2>
             </div>
           </CardHeader>
-          <CardBody className="space-y-3">
+          <CardBody className="space-y-4 !px-5 !py-5">
             {!effectiveMerchantId && (
               <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-3 py-2">
                 Set a merchant ID in the top bar first.
@@ -1776,17 +1879,53 @@ export function DecisionExplorerPage() {
                 </p>
               </div>
             ) : activeTab === 'volume' ? (
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Number of Payments</label>
-                <input
-                  type="text"
-                  value={volumePayments}
-                  onChange={e => setVolumePayments(e.target.value)}
-                  className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-                />
-                <p className="text-xs text-slate-500 mt-1">
-                  Enter how many decision evaluations to run against the active volume split rule.
-                </p>
+              <div className="space-y-4">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-[#283241] dark:bg-[#0b111a]">
+                  <label className="block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-[#7f8ca3]">
+                    Evaluation count
+                  </label>
+                  <div className="mt-3 flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-[#283241] dark:bg-[#101722]">
+                    <input
+                      type="number"
+                      min="1"
+                      inputMode="numeric"
+                      value={volumePayments}
+                      onChange={e => setVolumePayments(e.target.value)}
+                      className="min-w-0 flex-1 bg-transparent text-2xl font-semibold text-slate-950 outline-none dark:text-white"
+                    />
+                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500 dark:bg-[#1d2633] dark:text-[#91a0b8]">
+                      runs
+                    </span>
+                  </div>
+                  <p className="mt-3 text-xs leading-5 text-slate-500 dark:text-[#8f9bb0]">
+                    Samples the active volume split strategy through <code>/routing/evaluate</code> and records each decision trace.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-xl border border-slate-200 px-3 py-3 dark:border-[#283241]">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-[#77849a]">Target</p>
+                    <p className="mt-2 text-lg font-semibold text-slate-950 dark:text-white">{volumeRunTarget || '--'}</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 px-3 py-3 dark:border-[#283241]">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-[#77849a]">Completed</p>
+                    <p className="mt-2 text-lg font-semibold text-slate-950 dark:text-white">
+                      {loading ? volumeProgress : volumeEvaluationCount || '--'}
+                    </p>
+                  </div>
+                </div>
+
+                {loading && activeTab === 'volume' ? (
+                  <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-3 dark:border-sky-500/25 dark:bg-sky-500/10">
+                    <div className="flex items-center justify-between text-xs font-semibold text-sky-700 dark:text-sky-200">
+                      <span>Run progress</span>
+                      <span>{volumeProgressPercentage}%</span>
+                    </div>
+                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-sky-100 dark:bg-sky-950/70">
+                      <div className="h-full rounded-full bg-sky-500" style={{ width: `${volumeProgressPercentage}%` }} />
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ) : (
               <>
@@ -1930,7 +2069,11 @@ export function DecisionExplorerPage() {
                 {loading ? <><Spinner size={14} /> Running Debit Routing…</> : <><Network size={14} /> Run Debit Routing</>}
               </Button>
             ) : activeTab === 'volume' ? (
-              <Button onClick={runVolumeSplit} disabled={loading || !effectiveMerchantId} className="w-full justify-center">
+              <Button
+                onClick={runVolumeSplit}
+                disabled={loading || !effectiveMerchantId}
+                className="w-full justify-center dark:bg-sky-500 dark:text-white dark:hover:bg-sky-400"
+              >
                 {loading ? (
                   <><Spinner size={14} /> Running {volumeProgress}/{volumePayments || 0} decisions…</>
                 ) : (
@@ -1961,8 +2104,8 @@ export function DecisionExplorerPage() {
         <div
           className={
             activeTab === 'volume' && volumeDistribution.length > 0
-              ? 'space-y-4 lg:col-span-2'
-              : 'space-y-4'
+              ? 'min-w-0 space-y-4'
+              : 'min-w-0 space-y-4'
           }
         >
           {activeTab === 'debit' ? (
@@ -2071,243 +2214,250 @@ export function DecisionExplorerPage() {
             )
           ) : activeTab === 'volume' ? (
             volumeDistribution.length > 0 ? (
-              <div className="grid gap-4 xl:grid-cols-2">
-                <Card>
-                  <CardHeader>
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <h3 className="text-sm font-medium text-slate-800">Volume Distribution Overview</h3>
-                        <p className="mt-1 text-xs text-slate-500">
-                          Actual distribution from {volumeEvaluationLog.length} calls to <code>/routing/evaluate</code> using the active volume split rule.
-                        </p>
-                      </div>
-                      {ruleResult?.payment_id ? (
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => openPreviewModal(ruleResult.payment_id!, 'Volume Split Decision')}
-                        >
-                          View first decision trace
-                        </Button>
-                      ) : null}
-                    </div>
-                  </CardHeader>
-                  <CardBody>
-                    <div className="text-center mb-4">
-                      <p className="text-3xl font-bold text-slate-900">{volumeEvaluationLog.length}</p>
-                      <p className="text-xs text-slate-500">Evaluations completed</p>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      {volumeDistribution.map((item, idx) => (
-                        <div key={idx} className="bg-slate-50 dark:bg-[#111114] rounded-lg p-3">
-                          <div className="flex items-center gap-2 mb-1">
-                            <div
-                              className="w-3 h-3 rounded"
-                              style={{ backgroundColor: COLORS[idx % COLORS.length] }}
-                            />
-                            <span className="font-medium text-sm">{item.name}</span>
-                          </div>
-                          <div className="flex justify-between text-xs text-slate-500">
-                            <span>{item.percentage}%</span>
-                            <span className="font-medium text-slate-700">{item.count} payments</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </CardBody>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <h3 className="text-sm font-medium text-slate-800">Pie Chart</h3>
-                  </CardHeader>
-                  <CardBody>
-                    <ResponsiveContainer width="100%" height={250}>
-                      <PieChart>
-                        <Pie
-                          data={pieData}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={60}
-                          outerRadius={100}
-                          paddingAngle={3}
-                          dataKey="value"
-                          label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                          labelLine={false}
-                        >
-                          {pieData.map((_, index) => (
-                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip
-                          formatter={(value: number) => [`${value} payments`, 'Count']}
-                          contentStyle={document.documentElement.classList.contains('dark') ? { backgroundColor: '#111114', border: '1px solid #222226', borderRadius: '8px', color: '#fff' } : { backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px', color: '#1f2937' }}
-                        />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </CardBody>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <h3 className="text-sm font-medium text-slate-800">Percentage Distribution</h3>
-                  </CardHeader>
-                  <CardBody>
-                    <div className="h-4 rounded-full overflow-hidden flex">
-                      {volumeDistribution.map((item, idx) => (
-                        <div
-                          key={idx}
-                          style={{
-                            width: `${item.percentage}%`,
-                            backgroundColor: COLORS[idx % COLORS.length]
-                          }}
-                          className="h-full transition-all duration-300"
-                          title={`${item.name}: ${item.percentage}%`}
-                        />
-                      ))}
-                    </div>
-                    <div className="flex flex-wrap gap-3 mt-3">
-                      {volumeDistribution.map((item, idx) => (
-                        <div key={idx} className="flex items-center gap-1.5 text-xs">
-                          <div
-                            className="w-2.5 h-2.5 rounded-sm"
-                            style={{ backgroundColor: COLORS[idx % COLORS.length] }}
-                          />
-                          <span className="text-slate-600">{item.name}</span>
-                          <span className="font-medium">{item.percentage}%</span>
-                        </div>
-                      ))}
-                    </div>
-                  </CardBody>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <h3 className="text-sm font-medium text-slate-800">Gateway Summary</h3>
-                  </CardHeader>
-                  <CardBody className="p-0">
-                    <table className="w-full text-sm">
-                      <thead className="bg-slate-50 dark:bg-[#111114] text-xs text-slate-500">
-                        <tr>
-                          <th className="text-left px-4 py-2">gateway_name</th>
-                          <th className="text-right px-4 py-2">Payments</th>
-                          <th className="text-right px-4 py-2">Percentage</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 dark:divide-[#222226]">
-                        {volumeDistribution.map((item, idx) => (
-                          <tr key={idx} className="hover:bg-slate-50 dark:bg-[#111114]">
-                            <td className="px-4 py-2">
-                              <div className="flex items-center gap-2">
-                                <div
-                                  className="w-3 h-3 rounded"
-                                  style={{ backgroundColor: COLORS[idx % COLORS.length] }}
-                                />
-                                <span className="font-medium">{item.name}</span>
-                              </div>
-                            </td>
-                            <td className="px-4 py-2 text-right font-medium">{item.count}</td>
-                            <td className="px-4 py-2 text-right text-slate-500">{item.percentage}%</td>
-                          </tr>
-                        ))}
-                        <tr className="bg-slate-50 dark:bg-[#111114] font-medium">
-                          <td className="px-4 py-2">Total</td>
-                          <td className="px-4 py-2 text-right">{volumeEvaluationLog.length}</td>
-                          <td className="px-4 py-2 text-right">100%</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </CardBody>
-                </Card>
-
-                <Card>
-                  <CardHeader>
+              <div className="space-y-5">
+                <section className="rounded-2xl border border-slate-200 bg-white shadow-[0_18px_60px_-46px_rgba(15,23,42,0.2)] dark:border-[#283241] dark:bg-[#101722]">
+                  <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 dark:border-[#263141]">
                     <div>
-                      <h3 className="text-sm font-medium text-slate-800">Evaluation Sequence</h3>
-                      <p className="mt-1 text-xs text-slate-500">
-                        Actual connector sequence returned by repeated <code>/routing/evaluate</code> calls.
+                      <SurfaceLabel>Volume result</SurfaceLabel>
+                      <h3 className="mt-2 text-lg font-semibold text-slate-950 dark:text-white">Distribution analysis</h3>
+                      <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#8f9bb0]">
+                        {volumeEvaluationCount} evaluations from <code>/routing/evaluate</code> using the active volume split rule.
                       </p>
                     </div>
-                  </CardHeader>
-                  <CardBody className="p-0 max-h-80 overflow-auto">
-                    <table className="w-full text-sm">
-                      <thead className="bg-slate-50 dark:bg-[#111114] text-xs text-slate-500 sticky top-0">
-                        <tr>
-                          <th className="text-left px-4 py-2 w-20">#</th>
-                          <th className="text-left px-4 py-2">payment_id</th>
-                          <th className="text-left px-4 py-2">gateway_name</th>
-                          <th className="text-right px-4 py-2 w-28">trace</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 dark:divide-[#222226]">
-                        {volumeEvaluationLog.map((entry, idx) => (
-                          <tr
-                            key={entry.paymentId}
-                            className="cursor-pointer hover:bg-slate-50 dark:bg-[#111114]"
-                            onClick={() => openPreviewModal(entry.paymentId, 'Volume Split Decision')}
-                          >
-                            <td className="px-4 py-1.5 text-slate-500 font-mono text-xs">{idx + 1}</td>
-                            <td className="px-4 py-1.5 font-mono text-xs text-slate-500">{entry.paymentId}</td>
-                            <td className="px-4 py-1.5">
-                              <div className="flex items-center gap-2">
-                                <div
-                                  className="w-2 h-2 rounded"
-                                  style={{
-                                    backgroundColor:
-                                      COLORS[(volumeColorIndex.get(entry.connector) || 0) % COLORS.length],
-                                  }}
-                                />
-                                <span className="font-medium">{entry.connector}</span>
-                              </div>
-                            </td>
-                            <td className="px-4 py-1.5 text-right">
-                              <button
-                                type="button"
-                                className="text-xs font-medium text-brand-600 hover:text-brand-700"
-                                onClick={(event) => {
-                                  event.stopPropagation()
-                                  openPreviewModal(entry.paymentId, 'Volume Split Decision')
-                                }}
-                              >
-                                View trace
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </CardBody>
-                </Card>
+                    {ruleResult?.payment_id ? (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => openPreviewModal(ruleResult.payment_id!, 'Volume Split Decision')}
+                      >
+                        View first trace
+                      </Button>
+                    ) : null}
+                  </div>
 
-                <Card>
-                  <CardHeader>
-                    <button
-                      onClick={() => setVolumeResponseOpen(o => !o)}
-                      className="flex items-center justify-between w-full text-sm font-medium text-slate-800"
-                    >
-                      <span className="flex items-center gap-2">
-                        <Code size={14} />
-                        API Response
-                      </span>
-                      {volumeResponseOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                    </button>
-                  </CardHeader>
+                  <div className="grid gap-5 px-5 py-5 2xl:grid-cols-[minmax(0,1fr)_300px]">
+                    <div className="min-w-0 space-y-5">
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-[#293546] dark:bg-[#0b111a]">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-[#77849a]">Runs</p>
+                          <p className="mt-2 text-2xl font-semibold text-slate-950 dark:text-white">{volumeEvaluationCount}</p>
+                        </div>
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-[#293546] dark:bg-[#0b111a]">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-[#77849a]">Leader</p>
+                          <p className="mt-2 truncate text-2xl font-semibold text-slate-950 dark:text-white">{volumeLeader?.name || '--'}</p>
+                        </div>
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-[#293546] dark:bg-[#0b111a]">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-[#77849a]">Share</p>
+                          <p className="mt-2 text-2xl font-semibold text-slate-950 dark:text-white">{volumeLeader?.percentage ?? 0}%</p>
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between text-xs text-slate-500 dark:text-[#8f9bb0]">
+                          <span>Observed percentage split</span>
+                          <span>{sortedVolumeDistribution.length} gateways</span>
+                        </div>
+                        <div className="mt-2 flex h-3 overflow-hidden rounded-full bg-slate-100 dark:bg-[#1d2633]">
+                          {sortedVolumeDistribution.map((item) => (
+                            <div
+                              key={item.name}
+                              className="h-full transition-all duration-300"
+                              style={{
+                                width: `${item.percentage}%`,
+                                backgroundColor: COLORS[(volumeColorIndex.get(item.name) ?? 0) % COLORS.length],
+                              }}
+                              title={`${item.name}: ${item.percentage}%`}
+                            />
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        {sortedVolumeDistribution.map((item) => {
+                          const color = COLORS[(volumeColorIndex.get(item.name) ?? 0) % COLORS.length]
+                          return (
+                            <div key={item.name} className="rounded-xl border border-slate-200 bg-white px-4 py-3 dark:border-[#263141] dark:bg-[#0c121c]">
+                              <div className="flex items-center justify-between gap-4">
+                                <div className="flex min-w-0 items-center gap-3">
+                                  <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+                                  <div className="min-w-0">
+                                    <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{item.name}</p>
+                                    <p className="text-xs text-slate-500 dark:text-[#8290a5]">{item.count} payments</p>
+                                  </div>
+                                </div>
+                                <p className="text-sm font-semibold text-slate-900 dark:text-white">{item.percentage}%</p>
+                              </div>
+                              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-[#1d2633]">
+                                <div className="h-full rounded-full" style={{ width: `${item.percentage}%`, backgroundColor: color }} />
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 dark:border-[#293546] dark:bg-[#0b111a]">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-semibold text-slate-900 dark:text-white">Connector share</p>
+                        <Badge variant="gray">Live sample</Badge>
+                      </div>
+                      <div className="mt-4 h-[260px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={pieData}
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={72}
+                              outerRadius={104}
+                              paddingAngle={2}
+                              dataKey="value"
+                              label={false}
+                              labelLine={false}
+                            >
+                              {pieData.map((_, index) => (
+                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                              ))}
+                            </Pie>
+                            <Tooltip
+                              formatter={(value: number) => [`${value} payments`, 'Count']}
+                              contentStyle={{ backgroundColor: '#111827', border: '1px solid #293546', borderRadius: '12px', color: '#fff' }}
+                            />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </div>
+                      <div className="mt-4 space-y-2">
+                        {sortedVolumeDistribution.map((item) => (
+                          <div key={item.name} className="flex items-center justify-between gap-3 text-xs">
+                            <span className="flex min-w-0 items-center gap-2 text-slate-500 dark:text-[#9aa6bb]">
+                              <span
+                                className="h-2.5 w-2.5 rounded-full"
+                                style={{ backgroundColor: COLORS[(volumeColorIndex.get(item.name) ?? 0) % COLORS.length] }}
+                              />
+                              <span className="truncate">{item.name}</span>
+                            </span>
+                            <span className="font-semibold text-slate-900 dark:text-white">{item.percentage}%</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.8fr)]">
+                  <section className="rounded-2xl border border-slate-200 bg-white dark:border-[#283241] dark:bg-[#101722]">
+                    <div className="border-b border-slate-200 px-5 py-4 dark:border-[#263141]">
+                      <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Evaluation sequence</h3>
+                      <p className="mt-1 text-xs text-slate-500 dark:text-[#8f9bb0]">Click any row to inspect the captured decision trace.</p>
+                    </div>
+                    <div className="max-h-[360px] overflow-auto">
+                      <table className="w-full text-sm">
+                        <thead className="sticky top-0 bg-slate-50 text-xs text-slate-500 dark:bg-[#0b111a] dark:text-[#8290a5]">
+                          <tr>
+                            <th className="w-16 px-4 py-2 text-left">#</th>
+                            <th className="px-4 py-2 text-left">payment_id</th>
+                            <th className="px-4 py-2 text-left">gateway</th>
+                            <th className="w-24 px-4 py-2 text-right">trace</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-[#263141]">
+                          {volumeEvaluationLog.map((entry, idx) => (
+                            <tr
+                              key={entry.paymentId}
+                              className="cursor-pointer transition hover:bg-slate-50 dark:hover:bg-[#151d2a]"
+                              onClick={() => openPreviewModal(entry.paymentId, 'Volume Split Decision')}
+                            >
+                              <td className="px-4 py-2 font-mono text-xs text-slate-500">{idx + 1}</td>
+                              <td className="max-w-[260px] truncate px-4 py-2 font-mono text-xs text-slate-600 dark:text-[#aab5c8]">{entry.paymentId}</td>
+                              <td className="px-4 py-2">
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className="h-2 w-2 rounded-full"
+                                    style={{ backgroundColor: COLORS[(volumeColorIndex.get(entry.connector) ?? 0) % COLORS.length] }}
+                                  />
+                                  <span className="font-medium text-slate-900 dark:text-white">{entry.connector}</span>
+                                </div>
+                              </td>
+                              <td className="px-4 py-2 text-right">
+                                <button
+                                  type="button"
+                                  className="text-xs font-semibold text-brand-600 hover:text-brand-700 dark:text-sky-300"
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    openPreviewModal(entry.paymentId, 'Volume Split Decision')
+                                  }}
+                                >
+                                  Open
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+
+                  <section className="rounded-2xl border border-slate-200 bg-white dark:border-[#283241] dark:bg-[#101722]">
+                    <div className="border-b border-slate-200 px-5 py-4 dark:border-[#263141]">
+                      <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Gateway totals</h3>
+                    </div>
+                    <div className="p-5">
+                      <table className="w-full text-sm">
+                        <tbody className="divide-y divide-slate-100 dark:divide-[#263141]">
+                          {sortedVolumeDistribution.map((item) => (
+                            <tr key={item.name}>
+                              <td className="py-3">
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className="h-2.5 w-2.5 rounded-full"
+                                    style={{ backgroundColor: COLORS[(volumeColorIndex.get(item.name) ?? 0) % COLORS.length] }}
+                                  />
+                                  <span className="font-medium text-slate-900 dark:text-white">{item.name}</span>
+                                </div>
+                              </td>
+                              <td className="py-3 text-right text-slate-500 dark:text-[#9aa6bb]">{item.count}</td>
+                              <td className="py-3 text-right font-semibold text-slate-900 dark:text-white">{item.percentage}%</td>
+                            </tr>
+                          ))}
+                          <tr>
+                            <td className="py-3 font-semibold text-slate-900 dark:text-white">Total</td>
+                            <td className="py-3 text-right font-semibold text-slate-900 dark:text-white">{volumeEvaluationCount}</td>
+                            <td className="py-3 text-right font-semibold text-slate-900 dark:text-white">100%</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+                </div>
+
+                <section className="rounded-2xl border border-slate-200 bg-white dark:border-[#283241] dark:bg-[#101722]">
+                  <button
+                    onClick={() => setVolumeResponseOpen(o => !o)}
+                    className="flex w-full items-center justify-between px-5 py-4 text-sm font-semibold text-slate-900 dark:text-white"
+                  >
+                    <span className="flex items-center gap-2">
+                      <Code size={14} />
+                      API response
+                    </span>
+                    {volumeResponseOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  </button>
                   {volumeResponseOpen && ruleResult && (
-                    <CardBody className="p-0">
-                      <pre className="text-xs text-slate-600 bg-slate-50 dark:bg-[#0a0a0f] p-4 overflow-auto max-h-96 font-mono">
-                        {JSON.stringify(ruleResult, null, 2)}
-                      </pre>
-                    </CardBody>
+                    <pre className="max-h-96 overflow-auto border-t border-slate-200 bg-slate-50 p-4 text-xs text-slate-700 dark:border-[#263141] dark:bg-[#070b12] dark:text-[#b7c2d6]">
+                      {JSON.stringify(ruleResult, null, 2)}
+                    </pre>
                   )}
-                </Card>
+                </section>
               </div>
             ) : (
-              <Card>
-                <CardBody className="py-16 text-center">
-                  <PieChartIcon size={32} className="text-gray-300 mx-auto mb-3" />
-                  <p className="text-slate-400 text-sm">Enter the number of payments and click "Run Volume Evaluation" to execute repeated <code>/routing/evaluate</code> calls against the active volume rule.</p>
-                </CardBody>
-              </Card>
+              <section className="flex min-h-[360px] items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-8 py-12 text-center dark:border-[#2a303a] dark:bg-[#101722]/70">
+                <div className="max-w-sm">
+                  <PieChartIcon size={30} className="mx-auto text-slate-300 dark:text-[#536075]" />
+                  <h3 className="mt-4 text-sm font-semibold text-slate-900 dark:text-white">No volume sample yet</h3>
+                  <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-[#9aa6bb]">
+                    Set the run size, execute the volume test, then inspect distribution and traces here.
+                  </p>
+                </div>
+              </section>
             )
           ) : activeTab === 'rule' ? (
             ruleResult ? (
@@ -2671,6 +2821,74 @@ export function DecisionExplorerPage() {
           )}
         </div>
       </div>
+
+      {setupPrompt && (
+        <div className="fixed bottom-0 left-0 right-0 top-[76px] z-[140] flex items-center justify-center p-4">
+          <button
+            type="button"
+            aria-label="Close setup prompt"
+            className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm"
+            onClick={() => setSetupPrompt(null)}
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="decision-explorer-setup-title"
+            className="relative w-full max-w-[440px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-[#283241] dark:bg-[#101722]"
+          >
+            <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-sky-400/50 to-transparent" />
+            <div className="p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-start gap-4">
+                  <div className="rounded-2xl border border-sky-500/20 bg-sky-500/10 p-3 text-sky-500 dark:text-sky-300">
+                    <Settings size={22} />
+                  </div>
+                  <div>
+                    <SurfaceLabel>Setup required</SurfaceLabel>
+                    <h2 id="decision-explorer-setup-title" className="mt-2 text-2xl font-semibold tracking-tight text-slate-950 dark:text-white">
+                      {setupPrompt.title}
+                    </h2>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Close setup prompt"
+                  className="rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-[#1a2230] dark:hover:text-white"
+                  onClick={() => setSetupPrompt(null)}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <p className="mt-4 text-sm leading-6 text-slate-500 dark:text-[#9aa6bb]">
+                {setupPrompt.body}
+              </p>
+
+              {setupPrompt.detail ? (
+                <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 font-mono text-xs leading-5 text-slate-500 dark:border-[#283241] dark:bg-[#0b111a] dark:text-[#9aa6bb]">
+                  {setupPrompt.detail}
+                </div>
+              ) : null}
+
+              <div className="mt-6 flex flex-wrap justify-end gap-2">
+                <Button variant="secondary" onClick={() => setSetupPrompt(null)}>
+                  Stay here
+                </Button>
+                <Button
+                  onClick={() => {
+                    const route = setupPrompt.route
+                    setSetupPrompt(null)
+                    navigate(route)
+                  }}
+                >
+                  {setupPrompt.cta}
+                  <ArrowRight size={16} />
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {selectedAuditPaymentId && (
         <div className="fixed bottom-0 left-64 right-0 top-[76px] z-[130] p-8">

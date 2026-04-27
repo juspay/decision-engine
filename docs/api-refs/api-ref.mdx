@@ -81,12 +81,13 @@ curl "$BASE_URL/analytics/overview?range=1d" \
 - [Volume split](./routing-volume-split-example.mdx): distribute decisions across connectors by configured percentages.
 - [Advanced rule tree](./routing-advanced-example.mdx): AND, OR, nested AND+OR rules plus value variants such as enum arrays and number ranges.
 - [Activate routing algorithm](./routing-algorithm-activate.mdx): make a created algorithm active for a merchant.
+- [Deactivate routing algorithm](./routing-algorithm-deactivate.mdx): remove the active mapping without deleting the saved algorithm.
 - [List routing algorithms](./routing-algorithm-list.mdx): list created algorithms.
 - [List active routing algorithms](./routing-algorithm-list-active.mdx): read the active algorithm.
 - [Evaluate routing algorithm](./routing-algorithm-evaluate.mdx): run a rule/volume decision through `/routing/evaluate`.
 - [Hybrid routing evaluation](./routing-hybrid.mdx): evaluate the hybrid routing surface when rule output must be combined with runtime scoring.
 
-There is no public deactivate route in the current API contract. To change active behavior, create or select another algorithm and call `/routing/activate`.
+Use `/routing/deactivate` when a saved algorithm should remain available but no longer be active for the merchant.
 
 ### Rule Config CRUD
 

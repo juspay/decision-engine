@@ -9,7 +9,7 @@ import { Spinner } from '../ui/Spinner'
 import { useMerchantStore } from '../../store/merchantStore'
 import { apiPost } from '../../lib/api'
 import { RoutingAlgorithm } from '../../types/api'
-import { Plus, Trash2, Eye } from 'lucide-react'
+import { Plus, Trash2, Eye, PowerOff } from 'lucide-react'
 import { validateVolumeSplitRule } from '../../features/routing/volumeSplit/schema'
 import { toVolumeSplitCreatePayload } from '../../features/routing/volumeSplit/payload'
 import { toVolumeSplitRuleDetailsState } from '../../features/routing/volumeSplit/state'
@@ -40,6 +40,7 @@ export function VolumeSplitPage() {
   const [success, setSuccess] = useState<string | null>(null)
   const [showCurrentConfig, setShowCurrentConfig] = useState(false)
   const [expandedRuleIds, setExpandedRuleIds] = useState<Set<string>>(new Set())
+  const [deactivatingRuleId, setDeactivatingRuleId] = useState<string | null>(null)
 
   const total = gateways.reduce((s, g) => s + g.split, 0)
 
@@ -84,6 +85,8 @@ export function VolumeSplitPage() {
   async function handleActivate(ruleId: string) {
     if (!merchantId) return
     try {
+      setError(null)
+      setSuccess(null)
       await apiPost('/routing/activate', { created_by: merchantId, routing_algorithm_id: ruleId })
       await Promise.all([
         mutateActive(),
@@ -92,6 +95,29 @@ export function VolumeSplitPage() {
       setSuccess('Rule activated.')
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to activate')
+    }
+  }
+
+  async function handleDeactivate(ruleId: string) {
+    if (!merchantId) return
+    if (!window.confirm('Deactivate this volume split rule for the selected merchant? The saved rule will remain available.')) {
+      return
+    }
+
+    setDeactivatingRuleId(ruleId)
+    setError(null)
+    setSuccess(null)
+    try {
+      await apiPost('/routing/deactivate', { created_by: merchantId, routing_algorithm_id: ruleId })
+      await Promise.all([
+        mutateActive(),
+        mutateCache(['routing-list', merchantId]),
+      ])
+      setSuccess('Rule deactivated.')
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to deactivate')
+    } finally {
+      setDeactivatingRuleId(null)
     }
   }
 
@@ -141,6 +167,16 @@ export function VolumeSplitPage() {
               >
                 <Eye size={14} className="mr-1" />
                 {showCurrentConfig ? 'Hide' : 'View'}
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
+                size="sm"
+                onClick={() => handleDeactivate(activeVol.id)}
+                disabled={deactivatingRuleId === activeVol.id}
+              >
+                <PowerOff size={14} />
+                {deactivatingRuleId === activeVol.id ? 'Deactivating' : 'Deactivate'}
               </Button>
             </div>
           </CardHeader>
@@ -237,7 +273,10 @@ export function VolumeSplitPage() {
 
       <ActiveRulesList
         merchantId={merchantId}
+        activeRuleId={activeVol?.id}
         onActivate={handleActivate}
+        onDeactivate={handleDeactivate}
+        deactivatingRuleId={deactivatingRuleId}
         expandedRuleIds={expandedRuleIds}
         onToggleExpand={toggleRuleExpand}
       />
@@ -247,12 +286,18 @@ export function VolumeSplitPage() {
 
 function ActiveRulesList({
   merchantId,
+  activeRuleId,
   onActivate,
+  onDeactivate,
+  deactivatingRuleId,
   expandedRuleIds,
   onToggleExpand
 }: {
   merchantId: string;
+  activeRuleId?: string;
   onActivate: (id: string) => void;
+  onDeactivate: (id: string) => void;
+  deactivatingRuleId: string | null;
   expandedRuleIds: Set<string>;
   onToggleExpand: (id: string) => void;
 }) {
@@ -285,10 +330,16 @@ function ActiveRulesList({
               const itemText = details?.gateways.map(i => `${i.gatewayName}${i.gatewayId ? `(${i.gatewayId})` : ''}:${i.split}%`).join(' | ') || ''
               const algorithm = r.algorithm_data || r.algorithm
               const isExpanded = expandedRuleIds.has(r.id)
+              const isActive = activeRuleId === r.id
               return (
                 <>
                   <tr key={r.id} className="hover:bg-slate-100 dark:bg-[#0f0f16] transition-colors">
-                    <td className="px-4 py-2 font-medium text-slate-800">{r.name}</td>
+                    <td className="px-4 py-2 font-medium text-slate-800">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span>{r.name}</span>
+                        {isActive && <Badge variant="green">Active</Badge>}
+                      </div>
+                    </td>
                     <td className="px-4 py-2 text-slate-600 text-xs">
                       {itemText}
                     </td>
@@ -302,9 +353,21 @@ function ActiveRulesList({
                           <Eye size={14} className="mr-1" />
                           {isExpanded ? 'Hide' : 'View'}
                         </Button>
-                        <Button size="sm" variant="secondary" onClick={() => onActivate(r.id)}>
-                          Activate
-                        </Button>
+                        {isActive ? (
+                          <Button
+                            size="sm"
+                            variant="danger"
+                            onClick={() => onDeactivate(r.id)}
+                            disabled={deactivatingRuleId === r.id}
+                          >
+                            <PowerOff size={14} />
+                            {deactivatingRuleId === r.id ? 'Deactivating' : 'Deactivate'}
+                          </Button>
+                        ) : (
+                          <Button size="sm" variant="secondary" onClick={() => onActivate(r.id)}>
+                            Activate
+                          </Button>
+                        )}
                       </div>
                     </td>
                   </tr>
