@@ -14,7 +14,6 @@ RUN apt-get update \
 
 # Copy dependency files first for better layer caching
 COPY Cargo.toml Cargo.lock ./
-COPY crates/*/Cargo.toml crates/*/
 
 # Create dummy main files to build dependencies
 RUN mkdir -p src && \
