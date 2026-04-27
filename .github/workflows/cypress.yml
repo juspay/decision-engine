@@ -23,6 +23,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  actions: read
+
 env:
   CARGO_INCREMENTAL: 0
   CARGO_NET_RETRY: 10
