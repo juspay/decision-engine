@@ -55,8 +55,10 @@ jobs:
           file: Dockerfile.postgres
           tags: ${{ env.IMAGE_NAME }}
           load: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: |
+            type=gha,scope=cypress-${{ github.base_ref || github.ref_name }}
+            type=gha,scope=cypress-main
+          cache-to: type=gha,scope=cypress-${{ github.base_ref || github.ref_name }},mode=max
 
       - name: Save Docker image to tar
         run: docker save ${{ env.IMAGE_NAME }} | gzip > ${{ env.IMAGE_ARTIFACT }}.tar.gz
