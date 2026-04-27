@@ -89,8 +89,8 @@ Prerequisites: Rust 1.85+, MySQL or PostgreSQL, Redis, [`just`](https://just.sys
 git clone https://github.com/juspay/decision-engine.git
 cd decision-engine
 
-cp config.example.toml config/development.toml
-# Edit config with your DB, Redis, and ClickHouse connection details
+# Edit config/development.toml with your DB, Redis, and ClickHouse connection details
+# (config/development.toml already exists with all required sections)
 ```
 
 **MySQL** (default features):
@@ -153,17 +153,6 @@ curl http://localhost:8080/health
 </div>
 
 Decision Engine fits into an existing payment stack without replacing your orchestrator. The orchestrator calls Decision Engine to get a gateway recommendation, then dispatches to that gateway. Card data stays in your vault — Decision Engine never touches it.
-
-| Step | Direction | Component | Action |
-|:----:|:---------:|-----------|--------|
-| 1 | → | Your App | Initiates payment request |
-| 2 | → | Orchestrator | Forwards to Decision Engine |
-| 3 | → | Decision Engine | Selects optimal gateway |
-| 4 | → | Vault | Returns card token (PCI-safe) |
-| 5 | → | Gateway | Processes payment |
-| 6 | ← | Gateway | Returns result |
-| 7 | ← | Orchestrator | Routes response back |
-| 8 | ← | Your App | Receives final result |
 
 ---
 

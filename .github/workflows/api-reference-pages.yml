@@ -31,7 +31,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install pandoc
-        run: sudo apt-get install -y pandoc
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pandoc
 
       - name: Validate OpenAPI contract
         run: jq empty docs/openapi.json
@@ -58,8 +60,10 @@ jobs:
             -e "s|](CONTRIBUTING.md)|]($REPO/CONTRIBUTING.md)|g" \
             README.md > /tmp/readme-rewritten.md
 
+          # --from=gfm-raw_html strips raw HTML from README (e.g. <div align="center">)
+          # preventing any injected markup from reaching the published page.
           README_BODY=$(pandoc /tmp/readme-rewritten.md \
-            --from=gfm \
+            --from=gfm-raw_html \
             --to=html \
             --no-highlight)
 
@@ -70,6 +74,7 @@ jobs:
               <meta charset="utf-8" />
               <meta name="viewport" content="width=device-width, initial-scale=1" />
               <title>Decision Engine</title>
+              <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src https: data:; font-src https:; connect-src 'none'; script-src 'none';" />
               <link rel="icon" href="./favicon.svg" />
               <style>
                 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }

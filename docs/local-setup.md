@@ -11,9 +11,9 @@ This is the canonical local startup guide for Decision Engine.
 Required for source runs:
 
 - Rust 1.85+
-- [`just`](https://just.systems) — used for the `migrate-pg` command
 - PostgreSQL or MySQL
 - Redis
+- [`just`](https://just.systems) — required for PostgreSQL source runs (`just migrate-pg`); MySQL can use `diesel migration run` directly
 
 ## Runtime Tracks
 

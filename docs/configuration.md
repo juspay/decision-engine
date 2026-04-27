@@ -8,11 +8,7 @@ This document explains how to configure Decision Engine for local and on-prem de
 - `config/docker-configuration.toml`: used for Docker and Compose runs
 - `helm-charts/config/development.toml`: Kubernetes chart template config
 
-Start from the example:
-
-```bash
-cp config.example.toml config/development.toml
-```
+These files already exist with all required sections. Edit the one that matches your runtime rather than copying from `config.example.toml`, which is incomplete.
 
 ## Config Sections
 
@@ -42,10 +38,10 @@ log_format = "default"
 ```toml
 [metrics]
 host = "0.0.0.0"
-port = 9090
+port = 9094
 ```
 
-Prometheus metrics are exposed at `host:port/metrics`. Used by the `monitoring` Compose profile.
+Prometheus metrics are exposed at `host:port/metrics`. Used by the `monitoring` Compose profile (Prometheus scrapes `9094`, Grafana at `3000`).
 
 ### Rate Limiting
 
@@ -57,13 +53,7 @@ duration = 60
 
 Controls rate limiting on the delete APIs. `request_count` requests allowed per `duration` seconds.
 
-### In-Memory Cache
-
-```toml
-[cache]
-tti = 7200          # seconds of idle time before eviction
-max_capacity = 5000 # max entries per table cache
-```
+### Redis cache config
 
 ```toml
 [cache_config]
@@ -73,16 +63,31 @@ service_config_ttl = 300    # Redis TTL for service config entries, in seconds
 
 ### Database
 
+MySQL and PostgreSQL use separate config sections.
+
+**MySQL:**
+
 ```toml
 [database]
 username = "db_user"
 password = "db_pass"
 host = "localhost"
-port = 5432
+port = 3306
 dbname = "decision_engine_db"
 ```
 
-Use port `5432` for PostgreSQL and `3306` for MySQL. For Docker Compose runs this is pre-wired via service names.
+**PostgreSQL:**
+
+```toml
+[pg_database]
+pg_username = "db_user"
+pg_password = "db_pass"
+pg_host = "localhost"
+pg_port = 5432
+pg_dbname = "decision_engine_db"
+```
+
+For Docker Compose runs both are pre-wired via service names in `config/docker-configuration.toml`.
 
 ### Multi-Tenant Schema
 
@@ -112,7 +117,7 @@ jwt_expiry_seconds = 86400
 email_verification_enabled = false
 ```
 
-`jwt_secret` must be at least 32 characters. Set `email_verification_enabled = true` if you've wired an email provider.
+Use a strong, random `jwt_secret` — 32+ characters recommended. Set `email_verification_enabled = true` if you've wired an email provider.
 
 ### Admin Secret
 
@@ -129,23 +134,27 @@ Used to authenticate the `POST /merchant-account/create` endpoint (admin bootstr
 api_key_auth_enabled = true
 ```
 
-Top-level flag. When `true`, protected routes accept `x-api-key` in addition to JWT bearer tokens. Disable only in controlled environments.
+Top-level flag. When `true`, protected routes accept `x-api-key` in addition to JWT bearer tokens. When `false`, the auth middleware allows **all requests through without authentication** — this effectively disables auth for every protected route. Do not set this to `false` in any environment that should enforce auth.
 
 ### Analytics
 
+Both Kafka and ClickHouse require `enabled = true` — without it, analytics is disabled even if the connection details are configured.
+
 ```toml
 [analytics.kafka]
+enabled = true
 brokers = "localhost:9092"
 api_topic = "api"
 domain_topic = "domain"
 
 [analytics.clickhouse]
+enabled = true
 url = "http://localhost:8123"
-database = "default"
-user = "default"
+user = "decision_engine"
+password = "decision_engine"
 ```
 
-Decision outcomes are published to Kafka and consumed into ClickHouse. Both are required for analytics and audit dashboard views. For Docker runs, these are pre-configured via the Compose profiles.
+Decision outcomes are published to Kafka and consumed into ClickHouse. Both are required for analytics and audit dashboard views. For Docker runs, these are pre-configured and enabled via the Compose profiles.
 
 ### TLS
 
