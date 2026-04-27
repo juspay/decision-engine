@@ -81,6 +81,7 @@ export interface EuclidAlgorithmData {
 
 export interface RoutingAlgorithm {
   id: string
+  rule_id?: string  // create endpoint returns rule_id; list endpoint returns id
   name: string
   description: string
   created_by: string

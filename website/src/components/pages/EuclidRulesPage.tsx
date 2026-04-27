@@ -25,6 +25,7 @@ import { useMerchantStore } from '../../store/merchantStore'
 import { apiPost } from '../../lib/api'
 import { RoutingAlgorithm } from '../../types/api'
 import { useDynamicRoutingConfig, RoutingKeyConfig } from '../../hooks/useDynamicRoutingConfig'
+import { EuclidAlgorithmData } from '../../types/api'
 import { Plus, Trash2, GripVertical, ChevronDown, ChevronUp, Eye, PowerOff, CornerDownRight } from 'lucide-react'
 
 const OPERATOR_TO_API: Record<string, string> = {
@@ -34,6 +35,8 @@ const OPERATOR_TO_API: Record<string, string> = {
   '<': 'less_than',
   '>=': 'greater_than_equal',
   '<=': 'less_than_equal',
+  'in': 'equal',
+  'not_in': 'not_equal',
 }
 
 const OPERATOR_LABELS: Record<string, string> = {
@@ -43,9 +46,15 @@ const OPERATOR_LABELS: Record<string, string> = {
   '<': 'less than',
   '>=': 'greater than or equal',
   '<=': 'less than or equal',
+  'in': 'is one of',
+  'not_in': 'is not one of',
 }
 
-// ---- Types for builder ----
+function toLabel(key: string): string {
+  return key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+// ---- Types ----
 interface GatewayEntry {
   id: string
   gatewayName: string
@@ -56,7 +65,7 @@ interface ConditionRow {
   id: string
   lhs: string
   operator: string
-  value: string
+  value: string | string[]
 }
 
 interface StatementGroup {
@@ -65,11 +74,27 @@ interface StatementGroup {
   nested: StatementGroup[]
 }
 
+interface VolumeSplitEntry {
+  id: string
+  split: number
+  gatewayName: string
+  gatewayId: string
+}
+
+interface VolumeSplitPriorityEntry {
+  id: string
+  split: number
+  gateways: GatewayEntry[]
+}
+
 interface RuleBlock {
   id: string
   name: string
   statements: StatementGroup[]
+  outputType: 'priority' | 'volume_split' | 'volume_split_priority'
   priorityGateways: GatewayEntry[]
+  volumeSplitEntries: VolumeSplitEntry[]
+  volumeSplitPriorityEntries: VolumeSplitPriorityEntry[]
 }
 
 type DefaultOutput = {
@@ -79,7 +104,6 @@ type DefaultOutput = {
 function createCondition(routingKeys: Record<string, RoutingKeyConfig>): ConditionRow {
   const firstKey = Object.keys(routingKeys)[0] || 'payment_method'
   const firstKeyValues = routingKeys[firstKey]?.values || []
-
   return {
     id: crypto.randomUUID(),
     lhs: firstKey,
@@ -94,6 +118,20 @@ function createStatementGroup(routingKeys: Record<string, RoutingKeyConfig>): St
     conditions: [createCondition(routingKeys)],
     nested: [],
   }
+}
+
+function getRuleSummary(algo: RoutingAlgorithm): string {
+  const algorithm = algo.algorithm_data || algo.algorithm
+  const rules = (algorithm?.data as EuclidAlgorithmData | undefined)?.rules
+  if (!rules || rules.length === 0) return ''
+  const first = rules[0]
+  const cond = first?.statements?.[0]?.condition?.[0]
+  if (!cond) return ''
+  const field = toLabel(String(cond.lhs ?? ''))
+  const op = String(cond.comparison ?? '').replace(/_/g, ' ')
+  const val = toLabel(String(cond.value?.value ?? ''))
+  const summary = [field, op, val].filter(Boolean).join(' ')
+  return rules.length > 1 ? `${summary} · +${rules.length - 1} more` : summary
 }
 
 // ---- Sortable gateway item ----
@@ -129,12 +167,15 @@ function SortableGatewayItem({
 function PriorityEditor({
   gateways,
   onChange,
+  suggestions = [],
 }: {
   gateways: GatewayEntry[]
   onChange: (gws: GatewayEntry[]) => void
+  suggestions?: string[]
 }) {
   const [newGatewayName, setNewGatewayName] = useState('')
   const [newGatewayId, setNewGatewayId] = useState('')
+  const listId = `gateway-suggestions-${Math.random().toString(36).slice(2)}`
   const sensors = useSensors(
     useSensor(PointerSensor),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -153,15 +194,13 @@ function PriorityEditor({
     if (!newGatewayName.trim()) return
     onChange([
       ...gateways,
-      {
-        id: crypto.randomUUID(),
-        gatewayName: newGatewayName.trim(),
-        gatewayId: newGatewayId.trim(),
-      },
+      { id: crypto.randomUUID(), gatewayName: newGatewayName.trim(), gatewayId: newGatewayId.trim() },
     ])
     setNewGatewayName('')
     setNewGatewayId('')
   }
+
+  const unusedSuggestions = suggestions.filter((s) => !gateways.some((g) => g.gatewayName === s))
 
   return (
     <div className="space-y-2">
@@ -177,23 +216,192 @@ function PriorityEditor({
           ))}
         </SortableContext>
       </DndContext>
+      <datalist id={listId}>
+        {unusedSuggestions.map((s) => <option key={s} value={s} />)}
+      </datalist>
       <div className="flex gap-2">
         <input
           value={newGatewayName}
           onChange={(e) => setNewGatewayName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
-          placeholder="gateway_name"
+          list={listId}
+          placeholder="Gateway name"
           className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm flex-1 focus:outline-none focus:ring-1 focus:ring-brand-500"
         />
         <input
           value={newGatewayId}
           onChange={(e) => setNewGatewayId(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
-          placeholder="gateway_id"
+          placeholder="Gateway ID (optional)"
           className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm flex-1 focus:outline-none focus:ring-1 focus:ring-brand-500"
         />
         <Button type="button" size="sm" variant="secondary" onClick={add}>
           <Plus size={13} /> Add
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ---- Volume split editor ----
+function VolumeSplitEditor({
+  entries,
+  onChange,
+  suggestions = [],
+}: {
+  entries: VolumeSplitEntry[]
+  onChange: (e: VolumeSplitEntry[]) => void
+  suggestions?: string[]
+}) {
+  const [newSplit, setNewSplit] = useState('')
+  const [newName, setNewName] = useState('')
+  const [newId, setNewId] = useState('')
+  const listId = `vs-suggestions-${Math.random().toString(36).slice(2)}`
+
+  const total = entries.reduce((s, e) => s + e.split, 0)
+
+  function add() {
+    if (!newName.trim() || !newSplit) return
+    onChange([
+      ...entries,
+      { id: crypto.randomUUID(), split: Number(newSplit), gatewayName: newName.trim(), gatewayId: newId.trim() },
+    ])
+    setNewSplit('')
+    setNewName('')
+    setNewId('')
+  }
+
+  const unusedSuggestions = suggestions.filter((s) => !entries.some((e) => e.gatewayName === s))
+
+  return (
+    <div className="space-y-2">
+      {entries.map((e) => (
+        <div
+          key={e.id}
+          className="flex items-center gap-2 bg-slate-100 dark:bg-[#111118] border border-slate-200 dark:border-[#1c1c24] rounded-lg px-2 py-1.5"
+        >
+          <span className="text-xs font-bold text-brand-500 w-10 shrink-0 tabular-nums">{e.split}%</span>
+          <span className="text-sm flex-1 font-mono">
+            {e.gatewayName}{e.gatewayId ? ` (${e.gatewayId})` : ''}
+          </span>
+          <button type="button" onClick={() => onChange(entries.filter((x) => x.id !== e.id))} className="text-red-400 hover:text-red-600">
+            <Trash2 size={12} />
+          </button>
+        </div>
+      ))}
+      {entries.length > 0 && (
+        <p className={`text-xs font-medium ${total === 100 ? 'text-emerald-500' : 'text-amber-500'}`}>
+          Total: {total}%{total !== 100 ? ' (must equal 100%)' : ' ✓'}
+        </p>
+      )}
+      <datalist id={listId}>
+        {unusedSuggestions.map((s) => <option key={s} value={s} />)}
+      </datalist>
+      <div className="flex gap-2">
+        <input
+          type="number"
+          value={newSplit}
+          onChange={(e) => setNewSplit(e.target.value)}
+          placeholder="Split %"
+          className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm w-20 focus:outline-none focus:ring-1 focus:ring-brand-500"
+        />
+        <input
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
+          list={listId}
+          placeholder="Gateway name"
+          className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm flex-1 focus:outline-none focus:ring-1 focus:ring-brand-500"
+        />
+        <input
+          value={newId}
+          onChange={(e) => setNewId(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
+          placeholder="Gateway ID (optional)"
+          className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm flex-1 focus:outline-none focus:ring-1 focus:ring-brand-500"
+        />
+        <Button type="button" size="sm" variant="secondary" onClick={add}>
+          <Plus size={13} /> Add
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ---- Volume split priority editor ----
+function VolumeSplitPriorityEditor({
+  entries,
+  onChange,
+  suggestions = [],
+}: {
+  entries: VolumeSplitPriorityEntry[]
+  onChange: (e: VolumeSplitPriorityEntry[]) => void
+  suggestions?: string[]
+}) {
+  const [newSplit, setNewSplit] = useState('')
+
+  const total = entries.reduce((s, e) => s + e.split, 0)
+
+  function addSplit() {
+    if (!newSplit) return
+    onChange([...entries, { id: crypto.randomUUID(), split: Number(newSplit), gateways: [] }])
+    setNewSplit('')
+  }
+
+  function updateEntry(id: string, patch: Partial<VolumeSplitPriorityEntry>) {
+    onChange(entries.map((e) => (e.id === id ? { ...e, ...patch } : e)))
+  }
+
+  return (
+    <div className="space-y-3">
+      {entries.length > 0 && (
+        <p className={`text-xs font-medium ${total === 100 ? 'text-emerald-500' : 'text-amber-500'}`}>
+          Total: {total}%{total !== 100 ? ' (must equal 100%)' : ' ✓'}
+        </p>
+      )}
+      {entries.map((entry, idx) => (
+        <div
+          key={entry.id}
+          className="rounded-lg border border-slate-200 dark:border-[#222226] overflow-hidden"
+        >
+          <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 dark:bg-[#111118] border-b border-slate-200 dark:border-[#1c1c24]">
+            <span className="text-xs text-slate-400 font-medium shrink-0">Split {idx + 1}:</span>
+            <input
+              type="number"
+              value={entry.split}
+              onChange={(e) => updateEntry(entry.id, { split: Number(e.target.value) })}
+              className="border border-slate-200 dark:border-[#222226] bg-transparent rounded px-2 py-0.5 text-xs w-16 focus:outline-none"
+            />
+            <span className="text-xs text-slate-400">%</span>
+            <button
+              type="button"
+              onClick={() => onChange(entries.filter((e) => e.id !== entry.id))}
+              className="ml-auto text-red-400 hover:text-red-600"
+            >
+              <Trash2 size={12} />
+            </button>
+          </div>
+          <div className="p-3">
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400 mb-2">Priority list for this split</p>
+            <PriorityEditor
+              gateways={entry.gateways}
+              suggestions={suggestions}
+              onChange={(gws) => updateEntry(entry.id, { gateways: gws })}
+            />
+          </div>
+        </div>
+      ))}
+      <div className="flex gap-2 items-center">
+        <input
+          type="number"
+          value={newSplit}
+          onChange={(e) => setNewSplit(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addSplit())}
+          placeholder="Split %"
+          className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm w-24 focus:outline-none focus:ring-1 focus:ring-brand-500"
+        />
+        <Button type="button" size="sm" variant="secondary" onClick={addSplit}>
+          <Plus size={13} /> Add split
         </Button>
       </div>
     </div>
@@ -215,198 +423,239 @@ function ConditionRowEditor({
   const keyInfo = routingKeys[row.lhs]
   const isEnum = keyInfo?.type === 'enum'
   const isInt = keyInfo?.type === 'integer'
+  const isStr = keyInfo?.type === 'str_value' || keyInfo?.type === 'udf'
+  const isMulti = row.operator === 'in' || row.operator === 'not_in'
 
   const operators = isInt
     ? ['>', '<', '>=', '<=', '==', '!=']
+    : isEnum
+    ? ['==', '!=', 'in', 'not_in']
     : ['==', '!=']
 
+  const selectedValues = Array.isArray(row.value) ? row.value : []
+
+  function toggleEnumValue(v: string) {
+    const updated = selectedValues.includes(v)
+      ? selectedValues.filter((x) => x !== v)
+      : [...selectedValues, v]
+    onChange({ ...row, value: updated })
+  }
+
+  function handleOperatorChange(op: string) {
+    const switchingToMulti = op === 'in' || op === 'not_in'
+    const switchingFromMulti = row.operator === 'in' || row.operator === 'not_in'
+    let newValue: string | string[] = row.value
+    if (switchingToMulti && !Array.isArray(row.value)) {
+      newValue = row.value ? [row.value] : []
+    } else if (!switchingToMulti && switchingFromMulti) {
+      newValue = Array.isArray(row.value) ? (row.value[0] ?? '') : ''
+    }
+    onChange({ ...row, operator: op, value: newValue })
+  }
+
   return (
-    <div className="flex items-center gap-2 flex-wrap">
+    <div className="flex items-start gap-2 flex-wrap">
       <select
         value={row.lhs}
-        onChange={(e) => onChange({ ...row, lhs: e.target.value, value: '', operator: '==' })}
-        className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-xs focus:outline-none"
+        onChange={(e) => {
+          const newKey = e.target.value
+          const newConfig = routingKeys[newKey]
+          const defaultValue = newConfig?.type === 'enum' ? (newConfig.values?.[0] ?? '') : ''
+          onChange({ ...row, lhs: newKey, value: defaultValue, operator: '==' })
+        }}
+        className="cond-select"
       >
         {Object.keys(routingKeys).map((k) => (
-          <option key={k} value={k}>
-            {k}
-          </option>
+          <option key={k} value={k}>{toLabel(k)}</option>
         ))}
       </select>
       <select
         value={row.operator}
-        onChange={(e) => onChange({ ...row, operator: e.target.value })}
+        onChange={(e) => handleOperatorChange(e.target.value)}
         aria-label="Condition operator"
-        className="min-w-[9.5rem] border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2.5 py-1 text-xs focus:outline-none"
+        className="cond-select min-w-[9.5rem]"
       >
         {operators.map((op) => (
-          <option key={op} value={op}>
-            {OPERATOR_LABELS[op] || op}
-          </option>
+          <option key={op} value={op}>{OPERATOR_LABELS[op] || op}</option>
         ))}
       </select>
-      {isEnum ? (
+      {isEnum && isMulti ? (
+        <div className="flex flex-wrap gap-x-3 gap-y-1 rounded-lg border border-slate-200 dark:border-[#222226] px-2 py-1.5 min-w-[8rem]">
+          {(keyInfo?.values || []).map((v: string) => (
+            <label key={v} className="flex items-center gap-1 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={selectedValues.includes(v)}
+                onChange={() => toggleEnumValue(v)}
+                className="accent-brand-500"
+              />
+              <span className="text-xs">{toLabel(v)}</span>
+            </label>
+          ))}
+          {(keyInfo?.values || []).length === 0 && (
+            <span className="text-xs text-slate-400">No enum values</span>
+          )}
+        </div>
+      ) : isEnum ? (
         <select
-          value={row.value}
+          value={row.value as string}
           onChange={(e) => onChange({ ...row, value: e.target.value })}
-          className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-xs focus:outline-none"
+          className="cond-select"
         >
           <option value="">select...</option>
-          {(routingKeys[row.lhs]?.values || []).map((v: string) => (
-            <option key={v} value={v}>
-              {v}
-            </option>
+          {(keyInfo?.values || []).map((v: string) => (
+            <option key={v} value={v}>{toLabel(v)}</option>
           ))}
         </select>
-      ) : (
+      ) : isInt ? (
         <input
           type="number"
-          value={row.value}
+          value={row.value as string}
           onChange={(e) => onChange({ ...row, value: e.target.value })}
           placeholder="value"
           className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-xs w-24 focus:outline-none"
         />
+      ) : isStr ? (
+        <input
+          type="text"
+          value={row.value as string}
+          onChange={(e) => onChange({ ...row, value: e.target.value })}
+          placeholder="value"
+          className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-xs w-32 focus:outline-none"
+        />
+      ) : (
+        <input
+          type="text"
+          value={row.value as string}
+          onChange={(e) => onChange({ ...row, value: e.target.value })}
+          placeholder="value"
+          className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-xs w-32 focus:outline-none"
+        />
       )}
-      <button type="button" onClick={onRemove} className="text-red-400 hover:text-red-600">
+      <button type="button" onClick={onRemove} className="text-red-400 hover:text-red-600 mt-1">
         <Trash2 size={12} />
       </button>
     </div>
   )
 }
 
-// ---- Statement group ----
-function StatementGroupEditor({
+// ---- Condition group ----
+function ConditionGroupEditor({
   group,
   onChange,
   onRemove,
+  canRemove,
   routingKeys,
   depth = 0,
 }: {
   group: StatementGroup
   onChange: (g: StatementGroup) => void
   onRemove: () => void
+  canRemove: boolean
   routingKeys: Record<string, RoutingKeyConfig>
   depth?: number
 }) {
-  const canRemove = depth > 0 || group.conditions.length > 1 || group.nested.length > 0
-  const label = depth === 0 ? 'IF group' : 'Nested IF group'
-
   function addCondition() {
-    onChange({
-      ...group,
-      conditions: [...group.conditions, createCondition(routingKeys)],
-    })
+    onChange({ ...group, conditions: [...group.conditions, createCondition(routingKeys)] })
   }
 
-  function addNestedGroup() {
-    onChange({
-      ...group,
-      nested: [...group.nested, createStatementGroup(routingKeys)],
-    })
+  function addNestedBranch() {
+    onChange({ ...group, nested: [...group.nested, createStatementGroup(routingKeys)] })
   }
 
   return (
-    <div className={`rounded-xl border border-slate-200 bg-slate-50/40 dark:border-[#222733] dark:bg-[#0f141d] ${depth > 0 ? 'ml-4' : ''}`}>
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-3 py-2 dark:border-[#222733]">
-        <div className="flex items-center gap-2">
-          {depth > 0 && <CornerDownRight size={14} className="text-slate-400" />}
-          <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8490a5]">{label}</span>
-          <Badge variant="gray">{group.conditions.length} AND</Badge>
-          {group.nested.length > 0 && <Badge variant="blue">{group.nested.length} nested OR</Badge>}
-        </div>
-        <button
-          type="button"
-          onClick={onRemove}
-          disabled={!canRemove}
-          className="text-red-400 transition hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30"
-          aria-label="Remove condition group"
-        >
-          <Trash2 size={12} />
-        </button>
+    <div className="rounded-lg border border-slate-200 dark:border-[#222733] bg-white dark:bg-[#0f141d]">
+      <div className="space-y-0 divide-y divide-slate-100 dark:divide-[#1c1c24]">
+        {group.conditions.map((cond, idx) => (
+          <div key={cond.id} className="flex items-start gap-2 px-3 py-2.5 flex-wrap">
+            {group.conditions.length > 1 && (
+              <span className="w-8 shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400 select-none mt-1.5">
+                {idx === 0 ? 'IF' : 'AND'}
+              </span>
+            )}
+            <ConditionRowEditor
+              row={cond}
+              routingKeys={routingKeys}
+              onChange={(updated) =>
+                onChange({ ...group, conditions: group.conditions.map((c) => (c.id === cond.id ? updated : c)) })
+              }
+              onRemove={() =>
+                onChange({
+                  ...group,
+                  conditions: group.conditions.length > 1
+                    ? group.conditions.filter((c) => c.id !== cond.id)
+                    : group.conditions,
+                })
+              }
+            />
+          </div>
+        ))}
       </div>
 
-      <div className="space-y-3 px-3 py-3">
-        <div>
-          <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">
-            All conditions in this group must match
-          </p>
-          <div className="space-y-2">
-            {group.conditions.map((cond, idx) => (
-              <div key={cond.id} className="space-y-2">
-                {idx > 0 && (
-                  <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-500">
-                    <span className="h-px flex-1 bg-emerald-500/20" />
-                    AND
-                    <span className="h-px flex-1 bg-emerald-500/20" />
-                  </div>
-                )}
-                <ConditionRowEditor
-                  row={cond}
-                  routingKeys={routingKeys}
-                  onChange={(updated) =>
-                    onChange({
-                      ...group,
-                      conditions: group.conditions.map((c) => (c.id === cond.id ? updated : c)),
-                    })
-                  }
-                  onRemove={() =>
-                    onChange({
-                      ...group,
-                      conditions: group.conditions.length > 1
-                        ? group.conditions.filter((c) => c.id !== cond.id)
-                        : group.conditions,
-                    })
-                  }
-                />
-              </div>
-            ))}
-            <Button type="button" variant="ghost" size="sm" onClick={addCondition}>
-              <Plus size={12} /> Add AND condition
-            </Button>
+      {/* Nested OR branches — shown only at depth 0 */}
+      {depth === 0 && group.nested.length > 0 && (
+        <div className="border-t border-slate-100 dark:border-[#1c1c24] px-3 pt-3 pb-2 space-y-2">
+          <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-slate-400">
+            <CornerDownRight size={11} />
+            Then match any of (nested OR)
           </div>
-        </div>
-
-        <div className="space-y-2">
-          {group.nested.length > 0 && (
-            <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">
-              Nested branches. Any nested branch can satisfy this group after the parent conditions match.
-            </p>
-          )}
-          {group.nested.map((nested, idx) => (
-            <div key={nested.id} className="space-y-2">
-              {idx > 0 && (
-                <div className="flex items-center gap-2 pl-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-400">
-                  <span className="h-px flex-1 bg-sky-400/20" />
-                  OR
-                  <span className="h-px flex-1 bg-sky-400/20" />
-                </div>
+          {group.nested.map((nestedGroup, nIdx) => (
+            <div key={nestedGroup.id} className="pl-3 border-l-2 border-sky-200 dark:border-sky-800">
+              {nIdx > 0 && (
+                <p className="text-[10px] font-bold text-sky-500 mb-1">OR</p>
               )}
-              <StatementGroupEditor
-                group={nested}
+              <ConditionGroupEditor
+                group={nestedGroup}
                 routingKeys={routingKeys}
-                depth={depth + 1}
+                canRemove={true}
+                depth={1}
                 onChange={(updated) =>
-                  onChange({
-                    ...group,
-                    nested: group.nested.map((item) => (item.id === nested.id ? updated : item)),
-                  })
+                  onChange({ ...group, nested: group.nested.map((n) => (n.id === nestedGroup.id ? updated : n)) })
                 }
                 onRemove={() =>
-                  onChange({
-                    ...group,
-                    nested: group.nested.filter((item) => item.id !== nested.id),
-                  })
+                  onChange({ ...group, nested: group.nested.filter((n) => n.id !== nestedGroup.id) })
                 }
               />
             </div>
           ))}
-          <Button type="button" variant="secondary" size="sm" onClick={addNestedGroup}>
-            <Plus size={12} /> Add nested OR group
-          </Button>
         </div>
+      )}
+
+      <div className="flex items-center gap-3 border-t border-slate-100 dark:border-[#1c1c24] px-3 py-2 flex-wrap">
+        <button
+          type="button"
+          onClick={addCondition}
+          className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+        >
+          <Plus size={12} /> Add condition
+        </button>
+        {depth === 0 && (
+          <button
+            type="button"
+            onClick={addNestedBranch}
+            className="flex items-center gap-1 text-xs text-sky-400 hover:text-sky-600 transition-colors"
+          >
+            <CornerDownRight size={12} /> Add nested branch
+          </button>
+        )}
+        {canRemove && (
+          <button
+            type="button"
+            onClick={onRemove}
+            className="ml-auto flex items-center gap-1 text-xs text-red-400 hover:text-red-600 transition-colors"
+          >
+            <Trash2 size={12} /> Remove group
+          </button>
+        )}
       </div>
     </div>
   )
+}
+
+const OUTPUT_TYPE_LABELS: Record<RuleBlock['outputType'], string> = {
+  priority: 'Priority',
+  volume_split: 'Volume Split',
+  volume_split_priority: 'Split + Priority',
 }
 
 // ---- Rule block ----
@@ -415,104 +664,123 @@ function RuleBlockEditor({
   onChange,
   onRemove,
   routingKeys,
+  gatewaySuggestions = [],
 }: {
   block: RuleBlock
   onChange: (b: RuleBlock) => void
   onRemove: () => void
   routingKeys: Record<string, RoutingKeyConfig>
+  gatewaySuggestions?: string[]
 }) {
   const [collapsed, setCollapsed] = useState(false)
 
+  function addGroup() {
+    onChange({ ...block, statements: [...block.statements, createStatementGroup(routingKeys)] })
+  }
+
   return (
-    <div className="border border-slate-200 dark:border-[#1c1c24] rounded-xl">
-      <div
-        className="flex items-center justify-between px-4 py-2.5 bg-[#0d0d12] rounded-t-xl cursor-pointer"
-        onClick={() => setCollapsed(!collapsed)}
-      >
+    <div className="border border-slate-200 dark:border-[#1c1c24] rounded-xl overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-2.5 bg-slate-50 dark:bg-[#111118] border-b border-slate-200 dark:border-[#1c1c24]">
         <input
           value={block.name}
-          onChange={(e) => {
-            e.stopPropagation()
-            onChange({ ...block, name: e.target.value })
-          }}
-          onClick={(e) => e.stopPropagation()}
+          onChange={(e) => onChange({ ...block, name: e.target.value })}
           placeholder="Rule name"
-          className="bg-transparent text-sm font-medium focus:outline-none border-b border-transparent focus:border-[#28282f] text-slate-900"
+          className="bg-transparent text-sm font-semibold focus:outline-none text-slate-700 dark:text-slate-200 w-full"
         />
-        <div className="flex items-center gap-2">
-          <button type="button" onClick={(e) => { e.stopPropagation(); onRemove() }} className="text-red-400 hover:text-red-600">
+        <div className="flex items-center gap-2 ml-2 shrink-0">
+          <button type="button" onClick={onRemove} aria-label="Delete rule" className="text-red-400 hover:text-red-600">
             <Trash2 size={14} />
           </button>
-          {collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+          <button
+            type="button"
+            onClick={() => setCollapsed(!collapsed)}
+            aria-label={collapsed ? 'Expand rule' : 'Collapse rule'}
+            className="text-slate-400 hover:text-slate-600"
+          >
+            {collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+          </button>
         </div>
       </div>
+
       {!collapsed && (
-        <div className="px-4 py-3 space-y-3">
-          {/* Conditions */}
-          <div>
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <p className="text-xs font-medium text-slate-500">CONDITION LOGIC</p>
-                <p className="mt-1 text-xs text-slate-500 dark:text-[#8d96a8]">
-                  Rule groups are evaluated top-to-bottom. Sibling groups are OR; conditions inside a group are AND.
-                </p>
+        <div className="divide-y divide-slate-100 dark:divide-[#1c1c24]">
+          {/* IF section */}
+          <div className="px-4 py-4 space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-400 mb-3">If</p>
+            {block.statements.map((group, idx) => (
+              <div key={group.id} className="space-y-2">
+                {idx > 0 && (
+                  <div className="flex items-center gap-3">
+                    <span className="h-px flex-1 bg-slate-200 dark:bg-[#222]" />
+                    <span className="text-[11px] font-bold uppercase tracking-widest text-sky-500 px-1">or</span>
+                    <span className="h-px flex-1 bg-slate-200 dark:bg-[#222]" />
+                  </div>
+                )}
+                <ConditionGroupEditor
+                  group={group}
+                  routingKeys={routingKeys}
+                  canRemove={block.statements.length > 1}
+                  onChange={(updated) =>
+                    onChange({ ...block, statements: block.statements.map((s) => (s.id === group.id ? updated : s)) })
+                  }
+                  onRemove={() =>
+                    onChange({ ...block, statements: block.statements.filter((s) => s.id !== group.id) })
+                  }
+                />
               </div>
-              <Badge variant="blue">Nested supported</Badge>
-            </div>
-            <div className="space-y-2">
-              {block.statements.map((group, idx) => (
-                <div key={group.id} className="space-y-2">
-                  {idx > 0 && (
-                    <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-400">
-                      <span className="h-px flex-1 bg-sky-400/20" />
-                      OR
-                      <span className="h-px flex-1 bg-sky-400/20" />
-                    </div>
-                  )}
-                  <StatementGroupEditor
-                    group={group}
-                    routingKeys={routingKeys}
-                    onChange={(updated) =>
-                      onChange({
-                        ...block,
-                        statements: block.statements.map((statement) =>
-                          statement.id === group.id ? updated : statement
-                        ),
-                      })
-                    }
-                    onRemove={() =>
-                      onChange({
-                        ...block,
-                        statements: block.statements.length > 1
-                          ? block.statements.filter((statement) => statement.id !== group.id)
-                          : block.statements,
-                      })
-                    }
-                  />
-                </div>
-              ))}
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() =>
-                  onChange({
-                    ...block,
-                    statements: [...block.statements, createStatementGroup(routingKeys)],
-                  })
-                }
-              >
-                <Plus size={12} /> Add OR group
-              </Button>
-            </div>
+            ))}
+            <button
+              type="button"
+              onClick={addGroup}
+              className="flex items-center gap-1 text-xs text-sky-500 hover:text-sky-600 font-medium transition-colors mt-1"
+            >
+              <Plus size={12} /> Add OR group
+            </button>
           </div>
 
-          <div>
-            <p className="text-xs font-medium text-slate-500 mb-2">PRIORITY OUTPUT</p>
-            <PriorityEditor
-              gateways={block.priorityGateways}
-              onChange={(gws) => onChange({ ...block, priorityGateways: gws })}
-            />
+          {/* THEN section */}
+          <div className="px-4 py-4">
+            <div className="flex items-center gap-3 mb-3">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-400 shrink-0">Then route</p>
+              <div className="flex rounded-lg border border-slate-200 dark:border-[#222226] overflow-hidden text-[11px]">
+                {(Object.keys(OUTPUT_TYPE_LABELS) as RuleBlock['outputType'][]).map((type) => (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => onChange({ ...block, outputType: type })}
+                    className={`px-2.5 py-1 transition-colors ${
+                      block.outputType === type
+                        ? 'bg-brand-500 text-white font-semibold'
+                        : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-[#1c1c24]'
+                    }`}
+                  >
+                    {OUTPUT_TYPE_LABELS[type]}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {block.outputType === 'priority' && (
+              <PriorityEditor
+                gateways={block.priorityGateways}
+                suggestions={gatewaySuggestions}
+                onChange={(gws) => onChange({ ...block, priorityGateways: gws })}
+              />
+            )}
+            {block.outputType === 'volume_split' && (
+              <VolumeSplitEditor
+                entries={block.volumeSplitEntries}
+                suggestions={gatewaySuggestions}
+                onChange={(entries) => onChange({ ...block, volumeSplitEntries: entries })}
+              />
+            )}
+            {block.outputType === 'volume_split_priority' && (
+              <VolumeSplitPriorityEditor
+                entries={block.volumeSplitPriorityEntries}
+                suggestions={gatewaySuggestions}
+                onChange={(entries) => onChange({ ...block, volumeSplitPriorityEntries: entries })}
+              />
+            )}
           </div>
         </div>
       )}
@@ -528,13 +796,49 @@ function buildAlgorithmData(rules: RuleBlock[], defaultOutput: DefaultOutput, ro
     }
   }
 
+  function buildOutput(block: RuleBlock): Record<string, unknown> {
+    if (block.outputType === 'volume_split') {
+      return {
+        volume_split: block.volumeSplitEntries.map((e) => ({
+          split: e.split,
+          output: { gateway_name: e.gatewayName, gateway_id: e.gatewayId || null },
+        })),
+      }
+    }
+    if (block.outputType === 'volume_split_priority') {
+      return {
+        volume_split_priority: block.volumeSplitPriorityEntries.map((e) => ({
+          split: e.split,
+          output: e.gateways.map((g) => ({ gateway_name: g.gatewayName, gateway_id: g.gatewayId || null })),
+        })),
+      }
+    }
+    return buildPriorityOutput(block.priorityGateways)
+  }
+
   function buildCondition(c: ConditionRow) {
+    const keyType = routingKeys[c.lhs]?.type
+    const isMulti = c.operator === 'in' || c.operator === 'not_in'
+
+    if (isMulti && Array.isArray(c.value)) {
+      return {
+        lhs: c.lhs,
+        comparison: OPERATOR_TO_API[c.operator],
+        value: { type: 'enum_variant_array', value: c.value },
+        metadata: {},
+      }
+    }
+
+    const apiValueType =
+      keyType === 'integer' ? 'number' :
+      keyType === 'str_value' || keyType === 'udf' ? 'str_value' :
+      'enum_variant'
     return {
       lhs: c.lhs,
       comparison: OPERATOR_TO_API[c.operator] || c.operator,
       value: {
-        type: routingKeys[c.lhs]?.type === 'integer' ? 'number' : 'enum_variant',
-        value: routingKeys[c.lhs]?.type === 'integer' ? Number(c.value) : c.value,
+        type: apiValueType,
+        value: keyType === 'integer' ? Number(c.value) : c.value,
       },
       metadata: {},
     }
@@ -543,12 +847,8 @@ function buildAlgorithmData(rules: RuleBlock[], defaultOutput: DefaultOutput, ro
   function buildStatement(group: StatementGroup): Record<string, unknown> {
     const statement: Record<string, unknown> = {
       condition: group.conditions.map(buildCondition),
+      nested: group.nested.length > 0 ? group.nested.map(buildStatement) : null,
     }
-
-    if (group.nested.length > 0) {
-      statement.nested = group.nested.map(buildStatement)
-    }
-
     return statement
   }
 
@@ -557,8 +857,8 @@ function buildAlgorithmData(rules: RuleBlock[], defaultOutput: DefaultOutput, ro
     default_selection: buildPriorityOutput(defaultOutput.priorityGateways),
     rules: rules.map((r) => ({
       name: r.name,
-      routing_type: 'priority',
-      output: buildPriorityOutput(r.priorityGateways),
+      routing_type: r.outputType,
+      output: buildOutput(r),
       statements: r.statements.map(buildStatement),
     })),
   }
@@ -574,9 +874,7 @@ export function EuclidRulesPage() {
   const [ruleName, setRuleName] = useState('')
   const [ruleDesc, setRuleDesc] = useState('')
   const [ruleBlocks, setRuleBlocks] = useState<RuleBlock[]>([])
-  const [defaultOutput, setDefaultOutput] = useState<DefaultOutput>({
-    priorityGateways: [],
-  })
+  const [defaultOutput, setDefaultOutput] = useState<DefaultOutput>({ priorityGateways: [] })
   const [showJson, setShowJson] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -605,6 +903,15 @@ export function EuclidRulesPage() {
     return algorithm?.type !== 'volume_split'
   })
 
+  const gatewaySuggestions = Array.from(new Set([
+    ...ruleBlocks.flatMap((b) => [
+      ...b.priorityGateways.map((g) => g.gatewayName),
+      ...b.volumeSplitEntries.map((e) => e.gatewayName),
+      ...b.volumeSplitPriorityEntries.flatMap((e) => e.gateways.map((g) => g.gatewayName)),
+    ]),
+    ...defaultOutput.priorityGateways.map((g) => g.gatewayName),
+  ].filter(Boolean)))
+
   const algorithmData = buildAlgorithmData(ruleBlocks, defaultOutput, routingKeys)
 
   async function handleSubmit(e: React.FormEvent) {
@@ -626,7 +933,7 @@ export function EuclidRulesPage() {
         algorithm_for: 'payment',
         algorithm: { type: 'advanced', data: algorithmData },
       })
-      setCreatedId(result.id)
+      setCreatedId(result.rule_id ?? result.id)
       mutateAlgorithms()
     } catch (err) {
       setSubmitError(String(err))
@@ -643,15 +950,9 @@ export function EuclidRulesPage() {
     setDeactivateError(null)
     setDeactivateSuccess(false)
     try {
-      await apiPost('/routing/activate', {
-        created_by: merchantId,
-        routing_algorithm_id: id,
-      })
+      await apiPost('/routing/activate', { created_by: merchantId, routing_algorithm_id: id })
       setActivateSuccess(true)
-      await Promise.all([
-        mutateAlgorithms(),
-        mutateActiveAlgorithms(),
-      ])
+      await Promise.all([mutateAlgorithms(), mutateActiveAlgorithms()])
     } catch (err) {
       setActivateError(String(err))
     } finally {
@@ -664,22 +965,15 @@ export function EuclidRulesPage() {
     if (!window.confirm('Deactivate this routing rule for the selected merchant? The saved rule will remain available.')) {
       return
     }
-
     setDeactivatingId(id)
     setDeactivateError(null)
     setDeactivateSuccess(false)
     setActivateError(null)
     setActivateSuccess(false)
     try {
-      await apiPost('/routing/deactivate', {
-        created_by: merchantId,
-        routing_algorithm_id: id,
-      })
+      await apiPost('/routing/deactivate', { created_by: merchantId, routing_algorithm_id: id })
       setDeactivateSuccess(true)
-      await Promise.all([
-        mutateAlgorithms(),
-        mutateActiveAlgorithms(),
-      ])
+      await Promise.all([mutateAlgorithms(), mutateActiveAlgorithms()])
     } catch (err) {
       setDeactivateError(String(err))
     } finally {
@@ -690,11 +984,7 @@ export function EuclidRulesPage() {
   function toggleRuleExpand(id: string) {
     setExpandedRuleIds(prev => {
       const newSet = new Set(prev)
-      if (newSet.has(id)) {
-        newSet.delete(id)
-      } else {
-        newSet.add(id)
-      }
+      if (newSet.has(id)) { newSet.delete(id) } else { newSet.add(id) }
       return newSet
     })
   }
@@ -702,11 +992,14 @@ export function EuclidRulesPage() {
   function addRuleBlock() {
     setRuleBlocks((prev) => [
       ...prev,
-        {
-          id: crypto.randomUUID(),
-          name: `Rule ${prev.length + 1}`,
-          statements: [createStatementGroup(routingKeys)],
-          priorityGateways: [],
+      {
+        id: crypto.randomUUID(),
+        name: `Rule ${prev.length + 1}`,
+        statements: [createStatementGroup(routingKeys)],
+        outputType: 'priority',
+        priorityGateways: [],
+        volumeSplitEntries: [],
+        volumeSplitPriorityEntries: [],
       },
     ])
   }
@@ -738,34 +1031,28 @@ export function EuclidRulesPage() {
                     const isActive = activeIds.has(algo.id)
                     const isExpanded = expandedRuleIds.has(algo.id)
                     const algorithm = algo.algorithm_data || algo.algorithm
+                    const summary = getRuleSummary(algo)
 
                     return (
                       <div key={algo.id}>
                         <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
                           <div className="min-w-0 flex-1">
                             <p className="truncate font-medium">{algo.name}</p>
-                            <p className="text-xs text-slate-400 capitalize">{algorithm?.type}</p>
+                            {summary && (
+                              <p className="text-xs text-slate-400 mt-0.5 truncate" title={summary}>{summary}</p>
+                            )}
                           </div>
 
                           <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
                             <Badge variant={isActive ? 'green' : 'gray'}>
                               {isActive ? 'Active' : 'Inactive'}
                             </Badge>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => toggleRuleExpand(algo.id)}
-                            >
+                            <Button size="sm" variant="ghost" onClick={() => toggleRuleExpand(algo.id)}>
                               <Eye size={14} className="mr-1" />
                               {isExpanded ? 'Hide' : 'View'}
                             </Button>
                             {!isActive && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => handleActivate(algo.id)}
-                                disabled={activating}
-                              >
+                              <Button size="sm" variant="ghost" onClick={() => handleActivate(algo.id)} disabled={activating}>
                                 Activate
                               </Button>
                             )}
@@ -865,10 +1152,9 @@ export function EuclidRulesPage() {
                       key={block.id}
                       block={block}
                       routingKeys={routingKeys}
+                      gatewaySuggestions={gatewaySuggestions}
                       onChange={(updated) =>
-                        setRuleBlocks((prev) =>
-                          prev.map((b) => (b.id === block.id ? updated : b))
-                        )
+                        setRuleBlocks((prev) => prev.map((b) => (b.id === block.id ? updated : b)))
                       }
                       onRemove={() =>
                         setRuleBlocks((prev) => prev.filter((b) => b.id !== block.id))
@@ -882,23 +1168,20 @@ export function EuclidRulesPage() {
                     onClick={addRuleBlock}
                     disabled={routingKeysUnavailable}
                   >
-                    <Plus size={14} /> Add Rule Block
+                    <Plus size={14} /> Add Rule
                   </Button>
                 </div>
 
                 {/* Default selection */}
                 <div className="border border-slate-200 dark:border-[#1c1c24] rounded-xl px-4 py-3">
-                  <p className="text-xs font-medium text-slate-500 mb-2">DEFAULT PRIORITY SELECTION (Stored no-match output)</p>
-                  <p className="mb-3 text-xs leading-5 text-slate-500 dark:text-[#8d96a8]">
-                    Backend uses this configured default when no rule matches. If an evaluate request sends a non-empty
-                    <code className="mx-1 font-mono">fallback_output</code>, that request fallback overrides this default for that evaluation.
-                    Configure percentage-based split behavior from its dedicated routing page.
+                  <p className="text-xs font-medium text-slate-500 mb-1">Default Fallback</p>
+                  <p className="mb-3 text-xs text-slate-400 dark:text-[#8d96a8]">
+                    Used when no rule matches. Per-request overrides are possible via <code className="font-mono">fallback_output</code>.
                   </p>
                   <PriorityEditor
                     gateways={defaultOutput.priorityGateways}
-                    onChange={(gws) =>
-                      setDefaultOutput({ ...defaultOutput, priorityGateways: gws })
-                    }
+                    suggestions={gatewaySuggestions}
+                    onChange={(gws) => setDefaultOutput({ ...defaultOutput, priorityGateways: gws })}
                   />
                 </div>
 
@@ -906,12 +1189,7 @@ export function EuclidRulesPage() {
                 {createdId && (
                   <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-3 py-2 text-sm text-emerald-400 flex items-center justify-between">
                     <span>Rule created (ID: {createdId})</span>
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={() => handleActivate(createdId)}
-                      disabled={activating}
-                    >
+                    <Button type="button" size="sm" onClick={() => handleActivate(createdId)} disabled={activating}>
                       Activate Now
                     </Button>
                   </div>
@@ -920,12 +1198,7 @@ export function EuclidRulesPage() {
                   <Button type="submit" disabled={submitting || routingKeysUnavailable}>
                     {submitting ? 'Creating...' : 'Create Rule'}
                   </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setShowJson(!showJson)}
-                  >
+                  <Button type="button" variant="secondary" size="sm" onClick={() => setShowJson(!showJson)}>
                     {showJson ? 'Hide JSON' : 'Preview JSON'}
                   </Button>
                 </div>
