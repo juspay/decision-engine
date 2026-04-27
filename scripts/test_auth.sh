@@ -418,7 +418,85 @@ if [ -n "$JWT_TOKEN" ]; then
     fi
 fi
 
-# ── 21. Redis cache hit (API key) ──────────────────────
+# ── 21. Invite member (new user) ──────────────────────
+INVITE_EMAIL="invitee_$(date +%s)@example.com"
+echo ""
+echo "[ Invite new user to merchant ]"
+INVITE_RESPONSE=$(curl -s -X POST "$BASE_URL/merchant/members/invite" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $ONBOARD_TOKEN" \
+    -d "{\"email\": \"$INVITE_EMAIL\", \"role\": \"member\"}")
+
+IS_NEW=$(echo "$INVITE_RESPONSE" | grep -o '"is_new_user":true')
+INVITE_PASSWORD=$(echo "$INVITE_RESPONSE" | grep -o '"password":"[^"]*"' | cut -d'"' -f4)
+
+if [ -n "$IS_NEW" ] && [ -n "$INVITE_PASSWORD" ]; then
+    echo "  PASS  POST /merchant/members/invite creates new user and returns credentials"
+    echo "        generated password: ${INVITE_PASSWORD:0:6}..."
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL  POST /merchant/members/invite — unexpected: $INVITE_RESPONSE"
+    FAIL=$((FAIL + 1))
+fi
+
+# ── 22. Invited user can login ─────────────────────────
+echo ""
+echo "[ Invited user can login ]"
+INVITEE_LOGIN=$(curl -s -X POST "$BASE_URL/auth/login" \
+    -H "Content-Type: application/json" \
+    -d "{\"email\": \"$INVITE_EMAIL\", \"password\": \"$INVITE_PASSWORD\"}")
+
+INVITEE_TOKEN=$(echo "$INVITEE_LOGIN" | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
+if [ -n "$INVITEE_TOKEN" ]; then
+    echo "  PASS  Invited user can login with generated credentials"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL  Invited user login failed: $INVITEE_LOGIN"
+    FAIL=$((FAIL + 1))
+fi
+
+# ── 23. Invite same user again → 409 ──────────────────
+echo ""
+echo "[ Invite already-member user → 409 ]"
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/merchant/members/invite" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $ONBOARD_TOKEN" \
+    -d "{\"email\": \"$INVITE_EMAIL\"}")
+check "Invite existing member → 409" "409" "$STATUS"
+
+# ── 24. Invite existing user to a different merchant ───
+echo ""
+echo "[ Invite existing user to second merchant ]"
+INVITE2_RESPONSE=$(curl -s -X POST "$BASE_URL/merchant/members/invite" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $ONBOARD2_TOKEN" \
+    -d "{\"email\": \"$INVITE_EMAIL\", \"role\": \"admin\"}")
+
+IS_NEW2=$(echo "$INVITE2_RESPONSE" | grep -o '"is_new_user":false')
+if [ -n "$IS_NEW2" ]; then
+    echo "  PASS  Existing user added to second merchant (is_new_user=false)"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL  Expected is_new_user=false: $INVITE2_RESPONSE"
+    FAIL=$((FAIL + 1))
+fi
+
+# ── 25. List members ───────────────────────────────────
+echo ""
+echo "[ List merchant members ]"
+MEMBERS_RESPONSE=$(curl -s "$BASE_URL/merchant/members" \
+    -H "Authorization: Bearer $ONBOARD_TOKEN")
+
+MEMBER_COUNT=$(echo "$MEMBERS_RESPONSE" | grep -o '"user_id"' | wc -l | tr -d ' ')
+if [ "$MEMBER_COUNT" -ge "2" ]; then
+    echo "  PASS  GET /merchant/members returns $MEMBER_COUNT members"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL  GET /merchant/members — got: $MEMBERS_RESPONSE"
+    FAIL=$((FAIL + 1))
+fi
+
+# ── 26. Redis cache hit (API key) ──────────────────────
 echo ""
 echo "[ Redis cache hit ]"
 for i in 1 2; do
