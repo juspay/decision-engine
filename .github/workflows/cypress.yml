@@ -12,6 +12,13 @@
 #      - Build and serve UI from website/ directory (vite preview)
 #      - Run single spec file in headless mode
 #      - Upload screenshots on failure
+#
+# Caching layers:
+#   - Docker BuildKit layers → GHA cache, scoped to head branch (PR) or ref name (push)
+#     Fallback reads from the base branch so PRs warm-start from main's layers.
+#   - npm global cache (~/.npm) → actions/setup-node built-in, keyed on both lock files
+#   - Cypress binary (~/.cache/Cypress) → actions/cache, keyed on package-lock.json
+#     Separate from ~/.npm because the binary (~200 MB) is not part of the registry cache.
 
 name: Cypress E2E
 
@@ -56,9 +63,12 @@ jobs:
           tags: ${{ env.IMAGE_NAME }}
           load: true
           cache-from: |
-            type=gha,scope=cypress-${{ github.base_ref || github.ref_name }}
-            type=gha,scope=cypress-main
-          cache-to: type=gha,scope=cypress-${{ github.base_ref || github.ref_name }},mode=max
+            type=gha,scope=cypress-${{ github.head_ref || github.ref_name }}
+            type=gha,scope=cypress-${{ github.base_ref || 'main' }}
+          # Write to the head-branch scope so PR builds never overwrite the
+          # main-branch cache. On a push to main github.head_ref is empty, so
+          # github.ref_name ('main') is used — the main cache is updated then.
+          cache-to: type=gha,scope=cypress-${{ github.head_ref || github.ref_name }},mode=max
 
       - name: Save Docker image to tar
         run: docker save ${{ env.IMAGE_NAME }} | gzip > ${{ env.IMAGE_ARTIFACT }}.tar.gz
@@ -114,16 +124,54 @@ jobs:
       - name: Load Docker image
         run: gunzip -c ${{ env.IMAGE_ARTIFACT }}.tar.gz | docker load
 
+      # Start services early so they come up while npm installs + UI build run.
+      # docker compose up -d returns immediately; health checks wait later.
       - name: Start services (using pre-built image)
-        run: docker compose --profile postgres-local up -d --no-build
-
-      - name: Debug - Show service status
         run: |
-          sleep 5
-          docker compose ps
-          echo "---"
-          docker compose logs --tail=20 open-router-pg-local || true
+          # Override config to use service names instead of host.docker.internal
+          sed -i 's/host = "host.docker.internal"/host = "redis"/' config/docker-configuration.toml
+          sed -i 's/pg_host = "postgresql"/pg_host = "postgresql"/' config/docker-configuration.toml
+          docker compose --profile postgres-local up -d --no-build
 
+      # ── npm caches ────────────────────────────────────────────────────────
+      # actions/setup-node restores ~/.npm (the registry package cache).
+      # Key is a hash of BOTH lock files so either change invalidates the cache.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            website/package-lock.json
+            package-lock.json
+
+      # The Cypress binary (~200 MB) lives in ~/.cache/Cypress and is NOT part
+      # of ~/.npm. Without this cache every job downloads it from scratch.
+      # restore-keys provides a fallback so a lock-file bump that doesn't change
+      # the Cypress version still gets a partial hit; Cypress skips the download
+      # if the binary is already present in ~/.cache/Cypress/<version>/.
+      - name: Cache Cypress binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/Cypress
+          key: cypress-binary-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            cypress-binary-${{ runner.os }}-
+
+      # ── Install + build (runs while Docker services are starting up) ──────
+      - name: Install UI deps
+        run: npm ci
+        working-directory: website
+
+      - name: Install Cypress deps
+        run: npm ci
+
+      - name: Build UI
+        run: npm run build
+        working-directory: website
+        env:
+          VITE_API_BASE_PATH: http://localhost:8080/decision-engine-api
+
+      # ── Wait for services (Docker has had ~2-3 min to start by now) ───────
       - name: Wait for API (basic health)
         run: |
           timeout 60 bash -c \
@@ -136,24 +184,6 @@ jobs:
             'until curl -sf http://localhost:8080/health/ready; do sleep 3; done'
           echo "✓ Ready check passed"
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: |
-            website/package-lock.json
-            package-lock.json
-
-      - name: Install UI deps
-        run: npm ci
-        working-directory: website
-
-      - name: Build UI
-        run: npm run build
-        working-directory: website
-        env:
-          VITE_API_BASE_PATH: http://localhost:8080/decision-engine-api
-
       - name: Serve UI
         run: npx vite preview --port 5173 &
         working-directory: website
@@ -163,9 +193,7 @@ jobs:
           timeout 60 bash -c \
             'until curl -sf http://localhost:5173; do sleep 2; done'
 
-      - name: Install Cypress deps
-        run: npm ci
-
+      # ── Run Cypress ───────────────────────────────────────────────────────
       - name: Run ${{ matrix.spec }}
         run: npx cypress run --spec "${{ matrix.file }}" --headless
         env:

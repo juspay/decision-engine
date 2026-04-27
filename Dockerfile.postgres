@@ -1,28 +1,42 @@
-FROM rust:bookworm AS builder
-
-ARG EXTRA_FEATURES=""
-
+FROM rust:bookworm AS chef
+RUN cargo install cargo-chef --locked
+RUN apt-get update \
+    && apt-get install -y cmake libmariadb-dev libssl-dev clang \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /open_router
 
 ENV CARGO_NET_RETRY=10
 ENV RUSTUP_MAX_RETRIES=10
 
-RUN apt-get update \
-    && apt-get install -y cmake libmariadb-dev libssl-dev clang \
-    && rm -rf /var/lib/apt/lists/*
-
+# ── Stage 1: compute the dependency recipe ───────────────────────────────────
+# Only Cargo.toml / Cargo.lock files are needed here. Source files are not
+# copied, so this layer is invalidated only when dependencies change.
+FROM chef AS planner
 COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
 
+# ── Stage 2: build dependencies only ─────────────────────────────────────────
+# This is the slow step (~15-30 min). It is cached as a Docker layer and
+# only re-runs when recipe.json changes (i.e. Cargo.toml / Cargo.lock changed).
+# A source-only change never reaches this stage.
+FROM chef AS builder
+ARG EXTRA_FEATURES=""
+COPY --from=planner /open_router/recipe.json recipe.json
+RUN RUSTFLAGS="-A warnings" cargo chef cook --release --no-default-features --features middleware,kms-aws,postgres ${EXTRA_FEATURES} --recipe-path recipe.json
+
+# ── Stage 3: build the binary ─────────────────────────────────────────────────
+# Dependencies are already compiled above. Only changed crates are recompiled.
+COPY . .
 RUN RUSTFLAGS="-A warnings" cargo build --release --no-default-features --features middleware,kms-aws,postgres ${EXTRA_FEATURES}
 
 
+# ── Runtime image ─────────────────────────────────────────────────────────────
 FROM debian:bookworm
 
 ARG CONFIG_DIR=/local/config
 ARG BIN_DIR=/local
 ARG BINARY=open_router
 ENV BINARY=${BINARY}
-
 
 RUN apt-get update \
     && apt-get install -y ca-certificates tzdata libpq-dev curl procps libmariadb3
