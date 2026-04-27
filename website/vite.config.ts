@@ -1,11 +1,19 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 
-export default defineConfig(({ command }) => {
-  const isDevServer = command === 'serve'
-  const publicBaseUrl = isDevServer ? '/' : '/decision-engine/'
+function normalizeBasePath(value: string | undefined, fallback: string) {
+  const raw = (value || fallback).trim()
+  if (!raw || raw === '/') return '/'
+  return `/${raw.replace(/^\/+|\/+$/g, '')}/`
+}
+
+export default defineConfig(({ command, mode }) => {
+  const env = loadEnv(mode, process.cwd(), '')
+  const defaultBasePath = command === 'serve' ? '/' : '/decision-engine/'
+  const publicBaseUrl = normalizeBasePath(env.VITE_DASHBOARD_BASE_PATH, defaultBasePath)
   const backendTarget = 'http://localhost:8080'
   const apiProxyPrefix = '/decision-engine-api'
+  const hostedApiProxyPrefix = '/decision-engine/api'
 
   const createApiProxy = (rewritePrefix?: string) => ({
     target: backendTarget,
@@ -34,6 +42,7 @@ export default defineConfig(({ command }) => {
     server: {
       proxy: {
         '^/decision-engine-api(?:/.*)?$': createApiProxy(apiProxyPrefix),
+        '^/decision-engine/api(?:/.*)?$': createApiProxy(hostedApiProxyPrefix),
         '/decide-gateway': createApiProxy(),
         '/decision_gateway': createApiProxy(),
         '/merchant-account': createApiProxy(),

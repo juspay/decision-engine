@@ -1,9 +1,12 @@
-// All API calls use relative URLs so nginx/vite-proxy can handle routing
+// Dev uses the Vite proxy; production builds call the hosted dashboard API path.
 import { tokenRef } from './tokenRef'
 
 const DEBUG_API = true
 const DEFAULT_TENANT_ID = import.meta.env.VITE_DEFAULT_TENANT_ID ?? 'public'
-const API_BASE_PATH = (import.meta.env.VITE_API_BASE_PATH ?? '/decision-engine-api').replace(/\/$/, '')
+const DEFAULT_API_BASE_PATH = import.meta.env.PROD
+  ? 'https://app.hyperswitch.io/decision-engine/api'
+  : '/decision-engine-api'
+const API_BASE_PATH = (import.meta.env.VITE_API_BASE_PATH ?? DEFAULT_API_BASE_PATH).replace(/\/$/, '')
 const FEATURE_HEADER = import.meta.env.VITE_FEATURE_HEADER ?? 'decision-engine'
 
 function resolveApiPath(path: string) {
