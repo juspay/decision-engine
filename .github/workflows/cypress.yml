@@ -112,8 +112,8 @@ jobs:
       - name: Load Docker image
         run: gunzip -c ${{ env.IMAGE_ARTIFACT }}.tar.gz | docker load
 
-      - name: Start services with local build
-        run: docker compose --profile postgres-local up -d
+      - name: Start services (using pre-built image)
+        run: docker compose --profile postgres-local up -d --no-build
 
       - name: Debug - Show service status
         run: |
