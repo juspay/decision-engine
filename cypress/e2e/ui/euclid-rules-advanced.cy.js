@@ -95,7 +95,7 @@ describe('Advanced routing rule features', () => {
       })
     })
 
-    it('each checkbox is independently togglable', () => {
+    it('each checkbox is independently toggleable', () => {
       ruleBlock(0).within(() => {
         cy.get('select.cond-select').eq(1).select('is one of')
         cy.get('input[type="checkbox"]').first().check()
