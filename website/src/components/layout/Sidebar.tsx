@@ -12,6 +12,7 @@ import {
   Activity,
   Moon,
   Sun,
+  Users,
 } from 'lucide-react'
 
 export function Sidebar() {
@@ -89,6 +90,14 @@ export function Sidebar() {
         </div>
 
         <SideLink to="/decisions" icon={Search} selectedPath={selectedPath} onNavigate={setPendingPath}>Decision Explorer</SideLink>
+
+        <div className="flex items-center gap-2 px-3 pb-3 pt-8">
+          <span className="text-[11px] font-bold uppercase tracking-widest text-slate-400 dark:text-[#6d768a]">
+            Settings
+          </span>
+        </div>
+
+        <SideLink to="/members" icon={Users} selectedPath={selectedPath} onNavigate={setPendingPath}>Members</SideLink>
       </nav>
 
       {/* Footer */}

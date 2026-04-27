@@ -8,7 +8,7 @@ use crate::utils::date_time;
 use axum::http::HeaderMap;
 use axum::Json;
 use diesel::associations::HasTable;
-use diesel::ExpressionMethods;
+use diesel::{BoolExpressionMethods, ExpressionMethods};
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "mysql")]
@@ -431,6 +431,241 @@ pub async fn switch_merchant(
         role: target.role.clone(),
         merchants,
     }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct InviteMemberRequest {
+    pub email: String,
+    pub role: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct InviteMemberResponse {
+    pub email: String,
+    pub is_new_user: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+    pub role: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MemberInfo {
+    pub user_id: String,
+    pub email: String,
+    pub role: String,
+}
+
+#[axum::debug_handler]
+pub async fn invite_member(
+    headers: HeaderMap,
+    Json(payload): Json<InviteMemberRequest>,
+) -> Result<Json<InviteMemberResponse>, error::ContainerError<UserAuthError>> {
+    let token = extract_bearer_token(&headers)?;
+    let global_config = APP_STATE
+        .get()
+        .map(|s| s.global_config.clone())
+        .ok_or(UserAuthError::StorageError)?;
+
+    let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
+
+    if claims.role != "admin" {
+        return Err(error::ContainerError::from(UserAuthError::Forbidden));
+    }
+
+    let role = match payload.role.as_deref().unwrap_or("member") {
+        "admin" => "admin".to_string(),
+        _ => "member".to_string(),
+    };
+
+    let app_state = get_tenant_app_state().await;
+
+    let existing_users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
+        &app_state.db,
+        dsl::email.eq(payload.email.clone()),
+    )
+    .await
+    .map_err(|_| UserAuthError::StorageError)?;
+
+    let now = date_time::now();
+
+    if let Some(existing_user) = existing_users.into_iter().next() {
+        // Check if already a member
+        let existing_membership = crate::generics::generic_find_all::<
+            <UserMerchant as HasTable>::Table,
+            _,
+            UserMerchant,
+        >(
+            &app_state.db,
+            um_dsl::user_id
+                .eq(existing_user.user_id.clone())
+                .and(um_dsl::merchant_id.eq(claims.merchant_id.clone())),
+        )
+        .await
+        .map_err(|_| UserAuthError::StorageError)?;
+
+        if !existing_membership.is_empty() {
+            return Err(error::ContainerError::from(UserAuthError::AlreadyMember));
+        }
+
+        let new_user_merchant = NewUserMerchant {
+            user_id: existing_user.user_id.clone(),
+            merchant_id: claims.merchant_id.clone(),
+            role: role.clone(),
+            created_at: now,
+        };
+
+        crate::generics::generic_insert(&app_state.db, new_user_merchant)
+            .await
+            .map_err(|_| UserAuthError::StorageError)?;
+
+        Ok(Json(InviteMemberResponse {
+            email: existing_user.email,
+            is_new_user: false,
+            password: None,
+            role,
+        }))
+    } else {
+        // Create new user with generated password
+        let generated_password = generate_random_password();
+
+        let password_hash = auth::hash_password(&generated_password)
+            .map_err(|_| UserAuthError::PasswordHashingFailed)?;
+
+        let user_id = uuid::Uuid::new_v4().to_string();
+
+        let new_user = NewUser {
+            user_id: user_id.clone(),
+            email: payload.email.clone(),
+            password_hash,
+            merchant_id: None,
+            role: role.clone(),
+            #[cfg(feature = "mysql")]
+            is_active: 1,
+            #[cfg(feature = "postgres")]
+            is_active: true,
+            #[cfg(feature = "mysql")]
+            email_verified: 1,
+            #[cfg(feature = "postgres")]
+            email_verified: true,
+            created_at: now,
+        };
+
+        crate::generics::generic_insert(&app_state.db, new_user)
+            .await
+            .map_err(|_| UserAuthError::StorageError)?;
+
+        let new_user_merchant = NewUserMerchant {
+            user_id: user_id.clone(),
+            merchant_id: claims.merchant_id.clone(),
+            role: role.clone(),
+            created_at: now,
+        };
+
+        if crate::generics::generic_insert(&app_state.db, new_user_merchant)
+            .await
+            .is_err()
+        {
+            // Compensating delete: remove orphaned user if membership insert fails
+            let conn = app_state.db.get_conn().await.ok();
+            if let Some(conn) = conn {
+                let _ = crate::generics::generic_delete::<
+                    <User as diesel::associations::HasTable>::Table,
+                    _,
+                >(&conn, dsl::user_id.eq(user_id.clone()))
+                .await;
+            }
+            return Err(error::ContainerError::from(UserAuthError::StorageError));
+        }
+
+        Ok(Json(InviteMemberResponse {
+            email: payload.email,
+            is_new_user: true,
+            password: Some(generated_password),
+            role,
+        }))
+    }
+}
+
+#[axum::debug_handler]
+pub async fn list_members(
+    headers: HeaderMap,
+) -> Result<Json<Vec<MemberInfo>>, error::ContainerError<UserAuthError>> {
+    let token = extract_bearer_token(&headers)?;
+    let global_config = APP_STATE
+        .get()
+        .map(|s| s.global_config.clone())
+        .ok_or(UserAuthError::StorageError)?;
+
+    let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
+    let app_state = get_tenant_app_state().await;
+
+    let memberships =
+        crate::generics::generic_find_all::<<UserMerchant as HasTable>::Table, _, UserMerchant>(
+            &app_state.db,
+            um_dsl::merchant_id.eq(claims.merchant_id.clone()),
+        )
+        .await
+        .map_err(|_| UserAuthError::StorageError)?;
+
+    let user_ids: Vec<String> = memberships.iter().map(|m| m.user_id.clone()).collect();
+
+    let users = if user_ids.is_empty() {
+        Vec::new()
+    } else {
+        crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
+            &app_state.db,
+            dsl::user_id.eq_any(user_ids),
+        )
+        .await
+        .map_err(|_| UserAuthError::StorageError)?
+    };
+
+    let users_by_id: std::collections::HashMap<String, User> =
+        users.into_iter().map(|u| (u.user_id.clone(), u)).collect();
+
+    let members = memberships
+        .into_iter()
+        .filter_map(|membership| {
+            users_by_id.get(&membership.user_id).map(|user| MemberInfo {
+                user_id: user.user_id.clone(),
+                email: user.email.clone(),
+                role: membership.role,
+            })
+        })
+        .collect();
+
+    Ok(Json(members))
+}
+
+fn generate_random_password() -> String {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+    let uppercase = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    let lowercase = b"abcdefghijklmnopqrstuvwxyz";
+    let digits = b"0123456789";
+    let special = b"!@#$%^&*";
+
+    let mut password = vec![
+        uppercase[rng.gen_range(0..uppercase.len())] as char,
+        lowercase[rng.gen_range(0..lowercase.len())] as char,
+        digits[rng.gen_range(0..digits.len())] as char,
+        special[rng.gen_range(0..special.len())] as char,
+    ];
+
+    let all: Vec<u8> = [
+        uppercase.as_ref(),
+        lowercase.as_ref(),
+        digits.as_ref(),
+        special.as_ref(),
+    ]
+    .concat();
+    for _ in 0..12 {
+        password.push(all[rng.gen_range(0..all.len())] as char);
+    }
+
+    use rand::seq::SliceRandom;
+    password.shuffle(&mut rng);
+    password.into_iter().collect()
 }
 
 #[axum::debug_handler]
