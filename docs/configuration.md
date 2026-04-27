@@ -4,11 +4,13 @@ This document explains how to configure Decision Engine for local and on-prem de
 
 ## Primary Config Files
 
-- `config/development.toml`: host/source runs
-- `config/docker-configuration.toml`: Docker/Compose runs
+- `config/development.toml`: used for host/source runs
+- `config/docker-configuration.toml`: used for Docker and Compose runs
 - `helm-charts/config/development.toml`: Kubernetes chart template config
 
-## Core Sections
+These files already exist with all required sections. Edit the one that matches your runtime rather than copying from `config.example.toml`, which is incomplete.
+
+## Config Sections
 
 ### Server
 
@@ -18,13 +20,7 @@ host = "0.0.0.0"
 port = 8080
 ```
 
-### Metrics
-
-```toml
-[metrics]
-host = "0.0.0.0"
-port = 9090
-```
+`host` is the bind address. Use `0.0.0.0` for Docker/deployed, `127.0.0.1` for local-only.
 
 ### Logging
 
@@ -35,12 +31,72 @@ level = "DEBUG"
 log_format = "default"
 ```
 
+`log_format` accepts `"default"` (human-readable) or `"json"` (structured, recommended for prod).
+
+### Metrics
+
+```toml
+[metrics]
+host = "0.0.0.0"
+port = 9094
+```
+
+Prometheus metrics are exposed at `host:port/metrics`. Used by the `monitoring` Compose profile (Prometheus scrapes `9094`, Grafana at `3000`).
+
+### Rate Limiting
+
+```toml
+[limit]
+request_count = 1
+duration = 60
+```
+
+Controls rate limiting on the delete APIs. `request_count` requests allowed per `duration` seconds.
+
+### Redis cache config
+
+```toml
+[cache_config]
+service_config_redis_prefix = "DE_service_config_"
+service_config_ttl = 300    # Redis TTL for service config entries, in seconds
+```
+
 ### Database
 
-Use either MySQL or PostgreSQL as required by your deployment mode.
+MySQL and PostgreSQL use separate config sections.
 
-For Docker Compose profiles, connection details are pre-wired via service names and mounted config.
-For source runs, ensure your database URL in config matches your local DB.
+**MySQL:**
+
+```toml
+[database]
+username = "db_user"
+password = "db_pass"
+host = "localhost"
+port = 3306
+dbname = "decision_engine_db"
+```
+
+**PostgreSQL:**
+
+```toml
+[pg_database]
+pg_username = "db_user"
+pg_password = "db_pass"
+pg_host = "localhost"
+pg_port = 5432
+pg_dbname = "decision_engine_db"
+```
+
+For Docker Compose runs both are pre-wired via service names in `config/docker-configuration.toml`.
+
+### Multi-Tenant Schema
+
+```toml
+[tenant_secrets]
+hyperswitch = { schema = "public" }
+```
+
+Maps tenant identifiers to database schemas. Add entries for each tenant you want to support.
 
 ### Redis
 
@@ -50,21 +106,115 @@ host = "127.0.0.1"
 port = 6379
 ```
 
-### Secrets Manager
+Redis is required — it's used for caching routing config and service config. For Docker, use the service name as host.
 
-`secrets_manager` controls encryption/key-management behavior. In local environments this is commonly set to `no_encryption`.
+### Auth
+
+```toml
+[user_auth]
+jwt_secret = "change_me_in_production_use_32chars!!"
+jwt_expiry_seconds = 86400
+email_verification_enabled = false
+```
+
+Use a strong, random `jwt_secret` — 32+ characters recommended. Set `email_verification_enabled = true` if you've wired an email provider.
+
+### Admin Secret
+
+```toml
+[admin_secret]
+secret = "test_admin"
+```
+
+Used to authenticate the `POST /merchant-account/create` endpoint (admin bootstrap). Change this in production.
+
+### API Key Auth
+
+```toml
+api_key_auth_enabled = true
+```
+
+Top-level flag. When `true`, protected routes accept `x-api-key` in addition to JWT bearer tokens. When `false`, the auth middleware allows **all requests through without authentication** — this effectively disables auth for every protected route. Do not set this to `false` in any environment that should enforce auth.
+
+### Analytics
+
+Both Kafka and ClickHouse require `enabled = true` — without it, analytics is disabled even if the connection details are configured.
+
+```toml
+[analytics.kafka]
+enabled = true
+brokers = "localhost:9092"
+api_topic = "api"
+domain_topic = "domain"
+
+[analytics.clickhouse]
+enabled = true
+url = "http://localhost:8123"
+user = "decision_engine"
+password = "decision_engine"
+```
+
+Decision outcomes are published to Kafka and consumed into ClickHouse. Both are required for analytics and audit dashboard views. For Docker runs, these are pre-configured and enabled via the Compose profiles.
+
+### TLS
+
+```toml
+[tls]
+certificate = "cert.pem"
+private_key = "key.pem"
+```
+
+Paths to PEM-format certificate and key files. Only needed if you're terminating TLS at the app layer rather than a reverse proxy.
+
+### API Client
+
+```toml
+[api_client]
+client_idle_timeout = 90
+pool_max_idle_per_host = 10
+identity = ""
+```
+
+Controls the outbound HTTP client used for upstream calls. Set `identity` to a PEM path if you need mTLS.
+
+## Secrets Management
+
+By default, secrets in config are stored in plaintext. For production, use one of the two supported backends.
+
+### AWS KMS
+
+Requires the `kms-aws` feature (included in the `release` feature set).
+
+```toml
+[secrets_management]
+secrets_manager = "aws_kms"
+
+[secrets_management.aws_kms]
+key_id = "your-kms-key-id"
+region = "us-east-1"
+```
+
+### HashiCorp Vault
+
+Requires the `kms-hashicorp-vault` feature.
+
+```toml
+[secrets_management]
+secrets_manager = "hashi_corp_vault"
+
+[secrets_management.hashi_corp_vault]
+url = "http://127.0.0.1:8200"
+token = "hvs.your_token"
+```
+
+When a secrets manager is configured, sensitive fields like `database.password` and `user_auth.jwt_secret` are resolved from the vault rather than the config file.
 
 ## Environment Overrides
 
-Use environment variables to override selected runtime values when needed (for example in Helm via `extraEnvVars`).
-
-For deployment-specific examples, see:
-
-- [Local Setup Guide](local-setup.md)
-- [Helm Chart README](https://github.com/juspay/decision-engine/blob/main/helm-charts/README.md)
+Selected values can be overridden at runtime via environment variables. This is useful in Helm deployments via `extraEnvVars`. Consult `src/config.rs` for the full mapping.
 
 ## Related Docs
 
 - [Local Setup Guide](local-setup.md)
-- [API Reference](api-reference.md)
+- [API Overview](api-overview.md)
 - [API Examples](api-refs/api-ref.mdx)
