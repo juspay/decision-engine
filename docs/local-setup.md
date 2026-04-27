@@ -8,10 +8,10 @@ This is the canonical local startup guide for Decision Engine.
 - Docker Compose v2+
 - Git 2+
 
-Optional for source runs:
+Required for source runs:
 
 - Rust 1.85+
-- `just`
+- [`just`](https://just.systems) — used for the `migrate-pg` command
 - PostgreSQL or MySQL
 - Redis
 

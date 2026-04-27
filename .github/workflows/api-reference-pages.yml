@@ -5,6 +5,7 @@ on:
     branches:
       - main
     paths:
+      - "README.md"
       - "docs/openapi.json"
       - "docs/api-reference/**"
       - "docs/api-refs/**"
@@ -29,6 +30,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install pandoc
+        run: sudo apt-get install -y pandoc
+
       - name: Validate OpenAPI contract
         run: jq empty docs/openapi.json
 
@@ -38,13 +42,221 @@ jobs:
           set -euo pipefail
 
           rm -rf public
-          mkdir -p public
+          mkdir -p public/api-docs
 
           cp docs/openapi.json public/openapi.json
+          cp docs/openapi.json public/api-docs/openapi.json
+          cp docs/favicon.svg public/api-docs/favicon.svg
           cp docs/favicon.svg public/favicon.svg
           touch public/.nojekyll
 
-          cat > public/index.html <<'HTML'
+          # Rewrite relative doc links to their GitHub equivalents so they
+          # resolve correctly from the GitHub Pages landing page.
+          REPO="https://github.com/juspay/decision-engine/blob/main"
+          sed \
+            -e "s|](docs/|]($REPO/docs/|g" \
+            -e "s|](CONTRIBUTING.md)|]($REPO/CONTRIBUTING.md)|g" \
+            README.md > /tmp/readme-rewritten.md
+
+          README_BODY=$(pandoc /tmp/readme-rewritten.md \
+            --from=gfm \
+            --to=html \
+            --no-highlight)
+
+          cat > public/index.html <<LANDING
+          <!doctype html>
+          <html lang="en">
+            <head>
+              <meta charset="utf-8" />
+              <meta name="viewport" content="width=device-width, initial-scale=1" />
+              <title>Decision Engine</title>
+              <link rel="icon" href="./favicon.svg" />
+              <style>
+                *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+                body {
+                  background: #05070d;
+                  color: #e2e8f0;
+                  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                }
+                /* ── header ── */
+                .site-header {
+                  display: flex;
+                  align-items: center;
+                  justify-content: space-between;
+                  padding: 16px 32px;
+                  border-bottom: 1px solid #1e293b;
+                  position: sticky;
+                  top: 0;
+                  background: #05070d;
+                  z-index: 10;
+                }
+                .site-header h1 {
+                  font-size: 1rem;
+                  font-weight: 600;
+                  color: #f8fafc;
+                  letter-spacing: -0.01em;
+                }
+                .header-links { display: flex; gap: 20px; }
+                .header-links a {
+                  color: #94a3b8;
+                  font-size: 0.875rem;
+                  text-decoration: none;
+                }
+                .header-links a:hover { color: #e2e8f0; }
+                .header-links a.cta {
+                  color: #fff;
+                  background: #3b82f6;
+                  padding: 6px 14px;
+                  border-radius: 6px;
+                  font-weight: 500;
+                }
+                .header-links a.cta:hover { background: #2563eb; }
+                /* ── hero ── */
+                .hero {
+                  text-align: center;
+                  padding: 72px 24px 56px;
+                  border-bottom: 1px solid #1e293b;
+                }
+                .hero h2 {
+                  font-size: 2.5rem;
+                  font-weight: 700;
+                  letter-spacing: -0.03em;
+                  color: #f8fafc;
+                  margin-bottom: 16px;
+                }
+                .hero p {
+                  color: #94a3b8;
+                  font-size: 1.05rem;
+                  line-height: 1.6;
+                  max-width: 520px;
+                  margin: 0 auto 36px;
+                }
+                .hero-links { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+                .hero-links a {
+                  padding: 12px 22px;
+                  border-radius: 8px;
+                  font-size: 0.95rem;
+                  font-weight: 500;
+                  text-decoration: none;
+                  transition: opacity 0.15s;
+                }
+                .hero-links a:hover { opacity: 0.85; }
+                .hero-links a.primary { background: #3b82f6; color: #fff; }
+                .hero-links a.secondary { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; }
+                .spec-note {
+                  margin-top: 20px;
+                  font-size: 0.8rem;
+                  color: #475569;
+                }
+                .spec-note a { color: #64748b; text-decoration: underline; }
+                /* ── readme body ── */
+                .readme {
+                  max-width: 860px;
+                  margin: 0 auto;
+                  padding: 56px 24px 80px;
+                }
+                /* strip the h1 pandoc renders from the README — hero already has it */
+                .readme > h1:first-child { display: none; }
+                .readme h2 {
+                  font-size: 1.35rem;
+                  font-weight: 600;
+                  color: #f1f5f9;
+                  margin: 48px 0 16px;
+                  padding-bottom: 8px;
+                  border-bottom: 1px solid #1e293b;
+                }
+                .readme h3 {
+                  font-size: 1.05rem;
+                  font-weight: 600;
+                  color: #e2e8f0;
+                  margin: 28px 0 10px;
+                }
+                .readme p { color: #94a3b8; line-height: 1.7; margin-bottom: 14px; }
+                .readme a { color: #60a5fa; text-decoration: none; }
+                .readme a:hover { text-decoration: underline; }
+                .readme ul, .readme ol {
+                  color: #94a3b8;
+                  padding-left: 24px;
+                  margin-bottom: 14px;
+                  line-height: 1.7;
+                }
+                .readme li { margin-bottom: 4px; }
+                .readme strong { color: #e2e8f0; }
+                .readme code {
+                  background: #0f172a;
+                  color: #7dd3fc;
+                  padding: 2px 6px;
+                  border-radius: 4px;
+                  font-size: 0.875em;
+                  font-family: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+                }
+                .readme pre {
+                  background: #0f172a;
+                  border: 1px solid #1e293b;
+                  border-radius: 8px;
+                  padding: 16px 20px;
+                  overflow-x: auto;
+                  margin-bottom: 16px;
+                }
+                .readme pre code {
+                  background: none;
+                  padding: 0;
+                  color: #cbd5e1;
+                  font-size: 0.875rem;
+                }
+                .readme table {
+                  width: 100%;
+                  border-collapse: collapse;
+                  margin-bottom: 16px;
+                  font-size: 0.9rem;
+                }
+                .readme th {
+                  text-align: left;
+                  color: #e2e8f0;
+                  border-bottom: 1px solid #334155;
+                  padding: 8px 12px;
+                }
+                .readme td {
+                  color: #94a3b8;
+                  border-bottom: 1px solid #1e293b;
+                  padding: 8px 12px;
+                  vertical-align: top;
+                }
+                .readme img { max-width: 100%; border-radius: 8px; margin: 8px 0; }
+                .readme hr { border: none; border-top: 1px solid #1e293b; margin: 40px 0; }
+                /* hide the div align=center wrappers pandoc passes through */
+                .readme div[align="center"] { text-align: center; }
+              </style>
+            </head>
+            <body>
+              <header class="site-header">
+                <h1>Decision Engine</h1>
+                <nav class="header-links">
+                  <a href="https://github.com/juspay/decision-engine">GitHub</a>
+                  <a href="./openapi.json">OpenAPI JSON</a>
+                  <a class="cta" href="./api-docs/">API Reference</a>
+                </nav>
+              </header>
+
+              <section class="hero">
+                <h2>Decision Engine</h2>
+                <p>Open-source payment gateway routing — rule-based, success-rate aware, and self-hosted.</p>
+                <div class="hero-links">
+                  <a class="primary" href="./api-docs/">API Reference (Swagger)</a>
+                  <a class="secondary" href="https://github.com/juspay/decision-engine">GitHub Repository</a>
+                  <a class="secondary" href="https://juspay.io/blog/juspay-orchestrator-and-merchant-controlled-routing-engine">How It Works</a>
+                </div>
+                <p class="spec-note">Raw OpenAPI spec: <a href="./openapi.json">openapi.json</a></p>
+              </section>
+
+              <article class="readme">
+                ${README_BODY}
+              </article>
+            </body>
+          </html>
+          LANDING
+
+          cat > public/api-docs/index.html <<'HTML'
           <!doctype html>
           <html lang="en">
             <head>
