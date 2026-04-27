@@ -6,25 +6,13 @@ WORKDIR /open_router
 
 ENV CARGO_NET_RETRY=10
 ENV RUSTUP_MAX_RETRIES=10
-ENV CARGO_INCREMENTAL=0
 
 RUN apt-get update \
     && apt-get install -y cmake libmariadb-dev libssl-dev clang \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy dependency files first for better layer caching
-COPY Cargo.toml Cargo.lock ./
-
-# Create dummy main files to build dependencies
-RUN mkdir -p src && \
-    echo "fn main() {}" > src/main.rs && \
-    cargo build --release --no-default-features --features middleware,kms-aws,postgres ${EXTRA_FEATURES} && \
-    rm -rf src
-
-# Now copy actual source code
 COPY . .
 
-# Build the actual application (only recompiles changed code)
 RUN RUSTFLAGS="-A warnings" cargo build --release --no-default-features --features middleware,kms-aws,postgres ${EXTRA_FEATURES}
 
 
