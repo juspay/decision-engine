@@ -17,10 +17,6 @@
     {
       "url": "http://localhost:8080",
       "description": "Local development"
-    },
-    {
-      "url": "https://sandbox.hyperswitch.io",
-      "description": "Hyperswitch sandbox with x-feature: decision-engine"
     }
   ],
   "tags": [

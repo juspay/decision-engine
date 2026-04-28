@@ -1,5 +1,6 @@
 pub mod context;
 
+use error_stack::{Report, ResultExt};
 use josekit::jws::JwsHeader;
 use josekit::jwt::{self, JwtPayload};
 use ring::digest;
@@ -9,6 +10,30 @@ use uuid::Uuid;
 pub use context::{AuthContext, AuthKind};
 
 const KEY_PREFIX: &str = "DE_";
+
+#[derive(Debug, thiserror::Error)]
+pub enum AuthError {
+    #[error("Failed to get current system time")]
+    SystemTime,
+    #[error("Failed to build JWT signer or verifier")]
+    JwtKeyError,
+    #[error("Failed to set JWT claim")]
+    JwtClaimError,
+    #[error("Failed to encode JWT")]
+    JwtEncodeError,
+    #[error("Failed to decode or verify JWT")]
+    JwtDecodeError,
+    #[error("JWT token has expired")]
+    TokenExpired,
+    #[error("JWT token is missing required claim: {0}")]
+    MissingClaim(&'static str),
+    #[error("Failed to hash password")]
+    PasswordHashError,
+    #[error("Failed to verify password hash")]
+    PasswordVerifyError,
+    #[error("Password does not meet strength requirements")]
+    WeakPassword,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct JwtClaims {
@@ -29,10 +54,10 @@ pub fn generate_jwt(
     role: &str,
     secret: &str,
     expiry_seconds: u64,
-) -> Result<String, String> {
+) -> Result<String, Report<AuthError>> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_err(|e| e.to_string())?
+        .change_context(AuthError::SystemTime)?
         .as_secs();
 
     let jti = Uuid::new_v4().to_string();
@@ -44,86 +69,90 @@ pub fn generate_jwt(
             "user_id",
             Some(serde_json::Value::String(user_id.to_string())),
         )
-        .map_err(|e| e.to_string())?;
+        .change_context(AuthError::JwtClaimError)?;
     payload
         .set_claim("email", Some(serde_json::Value::String(email.to_string())))
-        .map_err(|e| e.to_string())?;
+        .change_context(AuthError::JwtClaimError)?;
     payload
         .set_claim(
             "merchant_id",
             Some(serde_json::Value::String(merchant_id.to_string())),
         )
-        .map_err(|e| e.to_string())?;
+        .change_context(AuthError::JwtClaimError)?;
     payload
         .set_claim("role", Some(serde_json::Value::String(role.to_string())))
-        .map_err(|e| e.to_string())?;
+        .change_context(AuthError::JwtClaimError)?;
     payload
         .set_claim("jti", Some(serde_json::Value::String(jti)))
-        .map_err(|e| e.to_string())?;
+        .change_context(AuthError::JwtClaimError)?;
     payload
         .set_claim("iat", Some(serde_json::Value::Number(now.into())))
-        .map_err(|e| e.to_string())?;
+        .change_context(AuthError::JwtClaimError)?;
     payload
         .set_claim(
             "exp",
             Some(serde_json::Value::Number((now + expiry_seconds).into())),
         )
-        .map_err(|e| e.to_string())?;
+        .change_context(AuthError::JwtClaimError)?;
 
     let signer = josekit::jws::HS256
         .signer_from_bytes(secret.as_bytes())
-        .map_err(|e| e.to_string())?;
+        .change_context(AuthError::JwtKeyError)?;
 
     let header = JwsHeader::new();
-    jwt::encode_with_signer(&payload, &header, &signer).map_err(|e| e.to_string())
+    jwt::encode_with_signer(&payload, &header, &signer).change_context(AuthError::JwtEncodeError)
 }
 
-pub fn verify_jwt(token: &str, secret: &str) -> Result<JwtClaims, String> {
+pub fn verify_jwt(token: &str, secret: &str) -> Result<JwtClaims, Report<AuthError>> {
     let verifier = josekit::jws::HS256
         .verifier_from_bytes(secret.as_bytes())
-        .map_err(|e| e.to_string())?;
+        .change_context(AuthError::JwtKeyError)?;
 
-    let (payload, _) = jwt::decode_with_verifier(token, &verifier).map_err(|e| e.to_string())?;
+    let (payload, _) =
+        jwt::decode_with_verifier(token, &verifier).change_context(AuthError::JwtDecodeError)?;
 
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_err(|e| e.to_string())?
+        .change_context(AuthError::SystemTime)?
         .as_secs();
 
     let exp = payload
         .claim("exp")
         .and_then(|v| v.as_u64())
-        .ok_or("missing exp")?;
+        .ok_or_else(|| Report::new(AuthError::MissingClaim("exp")))?;
 
     if now > exp {
-        return Err("token expired".to_string());
+        return Err(Report::new(AuthError::TokenExpired));
     }
 
-    let user_id = payload.subject().ok_or("missing sub")?.to_string();
+    let user_id = payload
+        .subject()
+        .ok_or_else(|| Report::new(AuthError::MissingClaim("sub")))?
+        .to_string();
     let email = payload
         .claim("email")
         .and_then(|v| v.as_str())
-        .ok_or("missing email")?
+        .ok_or_else(|| Report::new(AuthError::MissingClaim("email")))?
         .to_string();
     let merchant_id = payload
         .claim("merchant_id")
         .and_then(|v| v.as_str())
-        .ok_or("missing merchant_id")?
+        .ok_or_else(|| Report::new(AuthError::MissingClaim("merchant_id")))?
         .to_string();
     let role = payload
         .claim("role")
         .and_then(|v| v.as_str())
-        .ok_or("missing role")?
+        .ok_or_else(|| Report::new(AuthError::MissingClaim("role")))?
         .to_string();
     let jti = payload
         .claim("jti")
         .and_then(|v| v.as_str())
-        .ok_or("missing jti")?
+        .ok_or_else(|| Report::new(AuthError::MissingClaim("jti")))?
         .to_string();
     let iat = payload
         .claim("iat")
         .and_then(|v| v.as_u64())
-        .ok_or("missing iat")?;
+        .ok_or_else(|| Report::new(AuthError::MissingClaim("iat")))?;
 
     Ok(JwtClaims {
         sub: user_id.clone(),
@@ -137,17 +166,18 @@ pub fn verify_jwt(token: &str, secret: &str) -> Result<JwtClaims, String> {
     })
 }
 
-pub fn hash_password(password: &str) -> Result<String, String> {
-    bcrypt::hash(password, bcrypt::DEFAULT_COST).map_err(|e| e.to_string())
+pub fn hash_password(password: &str) -> Result<String, Report<AuthError>> {
+    bcrypt::hash(password, bcrypt::DEFAULT_COST).change_context(AuthError::PasswordHashError)
 }
 
-pub fn verify_password(password: &str, hash: &str) -> Result<bool, String> {
-    bcrypt::verify(password, hash).map_err(|e| e.to_string())
+pub fn verify_password(password: &str, hash: &str) -> Result<bool, Report<AuthError>> {
+    bcrypt::verify(password, hash).change_context(AuthError::PasswordVerifyError)
 }
 
-pub fn validate_password_strength(password: &str) -> Result<(), String> {
+pub fn validate_password_strength(password: &str) -> Result<(), Report<AuthError>> {
     if password.chars().count() < 10 {
-        return Err("Password must be at least 10 characters long".to_string());
+        return Err(Report::new(AuthError::WeakPassword)
+            .attach_printable("Password must be at least 10 characters long"));
     }
 
     let has_uppercase = password.chars().any(|c| c.is_ascii_uppercase());
@@ -156,10 +186,9 @@ pub fn validate_password_strength(password: &str) -> Result<(), String> {
     let has_special = password.chars().any(|c| !c.is_ascii_alphanumeric());
 
     if !(has_uppercase && has_lowercase && has_digit && has_special) {
-        return Err(
-            "Password must include an uppercase letter, a lowercase letter, a number, and a special character"
-                .to_string(),
-        );
+        return Err(Report::new(AuthError::WeakPassword).attach_printable(
+            "Password must include an uppercase letter, a lowercase letter, a number, and a special character",
+        ));
     }
 
     Ok(())
@@ -237,7 +266,6 @@ mod tests {
     fn hash_matches_on_verification() {
         let raw_key = generate_api_key();
         let stored_hash = hash_api_key(&raw_key);
-        // Simulate what the middleware does: hash the incoming key and compare
         let incoming_hash = hash_api_key(&raw_key);
         assert_eq!(
             stored_hash, incoming_hash,
