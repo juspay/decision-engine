@@ -143,9 +143,9 @@ jobs:
             --headless
         env:
           CYPRESS_API_BASE_URL: http://localhost:8080
-          # Dev server uses base '/' so routes are at the root — no base-path suffix.
           CYPRESS_UI_BASE_URL: http://localhost:5173
           CYPRESS_RUNTIME_MODE: ci
+
 
       - name: Upload screenshots on failure
         uses: actions/upload-artifact@v4

@@ -94,10 +94,13 @@ describe('Analytics UI', () => {
     // The analytics page doesn't show a "Refreshing" text, but the network requests are intercepted
     cy.wait('@overviewRefresh')
     cy.wait('@routingRefresh')
+    // Wait for the view to settle and API data to load
+    cy.contains('button', /^Auth-rate based$/).should('have.class', 'bg-white')
 
-    cy.contains('Gateway share over time').should('exist')
-    cy.contains('Connector success rate over time').should('exist')
+    // Wait for analytics data to load
+    cy.contains('API calls').should('be.visible')
 
+    // Switch to rule-based view
     cy.contains('h1', 'Analytics')
       .parents('div.space-y-8')
       .first()
@@ -106,6 +109,6 @@ describe('Analytics UI', () => {
       })
     cy.contains(
       'Routing activity for rule-based and volume-based flows, separate from auth-rate score updates.',
-    ).should('exist')
+    ).should('be.visible')
   })
 })
