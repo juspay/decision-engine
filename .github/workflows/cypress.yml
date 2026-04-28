@@ -51,7 +51,7 @@ jobs:
           cache-from: |
             type=gha,scope=cypress-debug-${{ github.head_ref || github.ref_name }}
             type=gha,scope=cypress-debug-${{ github.base_ref || 'main' }}
-          cache-to: type=gha,scope=cypress-debug-${{ github.head_ref || github.ref_name }},mode=max
+          cache-to: type=gha,scope=cypress-debug-${{ github.head_ref || github.ref_name }},mode=min
 
       # ── Start services ────────────────────────────────────────────────────
       # Services start in the background while npm installs and UI build run.

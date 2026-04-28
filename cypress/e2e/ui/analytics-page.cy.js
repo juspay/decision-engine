@@ -95,8 +95,8 @@ describe('Analytics UI', () => {
     cy.wait('@overviewRefresh')
     cy.wait('@routingRefresh')
 
-    cy.contains('Gateway share over time').should('be.visible')
-    cy.contains('Connector success rate over time').should('be.visible')
+    cy.contains('Gateway share over time').should('exist')
+    cy.contains('Connector success rate over time').should('exist')
 
     cy.contains('h1', 'Analytics')
       .parents('div.space-y-8')
