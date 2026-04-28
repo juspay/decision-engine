@@ -13,25 +13,25 @@ describe('End-to-end creation', () => {
   let merchantId
   let ruleName
 
-  before(() => {
-    merchantId = factory.merchantId('euclid_e2e')
-    cy.ensureMerchantAccount(merchantId)
-  })
-
-  after(() => {
-    cy.cleanupTestData(merchantId)
-  })
-
-  beforeEach(() => {
+  // Each test gets its own merchant so submitted rules never accumulate in
+  // the page DOM across tests (which caused SIGSEGV on test 6 via re-render
+  // of 5 previously saved rules when "Add Rule" was clicked).
+  beforeEach(function () {
     cy.waitForService()
     cy.viewport(1600, 1200)
+    merchantId = factory.merchantId('euclid_e2e')
     ruleName = factory.ruleName('adv_rule')
+    cy.ensureMerchantAccount(merchantId)
     cy.intercept('GET', '**/config/routing-keys').as('routingKeys')
     cy.intercept('POST', '**/routing/create').as('createRule')
     cy.visitWithSession('/routing/rules', merchantId)
     cy.contains('h1', 'Rule-Based Routing').should('be.visible')
     cy.wait('@routingKeys', { timeout: 15000 })
     cy.contains('button', 'Add Rule').click()
+  })
+
+  afterEach(() => {
+    cy.cleanupTestData(merchantId)
   })
 
   it('creates a rule using "is one of" — backend receives enum_variant_array', () => {

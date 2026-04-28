@@ -17,6 +17,10 @@ module.exports = defineConfig({
     // causes the Chromium process to SIGSEGV on long test runs (~45+ tests).
     // video is already false so there is no additional cost to setting this.
     numTestsKeptInMemory: 0,
+    // Force Chromium GC between every test to prevent renderer OOM on
+    // heavy E2E tests (complex form interactions accumulate heap even with
+    // numTestsKeptInMemory: 0, which only covers Cypress-internal snapshots).
+    experimentalMemoryManagement: true,
     env: {
       // Default configuration - can be overridden via environment variables
       API_BASE_URL: process.env.CYPRESS_API_BASE_URL || 'http://localhost:8080',
