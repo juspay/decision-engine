@@ -26,7 +26,7 @@ describe('Volume Split UI', () => {
     cy.get('input[placeholder="optional gateway_id"]').eq(1).type('mca_adyen_ui')
 
     cy.contains('button', 'Create Rule').click()
-    cy.contains('created successfully').should('be.visible')
+    cy.contains('Volume split rule successfully created').should('be.visible')
     cy.contains('button', 'Activate').click()
     cy.contains('Rule activated.').should('be.visible')
     cy.contains('Active Volume Split').scrollIntoView().should('exist')
