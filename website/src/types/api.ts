@@ -63,7 +63,7 @@ export interface EuclidStatement {
 export interface EuclidCondition {
   lhs: string
   comparison: string
-  value: { type: string; value: string | number | Record<string, unknown> | Array<string | number | Record<string, unknown>> }
+  value: { type: string; value: string | number }
   metadata: Record<string, unknown>
 }
 

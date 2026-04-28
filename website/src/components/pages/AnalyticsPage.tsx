@@ -76,31 +76,6 @@ const PRESET_OPTIONS: { value: AnalyticsRangeValue; label: string }[] = [
 ]
 
 const CHART_COLORS = ['#0069ED', '#14b8a6', '#f97316', '#e11d48', '#8b5cf6', '#22c55e']
-const CONNECTOR_COLOR_OVERRIDES: Record<string, string> = {
-  adyen: '#0069ED',
-  stripe: '#14b8a6',
-}
-
-function connectorColor(connector: string) {
-  const normalized = connector.trim().toLowerCase()
-
-  if (!normalized || normalized === 'no gateway selected') {
-    return '#64748b'
-  }
-
-  const override = CONNECTOR_COLOR_OVERRIDES[normalized]
-  if (override) {
-    return override
-  }
-
-  let hash = 0
-  for (const char of normalized) {
-    hash = (hash * 31 + char.charCodeAt(0)) >>> 0
-  }
-
-  return CHART_COLORS[hash % CHART_COLORS.length]
-}
-
 const CHART_TOOLTIP_STYLE = {
   backgroundColor: '#0d0d12',
   border: '1px solid #1c1c24',
@@ -138,10 +113,10 @@ const CARD_INFO: Record<'hits' | 'share' | 'sr' | 'preview_hits' | 'preview_acti
     source: 'Counts come from ClickHouse-backed API analytics rows ingested from Kafka into `analytics_api_events`.',
   },
   share: {
-    title: 'Actual gateway selections over time',
-    purpose: 'Use this to compare selected gateway volume against the connector success-rate trail below.',
-    calculation: 'Decision events are bucketed by time and grouped by chosen connector using the same active filters as the success-rate chart.',
-    source: 'Reads ClickHouse-backed decision rows from `analytics_domain_events`.',
+    title: 'Gateway share over time',
+    purpose: 'Use this to see when traffic shifted from one connector to another for the selected merchant.',
+    calculation: 'Decision events are bucketed by time and grouped by chosen connector. The chart shows how many decisions each gateway captured in each bucket.',
+    source: 'Reads ClickHouse-backed domain analytics rows from `analytics_domain_events`.',
   },
   sr: {
     title: 'Connector success rate over time',
@@ -889,11 +864,14 @@ export function AnalyticsPage() {
   const previewGatewayMixData = useMemo(() => {
     const total = previewGatewaySummary.reduce((sum, item) => sum + item.count, 0)
 
-    return previewGatewaySummary.map((item) => ({
+    return previewGatewaySummary.map((item, index) => ({
       name: item.gateway,
       value: item.count,
       percentage: total ? (item.count / total) * 100 : 0,
-      color: connectorColor(item.gateway),
+      color:
+        item.gateway === 'No gateway selected'
+          ? '#64748b'
+          : CHART_COLORS[index % CHART_COLORS.length],
     }))
   }, [previewGatewaySummary])
   const previewIngestionPending =
@@ -915,8 +893,7 @@ export function AnalyticsPage() {
   }, [previewListPage, previewListTotalPages, previewListTotalResults])
 
   const gatewayShareData = useMemo(() => {
-    const gatewaySharePoints = filteredRouting.data?.gateway_share || []
-    const gateways = sortedGateways(gatewaySharePoints.map((point) => point.gateway))
+    const gateways = sortedGateways((routing.data?.gateway_share || []).map((point) => point.gateway))
     if (!gateways.length) {
       return {
         gateways,
@@ -939,7 +916,7 @@ export function AnalyticsPage() {
       )
     }
 
-    for (const point of gatewaySharePoints) {
+    for (const point of routing.data?.gateway_share || []) {
       if (!gateways.includes(point.gateway)) continue
       const row =
         buckets.get(point.bucket_ms) ||
@@ -958,7 +935,7 @@ export function AnalyticsPage() {
       gateways,
       rows: Array.from(buckets.values()).sort((left, right) => left.bucket_ms - right.bucket_ms),
     }
-  }, [chartBucketSize, effectiveWindow, filteredRouting.data])
+  }, [chartBucketSize, effectiveWindow, routing.data])
 
   const connectorTrendData = useMemo(() => {
     const gateways = sortedGateways((filteredRouting.data?.sr_trend || []).map((point) => point.gateway))
@@ -1286,9 +1263,9 @@ export function AnalyticsPage() {
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Actual gateway selections over time</h2>
+              <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Gateway share over time</h2>
               <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                Decision volume by selected connector using the same filters as the success-rate chart below.
+                How decision volume moved across connectors inside the selected merchant window.
               </p>
             </div>
             <InfoButton content={CARD_INFO.share} />
@@ -1310,14 +1287,14 @@ export function AnalyticsPage() {
                     wrapperStyle={CHART_TOOLTIP_WRAPPER_STYLE}
                   />
                   <Legend />
-                  {gatewayShareData.gateways.map((gateway) => (
+                  {gatewayShareData.gateways.map((gateway, index) => (
                     <Area
                       key={gateway}
                       type="monotone"
                       dataKey={gateway}
-                      stroke={connectorColor(gateway)}
+                      stroke={CHART_COLORS[index % CHART_COLORS.length]}
                       strokeWidth={3}
-                      fill={connectorColor(gateway)}
+                      fill={CHART_COLORS[index % CHART_COLORS.length]}
                       fillOpacity={0.14}
                       name={gateway}
                     />
@@ -1501,20 +1478,9 @@ export function AnalyticsPage() {
           {latestConnectorSummary.length ? (
             <div className="flex flex-wrap gap-2">
               {latestConnectorSummary.map((item) => (
-                <span
-                  key={item.gateway}
-                  className="inline-flex items-center gap-1 rounded-md border bg-white/70 px-2 py-0.5 text-xs font-medium tracking-wide dark:bg-white/[0.04]"
-                  style={{
-                    borderColor: `${connectorColor(item.gateway)}66`,
-                    color: connectorColor(item.gateway),
-                  }}
-                >
-                  <span
-                    className="mr-1.5 inline-block h-2 w-2 rounded-full"
-                    style={{ backgroundColor: connectorColor(item.gateway) }}
-                  />
+                <Badge key={item.gateway} variant="blue">
                   {item.gateway}: {formatPercent(item.value)}
-                </span>
+                </Badge>
               ))}
             </div>
           ) : null}
@@ -1539,12 +1505,12 @@ export function AnalyticsPage() {
                     wrapperStyle={CHART_TOOLTIP_WRAPPER_STYLE}
                   />
                   <Legend />
-                  {connectorTrendData.gateways.map((gateway) => (
+                  {connectorTrendData.gateways.map((gateway, index) => (
                     <Line
                       key={gateway}
                       type="monotone"
                       dataKey={gateway}
-                      stroke={connectorColor(gateway)}
+                      stroke={CHART_COLORS[index % CHART_COLORS.length]}
                       strokeWidth={3}
                       dot={connectorTrendPointCounts[gateway] <= 1 ? { r: 4, strokeWidth: 2 } : false}
                       activeDot={{ r: 5 }}
@@ -1623,12 +1589,16 @@ export function AnalyticsPage() {
                           wrapperStyle={CHART_TOOLTIP_WRAPPER_STYLE}
                         />
                         <Legend />
-                        {previewConnectorSeriesData.gateways.map((gateway) => (
+                        {previewConnectorSeriesData.gateways.map((gateway, index) => (
                           <Bar
                             key={gateway}
                             dataKey={gateway}
                             stackId="preview-connectors"
-                            fill={connectorColor(gateway)}
+                            fill={
+                              gateway === 'No gateway selected'
+                                ? '#64748b'
+                                : CHART_COLORS[index % CHART_COLORS.length]
+                            }
                             radius={[6, 6, 0, 0]}
                             name={gateway}
                           />
@@ -1874,7 +1844,7 @@ export function AnalyticsPage() {
                 <CardBody>
                   {previewGatewaySummary.length ? (
                     <div className="space-y-3">
-                      {previewGatewaySummary.map((item) => (
+                      {previewGatewaySummary.map((item, index) => (
                         <div key={item.gateway} className="space-y-2">
                           <div className="flex items-center justify-between gap-3">
                             <p className="text-sm font-medium text-slate-900 dark:text-white">{item.gateway}</p>
@@ -1885,7 +1855,7 @@ export function AnalyticsPage() {
                               className="h-full rounded-full"
                               style={{
                                 width: `${(item.count / previewGatewayMaxCount) * 100}%`,
-                                backgroundColor: connectorColor(item.gateway),
+                                backgroundColor: CHART_COLORS[index % CHART_COLORS.length],
                               }}
                             />
                           </div>
