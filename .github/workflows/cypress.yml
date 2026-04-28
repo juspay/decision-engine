@@ -47,10 +47,11 @@ jobs:
           file: Dockerfile.postgres
           tags: decision-engine-pg:local
           load: true
+          build-args: BUILD_MODE=debug
           cache-from: |
-            type=gha,scope=cypress-${{ github.head_ref || github.ref_name }}
-            type=gha,scope=cypress-${{ github.base_ref || 'main' }}
-          cache-to: type=gha,scope=cypress-${{ github.head_ref || github.ref_name }},mode=max
+            type=gha,scope=cypress-debug-${{ github.head_ref || github.ref_name }}
+            type=gha,scope=cypress-debug-${{ github.base_ref || 'main' }}
+          cache-to: type=gha,scope=cypress-debug-${{ github.head_ref || github.ref_name }},mode=max
 
       # ── Start services ────────────────────────────────────────────────────
       # Services start in the background while npm installs and UI build run.

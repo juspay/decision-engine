@@ -19,20 +19,29 @@ RUN cargo chef prepare --recipe-path recipe.json
 # This is the slow step (~15-30 min). It is cached as a Docker layer and
 # only re-runs when recipe.json changes (i.e. Cargo.toml / Cargo.lock changed).
 # A source-only change never reaches this stage.
+#
+# BUILD_MODE=release  → production binary with full optimisations (default)
+# BUILD_MODE=debug    → development binary; skips LLVM passes, ~5-6× faster to
+#                       compile. Adequate for E2E / Cypress test runs where
+#                       throughput doesn't matter.
 FROM chef AS builder
+ARG BUILD_MODE=release
 ARG EXTRA_FEATURES=""
 COPY --from=planner /open_router/recipe.json recipe.json
-RUN RUSTFLAGS="-A warnings" cargo chef cook --release --no-default-features --features middleware,kms-aws,postgres ${EXTRA_FEATURES} --recipe-path recipe.json
+RUN RELEASE_FLAG=$([ "$BUILD_MODE" = "release" ] && echo "--release" || echo "") && \
+    RUSTFLAGS="-A warnings" cargo chef cook $RELEASE_FLAG --no-default-features --features middleware,kms-aws,postgres ${EXTRA_FEATURES} --recipe-path recipe.json
 
 # ── Stage 3: build the binary ─────────────────────────────────────────────────
 # Dependencies are already compiled above. Only changed crates are recompiled.
 COPY . .
-RUN RUSTFLAGS="-A warnings" cargo build --release --no-default-features --features middleware,kms-aws,postgres ${EXTRA_FEATURES}
+RUN RELEASE_FLAG=$([ "$BUILD_MODE" = "release" ] && echo "--release" || echo "") && \
+    RUSTFLAGS="-A warnings" cargo build $RELEASE_FLAG --no-default-features --features middleware,kms-aws,postgres ${EXTRA_FEATURES}
 
 
 # ── Runtime image ─────────────────────────────────────────────────────────────
 FROM debian:bookworm
 
+ARG BUILD_MODE=release
 ARG CONFIG_DIR=/local/config
 ARG BIN_DIR=/local
 ARG BINARY=open_router
@@ -45,7 +54,7 @@ EXPOSE 8080
 
 RUN mkdir -p ${CONFIG_DIR}
 
-COPY --from=builder /open_router/target/release/${BINARY} ${BIN_DIR}/${BINARY}
+COPY --from=builder /open_router/target/${BUILD_MODE}/${BINARY} ${BIN_DIR}/${BINARY}
 
 WORKDIR ${BIN_DIR}
 

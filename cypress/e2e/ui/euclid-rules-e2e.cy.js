@@ -17,6 +17,7 @@ describe('End-to-end creation', () => {
   // the page DOM across tests (which caused SIGSEGV on test 6 via re-render
   // of 5 previously saved rules when "Add Rule" was clicked).
   beforeEach(function () {
+    cy.log(`[beforeEach] start — ${this.currentTest?.title}`)
     cy.waitForService()
     cy.viewport(1600, 1200)
     merchantId = factory.merchantId('euclid_e2e')
@@ -24,10 +25,14 @@ describe('End-to-end creation', () => {
     cy.ensureMerchantAccount(merchantId)
     cy.intercept('GET', '**/config/routing-keys').as('routingKeys')
     cy.intercept('POST', '**/routing/create').as('createRule')
+    cy.log('[beforeEach] visiting page')
     cy.visitWithSession('/routing/rules', merchantId)
     cy.contains('h1', 'Rule-Based Routing').should('be.visible')
+    cy.log('[beforeEach] waiting for routing keys')
     cy.wait('@routingKeys', { timeout: 15000 })
+    cy.log('[beforeEach] clicking Add Rule')
     cy.contains('button', 'Add Rule').click()
+    cy.log('[beforeEach] done')
   })
 
   afterEach(() => {
@@ -167,20 +172,31 @@ describe('End-to-end creation', () => {
   })
 
   it('creates a rule with volume split priority output — backend receives routing_type: volume_split_priority', () => {
+    cy.log('[test] start')
     cy.get('input[placeholder="my-rule"]').type(ruleName)
+    cy.log('[test] typed rule name')
     ruleBlock(0).within(() => {
       cy.get('select.cond-select').eq(0).select('payment_method')
       cy.get('select.cond-select').eq(2).select('card')
     })
+    cy.log('[test] set condition')
     switchOutputType(0, 'Split + Priority')
+    cy.log('[test] switched to Split + Priority')
     addVolumeSplitPriorityRow(0, 60)
+    cy.log('[test] added split row 1 (60%)')
     addGatewayToSplitRow(0, 0, 'stripe', 'mca_stripe')
+    cy.log('[test] added stripe to split row 0')
     addGatewayToSplitRow(0, 0, 'adyen', 'mca_adyen')
+    cy.log('[test] added adyen to split row 0')
     addVolumeSplitPriorityRow(0, 40)
+    cy.log('[test] added split row 2 (40%)')
     addGatewayToSplitRow(0, 1, 'checkout', 'mca_checkout')
+    cy.log('[test] added checkout to split row 1')
     addFallbackGateway('stripe', 'mca_stripe')
+    cy.log('[test] added fallback — clicking Create Rule')
 
     cy.contains('button', 'Create Rule').click()
+    cy.log('[test] waiting for API response')
     cy.wait('@createRule', { timeout: 15000 }).then((interception) => {
       expect(interception.response.statusCode).to.eq(200)
       const rule = interception.request.body?.algorithm?.data?.rules?.[0]
