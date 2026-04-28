@@ -912,6 +912,8 @@ export function PaymentAuditPage() {
           </Button>
         </div>
 
+        <p className="text-sm font-medium text-slate-700 dark:text-slate-300">{content.searchTitle}</p>
+
         <div className="flex flex-wrap items-center gap-3">
           <input
             className={`${controlClassName()} min-w-[320px] flex-[1.4]`}

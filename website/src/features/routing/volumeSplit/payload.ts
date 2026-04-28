@@ -5,12 +5,11 @@ export function toVolumeSplitCreatePayload(
   merchantId: string
 ): VolumeSplitRuleCreatePayload {
   return {
-    rule_id: null,
     name: formValues.ruleName.trim(),
     description: '',
     created_by: merchantId,
     algorithm_for: 'payment',
-    metadata: null,
+    metadata: {},
     algorithm: {
       type: 'volume_split',
       data: formValues.gateways.map((gateway) => ({
