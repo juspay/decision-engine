@@ -1,24 +1,13 @@
 # Cypress E2E Tests
 #
-# This workflow runs Cypress tests in parallel across multiple jobs.
-# The Decision Engine is built once and shared across all test jobs via
-# Docker image artifact to avoid redundant builds.
-#
-# Architecture:
-#   1. Build job: Build Decision Engine from PR source, save as artifact
-#   2. Matrix jobs (parallel):
-#      - Download the pre-built image
-#      - Start API + dependencies via docker compose --profile postgres-local
-#      - Build and serve UI from website/ directory (vite preview)
-#      - Run single spec file in headless mode
-#      - Upload screenshots on failure
+# Single job: builds the Decision Engine, starts all services, runs all specs.
 #
 # Caching layers:
-#   - Docker BuildKit layers → GHA cache, scoped to head branch (PR) or ref name (push)
-#     Fallback reads from the base branch so PRs warm-start from main's layers.
-#   - npm global cache (~/.npm) → actions/setup-node built-in, keyed on both lock files
-#   - Cypress binary (~/.cache/Cypress) → actions/cache, keyed on package-lock.json
-#     Separate from ~/.npm because the binary (~200 MB) is not part of the registry cache.
+#   - Docker BuildKit layers → GHA cache, scoped per branch.
+#     load: true puts the image directly into the local Docker daemon —
+#     no docker save / tar artifact / docker load round-trip needed.
+#   - npm global cache (~/.npm) → actions/setup-node, keyed on both lock files.
+#   - Cypress binary (~/.cache/Cypress, ~200 MB) → actions/cache, separate from ~/.npm.
 
 name: Cypress E2E
 
@@ -32,112 +21,46 @@ concurrency:
 
 permissions:
   contents: read
-  # actions:write is required for:
-  #   - cache-to: type=gha (GHA cache saves in build job)
-  #   - actions/upload-artifact and actions/download-artifact
-  # Without this, all cache saves fail silently and artifact uploads fail.
+  # Required for GHA cache writes (cache-to: type=gha) and artifact uploads.
   actions: write
 
-env:
-  IMAGE_NAME: decision-engine-pg:local
-  IMAGE_ARTIFACT: decision-engine-image
-
 jobs:
-  # ========================================================================
-  # Build job: Compile Decision Engine once and share the image
-  # ========================================================================
-  build:
-    name: Build Decision Engine
+  cypress:
+    name: Cypress E2E
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
+
     steps:
       - uses: actions/checkout@v4
 
+      # ── Build Decision Engine ─────────────────────────────────────────────
+      # BuildKit GHA cache means only changed layers are rebuilt.
+      # load: true puts the image straight into the local Docker daemon —
+      # no tar.gz save/upload/download/load steps needed.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build Decision Engine from PR source
+      - name: Build Decision Engine
         uses: docker/build-push-action@v5
         with:
           context: .
           file: Dockerfile.postgres
-          tags: ${{ env.IMAGE_NAME }}
+          tags: decision-engine-pg:local
           load: true
           cache-from: |
             type=gha,scope=cypress-${{ github.head_ref || github.ref_name }}
             type=gha,scope=cypress-${{ github.base_ref || 'main' }}
-          # Write to the head-branch scope so PR builds never overwrite the
-          # main-branch cache. On a push to main github.head_ref is empty, so
-          # github.ref_name ('main') is used — the main cache is updated then.
           cache-to: type=gha,scope=cypress-${{ github.head_ref || github.ref_name }},mode=max
 
-      - name: Save Docker image to tar
-        run: docker save ${{ env.IMAGE_NAME }} | gzip > ${{ env.IMAGE_ARTIFACT }}.tar.gz
-
-      - name: Upload image artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.IMAGE_ARTIFACT }}
-          path: ${{ env.IMAGE_ARTIFACT }}.tar.gz
-          retention-days: 1
-
-  # ========================================================================
-  # Cypress test jobs: Run in parallel, each with own isolated stack
-  # ========================================================================
-  cypress:
-    name: "cypress / ${{ matrix.spec }}"
-    runs-on: ubuntu-latest
-    needs: build
-    timeout-minutes: 20
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - spec: euclid-rules-builder
-            file: cypress/e2e/ui/euclid-rules-builder.cy.js
-          - spec: euclid-rules-lifecycle
-            file: cypress/e2e/ui/euclid-rules-lifecycle.cy.js
-          - spec: euclid-rules-advanced
-            file: cypress/e2e/ui/euclid-rules-advanced.cy.js
-          - spec: volume-split-page
-            file: cypress/e2e/ui/volume-split-page.cy.js
-          - spec: dashboard-overview
-            file: cypress/e2e/ui/dashboard-overview.cy.js
-          - spec: auth-page
-            file: cypress/e2e/ui/auth-page.cy.js
-          - spec: debit-routing-page
-            file: cypress/e2e/ui/debit-routing-page.cy.js
-          - spec: decision-explorer
-            file: cypress/e2e/ui/decision-explorer.cy.js
-          - spec: payment-audit
-            file: cypress/e2e/ui/payment-audit.cy.js
-          - spec: analytics-page
-            file: cypress/e2e/ui/analytics-page.cy.js
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download image artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ env.IMAGE_ARTIFACT }}
-
-      - name: Load Docker image
-        run: gunzip -c ${{ env.IMAGE_ARTIFACT }}.tar.gz | docker load
-
-      # Start services early so they come up while npm installs + UI build run.
-      # docker compose up -d returns immediately; health checks wait later.
-      - name: Start services (using pre-built image)
+      # ── Start services ────────────────────────────────────────────────────
+      # Services start in the background while npm installs and UI build run.
+      - name: Start services
         run: |
-          # On Linux CI runners host.docker.internal is not available — rewrite
-          # the Redis host in the mounted config to the Docker service name.
+          # host.docker.internal doesn't resolve on Linux CI runners.
           sed -i 's/host = "host.docker.internal"/host = "redis"/' config/docker-configuration.toml
           docker compose --profile postgres-local up -d --no-build
 
-      # ── npm caches ────────────────────────────────────────────────────────
-      # actions/setup-node restores ~/.npm (the registry package cache).
-      # Key is a hash of BOTH lock files so either change invalidates the cache.
+      # ── npm + Cypress binary caches ───────────────────────────────────────
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -146,11 +69,6 @@ jobs:
             website/package-lock.json
             package-lock.json
 
-      # The Cypress binary (~200 MB) lives in ~/.cache/Cypress and is NOT part
-      # of ~/.npm. Without this cache every job downloads it from scratch.
-      # restore-keys provides a fallback so a lock-file bump that doesn't change
-      # the Cypress version still gets a partial hit; Cypress skips the download
-      # if the binary is already present in ~/.cache/Cypress/<version>/.
       - name: Cache Cypress binary
         uses: actions/cache@v4
         with:
@@ -159,7 +77,7 @@ jobs:
           restore-keys: |
             cypress-binary-${{ runner.os }}-
 
-      # ── Install + build (runs while Docker services are starting up) ──────
+      # ── Install + build UI (runs while services are coming up) ────────────
       - name: Install UI deps
         run: npm ci
         working-directory: website
@@ -171,47 +89,40 @@ jobs:
         run: npm run build
         working-directory: website
         env:
-          # In CI, vite preview serves the built files with no dev proxy, so
-          # VITE_API_BASE_PATH must be an absolute URL pointing directly at the
-          # API. The default ('/decision-engine-api') is a relative path for use
-          # with the Vite dev proxy or nginx — neither of which run here.
+          # vite preview has no dev proxy, so the API path must be an absolute
+          # URL. The default ('/decision-engine-api') only works with the Vite
+          # proxy or nginx, neither of which run in CI.
           VITE_API_BASE_PATH: http://localhost:8080
 
-      # ── Wait for services (Docker has had ~2-3 min to start by now) ───────
-      - name: Wait for API (basic health)
-        run: |
-          timeout 60 bash -c \
-            'until curl -sf http://localhost:8080/health; do sleep 2; done' \
-            || { echo "❌ Basic health timed out"; docker compose logs --tail=50; exit 1; }
-          echo "✓ Basic health check passed"
-
-      - name: Wait for API (ready check)
+      # ── Wait for API ──────────────────────────────────────────────────────
+      # The ready endpoint implies basic health — one check is enough.
+      # By this point services have had ~3 min to start while npm ran above.
+      - name: Wait for API
         run: |
           timeout 180 bash -c \
             'until curl -sf http://localhost:8080/health/ready; do sleep 3; done' \
-            || { echo "❌ Ready check timed out"; docker compose logs --tail=50; exit 1; }
-          echo "✓ Ready check passed"
+            || { echo "❌ API failed to become ready"; docker compose logs --tail=50; exit 1; }
+          echo "✓ API ready"
 
+      # ── Serve UI ──────────────────────────────────────────────────────────
       - name: Serve UI
         run: npx vite preview --port 5173 &
         working-directory: website
 
       - name: Wait for UI
-        # The production build has base '/decision-engine/', so the app lives at
-        # /decision-engine/ not /. Health-check that exact path.
+        # Production build base is '/decision-engine/' — check that path, not root.
         run: |
           timeout 60 bash -c \
             'until curl -sf http://localhost:5173/decision-engine/; do sleep 2; done'
 
-      # ── Run Cypress ───────────────────────────────────────────────────────
-      - name: Run ${{ matrix.spec }}
-        run: npx cypress run --spec "${{ matrix.file }}" --headless
+      # ── Run all Cypress specs ─────────────────────────────────────────────
+      - name: Run Cypress
+        run: npx cypress run --spec "cypress/e2e/ui/**/*.cy.js" --headless
         env:
           CYPRESS_API_BASE_URL: http://localhost:8080
-          # Include the Vite base path so resolveUiUrl() in commands.js builds
-          # the correct URL: http://localhost:5173/decision-engine/routing/rules
-          # Without this, visits to '/routing/rules' skip the base prefix and
-          # React Router can't match any route → blank page.
+          # Include Vite's base path so resolveUiUrl('/routing/rules') builds
+          # http://localhost:5173/decision-engine/routing/rules — matching what
+          # React Router expects under its '/decision-engine' basename.
           CYPRESS_UI_BASE_URL: http://localhost:5173/decision-engine
           CYPRESS_RUNTIME_MODE: ci
 
@@ -219,7 +130,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: cypress-screenshots-${{ matrix.spec }}
+          name: cypress-screenshots
           path: cypress/screenshots/
           retention-days: 7
 
