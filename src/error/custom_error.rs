@@ -332,15 +332,6 @@ pub enum UserAuthError {
     InvalidToken,
     #[error("Storage error")]
     StorageError,
-    #[error("Storage error during {operation} on {table}")]
-    StorageErrorWithContext {
-        operation: &'static str,
-        table: &'static str,
-    },
-    #[error("Authentication configuration is unavailable")]
-    ConfigurationUnavailable,
-    #[error("System clock error while processing authentication request")]
-    SystemClockError,
     #[error("Token generation failed")]
     TokenGenerationFailed,
     #[error("Password hashing failed")]
@@ -368,12 +359,7 @@ impl axum::response::IntoResponse for UserAuthError {
             Self::MerchantNotFound => (hyper::StatusCode::NOT_FOUND, self.to_string()),
             Self::AlreadyMember => (hyper::StatusCode::CONFLICT, self.to_string()),
             Self::Forbidden => (hyper::StatusCode::FORBIDDEN, self.to_string()),
-            Self::StorageError
-            | Self::StorageErrorWithContext { .. }
-            | Self::ConfigurationUnavailable
-            | Self::SystemClockError
-            | Self::TokenGenerationFailed
-            | Self::PasswordHashingFailed => {
+            Self::StorageError | Self::TokenGenerationFailed | Self::PasswordHashingFailed => {
                 (hyper::StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
             }
         };

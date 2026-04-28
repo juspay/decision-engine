@@ -10,7 +10,6 @@ use axum::Json;
 use diesel::associations::HasTable;
 use diesel::{BoolExpressionMethods, ExpressionMethods};
 use serde::{Deserialize, Serialize};
-use std::fmt::Debug;
 
 #[cfg(feature = "mysql")]
 use crate::storage::schema::users::dsl;
@@ -23,33 +22,6 @@ use crate::storage::schema::user_merchants::dsl as um_dsl;
 use crate::storage::schema_pg::user_merchants::dsl as um_dsl;
 
 const JWT_DENYLIST_PREFIX: &str = "jwt_revoked:";
-
-fn auth_storage_failure<E: Debug>(
-    err: E,
-    operation: &'static str,
-    table: &'static str,
-) -> error::ContainerError<UserAuthError> {
-    crate::logger::error!(
-        operation,
-        table,
-        source_error = ?err,
-        "auth storage operation failed"
-    );
-    error::ContainerError::from(
-        error_stack::Report::new(UserAuthError::StorageErrorWithContext { operation, table })
-            .attach_printable(format!(
-                "auth storage failure: operation={operation}, table={table}, source={err:?}"
-            )),
-    )
-}
-
-fn map_auth_storage<T, E: Debug>(
-    result: Result<T, E>,
-    operation: &'static str,
-    table: &'static str,
-) -> Result<T, error::ContainerError<UserAuthError>> {
-    result.map_err(|err| auth_storage_failure(err, operation, table))
-}
 
 #[derive(Debug, Deserialize)]
 pub struct SignupRequest {
@@ -117,14 +89,14 @@ pub async fn signup(
     let global_config = APP_STATE
         .get()
         .map(|s| s.global_config.clone())
-        .ok_or(UserAuthError::ConfigurationUnavailable)?;
+        .ok_or(UserAuthError::StorageError)?;
 
     let existing = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
         &app_state.db,
         dsl::email.eq(payload.email.clone()),
     )
-    .await;
-    let existing = map_auth_storage(existing, "lookup signup user by email", "users")?;
+    .await
+    .map_err(|_| UserAuthError::StorageError)?;
 
     if !existing.is_empty() {
         return Err(error::ContainerError::from(
@@ -161,12 +133,8 @@ pub async fn signup(
             &app_state.db,
             ma_dsl::merchant_id.eq(Some(merchant_id.clone())),
         )
-        .await;
-        let existing_merchant = map_auth_storage(
-            existing_merchant,
-            "lookup signup merchant",
-            "merchant_account",
-        )?;
+        .await
+        .map_err(|_| UserAuthError::StorageError)?;
 
         if existing_merchant.is_empty() {
             return Err(error::ContainerError::from(UserAuthError::MerchantNotFound));
@@ -196,7 +164,7 @@ pub async fn signup(
 
     crate::generics::generic_insert(&app_state.db, new_user)
         .await
-        .map_err(|err| auth_storage_failure(err, "insert signup user", "users"))?;
+        .map_err(|_| UserAuthError::StorageError)?;
 
     if let Some(merchant_id) = requested_merchant_id.as_ref() {
         let new_user_merchant = NewUserMerchant {
@@ -208,9 +176,7 @@ pub async fn signup(
 
         crate::generics::generic_insert(&app_state.db, new_user_merchant)
             .await
-            .map_err(|err| {
-                auth_storage_failure(err, "insert signup user merchant", "user_merchants")
-            })?;
+            .map_err(|_| UserAuthError::StorageError)?;
     }
 
     if global_config.user_auth.email_verification_enabled {
@@ -245,14 +211,14 @@ pub async fn login(
     let global_config = APP_STATE
         .get()
         .map(|s| s.global_config.clone())
-        .ok_or(UserAuthError::ConfigurationUnavailable)?;
+        .ok_or(UserAuthError::StorageError)?;
 
-    let users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
+    let mut users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
         &app_state.db,
         dsl::email.eq(payload.email.clone()),
     )
-    .await;
-    let mut users = map_auth_storage(users, "lookup login user by email", "users")?;
+    .await
+    .map_err(|_| UserAuthError::StorageError)?;
 
     let user = users.pop().ok_or(UserAuthError::UserNotFound)?;
 
@@ -284,10 +250,9 @@ pub async fn login(
         return Err(error::ContainerError::from(UserAuthError::EmailNotVerified));
     }
 
-    if !auth::verify_password(&payload.password, &user.password_hash).map_err(|err| {
-        crate::logger::error!(source_error = %err, "password verification failed");
-        UserAuthError::InvalidPassword
-    })? {
+    if !auth::verify_password(&payload.password, &user.password_hash)
+        .map_err(|_| UserAuthError::StorageError)?
+    {
         return Err(error::ContainerError::from(UserAuthError::InvalidPassword));
     }
 
@@ -328,7 +293,7 @@ pub async fn create_merchant(
     let global_config = APP_STATE
         .get()
         .map(|s| s.global_config.clone())
-        .ok_or(UserAuthError::ConfigurationUnavailable)?;
+        .ok_or(UserAuthError::StorageError)?;
 
     let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
     let app_state = get_tenant_app_state().await;
@@ -351,9 +316,7 @@ pub async fn create_merchant(
 
     crate::generics::generic_insert(&app_state.db, new_merchant)
         .await
-        .map_err(|err| {
-            auth_storage_failure(err, "insert onboarded merchant", "merchant_account")
-        })?;
+        .map_err(|_| UserAuthError::StorageError)?;
 
     let new_user_merchant = NewUserMerchant {
         user_id: claims.user_id.clone(),
@@ -364,9 +327,7 @@ pub async fn create_merchant(
 
     crate::generics::generic_insert(&app_state.db, new_user_merchant)
         .await
-        .map_err(|err| {
-            auth_storage_failure(err, "insert onboarded user merchant", "user_merchants")
-        })?;
+        .map_err(|_| UserAuthError::StorageError)?;
 
     // Update users.merchant_id to the newly created merchant
     {
@@ -375,9 +336,11 @@ pub async fn create_merchant(
         #[cfg(feature = "postgres")]
         use crate::storage::schema_pg::users::dsl as u_dsl;
 
-        let conn = &app_state.db.get_conn().await.map_err(|err| {
-            auth_storage_failure(err, "get connection for user merchant update", "users")
-        })?;
+        let conn = &app_state
+            .db
+            .get_conn()
+            .await
+            .map_err(|_| UserAuthError::StorageError)?;
         crate::generics::generic_update_if_present::<
             <User as diesel::associations::HasTable>::Table,
             UserMerchantIdUpdate,
@@ -390,7 +353,7 @@ pub async fn create_merchant(
             },
         )
         .await
-        .map_err(|err| auth_storage_failure(err, "update active user merchant", "users"))?;
+        .map_err(|_| UserAuthError::StorageError)?;
     }
 
     let merchants = fetch_user_merchants(&app_state, &claims.user_id).await?;
@@ -421,7 +384,7 @@ pub async fn list_merchants(
     let global_config = APP_STATE
         .get()
         .map(|s| s.global_config.clone())
-        .ok_or(UserAuthError::ConfigurationUnavailable)?;
+        .ok_or(UserAuthError::StorageError)?;
 
     let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
     let app_state = get_tenant_app_state().await;
@@ -439,7 +402,7 @@ pub async fn switch_merchant(
     let global_config = APP_STATE
         .get()
         .map(|s| s.global_config.clone())
-        .ok_or(UserAuthError::ConfigurationUnavailable)?;
+        .ok_or(UserAuthError::StorageError)?;
 
     let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
     let app_state = get_tenant_app_state().await;
@@ -501,7 +464,7 @@ pub async fn invite_member(
     let global_config = APP_STATE
         .get()
         .map(|s| s.global_config.clone())
-        .ok_or(UserAuthError::ConfigurationUnavailable)?;
+        .ok_or(UserAuthError::StorageError)?;
 
     let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
 
@@ -520,8 +483,8 @@ pub async fn invite_member(
         &app_state.db,
         dsl::email.eq(payload.email.clone()),
     )
-    .await;
-    let existing_users = map_auth_storage(existing_users, "lookup invited user by email", "users")?;
+    .await
+    .map_err(|_| UserAuthError::StorageError)?;
 
     let now = date_time::now();
 
@@ -537,12 +500,8 @@ pub async fn invite_member(
                 .eq(existing_user.user_id.clone())
                 .and(um_dsl::merchant_id.eq(claims.merchant_id.clone())),
         )
-        .await;
-        let existing_membership = map_auth_storage(
-            existing_membership,
-            "lookup invited user merchant membership",
-            "user_merchants",
-        )?;
+        .await
+        .map_err(|_| UserAuthError::StorageError)?;
 
         if !existing_membership.is_empty() {
             return Err(error::ContainerError::from(UserAuthError::AlreadyMember));
@@ -557,13 +516,7 @@ pub async fn invite_member(
 
         crate::generics::generic_insert(&app_state.db, new_user_merchant)
             .await
-            .map_err(|err| {
-                auth_storage_failure(
-                    err,
-                    "insert invited existing user merchant",
-                    "user_merchants",
-                )
-            })?;
+            .map_err(|_| UserAuthError::StorageError)?;
 
         Ok(Json(InviteMemberResponse {
             email: existing_user.email,
@@ -599,7 +552,7 @@ pub async fn invite_member(
 
         crate::generics::generic_insert(&app_state.db, new_user)
             .await
-            .map_err(|err| auth_storage_failure(err, "insert invited user", "users"))?;
+            .map_err(|_| UserAuthError::StorageError)?;
 
         let new_user_merchant = NewUserMerchant {
             user_id: user_id.clone(),
@@ -608,11 +561,10 @@ pub async fn invite_member(
             created_at: now,
         };
 
-        if let Err(err) = crate::generics::generic_insert(&app_state.db, new_user_merchant).await {
-            crate::logger::error!(
-                source_error = ?err,
-                "failed to insert invited user merchant; attempting compensating user delete"
-            );
+        if crate::generics::generic_insert(&app_state.db, new_user_merchant)
+            .await
+            .is_err()
+        {
             // Compensating delete: remove orphaned user if membership insert fails
             let conn = app_state.db.get_conn().await.ok();
             if let Some(conn) = conn {
@@ -622,11 +574,7 @@ pub async fn invite_member(
                 >(&conn, dsl::user_id.eq(user_id.clone()))
                 .await;
             }
-            return Err(auth_storage_failure(
-                err,
-                "insert invited new user merchant",
-                "user_merchants",
-            ));
+            return Err(error::ContainerError::from(UserAuthError::StorageError));
         }
 
         Ok(Json(InviteMemberResponse {
@@ -646,7 +594,7 @@ pub async fn list_members(
     let global_config = APP_STATE
         .get()
         .map(|s| s.global_config.clone())
-        .ok_or(UserAuthError::ConfigurationUnavailable)?;
+        .ok_or(UserAuthError::StorageError)?;
 
     let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
     let app_state = get_tenant_app_state().await;
@@ -656,12 +604,8 @@ pub async fn list_members(
             &app_state.db,
             um_dsl::merchant_id.eq(claims.merchant_id.clone()),
         )
-        .await;
-    let memberships = map_auth_storage(
-        memberships,
-        "lookup merchant member memberships",
-        "user_merchants",
-    )?;
+        .await
+        .map_err(|_| UserAuthError::StorageError)?;
 
     let user_ids: Vec<String> = memberships.iter().map(|m| m.user_id.clone()).collect();
 
@@ -673,7 +617,7 @@ pub async fn list_members(
             dsl::user_id.eq_any(user_ids),
         )
         .await
-        .map_err(|err| auth_storage_failure(err, "lookup merchant member users", "users"))?
+        .map_err(|_| UserAuthError::StorageError)?
     };
 
     let users_by_id: std::collections::HashMap<String, User> =
@@ -732,7 +676,7 @@ pub async fn logout(
     let global_config = APP_STATE
         .get()
         .map(|s| s.global_config.clone())
-        .ok_or(UserAuthError::ConfigurationUnavailable)?;
+        .ok_or(UserAuthError::StorageError)?;
 
     let claims = auth::verify_jwt(token, &global_config.user_auth.jwt_secret)
         .map_err(|_| UserAuthError::InvalidToken)?;
@@ -740,10 +684,7 @@ pub async fn logout(
     let app_state = get_tenant_app_state().await;
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|err| {
-            crate::logger::error!(source_error = ?err, "system clock error during logout");
-            UserAuthError::SystemClockError
-        })?
+        .map_err(|_| UserAuthError::StorageError)?
         .as_secs();
     let remaining_ttl = claims.exp.saturating_sub(now) as i64;
 
@@ -768,17 +709,17 @@ pub async fn me(
     let global_config = APP_STATE
         .get()
         .map(|s| s.global_config.clone())
-        .ok_or(UserAuthError::ConfigurationUnavailable)?;
+        .ok_or(UserAuthError::StorageError)?;
 
     let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
     let app_state = get_tenant_app_state().await;
 
-    let users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
+    let mut users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
         &app_state.db,
         dsl::user_id.eq(claims.user_id.clone()),
     )
-    .await;
-    let mut users = map_auth_storage(users, "lookup current auth user", "users")?;
+    .await
+    .map_err(|_| UserAuthError::StorageError)?;
 
     let user = users.pop().ok_or(UserAuthError::UserNotFound)?;
     let merchants = fetch_user_merchants(&app_state, &user.user_id).await?;
@@ -799,7 +740,7 @@ pub async fn me(
 async fn fetch_user_merchants(
     app_state: &crate::app::TenantAppState,
     user_id: &String,
-) -> Result<Vec<MerchantInfo>, error::ContainerError<UserAuthError>> {
+) -> Result<Vec<MerchantInfo>, UserAuthError> {
     #[cfg(feature = "mysql")]
     use crate::storage::schema::merchant_account::dsl as ma_dsl;
     #[cfg(feature = "postgres")]
@@ -810,16 +751,12 @@ async fn fetch_user_merchants(
         _,
         UserMerchant,
     >(&app_state.db, um_dsl::user_id.eq(user_id.clone()))
-    .await;
-    let user_merchant_rows = map_auth_storage(
-        user_merchant_rows,
-        "lookup user merchant memberships",
-        "user_merchants",
-    )?;
+    .await
+    .map_err(|_| UserAuthError::StorageError)?;
 
     let mut result = Vec::new();
     for um in user_merchant_rows {
-        let accounts = crate::generics::generic_find_all::<
+        let mut accounts = crate::generics::generic_find_all::<
             <crate::storage::types::MerchantAccount as HasTable>::Table,
             _,
             crate::storage::types::MerchantAccount,
@@ -827,9 +764,8 @@ async fn fetch_user_merchants(
             &app_state.db,
             ma_dsl::merchant_id.eq(Some(um.merchant_id.clone())),
         )
-        .await;
-        let mut accounts =
-            map_auth_storage(accounts, "lookup user merchant account", "merchant_account")?;
+        .await
+        .map_err(|_| UserAuthError::StorageError)?;
 
         let name = accounts
             .pop()
