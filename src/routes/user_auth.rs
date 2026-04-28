@@ -795,8 +795,7 @@ pub async fn verify_jwt_not_revoked(
     token: &str,
     secret: &str,
 ) -> Result<auth::JwtClaims, ContainerError<UserAuthError>> {
-    let claims = auth::verify_jwt(token, secret)
-        .change_context(UserAuthError::InvalidToken)?;
+    let claims = auth::verify_jwt(token, secret).change_context(UserAuthError::InvalidToken)?;
 
     let app_state = get_tenant_app_state().await;
     let deny_key = format!("{}{}", JWT_DENYLIST_PREFIX, claims.jti);
