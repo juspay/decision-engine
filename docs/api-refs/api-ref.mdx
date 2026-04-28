@@ -5,7 +5,7 @@ description: "Human-friendly Decision Engine API map with curl examples for ever
 
 # API Examples
 
-Use this page as the main route map for local smoke tests, dashboard integration, and sandbox debugging. It groups the APIs by the flows an operator usually performs: create merchant, create API key, configure routing, run transactions, send feedback, inspect analytics, and audit decisions. For schema-level details, use [API Overview](../api-reference.md) and the OpenAPI-backed endpoint pages.
+Use this page as the main route map for local smoke tests, dashboard integration, and deployment debugging. It groups the APIs by the flows an operator usually performs: create merchant, create API key, configure routing, run transactions, send feedback, inspect analytics, and audit decisions. For schema-level details, use [API Overview](../api-reference.md) and the OpenAPI-backed endpoint pages.
 
 ## Which API docs should I use?
 
@@ -26,7 +26,6 @@ The advanced AND, OR, nested, and value-variant routing examples live in [Advanc
 | Public auth entrypoint | `POST /auth/signup`, `POST /auth/login` | None |
 | Admin bootstrap | `POST /merchant-account/create` | Admin secret as configured for the deployment |
 | Protected operator/API-key APIs | Auth session, API keys, merchant reads/deletes, routing, rule config, decision, score update, config, analytics, and audit routes | `Authorization: Bearer <jwt_token>` or `x-api-key: <api_key>` |
-| Sandbox Hyperswitch routing | Same protected/public route rules, routed through `https://sandbox.hyperswitch.io` | Add `x-feature: decision-engine` |
 
 ## Environment
 
@@ -34,23 +33,16 @@ The advanced AND, OR, nested, and value-variant routing examples live in [Advanc
 # Local source or Docker Compose
 export BASE_URL=http://localhost:8080
 
-# Sandbox, when routed through Hyperswitch
-# export BASE_URL=https://sandbox.hyperswitch.io
-
 # Protected endpoints accept either a dashboard JWT or an API key.
 export AUTH_HEADER="Authorization: Bearer <jwt_token>"
 # export AUTH_HEADER="x-api-key: DE_<api_key>"
-
-# Sandbox-only routing header.
-export FEATURE_HEADER="x-feature: decision-engine"
 ```
 
 Public routes do not need `AUTH_HEADER`. Protected routes should include it:
 
 ```bash
 curl "$BASE_URL/analytics/overview?range=1d" \
-  --header "$AUTH_HEADER" \
-  --header "$FEATURE_HEADER"
+  --header "$AUTH_HEADER"
 ```
 
 ## Main Contents
