@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import useSWR, { useSWRConfig } from 'swr'
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { Card, CardBody, CardHeader } from '../ui/Card'
@@ -9,7 +9,7 @@ import { Spinner } from '../ui/Spinner'
 import { useMerchantStore } from '../../store/merchantStore'
 import { apiPost } from '../../lib/api'
 import { RoutingAlgorithm } from '../../types/api'
-import { Plus, Trash2, Eye, PowerOff, CheckCircle2, X } from 'lucide-react'
+import { Plus, Trash2, Eye, PowerOff } from 'lucide-react'
 import { validateVolumeSplitRule } from '../../features/routing/volumeSplit/schema'
 import { toVolumeSplitCreatePayload } from '../../features/routing/volumeSplit/payload'
 import { toVolumeSplitRuleDetailsState } from '../../features/routing/volumeSplit/state'
@@ -18,17 +18,6 @@ import { VolumeSplitGatewayFormEntry } from '../../features/routing/volumeSplit/
 const COLORS = ['#0069ED', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
 
 function makeId() { return Math.random().toString(36).slice(2) }
-
-interface RoutingCreateResponse {
-  rule_id?: string
-  id?: string
-  name?: string
-}
-
-interface CreatedVolumeRuleNotice {
-  id: string | null
-  name: string
-}
 
 export function VolumeSplitPage() {
   const { merchantId } = useMerchantStore()
@@ -47,10 +36,8 @@ export function VolumeSplitPage() {
   ])
   const [ruleName, setRuleName] = useState('')
   const [saving, setSaving] = useState(false)
-  const savingRef = useRef(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
-  const [createdRule, setCreatedRule] = useState<CreatedVolumeRuleNotice | null>(null)
   const [showCurrentConfig, setShowCurrentConfig] = useState(false)
   const [expandedRuleIds, setExpandedRuleIds] = useState<Set<string>>(new Set())
   const [deactivatingRuleId, setDeactivatingRuleId] = useState<string | null>(null)
@@ -70,28 +57,19 @@ export function VolumeSplitPage() {
   }
 
   async function handleCreate() {
-    if (savingRef.current) return
     if (!merchantId) return setError('Set a merchant ID first')
-    setError(null)
-    setSuccess(null)
-    setCreatedRule(null)
     const validationError = validateVolumeSplitRule({ ruleName, gateways })
     if (validationError) return setError(validationError)
 
-    const trimmedRuleName = ruleName.trim()
-    savingRef.current = true
-    setSaving(true)
+    setSaving(true); setError(null); setSuccess(null)
     try {
-      const payload = toVolumeSplitCreatePayload({ ruleName: trimmedRuleName, gateways }, merchantId)
-      const result = await apiPost<RoutingCreateResponse>('/routing/create', payload)
+      const payload = toVolumeSplitCreatePayload({ ruleName, gateways }, merchantId)
+      await apiPost('/routing/create', payload)
       await Promise.all([
         mutateActive(),
         mutateCache(['routing-list', merchantId]),
       ])
-      setCreatedRule({
-        id: result.rule_id || result.id || null,
-        name: result.name || trimmedRuleName,
-      })
+      setSuccess(`Rule "${ruleName}" created successfully. Find it in the list below to activate.`)
       setRuleName('')
       setGateways([
         { id: makeId(), gatewayName: '', gatewayId: '', split: 50 },
@@ -100,7 +78,6 @@ export function VolumeSplitPage() {
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to create rule')
     } finally {
-      savingRef.current = false
       setSaving(false)
     }
   }
@@ -116,7 +93,6 @@ export function VolumeSplitPage() {
         mutateCache(['routing-list', merchantId]),
       ])
       setSuccess('Rule activated.')
-      setCreatedRule(null)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to activate')
     }
@@ -287,73 +263,9 @@ export function VolumeSplitPage() {
           </div>
 
           <ErrorMessage error={error} />
-          {createdRule && (
-            <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/10 p-4 text-sm text-emerald-700 shadow-[0_20px_50px_-35px_rgba(16,185,129,0.7)] dark:text-emerald-200">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div className="flex gap-3">
-                  <CheckCircle2 size={20} className="mt-0.5 shrink-0 text-emerald-500" />
-                  <div>
-                    <p className="font-semibold">Volume split rule successfully created</p>
-                    <p className="mt-1 text-xs leading-5 text-emerald-700/80 dark:text-emerald-200/75">
-                      Saved <span className="font-semibold">{createdRule.name}</span>
-                      {createdRule.id ? (
-                        <>
-                          {' '}as <span className="font-mono">{createdRule.id}</span>
-                        </>
-                      ) : null}
-                      . The builder has been reset for the next rule.
-                    </p>
-                  </div>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  {createdRule.id ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={() => handleActivate(createdRule.id!)}
-                    >
-                      Activate Now
-                    </Button>
-                  ) : null}
-                  <button
-                    type="button"
-                    onClick={() => setCreatedRule(null)}
-                    className="rounded-full p-1 text-emerald-700/70 transition hover:bg-emerald-500/10 hover:text-emerald-800 dark:text-emerald-200/70 dark:hover:text-emerald-100"
-                    aria-label="Dismiss volume split created message"
-                  >
-                    <X size={16} />
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-          {success && (
-            <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/10 p-4 text-sm text-emerald-700 shadow-[0_20px_50px_-35px_rgba(16,185,129,0.7)] dark:text-emerald-200">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex gap-3">
-                  <CheckCircle2 size={20} className="mt-0.5 shrink-0 text-emerald-500" />
-                  <p className="font-semibold">{success}</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setSuccess(null)}
-                  className="rounded-full p-1 text-emerald-700/70 transition hover:bg-emerald-500/10 hover:text-emerald-800 dark:text-emerald-200/70 dark:hover:text-emerald-100"
-                  aria-label="Dismiss volume split status message"
-                >
-                  <X size={16} />
-                </button>
-              </div>
-            </div>
-          )}
+          {success && <p className="text-sm text-emerald-400">{success}</p>}
 
-          {saving && (
-            <div className="flex items-center gap-2 rounded-lg border border-sky-500/20 bg-sky-500/8 px-3 py-2 text-sm text-sky-600 dark:text-sky-300">
-              <Spinner size={14} />
-              Creating volume split rule. Please wait, this action is locked to prevent duplicate rules.
-            </div>
-          )}
-
-          <Button onClick={handleCreate} disabled={saving || !merchantId} aria-busy={saving}>
+          <Button onClick={handleCreate} disabled={saving || !merchantId}>
             {saving ? <><Spinner size={14} /> Creating…</> : 'Create Rule'}
           </Button>
         </CardBody>

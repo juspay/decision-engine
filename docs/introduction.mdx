@@ -13,7 +13,7 @@ The repository currently ships:
 - merchant and routing configuration APIs
 - Docker Compose profiles for local bring-up
 - Helm chart assets
-- a React dashboard under `/decision-engine/` in production-style hosting
+- a React dashboard under `/dashboard/`
 - Mintlify docs served in the dashboard profiles
 
 ## Main API Surface
@@ -52,7 +52,7 @@ COMPOSE_PROFILES= docker compose --profile dashboard-postgres-ghcr up -d
 URLs:
 
 - API: `http://localhost:8080`
-- Dashboard: `http://localhost:8081/decision-engine/`
+- Dashboard: `http://localhost:8081/dashboard/`
 - Docs: `http://localhost:8081/introduction`
 
 Use [Local Setup](local-setup) for the full Compose, source-build, and Helm matrix.
@@ -61,18 +61,18 @@ Use [Local Setup](local-setup) for the full Compose, source-build, and Helm matr
 
 When the dashboard profile is running, the React app is available at:
 
-- `/decision-engine/`
-- `/decision-engine/login`
-- `/decision-engine/signup`
-- `/decision-engine/onboarding`
-- `/decision-engine/routing`
-- `/decision-engine/routing/sr`
-- `/decision-engine/routing/rules`
-- `/decision-engine/routing/volume`
-- `/decision-engine/routing/debit`
-- `/decision-engine/decisions`
-- `/decision-engine/analytics`
-- `/decision-engine/audit`
+- `/dashboard/`
+- `/dashboard/login`
+- `/dashboard/signup`
+- `/dashboard/onboarding`
+- `/dashboard/routing`
+- `/dashboard/routing/sr`
+- `/dashboard/routing/rules`
+- `/dashboard/routing/volume`
+- `/dashboard/routing/debit`
+- `/dashboard/decisions`
+- `/dashboard/analytics`
+- `/dashboard/audit`
 
 Use [Dashboard Guide](dashboard-guide) for route-by-route details.
 

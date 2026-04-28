@@ -162,7 +162,7 @@ services:
       - "8081:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./website/dist:/usr/share/nginx/html/decision-engine:ro
+      - ./website/dist:/usr/share/nginx/html/dashboard:ro
     depends_on:
       mintlify-docs:
         condition: service_healthy
