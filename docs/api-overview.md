@@ -75,7 +75,6 @@ If the dashboard is hosted under a prefix such as `/decision-engine/`, the docs 
 | Public | `GET /health`, `GET /health/ready`, `GET /health/diagnostics`, `POST /auth/signup`, `POST /auth/login` | None |
 | Admin bootstrap | `POST /merchant-account/create` | Admin secret configured for the deployment |
 | Protected | Routing, decision, score update, rule config, API key, merchant read/delete, analytics, audit, config, and authenticated auth routes | `Authorization: Bearer <jwt_token>` or `x-api-key: <api_key>` |
-| Sandbox | Same routes through `https://sandbox.hyperswitch.io` | Same auth rules plus `x-feature: decision-engine` |
 
 ## Common flows
 
