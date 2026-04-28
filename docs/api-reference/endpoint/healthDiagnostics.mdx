@@ -8,20 +8,17 @@ openapi: "openapi.json GET /health/diagnostics"
 
 ## Use case
 
-Returns a deeper diagnostic snapshot for operators debugging local or sandbox environments.
+Returns a deeper diagnostic snapshot for operators debugging local or deployed environments.
 
 ## Authentication
 
-Public. No JWT or API key is required. Sandbox traffic may still include `x-feature: decision-engine` when routed through Hyperswitch.
+Public. No JWT or API key is required.
 
 For local development, start with:
 
 ```bash
 export BASE_URL=http://localhost:8080
 export AUTH_HEADER="Authorization: Bearer <jwt_token>"
-# Sandbox only:
-# export BASE_URL=https://sandbox.hyperswitch.io
-# export FEATURE_HEADER="x-feature: decision-engine"
 ```
 
 ## Request

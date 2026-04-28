@@ -12,16 +12,13 @@ Deletes a merchant account from Decision Engine local state.
 
 ## Authentication
 
-Protected. Send either `Authorization: Bearer <jwt_token>` or `x-api-key: <api_key>`. In sandbox, also send `x-feature: decision-engine`.
+Protected. Send either `Authorization: Bearer <jwt_token>` or `x-api-key: <api_key>`.
 
 For local development, start with:
 
 ```bash
 export BASE_URL=http://localhost:8080
 export AUTH_HEADER="Authorization: Bearer <jwt_token>"
-# Sandbox only:
-# export BASE_URL=https://sandbox.hyperswitch.io
-# export FEATURE_HEADER="x-feature: decision-engine"
 ```
 
 ## Request
@@ -52,7 +49,7 @@ curl --location "$BASE_URL/merchant-account/merchant_demo" \
 
 ## Notes
 
-- Do not use this in shared sandbox data unless you are cleaning up your own test merchant.
+- Do not use this in shared environments unless you are cleaning up your own test merchant.
 - Deleting a merchant does not imply external payment processor cleanup.
 
 ## Related

@@ -38,10 +38,9 @@ Based on the React routes in `website/src/App.tsx`, the dashboard exposes:
 - `/decision-engine/audit`
 
 For source-run Vite development, the same React routes are mounted at root, for example `http://localhost:5173/routing/rules`.
-Production builds default to `/decision-engine/`. To override the hosted prefix, run `VITE_DASHBOARD_BASE_PATH=/your-prefix/ npm run build` from `website/`.
+Hosted builds can be mounted under `/decision-engine/` or any other prefix configured with `VITE_DASHBOARD_BASE_PATH`.
 Local dev API calls use `/decision-engine-api/*`, which Vite proxies to `http://localhost:8080`.
-Production builds default to `https://app.hyperswitch.io/decision-engine/api/*`.
-Override it with `VITE_API_BASE_PATH=https://your-host/decision-engine/api`.
+Hosted API calls use the base supplied through `VITE_API_BASE_PATH`.
 
 ## Docs And API In The Same Profile
 

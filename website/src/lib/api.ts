@@ -7,7 +7,6 @@ const DEFAULT_API_BASE_PATH = import.meta.env.PROD
   ? 'https://app.hyperswitch.io/decision-engine/api'
   : '/decision-engine-api'
 const API_BASE_PATH = (import.meta.env.VITE_API_BASE_PATH ?? DEFAULT_API_BASE_PATH).replace(/\/$/, '')
-const FEATURE_HEADER = import.meta.env.VITE_FEATURE_HEADER ?? 'decision-engine'
 
 function resolveApiPath(path: string) {
   if (/^https?:\/\//.test(path)) return path
@@ -117,7 +116,6 @@ export async function apiFetch<T>(
     const headers = new Headers(options?.headers)
     headers.set('Content-Type', 'application/json')
     headers.set('x-tenant-id', DEFAULT_TENANT_ID)
-    headers.set('x-feature', FEATURE_HEADER)
     if (token) {
       headers.set('Authorization', `Bearer ${token}`)
     }

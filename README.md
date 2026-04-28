@@ -116,10 +116,9 @@ For the full local dev environment (API + dashboard on port 5173 + docs), run:
 This brings up Postgres, Redis, ClickHouse, and Kafka via Docker Compose, runs migrations, and starts the API server and dashboard locally. See [Local Setup Guide](docs/local-setup.md) for full details and options like `ONECLICK_KEEP_INFRA=1`.
 
 Source-run dashboard routes are mounted at root, for example `http://localhost:5173/routing/rules`.
-Production builds default to the `/decision-engine/` prefix, for example `/decision-engine/routing/rules`.
+Hosted builds can be mounted under a configured prefix such as `/decision-engine/`.
 Local dev API calls use `/decision-engine-api/*`, which Vite proxies to `http://localhost:8080`.
-Production builds default to `https://app.hyperswitch.io/decision-engine/api/*`.
-Override the build prefix with `VITE_DASHBOARD_BASE_PATH=/your-prefix/ npm run build` from `website/`, and override the API base with `VITE_API_BASE_PATH=https://your-host/decision-engine/api`.
+Override the build prefix with `VITE_DASHBOARD_BASE_PATH=/your-prefix/ npm run build` from `website/`, and override the API base with `VITE_API_BASE_PATH=https://your-host/your-api-prefix`.
 
 ### Verify
 
