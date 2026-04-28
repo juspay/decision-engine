@@ -68,7 +68,7 @@ describe('Dashboard Overview UI', () => {
     cy.wait('@overviewRefresh')
     cy.wait('@routingRefresh')
 
-    cy.contains('Top gateway').should('be.visible')
+    cy.contains('Top gateway').scrollIntoView().should('be.visible')
     cy.contains('button', 'Analytics').click()
     cy.url().should('include', '/analytics')
     cy.contains('h1', 'Analytics').should('exist')

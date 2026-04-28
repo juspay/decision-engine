@@ -75,7 +75,7 @@ describe('Analytics UI', () => {
 
     cy.contains('h1', 'Analytics').should('be.visible')
     cy.contains('h1', 'Analytics')
-      .parents('div.space-y-6')
+      .parents('div.space-y-8')
       .first()
       .within(() => {
         cy.contains('button', /^Auth-rate based$/).should('be.visible')
