@@ -77,22 +77,13 @@ jobs:
           restore-keys: |
             cypress-binary-${{ runner.os }}-
 
-      # ── Install + build UI (runs while services are coming up) ────────────
+      # ── Install UI + Cypress deps (runs while services are coming up) ──────
       - name: Install UI deps
         run: npm ci
         working-directory: website
 
       - name: Install Cypress deps
         run: npm ci
-
-      - name: Build UI
-        run: npm run build
-        working-directory: website
-        env:
-          # vite preview has no dev proxy, so the API path must be an absolute
-          # URL. The default ('/decision-engine-api') only works with the Vite
-          # proxy or nginx, neither of which run in CI.
-          VITE_API_BASE_PATH: http://localhost:8080
 
       # ── Wait for API ──────────────────────────────────────────────────────
       # The ready endpoint implies basic health — one check is enough.
@@ -104,26 +95,55 @@ jobs:
             || { echo "❌ API failed to become ready"; docker compose logs --tail=50; exit 1; }
           echo "✓ API ready"
 
-      # ── Serve UI ──────────────────────────────────────────────────────────
-      - name: Serve UI
-        run: npx vite preview --port 5173 &
+      # ── Bash API tests ───────────────────────────────────────────────────
+      # Run before the UI is served — only need the API, not the browser.
+      # test_auth.sh covers the full auth surface: API key lifecycle (create,
+      # list, revoke, Redis cache) + user auth (signup, login, JWT, logout,
+      # invite, multi-merchant). test_api_key_auth.sh is a strict subset of
+      # test_auth.sh so only the comprehensive script runs here.
+      # ADMIN_SECRET matches config/development.toml [admin_secret] secret.
+      # test_euclid.sh is excluded: no exit-code-on-failure, developer tool.
+      - name: Auth integration tests
+        run: bash scripts/test_auth.sh
+        env:
+          BASE_URL: http://localhost:8080
+          ADMIN_SECRET: test_admin
+
+      # ── Start UI dev server ───────────────────────────────────────────────
+      # Use the Vite dev server, NOT vite build + vite preview.
+      #
+      # vite preview has no proxy, so API calls from the browser go directly to
+      # http://localhost:8080 — a different origin (cross-origin from port 5173).
+      # The decision engine does not emit CORS headers for localhost:5173, so the
+      # browser blocks every API call and the app renders blank.
+      #
+      # The Vite dev server proxies /decision-engine-api/* → http://localhost:8080
+      # (same origin, no CORS). It also uses base '/' so routes are at the root —
+      # no /decision-engine prefix in CYPRESS_UI_BASE_URL needed.
+      - name: Start UI dev server
+        run: npx vite --port 5173 &
         working-directory: website
 
       - name: Wait for UI
-        # Production build base is '/decision-engine/' — check that path, not root.
         run: |
           timeout 60 bash -c \
-            'until curl -sf http://localhost:5173/decision-engine/; do sleep 2; done'
+            'until curl -sf http://localhost:5173; do sleep 2; done'
 
       # ── Run all Cypress specs ─────────────────────────────────────────────
+      # Includes: all UI tests + all API tests.
+      # Excludes: cypress/e2e/runtime/ — runtime-smoke.cy.js calls
+      #   waitForRuntimeSurface() which requires the Mintlify docs server.
+      #   Mintlify is only present in the dashboard-* compose profiles,
+      #   not in postgres-local. Add it here if that profile is adopted.
       - name: Run Cypress
-        run: npx cypress run --spec "cypress/e2e/ui/**/*.cy.js" --headless
+        run: |
+          npx cypress run \
+            --spec "cypress/e2e/ui/**/*.cy.js,cypress/e2e/api/**/*.cy.js" \
+            --headless
         env:
           CYPRESS_API_BASE_URL: http://localhost:8080
-          # Include Vite's base path so resolveUiUrl('/routing/rules') builds
-          # http://localhost:5173/decision-engine/routing/rules — matching what
-          # React Router expects under its '/decision-engine' basename.
-          CYPRESS_UI_BASE_URL: http://localhost:5173/decision-engine
+          # Dev server uses base '/' so routes are at the root — no base-path suffix.
+          CYPRESS_UI_BASE_URL: http://localhost:5173
           CYPRESS_RUNTIME_MODE: ci
 
       - name: Upload screenshots on failure
