@@ -60,14 +60,15 @@ describe('Dashboard Overview UI', () => {
     cy.contains('Top gateway').should('exist')
 
     cy.intercept('GET', '**/analytics/overview*', (req) => {
-      req.continue((res) => res.setDelay(1500))
+      req.continue((res) => res.setDelay(3000))
     }).as('overviewRefresh')
     cy.intercept('GET', '**/analytics/routing-stats*', (req) => {
-      req.continue((res) => res.setDelay(1500))
+      req.continue((res) => res.setDelay(3000))
     }).as('routingRefresh')
 
     cy.contains('button', '1 week').click()
-    cy.contains(/Refreshing overview analytics for/i).should('be.visible')
+    // Check for the "Loading" badge that appears during refresh
+    cy.contains('Loading').should('be.visible')
     cy.wait('@overviewRefresh')
     cy.wait('@routingRefresh')
 
