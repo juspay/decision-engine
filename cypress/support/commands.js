@@ -666,3 +666,34 @@ Cypress.Commands.add('visitAppPath', (path = '/', options = {}) => {
 Cypress.Commands.add('setMerchantFromTopBar', (merchantId) => {
   return cy.get('input[placeholder="Set Merchant ID"]').clear().type(merchantId).type('{enter}')
 })
+
+Cypress.Commands.add('createApiKey', (merchantId, description = null) => {
+  return requestApi('POST', '/api-key/create', {
+    body: { merchant_id: merchantId, description },
+  }).then((response) => cy.wrap({ response: response.body, status: response.status }))
+})
+
+Cypress.Commands.add('listApiKeys', (merchantId) => {
+  return requestApi('GET', `/api-key/list/${merchantId}`).then((response) =>
+    cy.wrap({ response: response.body, status: response.status }),
+  )
+})
+
+Cypress.Commands.add('revokeApiKey', (keyId) => {
+  return requestApi('DELETE', `/api-key/${keyId}`, { failOnStatusCode: false }).then((response) =>
+    cy.wrap({ response: response.body, status: response.status }),
+  )
+})
+
+Cypress.Commands.add('decideGatewayWithApiKey', (apiKey, decisionRequest) => {
+  return cy.task('httpRequest', {
+    method: 'POST',
+    url: resolveApiUrl('/decide-gateway'),
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'x-tenant-id': 'public',
+    },
+    body: decisionRequest,
+  })
+})

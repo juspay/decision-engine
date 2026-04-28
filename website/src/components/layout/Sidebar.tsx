@@ -13,6 +13,7 @@ import {
   Moon,
   Sun,
   Users,
+  Key,
 } from 'lucide-react'
 
 export function Sidebar() {
@@ -98,6 +99,7 @@ export function Sidebar() {
         </div>
 
         <SideLink to="/members" icon={Users} selectedPath={selectedPath} onNavigate={setPendingPath}>Members</SideLink>
+        <SideLink to="/api-keys" icon={Key} selectedPath={selectedPath} onNavigate={setPendingPath}>API Keys</SideLink>
       </nav>
 
       {/* Footer */}
