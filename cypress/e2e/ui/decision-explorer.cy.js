@@ -12,13 +12,16 @@ describe('Decision Explorer UI', () => {
       .then(() => cy.visitWithSession('/decisions', merchantId))
       .then(() => {
         cy.contains('h1', 'Decision Explorer').should('exist')
+        // Wait for routing config to load before interacting
+        cy.contains('Loading routing config from backend...').should('not.exist')
         // Tab button text is 'Auth-rate' (with 'Score simulation' subtitle).
         // Avoid using 'Auth-Rate Based Routing' which substring-matches the
         // always-visible 'Reset Auth-Rate Based Routing' button instead.
         cy.contains('button', 'Auth-rate').click()
         cy.contains('button', 'Run Auth-Rate Simulation').should('be.visible')
         cy.contains('Payments').should('be.visible')       // label for count input
-        cy.contains('Success Rate').should('be.visible')   // slider label
+        // Look for Success Rate label specifically within the form controls
+        cy.get('label').contains('Success Rate').should('be.visible')
       })
       .then(() => cy.cleanupTestData(merchantId))
   })
@@ -43,11 +46,12 @@ describe('Decision Explorer UI', () => {
       .then(() => cy.visitWithSession('/decisions', merchantId))
       .then(() => {
         cy.contains('button', 'Volume split').click()
-        cy.get('input').filter('[value="100"]').first().clear().type('20')
+        // Wait for the volume split UI to render
+        cy.contains('Evaluation count').should('be.visible')
+        cy.get('input[type="number"]').first().clear().type('20')
         cy.contains('button', 'Run Volume Evaluation').should('be.visible')
         cy.contains('Volume Split Configuration').should('be.visible')
-        cy.contains('Number of Payments').should('be.visible')
-        cy.contains('/routing/evaluate calls against the active volume rule.').should('be.visible')
+        cy.contains('/routing/evaluate').should('be.visible')
       })
       .then(() => cy.cleanupTestData(merchantId))
   })

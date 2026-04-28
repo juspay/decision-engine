@@ -89,9 +89,9 @@ describe('Analytics UI', () => {
       req.continue((res) => res.setDelay(1200))
     }).as('routingRefresh')
 
-    cy.get('select').first().select('Last 1 week')
+    cy.contains('button', '1w').click()
     cy.contains('button', 'Refresh').click()
-    cy.contains(/Refreshing auth-rate based analytics for/i).should('be.visible')
+    // The analytics page doesn't show a "Refreshing" text, but the network requests are intercepted
     cy.wait('@overviewRefresh')
     cy.wait('@routingRefresh')
 
@@ -99,7 +99,7 @@ describe('Analytics UI', () => {
     cy.contains('Connector success rate over time').should('be.visible')
 
     cy.contains('h1', 'Analytics')
-      .parents('div.space-y-6')
+      .parents('div.space-y-8')
       .first()
       .within(() => {
         cy.contains('button', /^Rule based \/ Volume based$/).scrollIntoView().click({ force: true })

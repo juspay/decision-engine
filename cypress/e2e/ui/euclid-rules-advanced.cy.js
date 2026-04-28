@@ -27,29 +27,32 @@ describe('Advanced routing rule features', () => {
   let merchantId
   let ruleName
 
+  before(() => {
+    merchantId = factory.merchantId('euclid_adv')
+    cy.ensureMerchantAccount(merchantId)
+  })
+
+  after(() => {
+    cy.cleanupTestData(merchantId)
+  })
+
   beforeEach(() => {
     cy.waitForService()
     cy.viewport(1600, 1200)
-    merchantId = factory.merchantId('euclid_adv')
     ruleName = factory.ruleName('adv_rule')
-    cy.ensureMerchantAccount(merchantId)
 
     // Intercept routing keys BEFORE visiting so the alias is registered in time.
     // Without this, "Add Rule" clicked while keys are still loading produces
     // default conditions with value='' which the backend rejects.
     cy.intercept('GET', '**/config/routing-keys').as('routingKeys')
 
-    cy.visitWithMerchant('/routing/rules', merchantId)
+    cy.visitWithSession('/routing/rules', merchantId)
     cy.contains('h1', 'Rule-Based Routing').should('be.visible')
 
     // Wait for routing keys to resolve before adding a rule block.
     cy.wait('@routingKeys', { timeout: 15000 })
 
     cy.contains('button', 'Add Rule').click()
-  })
-
-  afterEach(() => {
-    cy.cleanupTestData(merchantId)
   })
 
   // ── 1. "is one of" / "is not one of" operator (enum_variant_array) ─────────
