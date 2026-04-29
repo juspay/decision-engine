@@ -214,9 +214,9 @@
   top: 0;
   left: 0;
   right: 0;
-  height: 3px;
-  background: linear-gradient(90deg, #9b51e0, #4f46e5, #0ea5e9, transparent);
-  opacity: 0.8;
+  height: 2px;
+  background: linear-gradient(90deg, #3b82f6, #0ea5e9, #6366f1);
+  opacity: 0.35;
   z-index: 100;
 }
 

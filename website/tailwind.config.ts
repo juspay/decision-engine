@@ -7,12 +7,12 @@ export default {
     extend: {
       colors: {
         brand: {
-          DEFAULT: '#4f46e5',
-          50: '#eef2ff',
-          100: '#e0e7ff',
-          500: '#6366f1',
-          600: '#4f46e5',
-          700: '#4338ca',
+          DEFAULT: '#0c69ee',
+          50: '#eef5ff',
+          100: '#d9eaff',
+          500: '#3b82f6',
+          600: '#0c69ee',
+          700: '#0954be',
         },
       },
       fontFamily: {
