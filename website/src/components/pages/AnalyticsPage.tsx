@@ -83,8 +83,6 @@ type RoutingAlignmentSummary = {
   alignmentPercent: number | null
   leaderDecisionCount: number
   comparableDecisionCount: number
-  statusLabel: string
-  statusVariant: BadgeVariant
   headline: string
   detail: string
 }
@@ -641,7 +639,6 @@ function RoutingAlignmentCard({
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant={summary.statusVariant}>{summary.statusLabel}</Badge>
                   <Badge variant="gray">Best score: {srLeaderName}</Badge>
                   <Badge variant={volumeBadgeVariant}>
                     Traffic leader: {volumeLeaderName}
@@ -1375,8 +1372,6 @@ export function AnalyticsPage() {
       ? (leaderDecisionCount / comparableDecisionCount) * 100
       : null
 
-    let statusLabel = 'Waiting for data'
-    let statusVariant: BadgeVariant = 'gray'
     let headline = 'Waiting for traffic share and connector scores.'
     let detail = 'Run payments and send score updates in this time window to compare routing traffic.'
 
@@ -1388,24 +1383,16 @@ export function AnalyticsPage() {
           : 'Traffic and score updates did not happen close enough together to compare.'
 
       if (leadersDiffer) {
-        statusLabel = 'Needs review'
-        statusVariant = 'orange'
-        headline = `${srLeader.gateway} has the better success rate, but ${volumeLeader.gateway} leads traffic share.`
-        detail = `${comparisonText} This can happen when another rule, split, fallback, or a very small score difference influenced routing.`
+        headline = `${srLeader.gateway} has the better success rate; ${volumeLeader.gateway} still leads traffic share.`
+        detail = `${comparisonText} Traffic share is cumulative for this window, so earlier ${volumeLeader.gateway} selections can keep it ahead even after failures reduce its score.`
       } else {
-        statusLabel = 'Aligned'
-        statusVariant = 'green'
         headline = `${srLeader.gateway} has the better success rate and leads traffic share.`
         detail = comparisonText
       }
     } else if (srLeader) {
-      statusLabel = 'No traffic'
-      statusVariant = 'blue'
       headline = `${srLeader.gateway} has the better success rate, but no traffic share is available.`
       detail = 'Run decide-gateway traffic in this time window to compare scores against actual selections.'
     } else if (volumeLeader) {
-      statusLabel = 'No score'
-      statusVariant = 'blue'
       headline = `${volumeLeader.gateway} leads traffic share, but connector success rate is not available.`
       detail = 'Send update-gateway-score traffic in this time window to compare selections against success rates.'
     }
@@ -1418,8 +1405,6 @@ export function AnalyticsPage() {
       alignmentPercent,
       leaderDecisionCount,
       comparableDecisionCount,
-      statusLabel,
-      statusVariant,
       headline,
       detail,
     }
