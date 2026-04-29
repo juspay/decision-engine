@@ -1646,16 +1646,6 @@ export function AnalyticsPage() {
       {view === 'transactions' ? (
         <div className="space-y-6">
           <section className="space-y-5">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">API calls</h2>
-                <p className="mt-1 text-sm text-slate-500 dark:text-[#8a8a93]">
-                  Counts for the decision and feedback surfaces tied to real transaction flow.
-                </p>
-              </div>
-              <InfoButton content={CARD_INFO.hits} />
-            </div>
-
             <div className="grid gap-5 lg:grid-cols-2">
               {transactionRouteHits.map((item) => (
                 <HitsCard
