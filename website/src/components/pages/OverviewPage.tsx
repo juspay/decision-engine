@@ -414,11 +414,6 @@ export function OverviewPage() {
                         </p>
                       </div>
                     </div>
-                    <p className="mt-4 max-w-xl text-sm leading-7 text-slate-600 dark:text-[#a6b0c3]">
-                      {activeRouting
-                        ? `${activeRouting.name} is the current routing strategy for this merchant.`
-                        : 'No active routing strategy is configured for this merchant yet.'}
-                    </p>
                   </div>
 
                   <div className="mt-8 grid gap-3 sm:grid-cols-3">
