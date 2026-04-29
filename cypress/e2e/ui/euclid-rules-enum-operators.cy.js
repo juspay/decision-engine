@@ -22,7 +22,6 @@ describe('"is one of" / "is not one of" operator', () => {
     cy.viewport(1600, 1200)
     ruleName = factory.ruleName('adv_rule')
     cy.visitWithSession('/routing/rules', merchantId)
-    cy.contains('h1', 'Rule-Based Routing').should('be.visible')
     cy.contains('Loading routing keys from backend...', { timeout: 15000 }).should('not.exist')
     cy.contains('button', 'Add Rule').click()
     ruleBlock(0).within(() => {

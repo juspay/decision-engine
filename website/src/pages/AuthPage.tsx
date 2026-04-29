@@ -235,15 +235,15 @@ export function AuthPage() {
                   Route, inspect, and iterate from one control surface.
                 </h2>
                 <p className="max-w-[38rem] text-lg leading-9 text-slate-600 dark:text-[#9aa4b6] sm:text-[1.35rem]">
-                  Sign in to the internal workspace used for gateway routing setup,
-                  merchant-scoped analytics, and payment audit review.
+                  Sign in to the operator workspace for gateway routing setup,
+                  merchant analytics, and payment audit review.
                 </p>
               </div>
 
               <div className="flex flex-wrap gap-3">
                 <PillStat>Gateway routing</PillStat>
                 <PillStat>Merchant analytics</PillStat>
-                <PillStat>ClickHouse audit</PillStat>
+                <PillStat>Payment audit</PillStat>
               </div>
             </div>
           </div>

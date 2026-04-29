@@ -138,6 +138,15 @@ jobs:
       - name: Install just
         run: curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
 
+      # ── Shared Xvfb display ───────────────────────────────────────────────
+      # All three parallel workers use a single pre-started display.
+      # Cypress checks DISPLAY before spawning its own Xvfb, so workers
+      # don't race to claim :99 and fail with "already in use".
+      - name: Start Xvfb
+        run: |
+          Xvfb :99 -screen 0 1280x720x24 -ac &
+          echo "DISPLAY=:99" >> $GITHUB_ENV
+
       # ── Run all Cypress specs across 3 parallel workers ───────────────────
       # Delegates to `just cypress-parallel` — identical to local runs.
       - name: Run Cypress

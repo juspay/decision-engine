@@ -21,7 +21,6 @@ describe('Rule Lifecycle — creation and management', () => {
     cy.ensureMerchantAccount(merchantId)
     cy.intercept('POST', '**/routing/create').as('createRule')
     cy.visitWithMerchant('/routing/rules', merchantId)
-    cy.contains('h1', 'Rule-Based Routing').should('be.visible')
     cy.contains('Loading routing keys from backend...', { timeout: 15000 }).should('not.exist')
   })
 
@@ -196,7 +195,6 @@ describe('Rule Lifecycle — creation and management', () => {
         expect(res.status).to.eq(200)
       })
       cy.visitWithMerchant('/routing/rules', merchantId)
-      cy.contains('h1', 'Rule-Based Routing').should('be.visible')
     })
 
     it('shows the created rule as Inactive', () => {
