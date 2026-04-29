@@ -1,7 +1,7 @@
 // Dev uses the Vite proxy; production uses the hosted dashboard API path.
 import { tokenRef } from './tokenRef'
 
-const DEBUG_API = true
+const DEBUG_API = import.meta.env.DEV
 const DEFAULT_TENANT_ID = import.meta.env.VITE_DEFAULT_TENANT_ID ?? 'public'
 const DEFAULT_API_BASE_PATH = import.meta.env.PROD ? '/decision-engine/api' : '/decision-engine-api'
 const API_BASE_PATH = (import.meta.env.VITE_API_BASE_PATH ?? DEFAULT_API_BASE_PATH).replace(/\/$/, '')

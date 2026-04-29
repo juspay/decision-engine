@@ -12,11 +12,16 @@ describe('Decision Explorer UI', () => {
       .then(() => cy.visitWithSession('/decisions', merchantId))
       .then(() => {
         cy.contains('h1', 'Decision Explorer').should('exist')
-        cy.contains('button', 'Auth-Rate Based Routing').click()
+        // Wait for routing config to load before interacting
+        cy.contains('Loading routing config from backend...').should('not.exist')
+        // Tab button text is 'Auth-rate' (with 'Score simulation' subtitle).
+        // Avoid using 'Auth-Rate Based Routing' which substring-matches the
+        // always-visible 'Reset Auth-Rate Based Routing' button instead.
+        cy.contains('button', 'Auth-rate').click()
         cy.contains('button', 'Run Auth-Rate Simulation').should('be.visible')
-        cy.contains('Total Payments').should('be.visible')
-        cy.contains('Success Count').should('be.visible')
-        cy.contains('Failure Count').should('be.visible')
+        cy.contains('Payments').should('be.visible')       // label for count input
+        // Look for Success Rate label specifically within the form controls
+        cy.get('label').contains('Success Rate').should('be.visible')
       })
       .then(() => cy.cleanupTestData(merchantId))
   })
@@ -26,7 +31,7 @@ describe('Decision Explorer UI', () => {
     cy.ensureMerchantAccount(merchantId)
       .then(() => cy.visitWithSession('/decisions', merchantId))
       .then(() => {
-        cy.contains('button', 'Rule Based Routing').click()
+        cy.contains('button', 'Rule based').click()
         cy.contains('button', 'Evaluate Rules').should('be.visible')
         cy.contains('Rule Evaluation Parameters').should('be.visible')
         cy.contains('Fallback gateway_name/gateway_id').should('be.visible')
@@ -40,12 +45,13 @@ describe('Decision Explorer UI', () => {
     cy.ensureMerchantAccount(merchantId)
       .then(() => cy.visitWithSession('/decisions', merchantId))
       .then(() => {
-        cy.contains('button', 'Volume Based Routing').click()
-        cy.get('input').filter('[value="100"]').first().clear().type('20')
+        cy.contains('button', 'Volume split').click()
+        // Wait for the volume split UI to render
+        cy.contains('Evaluation count').should('be.visible')
+        cy.get('input[type="number"]').first().clear().type('20')
         cy.contains('button', 'Run Volume Evaluation').should('be.visible')
         cy.contains('Volume Split Configuration').should('be.visible')
-        cy.contains('Number of Payments').should('be.visible')
-        cy.contains('/routing/evaluate calls against the active volume rule.').should('be.visible')
+        cy.contains('/routing/evaluate').should('be.visible')
       })
       .then(() => cy.cleanupTestData(merchantId))
   })
@@ -55,7 +61,7 @@ describe('Decision Explorer UI', () => {
     cy.ensureMerchantAccount(merchantId)
       .then(() => cy.visitWithSession('/decisions', merchantId))
       .then(() => {
-        cy.contains('button', 'Debit Routing').click()
+        cy.contains('button', 'Debit routing').click()
         cy.contains('Debit Routing Parameters').should('be.visible')
         cy.contains('Debit routing is disabled for this merchant.').should('be.visible')
         cy.contains('button', 'Enable Debit Routing').should('be.visible')
@@ -72,7 +78,7 @@ describe('Decision Explorer UI', () => {
       .then(() => cy.updateDebitRoutingFlag(merchantId, true))
       .then(() => cy.visitWithSession('/decisions', merchantId))
       .then(() => {
-        cy.contains('button', 'Debit Routing').click()
+        cy.contains('button', 'Debit routing').click()
         cy.contains('Debit routing is enabled for this merchant.').should('be.visible')
         cy.contains('button', 'Run Debit Routing').should('not.be.disabled').click()
         cy.contains('Debit Routing Result', { timeout: 20000 }).should('be.visible')

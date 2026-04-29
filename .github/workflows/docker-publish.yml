@@ -68,8 +68,8 @@ jobs:
           platforms: ${{ matrix.platform }}
           tags: ghcr.io/${{ github.repository }}/postgres:${{ env.SHORT_SHA }}-${{ matrix.tag }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=publish-postgres-${{ matrix.tag }}
+          cache-to: type=gha,scope=publish-postgres-${{ matrix.tag }},mode=max
           push: true
         env:
           CARGO_INCREMENTAL: ${{ github.event_name == 'pull_request' && '1' || '0' }}
@@ -132,8 +132,8 @@ jobs:
           platforms: ${{ matrix.platform }}
           tags: ghcr.io/${{ github.repository }}:${{ env.SHORT_SHA }}-${{ matrix.tag }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=publish-mysql-${{ matrix.tag }}
+          cache-to: type=gha,scope=publish-mysql-${{ matrix.tag }},mode=max
           push: true
         env:
           CARGO_INCREMENTAL: ${{ github.event_name == 'pull_request' && '1' || '0' }}
@@ -257,5 +257,5 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=publish-groovy
+          cache-to: type=gha,scope=publish-groovy,mode=max

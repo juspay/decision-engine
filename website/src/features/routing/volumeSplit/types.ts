@@ -26,12 +26,11 @@ export interface VolumeSplitAlgorithmData {
 }
 
 export interface VolumeSplitRuleCreatePayload {
-  rule_id: null
   name: string
   description: string
   created_by: string
   algorithm_for: 'payment'
-  metadata: null
+  metadata: Record<string, unknown>
   algorithm: VolumeSplitAlgorithmData
 }
 
