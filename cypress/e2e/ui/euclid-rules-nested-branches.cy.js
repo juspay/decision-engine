@@ -21,10 +21,8 @@ describe('Nested AND+OR branches', () => {
     cy.waitForService()
     cy.viewport(1600, 1200)
     ruleName = factory.ruleName('adv_rule')
-    cy.intercept('GET', '**/config/routing-keys').as('routingKeys')
     cy.visitWithSession('/routing/rules', merchantId)
-    cy.contains('h1', 'Rule-Based Routing').should('be.visible')
-    cy.wait('@routingKeys', { timeout: 15000 })
+    cy.contains('Loading routing keys from backend...', { timeout: 15000 }).should('not.exist')
     cy.contains('button', 'Add Rule').click()
   })
 

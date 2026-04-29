@@ -1,6 +1,12 @@
 # Cypress E2E Tests
 #
-# Single job: builds the Decision Engine, starts all services, runs all specs.
+# Single job, three parallel workers (background processes).
+# Mirrors `just cypress-parallel` locally — same split, same runner.
+#
+# Workers:
+#   worker-1  — general UI specs
+#   worker-2  — euclid rule-builder specs
+#   worker-3  — API specs
 #
 # Caching layers:
 #   - Docker BuildKit layers → GHA cache, scoped per branch.
@@ -110,19 +116,18 @@ jobs:
           BASE_URL: http://localhost:8080
           ADMIN_SECRET: test_admin
 
-      # ── Start UI dev server ───────────────────────────────────────────────
-      # Use the Vite dev server, NOT vite build + vite preview.
-      #
-      # vite preview has no proxy, so API calls from the browser go directly to
-      # http://localhost:8080 — a different origin (cross-origin from port 5173).
-      # The decision engine does not emit CORS headers for localhost:5173, so the
-      # browser blocks every API call and the app renders blank.
-      #
-      # The Vite dev server proxies /decision-engine-api/* → http://localhost:8080
-      # (same origin, no CORS). It also uses base '/' so routes are at the root —
-      # no /decision-engine prefix in CYPRESS_UI_BASE_URL needed.
-      - name: Start UI dev server
-        run: npx vite --port 5173 &
+      # ── Build + serve UI ─────────────────────────────────────────────────
+      # Build first so import/compile errors (e.g. missing React hooks) fail
+      # fast with a clear message before Cypress even starts.
+      # vite preview has a proxy configured in vite.config.ts (same routes as
+      # the dev server), so API calls are forwarded to http://localhost:8080
+      # without CORS issues.
+      - name: Build UI
+        run: npx vite build
+        working-directory: website
+
+      - name: Start UI preview server
+        run: npx vite preview --port 5173 --host &
         working-directory: website
 
       - name: Wait for UI
@@ -130,22 +135,26 @@ jobs:
           timeout 60 bash -c \
             'until curl -sf http://localhost:5173; do sleep 2; done'
 
-      # ── Run all Cypress specs ─────────────────────────────────────────────
-      # Includes: all UI tests + all API tests.
-      # Excludes: cypress/e2e/runtime/ — runtime-smoke.cy.js calls
-      #   waitForRuntimeSurface() which requires the Mintlify docs server.
-      #   Mintlify is only present in the dashboard-* compose profiles,
-      #   not in postgres-local. Add it here if that profile is adopted.
-      - name: Run Cypress
+      - name: Install just
+        run: curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+
+      # ── Shared Xvfb display ───────────────────────────────────────────────
+      # All three parallel workers use a single pre-started display.
+      # Cypress checks DISPLAY before spawning its own Xvfb, so workers
+      # don't race to claim :99 and fail with "already in use".
+      - name: Start Xvfb
         run: |
-          npx cypress run \
-            --spec "cypress/e2e/ui/**/*.cy.js,cypress/e2e/api/**/*.cy.js" \
-            --headless
+          Xvfb :99 -screen 0 1280x720x24 -ac &
+          echo "DISPLAY=:99" >> $GITHUB_ENV
+
+      # ── Run all Cypress specs across 3 parallel workers ───────────────────
+      # Delegates to `just cypress-parallel` — identical to local runs.
+      - name: Run Cypress
+        run: just cypress-parallel
         env:
           CYPRESS_API_BASE_URL: http://localhost:8080
           CYPRESS_UI_BASE_URL: http://localhost:5173
           CYPRESS_RUNTIME_MODE: ci
-
 
       - name: Upload screenshots on failure
         uses: actions/upload-artifact@v4

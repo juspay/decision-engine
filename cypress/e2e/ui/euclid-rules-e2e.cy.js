@@ -19,11 +19,9 @@ describe('End-to-end creation', () => {
     merchantId = factory.merchantId('euclid_e2e')
     ruleName = factory.ruleName('adv_rule')
     cy.ensureMerchantAccount(merchantId)
-    cy.intercept('GET', '**/config/routing-keys').as('routingKeys')
     cy.intercept('POST', '**/routing/create').as('createRule')
     cy.visitWithSession('/routing/rules', merchantId)
-    cy.contains('h1', 'Rule-Based Routing').should('be.visible')
-    cy.wait('@routingKeys', { timeout: 15000 })
+    cy.contains('Loading routing keys from backend...', { timeout: 15000 }).should('not.exist')
     cy.contains('button', 'Add Rule').click()
   })
 

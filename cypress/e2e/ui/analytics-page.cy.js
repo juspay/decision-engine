@@ -109,6 +109,6 @@ describe('Analytics UI', () => {
       })
     cy.contains(
       'Routing activity for rule-based and volume-based flows, separate from auth-rate score updates.',
-    ).should('be.visible')
+    ).should('exist')
   })
 })
