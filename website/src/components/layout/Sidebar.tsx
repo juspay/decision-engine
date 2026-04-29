@@ -18,23 +18,24 @@ import {
 } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
 import { apiFetch } from '../../lib/api'
-import { getStoredThemePreference, persistThemePreference } from '../../lib/theme'
+import {
+  applyThemePreference,
+  getResolvedThemePreference,
+  getStoredThemePreference,
+  persistThemePreference,
+} from '../../lib/theme'
 
 export function Sidebar() {
   const location = useLocation()
   const navigate = useNavigate()
   const { user, clearAuth } = useAuthStore()
   const [pendingPath, setPendingPath] = useState<string | null>(null)
-  const [isDark, setIsDark] = useState(() => getStoredThemePreference() === 'dark')
+  const [isDark, setIsDark] = useState(() => getResolvedThemePreference() === 'dark')
   const [accountOpen, setAccountOpen] = useState(false)
   const accountRef = useRef<HTMLDivElement>(null)
   const selectedPath = pendingPath ?? location.pathname
   const assetBaseUrl = import.meta.env.BASE_URL
   const initials = user?.email ? user.email.slice(0, 2).toUpperCase() : 'ME'
-
-  useEffect(() => {
-    persistThemePreference(isDark ? 'dark' : 'light')
-  }, [isDark])
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -47,6 +48,27 @@ export function Sidebar() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') {
+      return
+    }
+
+    const systemTheme = window.matchMedia('(prefers-color-scheme: dark)')
+    const syncSystemTheme = () => {
+      if (getStoredThemePreference()) {
+        return
+      }
+
+      const nextIsDark = systemTheme.matches
+      setIsDark(nextIsDark)
+      applyThemePreference(nextIsDark ? 'dark' : 'light')
+    }
+
+    syncSystemTheme()
+    systemTheme.addEventListener('change', syncSystemTheme)
+    return () => systemTheme.removeEventListener('change', syncSystemTheme)
+  }, [])
+
   async function handleLogout() {
     setAccountOpen(false)
     try {
@@ -56,6 +78,12 @@ export function Sidebar() {
     }
     clearAuth()
     navigate('/login', { replace: true })
+  }
+
+  function handleThemeToggle() {
+    const nextTheme = isDark ? 'light' : 'dark'
+    setIsDark(nextTheme === 'dark')
+    persistThemePreference(nextTheme)
   }
 
   useLayoutEffect(() => {
@@ -173,7 +201,7 @@ export function Sidebar() {
 
           <button
             type="button"
-            onClick={() => setIsDark((value) => !value)}
+            onClick={handleThemeToggle}
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-[#1a1f2a] dark:hover:text-white"
             aria-label="Toggle theme"
             title="Toggle theme"
