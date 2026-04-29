@@ -152,7 +152,7 @@ const CARD_INFO: Record<'hits' | 'share' | 'alignment' | 'sr' | 'preview_hits' |
   },
   alignment: {
     title: 'Routing alignment',
-    purpose: 'Use this to check whether the best-scoring connector is also receiving most selected payments.',
+    purpose: 'Use this to see whether the best-scoring connector is also leading traffic share.',
     calculation: 'The page compares the latest connector success-rate score with the gateways actually selected in the same time window.',
     source: 'Reads the same ClickHouse-backed routing-stats response used by the gateway share and connector success-rate charts.',
   },
@@ -584,15 +584,15 @@ function RoutingAlignmentCard({
       ? summary.srLeader.value - summary.srRunnerUp.value
       : undefined
   const srLeaderVolumeText = summary.srLeaderVolume
-    ? `${formatNumber(summary.srLeaderVolume.count, 0)} selected payments for ${summary.srLeaderVolume.gateway}`
-    : 'No selected volume'
+    ? `${formatNumber(summary.srLeaderVolume.count, 0)} payments for ${summary.srLeaderVolume.gateway}`
+    : 'No traffic share'
   const alignedVolumeText = summary.comparableDecisionCount
-    ? `${formatNumber(summary.leaderDecisionCount, 0)} of ${formatNumber(summary.comparableDecisionCount, 0)} selected payments went to the best-scoring connector`
+    ? `${formatNumber(summary.leaderDecisionCount, 0)} of ${formatNumber(summary.comparableDecisionCount, 0)} payments matched the best score`
     : srLeaderVolumeText
   const alignmentText =
     summary.alignmentPercent === null
       ? 'Not enough data'
-      : `${formatPercent(summary.alignmentPercent)} aligned`
+      : `${formatPercent(summary.alignmentPercent)} traffic share`
   const srLeaderName = summary.srLeader?.gateway || '--'
   const volumeLeaderName = summary.volumeLeader?.gateway || '--'
   const leadersDiffer =
@@ -606,14 +606,14 @@ function RoutingAlignmentCard({
 
   return (
     <Card className="overflow-visible">
-      <CardHeader>
+      <CardHeader className="px-5 py-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <h2 className="text-sm font-semibold text-slate-800 dark:text-white">
               Routing alignment
             </h2>
             <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-              Checks whether the best-scoring connector is also getting most selected payments.
+              Traffic share: checks if the best-scoring connector is also getting the largest share.
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -624,23 +624,27 @@ function RoutingAlignmentCard({
           </div>
         </div>
       </CardHeader>
-      <CardBody className="space-y-4">
-        <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-[#2a303a] dark:bg-[#0d1118]">
+      <CardBody className={expanded ? 'space-y-4 px-5 py-4' : 'px-5 py-2.5'}>
+        <div className={`border border-slate-200 bg-slate-50/80 dark:border-[#2a303a] dark:bg-[#0d1118] ${
+          expanded ? 'rounded-2xl px-4 py-3' : 'rounded-[18px] px-3.5 py-2'
+        }`}>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant={summary.statusVariant}>{summary.statusLabel}</Badge>
                 <Badge variant="gray">Best score: {srLeaderName}</Badge>
                 <Badge variant={volumeBadgeVariant}>
-                  Most selected: {volumeLeaderName}
+                  Traffic leader: {volumeLeaderName}
                 </Badge>
               </div>
-              <p className="mt-3 text-sm font-semibold text-slate-900 dark:text-white">
+              <p className={`${expanded ? 'mt-3' : 'mt-2'} text-sm font-semibold text-slate-900 dark:text-white`}>
                 {summary.headline}
               </p>
-              <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#8a8a93]">
-                {summary.detail}
-              </p>
+              {expanded ? (
+                <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#8a8a93]">
+                  {summary.detail}
+                </p>
+              ) : null}
             </div>
             <p className="text-right text-xs font-medium text-slate-500 dark:text-[#8a8a93]">
               {alignmentText}
@@ -667,21 +671,21 @@ function RoutingAlignmentCard({
 
               <div className="border-b border-slate-200 p-4 dark:border-[#2a303a] lg:border-b-0 lg:border-r">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
-                  Most selected
+                  Traffic leader
                 </p>
                 <p className="mt-3 truncate text-2xl font-semibold text-slate-950 dark:text-white">
                   {summary.volumeLeader?.gateway || '--'}
                 </p>
                 <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
                   {summary.volumeLeader
-                    ? `${formatNumber(summary.volumeLeader.count, 0)} selected payments, ${formatPercent(summary.volumeLeader.share)} of volume`
-                    : 'No selected payments in this window'}
+                    ? `${formatNumber(summary.volumeLeader.count, 0)} payments, ${formatPercent(summary.volumeLeader.share)} traffic share`
+                    : 'No payment traffic in this window'}
                 </p>
               </div>
 
               <div className="p-4">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
-                  Best-score traffic
+                  Best-score share
                 </p>
                 <p className="mt-3 text-2xl font-semibold text-slate-950 dark:text-white">
                   {alignmentText}
@@ -698,7 +702,7 @@ function RoutingAlignmentCard({
                   <div className="grid grid-cols-[minmax(0,1.2fr)_0.65fr_0.65fr_0.65fr_1fr] gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:border-[#2a303a] dark:bg-[#0c0f15] dark:text-[#8a8a93]">
                     <span>Connector</span>
                     <span>Success rate</span>
-                    <span>Selected</span>
+                    <span>Traffic</span>
                     <span>Share</span>
                     <span>Read</span>
                   </div>
@@ -727,7 +731,7 @@ function RoutingAlignmentCard({
                       </span>
                       <div className="flex flex-wrap gap-2">
                         {row.isSrLeader ? <Badge variant="blue">Best score</Badge> : null}
-                        {row.isVolumeLeader ? <Badge variant="green">Most selected</Badge> : null}
+                        {row.isVolumeLeader ? <Badge variant="green">Traffic leader</Badge> : null}
                         {!row.isSrLeader && !row.isVolumeLeader ? (
                           <span className="text-xs text-slate-500 dark:text-[#8a8a93]">Secondary</span>
                         ) : null}
@@ -739,7 +743,7 @@ function RoutingAlignmentCard({
             ) : (
               <EmptyState
                 title="No connector comparison yet"
-                body="This view needs both selected payments and connector scores in the selected time window."
+                body="This view needs both payment traffic and connector scores in the selected time window."
               />
             )}
           </>
@@ -1368,36 +1372,36 @@ export function AnalyticsPage() {
 
     let statusLabel = 'Waiting for data'
     let statusVariant: BadgeVariant = 'gray'
-    let headline = 'Waiting for selected payments and connector scores.'
-    let detail = 'Run payments and send score updates in this time window to compare routing behavior.'
+    let headline = 'Waiting for traffic share and connector scores.'
+    let detail = 'Run payments and send score updates in this time window to compare routing traffic.'
 
     if (srLeader && volumeLeader) {
       const leadersDiffer = srLeader.gateway !== volumeLeader.gateway
       const comparisonText =
         comparableDecisionCount > 0
-          ? `${srLeader.gateway} got ${formatNumber(srLeaderVolume?.count || 0, 0)} of ${formatNumber(comparableDecisionCount, 0)} selected payments (${formatPercent(srLeaderVolume?.share || 0)}).`
-          : 'The selected payments and score updates did not happen close enough together to compare.'
+          ? `${srLeader.gateway} handled ${formatNumber(srLeaderVolume?.count || 0, 0)} of ${formatNumber(comparableDecisionCount, 0)} payments (${formatPercent(srLeaderVolume?.share || 0)} traffic share).`
+          : 'Traffic and score updates did not happen close enough together to compare.'
 
       if (leadersDiffer) {
         statusLabel = 'Needs review'
         statusVariant = 'orange'
-        headline = `${srLeader.gateway} has the better success rate, but most selected payments went to ${volumeLeader.gateway}.`
+        headline = `${srLeader.gateway} has the better success rate, but ${volumeLeader.gateway} leads traffic share.`
         detail = `${comparisonText} This can happen when another rule, split, fallback, or a very small score difference influenced routing.`
       } else {
         statusLabel = 'Aligned'
         statusVariant = 'green'
-        headline = `${srLeader.gateway} has the better success rate and received the most selected payments.`
+        headline = `${srLeader.gateway} has the better success rate and leads traffic share.`
         detail = comparisonText
       }
     } else if (srLeader) {
-      statusLabel = 'No selection volume'
+      statusLabel = 'No traffic'
       statusVariant = 'blue'
-      headline = `${srLeader.gateway} has the better success rate, but no selected payments are present.`
+      headline = `${srLeader.gateway} has the better success rate, but no traffic share is available.`
       detail = 'Run decide-gateway traffic in this time window to compare scores against actual selections.'
     } else if (volumeLeader) {
       statusLabel = 'No score'
       statusVariant = 'blue'
-      headline = `${volumeLeader.gateway} received the most selected payments, but connector success rate is not available.`
+      headline = `${volumeLeader.gateway} leads traffic share, but connector success rate is not available.`
       detail = 'Send update-gateway-score traffic in this time window to compare selections against success rates.'
     }
 
