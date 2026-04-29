@@ -114,7 +114,7 @@ type VolumePaymentEntry = {
   connector: string
 }
 
-const EXPLORER_STORAGE_KEY = 'decision-explorer-state-v2'
+const EXPLORER_STORAGE_KEY_PREFIX = 'decision-explorer-state-v2'
 const EXPLORER_RESULT_TTL_MS = 10 * 60 * 1000
 
 const DEFAULT_FORM: FormState = {
@@ -237,6 +237,10 @@ function explorerScopeKey(userId: string, userEmail: string, merchantId: string)
   return `${userId || userEmail || 'anonymous'}:${merchantId || 'no-merchant'}`
 }
 
+function explorerStorageKey(scopeKey: string) {
+  return `${EXPLORER_STORAGE_KEY_PREFIX}:${encodeURIComponent(scopeKey)}`
+}
+
 function hasExpiredExplorerResults(resultDataUpdatedAtMs?: number | null) {
   return Boolean(
     resultDataUpdatedAtMs &&
@@ -244,15 +248,27 @@ function hasExpiredExplorerResults(resultDataUpdatedAtMs?: number | null) {
   )
 }
 
+function removeExplorerState(scopeKey: string) {
+  if (typeof window === 'undefined') return
+  window.localStorage.removeItem(explorerStorageKey(scopeKey))
+}
+
+function saveExplorerState(scopeKey: string, state: ExplorerPersistedState) {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(explorerStorageKey(scopeKey), JSON.stringify(state))
+}
+
 function loadExplorerState(scopeKey: string): ExplorerPersistedState {
   if (typeof window === 'undefined') return getDefaultExplorerState()
 
   try {
-    const raw = window.localStorage.getItem(EXPLORER_STORAGE_KEY)
+    const raw = window.localStorage.getItem(explorerStorageKey(scopeKey))
+      || window.localStorage.getItem(EXPLORER_STORAGE_KEY_PREFIX)
     if (!raw) return { ...getDefaultExplorerState(), scopeKey }
     const parsed = JSON.parse(raw) as Partial<ExplorerPersistedState>
     const defaults = getDefaultExplorerState()
     if (parsed.scopeKey !== scopeKey || hasExpiredExplorerResults(parsed.resultDataUpdatedAtMs)) {
+      removeExplorerState(scopeKey)
       return { ...defaults, scopeKey }
     }
 
@@ -916,36 +932,70 @@ export function DecisionExplorerPage() {
     setResultDataUpdatedAtMs(Date.now())
   }
 
+  function applyExplorerState(nextState: ExplorerPersistedState, scopeKey: string) {
+    setActiveTab(nextState.activeTab)
+    setStateScopeKey(nextState.scopeKey || scopeKey)
+    setResultDataUpdatedAtMs(nextState.resultDataUpdatedAtMs)
+    setForm(nextState.form)
+    setSimulationConfig(nextState.simulationConfig)
+    setDebitForm(nextState.debitForm)
+    setRuleParams(nextState.ruleParams)
+    setFallbackConnectors(nextState.fallbackConnectors)
+    setVolumePayments(nextState.volumePayments)
+    setResult(nextState.result)
+    setDebitResult(nextState.debitResult)
+    setDebitPaymentId(nextState.debitPaymentId)
+    setSingleRunPaymentId(nextState.singleRunPaymentId)
+    setSingleRunOutcome(nextState.singleRunOutcome)
+    setRuleResult(nextState.ruleResult)
+    setVolumeDistribution(nextState.volumeDistribution)
+    setVolumeEvaluationLog(nextState.volumeEvaluationLog)
+    setVolumeProgress(nextState.volumeProgress)
+    setSimulationResults(nextState.simulationResults)
+    setResponseOpen(nextState.responseOpen)
+    setDebitResponseOpen(nextState.debitResponseOpen)
+    setVolumeResponseOpen(nextState.volumeResponseOpen)
+    setSelectedAuditPaymentId(null)
+    setSelectedAuditEventId(null)
+    setAuditInspectorTab('summary')
+    setSelectedPreviewPaymentId(null)
+    setSelectedPreviewEventId(null)
+    setPreviewInspectorTab('summary')
+    setPreviewTraceLabel('Rule Evaluation Decision')
+    setFilterOpen(false)
+    setError(null)
+    setSetupPrompt(null)
+    setLoading(false)
+    setIsSimulating(false)
+  }
+
   useEffect(() => {
     if (stateScopeKey === currentScopeKey) return
-    clearExplorerRunData()
-    setStateScopeKey(currentScopeKey)
-    if (typeof window !== 'undefined') {
-      window.localStorage.removeItem(EXPLORER_STORAGE_KEY)
-    }
+    applyExplorerState(loadExplorerState(currentScopeKey), currentScopeKey)
   }, [currentScopeKey, stateScopeKey])
 
   useEffect(() => {
     if (!resultDataUpdatedAtMs) return
 
+    const storageScopeKey = stateScopeKey || currentScopeKey
     const remainingMs = EXPLORER_RESULT_TTL_MS - (Date.now() - resultDataUpdatedAtMs)
     if (remainingMs <= 0) {
       clearExplorerRunData()
-      if (typeof window !== 'undefined') {
-        window.localStorage.removeItem(EXPLORER_STORAGE_KEY)
-      }
+      removeExplorerState(storageScopeKey)
       return
     }
 
     const timer = window.setTimeout(() => {
       clearExplorerRunData()
-      window.localStorage.removeItem(EXPLORER_STORAGE_KEY)
+      removeExplorerState(storageScopeKey)
     }, remainingMs)
 
     return () => window.clearTimeout(timer)
-  }, [resultDataUpdatedAtMs])
+  }, [currentScopeKey, resultDataUpdatedAtMs, stateScopeKey])
 
   useEffect(() => {
+    if (stateScopeKey !== currentScopeKey) return
+
     const nextState: ExplorerPersistedState = {
       scopeKey: currentScopeKey,
       resultDataUpdatedAtMs,
@@ -971,11 +1021,10 @@ export function DecisionExplorerPage() {
       volumeResponseOpen,
     }
 
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(EXPLORER_STORAGE_KEY, JSON.stringify(nextState))
-    }
+    saveExplorerState(currentScopeKey, nextState)
   }, [
     currentScopeKey,
+    stateScopeKey,
     resultDataUpdatedAtMs,
     activeTab,
     form,
