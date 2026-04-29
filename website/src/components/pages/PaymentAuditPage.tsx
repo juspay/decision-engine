@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import useSWR from 'swr'
 import { useLocation, useSearchParams } from 'react-router-dom'
+import { ArrowLeft } from 'lucide-react'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useAuthStore } from '../../store/authStore'
 import { fetcher } from '../../lib/api'
@@ -279,6 +280,11 @@ function eventPhase(event: PaymentAuditEvent) {
   return 'Errors'
 }
 
+function isDecideGatewayEvent(event: PaymentAuditEvent) {
+  const flowType = flowTypeValue(event)
+  return isDecisionFlow(flowType) || event.event_stage === 'gateway_decided'
+}
+
 function summaryBadgeVariant(status?: string | null): 'blue' | 'green' | 'purple' | 'red' | 'orange' | 'gray' {
   const normalizedStatus = (status || '').toUpperCase()
   if (
@@ -312,7 +318,7 @@ function stringifyValue(value: unknown) {
 
 function sectionButtonClass(active: boolean) {
   return active
-    ? '!border-slate-200 !bg-white !text-slate-950 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.28)] dark:!border-[#2a303a] dark:!bg-[#161b24] dark:!text-white'
+    ? '!border-brand-500/70 !bg-white !text-slate-950 shadow-[0_14px_30px_-24px_rgba(59,130,246,0.55)] ring-2 ring-brand-500/55 dark:!border-brand-500/70 dark:!bg-[#161b24] dark:!text-white dark:ring-brand-500/55'
     : '!border-transparent !bg-slate-100 !text-slate-600 hover:!bg-slate-200 hover:!text-slate-900 dark:!bg-[#161b24] dark:!text-[#a7b2c6] dark:hover:!bg-[#1c2330] dark:hover:!text-white'
 }
 
@@ -328,16 +334,6 @@ function FilterField({ label, children }: { label: string; children: React.React
       </span>
       {children}
     </label>
-  )
-}
-
-function KeyMetric({ label, value, helper }: { label: string; value: string; helper: string }) {
-  return (
-    <GlassCard className="p-5">
-      <SurfaceLabel>{label}</SurfaceLabel>
-      <p className="mt-4 text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">{value}</p>
-      <p className="mt-2 text-sm text-slate-500 dark:text-[#b2bdd1]">{helper}</p>
-    </GlassCard>
   )
 }
 
@@ -492,7 +488,7 @@ export function PaymentAuditPage() {
   const initialCustomWindow =
     initialStartMs > 0 && initialEndMs > initialStartMs
       ? { start_ms: initialStartMs, end_ms: initialEndMs }
-      : presetWindow('1h')
+      : presetWindow('1d')
 
   const [mode, setMode] = useState<AuditMode>(initialMode)
   const [range, setRange] = useState<AnalyticsRangeValue>(initialRange)
@@ -500,6 +496,7 @@ export function PaymentAuditPage() {
   const [appliedFilters, setAppliedFilters] = useState<AuditFilters>(initialFilters)
   const [page, setPage] = useState(initialPage)
   const [selectedKey, setSelectedKey] = useState<string>(initialSelectedKey)
+  const [trailFocused, setTrailFocused] = useState(Boolean(initialSelectedKey))
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('summary')
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
@@ -515,7 +512,8 @@ export function PaymentAuditPage() {
     if (range !== 'custom') return undefined
     const start_ms = fromDateTimeInputValue(customStart)
     const end_ms = fromDateTimeInputValue(customEnd)
-    if (start_ms === null || end_ms === null || end_ms <= start_ms) return undefined
+    const now = Date.now()
+    if (start_ms === null || end_ms === null || end_ms <= start_ms || start_ms > now || end_ms > now) return undefined
     return { start_ms, end_ms }
   }, [customEnd, customStart, range])
 
@@ -624,12 +622,14 @@ export function PaymentAuditPage() {
   }, [selectedEvent?.id, timeline])
 
   const inspectorModel = useMemo(() => buildInspectorModel(selectedEvent), [selectedEvent])
+  const selectedEventIsDecision = selectedEvent ? isDecideGatewayEvent(selectedEvent) : false
 
   const error = auditSearch.error?.message || auditDetail.error?.message || null
   const loading = auditSearch.isLoading || auditDetail.isLoading
   const resultRows = auditSearch.data?.results || []
   const totalMatches = auditSearch.data?.total_results || 0
   const totalEvents = timeline.length
+  const successCount = resultRows.filter((row) => summaryBadgeVariant(row.latest_status) === 'green').length
   const failureCount = resultRows.filter((row) => summaryBadgeVariant(row.latest_status) === 'red').length
   const activeGatewayList = Array.from(
     new Set(
@@ -640,11 +640,21 @@ export function PaymentAuditPage() {
     ),
   )
   const activeGateways = activeGatewayList.length
+  const summaryCards = [
+    { label: 'Matches', value: String(totalMatches), helper: 'Window' },
+    { label: 'Success', value: String(successCount), helper: 'Current page' },
+    { label: 'Failure', value: String(failureCount), helper: 'Current page' },
+    {
+      label: 'Connectors',
+      value: String(activeGateways),
+      helper: activeGatewayList.length ? activeGatewayList.slice(0, 2).join(', ') : 'None',
+    },
+  ]
   const content = mode === 'rule_based'
     ? {
         title: 'Decision Audit',
         description: 'Inspect rule decisions from /routing/evaluate without mixing them into auth-rate transaction outcomes.',
-        merchantPrompt: 'Analytics is scoped to your signed-in merchant. The top-bar merchant selector is not used for rule decision access.',
+        merchantPrompt: 'Audit data follows your signed-in merchant account.',
         searchTitle: 'Search Rule Decision Trail',
         searchDescription: 'Use decision payment IDs or request IDs when you have them. Gateway, status, and error code help narrow rule decision activity quickly.',
         matchingLabel: 'Matching decisions',
@@ -658,7 +668,7 @@ export function PaymentAuditPage() {
       ? {
           title: 'Decision Audit',
           description: 'Search debit-routing decisions produced by /decide-gateway with NTW_BASED_ROUTING.',
-          merchantPrompt: 'Analytics is scoped to your signed-in merchant. The top-bar merchant selector is not used for debit-routing audit access.',
+          merchantPrompt: 'Audit data follows your signed-in merchant account.',
           searchTitle: 'Search Debit Routing Trail',
           searchDescription: 'Use payment or request IDs when you have them. Gateway, status, and error code help narrow debit-routing outcomes quickly.',
           matchingLabel: 'Matching debit decisions',
@@ -671,9 +681,9 @@ export function PaymentAuditPage() {
       : {
           title: 'Decision Audit',
           description: 'Search by payment or request, then inspect gateway decisions, gateway updates, rule evaluations, and errors with the exact payload captured at each step.',
-          merchantPrompt: 'Analytics is scoped to your signed-in merchant. The top-bar merchant selector is not used for payment-audit access.',
+          merchantPrompt: 'Audit data follows your signed-in merchant account.',
           searchTitle: 'Search Decision Trail',
-          searchDescription: 'Use payment or request IDs when you have them. Error code, gateway, route, and status narrow operational noise quickly.',
+          searchDescription: 'Use payment or request IDs when you have them. Error code, gateway, route, and status narrow results quickly.',
           matchingLabel: 'Matching payments',
           matchingDescription: 'Scan the current result set and pick a payment to open its full event trail.',
           summaryLabel: 'Selected Payment Timeline',
@@ -722,6 +732,8 @@ export function PaymentAuditPage() {
       route: mode === 'transactions' ? filters.route : '',
     })
     setPage(nextPage)
+    setTrailFocused(false)
+    setSelectedEventId(null)
     setFilters(normalizedFilters)
     setAppliedFilters(normalizedFilters)
     syncSearch(mode, range, nextPage, normalizedFilters, undefined, customWindow)
@@ -734,6 +746,8 @@ export function PaymentAuditPage() {
       route: mode === 'transactions' ? EMPTY_FILTERS.route : '',
     }
     setPage(nextPage)
+    setTrailFocused(false)
+    setSelectedEventId(null)
     setFilters(clearedFilters)
     setAppliedFilters(clearedFilters)
     syncSearch(mode, range, nextPage, clearedFilters, undefined, customWindow)
@@ -751,13 +765,16 @@ export function PaymentAuditPage() {
         ? (() => {
             const start_ms = fromDateTimeInputValue(customStart)
             const end_ms = fromDateTimeInputValue(customEnd)
-            return start_ms !== null && end_ms !== null && end_ms > start_ms
+            const now = Date.now()
+            return start_ms !== null && end_ms !== null && end_ms > start_ms && start_ms <= now && end_ms <= now
               ? { start_ms, end_ms }
               : undefined
           })()
         : undefined
     setRange(nextRange)
     setPage(nextPage)
+    setTrailFocused(false)
+    setSelectedEventId(null)
     if (nextRange !== 'custom') {
       const preset = presetWindow(nextRange)
       setCustomStart(toDateTimeInputValue(preset.start_ms))
@@ -775,7 +792,15 @@ export function PaymentAuditPage() {
 
   function selectSummary(lookupKey: string) {
     setSelectedKey(lookupKey)
+    setSelectedEventId(null)
+    setTrailFocused(true)
     syncSearch(mode, range, page, appliedFilters, lookupKey, customWindow)
+  }
+
+  function returnToResults() {
+    setTrailFocused(false)
+    setSelectedEventId(null)
+    syncSearch(mode, range, page, appliedFilters, undefined, customWindow)
   }
 
   function updateMode(nextMode: AuditMode) {
@@ -789,6 +814,7 @@ export function PaymentAuditPage() {
     setPage(nextPage)
     setSelectedKey('')
     setSelectedEventId(null)
+    setTrailFocused(false)
     setFilters(nextFilters)
     setAppliedFilters(nextFilters)
     syncSearch(nextMode, range, nextPage, nextFilters, undefined, customWindow)
@@ -803,24 +829,6 @@ export function PaymentAuditPage() {
     }
   }
 
-  function openRelatedEvents() {
-    if (!selectedEvent) return
-    const lookupValue = selectedEvent.payment_id || selectedEvent.request_id || ''
-    const nextFilters: AuditFilters = {
-      paymentId: lookupValue,
-      requestId: '',
-      gateway: selectedEvent.gateway || '',
-      route: '',
-      status: '',
-      flowType: '',
-      errorCode: '',
-    }
-    setFilters(nextFilters)
-    setAppliedFilters(nextFilters)
-    setPage(1)
-    syncSearch(mode, range, 1, nextFilters, selectedKey)
-  }
-
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -829,13 +837,6 @@ export function PaymentAuditPage() {
             <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">{content.title}</h1>
             <Badge variant="green">{auditSearch.data?.merchant_id || effectiveMerchantId || 'Signed-in merchant'}</Badge>
           </div>
-          <p className="max-w-3xl text-sm text-slate-500 dark:text-[#8a8a93]">
-            {mode === 'rule_based'
-              ? 'Inspect rule-based and volume-based routing decisions, traces, and connector outcomes.'
-              : mode === 'debit_routing'
-                ? 'Inspect debit-routing network decisions and ranked co-badged card outcomes.'
-                : 'Inspect auth-rate routing decisions, routing logic, and connector scores for any payment.'}
-          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -878,14 +879,14 @@ export function PaymentAuditPage() {
           </div>
           {!customWindow ? (
             <p className="mt-3 text-xs text-red-500">
-              Choose an end time after the start time.
+              Choose an end time after the start time. Future dates are not available.
             </p>
           ) : null}
         </GlassCard>
       ) : null}
 
       <div className="space-y-4">
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-[18px] border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#11151d]">
           <Button
             size="sm"
             variant="secondary"
@@ -994,270 +995,248 @@ export function PaymentAuditPage() {
         </div>
       )}
 
-      <section className="grid gap-4 xl:grid-cols-3">
-        <KeyMetric label={content.matchingLabel} value={String(totalMatches)} helper="In this time window" />
-        <KeyMetric label="Failures" value={String(failureCount)} helper="In current results" />
-        <KeyMetric
-          label="Active gateways"
-          value={String(activeGateways)}
-          helper={activeGatewayList.length ? activeGatewayList.slice(0, 3).join(', ') : 'No gateway activity yet'}
-        />
-      </section>
-
-      <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)_340px]">
+      <div className="grid gap-4 xl:grid-cols-[minmax(360px,0.74fr)_minmax(0,1.26fr)] xl:items-start">
         <GlassCard className="overflow-hidden">
           <div className="border-b border-slate-200 px-4 py-4 dark:border-[#2a303a]">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-start gap-3">
-                <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-slate-200 text-[11px] font-semibold text-slate-600 dark:border-[#2a303a] dark:text-[#8a8a93]">
-                  1
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-slate-900 dark:text-white">Results</p>
-                  <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                    Click a payment to open its decision trail
-                  </p>
-                </div>
-              </div>
-              <p className="text-xs text-slate-500 dark:text-[#8a8a93]">{totalMatches}</p>
-            </div>
-          </div>
-
-          <div className="border-b border-slate-200 px-4 py-4 dark:border-[#2a303a]">
-            <div className="flex items-center justify-between gap-3">
-              <SurfaceLabel>{content.matchingLabel}</SurfaceLabel>
-              <p className="text-xs text-slate-500 dark:text-[#8a8a93]">{resultRows.length} results</p>
-            </div>
-          </div>
-
-          <div className="space-y-3 p-4">
-            {resultRows.length ? resultRows.map((row) => (
-              <button
-                key={row.lookup_key}
-                type="button"
-                onClick={() => selectSummary(row.lookup_key)}
-                className={`w-full rounded-[20px] border p-4 text-left transition-all ${
-                  selectedSummary?.lookup_key === row.lookup_key
-                    ? 'border-brand-500/70 bg-slate-50 shadow-[0_14px_30px_-28px_rgba(59,130,246,0.35)] dark:border-brand-500 dark:bg-[#161b24]'
-                    : 'border-slate-200/80 bg-white/40 hover:border-slate-300 hover:bg-slate-50/80 dark:border-[#23232a] dark:bg-[#131318] dark:hover:border-[#2a303a] dark:hover:bg-[#17171d]'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
-                      {row.payment_id || row.request_id || row.lookup_key}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                      {row.merchant_id || 'unknown merchant'} · {formatDateTime(row.last_seen_ms)}
-                    </p>
-                  </div>
-                  <Badge variant={summaryBadgeVariant(row.latest_status)}>
-                    {humanizeAuditValue(row.latest_status) || 'Unknown'}
-                  </Badge>
-                </div>
-                <p className="mt-3 text-xs text-slate-500 dark:text-[#8a8a93]">
-                  {compactMeta([
-                    row.latest_gateway || null,
-                    `${row.event_count} events`,
-                    formatRelative(row.last_seen_ms),
-                  ])}
-                </p>
-              </button>
-            )) : (
-              <EmptyState
-                title={content.noMatchesTitle}
-                body={content.noMatchesBody}
-              />
-            )}
-
-            <div className="flex items-center gap-2 pt-1">
-              <Button
-                size="sm"
-                variant="secondary"
-                disabled={page <= 1}
-                onClick={() => {
-                  const nextPage = Math.max(1, page - 1)
-                  setPage(nextPage)
-                  syncSearch(mode, range, nextPage, appliedFilters, selectedKey)
-                }}
-              >
-                Prev
+            {trailFocused ? (
+              <Button size="sm" variant="secondary" onClick={returnToResults} className="mb-4">
+                <ArrowLeft className="h-3.5 w-3.5" />
+                Back to results
               </Button>
-              <Button
-                size="sm"
-                variant="secondary"
-                disabled={resultRows.length < pageSize}
-                onClick={() => {
-                  const nextPage = page + 1
-                  setPage(nextPage)
-                  syncSearch(mode, range, nextPage, appliedFilters, selectedKey)
-                }}
-              >
-                Next
-              </Button>
-            </div>
-          </div>
-        </GlassCard>
+            ) : null}
 
-        <GlassCard className="overflow-hidden">
-          <div className="border-b border-slate-200 px-5 py-4 dark:border-[#2a303a]">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-start gap-3">
-                <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-slate-200 text-[11px] font-semibold text-slate-600 dark:border-[#2a303a] dark:text-[#8a8a93]">
-                  2
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-slate-900 dark:text-white">Decision trail</p>
-                  <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                    Click an event to inspect its scores and payload
-                  </p>
-                </div>
-              </div>
-              {selectedSummary?.payment_id || selectedSummary?.request_id ? (
-                <p className="truncate text-xs text-slate-500 dark:text-[#8a8a93]">
-                  {selectedSummary?.payment_id || selectedSummary?.request_id}
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <SurfaceLabel>{trailFocused ? 'Decision trail' : content.matchingLabel}</SurfaceLabel>
+                <h2 className="mt-2 text-lg font-semibold text-slate-900 dark:text-white">
+                  {trailFocused
+                    ? selectedSummary?.payment_id || selectedSummary?.request_id || selectedSummary?.lookup_key || 'Selected payment'
+                    : content.matchingLabel}
+                </h2>
+                <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                  {trailFocused
+                    ? 'Choose a timeline event to view scores, routing details, and payloads.'
+                    : 'Click a payment to list its decision trail.'}
                 </p>
+              </div>
+              {!trailFocused ? (
+                <Badge variant="gray">{resultRows.length} shown</Badge>
               ) : null}
             </div>
           </div>
 
-          <div className="space-y-4 p-5">
-            {selectedSummary ? (
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold text-slate-900 dark:text-white">
-                    {selectedSummary.payment_id || selectedSummary.request_id || selectedSummary.lookup_key}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                    {totalEvents} event{totalEvents === 1 ? '' : 's'} in this decision trail
-                  </p>
-                </div>
-                {selectedSummary.latest_status ? (
-                  <Badge variant={summaryBadgeVariant(selectedSummary.latest_status)}>
-                    {humanizeAuditValue(selectedSummary.latest_status)}
-                  </Badge>
-                ) : null}
+          {!trailFocused ? (
+            <div className="space-y-3 p-4">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                {summaryCards.map((item) => (
+                  <div
+                    key={item.label}
+                    className="rounded-[20px] border border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-[#252d3a] dark:bg-[#0c1119]"
+                  >
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#7d879b]">
+                      {item.label}
+                    </p>
+                    <p className="mt-2 text-xl font-semibold text-slate-950 dark:text-white">{item.value}</p>
+                    <p className="mt-1 truncate text-[11px] text-slate-500 dark:text-[#7d879b]">{item.helper}</p>
+                  </div>
+                ))}
               </div>
-            ) : null}
 
-            {timeline.length ? (
-              <div className="space-y-3">
-                {timeline.map((event, index) => {
-                  const selected = selectedEvent?.id === event.id
-                  return (
-                    <button
-                      key={event.id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedEventId(event.id)
-                        setInspectorTab('summary')
-                      }}
-                      className={`w-full rounded-[20px] border px-4 py-4 text-left transition ${
-                        selected
-                          ? 'border-brand-500/70 bg-slate-50 shadow-[0_14px_30px_-28px_rgba(59,130,246,0.35)] dark:border-brand-500 dark:bg-[#161b24]'
-                          : 'border-slate-200/70 bg-white/40 hover:border-slate-300 hover:bg-slate-50/80 dark:border-[#23232a] dark:bg-[#131318] dark:hover:border-[#2a303a] dark:hover:bg-[#17171d]'
-                      }`}
-                    >
-                      <div className="flex items-start gap-4">
-                        <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-sm font-semibold ${
+              {resultRows.length ? resultRows.map((row) => (
+                <button
+                  key={row.lookup_key}
+                  type="button"
+                  onClick={() => selectSummary(row.lookup_key)}
+                  className={`w-full rounded-[20px] border p-4 text-left transition-all ${
+                    selectedSummary?.lookup_key === row.lookup_key
+                      ? 'border-brand-500/70 bg-slate-50 shadow-[0_14px_30px_-28px_rgba(59,130,246,0.35)] dark:border-brand-500 dark:bg-[#161b24]'
+                      : 'border-slate-200/80 bg-white/40 hover:border-slate-300 hover:bg-slate-50/80 dark:border-[#23232a] dark:bg-[#131318] dark:hover:border-[#2a303a] dark:hover:bg-[#17171d]'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+                        {row.payment_id || row.request_id || row.lookup_key}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                        {row.merchant_id || 'unknown merchant'} · {formatDateTime(row.last_seen_ms)}
+                      </p>
+                    </div>
+                    <Badge variant={summaryBadgeVariant(row.latest_status)}>
+                      {humanizeAuditValue(row.latest_status) || 'Unknown'}
+                    </Badge>
+                  </div>
+                  <p className="mt-3 text-xs text-slate-500 dark:text-[#8a8a93]">
+                    {compactMeta([
+                      row.latest_gateway || null,
+                      `${row.event_count} events`,
+                      formatRelative(row.last_seen_ms),
+                    ])}
+                  </p>
+                </button>
+              )) : (
+                <EmptyState
+                  title={content.noMatchesTitle}
+                  body={content.noMatchesBody}
+                />
+              )}
+
+              <div className="flex items-center gap-2 pt-1">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={page <= 1}
+                  onClick={() => {
+                    const nextPage = Math.max(1, page - 1)
+                    setPage(nextPage)
+                    setTrailFocused(false)
+                    syncSearch(mode, range, nextPage, appliedFilters, selectedKey)
+                  }}
+                >
+                  Prev
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={resultRows.length < pageSize}
+                  onClick={() => {
+                    const nextPage = page + 1
+                    setPage(nextPage)
+                    setTrailFocused(false)
+                    syncSearch(mode, range, nextPage, appliedFilters, selectedKey)
+                  }}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4 p-5">
+              {selectedSummary ? (
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                      {selectedSummary.payment_id || selectedSummary.request_id || selectedSummary.lookup_key}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                      {totalEvents} event{totalEvents === 1 ? '' : 's'} in this decision trail
+                    </p>
+                  </div>
+                  {selectedSummary.latest_status ? (
+                    <Badge variant={summaryBadgeVariant(selectedSummary.latest_status)}>
+                      {humanizeAuditValue(selectedSummary.latest_status)}
+                    </Badge>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {timeline.length ? (
+                <div className="space-y-3">
+                  {timeline.map((event, index) => {
+                    const selected = selectedEvent?.id === event.id
+                    return (
+                      <button
+                        key={event.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedEventId(event.id)
+                          setInspectorTab('summary')
+                        }}
+                        className={`w-full rounded-[20px] border px-4 py-4 text-left transition ${
                           selected
-                            ? 'border-brand-500/50 bg-brand-500/10 text-brand-300'
-                            : 'border-slate-200 text-slate-600 dark:border-[#3a284f] dark:text-[#b38cff]'
-                        }`}>
-                          {index + 1}
-                        </div>
+                            ? 'border-brand-500/70 bg-slate-50 shadow-[0_14px_30px_-28px_rgba(59,130,246,0.35)] dark:border-brand-500 dark:bg-[#161b24]'
+                            : 'border-slate-200/70 bg-white/40 hover:border-slate-300 hover:bg-slate-50/80 dark:border-[#23232a] dark:bg-[#131318] dark:hover:border-[#2a303a] dark:hover:bg-[#17171d]'
+                        }`}
+                      >
+                        <div className="flex items-start gap-4">
+                          <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-sm font-semibold ${
+                            selected
+                              ? 'border-brand-500/50 bg-brand-500/10 text-brand-300'
+                              : 'border-slate-200 text-slate-600 dark:border-[#3a284f] dark:text-[#b38cff]'
+                          }`}>
+                            {index + 1}
+                          </div>
 
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <div className="flex flex-wrap items-center gap-2">
-                                <p className="text-lg font-semibold text-slate-900 dark:text-[#7da6ff]">
-                                  {stageLabel(event)}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="text-lg font-semibold text-slate-900 dark:text-[#7da6ff]">
+                                    {stageLabel(event)}
+                                  </p>
+                                  {event.status ? (
+                                    <Badge variant={summaryBadgeVariant(event.status)}>
+                                      {humanizeAuditValue(event.status)}
+                                    </Badge>
+                                  ) : null}
+                                </div>
+                                <p className="mt-2 text-xs text-slate-500 dark:text-[#8a8a93]">
+                                  {compactMeta([
+                                    event.gateway ? `gateway ${event.gateway}` : null,
+                                    formatDateTime(event.created_at_ms),
+                                    event.routing_approach || null,
+                                    event.payment_method_type || null,
+                                  ])}
                                 </p>
-                                {event.status ? (
-                                  <Badge variant={summaryBadgeVariant(event.status)}>
-                                    {humanizeAuditValue(event.status)}
-                                  </Badge>
-                                ) : null}
+                                <p className="mt-2 text-[11px] text-slate-500 dark:text-[#667085]">
+                                  {event.request_id || event.id}
+                                </p>
                               </div>
-                              <p className="mt-2 text-xs text-slate-500 dark:text-[#8a8a93]">
-                                {compactMeta([
-                                  event.gateway ? `gateway ${event.gateway}` : null,
-                                  formatDateTime(event.created_at_ms),
-                                  event.routing_approach || null,
-                                  event.payment_method_type || null,
-                                ])}
-                              </p>
-                              <p className="mt-2 text-[11px] text-slate-500 dark:text-[#667085]">
-                                {event.request_id || event.id}
-                              </p>
+
+                              {selected ? (
+                                <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500 dark:text-[#8a8a93]">
+                                  Inspecting -&gt;
+                                </p>
+                              ) : null}
                             </div>
 
-                            {selected ? (
-                              <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500 dark:text-[#8a8a93]">
-                                Inspecting →
+                            {event.error_message ? (
+                              <p className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/[0.08] px-4 py-3 text-sm text-red-600 dark:text-red-300">
+                                {event.error_message}
                               </p>
                             ) : null}
                           </div>
-
-                          {event.error_message ? (
-                            <p className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/[0.08] px-4 py-3 text-sm text-red-600 dark:text-red-300">
-                              {event.error_message}
-                            </p>
-                          ) : null}
                         </div>
-                      </div>
-                    </button>
-                  )
-                })}
-              </div>
-            ) : (
-              <EmptyState
-                title="No timeline selected yet"
-                body={content.summaryEmpty}
-              />
-            )}
-          </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              ) : (
+                <EmptyState
+                  title="No timeline selected yet"
+                  body={content.summaryEmpty}
+                />
+              )}
+            </div>
+          )}
         </GlassCard>
 
         <GlassCard className="overflow-hidden xl:sticky xl:top-6 xl:self-start">
-          <div className="border-b border-slate-200 px-5 py-4 dark:border-[#2a303a]">
-            <div className="flex items-start gap-3">
-              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-slate-200 text-[11px] font-semibold text-slate-600 dark:border-[#2a303a] dark:text-[#8a8a93]">
-                3
-              </div>
+          <div className="border-b border-slate-200 px-6 py-5 dark:border-[#2a303a]">
+            <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <p className="text-sm font-semibold text-slate-900 dark:text-white">Event inspector</p>
-                <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                  Click a timeline event to inspect its data
+                <SurfaceLabel>Event inspector</SurfaceLabel>
+                <h2 className="mt-2 text-xl font-semibold text-slate-900 dark:text-white">
+                  {selectedEvent ? stageLabel(selectedEvent) : 'No event selected'}
+                </h2>
+                <p className="mt-1 text-sm text-slate-500 dark:text-[#8a8a93]">
+                  {selectedEventIsDecision
+                    ? 'View connector scores, routing details, request payload, and response payload.'
+                    : 'View gateway update outcome, request payload, and response payload.'}
                 </p>
               </div>
+              {selectedEvent?.status ? (
+                <Badge variant={summaryBadgeVariant(selectedEvent.status)}>
+                  {humanizeAuditValue(selectedEvent.status)}
+                </Badge>
+              ) : null}
             </div>
           </div>
 
-          <div className="space-y-4 p-5">
+          <div className="space-y-5 p-6">
             {selectedEvent && inspectorModel ? (
               <>
-                <div className="space-y-3">
-                  <p className="text-xs text-slate-500 dark:text-[#8a8a93]">
-                    Connector scores, routing logic, and full payload
-                  </p>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-xl font-semibold text-slate-900 dark:text-[#7da6ff]">
-                      {stageLabel(selectedEvent)}
-                    </p>
-                    {selectedEvent.status ? (
-                      <Badge variant={summaryBadgeVariant(selectedEvent.status)}>
-                        {humanizeAuditValue(selectedEvent.status)}
-                      </Badge>
-                    ) : null}
-                  </div>
-                  <p className="text-sm text-slate-500 dark:text-[#8a8a93]">
-                    {formatDateTime(selectedEvent.created_at_ms)}
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-3 md:grid-cols-3">
                   <InsetPanel className="px-4 py-3">
                     <SurfaceLabel>Gateway</SurfaceLabel>
                     <p className="mt-2 text-base font-semibold text-slate-900 dark:text-[#7da6ff]">
@@ -1268,6 +1247,12 @@ export function PaymentAuditPage() {
                     <SurfaceLabel>Outcome</SurfaceLabel>
                     <p className="mt-2 text-base font-semibold text-slate-900 dark:text-[#34d399]">
                       {humanizeAuditValue(selectedEvent.status) || 'Unknown'}
+                    </p>
+                  </InsetPanel>
+                  <InsetPanel className="px-4 py-3">
+                    <SurfaceLabel>Time</SurfaceLabel>
+                    <p className="mt-2 text-sm font-semibold text-slate-900 dark:text-white">
+                      {formatDateTime(selectedEvent.created_at_ms)}
                     </p>
                   </InsetPanel>
                 </div>
@@ -1288,22 +1273,26 @@ export function PaymentAuditPage() {
 
                 {inspectorTab === 'summary' ? (
                   <div className="space-y-4">
-                    <InspectorJsonPanel
-                      title="Connector scores"
-                      value={inspectorModel.scoreContext}
-                      emptyMessage="No connector score map was captured for this event."
-                    />
+                    {selectedEventIsDecision ? (
+                      <InspectorJsonPanel
+                        title="Connector scores"
+                        value={inspectorModel.scoreContext}
+                        emptyMessage="No connector score map was captured for this event."
+                      />
+                    ) : null}
                     <InspectorKeyValueGrid rows={inspectorModel.summaryRows} />
                     <InspectorJsonPanel
                       title="Selection reason"
                       value={inspectorModel.selectionReason}
                       emptyMessage="No explicit selection reason was captured for this event."
                     />
-                    <InspectorJsonPanel
-                      title="Details"
-                      value={inspectorModel.signalRecord}
-                      emptyMessage="This event did not capture additional scoring or rule metadata."
-                    />
+                    {selectedEventIsDecision ? (
+                      <InspectorJsonPanel
+                        title="Details"
+                        value={inspectorModel.signalRecord}
+                        emptyMessage="This event did not capture additional scoring or rule metadata."
+                      />
+                    ) : null}
                   </div>
                 ) : null}
 
@@ -1338,15 +1327,12 @@ export function PaymentAuditPage() {
                   <Button size="sm" variant="secondary" disabled={!selectedEvent.payment_id} onClick={() => copyValue(selectedEvent.payment_id)}>
                     Copy payment ID
                   </Button>
-                  <Button size="sm" variant="secondary" onClick={openRelatedEvents}>
-                    Open related events
-                  </Button>
                 </div>
               </>
             ) : (
               <EmptyState
                 title="No event selected"
-                body="Select a timeline event to inspect connector scores, routing logic, and full payloads."
+                body="Select a timeline event to view scores, routing details, request payload, and response payload."
               />
             )}
           </div>

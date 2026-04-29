@@ -105,16 +105,15 @@ export function OnboardingPage() {
             <div className="max-w-[620px] space-y-9">
               <div className="space-y-6">
                 <h1 className="max-w-[10ch] text-[clamp(3.8rem,6.8vw,6rem)] font-semibold leading-[0.92] tracking-[-0.065em] text-slate-950 dark:text-white">
-                  Configure the merchant workspace before first traffic.
+                  Set up your merchant before processing traffic.
                 </h1>
                 <p className="max-w-[38rem] text-lg leading-9 text-slate-600 dark:text-[#9aa4b6] sm:text-[1.3rem]">
-                  Create the merchant shell once, then move straight into routing rules,
-                  analytics, and payment audit from the same control plane.
+                  Create your merchant account, then configure routing, analytics, and payment audits.
                 </p>
               </div>
 
               <div className="flex flex-wrap gap-3">
-                <Pill>Merchant workspace</Pill>
+                <Pill>Merchant account</Pill>
                 <Pill>Routing controls</Pill>
                 <Pill>Analytics ready</Pill>
               </div>
@@ -129,7 +128,7 @@ export function OnboardingPage() {
                 Create your merchant
               </h2>
               <p className="mt-3 text-base text-slate-500 dark:text-[#8a94a7]">
-                Set up the merchant account that will own your Decision Engine workspace.
+                Set up the merchant account for your Decision Engine dashboard.
               </p>
             </div>
 
@@ -137,7 +136,7 @@ export function OnboardingPage() {
               <form onSubmit={handleSubmit} className="space-y-6">
                 <Field
                   label="Merchant name"
-                  footer="You can adjust downstream rules, connectors, and analytics after the workspace is created."
+                  footer="You can adjust rules, connectors, and analytics after the merchant is created."
                 >
                   <div className="relative">
                     <Building2
@@ -166,7 +165,7 @@ export function OnboardingPage() {
                   {loading ? (
                     <>
                       <Loader2 size={16} className="animate-spin" />
-                      Creating workspace
+                      Creating merchant
                     </>
                   ) : (
                     <>
@@ -181,7 +180,7 @@ export function OnboardingPage() {
               </form>
 
               <div className="mt-10 border-t border-slate-200 pt-6 text-center text-xs text-slate-500 dark:border-[#1d1d23] dark:text-[#667085]">
-                <p>Workspace ownership and merchant-scoped access will be linked to your current operator session.</p>
+                <p>Merchant access will be linked to your current session.</p>
                 <p className="mt-4 text-slate-400 dark:text-[#525866]">Juspay Decision Engine</p>
               </div>
             </div>

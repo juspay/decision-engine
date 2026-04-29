@@ -232,18 +232,17 @@ export function AuthPage() {
             <div className="max-w-[620px] space-y-9">
               <div className="space-y-6">
                 <h2 className="max-w-[10ch] text-[clamp(4rem,7vw,6.2rem)] font-semibold leading-[0.92] tracking-[-0.065em] text-slate-950 dark:text-white">
-                  Route, inspect, and iterate from one control surface.
+                  Manage routing, analytics, and audits from one dashboard.
                 </h2>
                 <p className="max-w-[38rem] text-lg leading-9 text-slate-600 dark:text-[#9aa4b6] sm:text-[1.35rem]">
-                  Sign in to the internal workspace used for gateway routing setup,
-                  merchant-scoped analytics, and payment audit review.
+                  Sign in to manage gateway routing, analytics, and payment audits.
                 </p>
               </div>
 
               <div className="flex flex-wrap gap-3">
                 <PillStat>Gateway routing</PillStat>
                 <PillStat>Merchant analytics</PillStat>
-                <PillStat>ClickHouse audit</PillStat>
+                <PillStat>Payment audit</PillStat>
               </div>
             </div>
           </div>
@@ -258,7 +257,7 @@ export function AuthPage() {
               <p className="mt-3 text-base text-slate-500 dark:text-[#8a94a7]">
                 {tab === 'login'
                   ? 'Sign in to access your dashboard'
-                  : 'Create operator access for your Decision Engine workspace'}
+                  : 'Create access for your Decision Engine dashboard'}
               </p>
             </div>
 
@@ -288,7 +287,7 @@ export function AuthPage() {
                   {tab === 'signup' ? (
                     <Field
                       label="Merchant name"
-                      footer="This uses the same merchant onboarding step already present in the authenticated flow."
+                      footer="This merchant will be available across routing, analytics, and audits."
                     >
                       <FieldInput
                         type="text"
@@ -305,7 +304,7 @@ export function AuthPage() {
                     label="Password"
                     footer={
                       tab === 'login'
-                        ? 'Password reset is managed by your internal operator admin.'
+                        ? 'Password reset is managed by your account admin.'
                         : 'Use at least 10 characters with uppercase, lowercase, number, and special character.'
                     }
                   >
@@ -357,7 +356,7 @@ export function AuthPage() {
                       </>
                     ) : (
                       <>
-                        {tab === 'login' ? 'Enter workspace' : 'Create account'}
+                        {tab === 'login' ? 'Enter dashboard' : 'Create account'}
                         <ArrowRight
                           size={16}
                           className="transition-transform duration-200 group-hover:translate-x-0.5"
@@ -368,7 +367,7 @@ export function AuthPage() {
                 </form>
 
                 <div className="mt-10 border-t border-slate-200 pt-6 text-center text-xs text-slate-500 dark:border-[#1d1d23] dark:text-[#667085]">
-                  <p>By continuing you agree to internal access policy and audit logging for operator actions.</p>
+                  <p>By continuing you agree to access policy and audit logging for account activity.</p>
                   <p className="mt-4 text-slate-400 dark:text-[#525866]">Juspay Decision Engine</p>
                 </div>
               </div>

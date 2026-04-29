@@ -92,6 +92,7 @@ curl "$BASE_URL/analytics/routing-stats?range=1d&payment_method_type=CARD" \
 
 - Analytics reads are ClickHouse-backed and merchant-scoped by the authenticated context.
 - Use `range=15m|1h|12h|1d|1w` or `start_ms` plus `end_ms` for a custom window.
+- `gateway_share` and `sr_trend` are scoped by the same dimension and `gateway` filters so selected volume can be compared against the matching success-rate slice.
 - The dashboard uses this for both auth-rate based analytics and rule/volume decision activity.
 
 ## Related

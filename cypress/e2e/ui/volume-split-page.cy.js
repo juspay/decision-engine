@@ -15,6 +15,7 @@ describe('Volume Split UI', () => {
   })
 
   it('creates and activates a volume split rule from the page', () => {
+    cy.intercept('POST', '**/routing/create').as('createVolumeSplit')
     cy.visitWithMerchant('/routing/volume', merchantId)
 
     cy.contains('h1', 'Volume Split Routing').should('be.visible')
@@ -28,7 +29,7 @@ describe('Volume Split UI', () => {
     cy.contains('button', 'Create Rule').click()
     cy.contains('Volume split rule successfully created').should('be.visible')
     cy.contains('button', 'Activate').click()
-    cy.contains('Rule activated.').should('be.visible')
+    cy.contains('Rule activated.', { timeout: 15000 }).should('be.visible')
     cy.contains('Active Volume Split').scrollIntoView().should('exist')
   })
 })

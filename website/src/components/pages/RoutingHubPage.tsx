@@ -1,11 +1,7 @@
 import type { ElementType } from 'react'
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import useSWR, { useSWRConfig } from 'swr'
 import {
-  Activity,
-  ArrowRight,
-  BarChart3,
   BookOpen,
   CheckCircle2,
   FlaskConical,
@@ -35,7 +31,6 @@ interface StrategyRow {
   description: string
   useCase: string
   icon: ElementType
-  route: string
   state: StrategyState
   evidence: string
   canDeactivate: boolean
@@ -55,15 +50,7 @@ function stateBadge(state: StrategyState) {
   return <Badge variant="gray">Not set</Badge>
 }
 
-function routeForActiveType(type: string) {
-  if (type === 'advanced') return '/routing/rules'
-  if (type === 'volume_split') return '/routing/volume'
-  if (type === 'priority' || type === 'single') return '/routing/rules'
-  return '/routing'
-}
-
 export function RoutingHubPage() {
-  const navigate = useNavigate()
   const { mutate: mutateCache } = useSWRConfig()
   const selectedMerchantId = useMerchantStore((state) => state.merchantId)
   const authMerchantId = useAuthStore((state) => state.user?.merchantId || '')
@@ -94,13 +81,6 @@ export function RoutingHubPage() {
   const activeRuleAlgorithm = (activeAlgorithms || []).find((algorithm) => isRuleBasedAlgorithmType(algorithmType(algorithm)))
   const activeVolumeAlgorithm = (activeAlgorithms || []).find((algorithm) => algorithmType(algorithm) === 'volume_split')
   const hasRuntimeStrategy = Boolean(activeAlgorithm || hasAuthRateConfig || hasDebitRouting)
-  const activeRoute = activeAlgorithm
-    ? routeForActiveType(activeType)
-    : hasAuthRateConfig
-      ? '/routing/sr'
-      : hasDebitRouting
-        ? '/routing/debit'
-        : '/routing/rules'
   const activeStrategyId: StrategyId | null = isRuleBasedAlgorithmType(activeType)
     ? 'rules'
     : activeType === 'volume_split'
@@ -115,11 +95,11 @@ export function RoutingHubPage() {
   const runtimeDescription = activeAlgorithm
     ? `${activeAlgorithm.description || 'Active routing strategy'} is currently selected for payment routing.`
     : hasAuthRateConfig && hasDebitRouting
-      ? 'Success-rate routing is configured and debit routing is enabled for this merchant.'
+      ? 'Success-rate routing is configured and debit routing is enabled.'
       : hasAuthRateConfig
         ? 'Success-rate routing is configured and available for runtime routing decisions.'
         : hasDebitRouting
-          ? 'Debit network routing is enabled for this merchant.'
+          ? 'Debit network routing is enabled.'
           : 'Configure and activate a strategy before expecting runtime routing decisions to follow a custom policy.'
   const runtimeType = activeType
     ? activeType.replace('_', ' ')
@@ -191,7 +171,6 @@ export function RoutingHubPage() {
       description: 'Use connector score updates to steer traffic toward the best authorization rate.',
       useCase: 'Best when you want automatic gateway choice based on live success-rate signals.',
       icon: TrendingUp,
-      route: '/routing/sr',
       state: hasAuthRateConfig ? 'configured' : 'not_set',
       evidence: hasAuthRateConfig ? 'Score config is available for runtime decisions.' : 'Set score defaults before relying on auth-rate routing.',
       canDeactivate: hasAuthRateConfig,
@@ -203,7 +182,6 @@ export function RoutingHubPage() {
       description: 'Enforce explicit business conditions before traffic reaches connector selection.',
       useCase: 'Best for BIN, network, country, amount, metadata, or merchant policy overrides.',
       icon: BookOpen,
-      route: '/routing/rules',
       state: hasRuleBasedRouting ? 'enabled' : 'not_set',
       evidence: hasRuleBasedRouting ? 'An advanced rule algorithm is active.' : 'No active advanced rule algorithm found.',
       canDeactivate: Boolean(activeRuleAlgorithm),
@@ -215,7 +193,6 @@ export function RoutingHubPage() {
       description: 'Distribute payments by configured percentages and verify actual traffic share.',
       useCase: 'Best for ramp-ups, A/B routing, new connector rollout, and traffic balancing.',
       icon: PieChart,
-      route: '/routing/volume',
       state: hasVolumeSplit ? 'enabled' : 'not_set',
       evidence: hasVolumeSplit ? 'A volume split algorithm is active.' : 'No active volume split algorithm found.',
       canDeactivate: Boolean(activeVolumeAlgorithm),
@@ -227,7 +204,6 @@ export function RoutingHubPage() {
       description: 'Enable debit-network decisions for co-badged card payment flows.',
       useCase: 'Best when debit network cost, issuer country, and regulated-card behavior matter.',
       icon: Network,
-      route: '/routing/debit',
       state: hasDebitRouting ? 'enabled' : 'not_set',
       evidence: hasDebitRouting ? 'Merchant debit-routing flag is enabled.' : 'Enable the merchant flag before running debit network decisions.',
       canDeactivate: hasDebitRouting,
@@ -237,32 +213,24 @@ export function RoutingHubPage() {
   const nextAction = !merchantId
     ? {
         title: 'Select or create a merchant first',
-        body: 'Routing setup, audit, and explorer traffic are all merchant scoped.',
-        cta: 'Create merchant',
-        route: '/onboarding',
+        body: 'Routing setup and live strategy state require a signed-in merchant.',
         icon: ShieldCheck,
       }
     : !hasAuthRateConfig
       ? {
           title: 'Start with auth-rate configuration',
-          body: 'Score defaults make the runtime decision surface useful even before custom rules are active.',
-          cta: 'Configure auth-rate',
-          route: '/routing/sr',
+          body: 'Score defaults prepare auth-rate routing before custom rules are active.',
           icon: TrendingUp,
         }
       : !hasRuntimeStrategy
         ? {
             title: 'Activate one routing strategy',
-            body: 'Create a rule-based or volume-split strategy, activate it, then test it in Decision Explorer.',
-            cta: 'Create rule',
-            route: '/routing/rules',
+            body: 'Create and activate a rule-based, volume-split, or debit routing strategy before runtime traffic depends on policy.',
             icon: GitBranch,
           }
         : {
-            title: 'Test the active strategy now',
-            body: 'Run real decision calls, then open audit to inspect request, response, gateway, and status.',
-            cta: 'Open explorer',
-            route: '/decisions',
+            title: 'Active strategy is ready',
+            body: 'Routing is configured and ready for live traffic.',
             icon: FlaskConical,
           }
 
@@ -276,23 +244,6 @@ export function RoutingHubPage() {
             <h1 className="text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">Routing Hub</h1>
             <Badge variant={merchantId ? 'blue' : 'orange'}>{merchantId || 'No merchant selected'}</Badge>
           </div>
-          <p className="mt-2 max-w-3xl text-sm leading-7 text-slate-500 dark:text-[#8a8a93]">
-            Decide what to configure next, test the active strategy, and jump into audit without duplicating the overview dashboard.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" onClick={() => navigate('/analytics')}>
-            <BarChart3 size={16} />
-            Analytics
-          </Button>
-          <Button variant="secondary" onClick={() => navigate('/audit')}>
-            <Activity size={16} />
-            Audit
-          </Button>
-          <Button onClick={() => navigate('/decisions')}>
-            <FlaskConical size={16} />
-            Test routing
-          </Button>
         </div>
       </div>
 
@@ -317,19 +268,12 @@ export function RoutingHubPage() {
 
               <div className="grid gap-3 sm:grid-cols-3">
                 <PostureStat label="Ready surfaces" value={`${readiness}/3`} detail="Auth-rate, traffic policy, debit" />
-                <PostureStat label="Runtime type" value={runtimeType} detail="Current routing surface" />
-                <PostureStat label="Debit gate" value={hasDebitRouting ? 'Enabled' : 'Off'} detail="Merchant feature flag" />
+                <PostureStat label="Runtime type" value={runtimeType} detail="Active routing mode" />
+                <PostureStat label="Debit gate" value={hasDebitRouting ? 'Enabled' : 'Off'} detail="Debit routing access" />
               </div>
 
-              <div className="flex flex-wrap gap-2">
-                <Button disabled={!hasRuntimeStrategy} onClick={() => navigate(activeRoute)}>
-                  Manage active strategy
-                  <ArrowRight size={16} />
-                </Button>
-                <Button variant="secondary" onClick={() => navigate('/decisions')}>
-                  Run decision
-                </Button>
-                {activeStrategyId && (
+              {activeStrategyId ? (
+                <div className="flex flex-wrap gap-2">
                   <Button
                     variant="danger"
                     onClick={() => deactivateStrategy(activeStrategyId)}
@@ -338,8 +282,8 @@ export function RoutingHubPage() {
                     <PowerOff size={16} />
                     {deactivatingStrategy === activeStrategyId ? 'Deactivating' : 'Deactivate'}
                   </Button>
-                )}
-              </div>
+                </div>
+              ) : null}
             </div>
           </CardBody>
         </Card>
@@ -351,20 +295,16 @@ export function RoutingHubPage() {
                 <NextActionIcon size={22} />
               </div>
               <div>
-                <SurfaceLabel>Recommended next action</SurfaceLabel>
+                <SurfaceLabel>Routing status</SurfaceLabel>
                 <h3 className="mt-3 text-2xl font-semibold text-slate-950 dark:text-white">{nextAction.title}</h3>
                 <p className="mt-3 text-sm leading-7 text-slate-500 dark:text-[#9aa6bb]">{nextAction.body}</p>
-                <Button className="mt-5" onClick={() => navigate(nextAction.route)}>
-                  {nextAction.cta}
-                  <ArrowRight size={16} />
-                </Button>
               </div>
             </div>
 
             <div className="mt-7 space-y-3 border-t border-slate-200 pt-5 dark:border-[#242b36]">
               <RunbookStep done={hasAuthRateConfig} label="Configure" detail="Define score defaults or routing policy." />
-              <RunbookStep done={hasRuntimeStrategy} label="Activate" detail="Make one strategy live for the merchant." />
-              <RunbookStep done={false} label="Verify" detail="Run Explorer, then inspect Audit." />
+              <RunbookStep done={hasRuntimeStrategy} label="Activate" detail="Make one strategy live." />
+              <RunbookStep done={false} label="Verify" detail="Confirm live routing behavior with a real decision flow." />
             </div>
           </CardBody>
         </Card>
@@ -373,7 +313,7 @@ export function RoutingHubPage() {
       <section className="space-y-3">
         <div>
           <SurfaceLabel>Routing surfaces</SurfaceLabel>
-          <h2 className="mt-2 text-xl font-semibold text-slate-950 dark:text-white">Pick the job, then configure the route</h2>
+          <h2 className="mt-2 text-xl font-semibold text-slate-950 dark:text-white">Current configuration state</h2>
         </div>
 
         {actionError && (
@@ -393,12 +333,12 @@ export function RoutingHubPage() {
             return (
               <div
                 key={strategy.id}
-                className={`group grid gap-5 px-5 py-5 transition-colors hover:bg-slate-50 dark:hover:bg-[#151b25] lg:grid-cols-[minmax(320px,520px)_minmax(280px,1fr)] lg:items-center xl:grid-cols-[minmax(360px,560px)_minmax(320px,1fr)_max-content] ${
+                className={`grid gap-5 px-5 py-5 lg:grid-cols-[minmax(320px,520px)_minmax(280px,1fr)] lg:items-center xl:grid-cols-[minmax(360px,560px)_minmax(320px,1fr)_max-content] ${
                   index === 0 ? '' : 'border-t border-slate-200 dark:border-[#252d3a]'
                 }`}
               >
                 <div className="flex items-start gap-4">
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-slate-500 transition-colors group-hover:border-brand-500/25 group-hover:text-brand-600 dark:border-[#273141] dark:bg-[#0c1119] dark:text-[#8ea0bb] dark:group-hover:text-sky-300">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-slate-500 dark:border-[#273141] dark:bg-[#0c1119] dark:text-[#8ea0bb]">
                     <Icon size={22} />
                   </div>
                   <div className="min-w-0 max-w-[470px]">
@@ -420,14 +360,8 @@ export function RoutingHubPage() {
                   <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-[#7d879b]">{strategy.evidence}</p>
                 </div>
 
-                <div className="flex flex-wrap justify-start gap-2 lg:col-start-2 xl:col-start-auto xl:justify-end xl:whitespace-nowrap">
-                  <Button size="sm" variant="secondary" onClick={() => navigate(strategy.route)}>
-                    Configure
-                  </Button>
-                  <Button size="sm" variant="secondary" onClick={() => navigate('/decisions')}>
-                    Test
-                  </Button>
-                  {strategy.canDeactivate && (
+                {strategy.canDeactivate ? (
+                  <div className="flex flex-wrap justify-start gap-2 lg:col-start-2 xl:col-start-auto xl:justify-end xl:whitespace-nowrap">
                     <Button
                       size="sm"
                       variant="danger"
@@ -437,8 +371,8 @@ export function RoutingHubPage() {
                       <PowerOff size={14} />
                       {deactivatingStrategy === strategy.id ? 'Deactivating' : 'Deactivate'}
                     </Button>
-                  )}
-                </div>
+                  </div>
+                ) : null}
               </div>
             )
           })}
