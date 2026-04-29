@@ -2,6 +2,7 @@ const factory = require('../../support/test-data-factory')
 const {
   ruleBlock,
   addGatewayToBlock,
+  selectCondLhs,
 } = require('../../support/euclid-helpers')
 
 describe('Nested AND+OR branches', () => {
@@ -63,15 +64,16 @@ describe('Nested AND+OR branches', () => {
 
   it('nested branch can target a different field from the parent condition', () => {
     ruleBlock(0).within(() => {
-      cy.get('select.cond-select').eq(0).select('payment_method')
+      selectCondLhs(0, 'payment_method')
     })
     ruleBlock(0).contains('button', 'Add nested branch').click()
     ruleBlock(0).find('.border-l-2.border-sky-200').first().within(() => {
-      cy.get('select.cond-select').eq(0).select('currency')
+      selectCondLhs(0, 'currency')
     })
     // Parent field must remain unchanged
     ruleBlock(0).within(() => {
-      cy.get('select.cond-select').eq(0).should('have.value', 'payment_method')
+      cy.get('[data-cy="cond-lhs"]').eq(0).find('button.cond-select')
+        .should('have.attr', 'data-value', 'payment_method')
     })
   })
 
@@ -104,13 +106,13 @@ describe('Nested AND+OR branches', () => {
 
   it('JSON preview emits a non-null nested array when a branch is added', () => {
     ruleBlock(0).within(() => {
-      cy.get('select.cond-select').eq(0).select('amount')
-      cy.get('select.cond-select').eq(1).select('greater than')
+      selectCondLhs(0, 'amount')
+      cy.get('select.cond-select').eq(0).select('greater than')
       cy.get('input[type="number"]').type('10')
     })
     ruleBlock(0).contains('button', 'Add nested branch').click()
     ruleBlock(0).find('.border-l-2.border-sky-200').first().within(() => {
-      cy.get('select.cond-select').eq(0).select('payment_method')
+      selectCondLhs(0, 'payment_method')
     })
     addGatewayToBlock(0, 'rbl')
     cy.get('input[placeholder="my-rule"]').type(ruleName)

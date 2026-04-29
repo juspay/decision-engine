@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import useSWR from 'swr'
 import {
   DndContext,
@@ -457,6 +457,7 @@ function ConditionRowEditor({
   return (
     <div className="flex items-start gap-2 flex-wrap">
       <SearchableSelect
+        dataCy="cond-lhs"
         value={row.lhs}
         onChange={(newKey) => {
           const newConfig = routingKeys[newKey]
@@ -494,6 +495,7 @@ function ConditionRowEditor({
         </div>
       ) : isEnum ? (
         <SearchableSelect
+          dataCy="cond-val"
           value={row.value as string}
           onChange={(v) => onChange({ ...row, value: v })}
           options={(keyInfo?.values || []).map((v: string) => ({ value: v, label: toLabel(v) }))}
@@ -523,7 +525,7 @@ function ConditionRowEditor({
           className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-xs w-32 focus:outline-none"
         />
       )}
-      <button type="button" onClick={onRemove} className="text-red-400 hover:text-red-600 mt-1">
+      <button type="button" onClick={onRemove} aria-label="Remove condition" className="text-red-400 hover:text-red-600 mt-1">
         <Trash2 size={12} />
       </button>
     </div>

@@ -63,7 +63,7 @@ describe('Decision Explorer UI', () => {
       .then(() => {
         cy.contains('button', 'Debit routing').click()
         cy.contains('Debit Routing Parameters').should('be.visible')
-        cy.contains('Debit routing is disabled for this merchant.').should('be.visible')
+        cy.contains('Debit routing is disabled.').should('be.visible')
         cy.contains('button', 'Enable Debit Routing').should('be.visible')
         cy.get('input[value="merchant_category_code_0001"]').should('be.visible')
         cy.get('input[value="VISA, NYCE, PULSE, STAR"]').should('be.visible')
@@ -79,7 +79,7 @@ describe('Decision Explorer UI', () => {
       .then(() => cy.visitWithSession('/decisions', merchantId))
       .then(() => {
         cy.contains('button', 'Debit routing').click()
-        cy.contains('Debit routing is enabled for this merchant.').should('be.visible')
+        cy.contains('Debit routing is enabled.').should('be.visible')
         cy.contains('button', 'Run Debit Routing').should('not.be.disabled').click()
         cy.contains('Debit Routing Result', { timeout: 20000 }).should('be.visible')
         cy.contains('Ranked Debit Networks').should('be.visible')

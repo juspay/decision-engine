@@ -7,6 +7,8 @@ const {
   addVolumeSplitPriorityRow,
   addGatewayToSplitRow,
   addFallbackGateway,
+  selectCondLhs,
+  selectCondVal,
 } = require('../../support/euclid-helpers')
 
 describe('End-to-end creation', () => {
@@ -32,8 +34,8 @@ describe('End-to-end creation', () => {
   it('creates a rule using "is one of" — backend receives enum_variant_array', () => {
     cy.get('input[placeholder="my-rule"]').type(ruleName)
     ruleBlock(0).within(() => {
-      cy.get('select.cond-select').eq(0).select('payment_method')
-      cy.get('select.cond-select').eq(1).select('is one of')
+      selectCondLhs(0, 'payment_method')
+      cy.get('select.cond-select').eq(0).select('is one of')
       cy.get('input[type="checkbox"]').eq(0).check()
       cy.get('input[type="checkbox"]').eq(1).check()
     })
@@ -57,8 +59,8 @@ describe('End-to-end creation', () => {
   it('creates a rule using "is not one of" — backend receives not_equal + enum_variant_array', () => {
     cy.get('input[placeholder="my-rule"]').type(ruleName)
     ruleBlock(0).within(() => {
-      cy.get('select.cond-select').eq(0).select('payment_method')
-      cy.get('select.cond-select').eq(1).select('is not one of')
+      selectCondLhs(0, 'payment_method')
+      cy.get('select.cond-select').eq(0).select('is not one of')
       cy.get('input[type="checkbox"]').eq(0).check()
     })
     addGatewayToBlock(0, 'stripe', 'mca_stripe')
@@ -77,14 +79,14 @@ describe('End-to-end creation', () => {
   it('creates a rule with one nested AND+OR branch — backend receives nested array', () => {
     cy.get('input[placeholder="my-rule"]').type(ruleName)
     ruleBlock(0).within(() => {
-      cy.get('select.cond-select').eq(0).select('amount')
-      cy.get('select.cond-select').eq(1).select('greater than')
+      selectCondLhs(0, 'amount')
+      cy.get('select.cond-select').eq(0).select('greater than')
       cy.get('input[type="number"]').type('10')
     })
     ruleBlock(0).contains('button', 'Add nested branch').click()
     ruleBlock(0).find('.border-l-2.border-sky-200').eq(0).within(() => {
-      cy.get('select.cond-select').eq(0).select('payment_method')
-      cy.get('select.cond-select').eq(2).select('card')
+      selectCondLhs(0, 'payment_method')
+      selectCondVal(0, 'card')
     })
     addGatewayToBlock(0, 'rbl', 'mca_rbl')
     addFallbackGateway('stripe', 'mca_stripe')
@@ -105,20 +107,21 @@ describe('End-to-end creation', () => {
   it('creates a rule with two nested OR branches — backend receives nested array of length 2', () => {
     cy.get('input[placeholder="my-rule"]').type(ruleName)
     ruleBlock(0).within(() => {
-      cy.get('select.cond-select').eq(0).select('amount')
-      cy.get('select.cond-select').eq(1).select('greater than')
+      selectCondLhs(0, 'amount')
+      cy.get('select.cond-select').eq(0).select('greater than')
       cy.get('input[type="number"]').type('10')
     })
     ruleBlock(0).contains('button', 'Add nested branch').click()
     ruleBlock(0).find('.border-l-2.border-sky-200').eq(0).within(() => {
-      cy.get('select.cond-select').eq(0).select('payment_method')
-      cy.get('select.cond-select').eq(2).select('card')
+      selectCondLhs(0, 'payment_method')
+      selectCondVal(0, 'card')
     })
     ruleBlock(0).contains('button', 'Add nested branch').click()
     ruleBlock(0).find('.border-l-2.border-sky-200').eq(1).within(() => {
-      cy.get('select.cond-select').eq(0).select('currency')
-      cy.get('select.cond-select').eq(2).find('option').eq(1).then(($opt) => {
-        cy.get('select.cond-select').eq(2).select($opt.val())
+      selectCondLhs(0, 'currency')
+      cy.get('[data-cy="cond-val"]').eq(0).within(() => {
+        cy.get('button.cond-select').click()
+        cy.get('button:not(.cond-select)').first().click()
       })
     })
     addGatewayToBlock(0, 'rbl', 'mca_rbl')
@@ -136,8 +139,8 @@ describe('End-to-end creation', () => {
   it('creates a rule with volume split output — backend receives routing_type: volume_split', () => {
     cy.get('input[placeholder="my-rule"]').type(ruleName)
     ruleBlock(0).within(() => {
-      cy.get('select.cond-select').eq(0).select('payment_method')
-      cy.get('select.cond-select').eq(2).select('card')
+      selectCondLhs(0, 'payment_method')
+      selectCondVal(0, 'card')
     })
     switchOutputType(0, 'Volume Split')
     addVolumeSplitEntry(0, 60, 'stripe', 'mca_stripe')
@@ -164,8 +167,8 @@ describe('End-to-end creation', () => {
   it('creates a rule with volume split priority output — backend receives routing_type: volume_split_priority', () => {
     cy.get('input[placeholder="my-rule"]').type(ruleName)
     ruleBlock(0).within(() => {
-      cy.get('select.cond-select').eq(0).select('payment_method')
-      cy.get('select.cond-select').eq(2).select('card')
+      selectCondLhs(0, 'payment_method')
+      selectCondVal(0, 'card')
     })
     switchOutputType(0, 'Split + Priority')
     addVolumeSplitPriorityRow(0, 60)
@@ -191,14 +194,14 @@ describe('End-to-end creation', () => {
   it('creates a rule combining nested AND+OR with volume split output', () => {
     cy.get('input[placeholder="my-rule"]').type(ruleName)
     ruleBlock(0).within(() => {
-      cy.get('select.cond-select').eq(0).select('amount')
-      cy.get('select.cond-select').eq(1).select('greater than')
+      selectCondLhs(0, 'amount')
+      cy.get('select.cond-select').eq(0).select('greater than')
       cy.get('input[type="number"]').type('100')
     })
     ruleBlock(0).contains('button', 'Add nested branch').click()
     ruleBlock(0).find('.border-l-2.border-sky-200').first().within(() => {
-      cy.get('select.cond-select').eq(0).select('payment_method')
-      cy.get('select.cond-select').eq(2).select('card')
+      selectCondLhs(0, 'payment_method')
+      selectCondVal(0, 'card')
     })
     switchOutputType(0, 'Volume Split')
     addVolumeSplitEntry(0, 70, 'stripe', 'mca_stripe')
@@ -219,16 +222,17 @@ describe('End-to-end creation', () => {
   it('creates a rule combining "is one of" with nested AND+OR', () => {
     cy.get('input[placeholder="my-rule"]').type(ruleName)
     ruleBlock(0).within(() => {
-      cy.get('select.cond-select').eq(0).select('payment_method')
-      cy.get('select.cond-select').eq(1).select('is one of')
+      selectCondLhs(0, 'payment_method')
+      cy.get('select.cond-select').eq(0).select('is one of')
       cy.get('input[type="checkbox"]').eq(0).check()
       cy.get('input[type="checkbox"]').eq(1).check()
     })
     ruleBlock(0).contains('button', 'Add nested branch').click()
     ruleBlock(0).find('.border-l-2.border-sky-200').first().within(() => {
-      cy.get('select.cond-select').eq(0).select('currency')
-      cy.get('select.cond-select').eq(2).find('option').eq(1).then(($opt) => {
-        cy.get('select.cond-select').eq(2).select($opt.val())
+      selectCondLhs(0, 'currency')
+      cy.get('[data-cy="cond-val"]').eq(0).within(() => {
+        cy.get('button.cond-select').click()
+        cy.get('button:not(.cond-select)').first().click()
       })
     })
     addGatewayToBlock(0, 'stripe', 'mca_stripe')

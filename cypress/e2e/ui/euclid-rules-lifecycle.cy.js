@@ -7,7 +7,7 @@
  */
 
 const factory = require('../../support/test-data-factory')
-const { ruleBlock, addGatewayToBlock, addFallbackGateway } = require('../../support/euclid-helpers')
+const { ruleBlock, addGatewayToBlock, addFallbackGateway, selectCondLhs, selectCondVal } = require('../../support/euclid-helpers')
 
 describe('Rule Lifecycle — creation and management', () => {
   let merchantId
@@ -51,8 +51,8 @@ describe('Rule Lifecycle — creation and management', () => {
       cy.contains('button', 'Add Rule').click()
       ruleBlock(0).find('input[placeholder="Rule name"]').clear().type('card-rule')
       ruleBlock(0).within(() => {
-        cy.get('select.cond-select').eq(0).select('payment_method')
-        cy.get('select.cond-select').eq(2).select('card')
+        selectCondLhs(0, 'payment_method')
+        selectCondVal(0, 'card')
       })
 
       addGatewayToBlock(0, 'adyen', 'mca_adyen')
@@ -74,12 +74,12 @@ describe('Rule Lifecycle — creation and management', () => {
       cy.contains('button', 'Add Rule').click()
 
       ruleBlock(0).within(() => {
-        cy.get('select.cond-select').eq(0).select('payment_method')
-        cy.get('select.cond-select').eq(2).select('card')
+        selectCondLhs(0, 'payment_method')
+        selectCondVal(0, 'card')
 
         cy.contains('button', 'Add condition').click()
-        cy.get('select.cond-select').eq(3).select('currency')
-        cy.get('select.cond-select').eq(5).select('USD')
+        selectCondLhs(1, 'currency')
+        selectCondVal(1, 'USD')
 
         cy.contains('AND').should('be.visible')
       })
@@ -102,16 +102,16 @@ describe('Rule Lifecycle — creation and management', () => {
       cy.contains('button', 'Add Rule').click()
 
       ruleBlock(0).within(() => {
-        cy.get('select.cond-select').eq(0).select('payment_method')
-        cy.get('select.cond-select').eq(2).select('card')
+        selectCondLhs(0, 'payment_method')
+        selectCondVal(0, 'card')
 
         cy.contains('button', 'Add OR group').click()
 
         cy.get('button').filter(':contains("Add condition")').eq(1)
           .closest('[class*="rounded-lg"]')
           .within(() => {
-            cy.get('select.cond-select').eq(0).select('currency')
-            cy.get('select.cond-select').eq(2).select('USD')
+            selectCondLhs(0, 'currency')
+            selectCondVal(0, 'USD')
           })
 
         cy.contains('span', 'or').should('be.visible')
@@ -136,16 +136,16 @@ describe('Rule Lifecycle — creation and management', () => {
       cy.contains('button', 'Add Rule').click()
       ruleBlock(0).find('input[placeholder="Rule name"]').clear().type('card-rule')
       ruleBlock(0).within(() => {
-        cy.get('select.cond-select').eq(0).select('payment_method')
-        cy.get('select.cond-select').eq(2).select('card')
+        selectCondLhs(0, 'payment_method')
+        selectCondVal(0, 'card')
       })
       addGatewayToBlock(0, 'adyen', 'mca_adyen')
 
       cy.contains('button', 'Add Rule').click()
       ruleBlock(1).find('input[placeholder="Rule name"]').clear().type('upi-rule')
       ruleBlock(1).within(() => {
-        cy.get('select.cond-select').eq(0).select('payment_method')
-        cy.get('select.cond-select').eq(2).select('upi')
+        selectCondLhs(0, 'payment_method')
+        selectCondVal(0, 'upi')
       })
       addGatewayToBlock(1, 'razorpay', 'mca_razorpay')
 
@@ -166,8 +166,8 @@ describe('Rule Lifecycle — creation and management', () => {
       cy.contains('button', 'Add Rule').click()
 
       ruleBlock(0).within(() => {
-        cy.get('select.cond-select').eq(0).select('amount')
-        cy.get('select.cond-select').eq(1).select('greater than')
+        selectCondLhs(0, 'amount')
+        cy.get('select.cond-select').eq(0).select('greater than')
         cy.get('input[type="number"]').type('100')
       })
 
