@@ -31,7 +31,7 @@ describe('Decision Explorer UI', () => {
     cy.ensureMerchantAccount(merchantId)
       .then(() => cy.visitWithSession('/decisions', merchantId))
       .then(() => {
-        cy.contains('button', 'Rule based').click()
+        cy.contains('button', 'Rule based').should('be.visible').click()
         cy.contains('button', 'Evaluate Rules').should('be.visible')
         cy.contains('Rule Evaluation Parameters').should('be.visible')
         cy.contains('Fallback gateway_name/gateway_id').should('be.visible')
@@ -45,7 +45,7 @@ describe('Decision Explorer UI', () => {
     cy.ensureMerchantAccount(merchantId)
       .then(() => cy.visitWithSession('/decisions', merchantId))
       .then(() => {
-        cy.contains('button', 'Volume split').click()
+        cy.contains('button', 'Volume split').should('be.visible').click()
         // Wait for the volume split UI to render
         cy.contains('Evaluation count').should('be.visible')
         cy.get('input[type="number"]').first().clear().type('20')
@@ -61,9 +61,9 @@ describe('Decision Explorer UI', () => {
     cy.ensureMerchantAccount(merchantId)
       .then(() => cy.visitWithSession('/decisions', merchantId))
       .then(() => {
-        cy.contains('button', 'Debit routing').click()
+        cy.contains('button', 'Debit routing').should('be.visible').click()
         cy.contains('Debit Routing Parameters').should('be.visible')
-        cy.contains('Debit routing is disabled for this merchant.').should('be.visible')
+        cy.contains('Debit routing is disabled.').should('be.visible')
         cy.contains('button', 'Enable Debit Routing').should('be.visible')
         cy.get('input[value="merchant_category_code_0001"]').should('be.visible')
         cy.get('input[value="VISA, NYCE, PULSE, STAR"]').should('be.visible')
@@ -78,8 +78,8 @@ describe('Decision Explorer UI', () => {
       .then(() => cy.updateDebitRoutingFlag(merchantId, true))
       .then(() => cy.visitWithSession('/decisions', merchantId))
       .then(() => {
-        cy.contains('button', 'Debit routing').click()
-        cy.contains('Debit routing is enabled for this merchant.').should('be.visible')
+        cy.contains('button', 'Debit routing').should('be.visible').click()
+        cy.contains('Debit routing is enabled.').should('be.visible')
         cy.contains('button', 'Run Debit Routing').should('not.be.disabled').click()
         cy.contains('Debit Routing Result', { timeout: 20000 }).should('be.visible')
         cy.contains('Ranked Debit Networks').should('be.visible')

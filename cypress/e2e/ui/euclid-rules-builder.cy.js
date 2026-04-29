@@ -7,7 +7,7 @@
  */
 
 const factory = require('../../support/test-data-factory')
-const { ruleBlock, addGatewayToBlock, addFallbackGateway } = require('../../support/euclid-helpers')
+const { ruleBlock, addGatewayToBlock, addFallbackGateway, selectCondLhs, selectCondVal } = require('../../support/euclid-helpers')
 
 describe('Rule Builder — UI interactions', () => {
   let merchantId
@@ -102,7 +102,7 @@ describe('Rule Builder — UI interactions', () => {
 
     it('shows one condition row by default in a new rule block', () => {
       ruleBlock(0).within(() => {
-        cy.get('select.cond-select').should('have.length.gte', 2)
+        cy.get('.cond-select').should('have.length.gte', 2)
         cy.contains('button', 'Add condition').should('be.visible')
       })
     })
@@ -129,10 +129,7 @@ describe('Rule Builder — UI interactions', () => {
         cy.contains('button', 'Add condition').click()
         cy.contains('AND').should('be.visible')
 
-        cy.get('select.cond-select').first()
-          .closest('[class*="flex"][class*="flex-wrap"]')
-          .find('button')
-          .click()
+        cy.get('button[aria-label="Remove condition"]').first().click()
 
         cy.contains('AND').should('not.exist')
       })
@@ -140,28 +137,29 @@ describe('Rule Builder — UI interactions', () => {
 
     it('shows enum value dropdown for an enum-type field', () => {
       ruleBlock(0).within(() => {
-        cy.get('select.cond-select').eq(0).select('payment_method')
-        cy.get('select.cond-select').should('have.length', 3)
+        selectCondLhs(0, 'payment_method')
+        cy.get('.cond-select').should('have.length', 3)
         cy.get('input[type="number"]').should('not.exist')
       })
     })
 
     it('shows numeric input and extra comparison operators for amount field', () => {
       ruleBlock(0).within(() => {
-        cy.get('select.cond-select').eq(0).select('amount')
-        cy.get('select.cond-select').eq(1).within(() => {
+        selectCondLhs(0, 'amount')
+        cy.get('select.cond-select').eq(0).within(() => {
           cy.get('option').should('have.length.gte', 4)
         })
         cy.get('input[type="number"]').should('be.visible')
-        cy.get('select.cond-select').should('have.length', 2)
+        cy.get('.cond-select').should('have.length', 2)
       })
     })
 
     it('shows human-readable labels in the field dropdown', () => {
       ruleBlock(0).within(() => {
-        cy.get('select.cond-select').eq(0).within(() => {
-          cy.get('option').each(($opt) => {
-            expect($opt.text()).to.not.match(/_/)
+        cy.get('[data-cy="cond-lhs"]').eq(0).within(() => {
+          cy.get('button.cond-select').click()
+          cy.get('button:not(.cond-select)').each(($btn) => {
+            expect($btn.text().trim()).to.not.match(/_/)
           })
         })
       })
@@ -169,11 +167,11 @@ describe('Rule Builder — UI interactions', () => {
 
     it('shows human-readable labels in the enum value dropdown', () => {
       ruleBlock(0).within(() => {
-        cy.get('select.cond-select').eq(0).select('payment_method')
-        cy.get('select.cond-select').eq(2).within(() => {
-          cy.get('option').each(($opt) => {
-            const text = $opt.text()
-            if (text !== 'select...') expect(text).to.not.match(/_/)
+        selectCondLhs(0, 'payment_method')
+        cy.get('[data-cy="cond-val"]').eq(0).within(() => {
+          cy.get('button.cond-select').click()
+          cy.get('button:not(.cond-select)').each(($btn) => {
+            expect($btn.text().trim()).to.not.match(/_/)
           })
         })
       })
@@ -181,9 +179,12 @@ describe('Rule Builder — UI interactions', () => {
 
     it('can select a different field and choose a value', () => {
       ruleBlock(0).within(() => {
-        cy.get('select.cond-select').eq(0).select('currency')
-        cy.get('select.cond-select').eq(2).should('be.visible')
-        cy.get('select.cond-select').eq(2).find('option').should('have.length.gt', 1)
+        selectCondLhs(0, 'currency')
+        cy.get('[data-cy="cond-val"]').eq(0).should('be.visible')
+        cy.get('[data-cy="cond-val"]').eq(0).within(() => {
+          cy.get('button.cond-select').click()
+          cy.get('button:not(.cond-select)').should('have.length.gt', 1)
+        })
       })
     })
   })
@@ -240,15 +241,14 @@ describe('Rule Builder — UI interactions', () => {
         cy.get('button').filter(':contains("Add condition")').eq(0)
           .closest('[class*="rounded-lg"]')
           .within(() => {
-            cy.get('select.cond-select').eq(0).select('currency')
+            selectCondLhs(0, 'currency')
           })
 
         cy.get('button').filter(':contains("Add condition")').eq(1)
           .closest('[class*="rounded-lg"]')
           .within(() => {
-            cy.get('select.cond-select').eq(0).then(($sel) => {
-              expect($sel.val()).to.not.eq('currency')
-            })
+            cy.get('[data-cy="cond-lhs"]').eq(0).find('button.cond-select')
+              .should('not.have.attr', 'data-value', 'currency')
           })
       })
     })

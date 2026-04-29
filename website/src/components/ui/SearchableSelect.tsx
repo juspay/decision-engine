@@ -12,6 +12,7 @@ interface SearchableSelectProps {
   options: Option[]
   className?: string
   disabled?: boolean
+  dataCy?: string
 }
 
 export function SearchableSelect({
@@ -20,6 +21,7 @@ export function SearchableSelect({
   options,
   className = '',
   disabled = false,
+  dataCy,
 }: SearchableSelectProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -60,13 +62,14 @@ export function SearchableSelect({
   }
 
   return (
-    <div ref={containerRef} className={`relative inline-block ${className}`}>
+    <div ref={containerRef} className={`relative inline-block ${className}`} data-cy={dataCy}>
       <button
         type="button"
         disabled={disabled}
         onClick={() => setOpen(o => !o)}
         className="cond-select flex items-center gap-1 pr-2"
         style={{ backgroundImage: 'none', display: 'flex', alignItems: 'center' }}
+        data-value={value}
       >
         <span className="truncate max-w-[10rem]">{selectedLabel || <span className="text-slate-400">select...</span>}</span>
         <ChevronDown
