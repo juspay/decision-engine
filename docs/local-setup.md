@@ -211,7 +211,7 @@ Expected response:
 
 Dashboard profiles also expose:
 
-- Dashboard: `http://localhost:8081/decision-engine/`
+- Dashboard: `http://localhost:8081/dashboard/`
 - Docs: `http://localhost:8081/introduction`
 - API examples: `http://localhost:8081/api-refs/api-ref`
 

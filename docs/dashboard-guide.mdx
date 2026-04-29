@@ -15,32 +15,30 @@ COMPOSE_PROFILES= docker compose --profile dashboard-postgres-ghcr up -d
 
 Then open:
 
-- `http://localhost:8081/decision-engine/`
+- `http://localhost:8081/dashboard/`
 
 The dashboard is served by Nginx from the built assets in `website/dist`.
-This docs page intentionally lives at `/dashboard-guide`; `/decision-engine/` is reserved for the React app in production-style hosting.
+This docs page intentionally lives at `/dashboard-guide`; `/dashboard/` is reserved for the React app.
 
 ## What It Includes
 
 Based on the React routes in `website/src/App.tsx`, the dashboard exposes:
 
-- `/decision-engine/`
-- `/decision-engine/login`
-- `/decision-engine/signup`
-- `/decision-engine/onboarding`
-- `/decision-engine/routing`
-- `/decision-engine/routing/sr`
-- `/decision-engine/routing/rules`
-- `/decision-engine/routing/volume`
-- `/decision-engine/routing/debit`
-- `/decision-engine/decisions`
-- `/decision-engine/analytics`
-- `/decision-engine/audit`
+- `/dashboard/`
+- `/dashboard/login`
+- `/dashboard/signup`
+- `/dashboard/onboarding`
+- `/dashboard/routing`
+- `/dashboard/routing/sr`
+- `/dashboard/routing/rules`
+- `/dashboard/routing/volume`
+- `/dashboard/routing/debit`
+- `/dashboard/decisions`
+- `/dashboard/analytics`
+- `/dashboard/audit`
 
-For source-run Vite development, the same React routes are mounted at root, for example `http://localhost:5173/routing/rules`.
-Hosted builds can be mounted under `/decision-engine/` or any other prefix configured with `VITE_DASHBOARD_BASE_PATH`.
-Local dev API calls use `/decision-engine-api/*`, which Vite proxies to `http://localhost:8080`.
-Hosted API calls use the base supplied through `VITE_API_BASE_PATH`.
+For source-run Vite development, the same React routes are mounted at `http://localhost:5173/`.
+For external production hosting, the preferred route is `/decision-engine/` with API traffic proxied through `/decision-engine-api/*`.
 
 ## Docs And API In The Same Profile
 

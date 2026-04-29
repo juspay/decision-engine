@@ -2083,7 +2083,7 @@ export function DecisionExplorerPage() {
               <Button
                 onClick={runVolumeSplit}
                 disabled={loading || !effectiveMerchantId}
-                className="w-full justify-center !bg-white !text-slate-950 hover:!bg-slate-100 disabled:!text-slate-500"
+                className="w-full justify-center dark:bg-sky-500 dark:text-white dark:hover:bg-sky-400"
               >
                 {loading ? (
                   <><Spinner size={14} /> Running {volumeProgress}/{volumePayments || 0} decisions…</>
