@@ -22,12 +22,9 @@ describe('Volume split output', () => {
     cy.waitForService()
     cy.viewport(1600, 1200)
     ruleName = factory.ruleName('adv_rule')
-    cy.intercept('GET', '**/config/routing-keys').as('routingKeys')
     cy.visitWithSession('/routing/rules', merchantId)
-    // Give the app time to initialize
-    cy.wait(1000)
     cy.contains(/Rule-Based|Routing|Euclid/).should('exist')
-    cy.wait('@routingKeys', { timeout: 15000 })
+    cy.contains('Loading routing keys from backend...', { timeout: 15000 }).should('not.exist')
     cy.contains('button', 'Add Rule').click()
     switchOutputType(0, 'Volume Split')
   })
