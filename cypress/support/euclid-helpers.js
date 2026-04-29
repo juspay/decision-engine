@@ -89,6 +89,34 @@ function addFallbackGateway(gatewayName, gatewayId = '') {
   })
 }
 
+/**
+ * Select a routing-key (LHS) from the SearchableSelect dropdown.
+ * Works inside or outside a cy.within() scope.
+ * @param {number} index - 0-based index of cond-lhs within current scope
+ * @param {string} value - routing key value to search and select (e.g. 'payment_method')
+ */
+function selectCondLhs(index, value) {
+  cy.get('[data-cy="cond-lhs"]').eq(index).within(() => {
+    cy.get('button.cond-select').click()
+    cy.get('input[placeholder="Search…"]').clear().type(value)
+    cy.get('button:not(.cond-select)').first().click()
+  })
+}
+
+/**
+ * Select an enum value from the SearchableSelect value dropdown.
+ * Works inside or outside a cy.within() scope.
+ * @param {number} index - 0-based index of cond-val within current scope
+ * @param {string} value - enum value to search and select (e.g. 'card')
+ */
+function selectCondVal(index, value) {
+  cy.get('[data-cy="cond-val"]').eq(index).within(() => {
+    cy.get('button.cond-select').click()
+    cy.get('input[placeholder="Search…"]').clear().type(value)
+    cy.get('button:not(.cond-select)').first().click()
+  })
+}
+
 module.exports = {
   ruleBlock,
   thenSection,
@@ -98,4 +126,6 @@ module.exports = {
   addVolumeSplitPriorityRow,
   addGatewayToSplitRow,
   addFallbackGateway,
+  selectCondLhs,
+  selectCondVal,
 }

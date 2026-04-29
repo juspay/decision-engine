@@ -23,13 +23,13 @@ describe('Debit Routing UI', () => {
     cy.contains('Merchant Category Code (MCC)').should('not.exist')
 
     cy.contains('button', 'Enable Debit Routing').click()
-    cy.contains('Debit routing enabled for this merchant.').should('be.visible')
+    cy.contains('Debit routing enabled.').should('be.visible')
     cy.getDebitRoutingFlag(merchantId).then(({ response }) => {
       expect(response.debit_routing_enabled).to.eq(true)
     })
 
     cy.contains('button', 'Disable Debit Routing').click()
-    cy.contains('Debit routing disabled for this merchant.').should('be.visible')
+    cy.contains('Debit routing disabled.').should('be.visible')
     cy.getDebitRoutingFlag(merchantId).then(({ response }) => {
       expect(response.debit_routing_enabled).to.eq(false)
     })
