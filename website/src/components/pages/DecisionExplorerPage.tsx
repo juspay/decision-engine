@@ -1,5 +1,4 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import useSWR from 'swr'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts'
 import { Button } from '../ui/Button'
@@ -14,7 +13,7 @@ import { DecideGatewayResponse, GatewayConnector, PaymentAuditEvent, PaymentAudi
 import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
 import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
-import { Play, RefreshCw, ChevronDown, ChevronUp, Activity, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings, ArrowRight } from 'lucide-react'
+import { Play, RefreshCw, ChevronDown, ChevronUp, Activity, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings } from 'lucide-react'
 
 const ALGORITHMS: RoutingAlgorithmName[] = [
   'SR_BASED_ROUTING',
@@ -78,8 +77,6 @@ type AuditInspectorTab = 'summary' | 'input' | 'response' | 'raw'
 interface SetupPromptState {
   title: string
   body: string
-  cta: string
-  route: string
   detail?: string
 }
 
@@ -589,8 +586,6 @@ function setupPromptForTab(tab: TabType, detail?: string): SetupPromptState {
     return {
       title: 'Configure volume split first',
       body: 'Volume evaluation needs an active volume split rule for this merchant before it can sample distribution.',
-      cta: 'Configure volume split',
-      route: '/routing/volume',
       detail,
     }
   }
@@ -599,8 +594,6 @@ function setupPromptForTab(tab: TabType, detail?: string): SetupPromptState {
     return {
       title: 'Configure rule-based routing first',
       body: 'Rule evaluation needs an active rule-based strategy for this merchant before it can return a policy decision.',
-      cta: 'Configure rule',
-      route: '/routing/rules',
       detail,
     }
   }
@@ -609,8 +602,6 @@ function setupPromptForTab(tab: TabType, detail?: string): SetupPromptState {
     return {
       title: 'Enable debit routing first',
       body: 'Debit network decisions need the merchant debit routing flag enabled before this explorer can run network routing.',
-      cta: 'Configure debit routing',
-      route: '/routing/debit',
       detail,
     }
   }
@@ -618,8 +609,6 @@ function setupPromptForTab(tab: TabType, detail?: string): SetupPromptState {
   return {
     title: 'Configure auth-rate routing first',
     body: 'Auth-rate simulation needs success-rate routing configured for this merchant before it can run gateway decisions.',
-    cta: 'Configure auth-rate',
-    route: '/routing/sr',
     detail,
   }
 }
@@ -697,7 +686,6 @@ function InspectorJsonPanel({
 }
 
 export function DecisionExplorerPage() {
-  const navigate = useNavigate()
   const { merchantId } = useMerchantStore()
   const authUser = useAuthStore((state) => state.user)
   const authMerchantId = authUser?.merchantId || ''
@@ -2985,18 +2973,8 @@ export function DecisionExplorerPage() {
               ) : null}
 
               <div className="mt-6 flex flex-wrap justify-end gap-2">
-                <Button variant="secondary" onClick={() => setSetupPrompt(null)}>
-                  Stay here
-                </Button>
-                <Button
-                  onClick={() => {
-                    const route = setupPrompt.route
-                    setSetupPrompt(null)
-                    navigate(route)
-                  }}
-                >
-                  {setupPrompt.cta}
-                  <ArrowRight size={16} />
+                <Button onClick={() => setSetupPrompt(null)}>
+                  Dismiss
                 </Button>
               </div>
             </div>

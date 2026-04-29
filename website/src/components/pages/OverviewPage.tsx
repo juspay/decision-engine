@@ -1,11 +1,9 @@
 import type { ElementType, ReactNode } from 'react'
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import useSWR from 'swr'
 import {
   Activity,
   AlertCircle,
-  ArrowRight,
   BarChart3,
   CheckCircle2,
   Clock3,
@@ -206,7 +204,6 @@ type RuleConfigResponse = {
 }
 
 export function OverviewPage() {
-  const navigate = useNavigate()
   const { merchantId } = useMerchantStore()
   const authMerchantId = useAuthStore((state) => state.user?.merchantId || '')
   const effectiveMerchantId = merchantId || authMerchantId
@@ -288,28 +285,24 @@ export function OverviewPage() {
       description: health === 'up' ? 'Service is reachable.' : 'Please verify service health.',
       state: health === 'up' ? 'Live' : health === 'down' ? 'Issue' : 'Checking',
       icon: health === 'up' ? CheckCircle2 : health === 'down' ? XCircle : AlertCircle,
-      route: undefined,
     },
     {
       label: 'Routing strategy',
       description: activeRouting ? activeRouting.name : 'No active routing configured.',
       state: activeRouting ? 'Configured' : 'Not set',
       icon: GitBranch,
-      route: '/routing',
     },
     {
       label: 'Auth-rate config',
       description: hasAuthRateConfig ? 'Configured and available.' : 'Not configured yet.',
       state: hasAuthRateConfig ? 'Configured' : 'Not set',
       icon: ShieldCheck,
-      route: '/routing/sr',
     },
     {
       label: 'Rule-based routing',
       description: hasRuleBasedRouting ? 'Enabled for this merchant.' : 'Not enabled.',
       state: hasRuleBasedRouting ? 'Enabled' : 'Optional',
       icon: Sparkles,
-      route: '/routing/rules',
     },
     {
       label: 'Debit routing',
@@ -320,7 +313,6 @@ export function OverviewPage() {
           : 'Not enabled yet.',
       state: debitRoutingFlag.isLoading ? 'Checking' : hasDebitRouting ? 'Enabled' : 'Not set',
       icon: Network,
-      route: '/routing/debit',
     },
   ]
 
@@ -499,7 +491,6 @@ export function OverviewPage() {
                     <GlassCard
                       key={item.label}
                       className="min-h-[158px] p-5"
-                      onClick={item.route ? () => navigate(item.route) : undefined}
                     >
                       <div className="flex h-full flex-col justify-between">
                         <div className="flex items-start justify-between gap-4">
@@ -596,7 +587,7 @@ export function OverviewPage() {
               </GlassCard>
             </div>
 
-            <div className={`grid gap-6 xl:grid-cols-[0.86fr_1.14fr] transition-opacity duration-200 ${analyticsRefreshing ? 'opacity-60' : 'opacity-100'}`}>
+            <div className={`transition-opacity duration-200 ${analyticsRefreshing ? 'opacity-60' : 'opacity-100'}`}>
               <GlassCard className="p-6">
                 <SurfaceLabel>Quick summary</SurfaceLabel>
                 <div className="mt-5 space-y-4">
@@ -618,49 +609,6 @@ export function OverviewPage() {
                   ))}
                 </div>
               </GlassCard>
-
-              <div className="grid gap-4 md:grid-cols-3">
-                {[
-                  {
-                    label: 'Routing Hub',
-                    text: 'Configure routing strategies.',
-                    icon: GitBranch,
-                    route: '/routing',
-                  },
-                  {
-                    label: 'Analytics',
-                    text: 'Inspect request and gateway trends.',
-                    icon: BarChart3,
-                    route: '/analytics',
-                  },
-                  {
-                    label: 'Audit Trail',
-                    text: 'Review individual decision records.',
-                    icon: Clock3,
-                    route: '/audit',
-                  },
-                ].map((item) => (
-                  <GlassCard key={item.label} className="p-5" onClick={() => navigate(item.route)}>
-                    <div className="flex h-full flex-col justify-between">
-                      <div className="inline-flex w-fit rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-[#2a303a] dark:bg-[#161b24]">
-                        <item.icon className="h-5 w-5 text-brand-600 dark:text-sky-300" />
-                      </div>
-                      <div className="mt-10">
-                        <p className="text-sm font-semibold text-slate-950 dark:text-white">
-                          {item.label}
-                        </p>
-                        <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-[#a6b0c3]">
-                          {item.text}
-                        </p>
-                        <div className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-brand-600 dark:text-sky-300">
-                          <span>Open</span>
-                          <ArrowRight className="h-4 w-4" />
-                        </div>
-                      </div>
-                    </div>
-                  </GlassCard>
-                ))}
-              </div>
             </div>
           </>
         )}
