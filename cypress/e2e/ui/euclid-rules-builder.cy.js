@@ -20,7 +20,10 @@ describe('Rule Builder — UI interactions', () => {
     ruleName = factory.ruleName('ui_rule')
     cy.ensureMerchantAccount(merchantId)
     cy.visitWithMerchant('/routing/rules', merchantId)
-    cy.contains('h1', 'Rule-Based Routing').should('be.visible')
+    // Wait for page to finish loading (either rules load or empty state shows)
+    cy.contains(/Loading\.{3}|No rule-based rules yet\.|Existing Rules/).should('be.visible')
+    // Then ensure the main heading is present
+    cy.get('h1').should('contain', 'Rule-Based Routing')
     cy.contains('button', 'Create Rule').should('not.be.disabled')
   })
 

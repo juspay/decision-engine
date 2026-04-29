@@ -22,7 +22,9 @@ describe('End-to-end creation', () => {
     cy.intercept('GET', '**/config/routing-keys').as('routingKeys')
     cy.intercept('POST', '**/routing/create').as('createRule')
     cy.visitWithSession('/routing/rules', merchantId)
-    cy.contains('h1', 'Rule-Based Routing').should('be.visible')
+    // Wait for page to finish loading
+    cy.contains(/Loading\.{3}|No rule-based rules yet\.|Existing Rules/).should('be.visible')
+    cy.get('h1').should('contain', 'Rule-Based Routing')
     cy.wait('@routingKeys', { timeout: 15000 })
     cy.contains('button', 'Add Rule').click()
   })
