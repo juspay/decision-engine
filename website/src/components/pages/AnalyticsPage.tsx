@@ -65,6 +65,40 @@ type InfoContent = {
   calculation: string
   source: string
 }
+type BadgeVariant = 'green' | 'gray' | 'blue' | 'red' | 'orange' | 'purple'
+type GatewayVolumeSummaryItem = {
+  gateway: string
+  count: number
+  share: number
+}
+type SrGatewaySummaryItem = {
+  gateway: string
+  value: number
+}
+type RoutingAlignmentSummary = {
+  srLeader: SrGatewaySummaryItem | null
+  srRunnerUp: SrGatewaySummaryItem | null
+  volumeLeader: GatewayVolumeSummaryItem | null
+  srLeaderVolume: GatewayVolumeSummaryItem | null
+  alignmentPercent: number | null
+  leaderDecisionCount: number
+  comparableDecisionCount: number
+  comparableBucketCount: number
+  divergentBucketCount: number
+  statusLabel: string
+  statusVariant: BadgeVariant
+  headline: string
+  detail: string
+}
+type ConnectorComparisonRow = {
+  gateway: string
+  srValue: number | null
+  count: number
+  share: number
+  color: string
+  isSrLeader: boolean
+  isVolumeLeader: boolean
+}
 
 const PRESET_OPTIONS: { value: AnalyticsRangeValue; label: string }[] = [
   { value: '15m', label: 'Last 15 mins' },
@@ -105,7 +139,7 @@ const PREVIEW_TRACE_PAGE_SIZE = 50
 const MAX_PREVIEW_TRACE_PAGES = 5
 const PREVIEW_LIST_PAGE_SIZE = 10
 const CATCH_UP_REFRESH_DELAYS_MS = [750, 2000, 4000]
-const CARD_INFO: Record<'hits' | 'share' | 'sr' | 'preview_hits' | 'preview_activity' | 'preview_share', InfoContent> = {
+const CARD_INFO: Record<'hits' | 'share' | 'alignment' | 'sr' | 'preview_hits' | 'preview_activity' | 'preview_share', InfoContent> = {
   hits: {
     title: 'API call counts',
     purpose: 'Use these cards to see how much traffic each major decision-engine API handled in the selected window.',
@@ -113,10 +147,16 @@ const CARD_INFO: Record<'hits' | 'share' | 'sr' | 'preview_hits' | 'preview_acti
     source: 'Counts come from ClickHouse-backed API analytics rows ingested from Kafka into `analytics_api_events`.',
   },
   share: {
-    title: 'Gateway share over time',
-    purpose: 'Use this to see when traffic shifted from one connector to another for the selected merchant.',
-    calculation: 'Decision events are bucketed by time and grouped by chosen connector. The chart shows how many decisions each gateway captured in each bucket.',
+    title: 'Selected gateways over time',
+    purpose: 'Use this to see when traffic shifted from one connector to another for the selected merchant and routing slice.',
+    calculation: 'Decision events are bucketed by time and grouped by chosen connector. The chart shows how many filtered decisions each gateway captured in each bucket.',
     source: 'Reads ClickHouse-backed domain analytics rows from `analytics_domain_events`.',
+  },
+  alignment: {
+    title: 'Routing alignment',
+    purpose: 'Use this to check whether the connector with the highest recorded success rate also received most of the selected transaction volume.',
+    calculation: 'The page compares selected-gateway counts with the latest connector success-rate snapshot and counts decisions routed to the SR-leading connector in comparable buckets.',
+    source: 'Reads the same ClickHouse-backed routing-stats response used by the gateway share and connector success-rate charts.',
   },
   sr: {
     title: 'Connector success rate over time',
@@ -249,6 +289,17 @@ function formatPercent(value: number | string | undefined, digits = 1) {
     return '0%'
   }
   return `${formatNumber(toPercent(Number(value)), digits)}%`
+}
+
+function formatPercentPointDelta(value: number | undefined, digits = 1) {
+  if (value === undefined || !Number.isFinite(value)) return 'No runner-up'
+  const sign = value > 0 ? '+' : value < 0 ? '-' : ''
+  return `${sign}${formatNumber(Math.abs(value), digits)} pp`
+}
+
+function readChartValue(row: Record<string, number | null>, key: string) {
+  const value = row[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
 
 function formatBucketLabel(ms: number, window: TimeWindow) {
@@ -514,6 +565,167 @@ function HitsCard({
           </p>
           <Badge variant="blue">{subtitle}</Badge>
         </div>
+      </CardBody>
+    </Card>
+  )
+}
+
+function RoutingAlignmentCard({
+  summary,
+  comparisonRows,
+}: {
+  summary: RoutingAlignmentSummary
+  comparisonRows: ConnectorComparisonRow[]
+}) {
+  const srMargin =
+    summary.srLeader && summary.srRunnerUp
+      ? summary.srLeader.value - summary.srRunnerUp.value
+      : undefined
+  const srLeaderVolumeText = summary.srLeaderVolume
+    ? `${formatNumber(summary.srLeaderVolume.count, 0)} total decisions for ${summary.srLeaderVolume.gateway}`
+    : 'No selected volume'
+  const alignedVolumeText = summary.comparableDecisionCount
+    ? `${formatNumber(summary.leaderDecisionCount, 0)} of ${formatNumber(summary.comparableDecisionCount, 0)} decisions went to the SR leader`
+    : srLeaderVolumeText
+  const alignmentText =
+    summary.alignmentPercent === null
+      ? 'Not enough overlap'
+      : `${formatPercent(summary.alignmentPercent)} aligned`
+
+  return (
+    <Card className="overflow-visible">
+      <CardHeader>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800 dark:text-white">
+              Routing alignment
+            </h2>
+            <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+              Compares selected connector volume with the connector that currently has the highest SR.
+            </p>
+          </div>
+          <InfoButton content={CARD_INFO.alignment} />
+        </div>
+      </CardHeader>
+      <CardBody className="space-y-5">
+        <div className="grid overflow-hidden rounded-2xl border border-slate-200 bg-white/70 dark:border-[#2a303a] dark:bg-[#0c0f15] lg:grid-cols-3">
+          <div className="border-b border-slate-200 p-4 dark:border-[#2a303a] lg:border-b-0 lg:border-r">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+              SR leader
+            </p>
+            <p className="mt-3 truncate text-2xl font-semibold text-slate-950 dark:text-white">
+              {summary.srLeader?.gateway || '--'}
+            </p>
+            <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+              {summary.srLeader
+                ? `${formatPercent(summary.srLeader.value)} latest SR, ${formatPercentPointDelta(srMargin)} vs next`
+                : 'No score snapshot in this window'}
+            </p>
+          </div>
+
+          <div className="border-b border-slate-200 p-4 dark:border-[#2a303a] lg:border-b-0 lg:border-r">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+              Selection leader
+            </p>
+            <p className="mt-3 truncate text-2xl font-semibold text-slate-950 dark:text-white">
+              {summary.volumeLeader?.gateway || '--'}
+            </p>
+            <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+              {summary.volumeLeader
+                ? `${formatNumber(summary.volumeLeader.count, 0)} decisions, ${formatPercent(summary.volumeLeader.share)} of volume`
+                : 'No gateway decisions in this window'}
+            </p>
+          </div>
+
+          <div className="p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+              SR-leader volume
+            </p>
+            <p className="mt-3 text-2xl font-semibold text-slate-950 dark:text-white">
+              {alignmentText}
+            </p>
+            <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+              {alignedVolumeText}
+            </p>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-[#2a303a] dark:bg-[#0d1118]">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={summary.statusVariant}>{summary.statusLabel}</Badge>
+                {summary.comparableDecisionCount > 0 ? (
+                  <Badge variant="gray">
+                    {formatNumber(summary.comparableDecisionCount, 0)} comparable decisions
+                  </Badge>
+                ) : null}
+              </div>
+              <p className="mt-3 text-sm font-semibold text-slate-900 dark:text-white">
+                {summary.headline}
+              </p>
+              <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#8a8a93]">
+                {summary.detail}
+              </p>
+            </div>
+            {summary.comparableBucketCount > 0 ? (
+              <p className="text-xs font-medium text-slate-500 dark:text-[#8a8a93]">
+                {summary.divergentBucketCount} of {summary.comparableBucketCount} buckets diverged
+              </p>
+            ) : null}
+          </div>
+        </div>
+
+        {comparisonRows.length ? (
+          <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-[#2a303a]">
+            <div className="min-w-[640px]">
+              <div className="grid grid-cols-[minmax(0,1.2fr)_0.65fr_0.65fr_0.65fr_1fr] gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:border-[#2a303a] dark:bg-[#0c0f15] dark:text-[#8a8a93]">
+                <span>Connector</span>
+                <span>Latest SR</span>
+                <span>Decisions</span>
+                <span>Share</span>
+                <span>Read</span>
+              </div>
+              {comparisonRows.map((row) => (
+                <div
+                  key={row.gateway}
+                  className="grid grid-cols-[minmax(0,1.2fr)_0.65fr_0.65fr_0.65fr_1fr] gap-3 border-b border-slate-200 px-4 py-3 text-sm last:border-b-0 dark:border-[#2a303a]"
+                >
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: row.color }}
+                    />
+                    <span className="truncate font-medium text-slate-900 dark:text-white">
+                      {row.gateway}
+                    </span>
+                  </div>
+                  <span className="text-slate-600 dark:text-[#cbd5e1]">
+                    {row.srValue === null ? '--' : formatPercent(row.srValue)}
+                  </span>
+                  <span className="text-slate-600 dark:text-[#cbd5e1]">
+                    {formatNumber(row.count, 0)}
+                  </span>
+                  <span className="text-slate-600 dark:text-[#cbd5e1]">
+                    {formatPercent(row.share)}
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    {row.isSrLeader ? <Badge variant="blue">SR leader</Badge> : null}
+                    {row.isVolumeLeader ? <Badge variant="green">Volume leader</Badge> : null}
+                    {!row.isSrLeader && !row.isVolumeLeader ? (
+                      <span className="text-xs text-slate-500 dark:text-[#8a8a93]">Secondary</span>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <EmptyState
+            title="No comparable connector data yet"
+            body="The alignment view needs both gateway selections and connector SR snapshots in the selected window."
+          />
+        )}
       </CardBody>
     </Card>
   )
@@ -893,7 +1105,8 @@ export function AnalyticsPage() {
   }, [previewListPage, previewListTotalPages, previewListTotalResults])
 
   const gatewayShareData = useMemo(() => {
-    const gateways = sortedGateways((routing.data?.gateway_share || []).map((point) => point.gateway))
+    const gatewaySharePoints = filteredRouting.data?.gateway_share || []
+    const gateways = sortedGateways(gatewaySharePoints.map((point) => point.gateway || 'No gateway selected'))
     if (!gateways.length) {
       return {
         gateways,
@@ -916,8 +1129,9 @@ export function AnalyticsPage() {
       )
     }
 
-    for (const point of routing.data?.gateway_share || []) {
-      if (!gateways.includes(point.gateway)) continue
+    for (const point of gatewaySharePoints) {
+      const gateway = point.gateway || 'No gateway selected'
+      if (!gateways.includes(gateway)) continue
       const row =
         buckets.get(point.bucket_ms) ||
         gateways.reduce<Record<string, number>>(
@@ -927,7 +1141,7 @@ export function AnalyticsPage() {
           },
           { bucket_ms: point.bucket_ms },
         )
-      row[point.gateway] = point.count
+      row[gateway] = point.count
       buckets.set(point.bucket_ms, row)
     }
 
@@ -935,7 +1149,7 @@ export function AnalyticsPage() {
       gateways,
       rows: Array.from(buckets.values()).sort((left, right) => left.bucket_ms - right.bucket_ms),
     }
-  }, [chartBucketSize, effectiveWindow, routing.data])
+  }, [chartBucketSize, effectiveWindow, filteredRouting.data])
 
   const connectorTrendData = useMemo(() => {
     const gateways = sortedGateways((filteredRouting.data?.sr_trend || []).map((point) => point.gateway))
@@ -1018,6 +1232,10 @@ export function AnalyticsPage() {
       }))
       .filter((item): item is { gateway: string; value: number } => item.value !== null)
   }, [connectorTrendData])
+  const latestSrRanking = useMemo(
+    () => [...latestConnectorSummary].sort((left, right) => right.value - left.value),
+    [latestConnectorSummary],
+  )
 
   const connectorTrendPointCounts = useMemo(() => {
     return connectorTrendData.gateways.reduce<Record<string, number>>((counts, gateway) => {
@@ -1044,6 +1262,195 @@ export function AnalyticsPage() {
       Math.min(100, Math.ceil(max + padding)),
     ] as const
   }, [connectorTrendData])
+
+  const gatewayVolumeSummary = useMemo<GatewayVolumeSummaryItem[]>(() => {
+    const totals = new Map<string, number>()
+
+    for (const row of gatewayShareData.rows) {
+      for (const gateway of gatewayShareData.gateways) {
+        totals.set(gateway, (totals.get(gateway) || 0) + readChartValue(row, gateway))
+      }
+    }
+
+    const totalCount = Array.from(totals.values()).reduce((sum, value) => sum + value, 0)
+
+    return gatewayShareData.gateways
+      .map((gateway) => {
+        const count = totals.get(gateway) || 0
+        return {
+          gateway,
+          count,
+          share: totalCount ? (count / totalCount) * 100 : 0,
+        }
+      })
+      .filter((item) => item.count > 0)
+      .sort((left, right) => right.count - left.count)
+  }, [gatewayShareData])
+
+  const routingAlignmentSummary = useMemo<RoutingAlignmentSummary>(() => {
+    const srLeader = latestSrRanking[0] || null
+    const srRunnerUp = latestSrRanking[1] || null
+    const volumeLeader = gatewayVolumeSummary[0] || null
+    const srLeaderVolume = srLeader
+      ? gatewayVolumeSummary.find((item) => item.gateway === srLeader.gateway) || {
+          gateway: srLeader.gateway,
+          count: 0,
+          share: 0,
+        }
+      : null
+    const srRowsByBucket = new Map(
+      connectorTrendData.rows.map((row) => [Number(row.bucket_ms), row] as const),
+    )
+
+    let leaderDecisionCount = 0
+    let comparableDecisionCount = 0
+    let comparableBucketCount = 0
+    let divergentBucketCount = 0
+
+    for (const shareRow of gatewayShareData.rows) {
+      const decisionsInBucket = gatewayShareData.gateways.reduce(
+        (sum, gateway) => sum + readChartValue(shareRow, gateway),
+        0,
+      )
+      if (decisionsInBucket <= 0) continue
+
+      const srRow = srRowsByBucket.get(Number(shareRow.bucket_ms))
+      if (!srRow) continue
+
+      const srValues = connectorTrendData.gateways
+        .map((gateway) => {
+          const value = srRow[gateway]
+          return typeof value === 'number' && Number.isFinite(value)
+            ? { gateway, value }
+            : null
+        })
+        .filter((item): item is SrGatewaySummaryItem => item !== null)
+        .sort((left, right) => right.value - left.value)
+      if (!srValues.length) continue
+
+      const topSrValue = srValues[0].value
+      const srLeaders = srValues.filter(
+        (item) => Math.abs(item.value - topSrValue) < 0.0001,
+      )
+      const selectedRanking = gatewayShareData.gateways
+        .map((gateway) => ({
+          gateway,
+          count: readChartValue(shareRow, gateway),
+        }))
+        .filter((item) => item.count > 0)
+        .sort((left, right) => right.count - left.count)
+      const leaderVolume = srLeaders.reduce(
+        (sum, item) => sum + readChartValue(shareRow, item.gateway),
+        0,
+      )
+
+      comparableBucketCount += 1
+      comparableDecisionCount += decisionsInBucket
+      leaderDecisionCount += leaderVolume
+
+      if (
+        selectedRanking[0] &&
+        !srLeaders.some((leader) => leader.gateway === selectedRanking[0].gateway)
+      ) {
+        divergentBucketCount += 1
+      }
+    }
+
+    const alignmentPercent = comparableDecisionCount
+      ? (leaderDecisionCount / comparableDecisionCount) * 100
+      : null
+
+    let statusLabel = 'Waiting for data'
+    let statusVariant: BadgeVariant = 'gray'
+    let headline = 'Gateway selections and SR snapshots are not comparable yet.'
+    let detail = 'Send both decide-gateway and update-gateway-score traffic in the selected window to build this readout.'
+
+    if (srLeader && volumeLeader) {
+      const leadersDiffer = srLeader.gateway !== volumeLeader.gateway
+      const sampleText =
+        comparableDecisionCount > 0
+          ? `${formatNumber(comparableDecisionCount, 0)} comparable decisions across ${formatNumber(comparableBucketCount, 0)} bucket${comparableBucketCount === 1 ? '' : 's'}.`
+          : 'Selections and SR snapshots exist, but they did not overlap in the same time buckets.'
+
+      if (leadersDiffer) {
+        statusLabel = 'SR/volume mismatch'
+        statusVariant = 'orange'
+        headline = `${volumeLeader.gateway} leads selected volume while ${srLeader.gateway} has the highest SR.`
+        detail = `${srLeader.gateway} received ${formatNumber(srLeaderVolume?.count || 0, 0)} decisions (${formatPercent(srLeaderVolume?.share || 0)}). ${sampleText}`
+      } else {
+        statusLabel = 'Aligned'
+        statusVariant = 'green'
+        headline = `${srLeader.gateway} leads both latest SR and selected volume.`
+        detail = `${srLeader.gateway} received ${formatNumber(srLeaderVolume?.count || 0, 0)} decisions (${formatPercent(srLeaderVolume?.share || 0)}). ${sampleText}`
+      }
+    } else if (srLeader) {
+      statusLabel = 'No selection volume'
+      statusVariant = 'blue'
+      headline = `${srLeader.gateway} has the highest SR, but no selected-gateway volume is present.`
+      detail = 'Send decide-gateway traffic in the selected window to compare the score leader against actual routing volume.'
+    } else if (volumeLeader) {
+      statusLabel = 'No SR snapshot'
+      statusVariant = 'blue'
+      headline = `${volumeLeader.gateway} leads selected volume, but connector SR is not available.`
+      detail = 'Send update-gateway-score traffic in the selected window to compare selected volume against connector success rates.'
+    }
+
+    return {
+      srLeader,
+      srRunnerUp,
+      volumeLeader,
+      srLeaderVolume,
+      alignmentPercent,
+      leaderDecisionCount,
+      comparableDecisionCount,
+      comparableBucketCount,
+      divergentBucketCount,
+      statusLabel,
+      statusVariant,
+      headline,
+      detail,
+    }
+  }, [connectorTrendData, gatewayShareData, gatewayVolumeSummary, latestSrRanking])
+
+  const connectorComparisonRows = useMemo<ConnectorComparisonRow[]>(() => {
+    const srByGateway = new Map(latestSrRanking.map((item) => [item.gateway, item.value] as const))
+    const volumeByGateway = new Map(gatewayVolumeSummary.map((item) => [item.gateway, item] as const))
+    const gateways = Array.from(
+      new Set([...connectorTrendData.gateways, ...gatewayShareData.gateways]),
+    )
+    const colorByGateway = new Map(
+      gateways.map((gateway, index) => [gateway, CHART_COLORS[index % CHART_COLORS.length]] as const),
+    )
+
+    return gateways
+      .map((gateway) => {
+        const volume = volumeByGateway.get(gateway)
+        return {
+          gateway,
+          srValue: srByGateway.get(gateway) ?? null,
+          count: volume?.count || 0,
+          share: volume?.share || 0,
+          color: colorByGateway.get(gateway) || CHART_COLORS[0],
+          isSrLeader: routingAlignmentSummary.srLeader?.gateway === gateway,
+          isVolumeLeader: routingAlignmentSummary.volumeLeader?.gateway === gateway,
+        }
+      })
+      .filter((item) => item.srValue !== null || item.count > 0)
+      .sort((left, right) => {
+        const leftSr = left.srValue ?? -1
+        const rightSr = right.srValue ?? -1
+        if (rightSr !== leftSr) return rightSr - leftSr
+        return right.count - left.count
+      })
+      .slice(0, 6)
+  }, [
+    connectorTrendData.gateways,
+    gatewayShareData.gateways,
+    gatewayVolumeSummary,
+    latestSrRanking,
+    routingAlignmentSummary.srLeader?.gateway,
+    routingAlignmentSummary.volumeLeader?.gateway,
+  ])
 
   const activeFilterSummary = useMemo(() => {
     const parts = availableFilters.dimensions.flatMap((dimension) => {
@@ -1259,13 +1666,18 @@ export function AnalyticsPage() {
             </div>
           </section>
 
+          <RoutingAlignmentCard
+            summary={routingAlignmentSummary}
+            comparisonRows={connectorComparisonRows}
+          />
+
           <Card className="overflow-visible">
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Gateway share over time</h2>
+              <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Selected gateways over time</h2>
               <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                How decision volume moved across connectors inside the selected merchant window.
+                Connector decision counts for the same active filters used by the SR chart.
               </p>
             </div>
             <InfoButton content={CARD_INFO.share} />
@@ -1319,7 +1731,7 @@ export function AnalyticsPage() {
                 Connector success rate over time
               </h2>
               <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                Historical connector score trend for the selected merchant window.
+                Historical connector SR for the active filters; compare it with selected volume above.
               </p>
               <p className="mt-2 text-xs font-medium text-slate-600 dark:text-[#b3b3bd]">
                 Active filters: {activeFilterSummary}
