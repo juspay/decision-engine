@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { ChevronDown } from 'lucide-react'
 
 interface Option {
@@ -25,7 +26,9 @@ export function SearchableSelect({
 }: SearchableSelectProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
-  const containerRef = useRef<HTMLDivElement>(null)
+  const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({})
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const selectedLabel = options.find(o => o.value === value)?.label ?? value
@@ -38,6 +41,19 @@ export function SearchableSelect({
     : options
   ).slice().sort((a, b) => a.label.localeCompare(b.label))
 
+  function openDropdown() {
+    const rect = triggerRef.current?.getBoundingClientRect()
+    if (!rect) return
+    setDropdownStyle({
+      position: 'fixed',
+      top: rect.bottom + 4,
+      left: rect.left,
+      minWidth: rect.width,
+      zIndex: 9999,
+    })
+    setOpen(true)
+  }
+
   useEffect(() => {
     if (open) inputRef.current?.focus()
   }, [open])
@@ -45,7 +61,13 @@ export function SearchableSelect({
   useEffect(() => {
     if (!open) return
     function onOutside(e: MouseEvent) {
-      if (!containerRef.current?.contains(e.target as Node)) close()
+      const target = e.target as Node
+      if (
+        !triggerRef.current?.contains(target) &&
+        !dropdownRef.current?.contains(target)
+      ) {
+        close()
+      }
     }
     document.addEventListener('mousedown', onOutside)
     return () => document.removeEventListener('mousedown', onOutside)
@@ -62,11 +84,12 @@ export function SearchableSelect({
   }
 
   return (
-    <div ref={containerRef} className={`relative inline-block ${className}`} data-cy={dataCy}>
+    <div className={`relative inline-block ${className}`} data-cy={dataCy}>
       <button
+        ref={triggerRef}
         type="button"
         disabled={disabled}
-        onClick={() => setOpen(o => !o)}
+        onClick={() => open ? close() : openDropdown()}
         className="cond-select flex items-center gap-1 pr-2"
         style={{ backgroundImage: 'none', display: 'flex', alignItems: 'center' }}
         data-value={value}
@@ -78,8 +101,12 @@ export function SearchableSelect({
         />
       </button>
 
-      {open && (
-        <div className="absolute z-50 left-0 mt-1 min-w-full w-max max-w-[240px] rounded-lg border border-slate-200 dark:border-[#222226] bg-white dark:bg-[#111118] shadow-lg">
+      {open && createPortal(
+        <div
+          ref={dropdownRef}
+          style={dropdownStyle}
+          className="w-max max-w-[240px] rounded-lg border border-slate-200 dark:border-[#222226] bg-white dark:bg-[#111118] shadow-lg"
+        >
           <div className="p-1.5 border-b border-slate-100 dark:border-[#1c1c24]">
             <input
               ref={inputRef}
@@ -114,7 +141,8 @@ export function SearchableSelect({
               ))
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )
