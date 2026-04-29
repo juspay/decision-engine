@@ -767,7 +767,7 @@ export function AnalyticsPage() {
   const { merchantId } = useMerchantStore()
   const authMerchantId = useAuthStore((state) => state.user?.merchantId || '')
   const effectiveMerchantId = merchantId || authMerchantId
-  const [range, setRange] = useState<AnalyticsRangeValue>('1h')
+  const [range, setRange] = useState<AnalyticsRangeValue>('1d')
   const [view, setView] = useState<AnalyticsView>('transactions')
   const [routingFilters, setRoutingFilters] = useState<RoutingFilters>(EMPTY_ROUTING_FILTERS)
   const [connectorFiltersOpen, setConnectorFiltersOpen] = useState(false)
@@ -775,11 +775,11 @@ export function AnalyticsPage() {
   const [showAllFilters, setShowAllFilters] = useState(false)
   const [previewListPage, setPreviewListPage] = useState(1)
   const [customStart, setCustomStart] = useState(() =>
-    toDateTimeInputValue(Date.now() - 2 * 60 * 60 * 1000),
+    toDateTimeInputValue(Date.now() - 24 * 60 * 60 * 1000),
   )
   const [customEnd, setCustomEnd] = useState(() => toDateTimeInputValue(Date.now()))
   const [presetWindowBounds, setPresetWindowBounds] = useState<TimeWindow>(() =>
-    presetWindow('1h'),
+    presetWindow('1d'),
   )
 
   const customWindow = useMemo(() => {

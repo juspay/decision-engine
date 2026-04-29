@@ -488,7 +488,7 @@ export function PaymentAuditPage() {
   const initialCustomWindow =
     initialStartMs > 0 && initialEndMs > initialStartMs
       ? { start_ms: initialStartMs, end_ms: initialEndMs }
-      : presetWindow('1h')
+      : presetWindow('1d')
 
   const [mode, setMode] = useState<AuditMode>(initialMode)
   const [range, setRange] = useState<AnalyticsRangeValue>(initialRange)
