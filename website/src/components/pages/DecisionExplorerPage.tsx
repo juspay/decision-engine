@@ -1,5 +1,4 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import useSWR from 'swr'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts'
 import { Button } from '../ui/Button'
@@ -14,7 +13,7 @@ import { DecideGatewayResponse, GatewayConnector, PaymentAuditEvent, PaymentAudi
 import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
 import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
-import { Play, RefreshCw, ChevronDown, ChevronUp, Activity, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings, ArrowRight } from 'lucide-react'
+import { Play, RefreshCw, ChevronDown, ChevronUp, Activity, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings } from 'lucide-react'
 
 const ALGORITHMS: RoutingAlgorithmName[] = [
   'SR_BASED_ROUTING',
@@ -78,8 +77,6 @@ type AuditInspectorTab = 'summary' | 'input' | 'response' | 'raw'
 interface SetupPromptState {
   title: string
   body: string
-  cta: string
-  route: string
   detail?: string
 }
 
@@ -117,7 +114,8 @@ type VolumePaymentEntry = {
   connector: string
 }
 
-const EXPLORER_STORAGE_KEY = 'decision-explorer-state-v2'
+const EXPLORER_STORAGE_KEY_PREFIX = 'decision-explorer-state-v2'
+const EXPLORER_RESULT_TTL_MS = 10 * 60 * 1000
 
 const DEFAULT_FORM: FormState = {
   amount: '1000',
@@ -162,6 +160,8 @@ const DEFAULT_FALLBACK_CONNECTORS: GatewayConnector[] = [
 ]
 
 interface ExplorerPersistedState {
+  scopeKey: string | null
+  resultDataUpdatedAtMs: number | null
   activeTab: TabType
   form: FormState
   simulationConfig: SimulationConfig
@@ -208,6 +208,8 @@ function normalizeDebitCardType(value: unknown): DebitRoutingFormState['card_typ
 
 function getDefaultExplorerState(): ExplorerPersistedState {
   return {
+    scopeKey: null,
+    resultDataUpdatedAtMs: null,
     activeTab: 'batch',
     form: { ...DEFAULT_FORM },
     simulationConfig: { ...DEFAULT_SIMULATION_CONFIG },
@@ -231,17 +233,50 @@ function getDefaultExplorerState(): ExplorerPersistedState {
   }
 }
 
-function loadExplorerState(): ExplorerPersistedState {
+function explorerScopeKey(userId: string, userEmail: string, merchantId: string) {
+  return `${userId || userEmail || 'anonymous'}:${merchantId || 'no-merchant'}`
+}
+
+function explorerStorageKey(scopeKey: string) {
+  return `${EXPLORER_STORAGE_KEY_PREFIX}:${encodeURIComponent(scopeKey)}`
+}
+
+function hasExpiredExplorerResults(resultDataUpdatedAtMs?: number | null) {
+  return Boolean(
+    resultDataUpdatedAtMs &&
+    Date.now() - resultDataUpdatedAtMs > EXPLORER_RESULT_TTL_MS,
+  )
+}
+
+function removeExplorerState(scopeKey: string) {
+  if (typeof window === 'undefined') return
+  window.localStorage.removeItem(explorerStorageKey(scopeKey))
+}
+
+function saveExplorerState(scopeKey: string, state: ExplorerPersistedState) {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(explorerStorageKey(scopeKey), JSON.stringify(state))
+}
+
+function loadExplorerState(scopeKey: string): ExplorerPersistedState {
   if (typeof window === 'undefined') return getDefaultExplorerState()
 
   try {
-    const raw = window.localStorage.getItem(EXPLORER_STORAGE_KEY)
-    if (!raw) return getDefaultExplorerState()
+    const raw = window.localStorage.getItem(explorerStorageKey(scopeKey))
+      || window.localStorage.getItem(EXPLORER_STORAGE_KEY_PREFIX)
+    if (!raw) return { ...getDefaultExplorerState(), scopeKey }
     const parsed = JSON.parse(raw) as Partial<ExplorerPersistedState>
     const defaults = getDefaultExplorerState()
+    if (parsed.scopeKey !== scopeKey || hasExpiredExplorerResults(parsed.resultDataUpdatedAtMs)) {
+      removeExplorerState(scopeKey)
+      return { ...defaults, scopeKey }
+    }
+
     return {
       ...defaults,
       ...parsed,
+      scopeKey,
+      resultDataUpdatedAtMs: parsed.resultDataUpdatedAtMs || null,
       activeTab:
         parsed.activeTab && parsed.activeTab !== 'single'
           ? parsed.activeTab
@@ -264,7 +299,7 @@ function loadExplorerState(): ExplorerPersistedState {
       simulationResults: parsed.simulationResults || defaults.simulationResults,
     }
   } catch {
-    return getDefaultExplorerState()
+    return { ...getDefaultExplorerState(), scopeKey }
   }
 }
 
@@ -566,9 +601,7 @@ function setupPromptForTab(tab: TabType, detail?: string): SetupPromptState {
   if (tab === 'volume') {
     return {
       title: 'Configure volume split first',
-      body: 'Volume evaluation needs an active volume split rule for this merchant before it can sample distribution.',
-      cta: 'Configure volume split',
-      route: '/routing/volume',
+      body: 'Volume evaluation needs an active volume split rule before it can calculate distribution.',
       detail,
     }
   }
@@ -576,9 +609,7 @@ function setupPromptForTab(tab: TabType, detail?: string): SetupPromptState {
   if (tab === 'rule') {
     return {
       title: 'Configure rule-based routing first',
-      body: 'Rule evaluation needs an active rule-based strategy for this merchant before it can return a policy decision.',
-      cta: 'Configure rule',
-      route: '/routing/rules',
+      body: 'Rule evaluation needs an active rule-based strategy before it can return a policy decision.',
       detail,
     }
   }
@@ -587,17 +618,13 @@ function setupPromptForTab(tab: TabType, detail?: string): SetupPromptState {
     return {
       title: 'Enable debit routing first',
       body: 'Debit network decisions need the merchant debit routing flag enabled before this explorer can run network routing.',
-      cta: 'Configure debit routing',
-      route: '/routing/debit',
       detail,
     }
   }
 
   return {
     title: 'Configure auth-rate routing first',
-    body: 'Auth-rate simulation needs success-rate routing configured for this merchant before it can run gateway decisions.',
-    cta: 'Configure auth-rate',
-    route: '/routing/sr',
+    body: 'Auth-rate simulation needs success-rate routing configured before it can run gateway decisions.',
     detail,
   }
 }
@@ -675,16 +702,25 @@ function InspectorJsonPanel({
 }
 
 export function DecisionExplorerPage() {
-  const navigate = useNavigate()
   const { merchantId } = useMerchantStore()
-  const authMerchantId = useAuthStore((state) => state.user?.merchantId || '')
+  const authUser = useAuthStore((state) => state.user)
+  const authMerchantId = authUser?.merchantId || ''
   const effectiveMerchantId = merchantId || authMerchantId
+  const currentScopeKey = explorerScopeKey(
+    authUser?.userId || '',
+    authUser?.email || '',
+    effectiveMerchantId,
+  )
   const debitRoutingFlag = useDebitRoutingFlag(effectiveMerchantId)
   const { routingKeysConfig, isLoading: routingKeysLoading, error: routingKeysError } = useDynamicRoutingConfig()
   const hasRoutingKeys = Object.keys(routingKeysConfig).length > 0
   const routingConfigUnavailable = !routingKeysLoading && (!hasRoutingKeys || Boolean(routingKeysError))
-  const initialState = useMemo(() => loadExplorerState(), [])
+  const initialState = useMemo(() => loadExplorerState(currentScopeKey), [currentScopeKey])
   const [activeTab, setActiveTab] = useState<TabType>(initialState.activeTab)
+  const [stateScopeKey, setStateScopeKey] = useState(initialState.scopeKey || currentScopeKey)
+  const [resultDataUpdatedAtMs, setResultDataUpdatedAtMs] = useState<number | null>(
+    initialState.resultDataUpdatedAtMs,
+  )
 
   const [form, setForm] = useState<FormState>(initialState.form)
 
@@ -863,8 +899,106 @@ export function DecisionExplorerPage() {
     }
   }, [selectedAuditPaymentId, selectedPreviewPaymentId, setupPrompt])
 
+  function clearExplorerRunData() {
+    const defaults = getDefaultExplorerState()
+    setResult(defaults.result)
+    setDebitResult(defaults.debitResult)
+    setDebitPaymentId(defaults.debitPaymentId)
+    setSingleRunPaymentId(defaults.singleRunPaymentId)
+    setSingleRunOutcome(defaults.singleRunOutcome)
+    setRuleResult(defaults.ruleResult)
+    setVolumeDistribution(defaults.volumeDistribution)
+    setVolumeEvaluationLog(defaults.volumeEvaluationLog)
+    setVolumeProgress(defaults.volumeProgress)
+    setSimulationResults(defaults.simulationResults)
+    setResponseOpen(defaults.responseOpen)
+    setDebitResponseOpen(defaults.debitResponseOpen)
+    setVolumeResponseOpen(defaults.volumeResponseOpen)
+    setSelectedAuditPaymentId(null)
+    setSelectedAuditEventId(null)
+    setAuditInspectorTab('summary')
+    setSelectedPreviewPaymentId(null)
+    setSelectedPreviewEventId(null)
+    setPreviewInspectorTab('summary')
+    setPreviewTraceLabel('Rule Evaluation Decision')
+    setResultDataUpdatedAtMs(null)
+    setError(null)
+    setSetupPrompt(null)
+    setLoading(false)
+    setIsSimulating(false)
+  }
+
+  function markExplorerRunDataUpdated() {
+    setResultDataUpdatedAtMs(Date.now())
+  }
+
+  function applyExplorerState(nextState: ExplorerPersistedState, scopeKey: string) {
+    setActiveTab(nextState.activeTab)
+    setStateScopeKey(nextState.scopeKey || scopeKey)
+    setResultDataUpdatedAtMs(nextState.resultDataUpdatedAtMs)
+    setForm(nextState.form)
+    setSimulationConfig(nextState.simulationConfig)
+    setDebitForm(nextState.debitForm)
+    setRuleParams(nextState.ruleParams)
+    setFallbackConnectors(nextState.fallbackConnectors)
+    setVolumePayments(nextState.volumePayments)
+    setResult(nextState.result)
+    setDebitResult(nextState.debitResult)
+    setDebitPaymentId(nextState.debitPaymentId)
+    setSingleRunPaymentId(nextState.singleRunPaymentId)
+    setSingleRunOutcome(nextState.singleRunOutcome)
+    setRuleResult(nextState.ruleResult)
+    setVolumeDistribution(nextState.volumeDistribution)
+    setVolumeEvaluationLog(nextState.volumeEvaluationLog)
+    setVolumeProgress(nextState.volumeProgress)
+    setSimulationResults(nextState.simulationResults)
+    setResponseOpen(nextState.responseOpen)
+    setDebitResponseOpen(nextState.debitResponseOpen)
+    setVolumeResponseOpen(nextState.volumeResponseOpen)
+    setSelectedAuditPaymentId(null)
+    setSelectedAuditEventId(null)
+    setAuditInspectorTab('summary')
+    setSelectedPreviewPaymentId(null)
+    setSelectedPreviewEventId(null)
+    setPreviewInspectorTab('summary')
+    setPreviewTraceLabel('Rule Evaluation Decision')
+    setFilterOpen(false)
+    setError(null)
+    setSetupPrompt(null)
+    setLoading(false)
+    setIsSimulating(false)
+  }
+
   useEffect(() => {
+    if (stateScopeKey === currentScopeKey) return
+    applyExplorerState(loadExplorerState(currentScopeKey), currentScopeKey)
+  }, [currentScopeKey, stateScopeKey])
+
+  useEffect(() => {
+    if (!resultDataUpdatedAtMs) return
+
+    const storageScopeKey = stateScopeKey || currentScopeKey
+    const remainingMs = EXPLORER_RESULT_TTL_MS - (Date.now() - resultDataUpdatedAtMs)
+    if (remainingMs <= 0) {
+      clearExplorerRunData()
+      removeExplorerState(storageScopeKey)
+      return
+    }
+
+    const timer = window.setTimeout(() => {
+      clearExplorerRunData()
+      removeExplorerState(storageScopeKey)
+    }, remainingMs)
+
+    return () => window.clearTimeout(timer)
+  }, [currentScopeKey, resultDataUpdatedAtMs, stateScopeKey])
+
+  useEffect(() => {
+    if (stateScopeKey !== currentScopeKey) return
+
     const nextState: ExplorerPersistedState = {
+      scopeKey: currentScopeKey,
+      resultDataUpdatedAtMs,
       activeTab,
       form,
       simulationConfig,
@@ -887,10 +1021,11 @@ export function DecisionExplorerPage() {
       volumeResponseOpen,
     }
 
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(EXPLORER_STORAGE_KEY, JSON.stringify(nextState))
-    }
+    saveExplorerState(currentScopeKey, nextState)
   }, [
+    currentScopeKey,
+    stateScopeKey,
+    resultDataUpdatedAtMs,
     activeTab,
     form,
     simulationConfig,
@@ -1032,6 +1167,7 @@ export function DecisionExplorerPage() {
       })
       setResult(res)
       setSingleRunPaymentId(paymentId)
+      markExplorerRunDataUpdated()
     } catch (e: unknown) {
       handleRunError(e, 'single')
     } finally {
@@ -1056,7 +1192,7 @@ export function DecisionExplorerPage() {
 
   async function runDebitRouting() {
     if (!effectiveMerchantId) return setError('Sign in with a merchant-linked account to continue')
-    if (!debitRoutingFlag.isEnabled) return openSetupPrompt('debit', 'Debit routing is disabled for this merchant.')
+    if (!debitRoutingFlag.isEnabled) return openSetupPrompt('debit', 'Debit routing is disabled.')
 
     const gateways = debitForm.eligible_gateways.split(',').map(s => s.trim()).filter(Boolean)
     if (gateways.length === 0) return setError('Add at least one eligible gateway')
@@ -1087,6 +1223,7 @@ export function DecisionExplorerPage() {
 
       setDebitResult(res)
       setDebitPaymentId(paymentId)
+      markExplorerRunDataUpdated()
     } catch (e: unknown) {
       handleRunError(e, 'debit')
     } finally {
@@ -1166,6 +1303,7 @@ export function DecisionExplorerPage() {
         })
 
         setSimulationResults([...results])
+        markExplorerRunDataUpdated()
       }
     } catch (e: unknown) {
       handleRunError(e, 'batch', 'Simulation failed')
@@ -1210,6 +1348,7 @@ export function DecisionExplorerPage() {
       })
 
       setRuleResult(res)
+      markExplorerRunDataUpdated()
 
       if (res.output.type === 'volume_split' && res.output.splits) {
         const totalPayments = parseInt(volumePayments) || 100
@@ -1300,6 +1439,7 @@ export function DecisionExplorerPage() {
         setVolumeProgress(logEntries.length)
         setVolumeEvaluationLog(logEntries)
         setVolumeDistribution(buildDistribution(logEntries.length))
+        markExplorerRunDataUpdated()
       }
     } catch (e: unknown) {
       handleRunError(e, 'volume')
@@ -1529,9 +1669,6 @@ export function DecisionExplorerPage() {
             <h1 className="text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">Decision Explorer</h1>
             <Badge variant="blue">{effectiveMerchantId || 'No merchant'}</Badge>
           </div>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500 dark:text-[#9aa6bb]">
-            Run routing decisions, inspect distribution, and open the exact decision trace from one workspace.
-          </p>
         </div>
         <Button size="sm" variant="secondary" onClick={resetCurrentTabState}>
           <RefreshCw size={14} />
@@ -1748,12 +1885,12 @@ export function DecisionExplorerPage() {
                   </p>
                 ) : debitRoutingFlag.isEnabled ? (
                   <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
-                    Debit routing is enabled for this merchant. This tab will call /decide-gateway with NTW_BASED_ROUTING.
+                    Debit routing is enabled. This tab will call /decide-gateway with NTW_BASED_ROUTING.
                   </p>
                 ) : (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
                     <div className="flex flex-wrap items-center justify-between gap-3">
-                      <span>Debit routing is disabled for this merchant.</span>
+                      <span>Debit routing is disabled.</span>
                       <Button size="sm" variant="secondary" onClick={enableDebitRoutingForExplorer} disabled={!effectiveMerchantId || loading}>
                         Enable Debit Routing
                       </Button>
@@ -2310,7 +2447,7 @@ export function DecisionExplorerPage() {
                     <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 dark:border-[#293546] dark:bg-[#0b111a]">
                       <div className="flex items-center justify-between">
                         <p className="text-sm font-semibold text-slate-900 dark:text-white">Connector share</p>
-                        <Badge variant="gray">Live sample</Badge>
+                        <Badge variant="gray">Current run</Badge>
                       </div>
                       <div className="mt-4 h-[260px]">
                         <ResponsiveContainer width="100%" height="100%">
@@ -2463,9 +2600,9 @@ export function DecisionExplorerPage() {
               <section className="flex min-h-[360px] items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-8 py-12 text-center dark:border-[#2a303a] dark:bg-[#101722]/70">
                 <div className="max-w-sm">
                   <PieChartIcon size={30} className="mx-auto text-slate-300 dark:text-[#536075]" />
-                  <h3 className="mt-4 text-sm font-semibold text-slate-900 dark:text-white">No volume sample yet</h3>
+                  <h3 className="mt-4 text-sm font-semibold text-slate-900 dark:text-white">No volume results yet</h3>
                   <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-[#9aa6bb]">
-                    Set the run size, execute the volume test, then inspect distribution and traces here.
+                    Set the run size and run the volume split check to view distribution and traces.
                   </p>
                 </div>
               </section>
@@ -2882,18 +3019,8 @@ export function DecisionExplorerPage() {
               ) : null}
 
               <div className="mt-6 flex flex-wrap justify-end gap-2">
-                <Button variant="secondary" onClick={() => setSetupPrompt(null)}>
-                  Stay here
-                </Button>
-                <Button
-                  onClick={() => {
-                    const route = setupPrompt.route
-                    setSetupPrompt(null)
-                    navigate(route)
-                  }}
-                >
-                  {setupPrompt.cta}
-                  <ArrowRight size={16} />
+                <Button onClick={() => setSetupPrompt(null)}>
+                  Dismiss
                 </Button>
               </div>
             </div>
@@ -3252,7 +3379,7 @@ export function DecisionExplorerPage() {
                       }
                       body={
                         previewSummary
-                          ? 'We already found the decision summary for this run, but the step-by-step timeline has not been flushed yet. Waiting for the latest events.'
+                          ? 'The decision summary is available. The step-by-step timeline will appear as soon as the latest events are ready.'
                           : 'This decision was just logged. Waiting for the decision trace details to become available.'
                       }
                     />
@@ -3353,8 +3480,8 @@ export function DecisionExplorerPage() {
                       }
                       body={
                         previewSummary
-                          ? 'The decision record exists, but no inspectable step payload has arrived yet. The inspector will unlock as soon as the first timeline event is available.'
-                          : 'Inspector will unlock as soon as the first decision event is available.'
+                          ? 'The decision record is available. Request and response payloads will appear as soon as the first timeline event is ready.'
+                          : 'Request and response payloads will appear as soon as the first decision event is ready.'
                       }
                     />
                   ) : (

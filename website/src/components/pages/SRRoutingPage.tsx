@@ -176,9 +176,6 @@ export function SRRoutingPage() {
     <div className="space-y-6 max-w-5xl">
       <div>
         <h1 className="text-2xl font-semibold text-slate-900">Auth-Rate Based Routing</h1>
-        <p className="text-sm text-slate-500 mt-1">
-          Configure success-rate based gateway routing
-        </p>
       </div>
 
       {!merchantId && (

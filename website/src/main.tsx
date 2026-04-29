@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import App from './App'
 import { ErrorBoundary } from './ErrorBoundary'
+import { applyThemePreference } from './lib/theme'
 import './index.css'
 
 const routerBaseName = import.meta.env.BASE_URL.endsWith('/')
@@ -14,6 +15,8 @@ if (import.meta.env.DEV && window.location.hostname === '127.0.0.1') {
   nextUrl.hostname = 'localhost'
   window.location.replace(nextUrl.toString())
 } else {
+applyThemePreference()
+
 console.log('\n' + '='.repeat(80))
 console.log('[APP STARTUP] Dashboard initializing...')
 console.log(`Timestamp: ${new Date().toISOString()}`)

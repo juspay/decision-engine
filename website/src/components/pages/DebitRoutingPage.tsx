@@ -34,8 +34,8 @@ export function DebitRoutingPage() {
       const response = await setDebitRoutingEnabled(nextEnabled)
       setSuccess(
         response.debit_routing_enabled
-          ? 'Debit routing enabled for this merchant.'
-          : 'Debit routing disabled for this merchant.',
+          ? 'Debit routing enabled.'
+          : 'Debit routing disabled.',
       )
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to update debit routing')
@@ -48,9 +48,6 @@ export function DebitRoutingPage() {
     <div className="max-w-3xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Network / Debit Routing</h1>
-        <p className="mt-1 text-sm text-slate-500 dark:text-[#b2bdd1]">
-          Enable debit network routing for a merchant, then test real network-routing decisions from Decision Explorer.
-        </p>
       </div>
 
       <Card>
@@ -58,7 +55,7 @@ export function DebitRoutingPage() {
           <div className="flex items-center gap-2">
             <Network size={16} className="text-brand-500" />
             <div>
-              <SurfaceLabel>Merchant feature flag</SurfaceLabel>
+              <SurfaceLabel>Debit routing access</SurfaceLabel>
               <h2 className="mt-2 font-medium text-slate-800 dark:text-white">Debit Routing Runtime Access</h2>
             </div>
           </div>
@@ -129,7 +126,7 @@ export function DebitRoutingPage() {
             This toggle controls the backend runtime gate for <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-brand-600 dark:bg-[#111118]">NTW_BASED_ROUTING</code> and hybrid debit routing.
           </p>
           <p>
-            Detailed debit fee tables and network cost configuration are still backend configuration, not dashboard-editable rule config. This page only enables or disables merchant access to the runtime debit-routing flow.
+            Detailed debit fee tables and network cost configuration are still managed outside the dashboard. This toggle enables or disables access to the runtime debit-routing flow.
           </p>
           <p>
             Use Decision Explorer&apos;s Debit Routing tab to send a real <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-brand-600 dark:bg-[#111118]">/decide-gateway</code> request and inspect the ranked debit networks.
