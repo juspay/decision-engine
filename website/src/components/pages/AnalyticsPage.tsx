@@ -786,7 +786,8 @@ export function AnalyticsPage() {
     if (range !== 'custom') return undefined
     const start_ms = fromDateTimeInputValue(customStart)
     const end_ms = fromDateTimeInputValue(customEnd)
-    if (start_ms === null || end_ms === null || end_ms <= start_ms) {
+    const now = Date.now()
+    if (start_ms === null || end_ms === null || end_ms <= start_ms || start_ms > now || end_ms > now) {
       return undefined
     }
     return { start_ms, end_ms }
@@ -1630,7 +1631,9 @@ export function AnalyticsPage() {
             </label>
           </div>
           {!customWindow ? (
-            <p className="mt-3 text-xs text-red-500">Choose an end time after the start time.</p>
+            <p className="mt-3 text-xs text-red-500">
+              Choose an end time after the start time. Future dates are not available.
+            </p>
           ) : null}
         </Card>
       ) : null}

@@ -512,7 +512,8 @@ export function PaymentAuditPage() {
     if (range !== 'custom') return undefined
     const start_ms = fromDateTimeInputValue(customStart)
     const end_ms = fromDateTimeInputValue(customEnd)
-    if (start_ms === null || end_ms === null || end_ms <= start_ms) return undefined
+    const now = Date.now()
+    if (start_ms === null || end_ms === null || end_ms <= start_ms || start_ms > now || end_ms > now) return undefined
     return { start_ms, end_ms }
   }, [customEnd, customStart, range])
 
@@ -764,7 +765,8 @@ export function PaymentAuditPage() {
         ? (() => {
             const start_ms = fromDateTimeInputValue(customStart)
             const end_ms = fromDateTimeInputValue(customEnd)
-            return start_ms !== null && end_ms !== null && end_ms > start_ms
+            const now = Date.now()
+            return start_ms !== null && end_ms !== null && end_ms > start_ms && start_ms <= now && end_ms <= now
               ? { start_ms, end_ms }
               : undefined
           })()
@@ -884,7 +886,7 @@ export function PaymentAuditPage() {
           </div>
           {!customWindow ? (
             <p className="mt-3 text-xs text-red-500">
-              Choose an end time after the start time.
+              Choose an end time after the start time. Future dates are not available.
             </p>
           ) : null}
         </GlassCard>
