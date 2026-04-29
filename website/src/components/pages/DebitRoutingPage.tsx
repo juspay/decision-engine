@@ -48,9 +48,6 @@ export function DebitRoutingPage() {
     <div className="max-w-3xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Network / Debit Routing</h1>
-        <p className="mt-1 text-sm text-slate-500 dark:text-[#b2bdd1]">
-          Enable debit network routing for a merchant, then test real network-routing decisions from Decision Explorer.
-        </p>
       </div>
 
       <Card>

@@ -1559,11 +1559,6 @@ export function AnalyticsPage() {
             <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Analytics</h1>
             <Badge variant="green">{overview.data?.merchant_id || effectiveMerchantId || 'Signed-in merchant'}</Badge>
           </div>
-          <p className="text-sm text-slate-500 dark:text-[#8a8a93]">
-            {view === 'transactions'
-              ? 'One working surface for auth-rate route volume, connector share, and historical connector success rate.'
-              : 'Routing activity for rule-based and volume-based flows, separate from auth-rate score updates.'}
-          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 md:justify-end">

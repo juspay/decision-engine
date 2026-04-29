@@ -1620,9 +1620,6 @@ export function DecisionExplorerPage() {
             <h1 className="text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">Decision Explorer</h1>
             <Badge variant="blue">{effectiveMerchantId || 'No merchant'}</Badge>
           </div>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500 dark:text-[#9aa6bb]">
-            Run routing decisions, inspect distribution, and open the exact decision trace from one workspace.
-          </p>
         </div>
         <Button size="sm" variant="secondary" onClick={resetCurrentTabState}>
           <RefreshCw size={14} />

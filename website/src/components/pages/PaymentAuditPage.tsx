@@ -837,13 +837,6 @@ export function PaymentAuditPage() {
             <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">{content.title}</h1>
             <Badge variant="green">{auditSearch.data?.merchant_id || effectiveMerchantId || 'Signed-in merchant'}</Badge>
           </div>
-          <p className="max-w-3xl text-sm text-slate-500 dark:text-[#8a8a93]">
-            {mode === 'rule_based'
-              ? 'Inspect rule-based and volume-based routing decisions, traces, and connector outcomes.'
-              : mode === 'debit_routing'
-                ? 'Inspect debit-routing network decisions and ranked co-badged card outcomes.'
-                : 'Inspect auth-rate routing decisions, routing logic, and connector scores for any payment.'}
-          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">

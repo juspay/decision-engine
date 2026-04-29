@@ -333,9 +333,6 @@ export function OverviewPage() {
               <Badge variant="blue">{analyticsOverview.data?.merchant_id || effectiveMerchantId}</Badge>
             ) : null}
           </div>
-          <p className="max-w-3xl text-sm leading-6 text-slate-500 dark:text-[#8a8a93]">
-            Basic business-facing view of system status, setup, request volume, and gateway activity.
-          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 md:justify-end">

@@ -244,9 +244,6 @@ export function RoutingHubPage() {
             <h1 className="text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">Routing Hub</h1>
             <Badge variant={merchantId ? 'blue' : 'orange'}>{merchantId || 'No merchant selected'}</Badge>
           </div>
-          <p className="mt-2 max-w-3xl text-sm leading-7 text-slate-500 dark:text-[#8a8a93]">
-            Review routing posture, active strategies, and merchant readiness without jumping into other workspaces.
-          </p>
         </div>
       </div>
 
