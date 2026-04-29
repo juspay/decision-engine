@@ -60,5 +60,27 @@ export default defineConfig(({ command }) => {
     build: {
       outDir: 'dist',
     },
+    preview: {
+      proxy: {
+        '^/decision-engine-api(?:/.*)?$': createApiProxy(apiProxyPrefix),
+        '/decide-gateway': createApiProxy(),
+        '/decision_gateway': createApiProxy(),
+        '/merchant-account': createApiProxy(),
+        '/config-sr-dimension': createApiProxy(),
+        '^/config(?:/.*)?$': createApiProxy(),
+        '/health': createApiProxy(),
+        '/health/ready': createApiProxy(),
+        '/update-gateway-score': createApiProxy(),
+        '/update-score': createApiProxy(),
+        '^/rule(?:/.*)?$': createApiProxy(),
+        '^/routing/(create|activate|evaluate|list(?:/.*)?|hybrid)$': createApiProxy(),
+        '^/analytics/(overview|gateway-scores|decisions|routing-stats|log-summaries|preview-trace|payment-audit)(?:\\?.*)?$':
+          createApiProxy(),
+        '^/onboarding(?:/.*)?$': createApiProxy(),
+        '^/auth(?:/.*)?$': createApiProxy(),
+        '^/api-key(?:/.*)?$': createApiProxy(),
+        '^/merchant(?:/.*)?$': createApiProxy(),
+      },
+    },
   }
 })

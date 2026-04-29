@@ -242,7 +242,7 @@ export function AuthPage() {
               <div className="flex flex-wrap gap-3">
                 <PillStat>Gateway routing</PillStat>
                 <PillStat>Merchant analytics</PillStat>
-                <PillStat>ClickHouse audit</PillStat>
+                <PillStat>Payment audit</PillStat>
               </div>
             </div>
           </div>

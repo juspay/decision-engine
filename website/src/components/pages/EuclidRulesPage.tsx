@@ -175,7 +175,7 @@ function PriorityEditor({
 }) {
   const [newGatewayName, setNewGatewayName] = useState('')
   const [newGatewayId, setNewGatewayId] = useState('')
-  const listId = `gateway-suggestions-${Math.random().toString(36).slice(2)}`
+  const listId = useRef(`gateway-suggestions-${Math.random().toString(36).slice(2)}`).current
   const sensors = useSensors(
     useSensor(PointerSensor),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })

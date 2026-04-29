@@ -162,10 +162,12 @@ function seedDashboardStorage(win, merchantId, session) {
   win.localStorage.setItem('auth-store', authStoreState(session))
 }
 
+let serviceVerified = false
 Cypress.Commands.add('waitForService', () => {
+  if (serviceVerified) return cy.wrap(null)
   return requestApi('GET', '/health', {
     timeout: Cypress.env('HEALTH_POLL_TIMEOUT_MS') || 120000,
-  }).its('status').should('eq', 200)
+  }).its('status').should('eq', 200).then(() => { serviceVerified = true })
 })
 
 Cypress.Commands.add('waitForDocs', () => {

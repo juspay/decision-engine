@@ -12,6 +12,15 @@ module.exports = defineConfig({
     defaultCommandTimeout: 10000,
     requestTimeout: 10000,
     responseTimeout: 10000,
+    // Keep 0 snapshots in memory for passed tests. Without this, Cypress
+    // accumulates DOM snapshots + command logs for every passing test, which
+    // causes the Chromium process to SIGSEGV on long test runs (~45+ tests).
+    // video is already false so there is no additional cost to setting this.
+    numTestsKeptInMemory: 0,
+    // Force Chromium GC between every test to prevent renderer OOM on
+    // heavy E2E tests (complex form interactions accumulate heap even with
+    // numTestsKeptInMemory: 0, which only covers Cypress-internal snapshots).
+    experimentalMemoryManagement: true,
     env: {
       // Default configuration - can be overridden via environment variables
       API_BASE_URL: process.env.CYPRESS_API_BASE_URL || 'http://localhost:8080',
@@ -41,7 +50,7 @@ module.exports = defineConfig({
       DEFAULT_GATEWAYS: ['stripe', 'adyen', 'checkout'],
       DEFAULT_AMOUNT: 100.50,
       DEFAULT_CURRENCY: 'USD',
-      ANALYTICS_POLL_INTERVAL_MS: 2000,
+      ANALYTICS_POLL_INTERVAL_MS: 500,
       ANALYTICS_POLL_TIMEOUT_MS: 60000,
       // Routing algorithm types
       ROUTING_ALGORITHMS: {

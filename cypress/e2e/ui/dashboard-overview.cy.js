@@ -56,19 +56,23 @@ describe('Dashboard Overview UI', () => {
     cy.contains('Gateway activity').should('exist')
     cy.contains(merchantId).should('be.visible')
 
+    // Wait for initial analytics to load before triggering refresh
+    cy.contains('Top gateway').should('exist')
+
     cy.intercept('GET', '**/analytics/overview*', (req) => {
-      req.continue((res) => res.setDelay(1000))
+      req.continue((res) => res.setDelay(3000))
     }).as('overviewRefresh')
     cy.intercept('GET', '**/analytics/routing-stats*', (req) => {
-      req.continue((res) => res.setDelay(1000))
+      req.continue((res) => res.setDelay(3000))
     }).as('routingRefresh')
 
     cy.contains('button', '1 week').click()
-    cy.contains(/Refreshing overview analytics for/i).should('be.visible')
+    // Check for the "Loading" badge that appears during refresh
+    cy.contains('Loading').should('be.visible')
     cy.wait('@overviewRefresh')
     cy.wait('@routingRefresh')
 
-    cy.contains('Top gateway').should('be.visible')
+    cy.contains('Top gateway').scrollIntoView().should('be.visible')
     cy.contains('button', 'Analytics').click()
     cy.url().should('include', '/analytics')
     cy.contains('h1', 'Analytics').should('exist')

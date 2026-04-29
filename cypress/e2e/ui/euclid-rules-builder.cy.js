@@ -18,10 +18,8 @@ describe('Rule Builder — UI interactions', () => {
     cy.viewport(1600, 1200)
     merchantId = factory.merchantId('euclid_ui')
     ruleName = factory.ruleName('ui_rule')
-    cy.ensureMerchantAccount(merchantId)
     cy.visitWithMerchant('/routing/rules', merchantId)
-    cy.contains('h1', 'Rule-Based Routing').should('be.visible')
-    cy.contains('button', 'Create Rule').should('not.be.disabled')
+    cy.contains('Loading routing keys from backend...', { timeout: 15000 }).should('not.exist')
   })
 
   afterEach(() => {

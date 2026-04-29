@@ -1,7 +1,7 @@
 // All API calls use relative URLs so nginx/vite-proxy can handle routing
 import { tokenRef } from './tokenRef'
 
-const DEBUG_API = true
+const DEBUG_API = import.meta.env.DEV
 const DEFAULT_TENANT_ID = import.meta.env.VITE_DEFAULT_TENANT_ID ?? 'public'
 const API_BASE_PATH = (import.meta.env.VITE_API_BASE_PATH ?? '/decision-engine-api').replace(/\/$/, '')
 const FEATURE_HEADER = import.meta.env.VITE_FEATURE_HEADER ?? 'decision-engine'
