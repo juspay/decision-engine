@@ -13,6 +13,7 @@ import { AuthGuard } from './components/layout/AuthGuard'
 import { AuthPage } from './pages/AuthPage'
 import { OnboardingPage } from './pages/OnboardingPage'
 import { MembersPage } from './pages/MembersPage'
+import { ApiKeysPage } from './pages/ApiKeysPage'
 
 export default function App() {
   return (
@@ -32,6 +33,7 @@ export default function App() {
           <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="audit" element={<PaymentAuditPage />} />
           <Route path="members" element={<MembersPage />} />
+          <Route path="api-keys" element={<ApiKeysPage />} />
           <Route path="*" element={<Navigate to="." replace />} />
         </Route>
       </Route>

@@ -13,6 +13,7 @@ import {
   Moon,
   Sun,
   Users,
+  Key,
   ChevronDown,
   LogOut,
 } from 'lucide-react'
@@ -151,6 +152,7 @@ export function Sidebar() {
         </div>
 
         <SideLink to="/members" icon={Users} selectedPath={selectedPath} onNavigate={setPendingPath}>Members</SideLink>
+        <SideLink to="/api-keys" icon={Key} selectedPath={selectedPath} onNavigate={setPendingPath}>API Keys</SideLink>
       </nav>
 
       <div ref={accountRef} className="relative border-t border-slate-200 bg-white px-4 py-4 transition-colors duration-300 dark:border-[#22262f] dark:bg-[#0a0d12]">

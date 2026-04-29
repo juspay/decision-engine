@@ -21,6 +21,7 @@ import { Card, CardBody, CardHeader } from '../ui/Card'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { ErrorMessage } from '../ui/ErrorMessage'
+import { SearchableSelect } from '../ui/SearchableSelect'
 import { useMerchantStore } from '../../store/merchantStore'
 import { apiPost } from '../../lib/api'
 import { RoutingAlgorithm } from '../../types/api'
@@ -455,20 +456,15 @@ function ConditionRowEditor({
 
   return (
     <div className="flex items-start gap-2 flex-wrap">
-      <select
+      <SearchableSelect
         value={row.lhs}
-        onChange={(e) => {
-          const newKey = e.target.value
+        onChange={(newKey) => {
           const newConfig = routingKeys[newKey]
           const defaultValue = newConfig?.type === 'enum' ? (newConfig.values?.[0] ?? '') : ''
           onChange({ ...row, lhs: newKey, value: defaultValue, operator: '==' })
         }}
-        className="cond-select"
-      >
-        {Object.keys(routingKeys).map((k) => (
-          <option key={k} value={k}>{toLabel(k)}</option>
-        ))}
-      </select>
+        options={Object.keys(routingKeys).map((k) => ({ value: k, label: toLabel(k) }))}
+      />
       <select
         value={row.operator}
         onChange={(e) => handleOperatorChange(e.target.value)}
@@ -497,16 +493,11 @@ function ConditionRowEditor({
           )}
         </div>
       ) : isEnum ? (
-        <select
+        <SearchableSelect
           value={row.value as string}
-          onChange={(e) => onChange({ ...row, value: e.target.value })}
-          className="cond-select"
-        >
-          <option value="">select...</option>
-          {(keyInfo?.values || []).map((v: string) => (
-            <option key={v} value={v}>{toLabel(v)}</option>
-          ))}
-        </select>
+          onChange={(v) => onChange({ ...row, value: v })}
+          options={(keyInfo?.values || []).map((v: string) => ({ value: v, label: toLabel(v) }))}
+        />
       ) : isInt ? (
         <input
           type="number"
