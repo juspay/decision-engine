@@ -6,7 +6,7 @@ use crate::analytics::models::{AnalyticsGatewaySharePoint, AnalyticsQuery};
 use crate::error::ApiError;
 
 use super::super::common::{fetch_all, DOMAIN_TABLE};
-use super::super::filters::{base_window_filters, merchant_filter};
+use super::super::filters::{analytics_dimension_filters, base_window_filters, merchant_filter};
 use super::super::query::{BoundQueryBuilder, FilterClause, OrderClause};
 use super::super::time::{effective_window_bounds, query_bucket_select_expr};
 
@@ -30,6 +30,7 @@ pub async fn load(
     ]);
     builder.extend_filters(base_window_filters(start_ms, end_ms));
     builder.extend_filters(merchant_filter(&query.merchant_id));
+    builder.extend_filters(analytics_dimension_filters(query));
     builder.add_filter(FilterClause::raw(format!(
         "flow_type = '{}'",
         FlowType::DecideGatewayDecision.as_str()

@@ -55,6 +55,23 @@ function sameDay(left: Date, right: Date) {
   )
 }
 
+function startOfDay(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate())
+}
+
+function startOfMonth(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1)
+}
+
+function isFutureDay(date: Date, now: Date) {
+  return startOfDay(date).getTime() > startOfDay(now).getTime()
+}
+
+function clampToNow(date: Date) {
+  const now = new Date()
+  return date.getTime() > now.getTime() ? now : date
+}
+
 function buildCalendar(viewDate: Date): CalendarCell[] {
   const startOfMonth = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1)
   const startOffset = startOfMonth.getDay()
@@ -75,16 +92,23 @@ function buildCalendar(viewDate: Date): CalendarCell[] {
 export function DateTimePicker({ value, onChange, className = '' }: DateTimePickerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const parsedValue = useMemo(() => parseDateTimeInputValue(value), [value])
+  const normalizedValue = useMemo(
+    () => (parsedValue ? clampToNow(parsedValue) : null),
+    [parsedValue?.getTime()],
+  )
   const [open, setOpen] = useState(false)
-  const [draftDate, setDraftDate] = useState<Date>(parsedValue || new Date())
-  const [viewDate, setViewDate] = useState<Date>(parsedValue || new Date())
+  const [draftDate, setDraftDate] = useState<Date>(normalizedValue || new Date())
+  const [viewDate, setViewDate] = useState<Date>(normalizedValue || new Date())
 
   useEffect(() => {
-    if (parsedValue) {
-      setDraftDate(parsedValue)
-      setViewDate(new Date(parsedValue.getFullYear(), parsedValue.getMonth(), 1))
+    if (normalizedValue) {
+      setDraftDate(normalizedValue)
+      setViewDate(startOfMonth(normalizedValue))
+      if (parsedValue && normalizedValue.getTime() !== parsedValue.getTime()) {
+        onChange(toDateTimeInputValue(normalizedValue))
+      }
     }
-  }, [parsedValue?.getTime()])
+  }, [onChange, normalizedValue?.getTime(), parsedValue?.getTime()])
 
   useEffect(() => {
     if (!open) return
@@ -110,12 +134,16 @@ export function DateTimePicker({ value, onChange, className = '' }: DateTimePick
   }, [open])
 
   const calendar = useMemo(() => buildCalendar(viewDate), [viewDate])
+  const now = new Date()
+  const viewingCurrentOrFutureMonth =
+    startOfMonth(viewDate).getTime() >= startOfMonth(now).getTime()
+  const selectedDayIsToday = sameDay(draftDate, now)
 
   function selectDay(date: Date) {
     setDraftDate((current) => {
       const next = new Date(date)
       next.setHours(current.getHours(), current.getMinutes(), 0, 0)
-      return next
+      return clampToNow(next)
     })
   }
 
@@ -124,12 +152,12 @@ export function DateTimePicker({ value, onChange, className = '' }: DateTimePick
       const next = new Date(current)
       if (part === 'hours') next.setHours(Number(nextValue))
       else next.setMinutes(Number(nextValue))
-      return next
+      return clampToNow(next)
     })
   }
 
   function applyDraft() {
-    onChange(toDateTimeInputValue(draftDate))
+    onChange(toDateTimeInputValue(clampToNow(draftDate)))
     setOpen(false)
   }
 
@@ -145,9 +173,9 @@ export function DateTimePicker({ value, onChange, className = '' }: DateTimePick
         type="button"
         onClick={() => {
           if (!open) {
-            const next = parsedValue || new Date()
+            const next = normalizedValue || new Date()
             setDraftDate(next)
-            setViewDate(new Date(next.getFullYear(), next.getMonth(), 1))
+            setViewDate(startOfMonth(next))
           }
           setOpen((current) => !current)
         }}
@@ -174,8 +202,9 @@ export function DateTimePicker({ value, onChange, className = '' }: DateTimePick
               </button>
               <button
                 type="button"
+                disabled={viewingCurrentOrFutureMonth}
                 onClick={() => setViewDate((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1))}
-                className="flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:border-slate-300 hover:text-slate-900 dark:border-[#2a303a] dark:text-[#8a8a93] dark:hover:text-white"
+                className="flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:border-slate-200 disabled:hover:text-slate-500 dark:border-[#2a303a] dark:text-[#8a8a93] dark:hover:text-white dark:disabled:hover:text-[#8a8a93]"
               >
                 <ChevronRight size={14} />
               </button>
@@ -193,13 +222,17 @@ export function DateTimePicker({ value, onChange, className = '' }: DateTimePick
           <div className="grid grid-cols-7 gap-1">
             {calendar.map((cell) => {
               const selected = sameDay(cell.date, draftDate)
+              const future = isFutureDay(cell.date, now)
               return (
                 <button
                   key={cell.key}
                   type="button"
+                  disabled={future}
                   onClick={() => selectDay(cell.date)}
                   className={`flex h-9 items-center justify-center rounded-lg text-[13px] transition ${
-                    selected
+                    future
+                      ? 'cursor-not-allowed text-slate-300 opacity-35 dark:text-[#4b5565]'
+                      : selected
                       ? 'bg-brand-600 text-white shadow-[0_12px_30px_-22px_rgba(59,130,246,0.7)] dark:bg-brand-500 dark:text-white'
                       : cell.inMonth
                         ? 'text-slate-700 hover:bg-slate-100 dark:text-[#e5ecf7] dark:hover:bg-[#1a2130]'
@@ -226,11 +259,15 @@ export function DateTimePicker({ value, onChange, className = '' }: DateTimePick
                 onChange={(event) => updateTime('hours', event.target.value)}
                 className="h-9 rounded-xl border border-slate-200 bg-white/90 px-3 text-sm text-slate-700 dark:border-[#2a303a] dark:bg-[#11151d] dark:text-[#e5ecf7]"
               >
-                {Array.from({ length: 24 }, (_, index) => pad(index)).map((hour) => (
-                  <option key={hour} value={hour}>
-                    {hour}
-                  </option>
-                ))}
+                {Array.from({ length: 24 }, (_, index) => {
+                  const disabled = selectedDayIsToday && index > now.getHours()
+                  const hour = pad(index)
+                  return (
+                    <option key={hour} value={hour} disabled={disabled}>
+                      {hour}
+                    </option>
+                  )
+                })}
               </select>
               <span className="text-sm font-semibold text-slate-400 dark:text-[#8a8a93]">:</span>
               <select
@@ -238,11 +275,18 @@ export function DateTimePicker({ value, onChange, className = '' }: DateTimePick
                 onChange={(event) => updateTime('minutes', event.target.value)}
                 className="h-9 rounded-xl border border-slate-200 bg-white/90 px-3 text-sm text-slate-700 dark:border-[#2a303a] dark:bg-[#11151d] dark:text-[#e5ecf7]"
               >
-                {Array.from({ length: 60 }, (_, index) => pad(index)).map((minute) => (
-                  <option key={minute} value={minute}>
-                    {minute}
-                  </option>
-                ))}
+                {Array.from({ length: 60 }, (_, index) => {
+                  const disabled =
+                    selectedDayIsToday &&
+                    draftDate.getHours() === now.getHours() &&
+                    index > now.getMinutes()
+                  const minute = pad(index)
+                  return (
+                    <option key={minute} value={minute} disabled={disabled}>
+                      {minute}
+                    </option>
+                  )
+                })}
               </select>
             </div>
           </div>

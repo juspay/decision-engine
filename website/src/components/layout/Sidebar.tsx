@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard,
@@ -14,25 +14,78 @@ import {
   Sun,
   Users,
   Key,
+  ChevronDown,
+  LogOut,
 } from 'lucide-react'
+import { useAuthStore } from '../../store/authStore'
+import { apiFetch } from '../../lib/api'
+import {
+  applyThemePreference,
+  getResolvedThemePreference,
+  getStoredThemePreference,
+  persistThemePreference,
+} from '../../lib/theme'
 
 export function Sidebar() {
   const location = useLocation()
+  const navigate = useNavigate()
+  const { user, clearAuth } = useAuthStore()
   const [pendingPath, setPendingPath] = useState<string | null>(null)
-  const [isDark, setIsDark] = useState(() => localStorage.getItem('theme') !== 'light')
+  const [isDark, setIsDark] = useState(() => getResolvedThemePreference() === 'dark')
+  const [accountOpen, setAccountOpen] = useState(false)
+  const accountRef = useRef<HTMLDivElement>(null)
   const selectedPath = pendingPath ?? location.pathname
   const assetBaseUrl = import.meta.env.BASE_URL
+  const initials = user?.email ? user.email.slice(0, 2).toUpperCase() : 'ME'
 
   useEffect(() => {
-    const root = window.document.documentElement
-    if (isDark) {
-      root.classList.add('dark')
-      localStorage.setItem('theme', 'dark')
-    } else {
-      root.classList.remove('dark')
-      localStorage.setItem('theme', 'light')
+    function handleClickOutside(event: MouseEvent) {
+      if (accountRef.current && !accountRef.current.contains(event.target as Node)) {
+        setAccountOpen(false)
+      }
     }
-  }, [isDark])
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') {
+      return
+    }
+
+    const systemTheme = window.matchMedia('(prefers-color-scheme: dark)')
+    const syncSystemTheme = () => {
+      if (getStoredThemePreference()) {
+        return
+      }
+
+      const nextIsDark = systemTheme.matches
+      setIsDark(nextIsDark)
+      applyThemePreference(nextIsDark ? 'dark' : 'light')
+    }
+
+    syncSystemTheme()
+    systemTheme.addEventListener('change', syncSystemTheme)
+    return () => systemTheme.removeEventListener('change', syncSystemTheme)
+  }, [])
+
+  async function handleLogout() {
+    setAccountOpen(false)
+    try {
+      await apiFetch('/auth/logout', { method: 'POST' })
+    } catch {
+      // Clear local auth even if the server-side logout call fails.
+    }
+    clearAuth()
+    navigate('/login', { replace: true })
+  }
+
+  function handleThemeToggle() {
+    const nextTheme = isDark ? 'light' : 'dark'
+    setIsDark(nextTheme === 'dark')
+    persistThemePreference(nextTheme)
+  }
 
   useLayoutEffect(() => {
     if (!pendingPath) {
@@ -102,18 +155,62 @@ export function Sidebar() {
         <SideLink to="/api-keys" icon={Key} selectedPath={selectedPath} onNavigate={setPendingPath}>API Keys</SideLink>
       </nav>
 
-      {/* Footer */}
-      <div className="flex items-center justify-between border-t border-slate-200 bg-white px-6 py-5 transition-colors duration-300 dark:border-[#22262f] dark:bg-[#0a0d12]">
-        <span className="text-[11px] font-medium tracking-wide text-slate-500 dark:text-[#7d879b]">v1.4</span>
-        <button
-          type="button"
-          onClick={() => setIsDark((value) => !value)}
-          className="flex h-9 w-9 items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-[#1a1f2a] dark:hover:text-white"
-          aria-label="Toggle theme"
-          title="Toggle theme"
-        >
-          {isDark ? <Sun size={18} /> : <Moon size={18} />}
-        </button>
+      <div ref={accountRef} className="relative border-t border-slate-200 bg-white px-4 py-4 transition-colors duration-300 dark:border-[#22262f] dark:bg-[#0a0d12]">
+        {accountOpen ? (
+          <div className="absolute bottom-full left-4 right-4 mb-3 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_20px_60px_-36px_rgba(15,23,42,0.35)] dark:border-[#2a303a] dark:bg-[#0d1118]">
+            <div className="border-b border-slate-200 px-3 py-3 dark:border-[#242b36]">
+              <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+                {user?.email || 'Signed-in user'}
+              </p>
+              {user?.merchantId ? (
+                <p className="mt-1 truncate text-xs text-slate-500 dark:text-[#8a8a93]">
+                  {user.merchantId}
+                </p>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="flex w-full items-center gap-2.5 px-3 py-3 text-left text-sm font-medium text-red-600 transition-colors hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/25"
+            >
+              <LogOut size={16} />
+              Logout
+            </button>
+          </div>
+        ) : null}
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setAccountOpen((value) => !value)}
+            aria-haspopup="menu"
+            aria-expanded={accountOpen}
+            className="flex min-w-0 flex-1 items-center gap-3 rounded-2xl px-2 py-2 text-left transition-colors hover:bg-slate-100 dark:hover:bg-[#151b24]"
+          >
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-600 text-[11px] font-semibold text-white">
+              {initials}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-semibold text-slate-900 dark:text-white">
+                {user?.email || 'Account'}
+              </span>
+            </span>
+            <ChevronDown
+              size={15}
+              className={`shrink-0 text-slate-400 transition-transform ${accountOpen ? 'rotate-180' : ''}`}
+            />
+          </button>
+
+          <button
+            type="button"
+            onClick={handleThemeToggle}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-[#1a1f2a] dark:hover:text-white"
+            aria-label="Toggle theme"
+            title="Toggle theme"
+          >
+            {isDark ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
+        </div>
       </div>
     </aside>
   )

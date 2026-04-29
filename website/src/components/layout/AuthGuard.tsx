@@ -86,9 +86,9 @@ export function AuthGuard() {
 
   if (!hasHydrated) {
     return (
-      <div className="dark flex min-h-screen items-center justify-center bg-[#030507] text-white">
-        <div className="flex items-center gap-3 rounded-2xl border border-[#1d1d23] bg-[#111318] px-5 py-4 text-sm text-[#c7cfdb]">
-          <Loader2 size={16} className="animate-spin text-[#7ea4ff]" />
+      <div className="flex min-h-screen items-center justify-center bg-white text-slate-900 dark:bg-[#030507] dark:text-white">
+        <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 text-sm text-slate-600 shadow-[0_16px_40px_-30px_rgba(15,23,42,0.35)] dark:border-[#1d1d23] dark:bg-[#111318] dark:text-[#c7cfdb] dark:shadow-none">
+          <Loader2 size={16} className="animate-spin text-brand-600 dark:text-[#7ea4ff]" />
           Restoring session
         </div>
       </div>
@@ -97,9 +97,9 @@ export function AuthGuard() {
   if (!token) return <Navigate to="/login" replace />
   if (status === 'checking') {
     return (
-      <div className="dark flex min-h-screen items-center justify-center bg-[#030507] text-white">
-        <div className="flex items-center gap-3 rounded-2xl border border-[#1d1d23] bg-[#111318] px-5 py-4 text-sm text-[#c7cfdb]">
-          <Loader2 size={16} className="animate-spin text-[#7ea4ff]" />
+      <div className="flex min-h-screen items-center justify-center bg-white text-slate-900 dark:bg-[#030507] dark:text-white">
+        <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 text-sm text-slate-600 shadow-[0_16px_40px_-30px_rgba(15,23,42,0.35)] dark:border-[#1d1d23] dark:bg-[#111318] dark:text-[#c7cfdb] dark:shadow-none">
+          <Loader2 size={16} className="animate-spin text-brand-600 dark:text-[#7ea4ff]" />
           Validating session
         </div>
       </div>

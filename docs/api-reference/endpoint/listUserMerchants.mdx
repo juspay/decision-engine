@@ -12,13 +12,16 @@ Lists merchant workspaces available to the authenticated dashboard operator.
 
 ## Authentication
 
-Dashboard protected. Send `Authorization: Bearer <jwt_token>`.
+Dashboard protected. Send `Authorization: Bearer <jwt_token>`. In sandbox, also send `x-feature: decision-engine`.
 
 For local development, start with:
 
 ```bash
 export BASE_URL=http://localhost:8080
 export AUTH_HEADER="Authorization: Bearer <jwt_token>"
+# Sandbox only:
+# export BASE_URL=https://sandbox.hyperswitch.io
+# export FEATURE_HEADER="x-feature: decision-engine"
 ```
 
 ## Request
@@ -46,8 +49,8 @@ curl "$BASE_URL/auth/merchants" \
       "merchant_name": "Demo Merchant"
     },
     {
-      "merchant_id": "merchant_test",
-      "merchant_name": "Test Merchant"
+      "merchant_id": "merchant_sbx",
+      "merchant_name": "Sandbox Merchant"
     }
   ]
 }

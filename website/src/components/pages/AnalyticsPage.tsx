@@ -65,6 +65,36 @@ type InfoContent = {
   calculation: string
   source: string
 }
+type BadgeVariant = 'green' | 'gray' | 'blue' | 'red' | 'orange' | 'purple'
+type GatewayVolumeSummaryItem = {
+  gateway: string
+  count: number
+  share: number
+}
+type SrGatewaySummaryItem = {
+  gateway: string
+  value: number
+}
+type RoutingAlignmentSummary = {
+  srLeader: SrGatewaySummaryItem | null
+  srRunnerUp: SrGatewaySummaryItem | null
+  volumeLeader: GatewayVolumeSummaryItem | null
+  srLeaderVolume: GatewayVolumeSummaryItem | null
+  alignmentPercent: number | null
+  leaderDecisionCount: number
+  comparableDecisionCount: number
+  headline: string
+  detail: string
+}
+type ConnectorComparisonRow = {
+  gateway: string
+  srValue: number | null
+  count: number
+  share: number
+  color: string
+  isSrLeader: boolean
+  isVolumeLeader: boolean
+}
 
 const PRESET_OPTIONS: { value: AnalyticsRangeValue; label: string }[] = [
   { value: '15m', label: 'Last 15 mins' },
@@ -76,31 +106,6 @@ const PRESET_OPTIONS: { value: AnalyticsRangeValue; label: string }[] = [
 ]
 
 const CHART_COLORS = ['#0069ED', '#14b8a6', '#f97316', '#e11d48', '#8b5cf6', '#22c55e']
-const CONNECTOR_COLOR_OVERRIDES: Record<string, string> = {
-  adyen: '#0069ED',
-  stripe: '#14b8a6',
-}
-
-function connectorColor(connector: string) {
-  const normalized = connector.trim().toLowerCase()
-
-  if (!normalized || normalized === 'no gateway selected') {
-    return '#64748b'
-  }
-
-  const override = CONNECTOR_COLOR_OVERRIDES[normalized]
-  if (override) {
-    return override
-  }
-
-  let hash = 0
-  for (const char of normalized) {
-    hash = (hash * 31 + char.charCodeAt(0)) >>> 0
-  }
-
-  return CHART_COLORS[hash % CHART_COLORS.length]
-}
-
 const CHART_TOOLTIP_STYLE = {
   backgroundColor: '#0d0d12',
   border: '1px solid #1c1c24',
@@ -130,7 +135,7 @@ const PREVIEW_TRACE_PAGE_SIZE = 50
 const MAX_PREVIEW_TRACE_PAGES = 5
 const PREVIEW_LIST_PAGE_SIZE = 10
 const CATCH_UP_REFRESH_DELAYS_MS = [750, 2000, 4000]
-const CARD_INFO: Record<'hits' | 'share' | 'sr' | 'preview_hits' | 'preview_activity' | 'preview_share', InfoContent> = {
+const CARD_INFO: Record<'hits' | 'share' | 'alignment' | 'sr' | 'preview_hits' | 'preview_activity' | 'preview_share', InfoContent> = {
   hits: {
     title: 'API call counts',
     purpose: 'Use these cards to see how much traffic each major decision-engine API handled in the selected window.',
@@ -138,33 +143,39 @@ const CARD_INFO: Record<'hits' | 'share' | 'sr' | 'preview_hits' | 'preview_acti
     source: 'Counts come from ClickHouse-backed API analytics rows ingested from Kafka into `analytics_api_events`.',
   },
   share: {
-    title: 'Actual gateway selections over time',
-    purpose: 'Use this to compare selected gateway volume against the connector success-rate trail below.',
-    calculation: 'Decision events are bucketed by time and grouped by chosen connector using the same active filters as the success-rate chart.',
-    source: 'Reads ClickHouse-backed decision rows from `analytics_domain_events`.',
+    title: 'Selected gateways over time',
+    purpose: 'Use this to see when traffic shifted from one connector to another for the selected merchant and routing slice.',
+    calculation: 'Decision events are grouped by time and chosen connector. The chart shows how many filtered decisions each gateway received over time.',
+    source: 'Reads ClickHouse-backed domain analytics rows from `analytics_domain_events`.',
+  },
+  alignment: {
+    title: 'Routing alignment',
+    purpose: 'Use this to see whether the best-scoring connector is also leading traffic share.',
+    calculation: 'Compares the latest connector success-rate score with the gateways actually selected in the same time window.',
+    source: 'Reads the same ClickHouse-backed routing-stats response used by the gateway share and connector success-rate charts.',
   },
   sr: {
     title: 'Connector success rate over time',
     purpose: 'Use this to explain why a connector won routing at a given time, based on the recorded historical score trail.',
-    calculation: 'Stored `score_snapshot` events are bucketed over the selected window and averaged per connector. The line values are displayed as percentages.',
+    calculation: 'Stored `score_snapshot` events are grouped over the selected window and averaged per connector. The line values are displayed as percentages.',
     source: 'Reads ClickHouse-backed `score_snapshot` analytics rows from `analytics_domain_events`. The current score state still originates from Redis-backed scoring flows.',
   },
   preview_hits: {
     title: 'Rule-based summary',
     purpose: 'Use these cards to distinguish rule decision volume from the connector coverage produced by rule-based routing.',
-    calculation: 'Rule Evaluate counts come from request-hit analytics for `/routing/evaluate`. Gateway coverage counts the unique connectors selected in the fetched decision sample.',
+    calculation: 'Rule Evaluate counts come from request-hit analytics for `/routing/evaluate`. Gateway coverage counts the unique connectors selected in rule decisions for this window.',
     source: 'Reads request-hit and rule decision analytics associated with rule-based routing activity.',
   },
   preview_activity: {
     title: 'Connector selections over time',
-    purpose: 'Use this to see which connectors were selected in each time bucket inside the selected decision window.',
-    calculation: 'Returned decision traces are bucketed by time using each trace\'s latest activity timestamp, then grouped by latest selected connector. The chart shows connector counts per bucket.',
+    purpose: 'Use this to see which connectors were selected over the chosen decision window.',
+    calculation: 'Returned decision traces are grouped by time using each trace\'s latest activity timestamp, then grouped by latest selected connector. The chart shows connector counts over time.',
     source: 'Reads rule decision activity through `/analytics/preview-trace`.',
   },
   preview_share: {
     title: 'Rule-based gateway selection mix',
-    purpose: 'Use this to see which connectors dominate the fetched rule decision sample, separate from auth-rate transaction decisions.',
-    calculation: 'Returned decision traces are grouped by latest selected connector and displayed as share of the fetched decision sample.',
+    purpose: 'Use this to see which connectors lead selected rule decisions, separate from auth-rate transaction decisions.',
+    calculation: 'Returned decision traces are grouped by latest selected connector and displayed as share of selected rule decisions.',
     source: 'Reads rule decision activity through `/analytics/preview-trace`.',
   },
 }
@@ -274,6 +285,17 @@ function formatPercent(value: number | string | undefined, digits = 1) {
     return '0%'
   }
   return `${formatNumber(toPercent(Number(value)), digits)}%`
+}
+
+function formatPercentPointDelta(value: number | undefined, digits = 1) {
+  if (value === undefined || !Number.isFinite(value)) return 'No runner-up'
+  const sign = value > 0 ? '+' : value < 0 ? '-' : ''
+  return `${sign}${formatNumber(Math.abs(value), digits)} pp`
+}
+
+function readChartValue(row: Record<string, number | null>, key: string) {
+  const value = row[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
 
 function formatBucketLabel(ms: number, window: TimeWindow) {
@@ -407,7 +429,7 @@ function controlClassName() {
 
 function sectionButtonClass(active: boolean) {
   return active
-    ? '!border-slate-200 !bg-white !text-slate-950 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.28)] dark:!border-[#2a303a] dark:!bg-[#161b24] dark:!text-white'
+    ? '!border-brand-500/70 !bg-white !text-slate-950 shadow-[0_14px_30px_-24px_rgba(59,130,246,0.55)] ring-2 ring-brand-500/55 dark:!border-brand-500/70 dark:!bg-[#161b24] dark:!text-white dark:ring-brand-500/55'
     : '!border-transparent !bg-slate-100 !text-slate-600 hover:!bg-slate-200 hover:!text-slate-900 dark:!bg-[#161b24] dark:!text-[#a7b2c6] dark:hover:!bg-[#1c2330] dark:hover:!text-white'
 }
 
@@ -544,6 +566,195 @@ function HitsCard({
   )
 }
 
+function RoutingAlignmentCard({
+  summary,
+  comparisonRows,
+  expanded,
+  onToggle,
+}: {
+  summary: RoutingAlignmentSummary
+  comparisonRows: ConnectorComparisonRow[]
+  expanded: boolean
+  onToggle: () => void
+}) {
+  const srMargin =
+    summary.srLeader && summary.srRunnerUp
+      ? summary.srLeader.value - summary.srRunnerUp.value
+      : undefined
+  const srLeaderVolumeText = summary.srLeaderVolume
+    ? `${formatNumber(summary.srLeaderVolume.count, 0)} payments for ${summary.srLeaderVolume.gateway}`
+    : 'No traffic share'
+  const alignedVolumeText = summary.comparableDecisionCount
+    ? `${formatNumber(summary.leaderDecisionCount, 0)} of ${formatNumber(summary.comparableDecisionCount, 0)} payments matched the best score`
+    : srLeaderVolumeText
+  const alignmentText =
+    summary.alignmentPercent === null
+      ? 'Not enough data'
+      : `${formatPercent(summary.alignmentPercent)} traffic share`
+  const srLeaderName = summary.srLeader?.gateway || '--'
+  const volumeLeaderName = summary.volumeLeader?.gateway || '--'
+  const leadersDiffer =
+    Boolean(summary.srLeader && summary.volumeLeader) &&
+    summary.srLeader?.gateway !== summary.volumeLeader?.gateway
+  const volumeBadgeVariant: BadgeVariant = !summary.volumeLeader
+    ? 'gray'
+    : leadersDiffer
+      ? 'orange'
+      : 'green'
+  const collapsedReadout = [
+    summary.srLeader ? `Best score: ${srLeaderName}` : 'No score',
+    summary.volumeLeader ? `Traffic leader: ${volumeLeaderName}` : 'No traffic',
+    alignmentText,
+  ].join(' · ')
+
+  return (
+    <Card className="overflow-visible">
+      <CardHeader className={expanded ? 'px-5 py-4' : 'px-5 py-3 !border-b-0'}>
+        <div className={`flex flex-wrap justify-between gap-3 ${expanded ? 'items-start' : 'items-center'}`}>
+          <div className={expanded ? 'min-w-0' : 'flex min-w-0 flex-wrap items-center gap-2'}>
+            <h2 className="text-sm font-semibold text-slate-800 dark:text-white">
+              Routing alignment
+            </h2>
+            {expanded ? (
+              <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                Traffic share: checks if the best-scoring connector is also getting the largest share.
+              </p>
+            ) : (
+              <span className="min-w-0 truncate text-xs font-medium text-slate-500 dark:text-[#9aa7bb]">
+                {collapsedReadout}
+              </span>
+            )}
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <InfoButton content={CARD_INFO.alignment} />
+            <Button size="sm" variant="secondary" onClick={onToggle}>
+              {expanded ? 'Hide details' : 'Show details'}
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      {expanded ? (
+        <CardBody className="space-y-4 px-5 py-4">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-[#2a303a] dark:bg-[#0d1118]">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="gray">Best score: {srLeaderName}</Badge>
+                  <Badge variant={volumeBadgeVariant}>
+                    Traffic leader: {volumeLeaderName}
+                  </Badge>
+                </div>
+                <p className="mt-3 text-sm font-semibold text-slate-900 dark:text-white">
+                  {summary.headline}
+                </p>
+                <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#8a8a93]">
+                  {summary.detail}
+                </p>
+              </div>
+              <p className="text-right text-xs font-medium text-slate-500 dark:text-[#8a8a93]">
+                {alignmentText}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid overflow-hidden rounded-2xl border border-slate-200 bg-white/70 dark:border-[#2a303a] dark:bg-[#0c0f15] lg:grid-cols-3">
+              <div className="border-b border-slate-200 p-4 dark:border-[#2a303a] lg:border-b-0 lg:border-r">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                  Best score
+                </p>
+                <p className="mt-3 truncate text-2xl font-semibold text-slate-950 dark:text-white">
+                  {summary.srLeader?.gateway || '--'}
+                </p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                  {summary.srLeader
+                    ? `${formatPercent(summary.srLeader.value)} success rate, ${formatPercentPointDelta(srMargin)} vs next`
+                    : 'No score in this window'}
+                </p>
+              </div>
+
+              <div className="border-b border-slate-200 p-4 dark:border-[#2a303a] lg:border-b-0 lg:border-r">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                  Traffic leader
+                </p>
+                <p className="mt-3 truncate text-2xl font-semibold text-slate-950 dark:text-white">
+                  {summary.volumeLeader?.gateway || '--'}
+                </p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                  {summary.volumeLeader
+                    ? `${formatNumber(summary.volumeLeader.count, 0)} payments, ${formatPercent(summary.volumeLeader.share)} traffic share`
+                    : 'No payment traffic in this window'}
+                </p>
+              </div>
+
+              <div className="p-4">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                  Best-score share
+                </p>
+                <p className="mt-3 text-2xl font-semibold text-slate-950 dark:text-white">
+                  {alignmentText}
+                </p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                  {alignedVolumeText}
+                </p>
+              </div>
+            </div>
+
+            {comparisonRows.length ? (
+              <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-[#2a303a]">
+                <div className="min-w-[640px]">
+                  <div className="grid grid-cols-[minmax(0,1.2fr)_0.65fr_0.65fr_0.65fr_1fr] gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:border-[#2a303a] dark:bg-[#0c0f15] dark:text-[#8a8a93]">
+                    <span>Connector</span>
+                    <span>Success rate</span>
+                    <span>Traffic</span>
+                    <span>Share</span>
+                    <span>Read</span>
+                  </div>
+                  {comparisonRows.map((row) => (
+                    <div
+                      key={row.gateway}
+                      className="grid grid-cols-[minmax(0,1.2fr)_0.65fr_0.65fr_0.65fr_1fr] gap-3 border-b border-slate-200 px-4 py-3 text-sm last:border-b-0 dark:border-[#2a303a]"
+                    >
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span
+                          className="h-2.5 w-2.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: row.color }}
+                        />
+                        <span className="truncate font-medium text-slate-900 dark:text-white">
+                          {row.gateway}
+                        </span>
+                      </div>
+                      <span className="text-slate-600 dark:text-[#cbd5e1]">
+                        {row.srValue === null ? '--' : formatPercent(row.srValue)}
+                      </span>
+                      <span className="text-slate-600 dark:text-[#cbd5e1]">
+                        {formatNumber(row.count, 0)}
+                      </span>
+                      <span className="text-slate-600 dark:text-[#cbd5e1]">
+                        {formatPercent(row.share)}
+                      </span>
+                      <div className="flex flex-wrap gap-2">
+                        {row.isSrLeader ? <Badge variant="blue">Best score</Badge> : null}
+                        {row.isVolumeLeader ? <Badge variant="green">Traffic leader</Badge> : null}
+                        {!row.isSrLeader && !row.isVolumeLeader ? (
+                          <span className="text-xs text-slate-500 dark:text-[#8a8a93]">Secondary</span>
+                        ) : null}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <EmptyState
+                title="No connector comparison yet"
+                body="This view needs both payment traffic and connector scores in the selected time window."
+              />
+            )}
+      </CardBody>
+      ) : null}
+    </Card>
+  )
+}
+
 function analyticsRouteLabel(route: string) {
   if (route === '/decide_gateway') return 'Decide Gateway'
   if (route === '/update_gateway') return 'Update Gateway'
@@ -556,55 +767,61 @@ export function AnalyticsPage() {
   const { merchantId } = useMerchantStore()
   const authMerchantId = useAuthStore((state) => state.user?.merchantId || '')
   const effectiveMerchantId = merchantId || authMerchantId
-  const [range, setRange] = useState<AnalyticsRangeValue>('1h')
+  const [range, setRange] = useState<AnalyticsRangeValue>('1d')
   const [view, setView] = useState<AnalyticsView>('transactions')
   const [routingFilters, setRoutingFilters] = useState<RoutingFilters>(EMPTY_ROUTING_FILTERS)
   const [connectorFiltersOpen, setConnectorFiltersOpen] = useState(false)
+  const [routingAlignmentOpen, setRoutingAlignmentOpen] = useState(false)
   const [showAllFilters, setShowAllFilters] = useState(false)
   const [previewListPage, setPreviewListPage] = useState(1)
   const [customStart, setCustomStart] = useState(() =>
-    toDateTimeInputValue(Date.now() - 2 * 60 * 60 * 1000),
+    toDateTimeInputValue(Date.now() - 24 * 60 * 60 * 1000),
   )
   const [customEnd, setCustomEnd] = useState(() => toDateTimeInputValue(Date.now()))
+  const [presetWindowBounds, setPresetWindowBounds] = useState<TimeWindow>(() =>
+    presetWindow('1d'),
+  )
 
   const customWindow = useMemo(() => {
     if (range !== 'custom') return undefined
     const start_ms = fromDateTimeInputValue(customStart)
     const end_ms = fromDateTimeInputValue(customEnd)
-    if (start_ms === null || end_ms === null || end_ms <= start_ms) {
+    const now = Date.now()
+    if (start_ms === null || end_ms === null || end_ms <= start_ms || start_ms > now || end_ms > now) {
       return undefined
     }
     return { start_ms, end_ms }
   }, [customEnd, customStart, range])
+  const activeQueryWindow = range === 'custom' ? customWindow : presetWindowBounds
 
   const overviewUrl =
-    range !== 'custom' || customWindow
-      ? buildAnalyticsUrl('/analytics/overview', range, customWindow)
+    activeQueryWindow
+      ? buildAnalyticsUrl('/analytics/overview', range, activeQueryWindow)
       : null
   const routingUrl =
-    range !== 'custom' || customWindow
-      ? buildAnalyticsUrl('/analytics/routing-stats', range, customWindow)
+    activeQueryWindow
+      ? buildAnalyticsUrl('/analytics/routing-stats', range, activeQueryWindow)
       : null
   const filteredRoutingUrl =
-    range !== 'custom' || customWindow
-      ? buildAnalyticsUrl('/analytics/routing-stats', range, customWindow, routingFilters)
+    activeQueryWindow
+      ? buildAnalyticsUrl('/analytics/routing-stats', range, activeQueryWindow, routingFilters)
       : null
   const previewTraceKey =
-    range !== 'custom' || customWindow
+    activeQueryWindow
       ? ([
           'preview-trace-analytics',
           range,
-          customWindow?.start_ms ?? null,
-          customWindow?.end_ms ?? null,
+          activeQueryWindow.start_ms,
+          activeQueryWindow.end_ms,
         ] as const)
       : null
   const previewListUrl =
-    range !== 'custom' || customWindow
+    activeQueryWindow
       ? buildPreviewTraceUrl(
           range,
           previewListPage,
           PREVIEW_LIST_PAGE_SIZE,
-          customWindow,
+          activeQueryWindow,
         )
       : null
 
@@ -762,7 +979,7 @@ export function AnalyticsPage() {
 
   useEffect(() => {
     setPreviewListPage(1)
-  }, [range, customWindow?.start_ms, customWindow?.end_ms])
+  }, [range, activeQueryWindow?.start_ms, activeQueryWindow?.end_ms])
 
   const activeWindowLabel = useMemo(() => {
     if (range !== 'custom') {
@@ -772,9 +989,9 @@ export function AnalyticsPage() {
     return `${formatDateTime(customWindow.start_ms)} to ${formatDateTime(customWindow.end_ms)}`
   }, [customWindow, range])
   const effectiveWindow = useMemo(() => {
-    if (customWindow) return customWindow
+    if (activeQueryWindow) return activeQueryWindow
     return presetWindow(range as AnalyticsRange)
-  }, [customWindow, range])
+  }, [activeQueryWindow, range])
 
   const routeHits = useMemo(() => {
     const fallback = [
@@ -824,8 +1041,8 @@ export function AnalyticsPage() {
       .sort((left, right) => right.count - left.count)
   }, [previewRows])
   const chartBucketSize = useMemo(
-    () => bucketSizeForWindow(range, customWindow),
-    [customWindow, range],
+    () => bucketSizeForWindow(range, activeQueryWindow),
+    [activeQueryWindow, range],
   )
   const bucketTickFormatter = useMemo(
     () => (value: number | string) => formatBucketLabel(Number(value), effectiveWindow),
@@ -889,11 +1106,14 @@ export function AnalyticsPage() {
   const previewGatewayMixData = useMemo(() => {
     const total = previewGatewaySummary.reduce((sum, item) => sum + item.count, 0)
 
-    return previewGatewaySummary.map((item) => ({
+    return previewGatewaySummary.map((item, index) => ({
       name: item.gateway,
       value: item.count,
       percentage: total ? (item.count / total) * 100 : 0,
-      color: connectorColor(item.gateway),
+      color:
+        item.gateway === 'No gateway selected'
+          ? '#64748b'
+          : CHART_COLORS[index % CHART_COLORS.length],
     }))
   }, [previewGatewaySummary])
   const previewIngestionPending =
@@ -916,7 +1136,7 @@ export function AnalyticsPage() {
 
   const gatewayShareData = useMemo(() => {
     const gatewaySharePoints = filteredRouting.data?.gateway_share || []
-    const gateways = sortedGateways(gatewaySharePoints.map((point) => point.gateway))
+    const gateways = sortedGateways(gatewaySharePoints.map((point) => point.gateway || 'No gateway selected'))
     if (!gateways.length) {
       return {
         gateways,
@@ -940,7 +1160,8 @@ export function AnalyticsPage() {
     }
 
     for (const point of gatewaySharePoints) {
-      if (!gateways.includes(point.gateway)) continue
+      const gateway = point.gateway || 'No gateway selected'
+      if (!gateways.includes(gateway)) continue
       const row =
         buckets.get(point.bucket_ms) ||
         gateways.reduce<Record<string, number>>(
@@ -950,7 +1171,7 @@ export function AnalyticsPage() {
           },
           { bucket_ms: point.bucket_ms },
         )
-      row[point.gateway] = point.count
+      row[gateway] = point.count
       buckets.set(point.bucket_ms, row)
     }
 
@@ -1041,6 +1262,10 @@ export function AnalyticsPage() {
       }))
       .filter((item): item is { gateway: string; value: number } => item.value !== null)
   }, [connectorTrendData])
+  const latestSrRanking = useMemo(
+    () => [...latestConnectorSummary].sort((left, right) => right.value - left.value),
+    [latestConnectorSummary],
+  )
 
   const connectorTrendPointCounts = useMemo(() => {
     return connectorTrendData.gateways.reduce<Record<string, number>>((counts, gateway) => {
@@ -1067,6 +1292,164 @@ export function AnalyticsPage() {
       Math.min(100, Math.ceil(max + padding)),
     ] as const
   }, [connectorTrendData])
+
+  const gatewayVolumeSummary = useMemo<GatewayVolumeSummaryItem[]>(() => {
+    const totals = new Map<string, number>()
+
+    for (const row of gatewayShareData.rows) {
+      for (const gateway of gatewayShareData.gateways) {
+        totals.set(gateway, (totals.get(gateway) || 0) + readChartValue(row, gateway))
+      }
+    }
+
+    const totalCount = Array.from(totals.values()).reduce((sum, value) => sum + value, 0)
+
+    return gatewayShareData.gateways
+      .map((gateway) => {
+        const count = totals.get(gateway) || 0
+        return {
+          gateway,
+          count,
+          share: totalCount ? (count / totalCount) * 100 : 0,
+        }
+      })
+      .filter((item) => item.count > 0)
+      .sort((left, right) => right.count - left.count)
+  }, [gatewayShareData])
+
+  const routingAlignmentSummary = useMemo<RoutingAlignmentSummary>(() => {
+    const srLeader = latestSrRanking[0] || null
+    const srRunnerUp = latestSrRanking[1] || null
+    const volumeLeader = gatewayVolumeSummary[0] || null
+    const srLeaderVolume = srLeader
+      ? gatewayVolumeSummary.find((item) => item.gateway === srLeader.gateway) || {
+          gateway: srLeader.gateway,
+          count: 0,
+          share: 0,
+        }
+      : null
+    const srRowsByBucket = new Map(
+      connectorTrendData.rows.map((row) => [Number(row.bucket_ms), row] as const),
+    )
+
+    let leaderDecisionCount = 0
+    let comparableDecisionCount = 0
+
+    for (const shareRow of gatewayShareData.rows) {
+      const decisionsInBucket = gatewayShareData.gateways.reduce(
+        (sum, gateway) => sum + readChartValue(shareRow, gateway),
+        0,
+      )
+      if (decisionsInBucket <= 0) continue
+
+      const srRow = srRowsByBucket.get(Number(shareRow.bucket_ms))
+      if (!srRow) continue
+
+      const srValues = connectorTrendData.gateways
+        .map((gateway) => {
+          const value = srRow[gateway]
+          return typeof value === 'number' && Number.isFinite(value)
+            ? { gateway, value }
+            : null
+        })
+        .filter((item): item is SrGatewaySummaryItem => item !== null)
+        .sort((left, right) => right.value - left.value)
+      if (!srValues.length) continue
+
+      const topSrValue = srValues[0].value
+      const srLeaders = srValues.filter(
+        (item) => Math.abs(item.value - topSrValue) < 0.0001,
+      )
+      const leaderVolume = srLeaders.reduce(
+        (sum, item) => sum + readChartValue(shareRow, item.gateway),
+        0,
+      )
+
+      comparableDecisionCount += decisionsInBucket
+      leaderDecisionCount += leaderVolume
+    }
+
+    const alignmentPercent = comparableDecisionCount
+      ? (leaderDecisionCount / comparableDecisionCount) * 100
+      : null
+
+    let headline = 'Waiting for traffic share and connector scores.'
+    let detail = 'Run payments and send score updates in this time window to compare routing traffic.'
+
+    if (srLeader && volumeLeader) {
+      const leadersDiffer = srLeader.gateway !== volumeLeader.gateway
+      const comparisonText =
+        comparableDecisionCount > 0
+          ? `${srLeader.gateway} handled ${formatNumber(srLeaderVolume?.count || 0, 0)} of ${formatNumber(comparableDecisionCount, 0)} payments (${formatPercent(srLeaderVolume?.share || 0)} traffic share).`
+          : 'Traffic and score updates did not happen close enough together to compare.'
+
+      if (leadersDiffer) {
+        headline = `${srLeader.gateway} has the better success rate; ${volumeLeader.gateway} still leads traffic share.`
+        detail = `${comparisonText} Traffic share is cumulative for this window, so earlier ${volumeLeader.gateway} selections can keep it ahead even after failures reduce its score.`
+      } else {
+        headline = `${srLeader.gateway} has the better success rate and leads traffic share.`
+        detail = comparisonText
+      }
+    } else if (srLeader) {
+      headline = `${srLeader.gateway} has the better success rate, but no traffic share is available.`
+      detail = 'Run decide-gateway traffic in this time window to compare scores against actual selections.'
+    } else if (volumeLeader) {
+      headline = `${volumeLeader.gateway} leads traffic share, but connector success rate is not available.`
+      detail = 'Send update-gateway-score traffic in this time window to compare selections against success rates.'
+    }
+
+    return {
+      srLeader,
+      srRunnerUp,
+      volumeLeader,
+      srLeaderVolume,
+      alignmentPercent,
+      leaderDecisionCount,
+      comparableDecisionCount,
+      headline,
+      detail,
+    }
+  }, [connectorTrendData, gatewayShareData, gatewayVolumeSummary, latestSrRanking])
+
+  const connectorComparisonRows = useMemo<ConnectorComparisonRow[]>(() => {
+    const srByGateway = new Map(latestSrRanking.map((item) => [item.gateway, item.value] as const))
+    const volumeByGateway = new Map(gatewayVolumeSummary.map((item) => [item.gateway, item] as const))
+    const gateways = Array.from(
+      new Set([...connectorTrendData.gateways, ...gatewayShareData.gateways]),
+    )
+    const colorByGateway = new Map(
+      gateways.map((gateway, index) => [gateway, CHART_COLORS[index % CHART_COLORS.length]] as const),
+    )
+
+    return gateways
+      .map((gateway) => {
+        const volume = volumeByGateway.get(gateway)
+        return {
+          gateway,
+          srValue: srByGateway.get(gateway) ?? null,
+          count: volume?.count || 0,
+          share: volume?.share || 0,
+          color: colorByGateway.get(gateway) || CHART_COLORS[0],
+          isSrLeader: routingAlignmentSummary.srLeader?.gateway === gateway,
+          isVolumeLeader: routingAlignmentSummary.volumeLeader?.gateway === gateway,
+        }
+      })
+      .filter((item) => item.srValue !== null || item.count > 0)
+      .sort((left, right) => {
+        const leftSr = left.srValue ?? -1
+        const rightSr = right.srValue ?? -1
+        if (rightSr !== leftSr) return rightSr - leftSr
+        return right.count - left.count
+      })
+      .slice(0, 6)
+  }, [
+    connectorTrendData.gateways,
+    gatewayShareData.gateways,
+    gatewayVolumeSummary,
+    latestSrRanking,
+    routingAlignmentSummary.srLeader?.gateway,
+    routingAlignmentSummary.volumeLeader?.gateway,
+  ])
 
   const activeFilterSummary = useMemo(() => {
     const parts = availableFilters.dimensions.flatMap((dimension) => {
@@ -1107,12 +1490,18 @@ export function AnalyticsPage() {
     setRange(value)
     if (value !== 'custom') {
       const preset = presetWindow(value)
+      setPresetWindowBounds(preset)
       setCustomStart(toDateTimeInputValue(preset.start_ms))
       setCustomEnd(toDateTimeInputValue(preset.end_ms))
     }
   }
 
   function refreshAll() {
+    if (range !== 'custom') {
+      setPresetWindowBounds(presetWindow(range))
+      return
+    }
+
     overview.mutate()
     routing.mutate()
     filteredRouting.mutate()
@@ -1170,11 +1559,6 @@ export function AnalyticsPage() {
             <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Analytics</h1>
             <Badge variant="green">{overview.data?.merchant_id || effectiveMerchantId || 'Signed-in merchant'}</Badge>
           </div>
-          <p className="text-sm text-slate-500 dark:text-[#8a8a93]">
-            {view === 'transactions'
-              ? 'One working surface for auth-rate route volume, connector share, and historical connector success rate.'
-              : 'Routing activity for rule-based and volume-based flows, separate from auth-rate score updates.'}
-          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 md:justify-end">
@@ -1197,7 +1581,7 @@ export function AnalyticsPage() {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-[18px] border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#11151d]">
         <Button
           size="sm"
           variant="secondary"
@@ -1242,7 +1626,9 @@ export function AnalyticsPage() {
             </label>
           </div>
           {!customWindow ? (
-            <p className="mt-3 text-xs text-red-500">Choose an end time after the start time.</p>
+            <p className="mt-3 text-xs text-red-500">
+              Choose an end time after the start time. Future dates are not available.
+            </p>
           ) : null}
         </Card>
       ) : null}
@@ -1260,16 +1646,6 @@ export function AnalyticsPage() {
       {view === 'transactions' ? (
         <div className="space-y-6">
           <section className="space-y-5">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">API calls</h2>
-                <p className="mt-1 text-sm text-slate-500 dark:text-[#8a8a93]">
-                  Counts for the decision and feedback surfaces tied to real transaction flow.
-                </p>
-              </div>
-              <InfoButton content={CARD_INFO.hits} />
-            </div>
-
             <div className="grid gap-5 lg:grid-cols-2">
               {transactionRouteHits.map((item) => (
                 <HitsCard
@@ -1282,13 +1658,20 @@ export function AnalyticsPage() {
             </div>
           </section>
 
+          <RoutingAlignmentCard
+            summary={routingAlignmentSummary}
+            comparisonRows={connectorComparisonRows}
+            expanded={routingAlignmentOpen}
+            onToggle={() => setRoutingAlignmentOpen((value) => !value)}
+          />
+
           <Card className="overflow-visible">
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Actual gateway selections over time</h2>
+              <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Selected gateways over time</h2>
               <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                Decision volume by selected connector using the same filters as the success-rate chart below.
+                Connector decision counts for the same active filters used by the success-rate chart.
               </p>
             </div>
             <InfoButton content={CARD_INFO.share} />
@@ -1310,14 +1693,14 @@ export function AnalyticsPage() {
                     wrapperStyle={CHART_TOOLTIP_WRAPPER_STYLE}
                   />
                   <Legend />
-                  {gatewayShareData.gateways.map((gateway) => (
+                  {gatewayShareData.gateways.map((gateway, index) => (
                     <Area
                       key={gateway}
                       type="monotone"
                       dataKey={gateway}
-                      stroke={connectorColor(gateway)}
+                      stroke={CHART_COLORS[index % CHART_COLORS.length]}
                       strokeWidth={3}
-                      fill={connectorColor(gateway)}
+                      fill={CHART_COLORS[index % CHART_COLORS.length]}
                       fillOpacity={0.14}
                       name={gateway}
                     />
@@ -1328,7 +1711,7 @@ export function AnalyticsPage() {
           ) : (
             <EmptyState
               title="No gateway share history yet"
-              body="Send real decide-gateway traffic in the selected window to populate connector share."
+              body="Gateway traffic will appear here after payments are routed in this window."
             />
           )}
         </CardBody>
@@ -1342,7 +1725,7 @@ export function AnalyticsPage() {
                 Connector success rate over time
               </h2>
               <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                Historical connector score trend for the selected merchant window.
+                Historical connector success rate for the active filters; compare it with selected volume above.
               </p>
               <p className="mt-2 text-xs font-medium text-slate-600 dark:text-[#b3b3bd]">
                 Active filters: {activeFilterSummary}
@@ -1369,7 +1752,7 @@ export function AnalyticsPage() {
                   Connector filters
                 </p>
                 <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                  Narrow the success-rate line chart by the routing dimensions present for this merchant.
+                  Narrow the success-rate line chart by recorded routing dimensions.
                 </p>
               </div>
               <Button
@@ -1413,8 +1796,8 @@ export function AnalyticsPage() {
                   <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 dark:border-[#1d1d23] dark:bg-[#09090b]">
                     <p className="text-xs text-slate-500 dark:text-[#8a8a93]">
                       {showAllFilters
-                        ? 'Showing all routing dimensions available for this merchant.'
-                        : `${hiddenDimensionCount} more routing dimension${hiddenDimensionCount === 1 ? '' : 's'} available for this merchant.`}
+                        ? 'Showing all routing dimensions.'
+                        : `${hiddenDimensionCount} more routing dimension${hiddenDimensionCount === 1 ? '' : 's'} available.`}
                     </p>
                     <Button
                       size="sm"
@@ -1428,8 +1811,8 @@ export function AnalyticsPage() {
               </div>
             ) : availableFilters.missing_dimensions.length ? (
               <EmptyState
-                title="No populated routing dimensions in this window"
-                body="The merchant has score history, but none of the dynamic routing dimensions have values recorded in the selected time window yet."
+                title="No routing dimension values in this window"
+                body="Score history exists, but no routing dimensions have values recorded in the selected time window yet."
               />
             ) : null}
 
@@ -1501,20 +1884,9 @@ export function AnalyticsPage() {
           {latestConnectorSummary.length ? (
             <div className="flex flex-wrap gap-2">
               {latestConnectorSummary.map((item) => (
-                <span
-                  key={item.gateway}
-                  className="inline-flex items-center gap-1 rounded-md border bg-white/70 px-2 py-0.5 text-xs font-medium tracking-wide dark:bg-white/[0.04]"
-                  style={{
-                    borderColor: `${connectorColor(item.gateway)}66`,
-                    color: connectorColor(item.gateway),
-                  }}
-                >
-                  <span
-                    className="mr-1.5 inline-block h-2 w-2 rounded-full"
-                    style={{ backgroundColor: connectorColor(item.gateway) }}
-                  />
+                <Badge key={item.gateway} variant="blue">
                   {item.gateway}: {formatPercent(item.value)}
-                </span>
+                </Badge>
               ))}
             </div>
           ) : null}
@@ -1539,12 +1911,12 @@ export function AnalyticsPage() {
                     wrapperStyle={CHART_TOOLTIP_WRAPPER_STYLE}
                   />
                   <Legend />
-                  {connectorTrendData.gateways.map((gateway) => (
+                  {connectorTrendData.gateways.map((gateway, index) => (
                     <Line
                       key={gateway}
                       type="monotone"
                       dataKey={gateway}
-                      stroke={connectorColor(gateway)}
+                      stroke={CHART_COLORS[index % CHART_COLORS.length]}
                       strokeWidth={3}
                       dot={connectorTrendPointCounts[gateway] <= 1 ? { r: 4, strokeWidth: 2 } : false}
                       activeDot={{ r: 5 }}
@@ -1558,7 +1930,7 @@ export function AnalyticsPage() {
           ) : (
             <EmptyState
               title="No connector score history yet"
-              body="Send decide-gateway and update-gateway-score traffic in the selected window to populate connector history."
+              body="Connector history will appear after decide-gateway and update-gateway-score activity in this window."
             />
           )}
         </CardBody>
@@ -1601,7 +1973,7 @@ export function AnalyticsPage() {
                       Connector selections over time
                     </h2>
                     <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                      Time-bucketed connector counts from the fetched rule decision sample.
+                      Connector counts over time for selected rule decisions.
                     </p>
                   </div>
                   <InfoButton content={CARD_INFO.preview_activity} />
@@ -1623,12 +1995,16 @@ export function AnalyticsPage() {
                           wrapperStyle={CHART_TOOLTIP_WRAPPER_STYLE}
                         />
                         <Legend />
-                        {previewConnectorSeriesData.gateways.map((gateway) => (
+                        {previewConnectorSeriesData.gateways.map((gateway, index) => (
                           <Bar
                             key={gateway}
                             dataKey={gateway}
                             stackId="preview-connectors"
-                            fill={connectorColor(gateway)}
+                            fill={
+                              gateway === 'No gateway selected'
+                                ? '#64748b'
+                                : CHART_COLORS[index % CHART_COLORS.length]
+                            }
                             radius={[6, 6, 0, 0]}
                             name={gateway}
                           />
@@ -1639,12 +2015,12 @@ export function AnalyticsPage() {
                 ) : previewIngestionPending ? (
                   <PendingState
                     title="Processing recent rule decisions"
-                    body="Rule evaluate calls have landed, but the decision sample has not been materialized yet. It will populate once analytics catches up."
+                    body="Rule evaluate calls were received. Recent decisions are still being processed, and this view will update automatically."
                   />
                 ) : (
                   <EmptyState
                     title="No connector selections yet"
-                    body="Send /routing/evaluate decision traffic in the selected window to populate connector time-series."
+                    body="Rule decision traffic will appear here after /routing/evaluate calls in this window."
                   />
                 )}
               </CardBody>
@@ -1658,7 +2034,7 @@ export function AnalyticsPage() {
                       Gateway selection mix
                     </h2>
                     <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                      Connector share across the fetched rule decision sample.
+                      Connector share for selected rule decisions.
                     </p>
                   </div>
                   <InfoButton content={CARD_INFO.preview_share} />
@@ -1729,7 +2105,7 @@ export function AnalyticsPage() {
                             </p>
                           </div>
                           <p className="mt-2 text-xs text-slate-500 dark:text-[#8a8a93]">
-                            {formatPercent(item.percentage)} of fetched decisions
+                            {formatPercent(item.percentage)} of decisions
                           </p>
                         </div>
                       ))}
@@ -1738,7 +2114,7 @@ export function AnalyticsPage() {
                 ) : previewIngestionPending ? (
                   <PendingState
                     title="Building decision connector mix"
-                    body="Recent rule decision activity is still being folded into the fetched sample. This card will update automatically once the decision rows appear."
+                    body="Recent rule decisions are still being processed. This card will update automatically once decision rows are available."
                   />
                 ) : (
                   <EmptyState
@@ -1850,12 +2226,12 @@ export function AnalyticsPage() {
                 ) : previewIngestionPending ? (
                   <PendingState
                     title="Waiting for decision rows"
-                    body="Recent /routing/evaluate calls were recorded, but the detailed rule decision rows are still being flushed."
+                    body="Recent /routing/evaluate calls were recorded. Detailed rule decision rows will appear as soon as they are ready."
                   />
                 ) : (
                   <EmptyState
                     title="No rule-based activity yet"
-                    body="Send /routing/evaluate decision traffic in the selected window to populate rule-based activity."
+                    body="Rule-based activity will appear after /routing/evaluate calls in this window."
                   />
                 )}
               </CardBody>
@@ -1874,7 +2250,7 @@ export function AnalyticsPage() {
                 <CardBody>
                   {previewGatewaySummary.length ? (
                     <div className="space-y-3">
-                      {previewGatewaySummary.map((item) => (
+                      {previewGatewaySummary.map((item, index) => (
                         <div key={item.gateway} className="space-y-2">
                           <div className="flex items-center justify-between gap-3">
                             <p className="text-sm font-medium text-slate-900 dark:text-white">{item.gateway}</p>
@@ -1885,7 +2261,7 @@ export function AnalyticsPage() {
                               className="h-full rounded-full"
                               style={{
                                 width: `${(item.count / previewGatewayMaxCount) * 100}%`,
-                                backgroundColor: connectorColor(item.gateway),
+                                backgroundColor: CHART_COLORS[index % CHART_COLORS.length],
                               }}
                             />
                           </div>
@@ -1895,7 +2271,7 @@ export function AnalyticsPage() {
                   ) : previewIngestionPending ? (
                     <PendingState
                       title="Waiting for gateway activity"
-                      body="The decision sample is still being assembled from recent rule-evaluate calls. Gateway activity will appear here automatically once the rows are available."
+                      body="Recent rule decisions are still being processed. Gateway activity will appear automatically once rows are available."
                     />
                   ) : (
                     <EmptyState
@@ -1911,7 +2287,7 @@ export function AnalyticsPage() {
                   <div>
                     <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Recent decision outcomes</h2>
                     <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                      Status mix from the loaded decision sample.
+                      Status mix from the loaded decisions.
                     </p>
                   </div>
                 </CardHeader>
