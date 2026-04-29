@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import useSWR from 'swr'
 import { useLocation, useSearchParams } from 'react-router-dom'
+import { ArrowLeft } from 'lucide-react'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useAuthStore } from '../../store/authStore'
 import { fetcher } from '../../lib/api'
@@ -632,6 +633,16 @@ export function PaymentAuditPage() {
     ),
   )
   const activeGateways = activeGatewayList.length
+  const summaryCards = [
+    { label: 'Matches', value: String(totalMatches), helper: 'Window' },
+    { label: 'Success', value: String(successCount), helper: 'Current page' },
+    { label: 'Failure', value: String(failureCount), helper: 'Current page' },
+    {
+      label: 'Connectors',
+      value: String(activeGateways),
+      helper: activeGatewayList.length ? activeGatewayList.slice(0, 2).join(', ') : 'None',
+    },
+  ]
   const content = mode === 'rule_based'
     ? {
         title: 'Decision Audit',
@@ -776,6 +787,12 @@ export function PaymentAuditPage() {
     setSelectedEventId(null)
     setTrailFocused(true)
     syncSearch(mode, range, page, appliedFilters, lookupKey, customWindow)
+  }
+
+  function returnToResults() {
+    setTrailFocused(false)
+    setSelectedEventId(null)
+    syncSearch(mode, range, page, appliedFilters, undefined, customWindow)
   }
 
   function updateMode(nextMode: AuditMode) {
@@ -993,9 +1010,33 @@ export function PaymentAuditPage() {
         </div>
       )}
 
+      {!trailFocused ? (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {summaryCards.map((item) => (
+            <div
+              key={item.label}
+              className="rounded-[20px] border border-slate-200 bg-slate-50/80 px-5 py-4 dark:border-[#252d3a] dark:bg-[#0c1119]"
+            >
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#7d879b]">
+                {item.label}
+              </p>
+              <p className="mt-2 text-2xl font-semibold text-slate-950 dark:text-white">{item.value}</p>
+              <p className="mt-1 truncate text-xs text-slate-500 dark:text-[#7d879b]">{item.helper}</p>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       <div className="grid gap-4 xl:grid-cols-[minmax(360px,0.74fr)_minmax(0,1.26fr)] xl:items-start">
         <GlassCard className="overflow-hidden">
           <div className="border-b border-slate-200 px-4 py-4 dark:border-[#2a303a]">
+            {trailFocused ? (
+              <Button size="sm" variant="secondary" onClick={returnToResults} className="mb-4">
+                <ArrowLeft className="h-3.5 w-3.5" />
+                Back to results
+              </Button>
+            ) : null}
+
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <SurfaceLabel>{trailFocused ? 'Decision trail' : content.matchingLabel}</SurfaceLabel>
@@ -1010,37 +1051,9 @@ export function PaymentAuditPage() {
                     : 'Click a payment to replace this list with its decision trail.'}
                 </p>
               </div>
-              {trailFocused ? (
-                <Button size="sm" variant="secondary" onClick={() => setTrailFocused(false)}>
-                  Back to results
-                </Button>
-              ) : (
+              {!trailFocused ? (
                 <Badge variant="gray">{resultRows.length} shown</Badge>
-              )}
-            </div>
-
-            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {[
-                { label: 'Matches', value: String(totalMatches), helper: 'Window' },
-                { label: 'Success', value: String(successCount), helper: 'Current page' },
-                { label: 'Failure', value: String(failureCount), helper: 'Current page' },
-                {
-                  label: 'Connectors',
-                  value: String(activeGateways),
-                  helper: activeGatewayList.length ? activeGatewayList.slice(0, 2).join(', ') : 'None',
-                },
-              ].map((item) => (
-                <div
-                  key={item.label}
-                  className="rounded-[18px] border border-slate-200 bg-slate-50/80 px-3 py-3 dark:border-[#252d3a] dark:bg-[#0c1119]"
-                >
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#7d879b]">
-                    {item.label}
-                  </p>
-                  <p className="mt-2 text-xl font-semibold text-slate-950 dark:text-white">{item.value}</p>
-                  <p className="mt-1 truncate text-[11px] text-slate-500 dark:text-[#7d879b]">{item.helper}</p>
-                </div>
-              ))}
+              ) : null}
             </div>
           </div>
 
