@@ -18,13 +18,14 @@ import {
 } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
 import { apiFetch } from '../../lib/api'
+import { getStoredThemePreference, persistThemePreference } from '../../lib/theme'
 
 export function Sidebar() {
   const location = useLocation()
   const navigate = useNavigate()
   const { user, clearAuth } = useAuthStore()
   const [pendingPath, setPendingPath] = useState<string | null>(null)
-  const [isDark, setIsDark] = useState(() => localStorage.getItem('theme') !== 'light')
+  const [isDark, setIsDark] = useState(() => getStoredThemePreference() === 'dark')
   const [accountOpen, setAccountOpen] = useState(false)
   const accountRef = useRef<HTMLDivElement>(null)
   const selectedPath = pendingPath ?? location.pathname
@@ -32,14 +33,7 @@ export function Sidebar() {
   const initials = user?.email ? user.email.slice(0, 2).toUpperCase() : 'ME'
 
   useEffect(() => {
-    const root = window.document.documentElement
-    if (isDark) {
-      root.classList.add('dark')
-      localStorage.setItem('theme', 'dark')
-    } else {
-      root.classList.remove('dark')
-      localStorage.setItem('theme', 'light')
-    }
+    persistThemePreference(isDark ? 'dark' : 'light')
   }, [isDark])
 
   useEffect(() => {
