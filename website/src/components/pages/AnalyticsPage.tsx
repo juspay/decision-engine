@@ -753,6 +753,9 @@ export function AnalyticsPage() {
     toDateTimeInputValue(Date.now() - 2 * 60 * 60 * 1000),
   )
   const [customEnd, setCustomEnd] = useState(() => toDateTimeInputValue(Date.now()))
+  const [presetWindowBounds, setPresetWindowBounds] = useState<TimeWindow>(() =>
+    presetWindow('1h'),
+  )
 
   const customWindow = useMemo(() => {
     if (range !== 'custom') return undefined
@@ -763,35 +766,36 @@ export function AnalyticsPage() {
     }
     return { start_ms, end_ms }
   }, [customEnd, customStart, range])
+  const activeQueryWindow = range === 'custom' ? customWindow : presetWindowBounds
 
   const overviewUrl =
-    range !== 'custom' || customWindow
-      ? buildAnalyticsUrl('/analytics/overview', range, customWindow)
+    activeQueryWindow
+      ? buildAnalyticsUrl('/analytics/overview', range, activeQueryWindow)
       : null
   const routingUrl =
-    range !== 'custom' || customWindow
-      ? buildAnalyticsUrl('/analytics/routing-stats', range, customWindow)
+    activeQueryWindow
+      ? buildAnalyticsUrl('/analytics/routing-stats', range, activeQueryWindow)
       : null
   const filteredRoutingUrl =
-    range !== 'custom' || customWindow
-      ? buildAnalyticsUrl('/analytics/routing-stats', range, customWindow, routingFilters)
+    activeQueryWindow
+      ? buildAnalyticsUrl('/analytics/routing-stats', range, activeQueryWindow, routingFilters)
       : null
   const previewTraceKey =
-    range !== 'custom' || customWindow
+    activeQueryWindow
       ? ([
           'preview-trace-analytics',
           range,
-          customWindow?.start_ms ?? null,
-          customWindow?.end_ms ?? null,
+          activeQueryWindow.start_ms,
+          activeQueryWindow.end_ms,
         ] as const)
       : null
   const previewListUrl =
-    range !== 'custom' || customWindow
+    activeQueryWindow
       ? buildPreviewTraceUrl(
           range,
           previewListPage,
           PREVIEW_LIST_PAGE_SIZE,
-          customWindow,
+          activeQueryWindow,
         )
       : null
 
@@ -949,7 +953,7 @@ export function AnalyticsPage() {
 
   useEffect(() => {
     setPreviewListPage(1)
-  }, [range, customWindow?.start_ms, customWindow?.end_ms])
+  }, [range, activeQueryWindow?.start_ms, activeQueryWindow?.end_ms])
 
   const activeWindowLabel = useMemo(() => {
     if (range !== 'custom') {
@@ -959,9 +963,9 @@ export function AnalyticsPage() {
     return `${formatDateTime(customWindow.start_ms)} to ${formatDateTime(customWindow.end_ms)}`
   }, [customWindow, range])
   const effectiveWindow = useMemo(() => {
-    if (customWindow) return customWindow
+    if (activeQueryWindow) return activeQueryWindow
     return presetWindow(range as AnalyticsRange)
-  }, [customWindow, range])
+  }, [activeQueryWindow, range])
 
   const routeHits = useMemo(() => {
     const fallback = [
@@ -1011,8 +1015,8 @@ export function AnalyticsPage() {
       .sort((left, right) => right.count - left.count)
   }, [previewRows])
   const chartBucketSize = useMemo(
-    () => bucketSizeForWindow(range, customWindow),
-    [customWindow, range],
+    () => bucketSizeForWindow(range, activeQueryWindow),
+    [activeQueryWindow, range],
   )
   const bucketTickFormatter = useMemo(
     () => (value: number | string) => formatBucketLabel(Number(value), effectiveWindow),
@@ -1491,12 +1495,18 @@ export function AnalyticsPage() {
     setRange(value)
     if (value !== 'custom') {
       const preset = presetWindow(value)
+      setPresetWindowBounds(preset)
       setCustomStart(toDateTimeInputValue(preset.start_ms))
       setCustomEnd(toDateTimeInputValue(preset.end_ms))
     }
   }
 
   function refreshAll() {
+    if (range !== 'custom') {
+      setPresetWindowBounds(presetWindow(range))
+      return
+    }
+
     overview.mutate()
     routing.mutate()
     filteredRouting.mutate()
