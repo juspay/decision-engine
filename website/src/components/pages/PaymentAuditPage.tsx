@@ -1010,23 +1010,6 @@ export function PaymentAuditPage() {
         </div>
       )}
 
-      {!trailFocused ? (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {summaryCards.map((item) => (
-            <div
-              key={item.label}
-              className="rounded-[20px] border border-slate-200 bg-slate-50/80 px-5 py-4 dark:border-[#252d3a] dark:bg-[#0c1119]"
-            >
-              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#7d879b]">
-                {item.label}
-              </p>
-              <p className="mt-2 text-2xl font-semibold text-slate-950 dark:text-white">{item.value}</p>
-              <p className="mt-1 truncate text-xs text-slate-500 dark:text-[#7d879b]">{item.helper}</p>
-            </div>
-          ))}
-        </div>
-      ) : null}
-
       <div className="grid gap-4 xl:grid-cols-[minmax(360px,0.74fr)_minmax(0,1.26fr)] xl:items-start">
         <GlassCard className="overflow-hidden">
           <div className="border-b border-slate-200 px-4 py-4 dark:border-[#2a303a]">
@@ -1059,6 +1042,21 @@ export function PaymentAuditPage() {
 
           {!trailFocused ? (
             <div className="space-y-3 p-4">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                {summaryCards.map((item) => (
+                  <div
+                    key={item.label}
+                    className="rounded-[20px] border border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-[#252d3a] dark:bg-[#0c1119]"
+                  >
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#7d879b]">
+                      {item.label}
+                    </p>
+                    <p className="mt-2 text-xl font-semibold text-slate-950 dark:text-white">{item.value}</p>
+                    <p className="mt-1 truncate text-[11px] text-slate-500 dark:text-[#7d879b]">{item.helper}</p>
+                  </div>
+                ))}
+              </div>
+
               {resultRows.length ? resultRows.map((row) => (
                 <button
                   key={row.lookup_key}
