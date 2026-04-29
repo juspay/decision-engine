@@ -611,7 +611,7 @@ function RoutingAlignmentCard({
 
   return (
     <Card className="overflow-visible">
-      <CardHeader className={expanded ? 'px-5 py-4' : 'px-5 py-3'}>
+      <CardHeader className={expanded ? 'px-5 py-4' : 'px-5 py-3 !border-b-0'}>
         <div className={`flex flex-wrap justify-between gap-3 ${expanded ? 'items-start' : 'items-center'}`}>
           <div className={expanded ? 'min-w-0' : 'flex min-w-0 flex-wrap items-center gap-2'}>
             <h2 className="text-sm font-semibold text-slate-800 dark:text-white">
@@ -622,12 +622,9 @@ function RoutingAlignmentCard({
                 Traffic share: checks if the best-scoring connector is also getting the largest share.
               </p>
             ) : (
-              <>
-                <Badge variant={summary.statusVariant}>{summary.statusLabel}</Badge>
-                <span className="min-w-0 truncate text-xs font-medium text-slate-500 dark:text-[#9aa7bb]">
-                  {collapsedReadout}
-                </span>
-              </>
+              <span className="min-w-0 truncate text-xs font-medium text-slate-500 dark:text-[#9aa7bb]">
+                {collapsedReadout}
+              </span>
             )}
           </div>
           <div className="flex shrink-0 items-center gap-2">
