@@ -156,22 +156,6 @@ Decision Engine fits into an existing payment stack without replacing your orche
 
 ---
 
-## Roadmap
-
-| Status | Feature | Description |
-|:------:|---------|-------------|
-| ✅ | Rule-based routing | Merchant-defined priority rules via Euclid |
-| ✅ | Dynamic ordering | Success-rate based gateway selection |
-| ✅ | Downtime detection | Automatic health monitoring |
-| ✅ | Multi-database | MySQL & PostgreSQL support |
-| ✅ | Dashboard | Visual rule management and decision audit UI |
-| ✅ | Team management | Invite members to merchant accounts |
-| 🔄 | Enhanced routing models | Better success rate prediction |
-| 📋 | Multi-tenant analytics | Per-tenant routing insights |
-| 📋 | GraphQL API | Alternative query interface |
-
----
-
 ## Contributing
 
 Contributions are welcome — bug reports, feature requests, docs, or code.
