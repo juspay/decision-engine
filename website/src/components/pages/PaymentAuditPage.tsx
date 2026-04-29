@@ -280,6 +280,11 @@ function eventPhase(event: PaymentAuditEvent) {
   return 'Errors'
 }
 
+function isDecideGatewayEvent(event: PaymentAuditEvent) {
+  const flowType = flowTypeValue(event)
+  return isDecisionFlow(flowType) || event.event_stage === 'gateway_decided'
+}
+
 function summaryBadgeVariant(status?: string | null): 'blue' | 'green' | 'purple' | 'red' | 'orange' | 'gray' {
   const normalizedStatus = (status || '').toUpperCase()
   if (
@@ -616,6 +621,7 @@ export function PaymentAuditPage() {
   }, [selectedEvent?.id, timeline])
 
   const inspectorModel = useMemo(() => buildInspectorModel(selectedEvent), [selectedEvent])
+  const selectedEventIsDecision = selectedEvent ? isDecideGatewayEvent(selectedEvent) : false
 
   const error = auditSearch.error?.message || auditDetail.error?.message || null
   const loading = auditSearch.isLoading || auditDetail.isLoading
@@ -1235,7 +1241,9 @@ export function PaymentAuditPage() {
                   {selectedEvent ? stageLabel(selectedEvent) : 'No event selected'}
                 </h2>
                 <p className="mt-1 text-sm text-slate-500 dark:text-[#8a8a93]">
-                  Connector scores, routing logic, and captured payloads.
+                  {selectedEventIsDecision
+                    ? 'Connector scores, routing logic, and captured payloads.'
+                    : 'Gateway update outcome and captured payloads.'}
                 </p>
               </div>
               {selectedEvent?.status ? (
@@ -1286,22 +1294,26 @@ export function PaymentAuditPage() {
 
                 {inspectorTab === 'summary' ? (
                   <div className="space-y-4">
-                    <InspectorJsonPanel
-                      title="Connector scores"
-                      value={inspectorModel.scoreContext}
-                      emptyMessage="No connector score map was captured for this event."
-                    />
+                    {selectedEventIsDecision ? (
+                      <InspectorJsonPanel
+                        title="Connector scores"
+                        value={inspectorModel.scoreContext}
+                        emptyMessage="No connector score map was captured for this event."
+                      />
+                    ) : null}
                     <InspectorKeyValueGrid rows={inspectorModel.summaryRows} />
                     <InspectorJsonPanel
                       title="Selection reason"
                       value={inspectorModel.selectionReason}
                       emptyMessage="No explicit selection reason was captured for this event."
                     />
-                    <InspectorJsonPanel
-                      title="Details"
-                      value={inspectorModel.signalRecord}
-                      emptyMessage="This event did not capture additional scoring or rule metadata."
-                    />
+                    {selectedEventIsDecision ? (
+                      <InspectorJsonPanel
+                        title="Details"
+                        value={inspectorModel.signalRecord}
+                        emptyMessage="This event did not capture additional scoring or rule metadata."
+                      />
+                    ) : null}
                   </div>
                 ) : null}
 
