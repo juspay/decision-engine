@@ -15,6 +15,7 @@ import {
 import { Card, CardBody, SurfaceLabel } from '../ui/Card'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
+import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useAuthStore } from '../../store/authStore'
 import { apiPost } from '../../lib/api'
@@ -57,6 +58,7 @@ export function RoutingHubPage() {
   const merchantId = selectedMerchantId || authMerchantId
   const debitRoutingFlag = useDebitRoutingFlag(merchantId)
   const [deactivatingStrategy, setDeactivatingStrategy] = useState<StrategyId | null>(null)
+  const [pendingDeactivateStrategy, setPendingDeactivateStrategy] = useState<StrategyId | null>(null)
   const [actionMessage, setActionMessage] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
@@ -111,15 +113,15 @@ export function RoutingHubPage() {
 
   async function deactivateStrategy(strategyId: StrategyId) {
     if (!merchantId) return
+    setPendingDeactivateStrategy(strategyId)
+  }
+
+  async function doDeactivateStrategy(strategyId: StrategyId) {
     const labels: Record<StrategyId, string> = {
       'auth-rate': 'auth-rate configuration',
       rules: 'rule-based routing',
       volume: 'volume split routing',
       debit: 'debit routing',
-    }
-
-    if (!window.confirm(`Deactivate ${labels[strategyId]} for ${merchantId}?`)) {
-      return
     }
 
     setDeactivatingStrategy(strategyId)
@@ -236,8 +238,24 @@ export function RoutingHubPage() {
 
   const NextActionIcon = nextAction.icon
 
+  const strategyLabels: Record<StrategyId, string> = {
+    'auth-rate': 'Auth-Rate Configuration',
+    rules: 'Rule-Based Routing',
+    volume: 'Volume Split Routing',
+    debit: 'Debit Routing',
+  }
+
   return (
     <div className="mx-auto max-w-[1380px] space-y-6">
+      <ConfirmDialog
+        open={pendingDeactivateStrategy !== null}
+        title={`Deactivate ${pendingDeactivateStrategy ? strategyLabels[pendingDeactivateStrategy] : ''}?`}
+        description="This will stop routing decisions from using this strategy. You can reactivate it at any time."
+        confirmLabel="Deactivate"
+        variant="danger"
+        onConfirm={() => { const s = pendingDeactivateStrategy!; setPendingDeactivateStrategy(null); doDeactivateStrategy(s) }}
+        onCancel={() => setPendingDeactivateStrategy(null)}
+      />
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="flex flex-wrap items-center gap-2">
