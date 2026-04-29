@@ -827,24 +827,6 @@ export function PaymentAuditPage() {
     }
   }
 
-  function openRelatedEvents() {
-    if (!selectedEvent) return
-    const lookupValue = selectedEvent.payment_id || selectedEvent.request_id || ''
-    const nextFilters: AuditFilters = {
-      paymentId: lookupValue,
-      requestId: '',
-      gateway: selectedEvent.gateway || '',
-      route: '',
-      status: '',
-      flowType: '',
-      errorCode: '',
-    }
-    setFilters(nextFilters)
-    setAppliedFilters(nextFilters)
-    setPage(1)
-    syncSearch(mode, range, 1, nextFilters, selectedKey)
-  }
-
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -1347,9 +1329,6 @@ export function PaymentAuditPage() {
                   </Button>
                   <Button size="sm" variant="secondary" disabled={!selectedEvent.payment_id} onClick={() => copyValue(selectedEvent.payment_id)}>
                     Copy payment ID
-                  </Button>
-                  <Button size="sm" variant="secondary" onClick={openRelatedEvents}>
-                    Open related events
                   </Button>
                 </div>
               </>
