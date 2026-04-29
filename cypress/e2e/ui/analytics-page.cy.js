@@ -97,8 +97,8 @@ describe('Analytics UI', () => {
     // Wait for the view to settle and API data to load
     cy.contains('button', /^Auth-rate based$/).should('have.class', 'bg-white')
 
-    // Wait for analytics data to load
-    cy.contains('API calls').should('be.visible')
+    // Wait for analytics data to load (looking for endpoint hit cards)
+    cy.contains('Decide Gateway').should('be.visible')
 
     // Switch to rule-based view
     cy.contains('h1', 'Analytics')
@@ -108,7 +108,7 @@ describe('Analytics UI', () => {
         cy.contains('button', /^Rule based \/ Volume based$/).scrollIntoView().click({ force: true })
       })
     cy.contains(
-      'Routing activity for rule-based and volume-based flows, separate from auth-rate score updates.',
+      'Routing decisions from /routing/evaluate, kept separate from auth-rate transaction routing and gateway scoring.',
     ).should('exist')
   })
 })

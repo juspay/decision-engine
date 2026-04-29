@@ -25,7 +25,7 @@ describe('Auth UI', () => {
 
     cy.contains('h2', 'Manage routing, analytics, and audits from one dashboard.').should('be.visible')
     cy.contains('Welcome back').should('be.visible')
-    cy.contains('button', 'Enter workspace').should('be.visible')
+    cy.contains('button', 'Enter dashboard').should('be.visible')
     cy.visitWithSession('/', merchantId)
     cy.contains(email, { timeout: 20000 }).should('be.visible')
     cy.contains(merchantId).should('be.visible')
