@@ -2,7 +2,7 @@ import useSWR from 'swr'
 import { useForm, useFieldArray } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Card, CardBody, CardHeader } from '../ui/Card'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
@@ -11,7 +11,7 @@ import { Spinner } from '../ui/Spinner'
 import { useMerchantStore } from '../../store/merchantStore'
 import { apiPost } from '../../lib/api'
 import { PAYMENT_METHOD_TYPES, PAYMENT_METHODS } from '../../lib/constants'
-import { Plus, Trash2, Eye, CheckCircle2, X } from 'lucide-react'
+import { Plus, Trash2, Eye } from 'lucide-react'
 
 // ---- Schema ----
 const subLevelSchema = z.object({
@@ -71,7 +71,6 @@ interface SRConfigResponse {
 export function SRRoutingPage() {
   const { merchantId } = useMerchantStore()
   const [saving, setSaving] = useState(false)
-  const savingRef = useRef(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState(false)
   const [showCurrentConfig, setShowCurrentConfig] = useState(false)
@@ -131,9 +130,7 @@ export function SRRoutingPage() {
   }
 
   async function onSave(data: SRForm) {
-    if (savingRef.current) return
     if (!merchantId) { setSaveError('Set a Merchant ID first.'); return }
-    savingRef.current = true
     setSaving(true); setSaveError(null); setSaveSuccess(false)
     try {
       await ensureMerchantExists()
@@ -158,7 +155,6 @@ export function SRRoutingPage() {
     } catch (err: unknown) {
       setSaveError(err instanceof Error ? err.message : String(err))
     } finally {
-      savingRef.current = false
       setSaving(false)
     }
   }
@@ -180,9 +176,6 @@ export function SRRoutingPage() {
     <div className="space-y-6 max-w-5xl">
       <div>
         <h1 className="text-2xl font-semibold text-slate-900">Auth-Rate Based Routing</h1>
-        <p className="text-sm text-slate-500 mt-1">
-          Configure success-rate based gateway routing
-        </p>
       </div>
 
       {!merchantId && (
@@ -403,26 +396,8 @@ export function SRRoutingPage() {
 
           <ErrorMessage error={saveError} />
           {saveSuccess && (
-            <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/10 p-4 text-sm text-emerald-700 shadow-[0_20px_50px_-35px_rgba(16,185,129,0.7)] dark:text-emerald-200">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex gap-3">
-                  <CheckCircle2 size={20} className="mt-0.5 shrink-0 text-emerald-500" />
-                  <div>
-                    <p className="font-semibold">Auth-rate configuration saved</p>
-                    <p className="mt-1 text-xs leading-5 text-emerald-700/80 dark:text-emerald-200/75">
-                      Success-rate routing is ready for this merchant. The latest values remain in the form for review.
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setSaveSuccess(false)}
-                  className="rounded-full p-1 text-emerald-700/70 transition hover:bg-emerald-500/10 hover:text-emerald-800 dark:text-emerald-200/70 dark:hover:text-emerald-100"
-                  aria-label="Dismiss auth-rate saved message"
-                >
-                  <X size={16} />
-                </button>
-              </div>
+            <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-4 py-3 text-sm text-emerald-400">
+              Configuration saved successfully.
             </div>
           )}
 

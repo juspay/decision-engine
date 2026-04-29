@@ -12,13 +12,16 @@ Checks whether the HTTP service is reachable. Use this for lightweight uptime ch
 
 ## Authentication
 
-Public. No JWT or API key is required.
+Public. No JWT or API key is required. Sandbox traffic may still include `x-feature: decision-engine` when routed through Hyperswitch.
 
 For local development, start with:
 
 ```bash
 export BASE_URL=http://localhost:8080
 export AUTH_HEADER="Authorization: Bearer <jwt_token>"
+# Sandbox only:
+# export BASE_URL=https://sandbox.hyperswitch.io
+# export FEATURE_HEADER="x-feature: decision-engine"
 ```
 
 ## Request

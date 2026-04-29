@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import useSWR from 'swr'
 import {
   DndContext,
@@ -118,19 +118,6 @@ function createStatementGroup(routingKeys: Record<string, RoutingKeyConfig>): St
     conditions: [createCondition(routingKeys)],
     nested: [],
   }
-}
-
-function mapRoutingKeyTypeToEuclidValueType(keyType?: RoutingKeyConfig['type']) {
-  if (keyType === 'integer') return 'number'
-  if (keyType === 'enum') return 'enum_variant'
-  if (keyType === 'udf') return 'metadata_variant'
-  if (keyType === 'global_ref') return 'global_ref'
-  return 'str_value'
-}
-
-function mapRoutingKeyTypeToEuclidArrayValueType(keyType?: RoutingKeyConfig['type']) {
-  if (keyType === 'integer') return 'number_array'
-  return 'enum_variant_array'
 }
 
 function getRuleSummary(algo: RoutingAlgorithm): string {
@@ -829,38 +816,29 @@ function buildAlgorithmData(rules: RuleBlock[], defaultOutput: DefaultOutput, ro
     return buildPriorityOutput(block.priorityGateways)
   }
 
-  function buildConditionValue(c: ConditionRow, valueType: string) {
-    if (valueType === 'number') return Number(c.value)
-    if (valueType === 'number_array') {
-      return Array.isArray(c.value) ? c.value.map(Number) : [Number(c.value)]
-    }
-    if (valueType === 'metadata_variant') {
-      return { key: c.lhs, value: Array.isArray(c.value) ? c.value.join(',') : c.value }
-    }
-    return c.value
-  }
-
   function buildCondition(c: ConditionRow) {
     const keyType = routingKeys[c.lhs]?.type
     const isMulti = c.operator === 'in' || c.operator === 'not_in'
 
     if (isMulti && Array.isArray(c.value)) {
-      const arrayValueType = mapRoutingKeyTypeToEuclidArrayValueType(keyType)
       return {
         lhs: c.lhs,
         comparison: OPERATOR_TO_API[c.operator],
-        value: { type: arrayValueType, value: buildConditionValue(c, arrayValueType) },
+        value: { type: 'enum_variant_array', value: c.value },
         metadata: {},
       }
     }
 
-    const apiValueType = mapRoutingKeyTypeToEuclidValueType(keyType)
+    const apiValueType =
+      keyType === 'integer' ? 'number' :
+      keyType === 'str_value' || keyType === 'udf' ? 'str_value' :
+      'enum_variant'
     return {
       lhs: c.lhs,
       comparison: OPERATOR_TO_API[c.operator] || c.operator,
       value: {
         type: apiValueType,
-        value: buildConditionValue(c, apiValueType),
+        value: keyType === 'integer' ? Number(c.value) : c.value,
       },
       metadata: {},
     }
@@ -899,7 +877,6 @@ export function EuclidRulesPage() {
   const [defaultOutput, setDefaultOutput] = useState<DefaultOutput>({ priorityGateways: [] })
   const [showJson, setShowJson] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const submittingRef = useRef(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [createdId, setCreatedId] = useState<string | null>(null)
   const [activating, setActivating] = useState(false)
@@ -939,14 +916,12 @@ export function EuclidRulesPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (submittingRef.current) return
     if (!merchantId) { setSubmitError('Set a Merchant ID first.'); return }
     if (routingKeysUnavailable) {
       setSubmitError('Routing key config is unavailable. Ensure backend /config/routing-keys is reachable and valid.')
       return
     }
     if (!ruleName.trim()) { setSubmitError('Rule name is required.'); return }
-    submittingRef.current = true
     setSubmitting(true)
     setSubmitError(null)
     setCreatedId(null)
@@ -959,16 +934,10 @@ export function EuclidRulesPage() {
         algorithm: { type: 'advanced', data: algorithmData },
       })
       setCreatedId(result.rule_id ?? result.id)
-      setRuleName('')
-      setRuleDesc('')
-      setRuleBlocks([])
-      setDefaultOutput({ priorityGateways: [] })
-      setShowJson(false)
       mutateAlgorithms()
     } catch (err) {
       setSubmitError(String(err))
     } finally {
-      submittingRef.current = false
       setSubmitting(false)
     }
   }
@@ -1039,7 +1008,6 @@ export function EuclidRulesPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold text-slate-900">Rule-Based Routing</h1>
-        <p className="text-sm text-slate-500 mt-1">Create declarative routing rules</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
