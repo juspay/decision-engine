@@ -886,7 +886,7 @@ export function PaymentAuditPage() {
       ) : null}
 
       <div className="space-y-4">
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-[18px] border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#11151d]">
           <Button
             size="sm"
             variant="secondary"
