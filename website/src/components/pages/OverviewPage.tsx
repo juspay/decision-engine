@@ -138,9 +138,8 @@ function EmptyWorkspace() {
           Sign in with a merchant account to turn this into a live overview.
         </h2>
         <p className="mt-4 max-w-xl text-sm leading-7 text-slate-600 dark:text-[#b2bdd1]">
-          Analytics now derive merchant scope from your authenticated session. Once you are signed in,
-          this page shows service health, active routing, request count, and gateway activity without
-          needing analytics query params for merchant selection.
+          Analytics use your signed-in merchant account. After sign-in, the overview shows service
+          health, active routing, request count, and gateway activity.
         </p>
       </GlassCard>
 
@@ -300,16 +299,16 @@ export function OverviewPage() {
     },
     {
       label: 'Rule-based routing',
-      description: hasRuleBasedRouting ? 'Enabled for this merchant.' : 'Not enabled.',
+      description: hasRuleBasedRouting ? 'Enabled.' : 'Not enabled.',
       state: hasRuleBasedRouting ? 'Enabled' : 'Optional',
       icon: Sparkles,
     },
     {
       label: 'Debit routing',
       description: debitRoutingFlag.isLoading
-        ? 'Checking merchant debit-routing flag.'
+        ? 'Checking debit-routing access.'
         : hasDebitRouting
-          ? 'Enabled for this merchant.'
+          ? 'Enabled.'
           : 'Not enabled yet.',
       state: debitRoutingFlag.isLoading ? 'Checking' : hasDebitRouting ? 'Enabled' : 'Not set',
       icon: Network,

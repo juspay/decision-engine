@@ -585,7 +585,7 @@ function setupPromptForTab(tab: TabType, detail?: string): SetupPromptState {
   if (tab === 'volume') {
     return {
       title: 'Configure volume split first',
-      body: 'Volume evaluation needs an active volume split rule for this merchant before it can sample distribution.',
+      body: 'Volume evaluation needs an active volume split rule before it can calculate distribution.',
       detail,
     }
   }
@@ -593,7 +593,7 @@ function setupPromptForTab(tab: TabType, detail?: string): SetupPromptState {
   if (tab === 'rule') {
     return {
       title: 'Configure rule-based routing first',
-      body: 'Rule evaluation needs an active rule-based strategy for this merchant before it can return a policy decision.',
+      body: 'Rule evaluation needs an active rule-based strategy before it can return a policy decision.',
       detail,
     }
   }
@@ -608,7 +608,7 @@ function setupPromptForTab(tab: TabType, detail?: string): SetupPromptState {
 
   return {
     title: 'Configure auth-rate routing first',
-    body: 'Auth-rate simulation needs success-rate routing configured for this merchant before it can run gateway decisions.',
+    body: 'Auth-rate simulation needs success-rate routing configured before it can run gateway decisions.',
     detail,
   }
 }
@@ -1143,7 +1143,7 @@ export function DecisionExplorerPage() {
 
   async function runDebitRouting() {
     if (!effectiveMerchantId) return setError('Sign in with a merchant-linked account to continue')
-    if (!debitRoutingFlag.isEnabled) return openSetupPrompt('debit', 'Debit routing is disabled for this merchant.')
+    if (!debitRoutingFlag.isEnabled) return openSetupPrompt('debit', 'Debit routing is disabled.')
 
     const gateways = debitForm.eligible_gateways.split(',').map(s => s.trim()).filter(Boolean)
     if (gateways.length === 0) return setError('Add at least one eligible gateway')
@@ -1836,12 +1836,12 @@ export function DecisionExplorerPage() {
                   </p>
                 ) : debitRoutingFlag.isEnabled ? (
                   <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
-                    Debit routing is enabled for this merchant. This tab will call /decide-gateway with NTW_BASED_ROUTING.
+                    Debit routing is enabled. This tab will call /decide-gateway with NTW_BASED_ROUTING.
                   </p>
                 ) : (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
                     <div className="flex flex-wrap items-center justify-between gap-3">
-                      <span>Debit routing is disabled for this merchant.</span>
+                      <span>Debit routing is disabled.</span>
                       <Button size="sm" variant="secondary" onClick={enableDebitRoutingForExplorer} disabled={!effectiveMerchantId || loading}>
                         Enable Debit Routing
                       </Button>
@@ -2398,7 +2398,7 @@ export function DecisionExplorerPage() {
                     <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 dark:border-[#293546] dark:bg-[#0b111a]">
                       <div className="flex items-center justify-between">
                         <p className="text-sm font-semibold text-slate-900 dark:text-white">Connector share</p>
-                        <Badge variant="gray">Live sample</Badge>
+                        <Badge variant="gray">Current run</Badge>
                       </div>
                       <div className="mt-4 h-[260px]">
                         <ResponsiveContainer width="100%" height="100%">
@@ -2551,9 +2551,9 @@ export function DecisionExplorerPage() {
               <section className="flex min-h-[360px] items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-8 py-12 text-center dark:border-[#2a303a] dark:bg-[#101722]/70">
                 <div className="max-w-sm">
                   <PieChartIcon size={30} className="mx-auto text-slate-300 dark:text-[#536075]" />
-                  <h3 className="mt-4 text-sm font-semibold text-slate-900 dark:text-white">No volume sample yet</h3>
+                  <h3 className="mt-4 text-sm font-semibold text-slate-900 dark:text-white">No volume results yet</h3>
                   <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-[#9aa6bb]">
-                    Set the run size, execute the volume test, then inspect distribution and traces here.
+                    Set the run size and run the volume split check to view distribution and traces.
                   </p>
                 </div>
               </section>
@@ -3330,7 +3330,7 @@ export function DecisionExplorerPage() {
                       }
                       body={
                         previewSummary
-                          ? 'We already found the decision summary for this run, but the step-by-step timeline has not been flushed yet. Waiting for the latest events.'
+                          ? 'The decision summary is available. The step-by-step timeline will appear as soon as the latest events are ready.'
                           : 'This decision was just logged. Waiting for the decision trace details to become available.'
                       }
                     />
@@ -3431,8 +3431,8 @@ export function DecisionExplorerPage() {
                       }
                       body={
                         previewSummary
-                          ? 'The decision record exists, but no inspectable step payload has arrived yet. The inspector will unlock as soon as the first timeline event is available.'
-                          : 'Inspector will unlock as soon as the first decision event is available.'
+                          ? 'The decision record is available. Request and response payloads will appear as soon as the first timeline event is ready.'
+                          : 'Request and response payloads will appear as soon as the first decision event is ready.'
                       }
                     />
                   ) : (

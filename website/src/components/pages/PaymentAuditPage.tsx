@@ -654,7 +654,7 @@ export function PaymentAuditPage() {
     ? {
         title: 'Decision Audit',
         description: 'Inspect rule decisions from /routing/evaluate without mixing them into auth-rate transaction outcomes.',
-        merchantPrompt: 'Analytics is scoped to your signed-in merchant. The top-bar merchant selector is not used for rule decision access.',
+        merchantPrompt: 'Audit data follows your signed-in merchant account.',
         searchTitle: 'Search Rule Decision Trail',
         searchDescription: 'Use decision payment IDs or request IDs when you have them. Gateway, status, and error code help narrow rule decision activity quickly.',
         matchingLabel: 'Matching decisions',
@@ -668,7 +668,7 @@ export function PaymentAuditPage() {
       ? {
           title: 'Decision Audit',
           description: 'Search debit-routing decisions produced by /decide-gateway with NTW_BASED_ROUTING.',
-          merchantPrompt: 'Analytics is scoped to your signed-in merchant. The top-bar merchant selector is not used for debit-routing audit access.',
+          merchantPrompt: 'Audit data follows your signed-in merchant account.',
           searchTitle: 'Search Debit Routing Trail',
           searchDescription: 'Use payment or request IDs when you have them. Gateway, status, and error code help narrow debit-routing outcomes quickly.',
           matchingLabel: 'Matching debit decisions',
@@ -681,9 +681,9 @@ export function PaymentAuditPage() {
       : {
           title: 'Decision Audit',
           description: 'Search by payment or request, then inspect gateway decisions, gateway updates, rule evaluations, and errors with the exact payload captured at each step.',
-          merchantPrompt: 'Analytics is scoped to your signed-in merchant. The top-bar merchant selector is not used for payment-audit access.',
+          merchantPrompt: 'Audit data follows your signed-in merchant account.',
           searchTitle: 'Search Decision Trail',
-          searchDescription: 'Use payment or request IDs when you have them. Error code, gateway, route, and status narrow operational noise quickly.',
+          searchDescription: 'Use payment or request IDs when you have them. Error code, gateway, route, and status narrow results quickly.',
           matchingLabel: 'Matching payments',
           matchingDescription: 'Scan the current result set and pick a payment to open its full event trail.',
           summaryLabel: 'Selected Payment Timeline',
@@ -1013,8 +1013,8 @@ export function PaymentAuditPage() {
                 </h2>
                 <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
                   {trailFocused
-                    ? 'Inspect this payment trail, then choose a timeline event for the inspector.'
-                    : 'Click a payment to replace this list with its decision trail.'}
+                    ? 'Choose a timeline event to view scores, routing details, and payloads.'
+                    : 'Click a payment to list its decision trail.'}
                 </p>
               </div>
               {!trailFocused ? (
@@ -1219,8 +1219,8 @@ export function PaymentAuditPage() {
                 </h2>
                 <p className="mt-1 text-sm text-slate-500 dark:text-[#8a8a93]">
                   {selectedEventIsDecision
-                    ? 'Connector scores, routing logic, and captured payloads.'
-                    : 'Gateway update outcome and captured payloads.'}
+                    ? 'View connector scores, routing details, request payload, and response payload.'
+                    : 'View gateway update outcome, request payload, and response payload.'}
                 </p>
               </div>
               {selectedEvent?.status ? (
@@ -1330,7 +1330,7 @@ export function PaymentAuditPage() {
             ) : (
               <EmptyState
                 title="No event selected"
-                body="Select a timeline event to inspect connector scores, routing logic, and full payloads."
+                body="Select a timeline event to view scores, routing details, request payload, and response payload."
               />
             )}
           </div>

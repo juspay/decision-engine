@@ -151,7 +151,7 @@ const CARD_INFO: Record<'hits' | 'share' | 'alignment' | 'sr' | 'preview_hits' |
   alignment: {
     title: 'Routing alignment',
     purpose: 'Use this to see whether the best-scoring connector is also leading traffic share.',
-    calculation: 'The page compares the latest connector success-rate score with the gateways actually selected in the same time window.',
+    calculation: 'Compares the latest connector success-rate score with the gateways actually selected in the same time window.',
     source: 'Reads the same ClickHouse-backed routing-stats response used by the gateway share and connector success-rate charts.',
   },
   sr: {
@@ -163,7 +163,7 @@ const CARD_INFO: Record<'hits' | 'share' | 'alignment' | 'sr' | 'preview_hits' |
   preview_hits: {
     title: 'Rule-based summary',
     purpose: 'Use these cards to distinguish rule decision volume from the connector coverage produced by rule-based routing.',
-    calculation: 'Rule Evaluate counts come from request-hit analytics for `/routing/evaluate`. Gateway coverage counts the unique connectors selected in the fetched decision sample.',
+    calculation: 'Rule Evaluate counts come from request-hit analytics for `/routing/evaluate`. Gateway coverage counts the unique connectors selected in rule decisions for this window.',
     source: 'Reads request-hit and rule decision analytics associated with rule-based routing activity.',
   },
   preview_activity: {
@@ -174,8 +174,8 @@ const CARD_INFO: Record<'hits' | 'share' | 'alignment' | 'sr' | 'preview_hits' |
   },
   preview_share: {
     title: 'Rule-based gateway selection mix',
-    purpose: 'Use this to see which connectors dominate the fetched rule decision sample, separate from auth-rate transaction decisions.',
-    calculation: 'Returned decision traces are grouped by latest selected connector and displayed as share of the fetched decision sample.',
+    purpose: 'Use this to see which connectors lead selected rule decisions, separate from auth-rate transaction decisions.',
+    calculation: 'Returned decision traces are grouped by latest selected connector and displayed as share of selected rule decisions.',
     source: 'Reads rule decision activity through `/analytics/preview-trace`.',
   },
 }
@@ -1711,7 +1711,7 @@ export function AnalyticsPage() {
           ) : (
             <EmptyState
               title="No gateway share history yet"
-              body="Send real decide-gateway traffic in the selected window to populate connector share."
+              body="Gateway traffic will appear here after payments are routed in this window."
             />
           )}
         </CardBody>
@@ -1752,7 +1752,7 @@ export function AnalyticsPage() {
                   Connector filters
                 </p>
                 <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                  Narrow the success-rate line chart by the routing dimensions present for this merchant.
+                  Narrow the success-rate line chart by recorded routing dimensions.
                 </p>
               </div>
               <Button
@@ -1796,8 +1796,8 @@ export function AnalyticsPage() {
                   <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 dark:border-[#1d1d23] dark:bg-[#09090b]">
                     <p className="text-xs text-slate-500 dark:text-[#8a8a93]">
                       {showAllFilters
-                        ? 'Showing all routing dimensions available for this merchant.'
-                        : `${hiddenDimensionCount} more routing dimension${hiddenDimensionCount === 1 ? '' : 's'} available for this merchant.`}
+                        ? 'Showing all routing dimensions.'
+                        : `${hiddenDimensionCount} more routing dimension${hiddenDimensionCount === 1 ? '' : 's'} available.`}
                     </p>
                     <Button
                       size="sm"
@@ -1811,8 +1811,8 @@ export function AnalyticsPage() {
               </div>
             ) : availableFilters.missing_dimensions.length ? (
               <EmptyState
-                title="No populated routing dimensions in this window"
-                body="The merchant has score history, but none of the dynamic routing dimensions have values recorded in the selected time window yet."
+                title="No routing dimension values in this window"
+                body="Score history exists, but no routing dimensions have values recorded in the selected time window yet."
               />
             ) : null}
 
@@ -1930,7 +1930,7 @@ export function AnalyticsPage() {
           ) : (
             <EmptyState
               title="No connector score history yet"
-              body="Send decide-gateway and update-gateway-score traffic in the selected window to populate connector history."
+              body="Connector history will appear after decide-gateway and update-gateway-score activity in this window."
             />
           )}
         </CardBody>
@@ -1973,7 +1973,7 @@ export function AnalyticsPage() {
                       Connector selections over time
                     </h2>
                     <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                      Connector counts over time from the fetched rule decision sample.
+                      Connector counts over time for selected rule decisions.
                     </p>
                   </div>
                   <InfoButton content={CARD_INFO.preview_activity} />
@@ -2015,12 +2015,12 @@ export function AnalyticsPage() {
                 ) : previewIngestionPending ? (
                   <PendingState
                     title="Processing recent rule decisions"
-                    body="Rule evaluate calls have landed, but the decision sample has not been materialized yet. It will populate once analytics catches up."
+                    body="Rule evaluate calls were received. Recent decisions are still being processed, and this view will update automatically."
                   />
                 ) : (
                   <EmptyState
                     title="No connector selections yet"
-                    body="Send /routing/evaluate decision traffic in the selected window to populate connector time-series."
+                    body="Rule decision traffic will appear here after /routing/evaluate calls in this window."
                   />
                 )}
               </CardBody>
@@ -2034,7 +2034,7 @@ export function AnalyticsPage() {
                       Gateway selection mix
                     </h2>
                     <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                      Connector share across the fetched rule decision sample.
+                      Connector share for selected rule decisions.
                     </p>
                   </div>
                   <InfoButton content={CARD_INFO.preview_share} />
@@ -2105,7 +2105,7 @@ export function AnalyticsPage() {
                             </p>
                           </div>
                           <p className="mt-2 text-xs text-slate-500 dark:text-[#8a8a93]">
-                            {formatPercent(item.percentage)} of fetched decisions
+                            {formatPercent(item.percentage)} of decisions
                           </p>
                         </div>
                       ))}
@@ -2114,7 +2114,7 @@ export function AnalyticsPage() {
                 ) : previewIngestionPending ? (
                   <PendingState
                     title="Building decision connector mix"
-                    body="Recent rule decision activity is still being folded into the fetched sample. This card will update automatically once the decision rows appear."
+                    body="Recent rule decisions are still being processed. This card will update automatically once decision rows are available."
                   />
                 ) : (
                   <EmptyState
@@ -2226,12 +2226,12 @@ export function AnalyticsPage() {
                 ) : previewIngestionPending ? (
                   <PendingState
                     title="Waiting for decision rows"
-                    body="Recent /routing/evaluate calls were recorded, but the detailed rule decision rows are still being flushed."
+                    body="Recent /routing/evaluate calls were recorded. Detailed rule decision rows will appear as soon as they are ready."
                   />
                 ) : (
                   <EmptyState
                     title="No rule-based activity yet"
-                    body="Send /routing/evaluate decision traffic in the selected window to populate rule-based activity."
+                    body="Rule-based activity will appear after /routing/evaluate calls in this window."
                   />
                 )}
               </CardBody>
@@ -2271,7 +2271,7 @@ export function AnalyticsPage() {
                   ) : previewIngestionPending ? (
                     <PendingState
                       title="Waiting for gateway activity"
-                      body="The decision sample is still being assembled from recent rule-evaluate calls. Gateway activity will appear here automatically once the rows are available."
+                      body="Recent rule decisions are still being processed. Gateway activity will appear automatically once rows are available."
                     />
                   ) : (
                     <EmptyState
@@ -2287,7 +2287,7 @@ export function AnalyticsPage() {
                   <div>
                     <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Recent decision outcomes</h2>
                     <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                      Status mix from the loaded decision sample.
+                      Status mix from the loaded decisions.
                     </p>
                   </div>
                 </CardHeader>

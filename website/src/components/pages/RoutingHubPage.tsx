@@ -95,11 +95,11 @@ export function RoutingHubPage() {
   const runtimeDescription = activeAlgorithm
     ? `${activeAlgorithm.description || 'Active routing strategy'} is currently selected for payment routing.`
     : hasAuthRateConfig && hasDebitRouting
-      ? 'Success-rate routing is configured and debit routing is enabled for this merchant.'
+      ? 'Success-rate routing is configured and debit routing is enabled.'
       : hasAuthRateConfig
         ? 'Success-rate routing is configured and available for runtime routing decisions.'
         : hasDebitRouting
-          ? 'Debit network routing is enabled for this merchant.'
+          ? 'Debit network routing is enabled.'
           : 'Configure and activate a strategy before expecting runtime routing decisions to follow a custom policy.'
   const runtimeType = activeType
     ? activeType.replace('_', ' ')
@@ -213,13 +213,13 @@ export function RoutingHubPage() {
   const nextAction = !merchantId
     ? {
         title: 'Select or create a merchant first',
-        body: 'Routing setup and live strategy state are scoped to the signed-in merchant.',
+        body: 'Routing setup and live strategy state require a signed-in merchant.',
         icon: ShieldCheck,
       }
     : !hasAuthRateConfig
       ? {
           title: 'Start with auth-rate configuration',
-          body: 'Score defaults make the runtime decision surface useful even before custom rules are active.',
+          body: 'Score defaults prepare auth-rate routing before custom rules are active.',
           icon: TrendingUp,
         }
       : !hasRuntimeStrategy
@@ -230,7 +230,7 @@ export function RoutingHubPage() {
           }
         : {
             title: 'Active strategy is ready',
-            body: 'Runtime routing has a configured path for this merchant. Keep this page focused on strategy posture and activation state.',
+            body: 'Routing is configured and ready for live traffic.',
             icon: FlaskConical,
           }
 
@@ -268,8 +268,8 @@ export function RoutingHubPage() {
 
               <div className="grid gap-3 sm:grid-cols-3">
                 <PostureStat label="Ready surfaces" value={`${readiness}/3`} detail="Auth-rate, traffic policy, debit" />
-                <PostureStat label="Runtime type" value={runtimeType} detail="Current routing surface" />
-                <PostureStat label="Debit gate" value={hasDebitRouting ? 'Enabled' : 'Off'} detail="Merchant feature flag" />
+                <PostureStat label="Runtime type" value={runtimeType} detail="Active routing mode" />
+                <PostureStat label="Debit gate" value={hasDebitRouting ? 'Enabled' : 'Off'} detail="Debit routing access" />
               </div>
 
               {activeStrategyId ? (
@@ -295,7 +295,7 @@ export function RoutingHubPage() {
                 <NextActionIcon size={22} />
               </div>
               <div>
-                <SurfaceLabel>Recommended focus</SurfaceLabel>
+                <SurfaceLabel>Routing status</SurfaceLabel>
                 <h3 className="mt-3 text-2xl font-semibold text-slate-950 dark:text-white">{nextAction.title}</h3>
                 <p className="mt-3 text-sm leading-7 text-slate-500 dark:text-[#9aa6bb]">{nextAction.body}</p>
               </div>
@@ -303,7 +303,7 @@ export function RoutingHubPage() {
 
             <div className="mt-7 space-y-3 border-t border-slate-200 pt-5 dark:border-[#242b36]">
               <RunbookStep done={hasAuthRateConfig} label="Configure" detail="Define score defaults or routing policy." />
-              <RunbookStep done={hasRuntimeStrategy} label="Activate" detail="Make one strategy live for the merchant." />
+              <RunbookStep done={hasRuntimeStrategy} label="Activate" detail="Make one strategy live." />
               <RunbookStep done={false} label="Verify" detail="Confirm live routing behavior with a real decision flow." />
             </div>
           </CardBody>
