@@ -133,7 +133,7 @@ function formatRouteLabel(route: string) {
 
 function EmptyWorkspace() {
   return (
-    <div className="grid gap-5 pt-8 lg:grid-cols-[1.1fr_0.9fr]">
+    <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
       <GlassCard className="p-7">
         <SurfaceLabel>Merchant session required</SurfaceLabel>
         <h2 className="mt-4 max-w-xl text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">
@@ -339,91 +339,83 @@ export function OverviewPage() {
     (analyticsOverview.isValidating || analyticsRouting.isValidating)
 
   return (
-    <div className="relative mx-auto max-w-[1380px]">
-      <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
-        <div className="absolute -left-16 top-0 h-72 w-72 rounded-full bg-sky-500/10 blur-3xl dark:bg-sky-500/8" />
-        <div className="absolute right-0 top-12 h-80 w-80 rounded-full bg-brand-500/10 blur-3xl dark:bg-brand-500/10" />
-      </div>
-
-      <section className="relative overflow-hidden rounded-[40px] border border-slate-200 bg-white px-5 py-5 shadow-[0_28px_90px_-56px_rgba(15,23,42,0.16)] md:px-6 md:py-6 dark:border-[#232933] dark:bg-[#090c12] dark:shadow-[0_28px_90px_-56px_rgba(0,0,0,0.72)]">
-        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#3b82f6]/25 to-transparent dark:via-[#3b82f6]/35" />
-
-        <header className="relative flex flex-col gap-4 border-b border-slate-200 pb-5 dark:border-[#232933]">
+    <div className="space-y-6 px-5 sm:px-6 lg:px-8 xl:px-10">
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Overview</h1>
             <Badge variant={workspaceBadge.variant}>{workspaceBadge.label}</Badge>
             {(analyticsOverview.data?.merchant_id || effectiveMerchantId) ? (
               <Badge variant="blue">{analyticsOverview.data?.merchant_id || effectiveMerchantId}</Badge>
             ) : null}
           </div>
-          <div>
-              <h1 className="text-4xl font-semibold tracking-tight text-slate-950 md:text-[4rem] dark:text-white">
-                Overview
-              </h1>
-              <div className="mt-2 flex items-start justify-between gap-4">
-                <p className="max-w-2xl text-sm leading-7 text-slate-600 dark:text-[#a6b0c3]">
-                  Basic business-facing view of system status, setup, request volume, and gateway activity.
-                </p>
-                <span
-                  className={`inline-flex flex-shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium ${
-                    health === 'up'
-                      ? 'border-emerald-300/35 bg-emerald-500/12 text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/15 dark:text-emerald-200'
-                      : health === 'down'
-                        ? 'border-red-300/35 bg-red-500/12 text-red-700 dark:border-red-400/35 dark:bg-red-500/15 dark:text-red-200'
-                        : 'border-amber-300/35 bg-amber-500/12 text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/15 dark:text-amber-200'
+          <p className="max-w-3xl text-sm leading-6 text-slate-500 dark:text-[#8a8a93]">
+            Basic business-facing view of system status, setup, request volume, and gateway activity.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 md:justify-end">
+          <span
+            className={`inline-flex flex-shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium ${
+              health === 'up'
+                ? 'border-emerald-300/35 bg-emerald-500/12 text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/15 dark:text-emerald-200'
+                : health === 'down'
+                  ? 'border-red-300/35 bg-red-500/12 text-red-700 dark:border-red-400/35 dark:bg-red-500/15 dark:text-red-200'
+                  : 'border-amber-300/35 bg-amber-500/12 text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/15 dark:text-amber-200'
+            }`}
+          >
+            <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
+              <span
+                className={`absolute h-2 w-2 rounded-full ${health === 'up' ? 'bg-emerald-500' : health === 'down' ? 'bg-red-500' : 'bg-amber-500'} ${
+                  health === 'up' ? 'animate-ping' : ''
+                }`}
+              />
+              <span
+                className={`relative h-2 w-2 rounded-full ${health === 'up' ? 'bg-emerald-500' : health === 'down' ? 'bg-red-500' : 'bg-amber-500'}`}
+              />
+            </span>
+            {healthLabel(health)}
+          </span>
+
+          <div className="inline-flex rounded-2xl border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#11151d]">
+            {OVERVIEW_RANGE_OPTIONS.map((option) => {
+              const active = option.value === range
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setRange(option.value)}
+                  className={`rounded-[14px] px-3 py-2 text-xs font-semibold transition ${
+                    active
+                      ? 'bg-white text-slate-950 shadow-sm dark:bg-[#1a2332] dark:text-white'
+                      : 'text-slate-500 hover:text-slate-900 dark:text-[#8ea0bb] dark:hover:text-white'
                   }`}
                 >
-                  <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
-                    <span
-                      className={`absolute h-2 w-2 rounded-full ${health === 'up' ? 'bg-emerald-500' : health === 'down' ? 'bg-red-500' : 'bg-amber-500'} ${
-                        health === 'up' ? 'animate-ping' : ''
-                      }`}
-                    />
-                    <span
-                      className={`relative h-2 w-2 rounded-full ${health === 'up' ? 'bg-emerald-500' : health === 'down' ? 'bg-red-500' : 'bg-amber-500'}`}
-                    />
-                  </span>
-                  {healthLabel(health)}
-                </span>
-              </div>
-              <div className="mt-4 inline-flex rounded-2xl border border-slate-200 bg-slate-50 p-1 dark:border-[#2a303a] dark:bg-[#121720]">
-              {OVERVIEW_RANGE_OPTIONS.map((option) => {
-                const active = option.value === range
-                return (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() => setRange(option.value)}
-                    className={`rounded-[14px] px-3 py-2 text-xs font-semibold transition ${
-                      active
-                        ? 'bg-white text-slate-950 shadow-sm dark:bg-[#1a2332] dark:text-white'
-                        : 'text-slate-500 hover:text-slate-900 dark:text-[#8ea0bb] dark:hover:text-white'
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                )
-              })}
-            </div>
+                  {option.label}
+                </button>
+              )
+            })}
           </div>
-        </header>
+        </div>
+      </header>
 
-        {!effectiveMerchantId ? (
-          <EmptyWorkspace />
-        ) : (
-          <>
-            {analyticsLoading ? (
-              <div className="pt-8">
-                <RefreshingState label={`Loading overview analytics for ${selectedWindow.detail.toLowerCase()}`} />
-              </div>
-            ) : null}
+      {!effectiveMerchantId ? (
+        <EmptyWorkspace />
+      ) : (
+        <>
+          {analyticsLoading ? (
+            <div>
+              <RefreshingState label={`Loading overview analytics for ${selectedWindow.detail.toLowerCase()}`} />
+            </div>
+          ) : null}
 
-            {analyticsRefreshing ? (
-              <div className="pt-8">
-                <RefreshingState label={`Refreshing overview analytics for ${selectedWindow.detail.toLowerCase()}`} />
-              </div>
-            ) : null}
+          {analyticsRefreshing ? (
+            <div>
+              <RefreshingState label={`Refreshing overview analytics for ${selectedWindow.detail.toLowerCase()}`} />
+            </div>
+          ) : null}
 
-              <div className={`grid gap-5 pt-8 xl:grid-cols-[1.15fr_0.85fr] transition-opacity duration-200 ${analyticsRefreshing ? 'opacity-60' : 'opacity-100'}`}>
+          <div className={`grid gap-5 xl:grid-cols-[1.15fr_0.85fr] transition-opacity duration-200 ${analyticsRefreshing ? 'opacity-60' : 'opacity-100'}`}>
               <GlassCard className="p-6 md:p-7">
                 <div className="flex h-full flex-col justify-between">
                   <div>
@@ -488,7 +480,7 @@ export function OverviewPage() {
               </div>
             </div>
 
-            <div className={`mt-6 grid gap-6 xl:grid-cols-[1.02fr_0.98fr] transition-opacity duration-200 ${analyticsRefreshing ? 'opacity-60' : 'opacity-100'}`}>
+            <div className={`grid gap-6 xl:grid-cols-[1.02fr_0.98fr] transition-opacity duration-200 ${analyticsRefreshing ? 'opacity-60' : 'opacity-100'}`}>
               <GlassCard className="p-6">
                 <div className="flex items-center justify-between gap-4">
                   <div>
@@ -604,7 +596,7 @@ export function OverviewPage() {
               </GlassCard>
             </div>
 
-            <div className={`mt-6 grid gap-6 xl:grid-cols-[0.86fr_1.14fr] transition-opacity duration-200 ${analyticsRefreshing ? 'opacity-60' : 'opacity-100'}`}>
+            <div className={`grid gap-6 xl:grid-cols-[0.86fr_1.14fr] transition-opacity duration-200 ${analyticsRefreshing ? 'opacity-60' : 'opacity-100'}`}>
               <GlassCard className="p-6">
                 <SurfaceLabel>Quick summary</SurfaceLabel>
                 <div className="mt-5 space-y-4">
@@ -672,7 +664,6 @@ export function OverviewPage() {
             </div>
           </>
         )}
-      </section>
     </div>
   )
 }
