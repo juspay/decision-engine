@@ -316,13 +316,6 @@ export function OverviewPage() {
     },
   ]
 
-  const workspaceBadge = !effectiveMerchantId
-    ? { label: 'Merchant not selected', variant: 'orange' as const }
-    : health === 'up'
-      ? { label: 'System live', variant: 'green' as const }
-      : health === 'down'
-        ? { label: 'Attention needed', variant: 'red' as const }
-        : { label: 'Checking status', variant: 'gray' as const }
   const analyticsLoading =
     (!analyticsOverview.data && analyticsOverview.isLoading) ||
     (!analyticsRouting.data && analyticsRouting.isLoading)
@@ -336,7 +329,6 @@ export function OverviewPage() {
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Overview</h1>
-            <Badge variant={workspaceBadge.variant}>{workspaceBadge.label}</Badge>
             {(analyticsOverview.data?.merchant_id || effectiveMerchantId) ? (
               <Badge variant="blue">{analyticsOverview.data?.merchant_id || effectiveMerchantId}</Badge>
             ) : null}
