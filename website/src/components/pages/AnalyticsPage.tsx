@@ -771,9 +771,11 @@ export function AnalyticsPage() {
   const [view, setView] = useState<AnalyticsView>('transactions')
   const [routingFilters, setRoutingFilters] = useState<RoutingFilters>(EMPTY_ROUTING_FILTERS)
   const [connectorFiltersOpen, setConnectorFiltersOpen] = useState(false)
+  const [customRangeOpen, setCustomRangeOpen] = useState(false)
   const [routingAlignmentOpen, setRoutingAlignmentOpen] = useState(false)
   const [showAllFilters, setShowAllFilters] = useState(false)
   const [previewListPage, setPreviewListPage] = useState(1)
+  const timeRangeControlRef = useRef<HTMLDivElement | null>(null)
   const [customStart, setCustomStart] = useState(() =>
     toDateTimeInputValue(Date.now() - 24 * 60 * 60 * 1000),
   )
@@ -875,6 +877,29 @@ export function AnalyticsPage() {
     fetcher,
     previewListSwrOptions,
   )
+
+  useEffect(() => {
+    if (!customRangeOpen) return
+
+    function handlePointerDown(event: MouseEvent) {
+      if (!timeRangeControlRef.current?.contains(event.target as Node)) {
+        setCustomRangeOpen(false)
+      }
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setCustomRangeOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handlePointerDown)
+    document.addEventListener('keydown', handleEscape)
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown)
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [customRangeOpen])
 
   useEffect(() => {
     const revalidateCurrentView = () => {
@@ -1487,13 +1512,18 @@ export function AnalyticsPage() {
   }, [availableFilters.dimensions, routingFilters])
 
   function handleRangeChange(value: AnalyticsRangeValue) {
-    setRange(value)
-    if (value !== 'custom') {
-      const preset = presetWindow(value)
-      setPresetWindowBounds(preset)
-      setCustomStart(toDateTimeInputValue(preset.start_ms))
-      setCustomEnd(toDateTimeInputValue(preset.end_ms))
+    if (value === 'custom') {
+      setRange(value)
+      setCustomRangeOpen((current) => (range === 'custom' ? !current : true))
+      return
     }
+
+    setRange(value)
+    setCustomRangeOpen(false)
+    const preset = presetWindow(value)
+    setPresetWindowBounds(preset)
+    setCustomStart(toDateTimeInputValue(preset.start_ms))
+    setCustomEnd(toDateTimeInputValue(preset.end_ms))
   }
 
   function refreshAll() {
@@ -1565,18 +1595,72 @@ export function AnalyticsPage() {
           <Button size="sm" variant="ghost" onClick={refreshAll}>
             Refresh
           </Button>
-          <div className="flex flex-wrap items-center gap-2 rounded-full border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#11151d]">
-            {PRESET_OPTIONS.map((option) => (
-              <Button
-                key={option.value}
-                size="sm"
-                variant="secondary"
-                className={sectionButtonClass(range === option.value)}
-                onClick={() => handleRangeChange(option.value)}
-              >
-                {option.value === 'custom' ? 'Custom' : option.value}
-              </Button>
-            ))}
+          <div ref={timeRangeControlRef} className="relative">
+            <div className="flex flex-wrap items-center gap-2 rounded-full border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#11151d]">
+              {PRESET_OPTIONS.map((option) => (
+                <Button
+                  key={option.value}
+                  size="sm"
+                  variant="secondary"
+                  className={sectionButtonClass(range === option.value)}
+                  onClick={() => handleRangeChange(option.value)}
+                >
+                  {option.value === 'custom' ? 'Custom' : option.value}
+                </Button>
+              ))}
+            </div>
+
+            {range === 'custom' && customRangeOpen ? (
+              <div className="absolute right-0 top-[calc(100%+10px)] z-[90] w-[min(92vw,620px)] rounded-[24px] border border-slate-200 bg-white/95 p-4 shadow-[0_24px_70px_-34px_rgba(15,23,42,0.48)] backdrop-blur dark:border-[#2a303a] dark:bg-[#11151d]/95 dark:shadow-[0_24px_70px_-34px_rgba(0,0,0,0.72)]">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                      Select time range
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                      {customWindow ? activeWindowLabel : 'Choose a valid start and end time'}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setCustomRangeOpen(false)}
+                  >
+                    Close
+                  </Button>
+                </div>
+
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <label className="space-y-2">
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                      Start time
+                    </span>
+                    <DateTimePicker
+                      className="w-full"
+                      value={customStart}
+                      onChange={setCustomStart}
+                    />
+                  </label>
+
+                  <label className="space-y-2">
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                      End time
+                    </span>
+                    <DateTimePicker
+                      className="w-full"
+                      value={customEnd}
+                      onChange={setCustomEnd}
+                    />
+                  </label>
+                </div>
+
+                {!customWindow ? (
+                  <p className="mt-3 text-xs text-red-500">
+                    Choose an end time after the start time. Future dates are not available.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -1599,39 +1683,6 @@ export function AnalyticsPage() {
           {ANALYTICS_VIEW_LABELS.rule_based}
         </Button>
       </div>
-
-      {range === 'custom' ? (
-        <Card className="overflow-visible p-4">
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="space-y-2">
-              <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
-                Start time
-              </span>
-              <DateTimePicker
-                className="w-full"
-                value={customStart}
-                onChange={setCustomStart}
-              />
-            </label>
-
-            <label className="space-y-2">
-              <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
-                End time
-              </span>
-              <DateTimePicker
-                className="w-full"
-                value={customEnd}
-                onChange={setCustomEnd}
-              />
-            </label>
-          </div>
-          {!customWindow ? (
-            <p className="mt-3 text-xs text-red-500">
-              Choose an end time after the start time. Future dates are not available.
-            </p>
-          ) : null}
-        </Card>
-      ) : null}
 
       <ErrorMessage error={error} />
 

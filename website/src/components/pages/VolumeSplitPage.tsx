@@ -196,7 +196,7 @@ export function VolumeSplitPage() {
     : []
 
   return (
-    <div className="space-y-6 max-w-4xl">
+    <div className="space-y-6 max-w-5xl">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Volume Split Routing</h1>
       </div>
@@ -271,7 +271,7 @@ export function VolumeSplitPage() {
           </div>
 
           <div className="space-y-2">
-            <div className="grid grid-cols-[1fr_1fr_100px_32px] gap-2 text-xs font-medium text-slate-500 px-1">
+            <div className="hidden grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(260px,320px)_32px] gap-2 px-1 text-xs font-medium text-slate-500 md:grid">
               <span>Gateway Name</span>
               <span>Gateway ID</span>
               <span>Split %</span>
@@ -282,7 +282,7 @@ export function VolumeSplitPage() {
               const label = g.gatewayName.trim() || `Gateway ${index + 1}`
 
               return (
-              <div key={g.id} className="grid grid-cols-[1fr_1fr_100px_32px] gap-2 items-center">
+              <div key={g.id} className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(260px,320px)_32px] md:items-center">
                 <input
                   value={g.gatewayName}
                   onChange={e => updateGateway(g.id, 'gatewayName', e.target.value)}
@@ -295,16 +295,39 @@ export function VolumeSplitPage() {
                   placeholder="optional gateway_id"
                   className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
                 />
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  value={g.split}
-                  onChange={e => updateGateway(g.id, 'split', Number(e.target.value))}
-                  disabled={isInferred}
-                  aria-label={`${label} split percentage`}
-                  className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-70"
-                />
+                <div className="flex min-w-0 items-center gap-2 rounded-lg border border-slate-200 bg-transparent px-2 py-1.5 focus-within:ring-1 focus-within:ring-brand-500 dark:border-[#222226]">
+                  <span
+                    className="h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                  />
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={g.split}
+                    disabled={isInferred}
+                    onChange={e => updateGateway(g.id, 'split', Number(e.target.value))}
+                    aria-label={`${label} allocation slider`}
+                    className="h-2 min-w-0 flex-1 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                    style={{ accentColor: COLORS[index % COLORS.length] }}
+                  />
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={g.split}
+                    onChange={e => updateGateway(g.id, 'split', Number(e.target.value))}
+                    disabled={isInferred}
+                    aria-label={`${label} split percentage`}
+                    className="w-12 border-0 bg-transparent p-0 text-right text-sm tabular-nums focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
+                  />
+                  <span className="text-xs text-slate-500">%</span>
+                  {isInferred && gateways.length > 1 && (
+                    <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600 dark:bg-[#1a1a22] dark:text-slate-300">
+                      Auto
+                    </span>
+                  )}
+                </div>
                 <button
                   type="button"
                   onClick={() => removeGateway(g.id)}
@@ -316,57 +339,6 @@ export function VolumeSplitPage() {
               </div>
               )
             })}
-            {gateways.length > 1 && (
-              <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-[#222226] dark:bg-[#0d0d12]">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-                    Allocation sliders
-                  </p>
-                  <Badge variant={overAllocated ? 'orange' : 'blue'}>
-                    {gateways[gateways.length - 1]?.gatewayName.trim() || `Gateway ${gateways.length}`} inferred
-                  </Badge>
-                </div>
-                <div className="mt-4 space-y-4">
-                  {gateways.map((gateway, index) => {
-                    const isInferred = gateway.id === inferredGatewayId
-                    const label = gateway.gatewayName.trim() || `Gateway ${index + 1}`
-                    return (
-                      <div key={`slider-${gateway.id}`} className="space-y-2">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <span
-                              className="h-2.5 w-2.5 shrink-0 rounded-full"
-                              style={{ backgroundColor: COLORS[index % COLORS.length] }}
-                            />
-                            <span className="truncate text-sm font-medium text-slate-700 dark:text-slate-200">
-                              {label}
-                            </span>
-                            {isInferred && (
-                              <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600 dark:bg-[#1a1a22] dark:text-slate-300">
-                                Auto
-                              </span>
-                            )}
-                          </div>
-                          <span className="w-12 text-right text-sm font-semibold tabular-nums text-slate-800 dark:text-white">
-                            {gateway.split}%
-                          </span>
-                        </div>
-                        <input
-                          type="range"
-                          min={0}
-                          max={100}
-                          value={gateway.split}
-                          disabled={isInferred}
-                          onChange={e => updateGateway(gateway.id, 'split', Number(e.target.value))}
-                          aria-label={`${label} allocation slider`}
-                          className="h-2 w-full disabled:cursor-not-allowed disabled:opacity-60"
-                        />
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
             <div className="flex items-center gap-3">
               <button type="button" onClick={addGateway} className="flex items-center gap-1 text-sm text-brand-500 hover:text-brand-600">
                 <Plus size={14} /> Add Gateway
