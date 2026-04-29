@@ -75,7 +75,7 @@ test *FLAGS:
     cargo test {{ FLAGS }}
 alias t := test
 
-# Run all Cypress E2E tests headlessly (replicates CI behaviour)
+# Run all Cypress E2E tests headlessly (replicates CI behaviour — single browser, sequential)
 cypress:
     npx cypress run --spec "cypress/e2e/ui/**/*.cy.js,cypress/e2e/api/**/*.cy.js" --headless
 alias cy := cypress
@@ -83,6 +83,43 @@ alias cy := cypress
 # Run a single Cypress spec headlessly  e.g.: just cypress-spec cypress/e2e/ui/euclid-rules-builder.cy.js
 cypress-spec spec:
     npx cypress run --spec "{{ spec }}" --headless
+
+# Run all Cypress E2E tests across 3 balanced parallel workers.
+#
+# Split is based on measured spec durations (see worker comments).
+# Euclid specs are distributed across all three workers so no single
+# worker is left idle while another finishes the euclid suite alone.
+#
+#   Worker 1 ~78s — heavy euclid:  builder(1:07) + enum-operators(0:11)
+#   Worker 2 ~75s — medium euclid: e2e(0:36)     + lifecycle(0:39)
+#   Worker 3 ~86s — fast euclid + general UI + API:
+#                   nested-branches(0:09) + volume-split-priority(0:14) +
+#                   volume-split(0:14) + all general UI(0:35) + all API(0:14)
+cypress-parallel:
+    #!/usr/bin/env bash
+    set -uo pipefail
+
+    npx cypress run --headless \
+      --spec "cypress/e2e/ui/euclid-rules-builder.cy.js,cypress/e2e/ui/euclid-rules-enum-operators.cy.js" \
+      2>&1 | sed 's/^/[worker-1] /' &
+    pid1=$!
+
+    npx cypress run --headless \
+      --spec "cypress/e2e/ui/euclid-rules-e2e.cy.js,cypress/e2e/ui/euclid-rules-lifecycle.cy.js" \
+      2>&1 | sed 's/^/[worker-2] /' &
+    pid2=$!
+
+    npx cypress run --headless \
+      --spec "cypress/e2e/ui/euclid-rules-nested-branches.cy.js,cypress/e2e/ui/euclid-rules-volume-split-priority.cy.js,cypress/e2e/ui/euclid-rules-volume-split.cy.js,cypress/e2e/ui/analytics-page.cy.js,cypress/e2e/ui/auth-page.cy.js,cypress/e2e/ui/dashboard-overview.cy.js,cypress/e2e/ui/debit-routing-page.cy.js,cypress/e2e/ui/decision-explorer.cy.js,cypress/e2e/ui/payment-audit.cy.js,cypress/e2e/ui/volume-split-page.cy.js,cypress/e2e/api/**/*.cy.js" \
+      2>&1 | sed 's/^/[worker-3] /' &
+    pid3=$!
+
+    failed=0
+    wait "$pid1" || failed=1
+    wait "$pid2" || failed=1
+    wait "$pid3" || failed=1
+    exit "$failed"
+alias cyp := cypress-parallel
 
 # Run pre-commit checks
 precommit: fmt clippy
