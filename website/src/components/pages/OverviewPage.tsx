@@ -461,9 +461,6 @@ export function OverviewPage() {
                 <div className="flex items-center justify-between gap-4">
                   <div>
                     <SurfaceLabel>Current setup</SurfaceLabel>
-                    <p className="mt-2 text-sm text-slate-600 dark:text-[#a6b0c3]">
-                      The status cards you can explain in a demo without technical jargon.
-                    </p>
                   </div>
                   <Badge variant={configuredBasics >= 3 ? 'green' : 'orange'}>
                     {configuredBasics}/5 ready
@@ -512,9 +509,6 @@ export function OverviewPage() {
                 <div className="flex items-center justify-between gap-4">
                   <div>
                     <SurfaceLabel>Gateway activity</SurfaceLabel>
-                    <p className="mt-2 text-sm text-slate-600 dark:text-[#a6b0c3]">
-                      Request distribution by gateway for the selected window.
-                    </p>
                   </div>
                   <Badge variant="blue">{selectedWindow.badge}</Badge>
                 </div>
