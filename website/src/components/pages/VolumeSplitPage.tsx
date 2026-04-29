@@ -19,6 +19,35 @@ const COLORS = ['#0069ED', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'
 
 function makeId() { return Math.random().toString(36).slice(2) }
 
+function clampSplit(value: number) {
+  if (!Number.isFinite(value)) return 0
+  return Math.min(100, Math.max(0, Math.round(value)))
+}
+
+function withInferredSplit(entries: VolumeSplitGatewayFormEntry[]) {
+  if (!entries.length) return entries
+
+  const normalized = entries.map(entry => ({
+    ...entry,
+    split: clampSplit(entry.split),
+  }))
+
+  if (normalized.length === 1) {
+    return [{ ...normalized[0], split: 100 }]
+  }
+
+  const inferredIndex = normalized.length - 1
+  const fixedTotal = normalized
+    .slice(0, inferredIndex)
+    .reduce((sum, gateway) => sum + gateway.split, 0)
+
+  return normalized.map((entry, index) =>
+    index === inferredIndex
+      ? { ...entry, split: Math.max(0, 100 - fixedTotal) }
+      : entry,
+  )
+}
+
 export function VolumeSplitPage() {
   const { merchantId } = useMerchantStore()
   const { mutate: mutateCache } = useSWRConfig()
@@ -42,18 +71,42 @@ export function VolumeSplitPage() {
   const [expandedRuleIds, setExpandedRuleIds] = useState<Set<string>>(new Set())
   const [deactivatingRuleId, setDeactivatingRuleId] = useState<string | null>(null)
 
+  const inferredGatewayId = gateways[gateways.length - 1]?.id ?? null
+  const fixedTotal = inferredGatewayId
+    ? gateways
+        .filter(gateway => gateway.id !== inferredGatewayId)
+        .reduce((sum, gateway) => sum + gateway.split, 0)
+    : 0
+  const overAllocated = Math.max(0, fixedTotal - 100)
   const total = gateways.reduce((s, g) => s + g.split, 0)
 
   function updateGateway(id: string, field: 'gatewayName' | 'gatewayId' | 'split', val: string | number) {
-    setGateways(gs => gs.map(g => g.id === id ? { ...g, [field]: val } : g))
+    setGateways(gs =>
+      withInferredSplit(
+        gs.map(g => {
+          if (g.id !== id) return g
+          if (field === 'split') {
+            return { ...g, split: clampSplit(Number(val)) }
+          }
+          return { ...g, [field]: val }
+        }),
+      ),
+    )
   }
 
   function addGateway() {
-    setGateways(gs => [...gs, { id: makeId(), gatewayName: '', gatewayId: '', split: 0 }])
+    setGateways(gs => withInferredSplit([...gs, { id: makeId(), gatewayName: '', gatewayId: '', split: 0 }]))
   }
 
   function removeGateway(id: string) {
-    setGateways(gs => gs.filter(g => g.id !== id))
+    setGateways(gs => {
+      const remaining = gs.filter(g => g.id !== id)
+      return withInferredSplit(
+        remaining.length
+          ? remaining
+          : [{ id: makeId(), gatewayName: '', gatewayId: '', split: 100 }],
+      )
+    })
   }
 
   async function handleCreate() {
@@ -225,7 +278,11 @@ export function VolumeSplitPage() {
               <span>Split %</span>
               <span />
             </div>
-            {gateways.map(g => (
+            {gateways.map((g, index) => {
+              const isInferred = g.id === inferredGatewayId
+              const label = g.gatewayName.trim() || `Gateway ${index + 1}`
+
+              return (
               <div key={g.id} className="grid grid-cols-[1fr_1fr_100px_32px] gap-2 items-center">
                 <input
                   value={g.gatewayName}
@@ -245,19 +302,78 @@ export function VolumeSplitPage() {
                   max={100}
                   value={g.split}
                   onChange={e => updateGateway(g.id, 'split', Number(e.target.value))}
-                  className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  disabled={isInferred}
+                  aria-label={`${label} split percentage`}
+                  className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-70"
                 />
-                <button onClick={() => removeGateway(g.id)} className="text-slate-400 hover:text-red-500">
+                <button
+                  type="button"
+                  onClick={() => removeGateway(g.id)}
+                  disabled={gateways.length === 1}
+                  className="text-slate-400 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40"
+                >
                   <Trash2 size={15} />
                 </button>
               </div>
-            ))}
+              )
+            })}
+            {gateways.length > 1 && (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-[#222226] dark:bg-[#0d0d12]">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                    Allocation sliders
+                  </p>
+                  <Badge variant={overAllocated ? 'orange' : 'blue'}>
+                    {gateways[gateways.length - 1]?.gatewayName.trim() || `Gateway ${gateways.length}`} inferred
+                  </Badge>
+                </div>
+                <div className="mt-4 space-y-4">
+                  {gateways.map((gateway, index) => {
+                    const isInferred = gateway.id === inferredGatewayId
+                    const label = gateway.gatewayName.trim() || `Gateway ${index + 1}`
+                    return (
+                      <div key={`slider-${gateway.id}`} className="space-y-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span
+                              className="h-2.5 w-2.5 shrink-0 rounded-full"
+                              style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                            />
+                            <span className="truncate text-sm font-medium text-slate-700 dark:text-slate-200">
+                              {label}
+                            </span>
+                            {isInferred && (
+                              <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600 dark:bg-[#1a1a22] dark:text-slate-300">
+                                Auto
+                              </span>
+                            )}
+                          </div>
+                          <span className="w-12 text-right text-sm font-semibold tabular-nums text-slate-800 dark:text-white">
+                            {gateway.split}%
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          value={gateway.split}
+                          disabled={isInferred}
+                          onChange={e => updateGateway(gateway.id, 'split', Number(e.target.value))}
+                          aria-label={`${label} allocation slider`}
+                          className="h-2 w-full disabled:cursor-not-allowed disabled:opacity-60"
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
             <div className="flex items-center gap-3">
-              <button onClick={addGateway} className="flex items-center gap-1 text-sm text-brand-500 hover:text-brand-600">
+              <button type="button" onClick={addGateway} className="flex items-center gap-1 text-sm text-brand-500 hover:text-brand-600">
                 <Plus size={14} /> Add Gateway
               </button>
               <span className={`text-xs font-medium ${total === 100 ? 'text-emerald-400' : 'text-red-400'}`}>
-                Total: {total}%{total !== 100 && ' (must be 100)'}
+                Total: {total}%{overAllocated ? ` (reduce fixed splits by ${overAllocated}%)` : total !== 100 ? ' (must be 100)' : ''}
               </span>
             </div>
           </div>
