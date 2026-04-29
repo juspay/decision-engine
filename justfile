@@ -75,6 +75,15 @@ test *FLAGS:
     cargo test {{ FLAGS }}
 alias t := test
 
+# Run all Cypress E2E tests headlessly (replicates CI behaviour)
+cypress:
+    npx cypress run --spec "cypress/e2e/ui/**/*.cy.js,cypress/e2e/api/**/*.cy.js" --headless
+alias cy := cypress
+
+# Run a single Cypress spec headlessly  e.g.: just cypress-spec cypress/e2e/ui/euclid-rules-builder.cy.js
+cypress-spec spec:
+    npx cypress run --spec "{{ spec }}" --headless
+
 # Run pre-commit checks
 precommit: fmt clippy
 

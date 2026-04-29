@@ -19,7 +19,7 @@ describe('Rule Builder — UI interactions', () => {
     merchantId = factory.merchantId('euclid_ui')
     ruleName = factory.ruleName('ui_rule')
     cy.visitWithMerchant('/routing/rules', merchantId)
-    cy.contains(/Rule-Based|Routing|Euclid/).should('exist')
+    cy.contains('h1', 'Rule-Based Routing').should('be.visible')
     cy.contains('Loading routing keys from backend...', { timeout: 15000 }).should('not.exist')
   })
 
