@@ -603,18 +603,32 @@ function RoutingAlignmentCard({
     : leadersDiffer
       ? 'orange'
       : 'green'
+  const collapsedReadout = [
+    summary.srLeader ? `Best score: ${srLeaderName}` : 'No score',
+    summary.volumeLeader ? `Traffic leader: ${volumeLeaderName}` : 'No traffic',
+    alignmentText,
+  ].join(' · ')
 
   return (
     <Card className="overflow-visible">
-      <CardHeader className="px-5 py-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
+      <CardHeader className={expanded ? 'px-5 py-4' : 'px-5 py-3'}>
+        <div className={`flex flex-wrap justify-between gap-3 ${expanded ? 'items-start' : 'items-center'}`}>
+          <div className={expanded ? 'min-w-0' : 'flex min-w-0 flex-wrap items-center gap-2'}>
             <h2 className="text-sm font-semibold text-slate-800 dark:text-white">
               Routing alignment
             </h2>
-            <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-              Traffic share: checks if the best-scoring connector is also getting the largest share.
-            </p>
+            {expanded ? (
+              <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                Traffic share: checks if the best-scoring connector is also getting the largest share.
+              </p>
+            ) : (
+              <>
+                <Badge variant={summary.statusVariant}>{summary.statusLabel}</Badge>
+                <span className="min-w-0 truncate text-xs font-medium text-slate-500 dark:text-[#9aa7bb]">
+                  {collapsedReadout}
+                </span>
+              </>
+            )}
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <InfoButton content={CARD_INFO.alignment} />
@@ -624,37 +638,32 @@ function RoutingAlignmentCard({
           </div>
         </div>
       </CardHeader>
-      <CardBody className={expanded ? 'space-y-4 px-5 py-4' : 'px-5 py-2.5'}>
-        <div className={`border border-slate-200 bg-slate-50/80 dark:border-[#2a303a] dark:bg-[#0d1118] ${
-          expanded ? 'rounded-2xl px-4 py-3' : 'rounded-[18px] px-3.5 py-2'
-        }`}>
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant={summary.statusVariant}>{summary.statusLabel}</Badge>
-                <Badge variant="gray">Best score: {srLeaderName}</Badge>
-                <Badge variant={volumeBadgeVariant}>
-                  Traffic leader: {volumeLeaderName}
-                </Badge>
-              </div>
-              <p className={`${expanded ? 'mt-3' : 'mt-2'} text-sm font-semibold text-slate-900 dark:text-white`}>
-                {summary.headline}
-              </p>
-              {expanded ? (
+      {expanded ? (
+        <CardBody className="space-y-4 px-5 py-4">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-[#2a303a] dark:bg-[#0d1118]">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={summary.statusVariant}>{summary.statusLabel}</Badge>
+                  <Badge variant="gray">Best score: {srLeaderName}</Badge>
+                  <Badge variant={volumeBadgeVariant}>
+                    Traffic leader: {volumeLeaderName}
+                  </Badge>
+                </div>
+                <p className="mt-3 text-sm font-semibold text-slate-900 dark:text-white">
+                  {summary.headline}
+                </p>
                 <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#8a8a93]">
                   {summary.detail}
                 </p>
-              ) : null}
+              </div>
+              <p className="text-right text-xs font-medium text-slate-500 dark:text-[#8a8a93]">
+                {alignmentText}
+              </p>
             </div>
-            <p className="text-right text-xs font-medium text-slate-500 dark:text-[#8a8a93]">
-              {alignmentText}
-            </p>
           </div>
-        </div>
 
-        {expanded ? (
-          <>
-            <div className="grid overflow-hidden rounded-2xl border border-slate-200 bg-white/70 dark:border-[#2a303a] dark:bg-[#0c0f15] lg:grid-cols-3">
+          <div className="grid overflow-hidden rounded-2xl border border-slate-200 bg-white/70 dark:border-[#2a303a] dark:bg-[#0c0f15] lg:grid-cols-3">
               <div className="border-b border-slate-200 p-4 dark:border-[#2a303a] lg:border-b-0 lg:border-r">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
                   Best score
@@ -746,9 +755,8 @@ function RoutingAlignmentCard({
                 body="This view needs both payment traffic and connector scores in the selected time window."
               />
             )}
-          </>
-        ) : null}
       </CardBody>
+      ) : null}
     </Card>
   )
 }
