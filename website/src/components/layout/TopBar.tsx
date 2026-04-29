@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
 import { useMerchantStore } from '../../store/merchantStore'
 import { apiFetch } from '../../lib/api'
-import { LogOut, ChevronDown, Building2, Check, Plus } from 'lucide-react'
+import { ChevronDown, Building2, Check, Plus } from 'lucide-react'
 
 interface SwitchMerchantResponse {
   token: string
@@ -14,7 +14,7 @@ interface SwitchMerchantResponse {
 
 export function TopBar() {
   const navigate = useNavigate()
-  const { user, merchants, clearAuth, updateMerchant } = useAuthStore()
+  const { user, merchants, updateMerchant } = useAuthStore()
   const { setMerchantId } = useMerchantStore()
   const [merchantOpen, setMerchantOpen] = useState(false)
   const [switching, setSwitching] = useState<string | null>(null)
@@ -29,16 +29,6 @@ export function TopBar() {
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
-
-  async function handleLogout() {
-    try {
-      await apiFetch('/auth/logout', { method: 'POST' })
-    } catch {
-      // best-effort - clear locally regardless
-    }
-    clearAuth()
-    navigate('/login', { replace: true })
-  }
 
   async function handleSwitchMerchant(merchantId: string) {
     if (merchantId === user?.merchantId || switching) return
@@ -60,7 +50,6 @@ export function TopBar() {
   }
 
   const currentMerchant = merchants.find((m) => m.merchant_id === user?.merchantId)
-  const initials = user?.email ? user.email.slice(0, 2).toUpperCase() : 'ME'
 
   return (
     <header className="flex h-[78px] shrink-0 items-center justify-between border-b border-slate-200 bg-white px-6 transition-colors duration-300 dark:border-[#22262f] dark:bg-[#06080d] relative z-10">
@@ -120,28 +109,6 @@ export function TopBar() {
             )}
           </div>
         )}
-
-        {user && (
-          <div className="flex items-center gap-2 pl-1">
-            <div className="w-7 h-7 rounded-full bg-brand-600 flex items-center justify-center">
-              <span className="text-[10px] font-semibold text-white">{initials}</span>
-            </div>
-            <div className="hidden sm:block">
-              <p className="text-[13px] font-medium text-slate-700 dark:text-slate-300 leading-tight">
-                {user.email}
-              </p>
-            </div>
-          </div>
-        )}
-
-        <button
-          onClick={handleLogout}
-          className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:bg-red-50 hover:text-red-500 dark:text-slate-400 dark:hover:bg-red-950/30 dark:hover:text-red-400 transition-colors ml-1"
-          aria-label="Sign out"
-          title="Sign out"
-        >
-          <LogOut size={16} />
-        </button>
       </div>
     </header>
   )
