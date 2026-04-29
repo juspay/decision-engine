@@ -1,17 +1,11 @@
 # Cypress E2E Tests
 #
-# Single job, three parallel workers (background processes).
-# Mirrors `just cypress-parallel` locally — same split, same runner.
-#
-# Workers:
-#   worker-1  — general UI specs
-#   worker-2  — euclid rule-builder specs
-#   worker-3  — API specs
+# Single job: builds the Decision Engine, starts all services, runs all specs
+# sequentially in one Cypress process.
 #
 # Caching layers:
-#   - Docker BuildKit layers → GHA cache, scoped per branch.
-#     load: true puts the image directly into the local Docker daemon —
-#     no docker save / tar artifact / docker load round-trip needed.
+#   - Docker BuildKit layers → GHA cache, scoped per branch (mode=max caches
+#     all intermediate layers so Rust compilation is not re-run on unchanged code).
 #   - npm global cache (~/.npm) → actions/setup-node, keyed on both lock files.
 #   - Cypress binary (~/.cache/Cypress, ~200 MB) → actions/cache, separate from ~/.npm.
 
@@ -40,9 +34,8 @@ jobs:
       - uses: actions/checkout@v4
 
       # ── Build Decision Engine ─────────────────────────────────────────────
-      # BuildKit GHA cache means only changed layers are rebuilt.
-      # load: true puts the image straight into the local Docker daemon —
-      # no tar.gz save/upload/download/load steps needed.
+      # mode=max caches every layer, including the Rust compilation layer,
+      # so unchanged code is not recompiled on subsequent runs.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -57,7 +50,7 @@ jobs:
           cache-from: |
             type=gha,scope=cypress-debug-${{ github.head_ref || github.ref_name }}
             type=gha,scope=cypress-debug-${{ github.base_ref || 'main' }}
-          cache-to: type=gha,scope=cypress-debug-${{ github.head_ref || github.ref_name }},mode=min
+          cache-to: type=gha,scope=cypress-debug-${{ github.head_ref || github.ref_name }},mode=max
 
       # ── Start services ────────────────────────────────────────────────────
       # Services start in the background while npm installs and UI build run.
@@ -93,8 +86,6 @@ jobs:
         run: npm ci
 
       # ── Wait for API ──────────────────────────────────────────────────────
-      # The ready endpoint implies basic health — one check is enough.
-      # By this point services have had ~3 min to start while npm ran above.
       - name: Wait for API
         run: |
           timeout 180 bash -c \
@@ -103,31 +94,26 @@ jobs:
           echo "✓ API ready"
 
       # ── Bash API tests ───────────────────────────────────────────────────
-      # Run before the UI is served — only need the API, not the browser.
-      # test_auth.sh covers the full auth surface: API key lifecycle (create,
-      # list, revoke, Redis cache) + user auth (signup, login, JWT, logout,
-      # invite, multi-merchant). test_api_key_auth.sh is a strict subset of
-      # test_auth.sh so only the comprehensive script runs here.
-      # ADMIN_SECRET matches config/development.toml [admin_secret] secret.
-      # test_euclid.sh is excluded: no exit-code-on-failure, developer tool.
       - name: Auth integration tests
         run: bash scripts/test_auth.sh
         env:
           BASE_URL: http://localhost:8080
           ADMIN_SECRET: test_admin
 
-      # ── Build + serve UI ─────────────────────────────────────────────────
-      # Build first so import/compile errors (e.g. missing React hooks) fail
-      # fast with a clear message before Cypress even starts.
-      # vite preview has a proxy configured in vite.config.ts (same routes as
-      # the dev server), so API calls are forwarded to http://localhost:8080
-      # without CORS issues.
+      # ── Build UI (compile check only) ────────────────────────────────────
+      # Catches missing imports and type errors (e.g. useRef not imported)
+      # before Cypress starts. The built output is not used for serving —
+      # the dev server below is used instead so BASE_URL stays '/' and
+      # BrowserRouter's basename matches the paths Cypress visits.
       - name: Build UI
         run: npx vite build
         working-directory: website
+        env:
+          VITE_DASHBOARD_BASE_PATH: /
 
-      - name: Start UI preview server
-        run: npx vite preview --port 5173 --host &
+      # ── Start UI dev server ───────────────────────────────────────────────
+      - name: Start UI dev server
+        run: npx vite --port 5173 &
         working-directory: website
 
       - name: Wait for UI
@@ -135,22 +121,12 @@ jobs:
           timeout 60 bash -c \
             'until curl -sf http://localhost:5173; do sleep 2; done'
 
-      - name: Install just
-        run: curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
-
-      # ── Shared Xvfb display ───────────────────────────────────────────────
-      # All three parallel workers use a single pre-started display.
-      # Cypress checks DISPLAY before spawning its own Xvfb, so workers
-      # don't race to claim :99 and fail with "already in use".
-      - name: Start Xvfb
-        run: |
-          Xvfb :99 -screen 0 1280x720x24 -ac &
-          echo "DISPLAY=:99" >> $GITHUB_ENV
-
-      # ── Run all Cypress specs across 3 parallel workers ───────────────────
-      # Delegates to `just cypress-parallel` — identical to local runs.
+      # ── Run all Cypress specs (sequential) ───────────────────────────────
       - name: Run Cypress
-        run: just cypress-parallel
+        run: |
+          npx cypress run \
+            --spec "cypress/e2e/ui/**/*.cy.js,cypress/e2e/api/**/*.cy.js" \
+            --headless
         env:
           CYPRESS_API_BASE_URL: http://localhost:8080
           CYPRESS_UI_BASE_URL: http://localhost:5173
