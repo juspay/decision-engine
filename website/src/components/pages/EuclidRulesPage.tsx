@@ -28,6 +28,7 @@ import { RoutingAlgorithm } from '../../types/api'
 import { useDynamicRoutingConfig, RoutingKeyConfig } from '../../hooks/useDynamicRoutingConfig'
 import { EuclidAlgorithmData } from '../../types/api'
 import { Plus, Trash2, GripVertical, ChevronDown, ChevronUp, Eye, PowerOff, CornerDownRight } from 'lucide-react'
+import { ConfirmDialog } from '../ui/ConfirmDialog'
 
 const OPERATOR_TO_API: Record<string, string> = {
   '==': 'equal',
@@ -879,6 +880,8 @@ export function EuclidRulesPage() {
   const [deactivateError, setDeactivateError] = useState<string | null>(null)
   const [deactivateSuccess, setDeactivateSuccess] = useState(false)
   const [expandedRuleIds, setExpandedRuleIds] = useState<Set<string>>(new Set())
+  const [pendingActivateId, setPendingActivateId] = useState<string | null>(null)
+  const [pendingDeactivateId, setPendingDeactivateId] = useState<string | null>(null)
 
   const { data: allAlgorithms, mutate: mutateAlgorithms } = useSWR<RoutingAlgorithm[]>(
     merchantId ? `/routing/list/${merchantId}` : null,
@@ -891,6 +894,9 @@ export function EuclidRulesPage() {
   )
 
   const activeIds = new Set((activeAlgorithms || []).map((a) => a.id))
+  const activeVolumeAlgorithm = (activeAlgorithms || []).find(
+    (a) => (a.algorithm_data || a.algorithm)?.type === 'volume_split'
+  )
   const ruleAlgorithms = (allAlgorithms || []).filter((algo) => {
     const algorithm = algo.algorithm_data || algo.algorithm
     return algorithm?.type !== 'volume_split'
@@ -937,6 +943,14 @@ export function EuclidRulesPage() {
 
   async function handleActivate(id: string) {
     if (!merchantId) return
+    if (activeVolumeAlgorithm) {
+      setPendingActivateId(id)
+      return
+    }
+    await doActivate(id)
+  }
+
+  async function doActivate(id: string) {
     setActivating(true)
     setActivateError(null)
     setActivateSuccess(false)
@@ -955,9 +969,10 @@ export function EuclidRulesPage() {
 
   async function handleDeactivate(id: string) {
     if (!merchantId) return
-    if (!window.confirm('Deactivate this routing rule for the selected merchant? The saved rule will remain available.')) {
-      return
-    }
+    setPendingDeactivateId(id)
+  }
+
+  async function doDeactivate(id: string) {
     setDeactivatingId(id)
     setDeactivateError(null)
     setDeactivateSuccess(false)
@@ -999,6 +1014,24 @@ export function EuclidRulesPage() {
 
   return (
     <div className="space-y-6">
+      <ConfirmDialog
+        open={pendingActivateId !== null}
+        title="Switch to Rule-Based Routing?"
+        description={`"${activeVolumeAlgorithm?.name}" (Volume Split) is currently active. Activating this rule will replace it.`}
+        confirmLabel="Yes, activate"
+        variant="primary"
+        onConfirm={() => { const id = pendingActivateId!; setPendingActivateId(null); doActivate(id) }}
+        onCancel={() => setPendingActivateId(null)}
+      />
+      <ConfirmDialog
+        open={pendingDeactivateId !== null}
+        title="Deactivate this rule?"
+        description="The rule will be deactivated for this merchant. It will remain saved and can be reactivated at any time."
+        confirmLabel="Deactivate"
+        variant="danger"
+        onConfirm={() => { const id = pendingDeactivateId!; setPendingDeactivateId(null); doDeactivate(id) }}
+        onCancel={() => setPendingDeactivateId(null)}
+      />
       <div>
         <h1 className="text-2xl font-semibold text-slate-900">Rule-Based Routing</h1>
       </div>
@@ -1087,6 +1120,11 @@ export function EuclidRulesPage() {
               )}
             </CardBody>
           </Card>
+          {activeVolumeAlgorithm && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+              <strong>Volume Split is active</strong> — activating a rule-based rule will automatically deactivate it.
+            </div>
+          )}
           {activateError && <ErrorMessage error={activateError} />}
           {activateSuccess && (
             <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-3 py-2 text-sm text-emerald-400">

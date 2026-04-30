@@ -1,4 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import useSWR from 'swr'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts'
 import { Button } from '../ui/Button'
@@ -78,6 +79,7 @@ interface SetupPromptState {
   title: string
   body: string
   detail?: string
+  configurePath?: string
 }
 
 interface RuleEvaluateParams {
@@ -603,6 +605,7 @@ function setupPromptForTab(tab: TabType, detail?: string): SetupPromptState {
       title: 'Configure volume split first',
       body: 'Volume evaluation needs an active volume split rule before it can calculate distribution.',
       detail,
+      configurePath: '/routing/volume',
     }
   }
 
@@ -611,6 +614,7 @@ function setupPromptForTab(tab: TabType, detail?: string): SetupPromptState {
       title: 'Configure rule-based routing first',
       body: 'Rule evaluation needs an active rule-based strategy before it can return a policy decision.',
       detail,
+      configurePath: '/routing/rules',
     }
   }
 
@@ -619,6 +623,7 @@ function setupPromptForTab(tab: TabType, detail?: string): SetupPromptState {
       title: 'Enable debit routing first',
       body: 'Debit network decisions need the merchant debit routing flag enabled before this explorer can run network routing.',
       detail,
+      configurePath: '/routing/debit',
     }
   }
 
@@ -626,6 +631,7 @@ function setupPromptForTab(tab: TabType, detail?: string): SetupPromptState {
     title: 'Configure auth-rate routing first',
     body: 'Auth-rate simulation needs success-rate routing configured before it can run gateway decisions.',
     detail,
+    configurePath: '/routing/sr',
   }
 }
 
@@ -702,6 +708,7 @@ function InspectorJsonPanel({
 }
 
 export function DecisionExplorerPage() {
+  const navigate = useNavigate()
   const { merchantId } = useMerchantStore()
   const authUser = useAuthStore((state) => state.user)
   const authMerchantId = authUser?.merchantId || ''
@@ -1334,7 +1341,7 @@ export function DecisionExplorerPage() {
             }
           } else if (p.type === 'number') {
             parameters[p.key] = { type: p.type, value: parseFloat(p.value) || 0 }
-          } else {
+          } else if (p.value !== '') {
             parameters[p.key] = { type: p.type, value: p.value }
           }
         }
@@ -1614,7 +1621,11 @@ export function DecisionExplorerPage() {
       setSimulationResults(defaults.simulationResults)
       setIsSimulating(false)
     } else if (activeTab === 'rule') {
-      setRuleParams(defaults.ruleParams)
+      setRuleParams(defaults.ruleParams.map(p =>
+        p.type === 'enum_variant' && p.value === ''
+          ? { ...p, value: routingKeysConfig[p.key]?.values?.[0] || '' }
+          : p
+      ))
       setFallbackConnectors(defaults.fallbackConnectors)
       setRuleResult(defaults.ruleResult)
       setSelectedPreviewPaymentId(null)
@@ -1753,17 +1764,19 @@ export function DecisionExplorerPage() {
                 {routingConfigUnavailable && (
                   <ErrorMessage error="Routing keys are unavailable from backend (/config/routing-keys). Rule Evaluation is disabled." />
                 )}
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Parameters</label>
-                  <div className="space-y-2">
+
+                {/* Parameters */}
+                <div className="space-y-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-[#4e5870]">Parameters</p>
+                  <div className="space-y-1.5">
                     {ruleParams.map((param, idx) => (
-                      <div key={idx} className="space-y-2">
-                        <div className="flex gap-2 items-center">
+                      <div key={idx} className="space-y-1.5">
+                        <div className="group flex items-center gap-0 rounded-xl border border-slate-200 dark:border-[#1e2330] bg-white dark:bg-[#0c0f17] overflow-hidden transition-shadow hover:shadow-sm">
                           <select
                             value={param.key}
                             onChange={e => updateRuleParamKey(idx, e.target.value)}
                             disabled={routingConfigUnavailable || routingKeysLoading}
-                            className="flex-1 border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                            className="flex-1 min-w-0 bg-transparent px-3 py-2.5 text-sm font-medium text-slate-700 dark:text-[#c8d0de] focus:outline-none cursor-pointer appearance-none"
                           >
                             {routingKeyNames.length === 0 ? (
                               <option value="">No keys available</option>
@@ -1771,62 +1784,55 @@ export function DecisionExplorerPage() {
                               routingKeyNames.map(name => <option key={name} value={name}>{name}</option>)
                             )}
                           </select>
-                          <input
-                            value={param.type}
-                            readOnly
-                            className="w-36 border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-                          />
-                          <button
-                            onClick={() => removeRuleParam(idx)}
-                            className="p-1.5 text-slate-400 hover:text-red-500"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                        {param.type === 'metadata_variant' ? (
-                          <div className="flex gap-2 items-center pl-1">
-                            <input
-                              placeholder="Metadata Key"
-                              value={param.metadataKey || ''}
-                              onChange={e => updateRuleParamMetadataKey(idx, e.target.value)}
-                              className="flex-1 border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-                            />
-                            <input
-                              placeholder="Metadata Value"
-                              value={param.value}
-                              onChange={e => updateRuleParam(idx, 'value', e.target.value)}
-                              className="flex-1 border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-                            />
-                          </div>
-                        ) : param.type === 'enum_variant' ? (
-                          <div className="flex gap-2 items-center pl-1">
+                          <span className="shrink-0 border-x border-slate-100 dark:border-[#1e2330] bg-slate-50 dark:bg-[#10131c] px-2.5 py-2.5 text-[11px] font-bold text-slate-300 dark:text-[#3a4258] select-none">=</span>
+                          {param.type === 'enum_variant' ? (
                             <select
                               value={param.value}
                               onChange={e => updateRuleParam(idx, 'value', e.target.value)}
-                              className="flex-1 border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                              className="flex-1 min-w-0 bg-transparent px-3 py-2.5 text-sm text-slate-600 dark:text-[#a8b4c8] focus:outline-none cursor-pointer appearance-none"
                             >
                               {(routingKeysConfig[param.key]?.values || []).map(v => (
                                 <option key={v} value={v}>{v}</option>
                               ))}
                             </select>
-                          </div>
-                        ) : param.type === 'number' ? (
-                          <div className="flex gap-2 items-center pl-1">
+                          ) : param.type === 'number' ? (
                             <input
                               type="number"
                               placeholder="Value"
                               value={param.value}
                               onChange={e => updateRuleParam(idx, 'value', e.target.value)}
-                              className="flex-1 border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                              className="flex-1 min-w-0 bg-transparent px-3 py-2.5 text-sm text-slate-600 dark:text-[#a8b4c8] focus:outline-none"
                             />
-                          </div>
-                        ) : (
-                          <div className="flex gap-2 items-center pl-1">
+                          ) : param.type !== 'metadata_variant' ? (
                             <input
                               placeholder="Value"
                               value={param.value}
                               onChange={e => updateRuleParam(idx, 'value', e.target.value)}
-                              className="flex-1 border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                              className="flex-1 min-w-0 bg-transparent px-3 py-2.5 text-sm text-slate-600 dark:text-[#a8b4c8] focus:outline-none"
+                            />
+                          ) : (
+                            <span className="flex-1 px-3 py-2.5 text-sm text-slate-400 dark:text-[#3a4258] italic">see below</span>
+                          )}
+                          <button
+                            onClick={() => removeRuleParam(idx)}
+                            className="shrink-0 px-2.5 py-2.5 text-slate-300 dark:text-[#2a3040] hover:text-red-400 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                        {param.type === 'metadata_variant' && (
+                          <div className="ml-3 flex gap-1.5">
+                            <input
+                              placeholder="Metadata key"
+                              value={param.metadataKey || ''}
+                              onChange={e => updateRuleParamMetadataKey(idx, e.target.value)}
+                              className="flex-1 rounded-lg border border-slate-200 dark:border-[#1e2330] bg-white dark:bg-[#0c0f17] px-3 py-2 text-sm text-slate-600 dark:text-[#a8b4c8] focus:outline-none focus:ring-1 focus:ring-brand-500"
+                            />
+                            <input
+                              placeholder="Metadata value"
+                              value={param.value}
+                              onChange={e => updateRuleParam(idx, 'value', e.target.value)}
+                              className="flex-1 rounded-lg border border-slate-200 dark:border-[#1e2330] bg-white dark:bg-[#0c0f17] px-3 py-2 text-sm text-slate-600 dark:text-[#a8b4c8] focus:outline-none focus:ring-1 focus:ring-brand-500"
                             />
                           </div>
                         )}
@@ -1836,41 +1842,46 @@ export function DecisionExplorerPage() {
                   <button
                     onClick={addRuleParam}
                     disabled={routingConfigUnavailable || routingKeysLoading || routingKeyNames.length === 0}
-                    className="mt-2 flex items-center gap-1 text-xs text-brand-500 hover:text-brand-600"
+                    className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   >
                     <Plus size={12} /> Add Parameter
                   </button>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Fallback gateway_name/gateway_id</label>
-                  <div className="space-y-2">
+                {/* Fallback Gateways */}
+                <div className="space-y-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-[#4e5870]">Fallback Gateways</p>
+                  <div className="space-y-1.5">
                     {fallbackConnectors.map((connector, idx) => (
-                      <div key={idx} className="flex gap-2 items-center">
+                      <div key={idx} className="group flex items-center gap-0 rounded-xl border border-slate-200 dark:border-[#1e2330] bg-white dark:bg-[#0c0f17] overflow-hidden transition-shadow hover:shadow-sm">
+                        <span className="shrink-0 flex items-center justify-center w-8 self-stretch bg-slate-50 dark:bg-[#10131c] border-r border-slate-100 dark:border-[#1e2330] text-[10px] font-bold text-slate-300 dark:text-[#3a4258] select-none">
+                          {idx + 1}
+                        </span>
                         <input
-                          placeholder="gateway_name"
+                          placeholder="gateway name"
                           value={connector.gateway_name}
                           onChange={e => updateFallbackConnector(idx, 'gateway_name', e.target.value)}
-                          className="flex-1 border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                          className="flex-1 min-w-0 bg-transparent px-3 py-2.5 text-sm font-medium text-slate-700 dark:text-[#c8d0de] focus:outline-none"
                         />
+                        <span className="shrink-0 border-x border-slate-100 dark:border-[#1e2330] bg-slate-50 dark:bg-[#10131c] px-2 py-2.5 text-[11px] font-bold text-slate-300 dark:text-[#3a4258] select-none">/</span>
                         <input
-                          placeholder="gateway_id"
+                          placeholder="gateway id (optional)"
                           value={connector.gateway_id || ''}
                           onChange={e => updateFallbackConnector(idx, 'gateway_id', e.target.value)}
-                          className="flex-1 border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                          className="flex-1 min-w-0 bg-transparent px-3 py-2.5 text-sm text-slate-500 dark:text-[#8090a8] focus:outline-none"
                         />
                         <button
                           onClick={() => removeFallbackConnector(idx)}
-                          className="p-1.5 text-slate-400 hover:text-red-500"
+                          className="shrink-0 px-2.5 py-2.5 text-slate-300 dark:text-[#2a3040] hover:text-red-400 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
                         >
-                          <Trash2 size={14} />
+                          <Trash2 size={13} />
                         </button>
                       </div>
                     ))}
                   </div>
                   <button
                     onClick={addFallbackConnector}
-                    className="mt-2 flex items-center gap-1 text-xs text-brand-500 hover:text-brand-600"
+                    className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-500/10 transition-colors"
                   >
                     <Plus size={12} /> Add Gateway
                   </button>
@@ -3019,9 +3030,14 @@ export function DecisionExplorerPage() {
               ) : null}
 
               <div className="mt-6 flex flex-wrap justify-end gap-2">
-                <Button onClick={() => setSetupPrompt(null)}>
+                <Button variant="secondary" onClick={() => setSetupPrompt(null)}>
                   Dismiss
                 </Button>
+                {setupPrompt.configurePath && (
+                  <Button onClick={() => { setSetupPrompt(null); navigate(setupPrompt.configurePath!) }}>
+                    Configure
+                  </Button>
+                )}
               </div>
             </div>
           </div>

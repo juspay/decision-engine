@@ -10,6 +10,7 @@ import { useMerchantStore } from '../../store/merchantStore'
 import { apiPost } from '../../lib/api'
 import { RoutingAlgorithm } from '../../types/api'
 import { Plus, Trash2, Eye, PowerOff } from 'lucide-react'
+import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { validateVolumeSplitRule } from '../../features/routing/volumeSplit/schema'
 import { toVolumeSplitCreatePayload } from '../../features/routing/volumeSplit/payload'
 import { toVolumeSplitRuleDetailsState } from '../../features/routing/volumeSplit/state'
@@ -58,6 +59,10 @@ export function VolumeSplitPage() {
   )
 
   const activeVol = active?.find(r => (r.algorithm_data || r.algorithm)?.type === 'volume_split')
+  const activeRuleBased = active?.find(r => {
+    const t = (r.algorithm_data || r.algorithm)?.type
+    return t && t !== 'volume_split'
+  })
 
   const [gateways, setGateways] = useState<VolumeSplitGatewayFormEntry[]>([
     { id: makeId(), gatewayName: '', gatewayId: '', split: 50 },
@@ -70,6 +75,8 @@ export function VolumeSplitPage() {
   const [showCurrentConfig, setShowCurrentConfig] = useState(false)
   const [expandedRuleIds, setExpandedRuleIds] = useState<Set<string>>(new Set())
   const [deactivatingRuleId, setDeactivatingRuleId] = useState<string | null>(null)
+  const [pendingActivateId, setPendingActivateId] = useState<string | null>(null)
+  const [pendingDeactivateId, setPendingDeactivateId] = useState<string | null>(null)
 
   const inferredGatewayId = gateways[gateways.length - 1]?.id ?? null
   const fixedTotal = inferredGatewayId
@@ -137,6 +144,14 @@ export function VolumeSplitPage() {
 
   async function handleActivate(ruleId: string) {
     if (!merchantId) return
+    if (activeRuleBased) {
+      setPendingActivateId(ruleId)
+      return
+    }
+    await doActivate(ruleId)
+  }
+
+  async function doActivate(ruleId: string) {
     try {
       setError(null)
       setSuccess(null)
@@ -153,10 +168,10 @@ export function VolumeSplitPage() {
 
   async function handleDeactivate(ruleId: string) {
     if (!merchantId) return
-    if (!window.confirm('Deactivate this volume split rule for the selected merchant? The saved rule will remain available.')) {
-      return
-    }
+    setPendingDeactivateId(ruleId)
+  }
 
+  async function doDeactivate(ruleId: string) {
     setDeactivatingRuleId(ruleId)
     setError(null)
     setSuccess(null)
@@ -197,6 +212,24 @@ export function VolumeSplitPage() {
 
   return (
     <div className="space-y-6 max-w-5xl">
+      <ConfirmDialog
+        open={pendingActivateId !== null}
+        title="Switch to Volume Split Routing?"
+        description={`"${activeRuleBased?.name}" (Rule-Based) is currently active. Activating this rule will replace it.`}
+        confirmLabel="Yes, activate"
+        variant="primary"
+        onConfirm={() => { const id = pendingActivateId!; setPendingActivateId(null); doActivate(id) }}
+        onCancel={() => setPendingActivateId(null)}
+      />
+      <ConfirmDialog
+        open={pendingDeactivateId !== null}
+        title="Deactivate this rule?"
+        description="The rule will be deactivated for this merchant. It will remain saved and can be reactivated at any time."
+        confirmLabel="Deactivate"
+        variant="danger"
+        onConfirm={() => { const id = pendingDeactivateId!; setPendingDeactivateId(null); doDeactivate(id) }}
+        onCancel={() => setPendingDeactivateId(null)}
+      />
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Volume Split Routing</h1>
       </div>
@@ -349,6 +382,11 @@ export function VolumeSplitPage() {
             </div>
           </div>
 
+          {activeRuleBased && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+              <strong>Rule-Based routing is active</strong> — activating a volume split rule will automatically deactivate it.
+            </div>
+          )}
           <ErrorMessage error={error} />
           {success && <p className="text-sm text-emerald-400">{success}</p>}
 
