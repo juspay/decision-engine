@@ -18,17 +18,23 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { Card, CardBody, CardHeader } from '../ui/Card'
-import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { SearchableSelect } from '../ui/SearchableSelect'
+import { SearchableMultiSelect } from '../ui/SearchableMultiSelect'
 import { useMerchantStore } from '../../store/merchantStore'
 import { apiPost } from '../../lib/api'
 import { RoutingAlgorithm } from '../../types/api'
 import { useDynamicRoutingConfig, RoutingKeyConfig } from '../../hooks/useDynamicRoutingConfig'
 import { EuclidAlgorithmData } from '../../types/api'
-import { Plus, Trash2, GripVertical, ChevronDown, ChevronUp, Eye, PowerOff, CornerDownRight } from 'lucide-react'
+import {
+  RuleCodeEditor, serializeToDSL, parseDSL, CODE_EDITOR_PLACEHOLDER,
+  type RuleBlock, type StatementGroup, type ConditionRow,
+  type GatewayEntry, type VolumeSplitEntry, type VolumeSplitPriorityEntry,
+} from '../ui/RuleCodeEditor'
+import { Plus, Trash2, GripVertical, ChevronDown, ChevronUp, PowerOff, CornerDownRight, CopyPlus, MoreVertical } from 'lucide-react'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
+import { CopyButton } from '../ui/CopyButton'
 
 const OPERATOR_TO_API: Record<string, string> = {
   '==': 'equal',
@@ -56,48 +62,6 @@ function toLabel(key: string): string {
   return key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
-// ---- Types ----
-interface GatewayEntry {
-  id: string
-  gatewayName: string
-  gatewayId: string
-}
-
-interface ConditionRow {
-  id: string
-  lhs: string
-  operator: string
-  value: string | string[]
-}
-
-interface StatementGroup {
-  id: string
-  conditions: ConditionRow[]
-  nested: StatementGroup[]
-}
-
-interface VolumeSplitEntry {
-  id: string
-  split: number
-  gatewayName: string
-  gatewayId: string
-}
-
-interface VolumeSplitPriorityEntry {
-  id: string
-  split: number
-  gateways: GatewayEntry[]
-}
-
-interface RuleBlock {
-  id: string
-  name: string
-  statements: StatementGroup[]
-  outputType: 'priority' | 'volume_split' | 'volume_split_priority'
-  priorityGateways: GatewayEntry[]
-  volumeSplitEntries: VolumeSplitEntry[]
-  volumeSplitPriorityEntries: VolumeSplitPriorityEntry[]
-}
 
 type DefaultOutput = {
   priorityGateways: GatewayEntry[]
@@ -134,6 +98,162 @@ function getRuleSummary(algo: RoutingAlgorithm): string {
   const val = toLabel(String(cond.value?.value ?? ''))
   const summary = [field, op, val].filter(Boolean).join(' ')
   return rules.length > 1 ? `${summary} · +${rules.length - 1} more` : summary
+}
+
+function formatOp(comparison: string): string {
+  const map: Record<string, string> = {
+    equal: '=', not_equal: '≠',
+    greater_than: '>', less_than: '<',
+    greater_than_equal: '≥', less_than_equal: '≤',
+  }
+  return map[comparison] ?? comparison.replace(/_/g, ' ')
+}
+
+
+function RuleBreakdown({ algo }: { algo: RoutingAlgorithm }) {
+  const algorithm = algo.algorithm_data || algo.algorithm
+  const data = algorithm?.data as EuclidAlgorithmData | undefined
+  const defaultSel = data?.default_selection || data?.defaultSelection
+
+  return (
+    <div className="space-y-2.5">
+      {(data?.rules ?? []).map((rule, i) => {
+        const output = rule.output as Record<string, unknown> | undefined
+        // Backend may return { priority: [...] }, { type, data: [...] }, { volume_split: [...] }, or { volume_split_priority: [...] }
+        const rawPriority = output?.priority ?? output?.data
+        const rawVolume = output?.volume_split ?? (output?.type === 'volume_split' ? output?.data : undefined)
+        const rawVolumeSplitPriority = output?.volume_split_priority
+        const priorityGateways = (
+          Array.isArray(rawPriority) ? rawPriority : []
+        ) as { gateway_name: string; gateway_id: string | null }[]
+        const volumeSplits = (
+          Array.isArray(rawVolume) ? rawVolume : []
+        ) as { split: number; output: { gateway_name: string } }[]
+        const volumeSplitPriorityEntries = (
+          Array.isArray(rawVolumeSplitPriority) ? rawVolumeSplitPriority : []
+        ) as { split: number; output: { gateway_name: string; gateway_id: string | null }[] }[]
+        const isVolumeSplit = rule.routing_type === 'volume_split' || volumeSplits.length > 0
+        const isVolumeSplitPriority = rule.routing_type === 'volume_split_priority' || volumeSplitPriorityEntries.length > 0
+
+        type CondEntry = { op: 'IF' | 'AND' | 'OR'; cond: typeof rule.statements[0]['condition'][0] }
+        // Each statement becomes its own visual group, separated by OR dividers.
+        const condGroups: CondEntry[][] = []
+        rule.statements.forEach((s) => {
+          const group: CondEntry[] = []
+
+          s.condition.forEach((cond) => {
+            group.push({ op: group.length === 0 ? 'IF' : 'AND', cond })
+          })
+
+          ;(s.nested ?? []).forEach((nestedGroup, ni) => {
+            nestedGroup.condition.forEach((cond, ci) => {
+              if (ci === 0) group.push({ op: (group.length === 0 || ni === 0) ? (group.length === 0 ? 'IF' : 'AND') : 'OR', cond })
+              else group.push({ op: 'AND', cond })
+            })
+          })
+
+          if (group.length > 0) condGroups.push(group)
+        })
+
+        return (
+          <div key={i} className="overflow-hidden rounded-xl border border-slate-200 dark:border-[#1e2330] bg-white dark:bg-[#0d1018]">
+            <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-[#1e2330] bg-slate-50 dark:bg-[#10131c] px-3 py-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-[#4e5870]">
+                {rule.name || `Rule ${i + 1}`}
+              </span>
+              {rule.routing_type && (
+                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                  rule.routing_type === 'volume_split_priority'
+                    ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400'
+                    : rule.routing_type === 'volume_split'
+                    ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400'
+                    : 'bg-brand-100 dark:bg-brand-900/30 text-brand-600 dark:text-brand-400'
+                }`}>
+                  {rule.routing_type === 'volume_split_priority' ? 'Split + Priority'
+                    : rule.routing_type === 'volume_split' ? 'Volume Split'
+                    : 'Priority'}
+                </span>
+              )}
+            </div>
+            <div className="space-y-1.5 px-3 py-2.5">
+              {condGroups.map((group, gi) => (
+                <div key={gi}>
+                  {gi > 0 && (
+                    <div className="flex items-center gap-2 my-1.5">
+                      <span className="h-px flex-1 bg-slate-200 dark:bg-[#1e2330]" />
+                      <span className="text-[10px] font-bold text-sky-500">OR</span>
+                      <span className="h-px flex-1 bg-slate-200 dark:bg-[#1e2330]" />
+                    </div>
+                  )}
+                  <div className="rounded-lg border border-slate-200 dark:border-[#1e2330] divide-y divide-slate-100 dark:divide-[#1e2330] overflow-hidden">
+                    {group.map(({ op, cond }, ci) => (
+                      <div key={ci} className="flex items-center gap-2 text-xs px-2 py-1.5">
+                        <span className={`w-7 shrink-0 text-right text-[10px] font-bold select-none ${op === 'OR' ? 'text-sky-400 dark:text-sky-500' : 'text-slate-300 dark:text-[#3a4258]'}`}>
+                          {op}
+                        </span>
+                        <span className="rounded-md bg-slate-100 dark:bg-[#1a1f2a] px-2 py-1 text-slate-700 dark:text-[#c8d0de]">
+                          {toLabel(String(cond.lhs ?? ''))}{' '}
+                          <span className="font-mono text-slate-400 dark:text-[#5d6880]">{formatOp(String(cond.comparison ?? ''))}</span>{' '}
+                          <span className="font-medium">{toLabel(String(cond.value?.value ?? ''))}</span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              <div className="flex items-start gap-2 pt-0.5 text-xs">
+                <span className="w-7 shrink-0 text-right text-[10px] font-bold text-brand-500 select-none">→</span>
+                <div className="flex flex-wrap gap-1">
+                  {isVolumeSplitPriority
+                    ? volumeSplitPriorityEntries.map((e, j) => (
+                        <span key={j} className="rounded-full bg-purple-50 dark:bg-purple-900/20 px-2 py-0.5 text-[11px] font-medium text-purple-700 dark:text-purple-300">
+                          {e.split}%: {e.output.map(g => g.gateway_name).join(', ')}
+                        </span>
+                      ))
+                    : isVolumeSplit
+                    ? volumeSplits.map((s, j) => (
+                        <span key={j} className="rounded-full bg-emerald-50 dark:bg-emerald-900/20 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
+                          {s.output.gateway_name} {s.split}%
+                        </span>
+                      ))
+                    : priorityGateways.map((g, j) => (
+                        <span key={j} className="rounded-full bg-brand-50 dark:bg-brand-900/20 px-2 py-0.5 text-[11px] font-medium text-brand-700 dark:text-brand-300">
+                          {j + 1}. {g.gateway_name}
+                        </span>
+                      ))
+                  }
+                  {!isVolumeSplitPriority && !isVolumeSplit && priorityGateways.length === 0 && (
+                    <span className="text-slate-400 italic">No output configured</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      })}
+
+      {(() => {
+        const defRaw = defaultSel as Record<string, unknown> | undefined
+        const defGateways = (Array.isArray(defRaw?.priority) ? defRaw!.priority : Array.isArray(defRaw?.data) ? defRaw!.data : []) as { gateway_name: string }[]
+        return defGateways.length > 0 ? (
+          <div className="flex items-center gap-2 px-1 text-xs">
+            <span className="text-slate-400 dark:text-[#4e5870]">Default:</span>
+            <div className="flex flex-wrap gap-1">
+              {defGateways.map((g, i) => (
+                <span key={i} className="rounded-full bg-slate-100 dark:bg-[#1a1f2a] px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:text-[#8090a8]">
+                  {g.gateway_name}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : null
+      })()}
+
+      {(!data?.rules || data.rules.length === 0) && (
+        <p className="text-xs text-slate-400 italic">No rules configured.</p>
+      )}
+    </div>
+  )
 }
 
 // ---- Sortable gateway item ----
@@ -436,13 +556,6 @@ function ConditionRowEditor({
 
   const selectedValues = Array.isArray(row.value) ? row.value : []
 
-  function toggleEnumValue(v: string) {
-    const updated = selectedValues.includes(v)
-      ? selectedValues.filter((x) => x !== v)
-      : [...selectedValues, v]
-    onChange({ ...row, value: updated })
-  }
-
   function handleOperatorChange(op: string) {
     const switchingToMulti = op === 'in' || op === 'not_in'
     const switchingFromMulti = row.operator === 'in' || row.operator === 'not_in'
@@ -478,22 +591,12 @@ function ConditionRowEditor({
         ))}
       </select>
       {isEnum && isMulti ? (
-        <div className="flex flex-wrap gap-x-3 gap-y-1 rounded-lg border border-slate-200 dark:border-[#222226] px-2 py-1.5 min-w-[8rem]">
-          {(keyInfo?.values || []).map((v: string) => (
-            <label key={v} className="flex items-center gap-1 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={selectedValues.includes(v)}
-                onChange={() => toggleEnumValue(v)}
-                className="accent-brand-500"
-              />
-              <span className="text-xs">{toLabel(v)}</span>
-            </label>
-          ))}
-          {(keyInfo?.values || []).length === 0 && (
-            <span className="text-xs text-slate-400">No enum values</span>
-          )}
-        </div>
+        <SearchableMultiSelect
+          values={selectedValues}
+          onChange={(vals) => onChange({ ...row, value: vals })}
+          options={(keyInfo?.values || []).map((v: string) => ({ value: v, label: toLabel(v) }))}
+          placeholder="Select values…"
+        />
       ) : isEnum ? (
         <SearchableSelect
           dataCy="cond-val"
@@ -858,6 +961,75 @@ function buildAlgorithmData(rules: RuleBlock[], defaultOutput: DefaultOutput, ro
   }
 }
 
+// ---- Reverse-parse API → RuleBlocks ----
+const API_OPERATOR_TO_UI: Record<string, string> = {
+  equal: '==', not_equal: '!=',
+  greater_than: '>', less_than: '<',
+  greater_than_equal: '>=', less_than_equal: '<=',
+}
+
+function parseAlgorithmToRuleBlocks(algo: RoutingAlgorithm): { ruleBlocks: RuleBlock[]; defaultOutput: DefaultOutput } {
+  const algorithm = algo.algorithm_data || algo.algorithm
+  const data = algorithm?.data as EuclidAlgorithmData | undefined
+  if (!data) return { ruleBlocks: [], defaultOutput: { priorityGateways: [] } }
+
+  function parseGateways(arr: { gateway_name: string; gateway_id?: string | null }[]): GatewayEntry[] {
+    return arr.map((g) => ({ id: crypto.randomUUID(), gatewayName: g.gateway_name, gatewayId: g.gateway_id ?? '' }))
+  }
+
+  function parseCondition(cond: { lhs: string; comparison: string; value: { type: string; value: unknown } }): ConditionRow {
+    const isArray = cond.value?.type === 'enum_variant_array'
+    let operator = API_OPERATOR_TO_UI[cond.comparison] ?? cond.comparison
+    if (isArray && cond.comparison === 'equal') operator = 'in'
+    if (isArray && cond.comparison === 'not_equal') operator = 'not_in'
+    const value = isArray
+      ? (Array.isArray(cond.value?.value) ? (cond.value.value as string[]) : [String(cond.value?.value)])
+      : String(cond.value?.value ?? '')
+    return { id: crypto.randomUUID(), lhs: String(cond.lhs), operator, value }
+  }
+
+  function parseStatement(stmt: { condition: Parameters<typeof parseCondition>[0][]; nested?: typeof stmt[] }): StatementGroup {
+    return {
+      id: crypto.randomUUID(),
+      conditions: (stmt.condition ?? []).map(parseCondition),
+      nested: (stmt.nested ?? []).map(parseStatement),
+    }
+  }
+
+  const ruleBlocks: RuleBlock[] = (data.rules ?? []).map((rule) => {
+    const output = rule.output as Record<string, unknown> | undefined
+    const outputType: RuleBlock['outputType'] = rule.routing_type ?? 'priority'
+    const rawPriority = output?.priority ?? output?.data
+    const rawVolume = output?.volume_split ?? (output?.type === 'volume_split' ? output?.data : undefined)
+    const rawVolumeSplitPriority = output?.volume_split_priority
+
+    return {
+      id: crypto.randomUUID(),
+      name: rule.name || 'Cloned Rule',
+      statements: (rule.statements ?? []).map(parseStatement),
+      outputType,
+      priorityGateways: outputType === 'priority'
+        ? parseGateways((Array.isArray(rawPriority) ? rawPriority : []) as { gateway_name: string; gateway_id?: string | null }[])
+        : [],
+      volumeSplitEntries: outputType === 'volume_split'
+        ? (Array.isArray(rawVolume) ? rawVolume : []).map((e: { split: number; output: { gateway_name: string; gateway_id?: string | null } }) => ({
+            id: crypto.randomUUID(), split: e.split, gatewayName: e.output.gateway_name, gatewayId: e.output.gateway_id ?? '',
+          }))
+        : [],
+      volumeSplitPriorityEntries: outputType === 'volume_split_priority'
+        ? (Array.isArray(rawVolumeSplitPriority) ? rawVolumeSplitPriority : []).map((e: { split: number; output: { gateway_name: string; gateway_id?: string | null }[] }) => ({
+            id: crypto.randomUUID(), split: e.split, gateways: parseGateways(e.output),
+          }))
+        : [],
+    }
+  })
+
+  const defRaw = (data.default_selection || data.defaultSelection) as Record<string, unknown> | undefined
+  const defArr = (Array.isArray(defRaw?.priority) ? defRaw!.priority : Array.isArray(defRaw?.data) ? defRaw!.data : []) as { gateway_name: string; gateway_id?: string | null }[]
+
+  return { ruleBlocks, defaultOutput: { priorityGateways: parseGateways(defArr) } }
+}
+
 // ---- Main Page ----
 export function EuclidRulesPage() {
   const { merchantId } = useMerchantStore()
@@ -869,6 +1041,9 @@ export function EuclidRulesPage() {
   const [ruleDesc, setRuleDesc] = useState('')
   const [ruleBlocks, setRuleBlocks] = useState<RuleBlock[]>([])
   const [defaultOutput, setDefaultOutput] = useState<DefaultOutput>({ priorityGateways: [] })
+  const [editorMode, setEditorMode] = useState<'visual' | 'code'>('visual')
+  const [codeText, setCodeText] = useState('')
+  const [codeParseError, setCodeParseError] = useState<string | null>(null)
   const [showJson, setShowJson] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -882,6 +1057,20 @@ export function EuclidRulesPage() {
   const [expandedRuleIds, setExpandedRuleIds] = useState<Set<string>>(new Set())
   const [pendingActivateId, setPendingActivateId] = useState<string | null>(null)
   const [pendingDeactivateId, setPendingDeactivateId] = useState<string | null>(null)
+  const builderRef = useRef<HTMLDivElement>(null)
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null)
+
+  function handleClone(source: RoutingAlgorithm) {
+    const { ruleBlocks: clonedBlocks, defaultOutput: clonedDefault } = parseAlgorithmToRuleBlocks(source)
+    setRuleName(`copy-of-${source.name}`)
+    setRuleDesc(source.description && source.description !== 'N/A' ? source.description : '')
+    setRuleBlocks(clonedBlocks)
+    setDefaultOutput(clonedDefault)
+    setEditorMode('visual')
+    setCreatedId(null)
+    setSubmitError(null)
+    builderRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
 
   const { data: allAlgorithms, mutate: mutateAlgorithms } = useSWR<RoutingAlgorithm[]>(
     merchantId ? `/routing/list/${merchantId}` : null,
@@ -897,10 +1086,12 @@ export function EuclidRulesPage() {
   const activeVolumeAlgorithm = (activeAlgorithms || []).find(
     (a) => (a.algorithm_data || a.algorithm)?.type === 'volume_split'
   )
-  const ruleAlgorithms = (allAlgorithms || []).filter((algo) => {
-    const algorithm = algo.algorithm_data || algo.algorithm
-    return algorithm?.type !== 'volume_split'
-  })
+  const ruleAlgorithms = (allAlgorithms || [])
+    .filter((algo) => {
+      const algorithm = algo.algorithm_data || algo.algorithm
+      return algorithm?.type !== 'volume_split'
+    })
+    .sort((a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime())
 
   const gatewaySuggestions = Array.from(new Set([
     ...ruleBlocks.flatMap((b) => [
@@ -921,6 +1112,7 @@ export function EuclidRulesPage() {
       return
     }
     if (!ruleName.trim()) { setSubmitError('Rule name is required.'); return }
+    if (codeParseError) { setSubmitError(`Fix syntax error: ${codeParseError}`); return }
     setSubmitting(true)
     setSubmitError(null)
     setCreatedId(null)
@@ -1012,6 +1204,33 @@ export function EuclidRulesPage() {
     ])
   }
 
+function switchToCode() {
+    if (ruleBlocks.length > 0) {
+      setCodeText(serializeToDSL(ruleBlocks))
+    } else if (!codeText.trim()) {
+      setCodeText(CODE_EDITOR_PLACEHOLDER)
+    }
+    setCodeParseError(null)
+    setEditorMode('code')
+  }
+
+  function switchToVisual() {
+    setEditorMode('visual')
+  }
+
+  function handleCodeChange(text: string) {
+    setCodeText(text)
+    if (!text.trim()) { setCodeParseError(null); setRuleBlocks([]); return }
+    const result = parseDSL(text)
+    if (result.error) {
+      setCodeParseError(result.error)
+      setRuleBlocks([])
+    } else if (result.rules !== null) {
+      setCodeParseError(null)
+      setRuleBlocks(result.rules)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <ConfirmDialog
@@ -1043,7 +1262,7 @@ export function EuclidRulesPage() {
             <CardHeader>
               <h2 className="text-sm font-semibold text-slate-800">Existing Rules</h2>
             </CardHeader>
-            <CardBody className="p-0">
+            <div>
               {!merchantId ? (
                 <p className="px-4 py-3 text-sm text-slate-400">Set merchant ID to load rules.</p>
               ) : !allAlgorithms ? (
@@ -1051,66 +1270,108 @@ export function EuclidRulesPage() {
               ) : ruleAlgorithms.length === 0 ? (
                 <p className="px-4 py-3 text-sm text-slate-400">No rule-based rules yet.</p>
               ) : (
-                <div className="divide-y divide-slate-100 dark:divide-[#222226]">
+                <div>
                   {ruleAlgorithms.map((algo) => {
                     const isActive = activeIds.has(algo.id)
                     const isExpanded = expandedRuleIds.has(algo.id)
-                    const algorithm = algo.algorithm_data || algo.algorithm
-                    const summary = getRuleSummary(algo)
 
                     return (
-                      <div key={algo.id}>
-                        <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate font-medium">{algo.name}</p>
-                            {summary && (
-                              <p className="text-xs text-slate-400 mt-0.5 truncate" title={summary}>{summary}</p>
+                      <div
+                        key={algo.id}
+                        className={`border-b border-slate-100 dark:border-[#1e2330] last:border-b-0 transition-colors ${
+                          isActive ? 'bg-emerald-50/50 dark:bg-emerald-900/10' : ''
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2 px-6 py-3">
+                          <button
+                            type="button"
+                            onClick={() => toggleRuleExpand(algo.id)}
+                            className="min-w-0 flex-1 text-left group"
+                          >
+                            <div className="flex items-center gap-1.5">
+                              <p className={`truncate font-medium group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors ${
+                                isActive ? 'text-emerald-900 dark:text-emerald-100' : 'text-slate-900 dark:text-white'
+                              }`}>
+                                {algo.name}
+                              </p>
+                              {isActive && (
+                                <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">
+                                  ● Active
+                                </span>
+                              )}
+                              {isExpanded
+                                ? <ChevronUp size={12} className="text-slate-400 shrink-0 ml-auto" />
+                                : <ChevronDown size={12} className="text-slate-400 shrink-0 ml-auto" />
+                              }
+                            </div>
+                            <div className="mt-0.5 flex items-center gap-1">
+                              <span className="text-[10px] font-mono text-slate-500 dark:text-[#607087]">
+                                {algo.id}
+                              </span>
+                              <CopyButton text={algo.id} size={10} label="Copy routing ID" />
+                            </div>
+                            {algo.created_at && (
+                              <span className="text-[11px] text-slate-400 dark:text-[#4e5870]">
+                                {new Date(algo.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                              </span>
                             )}
-                          </div>
+                          </button>
 
-                          <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
-                            <Badge variant={isActive ? 'green' : 'gray'}>
-                              {isActive ? 'Active' : 'Inactive'}
-                            </Badge>
-                            <Button size="sm" variant="ghost" onClick={() => toggleRuleExpand(algo.id)}>
-                              <Eye size={14} className="mr-1" />
-                              {isExpanded ? 'Hide' : 'View'}
-                            </Button>
-                            {!isActive && (
-                              <Button size="sm" variant="ghost" onClick={() => handleActivate(algo.id)} disabled={activating}>
-                                Activate
-                              </Button>
-                            )}
-                            {isActive && (
-                              <Button
-                                size="sm"
-                                variant="danger"
-                                onClick={() => handleDeactivate(algo.id)}
-                                disabled={deactivatingId === algo.id}
+                          <div className="shrink-0 flex items-center gap-1.5">
+                            {!isActive ? (
+                              <button
+                                type="button"
+                                onClick={() => handleActivate(algo.id)}
+                                disabled={activating}
+                                className="group/badge inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium border transition-all duration-150
+                                  bg-slate-100 text-slate-500 border-slate-200 hover:bg-brand-50 hover:text-brand-600 hover:border-brand-200
+                                  dark:bg-[#1a1f2a] dark:text-[#8090a8] dark:border-[#2a3040] dark:hover:bg-brand-900/20 dark:hover:text-brand-400 dark:hover:border-brand-800
+                                  disabled:opacity-50 disabled:cursor-not-allowed"
                               >
-                                <PowerOff size={14} />
-                                {deactivatingId === algo.id ? 'Deactivating' : 'Deactivate'}
+                                <span className="group-hover/badge:hidden">Inactive</span>
+                                <span className="hidden group-hover/badge:inline-flex items-center gap-1">
+                                  <Plus size={10} /> Activate
+                                </span>
+                              </button>
+                            ) : (
+                              <Button size="sm" variant="danger" onClick={() => handleDeactivate(algo.id)} disabled={deactivatingId === algo.id}>
+                                <PowerOff size={13} />
+                                {deactivatingId === algo.id ? 'Deactivating…' : 'Deactivate'}
                               </Button>
                             )}
+                            <div className="relative">
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === algo.id ? null : algo.id) }}
+                                className="p-1 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:text-slate-300 dark:hover:bg-[#1c1c24] transition-colors"
+                              >
+                                <MoreVertical size={14} />
+                              </button>
+                              {openMenuId === algo.id && (
+                                <>
+                                  <div className="fixed inset-0 z-10" onClick={() => setOpenMenuId(null)} />
+                                  <div className="absolute right-0 top-full mt-1 z-20 min-w-[150px] rounded-lg border border-slate-200 bg-white shadow-lg dark:border-[#2a303a] dark:bg-[#11151d] py-1 overflow-hidden">
+                                    <button
+                                      type="button"
+                                      onClick={() => { handleClone(algo); setOpenMenuId(null) }}
+                                      className="flex w-full items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-[#1c2030] transition-colors"
+                                    >
+                                      <CopyPlus size={13} className="text-brand-500" />
+                                      Clone to builder
+                                    </button>
+                                  </div>
+                                </>
+                              )}
+                            </div>
                           </div>
                         </div>
 
                         {isExpanded && (
-                          <div className="bg-slate-50 px-4 py-3 dark:bg-[#151518]">
-                            <div className="space-y-2 text-xs text-slate-600">
-                              <p><strong>ID:</strong> {algo.id}</p>
-                              <p><strong>Description:</strong> {algo.description || 'N/A'}</p>
-                              <p><strong>Algorithm For:</strong> {algo.algorithm_for}</p>
-                              {algo.created_at && (
-                                <p><strong>Created:</strong> {new Date(algo.created_at).toLocaleString()}</p>
-                              )}
-                              <div>
-                                <strong>Configuration:</strong>
-                                <pre className="mt-1 max-h-48 overflow-auto rounded border border-transparent bg-slate-100 p-2 text-xs dark:border-[#222226] dark:bg-[#0f0f11]">
-                                  {JSON.stringify(algorithm, null, 2)}
-                                </pre>
-                              </div>
-                            </div>
+                          <div className="border-t border-slate-100 dark:border-[#1e2330] bg-slate-50/60 dark:bg-[#0c0f17] px-6 py-3">
+                            {algo.description && algo.description !== 'N/A' && (
+                              <p className="mb-3 text-xs text-slate-500 dark:text-[#6d7a8d]">{algo.description}</p>
+                            )}
+                            <RuleBreakdown algo={algo} />
                           </div>
                         )}
                       </div>
@@ -1118,7 +1379,7 @@ export function EuclidRulesPage() {
                   })}
                 </div>
               )}
-            </CardBody>
+            </div>
           </Card>
           {activeVolumeAlgorithm && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
@@ -1140,7 +1401,7 @@ export function EuclidRulesPage() {
         </div>
 
         {/* Rule builder */}
-        <div className="lg:col-span-2 space-y-4">
+        <div ref={builderRef} className="lg:col-span-2 space-y-4">
           <form onSubmit={handleSubmit} className="space-y-4">
             <Card>
               <CardHeader>
@@ -1170,36 +1431,66 @@ export function EuclidRulesPage() {
 
                 {/* Rule blocks */}
                 <div className="space-y-3">
-                  <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Rules</p>
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Rules</p>
+                    <div className="flex rounded-lg border border-slate-200 dark:border-[#222226] overflow-hidden text-[11px]">
+                      <button
+                        type="button"
+                        onClick={switchToVisual}
+                        className={`px-3 py-1 transition-colors ${editorMode === 'visual' ? 'bg-brand-500 text-white font-semibold' : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-[#1c1c24]'}`}
+                      >
+                        Visual
+                      </button>
+                      <button
+                        type="button"
+                        onClick={switchToCode}
+                        className={`px-3 py-1 transition-colors ${editorMode === 'code' ? 'bg-brand-500 text-white font-semibold' : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-[#1c1c24]'}`}
+                      >
+                        Code
+                      </button>
+                    </div>
+                  </div>
                   {routingKeysLoading && (
                     <p className="text-sm text-slate-500">Loading routing keys from backend...</p>
                   )}
                   {routingKeysUnavailable && (
                     <ErrorMessage error="Routing keys are unavailable from backend (/config/routing-keys). Rule Builder is disabled until this is fixed." />
                   )}
-                  {ruleBlocks.map((block) => (
-                    <RuleBlockEditor
-                      key={block.id}
-                      block={block}
+                  {editorMode === 'visual' ? (
+                    <>
+                      {ruleBlocks.map((block) => (
+                        <RuleBlockEditor
+                          key={block.id}
+                          block={block}
+                          routingKeys={routingKeys}
+                          gatewaySuggestions={gatewaySuggestions}
+                          onChange={(updated) =>
+                            setRuleBlocks((prev) => prev.map((b) => (b.id === block.id ? updated : b)))
+                          }
+                          onRemove={() =>
+                            setRuleBlocks((prev) => prev.filter((b) => b.id !== block.id))
+                          }
+                        />
+                      ))}
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={addRuleBlock}
+                        disabled={routingKeysUnavailable}
+                      >
+                        <Plus size={14} /> Add Rule
+                      </Button>
+                    </>
+                  ) : (
+                    <RuleCodeEditor
+                      value={codeText}
+                      onChange={handleCodeChange}
+                      parseError={codeParseError}
                       routingKeys={routingKeys}
                       gatewaySuggestions={gatewaySuggestions}
-                      onChange={(updated) =>
-                        setRuleBlocks((prev) => prev.map((b) => (b.id === block.id ? updated : b)))
-                      }
-                      onRemove={() =>
-                        setRuleBlocks((prev) => prev.filter((b) => b.id !== block.id))
-                      }
                     />
-                  ))}
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={addRuleBlock}
-                    disabled={routingKeysUnavailable}
-                  >
-                    <Plus size={14} /> Add Rule
-                  </Button>
+                  )}
                 </div>
 
                 {/* Default selection */}
