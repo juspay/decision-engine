@@ -98,9 +98,12 @@ function addFallbackGateway(gatewayName, gatewayId = '') {
 function selectCondLhs(index, value) {
   cy.get('[data-cy="cond-lhs"]').eq(index).within(() => {
     cy.get('button.cond-select').click()
-    cy.get('input[placeholder="Search…"]').clear().type(value)
-    cy.get('button:not(.cond-select)').first().click()
   })
+  // Dropdown is rendered via portal to document.body (outside any .within() scope)
+  // Use {withinSubject: null} to search from document root
+  cy.get('input[placeholder="Search…"]', {withinSubject: null}).should('be.visible').clear().type(value)
+  // Exclude trigger buttons (.cond-select) — only click portal option buttons
+  cy.get(`button[data-value="${value}"]:not(.cond-select)`, {withinSubject: null}).first().click()
 }
 
 /**
@@ -112,9 +115,48 @@ function selectCondLhs(index, value) {
 function selectCondVal(index, value) {
   cy.get('[data-cy="cond-val"]').eq(index).within(() => {
     cy.get('button.cond-select').click()
-    cy.get('input[placeholder="Search…"]').clear().type(value)
-    cy.get('button:not(.cond-select)').first().click()
   })
+  // Dropdown is rendered via portal to document.body (outside any .within() scope)
+  // Use {withinSubject: null} to search from document root
+  cy.get('input[placeholder="Search…"]', {withinSubject: null}).should('be.visible').clear().type(value)
+  // Exclude trigger buttons (.cond-select) — only click portal option buttons
+  cy.get(`button[data-value="${value}"]:not(.cond-select)`, {withinSubject: null}).first().click()
+}
+
+/**
+ * Select multiple enum values using the SearchableMultiSelect component.
+ * Works inside or outside a cy.within() scope.
+ * @param {number} index - 0-based index of the multi-select within current scope
+ * @param {string[]} values - array of enum values to select (e.g. ['card', 'bank_transfer'])
+ */
+function selectMultiCondVals(index, values) {
+  // Collect all values to be selected
+  const valuesToSelect = [...values]
+  
+  // Open dropdown
+  cy.get('[data-cy="cond-val"]', {withinSubject: null}).eq(index).click()
+  cy.wait(300) // Wait for portal to render
+  
+  // Select all values while keeping dropdown open
+  for (const value of valuesToSelect) {
+    // Clear search and type value
+    cy.get('input[placeholder="Search…"]', {withinSubject: null})
+      .clear()
+      .type(value)
+    
+    // Wait for filter and find button
+    cy.get(`button[data-value="${value}"]:not(.cond-select)`, {withinSubject: null})
+      .should('exist')
+      .first()
+      .click({force: true}) // Force click to bypass visibility check if needed
+    
+    // Refocus on input to keep dropdown open
+    cy.get('input[placeholder="Search…"]', {withinSubject: null}).focus()
+    cy.wait(150)
+  }
+  
+  // Close dropdown
+  cy.get('body', {withinSubject: null}).click({force: true})
 }
 
 module.exports = {
@@ -128,4 +170,5 @@ module.exports = {
   addFallbackGateway,
   selectCondLhs,
   selectCondVal,
+  selectMultiCondVals,
 }

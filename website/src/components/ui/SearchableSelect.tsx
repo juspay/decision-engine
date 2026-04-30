@@ -129,6 +129,7 @@ export function SearchableSelect({
                 <button
                   key={o.value}
                   type="button"
+                  data-value={o.value}
                   onClick={() => select(o.value)}
                   className={`w-full text-left px-3 py-2 text-xs transition-colors hover:bg-slate-50 dark:hover:bg-[#1c1c24] ${
                     o.value === value

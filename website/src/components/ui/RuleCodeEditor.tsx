@@ -447,7 +447,6 @@ function getSuggestions(
     const opts = [
       `priority: ${gw1}`,
       `volume_split: 70% ${gw1}, 30% ${gw2}`,
-      `volume_split_priority: 70% [${gw1}], 30% [${gw2}]`,
     ]
     if (!outPfxM[1]) return opts
     return opts.sort((a, b) =>

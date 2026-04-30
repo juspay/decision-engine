@@ -137,6 +137,7 @@ export function SearchableMultiSelect({
                   <button
                     key={o.value}
                     type="button"
+                    data-value={o.value}
                     onClick={() => toggle(o.value)}
                     className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-slate-50 dark:hover:bg-[#1c1c24] ${checked ? 'text-brand-600 dark:text-brand-400' : 'text-slate-700 dark:text-[#c8d0de]'}`}
                   >

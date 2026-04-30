@@ -561,7 +561,7 @@ function ConditionRowEditor({
     const switchingFromMulti = row.operator === 'in' || row.operator === 'not_in'
     let newValue: string | string[] = row.value
     if (switchingToMulti && !Array.isArray(row.value)) {
-      newValue = row.value ? [row.value] : []
+      newValue = []
     } else if (!switchingToMulti && switchingFromMulti) {
       newValue = Array.isArray(row.value) ? (row.value[0] ?? '') : ''
     }
@@ -591,12 +591,14 @@ function ConditionRowEditor({
         ))}
       </select>
       {isEnum && isMulti ? (
-        <SearchableMultiSelect
-          values={selectedValues}
-          onChange={(vals) => onChange({ ...row, value: vals })}
-          options={(keyInfo?.values || []).map((v: string) => ({ value: v, label: toLabel(v) }))}
-          placeholder="Select values…"
-        />
+        <div data-cy="cond-val">
+          <SearchableMultiSelect
+            values={selectedValues}
+            onChange={(vals) => onChange({ ...row, value: vals })}
+            options={(keyInfo?.values || []).map((v: string) => ({ value: v, label: toLabel(v) }))}
+            placeholder="Select values…"
+          />
+        </div>
       ) : isEnum ? (
         <SearchableSelect
           dataCy="cond-val"
@@ -749,10 +751,9 @@ function ConditionGroupEditor({
   )
 }
 
-const OUTPUT_TYPE_LABELS: Record<RuleBlock['outputType'], string> = {
+const OUTPUT_TYPE_LABELS: Record<string, string> = {
   priority: 'Priority',
   volume_split: 'Volume Split',
-  volume_split_priority: 'Split + Priority',
 }
 
 // ---- Rule block ----
@@ -841,11 +842,11 @@ function RuleBlockEditor({
             <div className="flex items-center gap-3 mb-3">
               <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-400 shrink-0">Then route</p>
               <div className="flex rounded-lg border border-slate-200 dark:border-[#222226] overflow-hidden text-[11px]">
-                {(Object.keys(OUTPUT_TYPE_LABELS) as RuleBlock['outputType'][]).map((type) => (
+                {Object.keys(OUTPUT_TYPE_LABELS).map((type) => (
                   <button
                     key={type}
                     type="button"
-                    onClick={() => onChange({ ...block, outputType: type })}
+                    onClick={() => onChange({ ...block, outputType: type as RuleBlock['outputType'] })}
                     className={`px-2.5 py-1 transition-colors ${
                       block.outputType === type
                         ? 'bg-brand-500 text-white font-semibold'
@@ -1282,88 +1283,101 @@ function switchToCode() {
                           isActive ? 'bg-emerald-50/50 dark:bg-emerald-900/10' : ''
                         }`}
                       >
-                        <div className="flex items-center justify-between gap-2 px-6 py-3">
-                          <button
-                            type="button"
-                            onClick={() => toggleRuleExpand(algo.id)}
-                            className="min-w-0 flex-1 text-left group"
-                          >
-                            <div className="flex items-center gap-1.5">
-                              <p className={`truncate font-medium group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors ${
-                                isActive ? 'text-emerald-900 dark:text-emerald-100' : 'text-slate-900 dark:text-white'
-                              }`}>
-                                {algo.name}
-                              </p>
-                              {isActive && (
-                                <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">
-                                  ● Active
+                        <div className="px-6 pt-3 pb-2">
+                          {/* Row 1: name + id (left) | action buttons (right) */}
+                          <div className="flex items-center justify-between gap-2">
+                            <button
+                              type="button"
+                              onClick={() => toggleRuleExpand(algo.id)}
+                              className="min-w-0 flex-1 text-left group"
+                            >
+                              <div className="flex items-center gap-1.5">
+                                <p className={`truncate font-medium group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors ${
+                                  isActive ? 'text-emerald-900 dark:text-emerald-100' : 'text-slate-900 dark:text-white'
+                                }`}>
+                                  {algo.name}
+                                </p>
+                                {isActive && (
+                                  <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">
+                                    ● Active
+                                  </span>
+                                )}
+                                {isExpanded
+                                  ? <ChevronUp size={12} className="text-slate-400 shrink-0 ml-auto" />
+                                  : <ChevronDown size={12} className="text-slate-400 shrink-0 ml-auto" />
+                                }
+                              </div>
+                              <div className="mt-0.5 flex items-center gap-1">
+                                <span className="text-[10px] font-mono text-slate-500 dark:text-[#607087]">
+                                  {algo.id}
                                 </span>
-                              )}
-                              {isExpanded
-                                ? <ChevronUp size={12} className="text-slate-400 shrink-0 ml-auto" />
-                                : <ChevronDown size={12} className="text-slate-400 shrink-0 ml-auto" />
-                              }
-                            </div>
-                            <div className="mt-0.5 flex items-center gap-1">
-                              <span className="text-[10px] font-mono text-slate-500 dark:text-[#607087]">
-                                {algo.id}
-                              </span>
-                              <CopyButton text={algo.id} size={10} label="Copy routing ID" />
-                            </div>
-                            {algo.created_at && (
-                              <span className="text-[11px] text-slate-400 dark:text-[#4e5870]">
-                                {new Date(algo.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
-                              </span>
-                            )}
-                          </button>
+                                <CopyButton text={algo.id} size={10} label="Copy routing ID" />
+                              </div>
+                            </button>
 
-                          <div className="shrink-0 flex items-center gap-1.5">
-                            {!isActive ? (
-                              <button
-                                type="button"
-                                onClick={() => handleActivate(algo.id)}
-                                disabled={activating}
-                                className="group/badge relative inline-flex items-center justify-center min-w-[68px] px-2.5 py-0.5 rounded-full text-xs font-medium border transition-colors duration-150
-                                  bg-slate-100 text-slate-500 border-slate-200 hover:bg-brand-50 hover:text-brand-600 hover:border-brand-200
-                                  dark:bg-[#1a1f2a] dark:text-[#8090a8] dark:border-[#2a3040] dark:hover:bg-brand-900/20 dark:hover:text-brand-400 dark:hover:border-brand-800
-                                  disabled:opacity-50 disabled:cursor-not-allowed"
-                              >
-                                <span className="transition-opacity duration-150 group-hover/badge:opacity-0">Inactive</span>
-                                <span className="absolute inset-0 flex items-center justify-center gap-1 opacity-0 transition-opacity duration-150 group-hover/badge:opacity-100">
-                                  <Plus size={10} /> Activate
-                                </span>
-                              </button>
-                            ) : (
-                              <Button size="sm" variant="danger" onClick={() => handleDeactivate(algo.id)} disabled={deactivatingId === algo.id}>
-                                <PowerOff size={13} />
-                                {deactivatingId === algo.id ? 'Deactivating…' : 'Deactivate'}
-                              </Button>
-                            )}
-                            <div className="relative">
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === algo.id ? null : algo.id) }}
-                                className="p-1 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:text-slate-300 dark:hover:bg-[#1c1c24] transition-colors"
-                              >
-                                <MoreVertical size={14} />
-                              </button>
-                              {openMenuId === algo.id && (
-                                <>
-                                  <div className="fixed inset-0 z-10" onClick={() => setOpenMenuId(null)} />
-                                  <div className="absolute right-0 top-full mt-1 z-20 min-w-[150px] rounded-lg border border-slate-200 bg-white shadow-lg dark:border-[#2a303a] dark:bg-[#11151d] py-1 overflow-hidden">
-                                    <button
-                                      type="button"
-                                      onClick={() => { handleClone(algo); setOpenMenuId(null) }}
-                                      className="flex w-full items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-[#1c2030] transition-colors"
-                                    >
-                                      <CopyPlus size={13} className="text-brand-500" />
-                                      Clone to builder
-                                    </button>
-                                  </div>
-                                </>
+                            <div className="shrink-0 flex items-center gap-1.5">
+                              {!isActive ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleActivate(algo.id)}
+                                  disabled={activating}
+                                  className="group/badge relative inline-flex items-center justify-center min-w-[68px] px-2.5 py-0.5 rounded-full text-xs font-medium border transition-colors duration-150
+                                    bg-slate-100 text-slate-500 border-slate-200 hover:bg-brand-50 hover:text-brand-600 hover:border-brand-200
+                                    dark:bg-[#1a1f2a] dark:text-[#8090a8] dark:border-[#2a3040] dark:hover:bg-brand-900/20 dark:hover:text-brand-400 dark:hover:border-brand-800
+                                    disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                  <span className="transition-opacity duration-150 group-hover/badge:opacity-0">Inactive</span>
+                                  <span className="absolute inset-0 flex items-center justify-center gap-1 opacity-0 transition-opacity duration-150 group-hover/badge:opacity-100">
+                                    <Plus size={10} /> Activate
+                                  </span>
+                                </button>
+                              ) : (
+                                <Button size="sm" variant="danger" onClick={() => handleDeactivate(algo.id)} disabled={deactivatingId === algo.id}>
+                                  <PowerOff size={13} />
+                                  {deactivatingId === algo.id ? 'Deactivating…' : 'Deactivate'}
+                                </Button>
                               )}
+                              <div className="relative">
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === algo.id ? null : algo.id) }}
+                                  className="p-1 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:text-slate-300 dark:hover:bg-[#1c1c24] transition-colors"
+                                >
+                                  <MoreVertical size={14} />
+                                </button>
+                                {openMenuId === algo.id && (
+                                  <>
+                                    <div className="fixed inset-0 z-10" onClick={() => setOpenMenuId(null)} />
+                                    <div className="absolute right-0 top-full mt-1 z-20 min-w-[150px] rounded-lg border border-slate-200 bg-white shadow-lg dark:border-[#2a303a] dark:bg-[#11151d] py-1 overflow-hidden">
+                                      <button
+                                        type="button"
+                                        onClick={() => { handleClone(algo); setOpenMenuId(null) }}
+                                        className="flex w-full items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-[#1c2030] transition-colors"
+                                      >
+                                        <CopyPlus size={13} className="text-brand-500" />
+                                        Clone to builder
+                                      </button>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
                             </div>
                           </div>
+
+                          {/* Row 2: description (left) | date (right) — same row */}
+                          {(algo.description && algo.description !== 'N/A' || algo.created_at) && (
+                            <div className="flex items-center justify-between gap-2 mt-0.5">
+                              {algo.description && algo.description !== 'N/A'
+                                ? <p className="text-[11px] text-slate-500 dark:text-[#6d7a8d] truncate min-w-0">{algo.description}</p>
+                                : <span />
+                              }
+                              {algo.created_at && (
+                                <span className="shrink-0 text-[10px] text-slate-400 dark:text-[#4e5870] pr-[12px]">
+                                  {new Date(algo.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
 
                         {isExpanded && (
