@@ -1323,13 +1323,13 @@ function switchToCode() {
                                 type="button"
                                 onClick={() => handleActivate(algo.id)}
                                 disabled={activating}
-                                className="group/badge inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium border transition-all duration-150
+                                className="group/badge relative inline-flex items-center justify-center min-w-[68px] px-2.5 py-0.5 rounded-full text-xs font-medium border transition-colors duration-150
                                   bg-slate-100 text-slate-500 border-slate-200 hover:bg-brand-50 hover:text-brand-600 hover:border-brand-200
                                   dark:bg-[#1a1f2a] dark:text-[#8090a8] dark:border-[#2a3040] dark:hover:bg-brand-900/20 dark:hover:text-brand-400 dark:hover:border-brand-800
                                   disabled:opacity-50 disabled:cursor-not-allowed"
                               >
-                                <span className="group-hover/badge:hidden">Inactive</span>
-                                <span className="hidden group-hover/badge:inline-flex items-center gap-1">
+                                <span className="transition-opacity duration-150 group-hover/badge:opacity-0">Inactive</span>
+                                <span className="absolute inset-0 flex items-center justify-center gap-1 opacity-0 transition-opacity duration-150 group-hover/badge:opacity-100">
                                   <Plus size={10} /> Activate
                                 </span>
                               </button>
