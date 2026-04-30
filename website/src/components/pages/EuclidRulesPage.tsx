@@ -32,7 +32,7 @@ import {
   type RuleBlock, type StatementGroup, type ConditionRow,
   type GatewayEntry, type VolumeSplitEntry, type VolumeSplitPriorityEntry,
 } from '../ui/RuleCodeEditor'
-import { Plus, Trash2, GripVertical, ChevronDown, ChevronUp, PowerOff, CornerDownRight, CopyPlus, MoreVertical } from 'lucide-react'
+import { Plus, Trash2, GripVertical, ChevronDown, ChevronUp, Eye, PowerOff, CornerDownRight, CopyPlus, MoreVertical } from 'lucide-react'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { CopyButton } from '../ui/CopyButton'
 
