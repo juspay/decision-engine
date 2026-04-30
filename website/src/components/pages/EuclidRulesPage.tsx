@@ -561,7 +561,7 @@ function ConditionRowEditor({
     const switchingFromMulti = row.operator === 'in' || row.operator === 'not_in'
     let newValue: string | string[] = row.value
     if (switchingToMulti && !Array.isArray(row.value)) {
-      newValue = []
+      newValue = row.value ? [row.value as string] : []
     } else if (!switchingToMulti && switchingFromMulti) {
       newValue = Array.isArray(row.value) ? (row.value[0] ?? '') : ''
     }

@@ -143,13 +143,18 @@ function selectMultiCondVals(index, values) {
     cy.get('input[placeholder="Search…"]', {withinSubject: null})
       .clear()
       .type(value)
-    
-    // Wait for filter and find button
+
+    // Only click if not already selected — text-brand-600 indicates checked state.
+    // Skipping avoids accidentally deselecting a value preserved from single-value mode.
     cy.get(`button[data-value="${value}"]:not(.cond-select)`, {withinSubject: null})
       .should('exist')
       .first()
-      .click({force: true}) // Force click to bypass visibility check if needed
-    
+      .then($btn => {
+        if (!$btn.hasClass('text-brand-600')) {
+          cy.wrap($btn).click({force: true})
+        }
+      })
+
     // Refocus on input to keep dropdown open
     cy.get('input[placeholder="Search…"]', {withinSubject: null}).focus()
     cy.wait(150)
