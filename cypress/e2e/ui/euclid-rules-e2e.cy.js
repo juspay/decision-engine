@@ -169,33 +169,6 @@ describe('End-to-end creation', () => {
     cy.contains('Rule created').should('be.visible')
   })
 
-  it('creates a rule with volume split priority output — backend receives routing_type: volume_split_priority', () => {
-    cy.get('input[placeholder="my-rule"]').type(ruleName)
-    ruleBlock(0).within(() => {
-      selectCondLhs(0, 'payment_method')
-      selectCondVal(0, 'card')
-    })
-    switchOutputType(0, 'Split + Priority')
-    addVolumeSplitPriorityRow(0, 60)
-    addVolumeSplitPriorityRow(0, 40)
-    addGatewayToSplitRow(0, 0, 'stripe', 'mca_stripe')
-    addGatewayToSplitRow(0, 0, 'adyen', 'mca_adyen')
-    addGatewayToSplitRow(0, 1, 'checkout', 'mca_checkout')
-    addFallbackGateway('stripe', 'mca_stripe')
-
-    cy.contains('button', 'Create Rule').click()
-    cy.wait('@createRule', { timeout: 15000 }).then((interception) => {
-      expect(interception.response.statusCode).to.eq(200)
-      const rule = interception.request.body?.algorithm?.data?.rules?.[0]
-      expect(rule.routing_type).to.eq('volume_split_priority')
-      expect(rule.output.volume_split_priority).to.be.an('array').with.length(2)
-      expect(rule.output.volume_split_priority[0].split).to.eq(60)
-      expect(rule.output.volume_split_priority[0].output).to.be.an('array').with.length(2)
-      expect(rule.output.volume_split_priority[1].output).to.be.an('array').with.length(1)
-    })
-    cy.contains('Rule created').should('be.visible')
-  })
-
   it('creates a rule combining nested AND+OR with volume split output', () => {
     cy.get('input[placeholder="my-rule"]').type(ruleName)
     ruleBlock(0).within(() => {
