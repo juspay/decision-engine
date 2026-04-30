@@ -158,11 +158,15 @@ describe('Rule Builder — UI interactions', () => {
       ruleBlock(0).within(() => {
         cy.get('[data-cy="cond-lhs"]').eq(0).within(() => {
           cy.get('button.cond-select').click()
-          cy.get('button:not(.cond-select)').each(($btn) => {
-            expect($btn.text().trim()).to.not.match(/_/)
-          })
         })
       })
+      // Dropdown renders via portal — escape within() scope to search document root
+      cy.get('button[data-value]:not(.cond-select)', {withinSubject: null})
+        .should('exist')
+        .each(($btn) => {
+          expect($btn.text().trim()).to.not.match(/_/)
+        })
+      cy.get('body').click({force: true})
     })
 
     it('shows human-readable labels in the enum value dropdown', () => {
@@ -170,11 +174,15 @@ describe('Rule Builder — UI interactions', () => {
         selectCondLhs(0, 'payment_method')
         cy.get('[data-cy="cond-val"]').eq(0).within(() => {
           cy.get('button.cond-select').click()
-          cy.get('button:not(.cond-select)').each(($btn) => {
-            expect($btn.text().trim()).to.not.match(/_/)
-          })
         })
       })
+      // Dropdown renders via portal — escape within() scope to search document root
+      cy.get('button[data-value]:not(.cond-select)', {withinSubject: null})
+        .should('exist')
+        .each(($btn) => {
+          expect($btn.text().trim()).to.not.match(/_/)
+        })
+      cy.get('body').click({force: true})
     })
 
     it('can select a different field and choose a value', () => {
@@ -183,9 +191,12 @@ describe('Rule Builder — UI interactions', () => {
         cy.get('[data-cy="cond-val"]').eq(0).should('be.visible')
         cy.get('[data-cy="cond-val"]').eq(0).within(() => {
           cy.get('button.cond-select').click()
-          cy.get('button:not(.cond-select)').should('have.length.gt', 1)
         })
       })
+      // Dropdown renders via portal — escape within() scope to search document root
+      cy.get('button[data-value]:not(.cond-select)', {withinSubject: null})
+        .should('have.length.gt', 1)
+      cy.get('body').click({force: true})
     })
   })
 

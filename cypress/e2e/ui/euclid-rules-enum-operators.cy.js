@@ -49,69 +49,115 @@ describe('"is one of" / "is not one of" operator', () => {
     })
   })
 
-  it('shows a checkbox list when "is one of" is selected', () => {
+  it('shows a multi-value picker when "is one of" is selected', () => {
     ruleBlock(0).within(() => {
       cy.get('select.cond-select').eq(0).select('is one of')
-      cy.get('input[type="checkbox"]').should('have.length.gte', 1)
-      // LHS button + operator select — value replaced by checkboxes
+      // LHS button + operator select — single-value button replaced by multi-select
       cy.get('.cond-select').should('have.length', 2)
+      cy.get('[data-cy="cond-val"]').should('exist')
     })
   })
 
-  it('shows a checkbox list when "is not one of" is selected', () => {
+  it('shows a multi-value picker when "is not one of" is selected', () => {
     ruleBlock(0).within(() => {
       cy.get('select.cond-select').eq(0).select('is not one of')
-      cy.get('input[type="checkbox"]').should('have.length.gte', 1)
+      cy.get('.cond-select').should('have.length', 2)
+      cy.get('[data-cy="cond-val"]').should('exist')
     })
   })
 
-  it('each checkbox is independently toggleable', () => {
+  it('each option is independently toggleable', () => {
     ruleBlock(0).within(() => {
       cy.get('select.cond-select').eq(0).select('is one of')
-      cy.get('input[type="checkbox"]').first().check()
-      cy.get('input[type="checkbox"]').first().should('be.checked')
-      cy.get('input[type="checkbox"]').first().uncheck()
-      cy.get('input[type="checkbox"]').first().should('not.be.checked')
     })
+    // handleOperatorChange preserves the single value — clear it first via the pill X button
+    cy.get('[data-cy="cond-val"]', { withinSubject: null })
+      .find('span[class*="bg-brand-100"] button').click()
+    // Open portal and select an option, capturing its value for the deselect step
+    cy.get('[data-cy="cond-val"]', { withinSubject: null }).click()
+    cy.get('button[data-value]:not(.cond-select)', { withinSubject: null })
+      .should('have.length.gte', 1)
+      .then($buttons => {
+        const val = $buttons.eq(0).attr('data-value')
+        cy.wrap($buttons.eq(0)).click({ force: true })
+        cy.get('body', { withinSubject: null }).click({ force: true })
+        // 1 pill selected
+        cy.get('[data-cy="cond-val"]', { withinSubject: null })
+          .find('span[class*="bg-brand-100"]').should('have.length', 1)
+        // Reopen and click the same option to deselect it
+        cy.get('[data-cy="cond-val"]', { withinSubject: null }).click()
+        cy.get(`button[data-value="${val}"]:not(.cond-select)`, { withinSubject: null })
+          .click({ force: true })
+        cy.get('body', { withinSubject: null }).click({ force: true })
+        // No pills — back to unselected state
+        cy.get('[data-cy="cond-val"]', { withinSubject: null })
+          .find('span[class*="bg-brand-100"]').should('have.length', 0)
+      })
   })
 
-  it('multiple checkboxes can be checked simultaneously', () => {
+  it('multiple options can be selected simultaneously', () => {
     ruleBlock(0).within(() => {
       cy.get('select.cond-select').eq(0).select('is one of')
-      cy.get('input[type="checkbox"]').eq(0).check()
-      cy.get('input[type="checkbox"]').eq(1).check()
-      cy.get('input[type="checkbox"]').filter(':checked').should('have.length', 2)
     })
+    // handleOperatorChange preserves the single value — clear it first via the pill X button
+    cy.get('[data-cy="cond-val"]', { withinSubject: null })
+      .find('span[class*="bg-brand-100"] button').click()
+    // Open portal, capture two data-values, then click each by specific selector
+    cy.get('[data-cy="cond-val"]', { withinSubject: null }).click()
+    cy.get('button[data-value]:not(.cond-select)', { withinSubject: null })
+      .should('have.length.gte', 2)
+      .then($buttons => {
+        const val0 = $buttons.eq(0).attr('data-value')
+        const val1 = $buttons.eq(1).attr('data-value')
+        cy.get(`button[data-value="${val0}"]:not(.cond-select)`, { withinSubject: null })
+          .click({ force: true })
+        cy.get(`button[data-value="${val1}"]:not(.cond-select)`, { withinSubject: null })
+          .click({ force: true })
+      })
+    cy.get('body', { withinSubject: null }).click({ force: true })
+    // Both values should appear as pills in the trigger
+    cy.get('[data-cy="cond-val"]', { withinSubject: null })
+      .find('span[class*="bg-brand-100"]').should('have.length', 2)
   })
 
-  it('switching back to "equals" replaces checkboxes with the single-value dropdown', () => {
+  it('switching back to "equals" replaces the multi-picker with the single-value dropdown', () => {
     ruleBlock(0).within(() => {
       cy.get('select.cond-select').eq(0).select('is one of')
-      cy.get('input[type="checkbox"]').should('exist')
+      // Multi-select mode: LHS button + operator select (no value button)
+      cy.get('.cond-select').should('have.length', 2)
       cy.get('select.cond-select').eq(0).select('equals')
-      cy.get('input[type="checkbox"]').should('not.exist')
-      // LHS button + operator select + value button = 3 .cond-select elements
+      // Single-value mode restored: LHS button + operator select + value button
       cy.get('.cond-select').should('have.length', 3)
     })
   })
 
-  it('preserves the previously selected single value as the first checked box when switching to "is one of"', () => {
+  it('preserves the previously selected single value when switching to "is one of"', () => {
+    // Open the single-value enum picker (SearchableSelect — portal rendered to body)
     ruleBlock(0).within(() => {
       cy.get('[data-cy="cond-val"]').eq(0).within(() => {
         cy.get('button.cond-select').click()
-        cy.get('button:not(.cond-select)').eq(1).click()
       })
-      cy.get('select.cond-select').eq(0).select('is one of')
-      cy.get('input[type="checkbox"]').filter(':checked').should('have.length', 1)
     })
-  })
-
-  it('JSON preview emits enum_variant_array type with the checked values', () => {
+    // Select the second option from the portal (outside within scope)
+    cy.get('button[data-value]:not(.cond-select)', { withinSubject: null }).eq(1).click()
+    // Switch operator to multi mode
     ruleBlock(0).within(() => {
       cy.get('select.cond-select').eq(0).select('is one of')
-      cy.get('input[type="checkbox"]').eq(0).check()
-      cy.get('input[type="checkbox"]').eq(1).check()
     })
+    // Previously selected value should be pre-populated as 1 pill
+    cy.get('[data-cy="cond-val"]', { withinSubject: null })
+      .find('span[class*="bg-brand-100"]').should('have.length', 1)
+  })
+
+  it('JSON preview emits enum_variant_array type with the selected values', () => {
+    ruleBlock(0).within(() => {
+      cy.get('select.cond-select').eq(0).select('is one of')
+    })
+    // Select two values (dropdown stays open between clicks)
+    cy.get('[data-cy="cond-val"]', { withinSubject: null }).click()
+    cy.get('button[data-value]:not(.cond-select)', { withinSubject: null }).eq(0).click()
+    cy.get('button[data-value]:not(.cond-select)', { withinSubject: null }).eq(1).click()
+    cy.get('body', { withinSubject: null }).click({ force: true })
     addGatewayToBlock(0, 'stripe')
     cy.get('input[placeholder="my-rule"]').type(ruleName)
     cy.contains('button', 'Preview JSON').click()
@@ -122,8 +168,11 @@ describe('"is one of" / "is not one of" operator', () => {
   it('JSON preview for "is not one of" uses not_equal comparison', () => {
     ruleBlock(0).within(() => {
       cy.get('select.cond-select').eq(0).select('is not one of')
-      cy.get('input[type="checkbox"]').eq(0).check()
     })
+    // Select one value
+    cy.get('[data-cy="cond-val"]', { withinSubject: null }).click()
+    cy.get('button[data-value]:not(.cond-select)', { withinSubject: null }).eq(0).click()
+    cy.get('body', { withinSubject: null }).click({ force: true })
     addGatewayToBlock(0, 'stripe')
     cy.get('input[placeholder="my-rule"]').type(ruleName)
     cy.contains('button', 'Preview JSON').click()

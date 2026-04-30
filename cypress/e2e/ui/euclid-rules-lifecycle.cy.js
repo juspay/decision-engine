@@ -212,20 +212,29 @@ describe('Rule Lifecycle — creation and management', () => {
         .should('not.be.empty')
     })
 
-    it('expands rule JSON when View is clicked', () => {
+    it('expands rule details when rule header is clicked', () => {
+      // Click the rule name/header to expand (accordion pattern with chevron)
+      cy.contains(ruleName).click()
+      // The rule breakdown/details should be visible
       cy.contains(ruleName)
         .closest('[class*="flex-col"]')
-        .contains('button', 'View')
-        .click()
-      cy.contains('Configuration').should('be.visible')
-      cy.get('pre').should('be.visible')
+        .find('.border-t')  // The expanded content has a border-t class
+        .should('be.visible')
     })
 
-    it('hides rule JSON when Hide is clicked', () => {
-      cy.contains(ruleName).closest('[class*="flex-col"]').contains('button', 'View').click()
-      cy.contains('Configuration').should('be.visible')
-      cy.contains(ruleName).closest('[class*="flex-col"]').contains('button', 'Hide').click()
-      cy.contains('Configuration').should('not.exist')
+    it('hides rule details when rule header is clicked again', () => {
+      // Click to expand
+      cy.contains(ruleName).click()
+      cy.contains(ruleName)
+        .closest('[class*="flex-col"]')
+        .find('.border-t')
+        .should('be.visible')
+      // Click again to collapse
+      cy.contains(ruleName).click()
+      cy.contains(ruleName)
+        .closest('[class*="flex-col"]')
+        .find('.border-t')
+        .should('not.exist')
     })
 
     it('activates the rule', () => {
@@ -251,6 +260,8 @@ describe('Rule Lifecycle — creation and management', () => {
         .closest('[class*="flex-col"]')
         .contains('button', 'Deactivate')
         .click()
+      cy.contains('Deactivate this rule?').should('be.visible')
+      cy.get('.fixed.inset-0').contains('button', 'Deactivate').click()
       cy.contains('Rule deactivated successfully.').should('be.visible')
       cy.contains(ruleName)
         .closest('[class*="flex-col"]')

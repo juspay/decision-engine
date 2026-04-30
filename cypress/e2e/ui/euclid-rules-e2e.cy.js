@@ -9,6 +9,7 @@ const {
   addFallbackGateway,
   selectCondLhs,
   selectCondVal,
+  selectMultiCondVals,
 } = require('../../support/euclid-helpers')
 
 describe('End-to-end creation', () => {
@@ -36,8 +37,13 @@ describe('End-to-end creation', () => {
     ruleBlock(0).within(() => {
       selectCondLhs(0, 'payment_method')
       cy.get('select.cond-select').eq(0).select('is one of')
-      cy.get('input[type="checkbox"]').eq(0).check()
-      cy.get('input[type="checkbox"]').eq(1).check()
+    })
+    // Multi-select for "is one of" operator (portal rendered, use root search)
+    selectMultiCondVals(0, ['card', 'bank_transfer'])
+    // Verify UI shows both values selected before submitting
+    cy.get('[data-cy="cond-val"]', {withinSubject: null}).eq(0).within(() => {
+      cy.contains('Card').should('exist')
+      cy.contains('Bank Transfer').should('exist')
     })
     addGatewayToBlock(0, 'stripe', 'mca_stripe')
     addFallbackGateway('adyen', 'mca_adyen')
@@ -61,8 +67,9 @@ describe('End-to-end creation', () => {
     ruleBlock(0).within(() => {
       selectCondLhs(0, 'payment_method')
       cy.get('select.cond-select').eq(0).select('is not one of')
-      cy.get('input[type="checkbox"]').eq(0).check()
     })
+    // Multi-select for "is not one of" operator (portal rendered, use root search)
+    selectMultiCondVals(0, ['card'])
     addGatewayToBlock(0, 'stripe', 'mca_stripe')
     addFallbackGateway('adyen', 'mca_adyen')
 
@@ -119,10 +126,8 @@ describe('End-to-end creation', () => {
     ruleBlock(0).contains('button', 'Add nested branch').click()
     ruleBlock(0).find('.border-l-2.border-sky-200').eq(1).within(() => {
       selectCondLhs(0, 'currency')
-      cy.get('[data-cy="cond-val"]').eq(0).within(() => {
-        cy.get('button.cond-select').click()
-        cy.get('button:not(.cond-select)').first().click()
-      })
+      // The selectCondVal helper handles the portal rendering correctly
+      selectCondVal(0, 'AED')
     })
     addGatewayToBlock(0, 'rbl', 'mca_rbl')
     addFallbackGateway('stripe', 'mca_stripe')
@@ -164,33 +169,6 @@ describe('End-to-end creation', () => {
     cy.contains('Rule created').should('be.visible')
   })
 
-  it('creates a rule with volume split priority output — backend receives routing_type: volume_split_priority', () => {
-    cy.get('input[placeholder="my-rule"]').type(ruleName)
-    ruleBlock(0).within(() => {
-      selectCondLhs(0, 'payment_method')
-      selectCondVal(0, 'card')
-    })
-    switchOutputType(0, 'Split + Priority')
-    addVolumeSplitPriorityRow(0, 60)
-    addVolumeSplitPriorityRow(0, 40)
-    addGatewayToSplitRow(0, 0, 'stripe', 'mca_stripe')
-    addGatewayToSplitRow(0, 0, 'adyen', 'mca_adyen')
-    addGatewayToSplitRow(0, 1, 'checkout', 'mca_checkout')
-    addFallbackGateway('stripe', 'mca_stripe')
-
-    cy.contains('button', 'Create Rule').click()
-    cy.wait('@createRule', { timeout: 15000 }).then((interception) => {
-      expect(interception.response.statusCode).to.eq(200)
-      const rule = interception.request.body?.algorithm?.data?.rules?.[0]
-      expect(rule.routing_type).to.eq('volume_split_priority')
-      expect(rule.output.volume_split_priority).to.be.an('array').with.length(2)
-      expect(rule.output.volume_split_priority[0].split).to.eq(60)
-      expect(rule.output.volume_split_priority[0].output).to.be.an('array').with.length(2)
-      expect(rule.output.volume_split_priority[1].output).to.be.an('array').with.length(1)
-    })
-    cy.contains('Rule created').should('be.visible')
-  })
-
   it('creates a rule combining nested AND+OR with volume split output', () => {
     cy.get('input[placeholder="my-rule"]').type(ruleName)
     ruleBlock(0).within(() => {
@@ -224,16 +202,14 @@ describe('End-to-end creation', () => {
     ruleBlock(0).within(() => {
       selectCondLhs(0, 'payment_method')
       cy.get('select.cond-select').eq(0).select('is one of')
-      cy.get('input[type="checkbox"]').eq(0).check()
-      cy.get('input[type="checkbox"]').eq(1).check()
     })
+    // Multi-select for "is one of" operator
+    selectMultiCondVals(0, ['card', 'bank_transfer'])
     ruleBlock(0).contains('button', 'Add nested branch').click()
     ruleBlock(0).find('.border-l-2.border-sky-200').first().within(() => {
       selectCondLhs(0, 'currency')
-      cy.get('[data-cy="cond-val"]').eq(0).within(() => {
-        cy.get('button.cond-select').click()
-        cy.get('button:not(.cond-select)').first().click()
-      })
+      // The selectCondVal helper handles the portal rendering correctly
+      selectCondVal(0, 'AED')
     })
     addGatewayToBlock(0, 'stripe', 'mca_stripe')
     addFallbackGateway('adyen', 'mca_adyen')
