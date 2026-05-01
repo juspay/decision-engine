@@ -30,10 +30,6 @@ const subLevelSchema = z.object({
 
 const srFormSchema = z.object({
   defaultBucketSize: z.coerce.number().int().positive(),
-  defaultSuccessRate: z.preprocess(
-    (v) => (v === '' || v === null ? null : Number(v)),
-    z.number().min(0).max(1).nullable()
-  ),
   defaultLatencyThreshold: z.preprocess(
     (v) => (v === '' || v === null ? null : Number(v)),
     z.number().nullable()
@@ -54,7 +50,6 @@ interface SRConfigResponse {
     type: string
     data: {
       defaultBucketSize: number
-      defaultSuccessRate: number | null
       defaultLatencyThreshold: number | null
       defaultHedgingPercent: number | null
       subLevelInputConfig: {
@@ -77,10 +72,6 @@ function CurrentConfigDetails({ config }: { config: SRConfigResponse['config'] }
           <div>
             <span className="text-slate-500">Bucket Size:</span>
             <p className="font-medium">{config.data.defaultBucketSize}</p>
-          </div>
-          <div>
-            <span className="text-slate-500">Success Rate:</span>
-            <p className="font-medium">{config.data.defaultSuccessRate ?? 'Not set'}</p>
           </div>
           <div>
             <span className="text-slate-500">Hedging %:</span>
@@ -165,7 +156,6 @@ export function SRRoutingPage() {
     resolver: zodResolver(srFormSchema),
     defaultValues: {
       defaultBucketSize: 200,
-      defaultSuccessRate: 0.5,
       defaultLatencyThreshold: null,
       defaultHedgingPercent: null,
       subLevelInputConfig: [],
@@ -179,7 +169,6 @@ export function SRRoutingPage() {
       const subLevelRows = d.subLevelInputConfig ?? []
       reset({
         defaultBucketSize: d.defaultBucketSize ?? 200,
-        defaultSuccessRate: d.defaultSuccessRate ?? 0.5,
         defaultLatencyThreshold: d.defaultLatencyThreshold ?? null,
         defaultHedgingPercent: d.defaultHedgingPercent ?? null,
         subLevelInputConfig: subLevelRows,
@@ -225,7 +214,6 @@ export function SRRoutingPage() {
           type: 'successRate',
           data: {
             defaultBucketSize: data.defaultBucketSize,
-            defaultSuccessRate: data.defaultSuccessRate,
             defaultLatencyThreshold: data.defaultLatencyThreshold,
             defaultHedgingPercent: data.defaultHedgingPercent,
             subLevelInputConfig: data.subLevelInputConfig.length > 0
@@ -354,7 +342,7 @@ export function SRRoutingPage() {
                 </p>
               </div>
             </CardHeader>
-            <CardBody className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <CardBody className="grid gap-4 md:grid-cols-3">
               <label className="space-y-1">
                 <span className="text-xs text-slate-500">Bucket Size</span>
                 <input
@@ -365,19 +353,6 @@ export function SRRoutingPage() {
                 {errors.defaultBucketSize && (
                   <p className="text-xs text-red-500">{errors.defaultBucketSize.message}</p>
                 )}
-              </label>
-
-              <label className="space-y-1">
-                <span className="text-xs text-slate-500">Success Rate</span>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  max="1"
-                  {...register('defaultSuccessRate')}
-                  placeholder="0.5"
-                  className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 w-full focus:outline-none focus:ring-1 focus:ring-brand-500"
-                />
               </label>
 
               <label className="space-y-1">

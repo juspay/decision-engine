@@ -12,6 +12,8 @@ interface SearchableSelectProps {
   onChange: (value: string) => void
   options: Option[]
   className?: string
+  triggerClassName?: string
+  labelClassName?: string
   disabled?: boolean
   dataCy?: string
 }
@@ -21,6 +23,8 @@ export function SearchableSelect({
   onChange,
   options,
   className = '',
+  triggerClassName = '',
+  labelClassName = '',
   disabled = false,
   dataCy,
 }: SearchableSelectProps) {
@@ -90,11 +94,13 @@ export function SearchableSelect({
         type="button"
         disabled={disabled}
         onClick={() => open ? close() : openDropdown()}
-        className="cond-select flex items-center gap-1 pr-2"
+        className={`cond-select flex items-center gap-1 pr-2 ${triggerClassName}`}
         style={{ backgroundImage: 'none', display: 'flex', alignItems: 'center' }}
         data-value={value}
       >
-        <span className="truncate max-w-[10rem]">{selectedLabel || <span className="text-slate-400">select...</span>}</span>
+        <span className={`truncate max-w-[10rem] ${labelClassName}`}>
+          {selectedLabel || <span className="text-slate-400">select...</span>}
+        </span>
         <ChevronDown
           size={11}
           className={`shrink-0 text-slate-400 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
