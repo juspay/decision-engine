@@ -10,6 +10,7 @@ import { Spinner } from '../ui/Spinner'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useAuthStore } from '../../store/authStore'
 import { apiPost, fetcher } from '../../lib/api'
+import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
 import { DecideGatewayResponse, GatewayConnector, PaymentAuditEvent, PaymentAuditResponse, RoutingAlgorithmName } from '../../types/api'
 import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
 import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
@@ -697,7 +698,7 @@ function InspectorJsonPanel({
         <h3 className="text-sm font-semibold text-slate-900 dark:text-white">{title}</h3>
       </div>
       {value ? (
-        <pre className="overflow-x-auto rounded-[22px] border border-slate-200 bg-slate-950/95 px-4 py-4 text-xs leading-6 text-slate-200 shadow-[0_16px_30px_-28px_rgba(15,23,42,0.4)] dark:border-[#2a303a] dark:bg-[#0b1017] dark:text-[#d8e1ef] dark:shadow-none">
+        <pre className="overflow-x-auto rounded-[22px] border border-slate-200/80 bg-slate-50/90 px-4 py-4 font-mono text-xs leading-6 text-slate-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.75),0_16px_30px_-28px_rgba(15,23,42,0.18)] dark:border-[#2a303a] dark:bg-[#0b1017] dark:text-[#d8e1ef] dark:shadow-none">
           {stringifyValue(value)}
         </pre>
       ) : (
@@ -2355,7 +2356,7 @@ export function DecisionExplorerPage() {
                         Raw response
                       </button>
                       {debitResponseOpen && (
-                        <pre className="mt-3 max-h-96 overflow-auto rounded-lg bg-slate-950 p-4 text-xs text-slate-200">
+                        <pre className="mt-3 max-h-96 overflow-auto rounded-lg border border-slate-200/80 bg-slate-50/90 p-4 font-mono text-xs leading-6 text-slate-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.75),0_16px_30px_-28px_rgba(15,23,42,0.18)] dark:border-[#2a303a] dark:bg-[#0b1017] dark:text-[#d8e1ef] dark:shadow-none">
                           {JSON.stringify(debitResult, null, 2)}
                         </pre>
                       )}
@@ -2480,7 +2481,9 @@ export function DecisionExplorerPage() {
                             </Pie>
                             <Tooltip
                               formatter={(value: number) => [`${value} payments`, 'Count']}
-                              contentStyle={{ backgroundColor: '#111827', border: '1px solid #293546', borderRadius: '12px', color: '#fff' }}
+                              contentStyle={CHART_TOOLTIP_STYLE}
+                              labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                              itemStyle={CHART_TOOLTIP_ITEM_STYLE}
                             />
                           </PieChart>
                         </ResponsiveContainer>
@@ -2895,7 +2898,12 @@ export function DecisionExplorerPage() {
                         <BarChart data={scoreData} layout="vertical" margin={{ left: 10, right: 30 }}>
                           <XAxis type="number" domain={[0, 100]} tickFormatter={v => `${v}%`} tick={{ fontSize: 11, fill: '#66667a' }} axisLine={{ stroke: '#1c1c24' }} tickLine={false} />
                           <YAxis type="category" dataKey="name" tick={{ fontSize: 12, fill: '#8e8ea0' }} width={60} axisLine={false} tickLine={false} />
-                          <Tooltip formatter={v => `${v}%`} contentStyle={{ backgroundColor: '#0d0d12', border: '1px solid #1c1c24', borderRadius: '8px', color: '#e8e8f4' }} />
+                          <Tooltip
+                            formatter={v => `${v}%`}
+                            contentStyle={CHART_TOOLTIP_STYLE}
+                            labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                            itemStyle={CHART_TOOLTIP_ITEM_STYLE}
+                          />
                           <Bar dataKey="score" radius={[0, 4, 4, 0]}>
                             {scoreData.map((entry, i) => (
                               <Cell

@@ -79,15 +79,17 @@ function HeroStat({
 }: {
   label: string
   value: string
-  detail: string
+  detail?: string
 }) {
+  const hasDetail = Boolean(detail)
+
   return (
-    <div className="rounded-[22px] border border-slate-200 bg-white px-4 py-4 dark:border-[#2a303a] dark:bg-[#161b24]">
+    <div className={`min-h-[118px] rounded-[22px] border border-slate-200 bg-white px-4 py-4 dark:border-[#2a303a] dark:bg-[#161b24] ${hasDetail ? '' : 'flex flex-col justify-center'}`}>
       <SurfaceLabel>{label}</SurfaceLabel>
       <p className="mt-3 text-2xl font-semibold tracking-tight text-slate-950 dark:text-white">
         {value}
       </p>
-      <p className="mt-1 text-sm text-slate-500 dark:text-[#b2bdd1]">{detail}</p>
+      {detail ? <p className="mt-1 text-sm text-slate-500 dark:text-[#b2bdd1]">{detail}</p> : null}
     </div>
   )
 }
@@ -101,17 +103,19 @@ function MetricCard({
   icon: ElementType
   label: string
   value: ReactNode
-  detail: string
+  detail?: string
 }) {
+  const hasDetail = Boolean(detail)
+
   return (
-    <GlassCard className="p-5">
-      <div className="flex items-start justify-between gap-4">
+    <GlassCard className="h-full p-5">
+      <div className={`flex min-h-[118px] justify-between gap-4 ${hasDetail ? 'items-start' : 'items-center'}`}>
         <div>
           <SurfaceLabel>{label}</SurfaceLabel>
           <p className="mt-4 text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">
             {value}
           </p>
-          <p className="mt-2 text-sm text-slate-500 dark:text-[#b2bdd1]">{detail}</p>
+          {detail ? <p className="mt-2 text-sm text-slate-500 dark:text-[#b2bdd1]">{detail}</p> : null}
         </div>
         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-[#2a303a] dark:bg-[#161b24]">
           <Icon className="h-5 w-5 text-brand-600 dark:text-sky-300" />
@@ -419,10 +423,9 @@ export function OverviewPage() {
                     <HeroStat
                       label="Requests"
                       value={formatCompactNumber(decideHits)}
-                      detail={selectedWindow.detail}
                     />
                     <HeroStat label="Setup ready" value={`${configuredBasics}/5`} detail="Core basics configured" />
-                    <HeroStat label="Window" value={selectedWindow.label} detail={selectedWindow.detail} />
+                    <HeroStat label="Window" value={selectedWindow.label} />
                   </div>
                 </div>
               </GlassCard>
@@ -443,7 +446,6 @@ export function OverviewPage() {
                     icon={Clock3}
                     label="Requests"
                     value={formatCompactNumber(decideHits)}
-                    detail={selectedWindow.detail}
                   />
                   <MetricCard
                     icon={BarChart3}

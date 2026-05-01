@@ -15,9 +15,9 @@ const variantClasses: Record<string, string> = {
 export function Badge({ variant = 'gray', children }: BadgeProps) {
   return (
     <span
-      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium tracking-wide ${variantClasses[variant]}`}
+      className={`inline-flex max-w-full min-w-0 items-center gap-1 overflow-hidden rounded-md px-2 py-0.5 text-xs font-medium tracking-wide ${variantClasses[variant]}`}
     >
-      {children}
+      <span className="min-w-0 truncate">{children}</span>
     </span>
   )
 }

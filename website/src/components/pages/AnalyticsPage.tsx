@@ -18,9 +18,8 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { useMerchantStore } from '../../store/merchantStore'
-import { useAuthStore } from '../../store/authStore'
 import { fetcher } from '../../lib/api'
+import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
 import {
   AnalyticsOverviewResponse,
   AnalyticsRange,
@@ -106,21 +105,6 @@ const PRESET_OPTIONS: { value: AnalyticsRangeValue; label: string }[] = [
 ]
 
 const CHART_COLORS = ['#0069ED', '#14b8a6', '#f97316', '#e11d48', '#8b5cf6', '#22c55e']
-const CHART_TOOLTIP_STYLE = {
-  backgroundColor: '#0d0d12',
-  border: '1px solid #1c1c24',
-  borderRadius: '14px',
-  color: '#e8e8f4',
-  boxShadow: '0 16px 40px rgba(0, 0, 0, 0.35)',
-}
-const CHART_TOOLTIP_LABEL_STYLE = {
-  color: '#f8fafc',
-  fontWeight: 600,
-  marginBottom: 8,
-}
-const CHART_TOOLTIP_ITEM_STYLE = {
-  color: '#e2e8f0',
-}
 const CHART_TOOLTIP_WRAPPER_STYLE = {
   zIndex: 30,
   outline: 'none',
@@ -543,7 +527,7 @@ function HitsCard({
 }: {
   label: string
   value: number
-  subtitle: string
+  subtitle?: string
   eyebrow?: string
 }) {
   return (
@@ -559,7 +543,7 @@ function HitsCard({
           <p className="text-5xl font-semibold tracking-tight text-slate-950 dark:text-white">
             {formatNumber(value, 0)}
           </p>
-          <Badge variant="blue">{subtitle}</Badge>
+          {subtitle ? <Badge variant="blue">{subtitle}</Badge> : null}
         </div>
       </CardBody>
     </Card>
@@ -764,9 +748,6 @@ function analyticsRouteLabel(route: string) {
 
 export function AnalyticsPage() {
   const location = useLocation()
-  const { merchantId } = useMerchantStore()
-  const authMerchantId = useAuthStore((state) => state.user?.merchantId || '')
-  const effectiveMerchantId = merchantId || authMerchantId
   const [range, setRange] = useState<AnalyticsRangeValue>('1d')
   const [view, setView] = useState<AnalyticsView>('transactions')
   const [routingFilters, setRoutingFilters] = useState<RoutingFilters>(EMPTY_ROUTING_FILTERS)
@@ -1587,7 +1568,6 @@ export function AnalyticsPage() {
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Analytics</h1>
-            <Badge variant="green">{overview.data?.merchant_id || effectiveMerchantId || 'Signed-in merchant'}</Badge>
           </div>
         </div>
 
@@ -1703,7 +1683,6 @@ export function AnalyticsPage() {
                   key={item.route}
                   label={analyticsRouteLabel(item.route)}
                   value={item.count}
-                  subtitle={range === 'custom' ? 'Custom window' : activeWindowLabel}
                 />
               ))}
             </div>
@@ -2004,7 +1983,6 @@ export function AnalyticsPage() {
               <HitsCard
                 label="Rule Evaluate"
                 value={ruleEvaluateHits}
-                subtitle={range === 'custom' ? 'Custom window' : activeWindowLabel}
               />
               <HitsCard
                 label="Gateways touched"
