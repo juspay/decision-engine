@@ -122,9 +122,15 @@
   :where(input:not([type='checkbox']):not([type='radio']):not([type='range'])),
   :where(select),
   :where(textarea) {
-    @apply bg-white dark:bg-[#0f0f11] border-slate-200 dark:border-transparent text-slate-800 dark:text-white rounded-full px-4 placeholder-slate-400 dark:placeholder-[#66666e] transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:focus:bg-[#151518] dark:focus:border-[#333338];
+    @apply bg-white dark:bg-[#0f0f11] border-slate-200 dark:border-transparent text-slate-800 dark:text-white rounded-full px-4 placeholder-slate-400 dark:placeholder-[#66666e] transition-all duration-200 focus:outline-none focus:ring-0 focus:border-slate-300 dark:focus:bg-[#0f0f11] dark:focus:border-[#222226];
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05) !important;
     font-family: 'Outfit', sans-serif;
+  }
+
+  :where(input:not([type='checkbox']):not([type='radio']):not([type='range'])):focus,
+  :where(textarea):focus {
+    box-shadow: none !important;
+    outline: none !important;
   }
 
   :where(select) {
@@ -207,6 +213,24 @@
 .cond-select:focus {
   outline: none;
   box-shadow: none !important;
+}
+
+.inline-param-input {
+  min-width: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+.inline-param-input:focus,
+.inline-param-input:focus-visible,
+.dark .inline-param-input:focus,
+.dark .inline-param-input:focus-visible {
+  border-color: inherit;
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
 }
 
 /* Floating panel utility class */

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import useSWR from 'swr'
 import {
   DndContext,
@@ -67,14 +67,21 @@ type DefaultOutput = {
   priorityGateways: GatewayEntry[]
 }
 
+type RuleOutputValidationError = {
+  ruleId: string
+  message: string
+}
+
 function createCondition(routingKeys: Record<string, RoutingKeyConfig>): ConditionRow {
   const firstKey = Object.keys(routingKeys)[0] || 'payment_method'
-  const firstKeyValues = routingKeys[firstKey]?.values || []
+  const firstKeyConfig = routingKeys[firstKey]
+  const firstKeyValues = firstKeyConfig?.values || []
   return {
     id: crypto.randomUUID(),
     lhs: firstKey,
     operator: '==',
-    value: firstKeyValues[0] || '',
+    value: firstKeyConfig?.type === 'enum' ? (firstKeyValues[0] || '') : '',
+    metadataKey: firstKeyConfig?.type === 'udf' && firstKey !== 'metadata' ? firstKey : undefined,
   }
 }
 
@@ -93,6 +100,40 @@ function formatOp(comparison: string): string {
     greater_than_equal: '≥', less_than_equal: '≤',
   }
   return map[comparison] ?? comparison.replace(/_/g, ' ')
+}
+
+function formatScalar(value: unknown): string {
+  if (value === null || value === undefined) return ''
+  if (Array.isArray(value)) return value.map(formatScalar).filter(Boolean).join(', ')
+  if (typeof value === 'object') return JSON.stringify(value)
+  return String(value)
+}
+
+function getMetadataVariant(value: unknown): { key?: string; value?: unknown } | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const metadata = value as { key?: unknown; value?: unknown }
+  return {
+    key: metadata.key === undefined || metadata.key === null ? undefined : String(metadata.key),
+    value: metadata.value,
+  }
+}
+
+function formatConditionSubject(cond: EuclidAlgorithmData['rules'][number]['statements'][number]['condition'][number]): string {
+  const metadata = cond.value?.type === 'metadata_variant' ? getMetadataVariant(cond.value.value) : null
+  const lhs = toLabel(String(cond.lhs ?? ''))
+  return metadata?.key ? `${lhs}[${metadata.key}]` : lhs
+}
+
+function formatConditionValue(cond: EuclidAlgorithmData['rules'][number]['statements'][number]['condition'][number]): string {
+  const metadata = cond.value?.type === 'metadata_variant' ? getMetadataVariant(cond.value.value) : null
+  return formatScalar(metadata ? metadata.value : cond.value?.value)
+}
+
+function formatRoutingType(type: string | undefined): string {
+  if (type === 'volume_split_priority') return 'Split + Priority'
+  if (type === 'volume_split') return 'Volume Split'
+  if (type === 'priority') return 'Priority'
+  return type ? toLabel(type) : 'Priority'
 }
 
 
@@ -148,16 +189,14 @@ function RuleBreakdown({ algo }: { algo: RoutingAlgorithm }) {
                 {rule.name || `Rule ${i + 1}`}
               </span>
               {rule.routing_type && (
-                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold leading-4 ${
                   rule.routing_type === 'volume_split_priority'
-                    ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400'
+                    ? 'border-purple-500/25 bg-purple-500/10 text-purple-700 dark:text-purple-300'
                     : rule.routing_type === 'volume_split'
-                    ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400'
-                    : 'bg-brand-100 dark:bg-brand-900/30 text-brand-600 dark:text-brand-400'
+                    ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                    : 'border-brand-500/25 bg-brand-500/10 text-brand-700 dark:text-brand-300'
                 }`}>
-                  {rule.routing_type === 'volume_split_priority' ? 'Split + Priority'
-                    : rule.routing_type === 'volume_split' ? 'Volume Split'
-                    : 'Priority'}
+                  {formatRoutingType(rule.routing_type)}
                 </span>
               )}
             </div>
@@ -178,9 +217,9 @@ function RuleBreakdown({ algo }: { algo: RoutingAlgorithm }) {
                           {op}
                         </span>
                         <span className="rounded-md bg-slate-100 dark:bg-[#1a1f2a] px-2 py-1 text-slate-700 dark:text-[#c8d0de]">
-                          {toLabel(String(cond.lhs ?? ''))}{' '}
+                          {formatConditionSubject(cond)}{' '}
                           <span className="font-mono text-slate-400 dark:text-[#5d6880]">{formatOp(String(cond.comparison ?? ''))}</span>{' '}
-                          <span className="font-medium">{toLabel(String(cond.value?.value ?? ''))}</span>
+                          <span className="font-medium">{formatConditionValue(cond)}</span>
                         </span>
                       </div>
                     ))}
@@ -276,18 +315,25 @@ function PriorityEditor({
   gateways,
   onChange,
   suggestions = [],
+  highlightMissing = false,
 }: {
   gateways: GatewayEntry[]
   onChange: (gws: GatewayEntry[]) => void
   suggestions?: string[]
+  highlightMissing?: boolean
 }) {
   const [newGatewayName, setNewGatewayName] = useState('')
   const [newGatewayId, setNewGatewayId] = useState('')
   const listId = useRef(`gateway-suggestions-${Math.random().toString(36).slice(2)}`).current
+  const gatewayNameInputRef = useRef<HTMLInputElement>(null)
   const sensors = useSensors(
     useSensor(PointerSensor),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   )
+
+  useEffect(() => {
+    if (highlightMissing) gatewayNameInputRef.current?.focus()
+  }, [highlightMissing])
 
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event
@@ -329,12 +375,19 @@ function PriorityEditor({
       </datalist>
       <div className="flex gap-2">
         <input
+          ref={gatewayNameInputRef}
           value={newGatewayName}
           onChange={(e) => setNewGatewayName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
           list={listId}
           placeholder="Gateway name"
-          className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm flex-1 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          aria-invalid={highlightMissing}
+          aria-describedby={highlightMissing ? `${listId}-missing-output` : undefined}
+          className={`border bg-transparent rounded-lg px-2 py-1 text-sm flex-1 focus:outline-none focus:ring-1 ${
+            highlightMissing
+              ? 'border-red-400 ring-2 ring-red-400/35 focus:ring-red-400 dark:border-red-400 dark:ring-red-500/35'
+              : 'border-slate-200 focus:ring-brand-500 dark:border-[#222226]'
+          }`}
         />
         <input
           value={newGatewayId}
@@ -343,10 +396,21 @@ function PriorityEditor({
           placeholder="Gateway ID (optional)"
           className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm flex-1 focus:outline-none focus:ring-1 focus:ring-brand-500"
         />
-        <Button type="button" size="sm" variant="secondary" onClick={add}>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          onClick={add}
+          className={highlightMissing ? 'ring-2 ring-red-400/45 dark:ring-red-500/40' : ''}
+        >
           <Plus size={13} /> Add
         </Button>
       </div>
+      {highlightMissing && (
+        <p id={`${listId}-missing-output`} className="text-xs font-medium text-red-500 dark:text-red-300">
+          Enter a gateway name here, then click Add to include it in the rule output.
+        </p>
+      )}
     </div>
   )
 }
@@ -531,7 +595,8 @@ function ConditionRowEditor({
   const keyInfo = routingKeys[row.lhs]
   const isEnum = keyInfo?.type === 'enum'
   const isInt = keyInfo?.type === 'integer'
-  const isStr = keyInfo?.type === 'str_value' || keyInfo?.type === 'udf'
+  const isUdf = keyInfo?.type === 'udf'
+  const isStr = keyInfo?.type === 'str_value'
   const isMulti = row.operator === 'in' || row.operator === 'not_in'
 
   const operators = isInt
@@ -562,7 +627,13 @@ function ConditionRowEditor({
         onChange={(newKey) => {
           const newConfig = routingKeys[newKey]
           const defaultValue = newConfig?.type === 'enum' ? (newConfig.values?.[0] ?? '') : ''
-          onChange({ ...row, lhs: newKey, value: defaultValue, operator: '==' })
+          onChange({
+            ...row,
+            lhs: newKey,
+            value: defaultValue,
+            metadataKey: newConfig?.type === 'udf' && newKey !== 'metadata' ? newKey : undefined,
+            operator: '==',
+          })
         }}
         options={Object.keys(routingKeys).map((k) => ({ value: k, label: toLabel(k) }))}
       />
@@ -600,6 +671,25 @@ function ConditionRowEditor({
           placeholder="value"
           className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-xs w-24 focus:outline-none"
         />
+      ) : isUdf ? (
+        <>
+          <input
+            type="text"
+            value={row.metadataKey ?? ''}
+            onChange={(e) => onChange({ ...row, metadataKey: e.target.value })}
+            placeholder="metadata key"
+            aria-label="Metadata key"
+            className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-xs w-36 focus:outline-none"
+          />
+          <input
+            type="text"
+            value={row.value as string}
+            onChange={(e) => onChange({ ...row, value: e.target.value })}
+            placeholder="value"
+            aria-label="Metadata value"
+            className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-xs w-32 focus:outline-none"
+          />
+        </>
       ) : isStr ? (
         <input
           type="text"
@@ -749,12 +839,14 @@ function RuleBlockEditor({
   onRemove,
   routingKeys,
   gatewaySuggestions = [],
+  highlightMissingOutput = false,
 }: {
   block: RuleBlock
   onChange: (b: RuleBlock) => void
   onRemove: () => void
   routingKeys: Record<string, RoutingKeyConfig>
   gatewaySuggestions?: string[]
+  highlightMissingOutput?: boolean
 }) {
   const [collapsed, setCollapsed] = useState(false)
 
@@ -848,6 +940,7 @@ function RuleBlockEditor({
               <PriorityEditor
                 gateways={block.priorityGateways}
                 suggestions={gatewaySuggestions}
+                highlightMissing={highlightMissingOutput}
                 onChange={(gws) => onChange({ ...block, priorityGateways: gws })}
               />
             )}
@@ -903,6 +996,7 @@ function buildAlgorithmData(rules: RuleBlock[], defaultOutput: DefaultOutput, ro
   function buildCondition(c: ConditionRow) {
     const keyType = routingKeys[c.lhs]?.type
     const isMulti = c.operator === 'in' || c.operator === 'not_in'
+    const scalarValue = Array.isArray(c.value) ? (c.value[0] ?? '') : c.value
 
     if (isMulti && Array.isArray(c.value)) {
       return {
@@ -913,16 +1007,30 @@ function buildAlgorithmData(rules: RuleBlock[], defaultOutput: DefaultOutput, ro
       }
     }
 
+    if (keyType === 'udf') {
+      const metadataKey = c.metadataKey?.trim() ?? ''
+      return {
+        lhs: c.lhs,
+        comparison: OPERATOR_TO_API[c.operator] || c.operator,
+        value: {
+          type: 'metadata_variant',
+          value: { key: metadataKey, value: scalarValue },
+        },
+        metadata: {},
+      }
+    }
+
     const apiValueType =
       keyType === 'integer' ? 'number' :
-      keyType === 'str_value' || keyType === 'udf' ? 'str_value' :
+      keyType === 'global_ref' ? 'global_ref' :
+      keyType === 'str_value' ? 'str_value' :
       'enum_variant'
     return {
       lhs: c.lhs,
       comparison: OPERATOR_TO_API[c.operator] || c.operator,
       value: {
         type: apiValueType,
-        value: keyType === 'integer' ? Number(c.value) : c.value,
+        value: keyType === 'integer' ? Number(scalarValue) : scalarValue,
       },
       metadata: {},
     }
@@ -948,6 +1056,68 @@ function buildAlgorithmData(rules: RuleBlock[], defaultOutput: DefaultOutput, ro
   }
 }
 
+function findIncompleteUdfCondition(
+  rules: RuleBlock[],
+  routingKeys: Record<string, RoutingKeyConfig>
+): string | null {
+  for (const rule of rules) {
+    const visitGroup = (group: StatementGroup): string | null => {
+      for (const condition of group.conditions) {
+        if (routingKeys[condition.lhs]?.type !== 'udf') continue
+        const metadataKey = condition.metadataKey?.trim()
+        const metadataValue = Array.isArray(condition.value) ? '' : condition.value.trim()
+        if (!metadataKey) {
+          return `${rule.name}: add metadata key for ${toLabel(condition.lhs)}.`
+        }
+        if (!metadataValue) {
+          return `${rule.name}: add metadata value for ${toLabel(condition.lhs)}.`
+        }
+      }
+      for (const nested of group.nested) {
+        const nestedError = visitGroup(nested)
+        if (nestedError) return nestedError
+      }
+      return null
+    }
+
+    for (const statement of rule.statements) {
+      const error = visitGroup(statement)
+      if (error) return error
+    }
+  }
+
+  return null
+}
+
+function findIncompleteRuleOutput(rules: RuleBlock[]): RuleOutputValidationError | null {
+  for (const rule of rules) {
+    if (rule.outputType === 'priority') {
+      if (!rule.priorityGateways.some((gateway) => gateway.gatewayName.trim())) {
+        return { ruleId: rule.id, message: `${rule.name}: add at least one priority gateway.` }
+      }
+      continue
+    }
+
+    if (rule.outputType === 'volume_split') {
+      if (!rule.volumeSplitEntries.some((entry) => entry.gatewayName.trim())) {
+        return { ruleId: rule.id, message: `${rule.name}: add at least one volume split gateway.` }
+      }
+      continue
+    }
+
+    if (rule.outputType === 'volume_split_priority') {
+      const hasGateway = rule.volumeSplitPriorityEntries.some((entry) =>
+        entry.gateways.some((gateway) => gateway.gatewayName.trim())
+      )
+      if (!hasGateway) {
+        return { ruleId: rule.id, message: `${rule.name}: add at least one split priority gateway.` }
+      }
+    }
+  }
+
+  return null
+}
+
 // ---- Reverse-parse API → RuleBlocks ----
 const API_OPERATOR_TO_UI: Record<string, string> = {
   equal: '==', not_equal: '!=',
@@ -969,6 +1139,16 @@ function parseAlgorithmToRuleBlocks(algo: RoutingAlgorithm): { ruleBlocks: RuleB
     let operator = API_OPERATOR_TO_UI[cond.comparison] ?? cond.comparison
     if (isArray && cond.comparison === 'equal') operator = 'in'
     if (isArray && cond.comparison === 'not_equal') operator = 'not_in'
+    if (cond.value?.type === 'metadata_variant' && typeof cond.value.value === 'object' && cond.value.value !== null) {
+      const metadata = cond.value.value as { key?: unknown; value?: unknown }
+      return {
+        id: crypto.randomUUID(),
+        lhs: String(cond.lhs),
+        operator,
+        value: String(metadata.value ?? ''),
+        metadataKey: String(metadata.key ?? ''),
+      }
+    }
     const value = isArray
       ? (Array.isArray(cond.value?.value) ? (cond.value.value as string[]) : [String(cond.value?.value)])
       : String(cond.value?.value ?? '')
@@ -1034,6 +1214,7 @@ export function EuclidRulesPage() {
   const [showJson, setShowJson] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [missingOutputRuleId, setMissingOutputRuleId] = useState<string | null>(null)
   const [createdId, setCreatedId] = useState<string | null>(null)
   const [activating, setActivating] = useState(false)
   const [activateError, setActivateError] = useState<string | null>(null)
@@ -1099,6 +1280,8 @@ export function EuclidRulesPage() {
     setEditorMode('visual')
     setCodeText('')
     setCodeParseError(null)
+    setSubmitError(null)
+    setMissingOutputRuleId(null)
     setShowJson(false)
   }
 
@@ -1111,8 +1294,17 @@ export function EuclidRulesPage() {
     }
     if (!ruleName.trim()) { setSubmitError('Rule name is required.'); return }
     if (codeParseError) { setSubmitError(`Fix syntax error: ${codeParseError}`); return }
+    const udfError = findIncompleteUdfCondition(ruleBlocks, routingKeys)
+    if (udfError) { setSubmitError(udfError); return }
+    const outputError = findIncompleteRuleOutput(ruleBlocks)
+    if (outputError) {
+      setSubmitError(outputError.message)
+      setMissingOutputRuleId(outputError.ruleId)
+      return
+    }
     setSubmitting(true)
     setSubmitError(null)
+    setMissingOutputRuleId(null)
     setCreatedId(null)
     try {
       const nextRuleName = ruleName.trim()
@@ -1282,39 +1474,41 @@ function switchToCode() {
                           isActive ? 'bg-emerald-50/50 dark:bg-emerald-900/10' : ''
                         }`}
                       >
-                        <div className="px-6 pt-3 pb-2">
+                        <div className="px-5 py-4">
                           {/* Row 1: name + id (left) | action buttons (right) */}
-                          <div className="flex items-center justify-between gap-2">
-                            <button
-                              type="button"
-                              onClick={() => toggleRuleExpand(algo.id)}
-                              className="min-w-0 flex-1 text-left group"
-                            >
-                              <div className="flex items-center gap-1.5">
-                                <p className={`truncate font-medium group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors ${
-                                  isActive ? 'text-emerald-900 dark:text-emerald-100' : 'text-slate-900 dark:text-white'
-                                }`}>
-                                  {algo.name}
-                                </p>
-                                {isActive && (
-                                  <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">
-                                    ● Active
-                                  </span>
-                                )}
-                                {isExpanded
-                                  ? <ChevronUp size={12} className="text-slate-400 shrink-0 ml-auto" />
-                                  : <ChevronDown size={12} className="text-slate-400 shrink-0 ml-auto" />
-                                }
-                              </div>
-                              <div className="mt-0.5 flex items-center gap-1">
-                                <span className="text-[10px] font-mono text-slate-500 dark:text-[#607087]">
+                          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+                            <div className="min-w-0 overflow-hidden">
+                              <button
+                                type="button"
+                                onClick={() => toggleRuleExpand(algo.id)}
+                                className="w-full min-w-0 rounded-lg text-left group focus:outline-none focus-visible:outline-none focus-visible:ring-0"
+                              >
+                                <div className="flex min-w-0 items-center gap-1.5">
+                                  <p className={`min-w-0 truncate font-medium group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors ${
+                                    isActive ? 'text-emerald-900 dark:text-emerald-100' : 'text-slate-900 dark:text-white'
+                                  }`}>
+                                    {algo.name}
+                                  </p>
+                                  {isActive && (
+                                    <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">
+                                      ● Active
+                                    </span>
+                                  )}
+                                  {isExpanded
+                                    ? <ChevronUp size={12} className="text-slate-400 shrink-0 ml-auto" />
+                                    : <ChevronDown size={12} className="text-slate-400 shrink-0 ml-auto" />
+                                  }
+                                </div>
+                              </button>
+                              <div className="mt-1 flex min-w-0 items-center gap-1">
+                                <span className="block min-w-0 truncate text-[10px] font-mono leading-4 text-slate-500 dark:text-[#607087]">
                                   {algo.id}
                                 </span>
                                 <CopyButton text={algo.id} size={10} label="Copy routing ID" />
                               </div>
-                            </button>
+                            </div>
 
-                            <div className="shrink-0 flex items-center gap-1.5">
+                            <div className="flex shrink-0 items-center gap-1.5">
                               {!isActive ? (
                                 <button
                                   type="button"
@@ -1331,10 +1525,15 @@ function switchToCode() {
                                   </span>
                                 </button>
                               ) : (
-                                <Button size="sm" variant="danger" onClick={() => handleDeactivate(algo.id)} disabled={deactivatingId === algo.id}>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeactivate(algo.id)}
+                                  disabled={deactivatingId === algo.id}
+                                  className="inline-flex h-8 items-center justify-center gap-1.5 rounded-full border border-red-500/30 bg-red-500/10 px-3 text-xs font-semibold text-red-600 transition-colors hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-500/35 dark:bg-red-500/15 dark:text-red-400 dark:hover:bg-red-500/20"
+                                >
                                   <PowerOff size={13} />
                                   {deactivatingId === algo.id ? 'Deactivating…' : 'Deactivate'}
-                                </Button>
+                                </button>
                               )}
                               <div className="relative">
                                 <button
@@ -1477,9 +1676,11 @@ function switchToCode() {
                           block={block}
                           routingKeys={routingKeys}
                           gatewaySuggestions={gatewaySuggestions}
-                          onChange={(updated) =>
+                          highlightMissingOutput={missingOutputRuleId === block.id}
+                          onChange={(updated) => {
+                            if (missingOutputRuleId === block.id) setMissingOutputRuleId(null)
                             setRuleBlocks((prev) => prev.map((b) => (b.id === block.id ? updated : b)))
-                          }
+                          }}
                           onRemove={() =>
                             setRuleBlocks((prev) => prev.filter((b) => b.id !== block.id))
                           }

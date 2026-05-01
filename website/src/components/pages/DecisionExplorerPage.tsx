@@ -7,6 +7,7 @@ import { Badge } from '../ui/Badge'
 import { Card, CardBody, CardHeader, SurfaceLabel } from '../ui/Card'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { Spinner } from '../ui/Spinner'
+import { SearchableSelect } from '../ui/SearchableSelect'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useAuthStore } from '../../store/authStore'
 import { apiPost, fetcher } from '../../lib/api'
@@ -38,7 +39,6 @@ interface FormState {
   currency: string
   payment_method_type: string
   payment_method: string
-  card_brand: string
   auth_type: string
   eligible_gateways: string
   ranking_algorithm: RoutingAlgorithmName
@@ -85,7 +85,7 @@ interface SetupPromptState {
 
 interface RuleEvaluateParams {
   key: string
-  type: 'enum_variant' | 'str_value' | 'number' | 'metadata_variant'
+  type: 'enum_variant' | 'str_value' | 'number' | 'metadata_variant' | 'global_ref'
   value: string
   metadataKey?: string
 }
@@ -125,7 +125,6 @@ const DEFAULT_FORM: FormState = {
   currency: '',
   payment_method_type: '',
   payment_method: '',
-  card_brand: '',
   auth_type: '',
   eligible_gateways: 'stripe, adyen',
   ranking_algorithm: 'SR_BASED_ROUTING',
@@ -328,7 +327,8 @@ function mapRoutingTypeToRuleParamType(
 ): RuleEvaluateParams['type'] {
   if (keyType === 'enum') return 'enum_variant'
   if (keyType === 'integer') return 'number'
-  if (keyType === 'udf' || keyType === 'global_ref') return 'metadata_variant'
+  if (keyType === 'udf') return 'metadata_variant'
+  if (keyType === 'global_ref') return 'global_ref'
   return 'str_value'
 }
 
@@ -775,6 +775,11 @@ export function DecisionExplorerPage() {
     [routingKeysConfig]
   )
 
+  const routingKeyOptions = useMemo(
+    () => routingKeyNames.map((name) => ({ value: name, label: name })),
+    [routingKeyNames]
+  )
+
   const paymentMethodTypeOptions = useMemo(
     () => toUpperOptions(routingKeysConfig.payment_method?.values || []),
     [routingKeysConfig]
@@ -787,11 +792,6 @@ export function DecisionExplorerPage() {
 
   const currencyOptions = useMemo(
     () => uniqueUpperOptions(routingKeysConfig.currency?.values || []),
-    [routingKeysConfig]
-  )
-
-  const cardBrandOptions = useMemo(
-    () => uniqueUpperOptions(routingKeysConfig.card_network?.values || []),
     [routingKeysConfig]
   )
 
@@ -846,11 +846,6 @@ export function DecisionExplorerPage() {
         changed = true
       }
 
-      if (cardBrandOptions.length > 0 && !cardBrandOptions.includes(next.card_brand)) {
-        next.card_brand = cardBrandOptions[0]
-        changed = true
-      }
-
       return changed ? next : prev
     })
 
@@ -879,7 +874,6 @@ export function DecisionExplorerPage() {
     currencyOptions,
     paymentMethodTypeOptions,
     authTypeOptions,
-    cardBrandOptions,
   ])
 
   useEffect(() => {
@@ -1159,7 +1153,6 @@ export function DecisionExplorerPage() {
           paymentMethodType: form.payment_method_type,
           paymentMethod: form.payment_method,
           authType: form.auth_type,
-          cardBrand: form.card_brand,
         },
         eligibleGatewayList: gateways,
         rankingAlgorithm: form.ranking_algorithm,
@@ -1284,7 +1277,6 @@ export function DecisionExplorerPage() {
             paymentMethodType: form.payment_method_type,
             paymentMethod: form.payment_method,
             authType: form.auth_type,
-            cardBrand: form.card_brand,
           },
           eligibleGatewayList: gateways,
           rankingAlgorithm: form.ranking_algorithm,
@@ -1336,9 +1328,11 @@ export function DecisionExplorerPage() {
       ruleParams.forEach(p => {
         if (p.key) {
           if (p.type === 'metadata_variant') {
-            parameters[p.key] = {
+            const metadataKey = (p.metadataKey || p.key).trim()
+            if (!metadataKey || !p.value.trim()) return
+            parameters[metadataKey] = {
               type: p.type,
-              value: { key: p.metadataKey || p.key, value: p.value }
+              value: { key: metadataKey, value: p.value }
             }
           } else if (p.type === 'number') {
             parameters[p.key] = { type: p.type, value: parseFloat(p.value) || 0 }
@@ -1773,24 +1767,21 @@ export function DecisionExplorerPage() {
                     {ruleParams.map((param, idx) => (
                       <div key={idx} className="space-y-1.5">
                         <div className="group flex items-center gap-0 rounded-xl border border-slate-200 dark:border-[#1e2330] bg-white dark:bg-[#0c0f17] overflow-hidden transition-shadow hover:shadow-sm">
-                          <select
+                          <SearchableSelect
                             value={param.key}
-                            onChange={e => updateRuleParamKey(idx, e.target.value)}
+                            onChange={(value) => updateRuleParamKey(idx, value)}
+                            options={routingKeyOptions}
                             disabled={routingConfigUnavailable || routingKeysLoading}
-                            className="flex-1 min-w-0 bg-transparent px-3 py-2.5 text-sm font-medium text-slate-700 dark:text-[#c8d0de] focus:outline-none cursor-pointer appearance-none"
-                          >
-                            {routingKeyNames.length === 0 ? (
-                              <option value="">No keys available</option>
-                            ) : (
-                              routingKeyNames.map(name => <option key={name} value={name}>{name}</option>)
-                            )}
-                          </select>
+                            className="flex-1 min-w-0"
+                            triggerClassName="w-full !border-0 !rounded-none !bg-transparent !px-3 !py-2.5 text-sm font-medium text-slate-700 dark:text-[#c8d0de] hover:bg-slate-50 dark:hover:bg-[#10131c] disabled:cursor-not-allowed disabled:opacity-50"
+                            labelClassName="max-w-none"
+                          />
                           <span className="shrink-0 border-x border-slate-100 dark:border-[#1e2330] bg-slate-50 dark:bg-[#10131c] px-2.5 py-2.5 text-[11px] font-bold text-slate-300 dark:text-[#3a4258] select-none">=</span>
                           {param.type === 'enum_variant' ? (
                             <select
                               value={param.value}
                               onChange={e => updateRuleParam(idx, 'value', e.target.value)}
-                              className="flex-1 min-w-0 bg-transparent px-3 py-2.5 text-sm text-slate-600 dark:text-[#a8b4c8] focus:outline-none cursor-pointer appearance-none"
+                              className="flex-1 min-w-0 bg-transparent px-3 py-2.5 text-sm text-slate-600 dark:text-[#a8b4c8] !shadow-none focus:outline-none focus:!ring-0 focus:!shadow-none cursor-pointer appearance-none"
                             >
                               {(routingKeysConfig[param.key]?.values || []).map(v => (
                                 <option key={v} value={v}>{v}</option>
@@ -1802,17 +1793,30 @@ export function DecisionExplorerPage() {
                               placeholder="Value"
                               value={param.value}
                               onChange={e => updateRuleParam(idx, 'value', e.target.value)}
-                              className="flex-1 min-w-0 bg-transparent px-3 py-2.5 text-sm text-slate-600 dark:text-[#a8b4c8] focus:outline-none"
+                              className="flex-1 min-w-0 bg-transparent px-3 py-2.5 text-sm text-slate-600 dark:text-[#a8b4c8] !shadow-none focus:outline-none focus:!ring-0 focus:!shadow-none"
                             />
-                          ) : param.type !== 'metadata_variant' ? (
+                          ) : param.type === 'metadata_variant' ? (
+                            <div className="flex-1 min-w-0 grid grid-cols-1 sm:grid-cols-2">
+                              <input
+                                placeholder="Metadata key"
+                                value={param.metadataKey || ''}
+                                onChange={e => updateRuleParamMetadataKey(idx, e.target.value)}
+                                className="inline-param-input border-b border-slate-100 px-3 py-2.5 text-sm text-slate-600 dark:border-[#1e2330] dark:text-[#a8b4c8] sm:border-b-0 sm:border-r"
+                              />
+                              <input
+                                placeholder="Metadata value"
+                                value={param.value}
+                                onChange={e => updateRuleParam(idx, 'value', e.target.value)}
+                                className="inline-param-input px-3 py-2.5 text-sm text-slate-600 dark:text-[#a8b4c8]"
+                              />
+                            </div>
+                          ) : (
                             <input
                               placeholder="Value"
                               value={param.value}
                               onChange={e => updateRuleParam(idx, 'value', e.target.value)}
-                              className="flex-1 min-w-0 bg-transparent px-3 py-2.5 text-sm text-slate-600 dark:text-[#a8b4c8] focus:outline-none"
+                              className="flex-1 min-w-0 bg-transparent px-3 py-2.5 text-sm text-slate-600 dark:text-[#a8b4c8] !shadow-none focus:outline-none focus:!ring-0 focus:!shadow-none"
                             />
-                          ) : (
-                            <span className="flex-1 px-3 py-2.5 text-sm text-slate-400 dark:text-[#3a4258] italic">see below</span>
                           )}
                           <button
                             onClick={() => removeRuleParam(idx)}
@@ -1821,22 +1825,6 @@ export function DecisionExplorerPage() {
                             <Trash2 size={13} />
                           </button>
                         </div>
-                        {param.type === 'metadata_variant' && (
-                          <div className="ml-3 flex gap-1.5">
-                            <input
-                              placeholder="Metadata key"
-                              value={param.metadataKey || ''}
-                              onChange={e => updateRuleParamMetadataKey(idx, e.target.value)}
-                              className="flex-1 rounded-lg border border-slate-200 dark:border-[#1e2330] bg-white dark:bg-[#0c0f17] px-3 py-2 text-sm text-slate-600 dark:text-[#a8b4c8] focus:outline-none focus:ring-1 focus:ring-brand-500"
-                            />
-                            <input
-                              placeholder="Metadata value"
-                              value={param.value}
-                              onChange={e => updateRuleParam(idx, 'value', e.target.value)}
-                              className="flex-1 rounded-lg border border-slate-200 dark:border-[#1e2330] bg-white dark:bg-[#0c0f17] px-3 py-2 text-sm text-slate-600 dark:text-[#a8b4c8] focus:outline-none focus:ring-1 focus:ring-brand-500"
-                            />
-                          </div>
-                        )}
                       </div>
                     ))}
                   </div>
@@ -2108,14 +2096,6 @@ export function DecisionExplorerPage() {
                       disabled={routingConfigUnavailable || routingKeysLoading}
                       className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
                       {paymentMethodOptions.map(p => <option key={p}>{p}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">Card Brand</label>
-                    <select value={form.card_brand} onChange={e => set('card_brand', e.target.value)}
-                      disabled={routingConfigUnavailable || routingKeysLoading}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
-                      {cardBrandOptions.map(b => <option key={b}>{b}</option>)}
                     </select>
                   </div>
                   <div>

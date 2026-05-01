@@ -37,6 +37,11 @@ export interface GatewayConnector {
   gateway_id: string | null
 }
 
+export interface GatewayWiseExtraScore {
+  gatewayName: string
+  gatewaySigmaFactor: number
+}
+
 export interface VolumeSplitItem {
   split: number
   output: GatewayConnector
@@ -63,7 +68,7 @@ export interface EuclidStatement {
 export interface EuclidCondition {
   lhs: string
   comparison: string
-  value: { type: string; value: string | number }
+  value: { type: string; value: string | number | string[] | { key?: string; value?: unknown } }
   metadata: Record<string, unknown>
 }
 
@@ -127,7 +132,7 @@ export interface SRConfigData {
   defaultHedgingPercent: number | null
   defaultLowerResetFactor: number | null
   defaultUpperResetFactor: number | null
-  defaultGatewayExtraScore: number | null
+  defaultGatewayExtraScore: GatewayWiseExtraScore[] | null
   subLevelInputConfig: SubLevelConfig[] | null
 }
 
