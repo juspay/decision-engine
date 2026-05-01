@@ -2,8 +2,6 @@ import { useEffect, useMemo, useState } from 'react'
 import useSWR from 'swr'
 import { useLocation, useSearchParams } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
-import { useMerchantStore } from '../../store/merchantStore'
-import { useAuthStore } from '../../store/authStore'
 import { fetcher } from '../../lib/api'
 import {
   AnalyticsRange,
@@ -469,9 +467,6 @@ function buildInspectorModel(event: PaymentAuditEvent | null) {
 
 export function PaymentAuditPage() {
   const location = useLocation()
-  const { merchantId } = useMerchantStore()
-  const authMerchantId = useAuthStore((state) => state.user?.merchantId || '')
-  const effectiveMerchantId = merchantId || authMerchantId
   const [searchParams, setSearchParams] = useSearchParams()
 
   const initialMode = searchParams.get('routing_approach') === DEBIT_ROUTING_APPROACH
@@ -835,7 +830,6 @@ export function PaymentAuditPage() {
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">{content.title}</h1>
-            <Badge variant="green">{auditSearch.data?.merchant_id || effectiveMerchantId || 'Signed-in merchant'}</Badge>
           </div>
         </div>
 
@@ -1031,13 +1025,16 @@ export function PaymentAuditPage() {
                 {summaryCards.map((item) => (
                   <div
                     key={item.label}
-                    className="rounded-[20px] border border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-[#252d3a] dark:bg-[#0c1119]"
+                    className="min-w-0 overflow-hidden rounded-[20px] border border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-[#252d3a] dark:bg-[#0c1119]"
                   >
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#7d879b]">
+                    <p
+                      className="max-w-full truncate text-[10px] font-semibold uppercase leading-4 tracking-[0.12em] text-slate-500 dark:text-[#7d879b]"
+                      title={item.label}
+                    >
                       {item.label}
                     </p>
-                    <p className="mt-2 text-xl font-semibold text-slate-950 dark:text-white">{item.value}</p>
-                    <p className="mt-1 truncate text-[11px] text-slate-500 dark:text-[#7d879b]">{item.helper}</p>
+                    <p className="mt-2 min-w-0 truncate text-xl font-semibold text-slate-950 dark:text-white">{item.value}</p>
+                    <p className="mt-1 min-w-0 truncate text-[11px] text-slate-500 dark:text-[#7d879b]">{item.helper}</p>
                   </div>
                 ))}
               </div>

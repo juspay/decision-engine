@@ -32,7 +32,7 @@ import {
   type RuleBlock, type StatementGroup, type ConditionRow,
   type GatewayEntry, type VolumeSplitEntry, type VolumeSplitPriorityEntry,
 } from '../ui/RuleCodeEditor'
-import { Plus, Trash2, GripVertical, ChevronDown, ChevronUp, Eye, PowerOff, CornerDownRight, CopyPlus, MoreVertical } from 'lucide-react'
+import { Plus, Trash2, GripVertical, ChevronDown, ChevronUp, PowerOff, CornerDownRight, CopyPlus, MoreVertical } from 'lucide-react'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { CopyButton } from '../ui/CopyButton'
 
@@ -84,20 +84,6 @@ function createStatementGroup(routingKeys: Record<string, RoutingKeyConfig>): St
     conditions: [createCondition(routingKeys)],
     nested: [],
   }
-}
-
-function getRuleSummary(algo: RoutingAlgorithm): string {
-  const algorithm = algo.algorithm_data || algo.algorithm
-  const rules = (algorithm?.data as EuclidAlgorithmData | undefined)?.rules
-  if (!rules || rules.length === 0) return ''
-  const first = rules[0]
-  const cond = first?.statements?.[0]?.condition?.[0]
-  if (!cond) return ''
-  const field = toLabel(String(cond.lhs ?? ''))
-  const op = String(cond.comparison ?? '').replace(/_/g, ' ')
-  const val = toLabel(String(cond.value?.value ?? ''))
-  const summary = [field, op, val].filter(Boolean).join(' ')
-  return rules.length > 1 ? `${summary} · +${rules.length - 1} more` : summary
 }
 
 function formatOp(comparison: string): string {
@@ -1105,6 +1091,17 @@ export function EuclidRulesPage() {
 
   const algorithmData = buildAlgorithmData(ruleBlocks, defaultOutput, routingKeys)
 
+  function resetConfigurator() {
+    setRuleName('')
+    setRuleDesc('')
+    setRuleBlocks([])
+    setDefaultOutput({ priorityGateways: [] })
+    setEditorMode('visual')
+    setCodeText('')
+    setCodeParseError(null)
+    setShowJson(false)
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!merchantId) { setSubmitError('Set a Merchant ID first.'); return }
@@ -1118,14 +1115,16 @@ export function EuclidRulesPage() {
     setSubmitError(null)
     setCreatedId(null)
     try {
+      const nextRuleName = ruleName.trim()
       const result = await apiPost<RoutingAlgorithm>('/routing/create', {
-        name: ruleName.trim(),
+        name: nextRuleName,
         description: ruleDesc,
         created_by: merchantId,
         algorithm_for: 'payment',
         algorithm: { type: 'advanced', data: algorithmData },
       })
       setCreatedId(result.rule_id ?? result.id)
+      resetConfigurator()
       mutateAlgorithms()
     } catch (err) {
       setSubmitError(String(err))
@@ -1522,8 +1521,10 @@ function switchToCode() {
 
                 <ErrorMessage error={submitError} />
                 {createdId && (
-                  <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-3 py-2 text-sm text-emerald-400 flex items-center justify-between">
-                    <span>Rule created (ID: {createdId})</span>
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-200">
+                    <span className="min-w-0">
+                      Rule created: <span className="font-mono">{createdId}</span>
+                    </span>
                     <Button type="button" size="sm" onClick={() => handleActivate(createdId)} disabled={activating}>
                       Activate Now
                     </Button>
@@ -1548,7 +1549,7 @@ function switchToCode() {
                 <h2 className="text-sm font-semibold text-slate-800">JSON Preview</h2>
               </CardHeader>
               <CardBody>
-                <pre className="text-xs text-slate-600 overflow-auto max-h-64 bg-[#07070b] rounded-lg p-4 font-mono border border-slate-200 dark:border-[#1c1c24]">
+                <pre className="max-h-64 overflow-auto rounded-lg border border-slate-200/80 bg-slate-50/90 p-4 font-mono text-xs leading-6 text-slate-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.75),0_16px_30px_-28px_rgba(15,23,42,0.18)] dark:border-[#2a303a] dark:bg-[#0b1017] dark:text-[#d8e1ef] dark:shadow-none">
                   {JSON.stringify(
                     {
                       name: ruleName,

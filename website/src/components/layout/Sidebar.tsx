@@ -25,6 +25,7 @@ import {
   getStoredThemePreference,
   persistThemePreference,
 } from '../../lib/theme'
+import { CopyButton } from '../ui/CopyButton'
 
 export function Sidebar() {
   const location = useLocation()
@@ -168,9 +169,17 @@ export function Sidebar() {
                 {user?.email || 'Signed-in user'}
               </p>
               {user?.merchantId ? (
-                <p className="mt-1 truncate text-xs text-slate-500 dark:text-[#8a8a93]">
-                  {user.merchantId}
-                </p>
+                <div className="mt-1 flex items-center gap-2">
+                  <p className="min-w-0 flex-1 truncate text-xs text-slate-500 dark:text-[#8a8a93]">
+                    {user.merchantId}
+                  </p>
+                  <CopyButton
+                    text={user.merchantId}
+                    label="Copy merchant ID"
+                    size={13}
+                    className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:text-[#6d768a] dark:hover:bg-[#151b24] dark:hover:text-white"
+                  />
+                </div>
               ) : null}
             </div>
             <button

@@ -8,6 +8,7 @@ import { ErrorMessage } from '../ui/ErrorMessage'
 import { Spinner } from '../ui/Spinner'
 import { useMerchantStore } from '../../store/merchantStore'
 import { apiPost } from '../../lib/api'
+import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
 import { RoutingAlgorithm } from '../../types/api'
 import { Plus, Trash2, Eye, PowerOff } from 'lucide-react'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
@@ -19,6 +20,13 @@ import { VolumeSplitGatewayFormEntry } from '../../features/routing/volumeSplit/
 const COLORS = ['#0069ED', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
 
 function makeId() { return Math.random().toString(36).slice(2) }
+
+function createInitialGateways(): VolumeSplitGatewayFormEntry[] {
+  return [
+    { id: makeId(), gatewayName: '', gatewayId: '', split: 50 },
+    { id: makeId(), gatewayName: '', gatewayId: '', split: 50 },
+  ]
+}
 
 function clampSplit(value: number) {
   if (!Number.isFinite(value)) return 0
@@ -64,14 +72,12 @@ export function VolumeSplitPage() {
     return t && t !== 'volume_split'
   })
 
-  const [gateways, setGateways] = useState<VolumeSplitGatewayFormEntry[]>([
-    { id: makeId(), gatewayName: '', gatewayId: '', split: 50 },
-    { id: makeId(), gatewayName: '', gatewayId: '', split: 50 },
-  ])
+  const [gateways, setGateways] = useState<VolumeSplitGatewayFormEntry[]>(() => createInitialGateways())
   const [ruleName, setRuleName] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [createdId, setCreatedId] = useState<string | null>(null)
   const [showCurrentConfig, setShowCurrentConfig] = useState(false)
   const [expandedRuleIds, setExpandedRuleIds] = useState<Set<string>>(new Set())
   const [deactivatingRuleId, setDeactivatingRuleId] = useState<string | null>(null)
@@ -121,20 +127,19 @@ export function VolumeSplitPage() {
     const validationError = validateVolumeSplitRule({ ruleName, gateways })
     if (validationError) return setError(validationError)
 
-    setSaving(true); setError(null); setSuccess(null)
+    setSaving(true); setError(null); setSuccess(null); setCreatedId(null)
     try {
+      const nextRuleName = ruleName.trim()
       const payload = toVolumeSplitCreatePayload({ ruleName, gateways }, merchantId)
-      await apiPost('/routing/create', payload)
+      const result = await apiPost<RoutingAlgorithm>('/routing/create', payload)
       await Promise.all([
         mutateActive(),
         mutateCache(['routing-list', merchantId]),
       ])
-      setSuccess(`Rule "${ruleName}" created successfully. Find it in the list below to activate.`)
+      setCreatedId(result.rule_id ?? result.id)
+      setSuccess(`Rule "${nextRuleName}" created successfully. Configurator reset.`)
       setRuleName('')
-      setGateways([
-        { id: makeId(), gatewayName: '', gatewayId: '', split: 50 },
-        { id: makeId(), gatewayName: '', gatewayId: '', split: 50 },
-      ])
+      setGateways(createInitialGateways())
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to create rule')
     } finally {
@@ -144,6 +149,8 @@ export function VolumeSplitPage() {
 
   async function handleActivate(ruleId: string) {
     if (!merchantId) return
+    setSuccess(null)
+    setCreatedId(null)
     if (activeRuleBased) {
       setPendingActivateId(ruleId)
       return
@@ -155,6 +162,7 @@ export function VolumeSplitPage() {
     try {
       setError(null)
       setSuccess(null)
+      setCreatedId(null)
       await apiPost('/routing/activate', { created_by: merchantId, routing_algorithm_id: ruleId })
       await Promise.all([
         mutateActive(),
@@ -175,6 +183,7 @@ export function VolumeSplitPage() {
     setDeactivatingRuleId(ruleId)
     setError(null)
     setSuccess(null)
+    setCreatedId(null)
     try {
       await apiPost('/routing/deactivate', { created_by: merchantId, routing_algorithm_id: ruleId })
       await Promise.all([
@@ -274,7 +283,12 @@ export function VolumeSplitPage() {
                       <Cell key={i} fill={COLORS[i % COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip formatter={(v) => `${v}%`} contentStyle={{ backgroundColor: '#0d0d12', border: '1px solid #1c1c24', borderRadius: '8px', color: '#e8e8f4' }} />
+                  <Tooltip
+                    formatter={(v) => `${v}%`}
+                    contentStyle={CHART_TOOLTIP_STYLE}
+                    labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                    itemStyle={CHART_TOOLTIP_ITEM_STYLE}
+                  />
                   <Legend wrapperStyle={{ color: '#8e8ea0' }} />
                 </PieChart>
               </ResponsiveContainer>
@@ -388,7 +402,18 @@ export function VolumeSplitPage() {
             </div>
           )}
           <ErrorMessage error={error} />
-          {success && <p className="text-sm text-emerald-400">{success}</p>}
+          {success && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-200">
+              <span className="min-w-0">
+                {createdId ? <>Rule created: <span className="font-mono">{createdId}</span></> : success}
+              </span>
+              {createdId ? (
+                <Button type="button" size="sm" onClick={() => handleActivate(createdId)}>
+                  Activate Now
+                </Button>
+              ) : null}
+            </div>
+          )}
 
           <Button onClick={handleCreate} disabled={saving || !merchantId}>
             {saving ? <><Spinner size={14} /> Creating…</> : 'Create Rule'}

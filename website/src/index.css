@@ -8,10 +8,20 @@
 
   html {
     color-scheme: light;
+    --chart-tooltip-bg: rgba(248, 250, 252, 0.98);
+    --chart-tooltip-border: #cbd5e1;
+    --chart-tooltip-label: #0f172a;
+    --chart-tooltip-text: #334155;
+    --chart-tooltip-shadow: 0 18px 44px -24px rgba(15, 23, 42, 0.42);
   }
 
   html.dark {
     color-scheme: dark;
+    --chart-tooltip-bg: #0d0d12;
+    --chart-tooltip-border: #1c1c24;
+    --chart-tooltip-label: #f8fafc;
+    --chart-tooltip-text: #e2e8f0;
+    --chart-tooltip-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
   }
 
   html,
@@ -20,6 +30,11 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     @apply bg-[#ffffff] text-slate-800 dark:bg-[#000000] dark:text-[#f4f4f5] transition-colors duration-300;
+  }
+
+  #root {
+    min-width: 0;
+    overflow-wrap: break-word;
   }
 
   /* Fallback text colors for robust contrast when not overridden */

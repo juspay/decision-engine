@@ -68,14 +68,85 @@ interface SRConfigResponse {
   }
 }
 
+function CurrentConfigDetails({ config }: { config: SRConfigResponse['config'] }) {
+  return (
+    <div className="text-xs text-slate-600 dark:text-[#b2bdd1] space-y-4">
+      <div className="border-b border-slate-200 pb-3 dark:border-[#222226]">
+        <h3 className="font-medium text-slate-700 mb-2 dark:text-slate-200">Default Settings</h3>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+          <div>
+            <span className="text-slate-500">Bucket Size:</span>
+            <p className="font-medium">{config.data.defaultBucketSize}</p>
+          </div>
+          <div>
+            <span className="text-slate-500">Success Rate:</span>
+            <p className="font-medium">{config.data.defaultSuccessRate ?? 'Not set'}</p>
+          </div>
+          <div>
+            <span className="text-slate-500">Hedging %:</span>
+            <p className="font-medium">{config.data.defaultHedgingPercent ?? 'Not set'}</p>
+          </div>
+          <div>
+            <span className="text-slate-500">Latency Threshold:</span>
+            <p className="font-medium">{config.data.defaultLatencyThreshold ?? 'Not set'} ms</p>
+          </div>
+        </div>
+      </div>
+
+      {config.data.subLevelInputConfig && config.data.subLevelInputConfig.length > 0 ? (
+        <div>
+          <h3 className="font-medium text-slate-700 mb-2 dark:text-slate-200">Sub-Level Configurations</h3>
+          <div className="space-y-2">
+            {config.data.subLevelInputConfig.map((subConfig, idx) => (
+              <div key={idx} className="bg-slate-50 dark:bg-[#151518] rounded-lg p-3">
+                <div className="grid grid-cols-2 gap-2 text-xs md:grid-cols-5">
+                  <div>
+                    <span className="text-slate-500">Payment Type:</span>
+                    <p className="font-medium capitalize">{subConfig.paymentMethodType}</p>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Payment Method:</span>
+                    <p className="font-medium">{subConfig.paymentMethod}</p>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Bucket Size:</span>
+                    <p className="font-medium">{subConfig.bucketSize}</p>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Hedging %:</span>
+                    <p className="font-medium">{subConfig.hedgingPercent ?? 'Default'}</p>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Latency Threshold:</span>
+                    <p className="font-medium">{subConfig.latencyThreshold ?? 'Default'} ms</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="border-t border-slate-200 pt-3 dark:border-[#222226]">
+        <h3 className="font-medium text-slate-700 mb-2 dark:text-slate-200">Raw Configuration (JSON)</h3>
+        <pre className="max-h-64 overflow-auto rounded-lg border border-slate-200/80 bg-slate-50/90 p-3 font-mono text-xs leading-6 text-slate-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.75),0_16px_30px_-28px_rgba(15,23,42,0.18)] dark:border-[#2a303a] dark:bg-[#0b1017] dark:text-[#d8e1ef] dark:shadow-none">
+          {JSON.stringify(config, null, 2)}
+        </pre>
+      </div>
+    </div>
+  )
+}
+
 export function SRRoutingPage() {
   const { merchantId } = useMerchantStore()
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState(false)
   const [showCurrentConfig, setShowCurrentConfig] = useState(false)
+  const [showSubLevelOverrides, setShowSubLevelOverrides] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
 
   const { data: existing, isLoading, mutate } = useSWR<SRConfigResponse>(
     merchantId ? ['rule-sr', merchantId] : null,
@@ -105,18 +176,31 @@ export function SRRoutingPage() {
   useEffect(() => {
     if (existing?.config?.data) {
       const d = existing.config.data
+      const subLevelRows = d.subLevelInputConfig ?? []
       reset({
         defaultBucketSize: d.defaultBucketSize ?? 200,
         defaultSuccessRate: d.defaultSuccessRate ?? 0.5,
         defaultLatencyThreshold: d.defaultLatencyThreshold ?? null,
         defaultHedgingPercent: d.defaultHedgingPercent ?? null,
-        subLevelInputConfig: d.subLevelInputConfig ?? [],
+        subLevelInputConfig: subLevelRows,
       })
+      setShowSubLevelOverrides(subLevelRows.length > 0)
     }
   }, [existing, reset])
 
   const { fields, append, remove } = useFieldArray({ control, name: 'subLevelInputConfig' })
   const watchedRows = watch('subLevelInputConfig')
+  const subLevelOverridesOpen = showSubLevelOverrides || fields.length > 0
+
+  function addSubLevelOverride() {
+    setShowSubLevelOverrides(true)
+    append({ paymentMethodType: 'card', paymentMethod: 'credit', bucketSize: 20, hedgingPercent: null, latencyThreshold: null })
+  }
+
+  function removeSubLevelOverride(index: number) {
+    remove(index)
+    if (fields.length <= 1) setShowSubLevelOverrides(false)
+  }
 
   async function ensureMerchantExists() {
     try {
@@ -150,6 +234,7 @@ export function SRRoutingPage() {
           },
         },
       })
+      setLastSavedAt(new Date().toISOString())
       setSaveSuccess(true)
       mutate()
     } catch (err: unknown) {
@@ -164,6 +249,7 @@ export function SRRoutingPage() {
     setDeleting(true); setDeleteError(null)
     try {
       await apiPost('/rule/delete', { merchant_id: merchantId, algorithm: 'successRate' })
+      setLastSavedAt(null)
       mutate(undefined, { revalidate: false })
     } catch (err: unknown) {
       setDeleteError(err instanceof Error ? err.message : String(err))
@@ -171,6 +257,10 @@ export function SRRoutingPage() {
       setDeleting(false)
     }
   }
+
+  const lastModifiedAt = existing?.modified_at ?? lastSavedAt
+  const lastModifiedDate = lastModifiedAt ? new Date(lastModifiedAt) : null
+  const hasLastModified = Boolean(lastModifiedDate && !Number.isNaN(lastModifiedDate.getTime()))
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -187,48 +277,65 @@ export function SRRoutingPage() {
       {/* Status Card */}
       {merchantId && !isLoading && (
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <h2 className="text-sm font-semibold text-slate-800">Configuration Status</h2>
+          <CardHeader className="flex flex-row items-center justify-between gap-4">
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold text-slate-800 dark:text-white">
+                {existing?.config?.data ? 'Current Active Configuration' : 'Configuration Status'}
+              </h2>
               <p className="text-xs text-slate-500 mt-0.5">
                 {existing?.config?.data
-                  ? 'Success Rate routing is configured and active'
+                  ? (
+                    <>
+                      Success Rate routing is configured and active
+                      {hasLastModified && lastModifiedDate ? (
+                        <span className="ml-1">· Last saved {lastModifiedDate.toLocaleString()}</span>
+                      ) : null}
+                    </>
+                  )
                   : 'No Success Rate configuration found'}
               </p>
             </div>
-            <Badge variant={existing?.config?.data ? 'green' : 'gray'}>
-              {existing?.config?.data ? 'Active' : 'Not Configured'}
-            </Badge>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Badge variant={existing?.config?.data ? 'green' : 'gray'}>
+                {existing?.config?.data ? 'Active' : 'Not Configured'}
+              </Badge>
+              {existing?.config?.data ? (
+                <>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowCurrentConfig(!showCurrentConfig)}
+                  >
+                    <Eye size={14} className="mr-1" />
+                    {showCurrentConfig ? 'Hide' : 'View'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      if (confirm('Are you sure you want to clear the Success Rate configuration? This will disable SR-based routing.')) {
+                        handleDelete()
+                      }
+                    }}
+                    disabled={deleting}
+                  >
+                    <Trash2 size={14} className="mr-1" />
+                    {deleting ? 'Clearing...' : 'Clear Configuration'}
+                  </Button>
+                </>
+              ) : null}
+            </div>
           </CardHeader>
-          {existing?.config?.data && (
+          {existing?.config?.data && (deleteError || showCurrentConfig) && (
             <CardBody className="border-t border-slate-100 dark:border-[#222226]">
-              <div className="flex items-center justify-between text-xs text-slate-600">
-                <div>
-                  <span className="text-slate-500">Last Modified:</span>
-                  <span className="ml-1 font-medium">
-                    {existing.modified_at
-                      ? new Date(existing.modified_at).toLocaleString()
-                      : 'Unknown'}
-                  </span>
-                </div>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => {
-                    if (confirm('Are you sure you want to clear the Success Rate configuration? This will disable SR-based routing.')) {
-                      handleDelete()
-                    }
-                  }}
-                  disabled={deleting}
-                >
-                  <Trash2 size={14} className="mr-1" />
-                  {deleting ? 'Clearing...' : 'Clear Configuration'}
-                </Button>
-              </div>
               {deleteError && (
-                <p className="text-xs text-red-500 mt-2">{deleteError}</p>
+                <p className={`text-xs text-red-500 ${showCurrentConfig ? 'mb-3' : ''}`}>{deleteError}</p>
               )}
+              {showCurrentConfig ? (
+                <CurrentConfigDetails config={existing.config} />
+              ) : null}
             </CardBody>
           )}
         </Card>
@@ -308,12 +415,13 @@ export function SRRoutingPage() {
                 type="button"
                 variant="secondary"
                 size="sm"
-                onClick={() => append({ paymentMethodType: 'card', paymentMethod: 'credit', bucketSize: 20, hedgingPercent: null, latencyThreshold: null })}
+                onClick={addSubLevelOverride}
               >
                 <Plus size={14} /> Add Level
               </Button>
             </CardHeader>
-            <CardBody className="overflow-x-auto p-0">
+            {subLevelOverridesOpen ? (
+              <CardBody className="overflow-x-auto p-0">
               {fields.length ? (
                 <table className="w-full text-sm">
                   <thead>
@@ -377,7 +485,7 @@ export function SRRoutingPage() {
                             />
                           </td>
                           <td className="px-4 py-2">
-                            <button type="button" onClick={() => remove(idx)} className="text-slate-400 hover:text-red-500">
+                            <button type="button" onClick={() => removeSubLevelOverride(idx)} className="text-slate-400 hover:text-red-500">
                               <Trash2 size={14} />
                             </button>
                           </td>
@@ -391,7 +499,8 @@ export function SRRoutingPage() {
                   No sub-level overrides configured. The default row above is the only active configuration.
                 </div>
               )}
-            </CardBody>
+              </CardBody>
+            ) : null}
           </Card>
 
           <ErrorMessage error={saveError} />
@@ -399,95 +508,6 @@ export function SRRoutingPage() {
             <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-4 py-3 text-sm text-emerald-400">
               Configuration saved successfully.
             </div>
-          )}
-
-          {/* View Current Configuration Section */}
-          {existing?.config?.data && (
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
-                <h2 className="text-sm font-semibold text-slate-800">Current Active Configuration</h2>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowCurrentConfig(!showCurrentConfig)}
-                >
-                  <Eye size={14} className="mr-1" />
-                  {showCurrentConfig ? 'Hide' : 'View'}
-                </Button>
-              </CardHeader>
-              {showCurrentConfig && (
-                <CardBody>
-                  <div className="text-xs text-slate-600 space-y-4">
-                    {/* Default Config */}
-                    <div className="border-b border-slate-200 dark:border-[#222226] pb-3">
-                      <h3 className="font-medium text-slate-700 mb-2">Default Settings</h3>
-                      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                        <div>
-                          <span className="text-slate-500">Bucket Size:</span>
-                          <p className="font-medium">{existing.config.data.defaultBucketSize}</p>
-                        </div>
-                        <div>
-                          <span className="text-slate-500">Success Rate:</span>
-                          <p className="font-medium">{existing.config.data.defaultSuccessRate ?? 'Not set'}</p>
-                        </div>
-                        <div>
-                          <span className="text-slate-500">Hedging %:</span>
-                          <p className="font-medium">{existing.config.data.defaultHedgingPercent ?? 'Not set'}</p>
-                        </div>
-                        <div>
-                          <span className="text-slate-500">Latency Threshold:</span>
-                          <p className="font-medium">{existing.config.data.defaultLatencyThreshold ?? 'Not set'} ms</p>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Sub-level Configs */}
-                    {existing.config.data.subLevelInputConfig && existing.config.data.subLevelInputConfig.length > 0 && (
-                      <div>
-                        <h3 className="font-medium text-slate-700 mb-2">Sub-Level Configurations</h3>
-                        <div className="space-y-2">
-                          {existing.config.data.subLevelInputConfig.map((config, idx) => (
-                            <div key={idx} className="bg-slate-50 dark:bg-[#151518] rounded-lg p-3">
-                              <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
-                                <div>
-                                  <span className="text-slate-500">Payment Type:</span>
-                                  <p className="font-medium capitalize">{config.paymentMethodType}</p>
-                                </div>
-                                <div>
-                                  <span className="text-slate-500">Payment Method:</span>
-                                  <p className="font-medium">{config.paymentMethod}</p>
-                                </div>
-                                <div>
-                                  <span className="text-slate-500">Bucket Size:</span>
-                                  <p className="font-medium">{config.bucketSize}</p>
-                                </div>
-                                <div>
-                                  <span className="text-slate-500">Hedging %:</span>
-                                  <p className="font-medium">{config.hedgingPercent ?? 'Default'}</p>
-                                </div>
-                                <div>
-                                  <span className="text-slate-500">Latency Threshold:</span>
-                                  <p className="font-medium">{config.latencyThreshold ?? 'Default'} ms</p>
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Raw JSON */}
-                    <div className="border-t border-gray-200 pt-3">
-                      <h3 className="font-medium text-slate-700 mb-2">Raw Configuration (JSON)</h3>
-                      <pre className="bg-slate-900 dark:bg-[#0f0f11] text-slate-100 border border-transparent dark:border-[#222226] rounded-lg p-3 text-xs overflow-auto max-h-64">
-                        {JSON.stringify(existing.config, null, 2)}
-                      </pre>
-                    </div>
-                  </div>
-                </CardBody>
-              )}
-            </Card>
           )}
 
           <Button type="submit" disabled={saving || !merchantId}>
