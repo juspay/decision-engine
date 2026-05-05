@@ -120,7 +120,6 @@ pub struct EmailConfig {
     /// SMTP settings — required when active_email_client = "smtp"
     pub smtp: Option<SmtpConfig>,
     /// AWS SES settings — required when active_email_client = "aws_ses"
-    #[cfg(feature = "email-aws-ses")]
     pub aws_ses: Option<AwsSesEmailConfig>,
 }
 
@@ -131,7 +130,6 @@ impl Default for EmailConfig {
             base_url: "http://localhost:8080".to_string(),
             active_email_client: EmailClientChoice::default(),
             smtp: None,
-            #[cfg(feature = "email-aws-ses")]
             aws_ses: None,
         }
     }
@@ -162,7 +160,6 @@ impl EmailConfig {
                     self.sender_email.clone(),
                 )?)
             }
-            #[cfg(feature = "email-aws-ses")]
             EmailClientChoice::AwsSes => {
                 let ses_config = self
                     .aws_ses
@@ -192,7 +189,6 @@ pub enum EmailClientChoice {
     /// Send via SMTP (works with any SMTP-compatible service)
     Smtp,
     /// Send via AWS Simple Email Service v2
-    #[cfg(feature = "email-aws-ses")]
     AwsSes,
 }
 
@@ -225,7 +221,6 @@ pub enum SmtpTls {
 }
 
 /// AWS SES v2 client configuration
-#[cfg(feature = "email-aws-ses")]
 #[derive(Clone, serde::Deserialize, Debug)]
 pub struct AwsSesEmailConfig {
     /// AWS region where SES is configured (e.g. "us-east-1")

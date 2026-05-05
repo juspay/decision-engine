@@ -69,26 +69,28 @@ impl GlobalAppState {
         )?;
 
         if global_config.email.is_active() {
-            tokio::time::timeout(
-                Duration::from_secs(10),
-                email_client.health_check(),
-            )
-            .await
-            .map_err(|_| {
-                error_stack::report!(
-                    crate::error::ConfigurationError::InvalidConfigurationValueError(
-                        "email health check timed out after 10s — email backend unreachable or not running. \
-                         Fix [email] host/port/credentials in config and ensure the server is up, \
-                         or set active_email_client = \"no_email_client\" to disable email sending."
-                            .to_string()
-                    )
-                )
-            })?
-            .change_context(crate::error::ConfigurationError::InvalidConfigurationValueError(
-                "email backend is unreachable — fix [email.smtp] / [email.aws_ses] in config, \
-                 or set active_email_client = \"no_email_client\" to disable email sending."
-                    .to_string(),
-            ))?;
+            let health_result =
+                tokio::time::timeout(Duration::from_secs(10), email_client.health_check()).await;
+
+            match health_result {
+                Err(_) => {
+                    tracing::warn!(
+                        "Email health check timed out after 10s — \
+                         email backend may be unreachable. \
+                         Fix [email.smtp] / [email.aws_ses] in config, \
+                         or set active_email_client = \"no_email_client\" to disable."
+                    );
+                }
+                Ok(Err(e)) => {
+                    tracing::warn!(
+                        error = %e,
+                        "Email backend is unreachable — \
+                         fix [email.smtp] / [email.aws_ses] in config, \
+                         or set active_email_client = \"no_email_client\" to disable."
+                    );
+                }
+                Ok(Ok(())) => {}
+            }
         }
 
         Ok(Arc::new(Self {
