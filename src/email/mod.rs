@@ -1,4 +1,3 @@
-#[cfg(feature = "email-aws-ses")]
 pub mod aws_ses;
 pub mod no_email;
 pub mod smtp;
