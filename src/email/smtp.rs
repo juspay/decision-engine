@@ -43,6 +43,15 @@ impl SmtpEmailClient {
             .timeout(Some(Duration::from_secs(5)))
             .build();
 
+        // Validate sender_email at construction time so misconfiguration is
+        // caught at startup rather than on the first send attempt.
+        sender_email
+            .parse::<lettre::message::Mailbox>()
+            .change_context(EmailError::BuildFailed)
+            .attach_printable_lazy(|| {
+                format!("invalid sender_email address: {:?}", sender_email)
+            })?;
+
         Ok(Self {
             mailer,
             sender_email,

@@ -12,14 +12,13 @@ export function VerifyEmailPage() {
   const [status, setStatus] = useState<Status>('verifying')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isDark, setIsDark] = useState(() => getResolvedThemePreference() === 'dark')
-  const didRun = useRef(false)
+  const lastVerifiedToken = useRef<string | null>(null)
   const assetBaseUrl = import.meta.env.BASE_URL
 
   useEffect(() => {
-    if (didRun.current) return
-    didRun.current = true
-
     const token = searchParams.get('token')
+    if (token === lastVerifiedToken.current) return
+    lastVerifiedToken.current = token
 
     if (!token) {
       setStatus('error')

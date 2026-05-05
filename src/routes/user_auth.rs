@@ -908,7 +908,7 @@ pub async fn verify_email(
         .redis_conn
         .get_key_string(&redis_key)
         .await
-        .change_context(UserAuthError::InvalidVerificationToken)?;
+        .change_context(UserAuthError::StorageError)?;
 
     if user_id.is_empty() {
         return Err(error::ContainerError::from(

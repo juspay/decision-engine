@@ -182,7 +182,10 @@ export function AuthPage() {
 
       if ('email_verification_required' in res && res.email_verification_required) {
         if (normalizedMerchantName) {
-          localStorage.setItem('pending_merchant_name', normalizedMerchantName)
+          localStorage.setItem(
+            'pending_merchant_name',
+            JSON.stringify({ email, merchant_name: normalizedMerchantName }),
+          )
         }
         navigate('/login', {
           replace: true,
@@ -201,7 +204,9 @@ export function AuthPage() {
       )
       if (authRes.merchant_id) setMerchantId(authRes.merchant_id)
 
-      const pendingMerchantName = localStorage.getItem('pending_merchant_name') ?? ''
+      const pendingRaw = localStorage.getItem('pending_merchant_name')
+      const pending = pendingRaw ? (() => { try { return JSON.parse(pendingRaw) } catch { return null } })() : null
+      const pendingMerchantName = (pending?.email === authRes.email ? pending.merchant_name : '') ?? ''
       const merchantNameToUse = normalizedMerchantName || pendingMerchantName
 
       if (merchantNameToUse && !authRes.merchant_id) {

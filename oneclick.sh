@@ -243,7 +243,7 @@ run_infra_checklist() {
     print_service_status "Redis (${REDIS_HOST}:${REDIS_PORT})" "$REDIS_READY"
     print_service_status "Kafka (${KAFKA_HOST}:${KAFKA_PORT})" "$KAFKA_READY"
     print_service_status "ClickHouse (${CLICKHOUSE_HTTP_URL})" "$CLICKHOUSE_READY"
-    print_service_status "Mailpit SMTP (${MAILPIT_HOST}:${MAILPIT_UI_PORT})" "$MAILPIT_READY"
+    print_service_status "Mailpit UI (${MAILPIT_HOST}:${MAILPIT_UI_PORT}) / SMTP :1025" "$MAILPIT_READY"
     echo ""
 }
 

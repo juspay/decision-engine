@@ -68,7 +68,7 @@ impl GlobalAppState {
             crate::error::ConfigurationError::InvalidConfigurationValueError("email".to_string()),
         )?;
 
-        if global_config.user_auth.email_verification_enabled {
+        if global_config.email.is_active() {
             tokio::time::timeout(
                 Duration::from_secs(10),
                 email_client.health_check(),
@@ -77,16 +77,16 @@ impl GlobalAppState {
             .map_err(|_| {
                 error_stack::report!(
                     crate::error::ConfigurationError::InvalidConfigurationValueError(
-                        "email health check timed out after 10s — SMTP host unreachable or not running. \
-                         Fix [email.smtp] host/port in config, ensure the server is up, \
-                         or set email_verification_enabled = false"
+                        "email health check timed out after 10s — email backend unreachable or not running. \
+                         Fix [email] host/port/credentials in config and ensure the server is up, \
+                         or set active_email_client = \"no_email_client\" to disable email sending."
                             .to_string()
                     )
                 )
             })?
             .change_context(crate::error::ConfigurationError::InvalidConfigurationValueError(
                 "email backend is unreachable — fix [email.smtp] / [email.aws_ses] in config, \
-                 or set email_verification_enabled = false"
+                 or set active_email_client = \"no_email_client\" to disable email sending."
                     .to_string(),
             ))?;
         }

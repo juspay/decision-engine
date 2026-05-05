@@ -74,8 +74,8 @@ fn log_startup_configuration(global_config: &open_router::config::GlobalConfig) 
         } else {
             logger::warn!(
                 "Email verification is ENABLED but active_email_client = \"no_email_client\" — \
-                 verification emails will not be delivered. Tokens are logged at INFO level so you \
-                 can verify manually via GET /auth/verify-email?token=<token>. \
+                 verification emails will not be delivered. The verification URL is logged at INFO \
+                 level by the no-email client so you can complete verification manually. \
                  Set active_email_client = \"smtp\" (or \"aws_ses\") for real delivery."
             );
         }

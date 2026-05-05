@@ -1,5 +1,13 @@
 use super::EmailMessage;
 
+fn escape_html(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#x27;")
+}
+
 pub struct MemberAddedTemplate {
     pub user_email: String,
     pub merchant_id: String,
@@ -8,6 +16,8 @@ pub struct MemberAddedTemplate {
 
 impl MemberAddedTemplate {
     pub fn into_message(self) -> EmailMessage {
+        let merchant = escape_html(&self.merchant_id);
+        let base_url = escape_html(&self.base_url);
         let html_body = format!(
             r#"<!DOCTYPE html>
 <html lang="en">
@@ -88,13 +98,14 @@ impl MemberAddedTemplate {
 }
 
 pub struct EmailVerificationTemplate {
+
     pub user_email: String,
     pub verification_url: String,
 }
 
 impl EmailVerificationTemplate {
     pub fn into_message(self) -> EmailMessage {
-        let url = &self.verification_url;
+        let url = escape_html(&self.verification_url);
         let html_body = format!(
             r#"<!DOCTYPE html>
 <html lang="en">
@@ -197,6 +208,10 @@ pub struct InviteUserTemplate {
 
 impl InviteUserTemplate {
     pub fn into_message(self) -> EmailMessage {
+        let merchant = escape_html(&self.merchant_id);
+        let email = escape_html(&self.user_email);
+        let password = escape_html(&self.temporary_password);
+        let base_url = escape_html(&self.base_url);
         let html_body = format!(
             r#"<!DOCTYPE html>
 <html lang="en">
@@ -232,7 +247,7 @@ impl InviteUserTemplate {
               </h1>
               <p style="margin:0 0 32px;font-size:15px;line-height:1.75;color:#475569;">
                 You&rsquo;ve been added to <strong style="color:#0f172a;">{merchant}</strong> on Juspay Decision Engine.
-                Use the credentials below to sign in. You&rsquo;ll be prompted to set a new password on your first login.
+                Use the credentials below to sign in, then change your password from your account settings.
               </p>
 
               <!-- Credentials card -->
@@ -271,7 +286,7 @@ impl InviteUserTemplate {
           <tr>
             <td style="background-color:#f8fafc;border-radius:0 0 16px 16px;padding:24px 48px;border:1px solid #e2e8f0;border-top:none;">
               <p style="margin:0 0 6px;font-size:12px;color:#94a3b8;line-height:1.65;">
-                For your security, please <strong style="color:#64748b;">change your password</strong> immediately after signing in.
+                For your security, please <strong style="color:#64748b;">change your password</strong> after signing in.
                 If you weren&rsquo;t expecting this invitation, contact your account administrator.
               </p>
               <p style="margin:10px 0 0;font-size:11px;color:#cbd5e1;">
