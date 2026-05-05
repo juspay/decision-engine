@@ -8,7 +8,11 @@ impl EmailClient for NoEmailClient {
         // Extract the verification URL from the body so developers can complete
         // email verification manually. Avoid logging the full HTML body for other
         // email types (e.g. invite emails) because it would expose temporary passwords.
-        let verification_url = if message.subject.to_lowercase().contains("confirm your email") {
+        let verification_url = if message
+            .subject
+            .to_lowercase()
+            .contains("confirm your email")
+        {
             extract_href_from_cta(&message.html_body)
         } else {
             None

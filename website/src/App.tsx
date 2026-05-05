@@ -15,6 +15,7 @@ import { OnboardingPage } from './pages/OnboardingPage'
 import { MembersPage } from './pages/MembersPage'
 import { ApiKeysPage } from './pages/ApiKeysPage'
 import { VerifyEmailPage } from './pages/VerifyEmailPage'
+import { AccountPage } from './pages/AccountPage'
 
 export default function App() {
   return (
@@ -36,6 +37,7 @@ export default function App() {
           <Route path="audit" element={<PaymentAuditPage />} />
           <Route path="members" element={<MembersPage />} />
           <Route path="api-keys" element={<ApiKeysPage />} />
+          <Route path="account" element={<AccountPage />} />
           <Route path="*" element={<Navigate to="." replace />} />
         </Route>
       </Route>

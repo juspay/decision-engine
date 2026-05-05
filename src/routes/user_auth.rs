@@ -478,6 +478,78 @@ pub async fn switch_merchant(
 }
 
 #[derive(Debug, Deserialize)]
+pub struct ChangePasswordRequest {
+    pub current_password: String,
+    pub new_password: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ChangePasswordResponse {
+    pub message: String,
+}
+
+#[axum::debug_handler]
+pub async fn change_password(
+    headers: HeaderMap,
+    Json(payload): Json<ChangePasswordRequest>,
+) -> Result<Json<ChangePasswordResponse>, error::ContainerError<UserAuthError>> {
+    let token = extract_bearer_token(&headers)?;
+    let global_config = APP_STATE
+        .get()
+        .map(|s| s.global_config.clone())
+        .ok_or(UserAuthError::StorageError)?;
+
+    let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
+
+    let app_state = get_tenant_app_state().await;
+
+    let mut users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
+        &app_state.db,
+        dsl::user_id.eq(claims.sub.clone()),
+    )
+    .await
+    .change_error(UserAuthError::StorageError)?;
+
+    let user = users.pop().ok_or(UserAuthError::UserNotFound)?;
+
+    if !auth::verify_password(&payload.current_password, &user.password_hash)
+        .change_context(UserAuthError::StorageError)?
+    {
+        return Err(error::ContainerError::from(UserAuthError::InvalidPassword));
+    }
+
+    auth::validate_password_strength(&payload.new_password)
+        .change_context(UserAuthError::WeakPassword)?;
+
+    let new_hash = auth::hash_password(&payload.new_password)
+        .change_context(UserAuthError::PasswordHashingFailed)?;
+
+    let conn = app_state
+        .db
+        .get_conn()
+        .await
+        .change_error(UserAuthError::StorageError)?;
+
+    crate::generics::generic_update_if_present::<
+        <User as HasTable>::Table,
+        crate::storage::types::UserPasswordUpdate,
+        _,
+    >(
+        &conn,
+        dsl::user_id.eq(claims.sub),
+        crate::storage::types::UserPasswordUpdate {
+            password_hash: new_hash,
+        },
+    )
+    .await
+    .change_context(UserAuthError::StorageError)?;
+
+    Ok(Json(ChangePasswordResponse {
+        message: "Password updated successfully.".to_string(),
+    }))
+}
+
+#[derive(Debug, Deserialize)]
 pub struct InviteMemberRequest {
     pub email: String,
     pub role: Option<String>,

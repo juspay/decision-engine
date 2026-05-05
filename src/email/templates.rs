@@ -98,7 +98,6 @@ impl MemberAddedTemplate {
 }
 
 pub struct EmailVerificationTemplate {
-
     pub user_email: String,
     pub verification_url: String,
 }

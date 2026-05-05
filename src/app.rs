@@ -454,7 +454,11 @@ where
             "/merchant/members/invite",
             post(routes::user_auth::invite_member),
         )
-        .route("/auth/verify-email", get(routes::user_auth::verify_email));
+        .route("/auth/verify-email", get(routes::user_auth::verify_email))
+        .route(
+            "/auth/change-password",
+            post(routes::user_auth::change_password),
+        );
 
     let router = axum::Router::new()
         .merge(protected_router)
