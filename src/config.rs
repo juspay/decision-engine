@@ -230,6 +230,10 @@ pub enum SmtpTls {
 pub struct AwsSesEmailConfig {
     /// AWS region where SES is configured (e.g. "us-east-1")
     pub region: String,
+    /// IAM role ARN to assume via STS before sending emails (cross-account use)
+    pub email_role_arn: Option<String>,
+    /// STS session name used when assuming the role
+    pub sts_role_session_name: Option<String>,
 }
 
 #[derive(Clone, Debug)]

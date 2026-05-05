@@ -16,14 +16,37 @@ impl AwsSesEmailClient {
         config: &AwsSesEmailConfig,
         sender_email: String,
     ) -> error_stack::Result<Self, EmailError> {
-        let region = aws_config::meta::region::RegionProviderChain::first_try(
-            aws_sdk_sesv2::config::Region::new(config.region.clone()),
-        );
+        let region = aws_sdk_sesv2::config::Region::new(config.region.clone());
 
-        let aws_config = aws_config::defaults(BehaviorVersion::latest())
-            .region(region)
-            .load()
-            .await;
+        let aws_config = if let (Some(role_arn), Some(session_name)) = (
+            &config.email_role_arn,
+            &config.sts_role_session_name,
+        ) {
+            // Load a base config to build the STS client, then assume the target role.
+            // The resulting credentials are used for all SES calls (cross-account setup).
+            let base_config = aws_config::defaults(BehaviorVersion::latest())
+                .region(region.clone())
+                .load()
+                .await;
+
+            let assume_role_provider =
+                aws_config::sts::AssumeRoleProvider::builder(role_arn.as_str())
+                    .session_name(session_name.as_str())
+                    .configure(&base_config)
+                    .build()
+                    .await;
+
+            aws_config::defaults(BehaviorVersion::latest())
+                .region(region)
+                .credentials_provider(assume_role_provider)
+                .load()
+                .await
+        } else {
+            aws_config::defaults(BehaviorVersion::latest())
+                .region(region)
+                .load()
+                .await
+        };
 
         let client = aws_sdk_sesv2::Client::new(&aws_config);
 
