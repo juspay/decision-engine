@@ -69,11 +69,8 @@ impl GlobalAppState {
         )?;
 
         if global_config.email.is_active() {
-            let health_result = tokio::time::timeout(
-                Duration::from_secs(10),
-                email_client.health_check(),
-            )
-            .await;
+            let health_result =
+                tokio::time::timeout(Duration::from_secs(10), email_client.health_check()).await;
 
             match health_result {
                 Err(_) => {
