@@ -614,6 +614,26 @@ pub async fn invite_member(
 
     let app_state = get_tenant_app_state().await;
 
+    #[cfg(feature = "mysql")]
+    use crate::storage::schema::merchant_account::dsl as ma_dsl;
+    #[cfg(feature = "postgres")]
+    use crate::storage::schema_pg::merchant_account::dsl as ma_dsl;
+
+    let merchant_name = crate::generics::generic_find_all::<
+        <crate::storage::types::MerchantAccount as HasTable>::Table,
+        _,
+        crate::storage::types::MerchantAccount,
+    >(
+        &app_state.db,
+        ma_dsl::merchant_id.eq(Some(claims.merchant_id.clone())),
+    )
+    .await
+    .change_error(UserAuthError::StorageError)?
+    .into_iter()
+    .next()
+    .and_then(|m| m.merchant_name)
+    .unwrap_or_else(|| claims.merchant_id.clone());
+
     let existing_users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
         &app_state.db,
         dsl::email.eq(payload.email.clone()),
@@ -662,7 +682,7 @@ pub async fn invite_member(
 
             let email_msg = crate::email::templates::MemberAddedTemplate {
                 user_email: existing_user.email.clone(),
-                merchant_id: claims.merchant_id.clone(),
+                merchant_name: merchant_name.clone(),
                 base_url: email_config.base_url.clone(),
             }
             .into_message();
@@ -744,7 +764,7 @@ pub async fn invite_member(
 
             let email_msg = crate::email::templates::InviteUserTemplate {
                 user_email: payload.email.clone(),
-                merchant_id: claims.merchant_id.clone(),
+                merchant_name: merchant_name.clone(),
                 temporary_password: generated_password.clone(),
                 base_url: email_config.base_url.clone(),
             }

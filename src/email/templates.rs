@@ -10,13 +10,13 @@ fn escape_html(s: &str) -> String {
 
 pub struct MemberAddedTemplate {
     pub user_email: String,
-    pub merchant_id: String,
+    pub merchant_name: String,
     pub base_url: String,
 }
 
 impl MemberAddedTemplate {
     pub fn into_message(self) -> EmailMessage {
-        let merchant = escape_html(&self.merchant_id);
+        let merchant = escape_html(&self.merchant_name);
         let base_url = escape_html(&self.base_url);
         let html_body = format!(
             r#"<!DOCTYPE html>
@@ -90,7 +90,7 @@ impl MemberAddedTemplate {
             to: self.user_email,
             subject: format!(
                 "You've been added to {} on Decision Engine",
-                self.merchant_id
+                self.merchant_name
             ),
             html_body,
         }
@@ -200,14 +200,14 @@ impl EmailVerificationTemplate {
 
 pub struct InviteUserTemplate {
     pub user_email: String,
-    pub merchant_id: String,
+    pub merchant_name: String,
     pub temporary_password: String,
     pub base_url: String,
 }
 
 impl InviteUserTemplate {
     pub fn into_message(self) -> EmailMessage {
-        let merchant = escape_html(&self.merchant_id);
+        let merchant = escape_html(&self.merchant_name);
         let email = escape_html(&self.user_email);
         let password = escape_html(&self.temporary_password);
         let base_url = escape_html(&self.base_url);
@@ -310,7 +310,7 @@ impl InviteUserTemplate {
             to: self.user_email,
             subject: format!(
                 "You've been invited to join {} on Decision Engine",
-                self.merchant_id
+                self.merchant_name
             ),
             html_body,
         }
