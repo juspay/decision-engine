@@ -18,6 +18,7 @@ use std::{
     collections::{HashMap, HashSet},
     ops::{Deref, DerefMut},
     path::PathBuf,
+    sync::Arc,
 };
 
 #[derive(Clone, serde::Deserialize, Debug)]
@@ -54,6 +55,8 @@ pub struct GlobalConfig {
     pub user_auth: UserAuthConfig,
     #[serde(default)]
     pub admin_secret: AdminSecretConfig,
+    #[serde(default)]
+    pub email: EmailConfig,
 }
 
 #[derive(Clone, serde::Deserialize, Debug)]
@@ -102,6 +105,131 @@ impl Default for UserAuthConfig {
             email_verification_enabled: false,
         }
     }
+}
+
+/// Top-level email configuration block
+#[derive(Clone, serde::Deserialize, Debug)]
+#[serde(default)]
+pub struct EmailConfig {
+    /// From-address used in all outgoing emails
+    pub sender_email: String,
+    /// Public base URL of the application (used for verification links)
+    pub base_url: String,
+    /// Which email backend to use
+    pub active_email_client: EmailClientChoice,
+    /// SMTP settings — required when active_email_client = "smtp"
+    pub smtp: Option<SmtpConfig>,
+    /// AWS SES settings — required when active_email_client = "aws_ses"
+    #[cfg(feature = "email-aws-ses")]
+    pub aws_ses: Option<AwsSesEmailConfig>,
+}
+
+impl Default for EmailConfig {
+    fn default() -> Self {
+        Self {
+            sender_email: String::new(),
+            base_url: "http://localhost:8080".to_string(),
+            active_email_client: EmailClientChoice::default(),
+            smtp: None,
+            #[cfg(feature = "email-aws-ses")]
+            aws_ses: None,
+        }
+    }
+}
+
+impl EmailConfig {
+    /// Returns true if a real email backend is configured
+    pub fn is_active(&self) -> bool {
+        !matches!(self.active_email_client, EmailClientChoice::NoEmailClient)
+    }
+
+    /// Construct the email client from this config
+    pub async fn build_client(
+        &self,
+    ) -> error_stack::Result<crate::email::DynEmailClient, crate::email::EmailError> {
+        use crate::email::EmailError;
+        use error_stack::report;
+
+        let client: Arc<dyn crate::email::EmailClient> = match &self.active_email_client {
+            EmailClientChoice::NoEmailClient => Arc::new(crate::email::no_email::NoEmailClient),
+            EmailClientChoice::Smtp => {
+                let smtp_config = self
+                    .smtp
+                    .as_ref()
+                    .ok_or_else(|| report!(EmailError::MissingConfig))?;
+                Arc::new(crate::email::smtp::SmtpEmailClient::new(
+                    smtp_config,
+                    self.sender_email.clone(),
+                )?)
+            }
+            #[cfg(feature = "email-aws-ses")]
+            EmailClientChoice::AwsSes => {
+                let ses_config = self
+                    .aws_ses
+                    .as_ref()
+                    .ok_or_else(|| report!(EmailError::MissingConfig))?;
+                Arc::new(
+                    crate::email::aws_ses::AwsSesEmailClient::new(
+                        ses_config,
+                        self.sender_email.clone(),
+                    )
+                    .await?,
+                )
+            }
+        };
+
+        Ok(client)
+    }
+}
+
+/// Selects which email backend is active
+#[derive(Clone, serde::Deserialize, Debug, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum EmailClientChoice {
+    /// Emails are silently discarded — useful for development
+    #[default]
+    NoEmailClient,
+    /// Send via SMTP (works with any SMTP-compatible service)
+    Smtp,
+    /// Send via AWS Simple Email Service v2
+    #[cfg(feature = "email-aws-ses")]
+    AwsSes,
+}
+
+/// SMTP client configuration
+#[derive(Clone, serde::Deserialize, Debug)]
+pub struct SmtpConfig {
+    /// SMTP server hostname
+    pub host: String,
+    /// SMTP server port — defaults to 587 (STARTTLS) or 465 (TLS), 1025 (None)
+    pub port: Option<u16>,
+    /// SMTP auth username
+    pub username: String,
+    /// SMTP auth password
+    pub password: String,
+    /// TLS mode — use "none" for local dev (Mailpit), "starttls" for most production SMTP servers
+    #[serde(default)]
+    pub tls: SmtpTls,
+}
+
+#[derive(Clone, serde::Deserialize, Debug, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SmtpTls {
+    /// No TLS — plain SMTP. Use for local testing with Mailpit.
+    None,
+    /// Upgrade to TLS via STARTTLS after connecting. Standard for port 587.
+    #[default]
+    StartTls,
+    /// Implicit TLS from the first byte. Standard for port 465.
+    Tls,
+}
+
+/// AWS SES v2 client configuration
+#[cfg(feature = "email-aws-ses")]
+#[derive(Clone, serde::Deserialize, Debug)]
+pub struct AwsSesEmailConfig {
+    /// AWS region where SES is configured (e.g. "us-east-1")
+    pub region: String,
 }
 
 #[derive(Clone, Debug)]

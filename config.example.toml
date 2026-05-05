@@ -86,3 +86,26 @@ email_verification_enabled = false
 
 [admin_secret]
 secret = "test_admin"
+
+# Email configuration
+# active_email_client options: "no_email_client" | "smtp" | "aws_ses" (requires feature email-aws-ses)
+[email]
+sender_email = "noreply@example.com"
+base_url = "https://your-domain.example.com"
+active_email_client = "no_email_client"
+
+# SMTP backend — used when active_email_client = "smtp"
+# Works with any SMTP relay: Gmail, SendGrid, Mailgun, Postfix, etc.
+# [email.smtp]
+# host = "smtp.example.com"
+# port = 587          # optional — defaults to 1025 (none), 587 (starttls), 465 (tls)
+# username = "smtp-user"
+# password = "smtp-password"
+# tls = "starttls"   # "none" | "starttls" | "tls" — use "none" for Mailpit, "starttls" for production
+
+# AWS SES v2 backend — used when active_email_client = "aws_ses"
+# Requires the binary to be compiled with --features email-aws-ses
+# Credentials are resolved from the standard AWS credential chain
+# (env vars, IAM role, ~/.aws/credentials)
+# [email.aws_ses]
+# region = "us-east-1"

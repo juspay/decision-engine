@@ -420,10 +420,7 @@ impl RedisConnectionWrapper {
 
     #[cfg(not(feature = "redis_compression"))]
     pub async fn get_key_string(&self, key: &str) -> Result<String, errors::RedisError> {
-        self.conn
-            .get_key(key)
-            .await
-            .change_context(errors::RedisError::GetFailed)
+        self.get_key::<String>(key, "").await
     }
 
     pub async fn get_list_length(&self, key: &str) -> Result<usize, errors::RedisError> {

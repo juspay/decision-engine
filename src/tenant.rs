@@ -1,4 +1,5 @@
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 use std::{collections::HashSet, sync::Arc};
 
 use error_stack::ResultExt;
@@ -16,6 +17,7 @@ pub struct GlobalAppState {
     pub global_config: GlobalConfig,
     pub readiness_flag: Arc<AtomicBool>,
     pub analytics_runtime: Arc<AnalyticsRuntime>,
+    pub email_client: crate::email::DynEmailClient,
 }
 
 impl GlobalAppState {
@@ -62,6 +64,33 @@ impl GlobalAppState {
                     ),
                 )?;
 
+        let email_client = global_config.email.build_client().await.change_context(
+            crate::error::ConfigurationError::InvalidConfigurationValueError("email".to_string()),
+        )?;
+
+        if global_config.email.is_active() {
+            tokio::time::timeout(
+                Duration::from_secs(10),
+                email_client.health_check(),
+            )
+            .await
+            .map_err(|_| {
+                error_stack::report!(
+                    crate::error::ConfigurationError::InvalidConfigurationValueError(
+                        "email health check timed out after 10s — email backend unreachable or not running. \
+                         Fix [email] host/port/credentials in config and ensure the server is up, \
+                         or set active_email_client = \"no_email_client\" to disable email sending."
+                            .to_string()
+                    )
+                )
+            })?
+            .change_context(crate::error::ConfigurationError::InvalidConfigurationValueError(
+                "email backend is unreachable — fix [email.smtp] / [email.aws_ses] in config, \
+                 or set active_email_client = \"no_email_client\" to disable email sending."
+                    .to_string(),
+            ))?;
+        }
+
         Ok(Arc::new(Self {
             tenants_app_state: RwLock::new(tenants_app_state),
             api_client: api_client.clone(),
@@ -69,6 +98,7 @@ impl GlobalAppState {
             global_config,
             readiness_flag: Arc::new(AtomicBool::new(true)),
             analytics_runtime,
+            email_client,
         }))
     }
 

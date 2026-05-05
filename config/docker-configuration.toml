@@ -68,6 +68,26 @@ client_idle_timeout = 90
 pool_max_idle_per_host = 10
 identity = ""
 
+[user_auth]
+jwt_secret = "change_me_in_production_use_32chars!!"
+jwt_expiry_seconds = 86400
+email_verification_enabled = false
+
+[admin_secret]
+secret = "test_admin"
+
+[email]
+sender_email = "noreply@decision-engine.local"
+base_url = "http://localhost:8081"
+active_email_client = "no_email_client"
+
+[email.smtp]
+host = "localhost"
+port = 1025
+username = ""
+password = ""
+tls = "none"
+
 [analytics.kafka]
 enabled = true
 brokers = "kafka:19092"

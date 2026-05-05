@@ -342,6 +342,10 @@ pub enum UserAuthError {
     AlreadyMember,
     #[error("Insufficient permissions")]
     Forbidden,
+    #[error("Failed to send email")]
+    EmailSendFailed,
+    #[error("Invalid or expired verification token")]
+    InvalidVerificationToken,
 }
 
 impl axum::response::IntoResponse for UserAuthError {
@@ -362,6 +366,8 @@ impl axum::response::IntoResponse for UserAuthError {
             Self::StorageError | Self::TokenGenerationFailed | Self::PasswordHashingFailed => {
                 (hyper::StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
             }
+            Self::EmailSendFailed => (hyper::StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
+            Self::InvalidVerificationToken => (hyper::StatusCode::BAD_REQUEST, self.to_string()),
         };
         (
             status,

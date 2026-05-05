@@ -26,6 +26,8 @@ services:
         condition: service_healthy
       kafka-init:
         condition: service_completed_successfully
+      mailpit:
+        condition: service_healthy
     volumes:
       - ./config/docker-configuration.toml:/local/config/development.toml
     networks:
@@ -60,6 +62,8 @@ services:
         condition: service_healthy
       kafka-init:
         condition: service_completed_successfully
+      mailpit:
+        condition: service_healthy
     volumes:
       - ./config/docker-configuration.toml:/local/config/development.toml
     networks:
@@ -100,6 +104,8 @@ services:
         condition: service_healthy
       kafka-init:
         condition: service_completed_successfully
+      mailpit:
+        condition: service_healthy
     volumes:
       - ./config/docker-configuration.toml:/local/config/development.toml
     networks:
@@ -138,6 +144,8 @@ services:
         condition: service_healthy
       kafka-init:
         condition: service_completed_successfully
+      mailpit:
+        condition: service_healthy
     volumes:
       - ./config/docker-configuration.toml:/local/config/development.toml
     networks:
@@ -369,6 +377,40 @@ services:
       timeout: 5s
       retries: 10
       start_period: 20s
+
+  # ==========================================
+  # Local Email Testing (Mailpit)
+  # Captures all outgoing SMTP — nothing is actually delivered.
+  # Web UI:  http://localhost:8025
+  # SMTP:    localhost:1025  (no auth)
+  # ==========================================
+  mailpit:
+    image: axllent/mailpit:latest
+    profiles:
+      - postgres-ghcr
+      - dashboard-postgres-ghcr
+      - postgres-local
+      - dashboard-postgres-local
+      - mysql-ghcr
+      - dashboard-mysql-ghcr
+      - mysql-local
+      - dashboard-mysql-local
+    restart: unless-stopped
+    ports:
+      - "1025:1025"   # SMTP
+      - "8025:8025"   # Web UI
+    environment:
+      MP_MAX_MESSAGES: 500
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
+    networks:
+      - open-router-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8025/api/v1/info > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
 
   # ==========================================
   # Core Infrastructure

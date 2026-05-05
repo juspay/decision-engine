@@ -63,4 +63,28 @@ fn log_startup_configuration(global_config: &open_router::config::GlobalConfig) 
              Set it to a strong random secret in production."
         );
     }
+
+    if global_config.user_auth.email_verification_enabled {
+        if global_config.email.is_active() {
+            logger::info!(
+                "Email verification is ENABLED — users must verify their email before logging in. \
+                 Active email backend: {:?}",
+                global_config.email.active_email_client
+            );
+        } else {
+            logger::warn!(
+                "Email verification is ENABLED but active_email_client = \"no_email_client\" — \
+                 verification emails will not be delivered. The verification URL is logged at INFO \
+                 level by the no-email client so you can complete verification manually. \
+                 Set active_email_client = \"smtp\" (or \"aws_ses\") for real delivery."
+            );
+        }
+    } else {
+        logger::info!(
+            "Email verification is DISABLED — users can log in without verifying their email. \
+             To enable: set `email_verification_enabled = true` under [user_auth] and configure \
+             an email backend under [email] (active_email_client = \"smtp\" or \"aws_ses\"). \
+             For local testing, Mailpit captures all mail at http://localhost:8025."
+        );
+    }
 }

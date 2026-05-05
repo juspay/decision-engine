@@ -15,6 +15,7 @@ import {
   Users,
   Key,
   ChevronDown,
+  KeyRound,
   LogOut,
 } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
@@ -182,6 +183,14 @@ export function Sidebar() {
                 </div>
               ) : null}
             </div>
+            <button
+              type="button"
+              onClick={() => { setAccountOpen(false); navigate('/account') }}
+              className="flex w-full items-center gap-2.5 px-3 py-3 text-left text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-white/5"
+            >
+              <KeyRound size={16} />
+              Change password
+            </button>
             <button
               type="button"
               onClick={handleLogout}

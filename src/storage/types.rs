@@ -805,3 +805,20 @@ pub struct NewUserMerchant {
 pub struct UserMerchantIdUpdate {
     pub merchant_id: Option<String>,
 }
+
+#[derive(AsChangeset, Debug)]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::users))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::users))]
+pub struct UserEmailVerifiedUpdate {
+    #[cfg(feature = "mysql")]
+    pub email_verified: i8,
+    #[cfg(feature = "postgres")]
+    pub email_verified: bool,
+}
+
+#[derive(AsChangeset, Debug)]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::users))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::users))]
+pub struct UserPasswordUpdate {
+    pub password_hash: String,
+}

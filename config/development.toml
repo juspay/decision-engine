@@ -738,3 +738,15 @@ email_verification_enabled = false
 secret = "test_admin"
 
 api_key_auth_enabled = true
+
+[email]
+sender_email = "noreply@example.com"
+base_url = "http://localhost:5173"
+active_email_client = "no_email_client"
+
+[email.smtp]
+host = "localhost"
+port = 1025
+username = ""
+password = ""
+tls = "none"

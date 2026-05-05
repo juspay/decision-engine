@@ -33,6 +33,7 @@ pub mod config;
 pub mod crypto;
 pub mod custom_extractors;
 pub mod decider;
+pub mod email;
 pub mod error;
 pub mod euclid;
 pub mod feedback;

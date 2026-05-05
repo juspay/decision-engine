@@ -26,6 +26,8 @@ CLICKHOUSE_USER="${CLICKHOUSE_USER:-decision_engine}"
 CLICKHOUSE_PASSWORD="${CLICKHOUSE_PASSWORD:-decision_engine}"
 KAFKA_HOST="${KAFKA_HOST:-localhost}"
 KAFKA_PORT="${KAFKA_PORT:-9092}"
+MAILPIT_HOST="${MAILPIT_HOST:-localhost}"
+MAILPIT_UI_PORT="${MAILPIT_UI_PORT:-8025}"
 
 PORTS=(8080 5173 "$DOCS_PORT" 9094)
 EXPECTED_CLICKHOUSE_TABLES=(
@@ -163,6 +165,10 @@ check_kafka() {
     fi
 }
 
+check_mailpit() {
+    curl -fsS "http://${MAILPIT_HOST}:${MAILPIT_UI_PORT}/api/v1/info" >/dev/null 2>&1
+}
+
 check_clickhouse_schema() {
     local missing=0
 
@@ -226,11 +232,18 @@ run_infra_checklist() {
         CLICKHOUSE_READY=0
     fi
 
+    if check_mailpit; then
+        MAILPIT_READY=1
+    else
+        MAILPIT_READY=0
+    fi
+
     print_service_status "Docker daemon" "$DOCKER_READY"
     print_service_status "Postgres (${POSTGRES_HOST}:${POSTGRES_PORT})" "$POSTGRES_READY"
     print_service_status "Redis (${REDIS_HOST}:${REDIS_PORT})" "$REDIS_READY"
     print_service_status "Kafka (${KAFKA_HOST}:${KAFKA_PORT})" "$KAFKA_READY"
     print_service_status "ClickHouse (${CLICKHOUSE_HTTP_URL})" "$CLICKHOUSE_READY"
+    print_service_status "Mailpit UI (${MAILPIT_HOST}:${MAILPIT_UI_PORT}) / SMTP :1025" "$MAILPIT_READY"
     echo ""
 }
 
@@ -318,6 +331,27 @@ wait_for_clickhouse() {
     return 1
 }
 
+wait_for_mailpit() {
+    local attempts=0
+    local max_attempts=30
+
+    echo "Waiting for Mailpit on http://${MAILPIT_HOST}:${MAILPIT_UI_PORT}..."
+
+    while [ $attempts -lt $max_attempts ]; do
+        if check_mailpit; then
+            echo "Mailpit is healthy."
+            echo ""
+            return 0
+        fi
+
+        attempts=$((attempts + 1))
+        sleep 1
+    done
+
+    echo "Mailpit did not become healthy within ${max_attempts}s."
+    return 1
+}
+
 wait_for_backend() {
     local attempts=0
     local max_attempts=90
@@ -375,15 +409,15 @@ wait_for_docs() {
 check_and_kill_ports
 run_infra_checklist
 
-if [ "${DOCKER_READY}" -eq 0 ] && ([ "${POSTGRES_READY}" -eq 0 ] || [ "${REDIS_READY}" -eq 0 ] || [ "${KAFKA_READY}" -eq 0 ] || [ "${CLICKHOUSE_READY}" -eq 0 ]); then
+if [ "${DOCKER_READY}" -eq 0 ] && ([ "${POSTGRES_READY}" -eq 0 ] || [ "${REDIS_READY}" -eq 0 ] || [ "${KAFKA_READY}" -eq 0 ] || [ "${CLICKHOUSE_READY}" -eq 0 ] || [ "${MAILPIT_READY}" -eq 0 ]); then
     echo "Cannot start missing infrastructure services because Docker is not available."
     echo "Start Docker/OrbStack first, then rerun ./oneclick.sh."
     cleanup 1
 fi
 
-if [ "${POSTGRES_READY}" -eq 0 ] || [ "${REDIS_READY}" -eq 0 ] || [ "${KAFKA_READY}" -eq 0 ] || [ "${CLICKHOUSE_READY}" -eq 0 ]; then
+if [ "${POSTGRES_READY}" -eq 0 ] || [ "${REDIS_READY}" -eq 0 ] || [ "${KAFKA_READY}" -eq 0 ] || [ "${CLICKHOUSE_READY}" -eq 0 ] || [ "${MAILPIT_READY}" -eq 0 ]; then
     echo "Starting infrastructure services..."
-    COMPOSE_PROFILES= docker compose --profile postgres-ghcr --profile analytics-clickhouse up -d postgresql redis kafka kafka-init clickhouse
+    COMPOSE_PROFILES= docker compose --profile postgres-ghcr --profile analytics-clickhouse up -d postgresql redis kafka kafka-init clickhouse mailpit
     echo ""
 fi
 
@@ -400,6 +434,10 @@ if [ "${KAFKA_READY}" -eq 0 ] && ! wait_for_kafka; then
 fi
 
 if [ "${CLICKHOUSE_READY}" -eq 0 ] && ! wait_for_clickhouse; then
+    cleanup 1
+fi
+
+if [ "${MAILPIT_READY}" -eq 0 ] && ! wait_for_mailpit; then
     cleanup 1
 fi
 
@@ -464,6 +502,7 @@ echo "  Docs:         $DOCS_HOME_URL"
 echo "  API Ref:      $API_REF_URL"
 echo "  API Examples: $API_EXAMPLES_URL"
 echo "  OpenAPI:      $OPENAPI_PATH"
+echo "  Mailpit:      http://${MAILPIT_HOST}:${MAILPIT_UI_PORT}  (catches all outgoing email)"
 echo ""
 echo "=========================================="
 echo ""
