@@ -109,3 +109,6 @@ active_email_client = "no_email_client"
 # (env vars, IAM role, ~/.aws/credentials)
 # [email.aws_ses]
 # region = "us-east-1"
+# For cross-account setups, provide a role to assume via STS:
+# email_role_arn = "arn:aws:iam::<account-id>:role/<role-name>"
+# sts_role_session_name = "decision_engine_ses_session"
