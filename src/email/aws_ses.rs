@@ -18,10 +18,9 @@ impl AwsSesEmailClient {
     ) -> error_stack::Result<Self, EmailError> {
         let region = aws_sdk_sesv2::config::Region::new(config.region.clone());
 
-        let aws_config = if let (Some(role_arn), Some(session_name)) = (
-            &config.email_role_arn,
-            &config.sts_role_session_name,
-        ) {
+        let aws_config = if let (Some(role_arn), Some(session_name)) =
+            (&config.email_role_arn, &config.sts_role_session_name)
+        {
             // Load a base config to build the STS client, then assume the target role.
             // The resulting credentials are used for all SES calls (cross-account setup).
             let base_config = aws_config::defaults(BehaviorVersion::latest())
