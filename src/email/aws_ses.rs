@@ -60,16 +60,11 @@ impl EmailClient for AwsSesEmailClient {
 
         let body = Body::builder().html(html_body).build();
 
-        let msg = Message::builder()
-            .subject(subject)
-            .body(body)
-            .build();
+        let msg = Message::builder().subject(subject).body(body).build();
 
         let email_content = EmailContent::builder().simple(msg).build();
 
-        let destination = Destination::builder()
-            .to_addresses(&message.to)
-            .build();
+        let destination = Destination::builder().to_addresses(&message.to).build();
 
         self.client
             .send_email()

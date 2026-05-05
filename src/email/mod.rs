@@ -1,7 +1,7 @@
-pub mod no_email;
-pub mod smtp;
 #[cfg(feature = "email-aws-ses")]
 pub mod aws_ses;
+pub mod no_email;
+pub mod smtp;
 pub mod templates;
 
 use std::sync::Arc;

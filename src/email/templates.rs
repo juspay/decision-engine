@@ -78,7 +78,10 @@ impl MemberAddedTemplate {
 
         EmailMessage {
             to: self.user_email,
-            subject: format!("You've been added to {} on Decision Engine", self.merchant_id),
+            subject: format!(
+                "You've been added to {} on Decision Engine",
+                self.merchant_id
+            ),
             html_body,
         }
     }
@@ -291,7 +294,10 @@ impl InviteUserTemplate {
 
         EmailMessage {
             to: self.user_email,
-            subject: format!("You've been invited to join {} on Decision Engine", self.merchant_id),
+            subject: format!(
+                "You've been invited to join {} on Decision Engine",
+                self.merchant_id
+            ),
             html_body,
         }
     }

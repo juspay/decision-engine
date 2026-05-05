@@ -64,13 +64,9 @@ impl GlobalAppState {
                     ),
                 )?;
 
-        let email_client = global_config
-            .email
-            .build_client()
-            .await
-            .change_context(crate::error::ConfigurationError::InvalidConfigurationValueError(
-                "email".to_string(),
-            ))?;
+        let email_client = global_config.email.build_client().await.change_context(
+            crate::error::ConfigurationError::InvalidConfigurationValueError("email".to_string()),
+        )?;
 
         if global_config.user_auth.email_verification_enabled {
             tokio::time::timeout(

@@ -151,9 +151,7 @@ impl EmailConfig {
         use error_stack::report;
 
         let client: Arc<dyn crate::email::EmailClient> = match &self.active_email_client {
-            EmailClientChoice::NoEmailClient => {
-                Arc::new(crate::email::no_email::NoEmailClient)
-            }
+            EmailClientChoice::NoEmailClient => Arc::new(crate::email::no_email::NoEmailClient),
             EmailClientChoice::Smtp => {
                 let smtp_config = self
                     .smtp

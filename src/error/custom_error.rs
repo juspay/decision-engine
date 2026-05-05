@@ -367,9 +367,7 @@ impl axum::response::IntoResponse for UserAuthError {
                 (hyper::StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
             }
             Self::EmailSendFailed => (hyper::StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
-            Self::InvalidVerificationToken => {
-                (hyper::StatusCode::BAD_REQUEST, self.to_string())
-            }
+            Self::InvalidVerificationToken => (hyper::StatusCode::BAD_REQUEST, self.to_string()),
         };
         (
             status,

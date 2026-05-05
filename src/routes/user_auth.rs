@@ -939,7 +939,6 @@ pub async fn verify_email(
     .await
     .change_context(UserAuthError::StorageError)?;
 
-
     if rows_updated == 0 {
         crate::logger::error!(user_id = %user_id, "Email verification update matched 0 rows — user_id not found in DB");
         return Err(error::ContainerError::from(
