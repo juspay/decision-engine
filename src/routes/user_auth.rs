@@ -2,9 +2,11 @@ use crate::app::{get_tenant_app_state, APP_STATE};
 use crate::auth;
 use crate::error::{self, ContainerError, ResultContainerExt, UserAuthError};
 use crate::storage::types::{
-    MerchantAccountNew, NewUser, NewUserMerchant, User, UserMerchant, UserMerchantIdUpdate,
+    MerchantAccountNew, NewUser, NewUserMerchant, User, UserEmailVerifiedUpdate, UserMerchant,
+    UserMerchantIdUpdate,
 };
 use crate::utils::date_time;
+use axum::extract::Query;
 use axum::http::HeaderMap;
 use axum::Json;
 use diesel::associations::HasTable;
@@ -82,10 +84,13 @@ pub struct CreateMerchantResponse {
     pub merchants: Vec<MerchantInfo>,
 }
 
+const EMAIL_VERIFICATION_PREFIX: &str = "email_verification:";
+const EMAIL_VERIFICATION_TTL_SECONDS: i64 = 86400; // 24 hours
+
 #[axum::debug_handler]
 pub async fn signup(
     Json(payload): Json<SignupRequest>,
-) -> Result<Json<AuthResponse>, error::ContainerError<UserAuthError>> {
+) -> Result<Json<SignupResponse>, error::ContainerError<UserAuthError>> {
     let app_state = get_tenant_app_state().await;
     let global_config = APP_STATE
         .get()
@@ -182,7 +187,42 @@ pub async fn signup(
     }
 
     if global_config.user_auth.email_verification_enabled {
-        return Err(error::ContainerError::from(UserAuthError::EmailNotVerified));
+        let token = uuid::Uuid::new_v4().to_string();
+        let redis_key = format!("{}{}", EMAIL_VERIFICATION_PREFIX, token);
+
+        app_state
+            .redis_conn
+            .set_key_with_ttl(&redis_key, &user_id, EMAIL_VERIFICATION_TTL_SECONDS)
+            .await
+            .change_context(UserAuthError::StorageError)?;
+
+        let verification_url = format!(
+            "{}/verify-email?token={}",
+            global_config.email.base_url, token
+        );
+
+        let email_client = APP_STATE
+            .get()
+            .map(|s| s.email_client.clone())
+            .ok_or(UserAuthError::StorageError)?;
+
+        email_client
+            .send_email(
+                crate::email::templates::EmailVerificationTemplate {
+                    user_email: payload.email.clone(),
+                    verification_url,
+                }
+                .into_message(),
+            )
+            .await
+            .change_context(UserAuthError::EmailSendFailed)?;
+
+        return Ok(Json(SignupResponse::VerificationPending(
+            SignupVerificationPendingResponse {
+                message: "Account created. Please check your email to verify your address before logging in.".to_string(),
+                email_verification_required: true,
+            },
+        )));
     }
 
     let token = auth::generate_jwt(
@@ -195,14 +235,16 @@ pub async fn signup(
     )
     .change_context(UserAuthError::TokenGenerationFailed)?;
 
-    Ok(Json(AuthResponse {
+    let merchants = fetch_user_merchants(&app_state, &user_id).await?;
+
+    Ok(Json(SignupResponse::Authenticated(AuthResponse {
         token,
-        user_id: user_id.clone(),
+        user_id,
         email: payload.email,
         merchant_id: requested_merchant_id.unwrap_or_default(),
         role: "admin".to_string(),
-        merchants: fetch_user_merchants(&app_state, &user_id).await?,
-    }))
+        merchants,
+    })))
 }
 
 #[axum::debug_handler]
@@ -457,6 +499,25 @@ pub struct MemberInfo {
     pub role: String,
 }
 
+/// Signup response — either authenticated (no verification needed) or pending verification
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum SignupResponse {
+    Authenticated(AuthResponse),
+    VerificationPending(SignupVerificationPendingResponse),
+}
+
+#[derive(Debug, Serialize)]
+pub struct SignupVerificationPendingResponse {
+    pub message: String,
+    pub email_verification_required: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct VerifyEmailResponse {
+    pub message: String,
+}
+
 #[axum::debug_handler]
 pub async fn invite_member(
     headers: HeaderMap,
@@ -520,6 +581,29 @@ pub async fn invite_member(
             .await
             .change_context(UserAuthError::StorageError)?;
 
+        let email_config = &global_config.email;
+        if email_config.is_active() {
+            let email_client = APP_STATE
+                .get()
+                .map(|s| s.email_client.clone())
+                .ok_or(UserAuthError::StorageError)?;
+
+            let email_msg = crate::email::templates::MemberAddedTemplate {
+                user_email: existing_user.email.clone(),
+                merchant_id: claims.merchant_id.clone(),
+                base_url: email_config.base_url.clone(),
+            }
+            .into_message();
+
+            if let Err(err) = email_client.send_email(email_msg).await {
+                crate::logger::warn!(
+                    to = %existing_user.email,
+                    error = ?err,
+                    "Failed to send member-added notification email"
+                );
+            }
+        }
+
         Ok(Json(InviteMemberResponse {
             email: existing_user.email,
             is_new_user: false,
@@ -577,6 +661,30 @@ pub async fn invite_member(
                 .await;
             }
             return Err(error::ContainerError::from(UserAuthError::StorageError));
+        }
+
+        let email_config = &global_config.email;
+        if email_config.is_active() {
+            let email_client = APP_STATE
+                .get()
+                .map(|s| s.email_client.clone())
+                .ok_or(UserAuthError::StorageError)?;
+
+            let email_msg = crate::email::templates::InviteUserTemplate {
+                user_email: payload.email.clone(),
+                merchant_id: claims.merchant_id.clone(),
+                temporary_password: generated_password.clone(),
+                base_url: email_config.base_url.clone(),
+            }
+            .into_message();
+
+            if let Err(err) = email_client.send_email(email_msg).await {
+                crate::logger::warn!(
+                    to = %payload.email,
+                    error = ?err,
+                    "Failed to send invite email; invite still succeeded"
+                );
+            }
         }
 
         Ok(Json(InviteMemberResponse {
@@ -781,6 +889,69 @@ async fn fetch_user_merchants(
         });
     }
     Ok(result)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct VerifyEmailQuery {
+    pub token: String,
+}
+
+#[axum::debug_handler]
+pub async fn verify_email(
+    Query(query): Query<VerifyEmailQuery>,
+) -> Result<Json<VerifyEmailResponse>, error::ContainerError<UserAuthError>> {
+    let app_state = get_tenant_app_state().await;
+
+    let redis_key = format!("{}{}", EMAIL_VERIFICATION_PREFIX, query.token);
+
+    let user_id = app_state
+        .redis_conn
+        .get_key_string(&redis_key)
+        .await
+        .change_context(UserAuthError::InvalidVerificationToken)?;
+
+    if user_id.is_empty() {
+        return Err(error::ContainerError::from(
+            UserAuthError::InvalidVerificationToken,
+        ));
+    }
+
+    let conn = app_state
+        .db
+        .get_conn()
+        .await
+        .change_error(UserAuthError::StorageError)?;
+
+    let rows_updated = crate::generics::generic_update_if_present::<
+        <User as HasTable>::Table,
+        UserEmailVerifiedUpdate,
+        _,
+    >(
+        &conn,
+        dsl::user_id.eq(user_id.clone()),
+        UserEmailVerifiedUpdate {
+            #[cfg(feature = "mysql")]
+            email_verified: 1,
+            #[cfg(feature = "postgres")]
+            email_verified: true,
+        },
+    )
+    .await
+    .change_context(UserAuthError::StorageError)?;
+
+
+    if rows_updated == 0 {
+        crate::logger::error!(user_id = %user_id, "Email verification update matched 0 rows — user_id not found in DB");
+        return Err(error::ContainerError::from(
+            UserAuthError::InvalidVerificationToken,
+        ));
+    }
+
+    let _ = app_state.redis_conn.delete_key(&redis_key).await;
+
+    Ok(Json(VerifyEmailResponse {
+        message: "Email verified successfully. You can now log in.".to_string(),
+    }))
 }
 
 fn extract_bearer_token(headers: &HeaderMap) -> Result<&str, error::ContainerError<UserAuthError>> {

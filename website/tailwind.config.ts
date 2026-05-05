@@ -26,6 +26,15 @@ export default {
         'glass-light': '0 10px 40px -10px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.05)',
         'glass-dark': '0 20px 40px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05), inset 0 0 0 1px rgba(255,255,255,0.02)',
       },
+      keyframes: {
+        progress: {
+          '0%': { width: '0%' },
+          '100%': { width: '100%' },
+        },
+      },
+      animation: {
+        progress: 'progress 2.5s linear forwards',
+      },
     },
   },
   plugins: [],

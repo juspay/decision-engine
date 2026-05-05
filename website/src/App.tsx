@@ -14,12 +14,14 @@ import { AuthPage } from './pages/AuthPage'
 import { OnboardingPage } from './pages/OnboardingPage'
 import { MembersPage } from './pages/MembersPage'
 import { ApiKeysPage } from './pages/ApiKeysPage'
+import { VerifyEmailPage } from './pages/VerifyEmailPage'
 
 export default function App() {
   return (
     <Routes>
       <Route path="login" element={<AuthPage />} />
       <Route path="signup" element={<AuthPage />} />
+      <Route path="verify-email" element={<VerifyEmailPage />} />
       <Route element={<AuthGuard />}>
         <Route path="onboarding" element={<OnboardingPage />} />
         <Route element={<AppShell />}>

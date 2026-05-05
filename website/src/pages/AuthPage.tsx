@@ -8,10 +8,13 @@ import {
   Loader2,
   LockKeyhole,
   Mail,
+  Moon,
+  Sun,
 } from 'lucide-react'
 import { useAuthStore, MerchantInfo } from '../store/authStore'
 import { useMerchantStore } from '../store/merchantStore'
 import { apiFetch } from '../lib/api'
+import { getResolvedThemePreference, persistThemePreference } from '../lib/theme'
 import { SurfaceLabel } from '../components/ui/Card'
 import { ErrorMessage } from '../components/ui/ErrorMessage'
 
@@ -23,6 +26,13 @@ interface AuthResponse {
   role: string
   merchants: MerchantInfo[]
 }
+
+interface SignupVerificationPendingResponse {
+  email_verification_required: true
+  message: string
+}
+
+type SignupResponse = AuthResponse | SignupVerificationPendingResponse
 
 interface CreateMerchantResponse {
   token: string
@@ -94,6 +104,7 @@ export function AuthPage() {
   const assetBaseUrl = import.meta.env.BASE_URL
   const passwordInputRef = useRef<HTMLInputElement>(null)
 
+  const [isDark, setIsDark] = useState(() => getResolvedThemePreference() === 'dark')
   const [tab, setTab] = useState<Tab>(() => getTabFromPath(location.pathname))
   const [email, setEmail] = useState(locationState?.email ?? '')
   const [password, setPassword] = useState('')
@@ -133,6 +144,12 @@ export function AuthPage() {
     setFocusPasswordOnLogin(false)
   }, [focusPasswordOnLogin, tab])
 
+  function handleThemeToggle() {
+    const next = isDark ? 'light' : 'dark'
+    setIsDark(next === 'dark')
+    persistThemePreference(next)
+  }
+
   function switchTab(nextTab: Tab) {
     setTab(nextTab)
     setError(null)
@@ -158,22 +175,40 @@ export function AuthPage() {
     try {
       const path = tab === 'login' ? '/auth/login' : '/auth/signup'
       const normalizedMerchantName = merchantName.trim()
-      const res = await apiFetch<AuthResponse>(path, {
+      const res = await apiFetch<SignupResponse>(path, {
         method: 'POST',
         body: JSON.stringify({ email, password }),
       })
 
-      setAuth(
-        res.token,
-        { userId: res.user_id, email: res.email, merchantId: res.merchant_id, role: res.role },
-        res.merchants,
-      )
-      if (res.merchant_id) setMerchantId(res.merchant_id)
+      if ('email_verification_required' in res && res.email_verification_required) {
+        if (normalizedMerchantName) {
+          localStorage.setItem('pending_merchant_name', normalizedMerchantName)
+        }
+        navigate('/login', {
+          replace: true,
+          state: {
+            notice: res.message,
+          } satisfies AuthLocationState,
+        })
+        return
+      }
 
-      if (tab === 'signup' && normalizedMerchantName && !res.merchant_id) {
+      const authRes = res as AuthResponse
+      setAuth(
+        authRes.token,
+        { userId: authRes.user_id, email: authRes.email, merchantId: authRes.merchant_id, role: authRes.role },
+        authRes.merchants,
+      )
+      if (authRes.merchant_id) setMerchantId(authRes.merchant_id)
+
+      const pendingMerchantName = localStorage.getItem('pending_merchant_name') ?? ''
+      const merchantNameToUse = normalizedMerchantName || pendingMerchantName
+
+      if (merchantNameToUse && !authRes.merchant_id) {
+        localStorage.removeItem('pending_merchant_name')
         const merchantRes = await apiFetch<CreateMerchantResponse>('/onboarding/merchant', {
           method: 'POST',
-          body: JSON.stringify({ merchant_name: normalizedMerchantName }),
+          body: JSON.stringify({ merchant_name: merchantNameToUse }),
         })
 
         updateMerchant(merchantRes.token, merchantRes.merchant_id, merchantRes.merchants)
@@ -182,7 +217,9 @@ export function AuthPage() {
         return
       }
 
-      if (!res.merchant_id || res.merchants.length === 0) {
+      localStorage.removeItem('pending_merchant_name')
+
+      if (!authRes.merchant_id || authRes.merchants.length === 0) {
         navigate('/onboarding', { replace: true })
       } else {
         navigate('/', { replace: true })
@@ -213,18 +250,32 @@ export function AuthPage() {
   }
 
   return (
-    <div className="dark relative min-h-screen overflow-hidden bg-white text-slate-900 dark:bg-[#030507] dark:text-white">
+    <div className="relative min-h-screen overflow-hidden bg-white text-slate-900 dark:bg-[#030507] dark:text-white">
       <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,_rgba(255,255,255,1),_rgba(255,255,255,1))] dark:bg-[linear-gradient(180deg,_rgba(3,5,7,1),_rgba(5,8,12,1))]" />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_18%,_rgba(59,130,246,0.06),_transparent_24%),radial-gradient(circle_at_78%_20%,_rgba(14,165,233,0.04),_transparent_18%),radial-gradient(circle_at_50%_100%,_rgba(14,165,233,0.03),_transparent_24%)] dark:bg-[radial-gradient(circle_at_18%_18%,_rgba(56,189,248,0.05),_transparent_24%),radial-gradient(circle_at_78%_20%,_rgba(59,130,246,0.04),_transparent_18%),radial-gradient(circle_at_50%_100%,_rgba(14,165,233,0.035),_transparent_24%)]" />
       <div className="pointer-events-none absolute inset-0 opacity-[0.05] dark:opacity-[0.08] [background-image:linear-gradient(rgba(148,163,184,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.08)_1px,transparent_1px)] [background-size:56px_56px]" />
 
       <div className="relative z-10 grid min-h-screen lg:grid-cols-[1.06fr_0.94fr]">
-        <section className="flex min-h-[44vh] flex-col border-b border-slate-200 px-6 py-8 dark:border-white/6 sm:px-10 lg:min-h-screen lg:border-b-0 lg:border-r lg:border-[#1d1d23] lg:px-14 lg:py-12 xl:px-16">
+        <button
+          type="button"
+          onClick={handleThemeToggle}
+          className="absolute right-4 top-4 z-20 flex h-9 w-9 items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-white/8 dark:hover:text-white sm:right-6 sm:top-6"
+          aria-label="Toggle theme"
+          title="Toggle theme"
+        >
+          {isDark ? <Sun size={18} /> : <Moon size={18} />}
+        </button>
+        <section className="flex min-h-[44vh] flex-col border-b border-slate-200 px-6 py-8 dark:border-white/6 sm:px-10 lg:min-h-screen lg:border-b-0 lg:border-r lg:border-slate-200 lg:dark:border-[#1d1d23] lg:px-14 lg:py-12 xl:px-16">
           <div className="pt-2">
+            <img
+              src={`${assetBaseUrl}logo/decision-engine-light.svg`}
+              alt="Juspay Decision Engine"
+              className="h-11 w-auto dark:hidden sm:h-12"
+            />
             <img
               src={`${assetBaseUrl}logo/decision-engine-dark.svg`}
               alt="Juspay Decision Engine"
-              className="h-11 w-auto sm:h-12"
+              className="hidden h-11 w-auto dark:block sm:h-12"
             />
           </div>
 
@@ -322,7 +373,7 @@ export function AuthPage() {
                       <button
                         type="button"
                         onClick={() => setShowPassword((value) => !value)}
-                        className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 transition-colors hover:text-slate-200"
+                        className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 transition-colors hover:text-slate-700 dark:text-slate-500 dark:hover:text-slate-200"
                         aria-label={showPassword ? 'Hide password' : 'Show password'}
                       >
                         {showPassword ? <Eye size={18} /> : <EyeOff size={18} />}
@@ -339,7 +390,7 @@ export function AuthPage() {
 
                   <ErrorMessage error={error} />
                   {notice ? (
-                    <div className="rounded-lg border border-sky-500/20 bg-sky-500/8 px-4 py-3 text-sm text-sky-300">
+                    <div className="rounded-lg border border-sky-500/30 bg-sky-50 px-4 py-3 text-sm text-sky-700 dark:border-sky-500/20 dark:bg-sky-500/8 dark:text-sky-300">
                       {notice}
                     </div>
                   ) : null}

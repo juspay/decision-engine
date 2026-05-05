@@ -30,6 +30,7 @@ pub mod api_client;
 pub mod app;
 pub mod auth;
 pub mod config;
+pub mod email;
 pub mod crypto;
 pub mod custom_extractors;
 pub mod decider;
