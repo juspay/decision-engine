@@ -82,8 +82,8 @@ impl MemberAddedTemplate {
   </table>
 </body>
 </html>"#,
-            merchant = self.merchant_id,
-            base_url = self.base_url,
+            merchant = merchant,
+            base_url = base_url,
         );
 
         EmailMessage {
@@ -300,10 +300,10 @@ impl InviteUserTemplate {
   </table>
 </body>
 </html>"#,
-            merchant = self.merchant_id,
-            email = self.user_email,
-            password = self.temporary_password,
-            base_url = self.base_url
+            merchant = merchant,
+            email = email,
+            password = password,
+            base_url = base_url
         );
 
         EmailMessage {
