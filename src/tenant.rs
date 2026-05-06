@@ -1,5 +1,4 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
 use std::{collections::HashSet, sync::Arc};
 
 use error_stack::ResultExt;
@@ -69,27 +68,13 @@ impl GlobalAppState {
         )?;
 
         if global_config.email.is_active() {
-            let health_result =
-                tokio::time::timeout(Duration::from_secs(10), email_client.health_check()).await;
-
-            match health_result {
-                Err(_) => {
-                    tracing::warn!(
-                        "Email health check timed out after 10s — \
-                         email backend may be unreachable. \
-                         Fix [email.smtp] / [email.aws_ses] in config, \
-                         or set active_email_client = \"no_email_client\" to disable."
-                    );
-                }
-                Ok(Err(e)) => {
-                    tracing::warn!(
-                        error = %e,
-                        "Email backend is unreachable — \
-                         fix [email.smtp] / [email.aws_ses] in config, \
-                         or set active_email_client = \"no_email_client\" to disable."
-                    );
-                }
-                Ok(Ok(())) => {}
+            if let Err(e) = email_client.health_check().await {
+                tracing::warn!(
+                    error = ?e,
+                    "Email backend is unreachable — \
+                     fix [email.smtp] / [email.aws_ses] in config, \
+                     or set active_email_client = \"no_email_client\" to disable."
+                );
             }
         }
 

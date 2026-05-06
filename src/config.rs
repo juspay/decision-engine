@@ -49,7 +49,7 @@ pub struct GlobalConfig {
     #[serde(default)]
     pub debit_routing_config: network_decider::types::DebitRoutingConfig,
     pub compression_filepath: Option<CompressionFilepath>,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub api_key_auth_enabled: bool,
     #[serde(default)]
     pub user_auth: UserAuthConfig,
@@ -69,6 +69,10 @@ pub struct UserAuthConfig {
     /// Send verification email on signup; block login until verified
     #[serde(default)]
     pub email_verification_enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_jwt_expiry() -> u64 {
