@@ -78,9 +78,55 @@ jobs:
               <link rel="icon" href="./favicon.svg" />
               <style>
                 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+                :root {
+                  --bg:                #f8fafc;
+                  --bg-header:         #ffffff;
+                  --bg-secondary:      #f1f5f9;
+                  --bg-code:           #f1f5f9;
+                  --bg-pre:            #f8fafc;
+                  --border:            #e2e8f0;
+                  --border-strong:     #e2e8f0;
+                  --text:              #1e293b;
+                  --text-muted:        #475569;
+                  --text-heading:      #0f172a;
+                  --text-subheading:   #1e293b;
+                  --text-secondary:    #334155;
+                  --text-faint:        #94a3b8;
+                  --text-code:         #0369a1;
+                  --text-pre:          #334155;
+                  --text-th:           #0f172a;
+                  --text-td:           #475569;
+                  --link:              #2563eb;
+                  --spec-note:         #94a3b8;
+                  --spec-note-link:    #64748b;
+                }
+                @media (prefers-color-scheme: dark) {
+                  :root {
+                    --bg:                #05070d;
+                    --bg-header:         #05070d;
+                    --bg-secondary:      #1e293b;
+                    --bg-code:           #0f172a;
+                    --bg-pre:            #0f172a;
+                    --border:            #1e293b;
+                    --border-strong:     #334155;
+                    --text:              #e2e8f0;
+                    --text-muted:        #94a3b8;
+                    --text-heading:      #f8fafc;
+                    --text-subheading:   #e2e8f0;
+                    --text-secondary:    #e2e8f0;
+                    --text-faint:        #475569;
+                    --text-code:         #7dd3fc;
+                    --text-pre:          #cbd5e1;
+                    --text-th:           #e2e8f0;
+                    --text-td:           #94a3b8;
+                    --link:              #60a5fa;
+                    --spec-note:         #475569;
+                    --spec-note-link:    #64748b;
+                  }
+                }
                 body {
-                  background: #05070d;
-                  color: #e2e8f0;
+                  background: var(--bg);
+                  color: var(--text);
                   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
                 }
                 /* ── header ── */
@@ -89,25 +135,25 @@ jobs:
                   align-items: center;
                   justify-content: space-between;
                   padding: 16px 32px;
-                  border-bottom: 1px solid #1e293b;
+                  border-bottom: 1px solid var(--border);
                   position: sticky;
                   top: 0;
-                  background: #05070d;
+                  background: var(--bg-header);
                   z-index: 10;
                 }
                 .site-header h1 {
                   font-size: 1rem;
                   font-weight: 600;
-                  color: #f8fafc;
+                  color: var(--text-heading);
                   letter-spacing: -0.01em;
                 }
                 .header-links { display: flex; gap: 20px; }
                 .header-links a {
-                  color: #94a3b8;
+                  color: var(--text-muted);
                   font-size: 0.875rem;
                   text-decoration: none;
                 }
-                .header-links a:hover { color: #e2e8f0; }
+                .header-links a:hover { color: var(--text); }
                 .header-links a.cta {
                   color: #fff;
                   background: #3b82f6;
@@ -120,17 +166,17 @@ jobs:
                 .hero {
                   text-align: center;
                   padding: 72px 24px 56px;
-                  border-bottom: 1px solid #1e293b;
+                  border-bottom: 1px solid var(--border);
                 }
                 .hero h2 {
                   font-size: 2.5rem;
                   font-weight: 700;
                   letter-spacing: -0.03em;
-                  color: #f8fafc;
+                  color: var(--text-heading);
                   margin-bottom: 16px;
                 }
                 .hero p {
-                  color: #94a3b8;
+                  color: var(--text-muted);
                   font-size: 1.05rem;
                   line-height: 1.6;
                   max-width: 520px;
@@ -147,13 +193,13 @@ jobs:
                 }
                 .hero-links a:hover { opacity: 0.85; }
                 .hero-links a.primary { background: #3b82f6; color: #fff; }
-                .hero-links a.secondary { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; }
+                .hero-links a.secondary { background: var(--bg-secondary); color: var(--text-secondary); border: 1px solid var(--border-strong); }
                 .spec-note {
                   margin-top: 20px;
                   font-size: 0.8rem;
-                  color: #475569;
+                  color: var(--spec-note);
                 }
-                .spec-note a { color: #64748b; text-decoration: underline; }
+                .spec-note a { color: var(--spec-note-link); text-decoration: underline; }
                 /* ── readme body ── */
                 .readme {
                   max-width: 860px;
@@ -165,39 +211,39 @@ jobs:
                 .readme h2 {
                   font-size: 1.35rem;
                   font-weight: 600;
-                  color: #f1f5f9;
+                  color: var(--text-heading);
                   margin: 48px 0 16px;
                   padding-bottom: 8px;
-                  border-bottom: 1px solid #1e293b;
+                  border-bottom: 1px solid var(--border);
                 }
                 .readme h3 {
                   font-size: 1.05rem;
                   font-weight: 600;
-                  color: #e2e8f0;
+                  color: var(--text-subheading);
                   margin: 28px 0 10px;
                 }
-                .readme p { color: #94a3b8; line-height: 1.7; margin-bottom: 14px; }
-                .readme a { color: #60a5fa; text-decoration: none; }
+                .readme p { color: var(--text-muted); line-height: 1.7; margin-bottom: 14px; }
+                .readme a { color: var(--link); text-decoration: none; }
                 .readme a:hover { text-decoration: underline; }
                 .readme ul, .readme ol {
-                  color: #94a3b8;
+                  color: var(--text-muted);
                   padding-left: 24px;
                   margin-bottom: 14px;
                   line-height: 1.7;
                 }
                 .readme li { margin-bottom: 4px; }
-                .readme strong { color: #e2e8f0; }
+                .readme strong { color: var(--text-subheading); }
                 .readme code {
-                  background: #0f172a;
-                  color: #7dd3fc;
+                  background: var(--bg-code);
+                  color: var(--text-code);
                   padding: 2px 6px;
                   border-radius: 4px;
                   font-size: 0.875em;
                   font-family: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
                 }
                 .readme pre {
-                  background: #0f172a;
-                  border: 1px solid #1e293b;
+                  background: var(--bg-pre);
+                  border: 1px solid var(--border);
                   border-radius: 8px;
                   padding: 16px 20px;
                   overflow-x: auto;
@@ -206,7 +252,7 @@ jobs:
                 .readme pre code {
                   background: none;
                   padding: 0;
-                  color: #cbd5e1;
+                  color: var(--text-pre);
                   font-size: 0.875rem;
                 }
                 .readme table {
@@ -217,18 +263,18 @@ jobs:
                 }
                 .readme th {
                   text-align: left;
-                  color: #e2e8f0;
-                  border-bottom: 1px solid #334155;
+                  color: var(--text-th);
+                  border-bottom: 1px solid var(--border-strong);
                   padding: 8px 12px;
                 }
                 .readme td {
-                  color: #94a3b8;
-                  border-bottom: 1px solid #1e293b;
+                  color: var(--text-td);
+                  border-bottom: 1px solid var(--border);
                   padding: 8px 12px;
                   vertical-align: top;
                 }
                 .readme img { max-width: 100%; border-radius: 8px; margin: 8px 0; }
-                .readme hr { border: none; border-top: 1px solid #1e293b; margin: 40px 0; }
+                .readme hr { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
                 /* hide the div align=center wrappers pandoc passes through */
                 .readme div[align="center"] { text-align: center; }
               </style>
@@ -271,14 +317,31 @@ jobs:
               <link rel="icon" href="./favicon.svg" />
               <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
               <style>
+                :root {
+                  --bg:         #f8fafc;
+                  --bg-header:  #ffffff;
+                  --border:     #e2e8f0;
+                  --text:       #0f172a;
+                  --link:       #2563eb;
+                }
+                @media (prefers-color-scheme: dark) {
+                  :root {
+                    --bg:         #0f172a;
+                    --bg-header:  #05070d;
+                    --border:     #1e293b;
+                    --text:       #f8fafc;
+                    --link:       #93c5fd;
+                  }
+                }
                 body {
                   margin: 0;
-                  background: #f8fafc;
+                  background: var(--bg);
                 }
                 header {
                   align-items: center;
-                  background: #05070d;
-                  color: #fff;
+                  background: var(--bg-header);
+                  border-bottom: 1px solid var(--border);
+                  color: var(--text);
                   display: flex;
                   justify-content: space-between;
                   padding: 16px 24px;
@@ -288,7 +351,7 @@ jobs:
                   margin: 0;
                 }
                 header a {
-                  color: #93c5fd;
+                  color: var(--link);
                   font: 500 13px/1.3 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
                   text-decoration: none;
                 }
