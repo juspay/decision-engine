@@ -69,11 +69,11 @@ impl GlobalAppState {
 
         if global_config.email.is_active() {
             match tokio::time::timeout(
-                 std::time::Duration::from_secs(10),
-                 email_client.health_check(),
-             )
-             .await
-             {
+                std::time::Duration::from_secs(10),
+                email_client.health_check(),
+            )
+            .await
+            {
                 Ok(Err(e)) => {
                     tracing::warn!(
                         error = ?e,
