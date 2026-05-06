@@ -68,13 +68,30 @@ impl GlobalAppState {
         )?;
 
         if global_config.email.is_active() {
-            if let Err(e) = email_client.health_check().await {
-                tracing::warn!(
-                    error = ?e,
-                    "Email backend is unreachable — \
-                     fix [email.smtp] / [email.aws_ses] in config, \
-                     or set active_email_client = \"no_email_client\" to disable."
-                );
+            match tokio::time::timeout(
+                 std::time::Duration::from_secs(10),
+                 email_client.health_check(),
+             )
+             .await
+             {
+                Ok(Err(e)) => {
+                    tracing::warn!(
+                        error = ?e,
+                        "Email backend is unreachable — \
+                        fix [email.smtp] / [email.aws_ses] in config, \
+                        or set active_email_client = \"no_email_client\" to disable."
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = ?e,
+                        "Email backend health check timed out during startup; \
+                        continuing with email degraded. Fix [email.smtp] / \
+                        [email.aws_ses] in config, or set \
+                        active_email_client = \"no_email_client\" to disable."
+                    );
+                }
+                Ok(Ok(())) => {}
             }
         }
 
