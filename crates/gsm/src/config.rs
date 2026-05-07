@@ -58,11 +58,16 @@ impl TryFrom<CsvRow> for GsmRule {
         let feature_data_raw = none_if_empty(row.feature_data);
 
         // `alternate_network_possible` lives inside the feature_data JSON blob.
-        // We avoid a serde_json dependency here by doing a minimal string scan.
+        // We avoid a serde_json dependency here by doing a minimal tolerant scan
+        // that handles both `"key":true` and `"key": true` (with whitespace).
         // This keeps the crate dependency-light for consumers like hyperswitch-prism.
         let alternate_network_possible = feature_data_raw
             .as_deref()
-            .map(|s| s.contains("\"alternate_network_possible\":true"))
+            .map(|s| {
+                // Find the key anywhere in the string, then look for :true or : true
+                s.contains("\"alternate_network_possible\":true")
+                    || s.contains("\"alternate_network_possible\": true")
+            })
             .unwrap_or(false);
 
         let _ = (row.created_at, row.last_modified); // present in CSV, not needed at runtime
@@ -95,7 +100,8 @@ impl TryFrom<CsvRow> for GsmRule {
 /// `(connector, flow, sub_flow, code, message)`.
 ///
 /// Build once at startup from a CSV export of `gateway_status_map`.
-/// All lookups are O(1) with zero allocation.
+/// Lookups are O(1); note: each lookup creates a temporary key (5 allocations).
+/// Future optimization: consider a custom borrow-aware key type to eliminate these.
 pub struct ConfigGsmStore {
     index: HashMap<(String, String, String, String, String), GsmRule>,
 }

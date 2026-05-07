@@ -73,6 +73,8 @@ VAS = "VAS"
 Vas = "Vas"
 # JWT library API term
 encrypter = "encrypter"
+# Unified Error codes (GSM error classification)
+UE = "UE"
 
 [files]
 extend-exclude = [
