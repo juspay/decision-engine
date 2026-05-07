@@ -238,6 +238,8 @@ pub enum TxnObjectType {
     MotoPayment,
 }
 
+pub use gsm::{GsmErrorInfo, GsmInfo};
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateScorePayload {
@@ -248,6 +250,10 @@ pub struct UpdateScorePayload {
     pub payment_id: String,
     pub enforce_dynamic_routing_failure: Option<bool>,
     pub txn_latency: Option<TransactionLatency>,
+    /// Optional error context from the failed payment. When present, the response
+    /// will include `gsm_info` with the retry decision and unified error details.
+    #[serde(default)]
+    pub error_info: Option<GsmErrorInfo>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -256,6 +262,10 @@ pub struct UpdateScoreResponse {
     pub merchant_id: String,
     pub gateway: String,
     pub payment_id: String,
+    /// GSM lookup result. Present only when `errorInfo` was supplied in the request
+    /// and a matching rule was found in the GSM store.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gsm_info: Option<GsmInfo>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

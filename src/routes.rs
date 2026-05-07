@@ -9,5 +9,6 @@ pub mod decision_gateway;
 pub mod health;
 pub mod merchant_account_config;
 pub mod rule_configuration;
+pub mod gsm;
 pub mod update_gateway_score;
 pub mod update_score;

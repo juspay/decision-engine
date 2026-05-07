@@ -36,6 +36,7 @@ struct UpdateGatewayScoreRequestDetail<'a> {
     gateway_reference_id: Option<&'a str>,
     enforce_dynamic_routing_failure: Option<bool>,
     txn_latency: Option<&'a crate::types::txn_details::types::TransactionLatency>,
+    error_info: Option<&'a crate::feedback::types::GsmErrorInfo>,
 }
 
 #[derive(Debug, Serialize)]
@@ -159,11 +160,16 @@ pub async fn update_gateway_score(
                         .unwrap_or_else(|_| format!("{:?}", payload.status))
                         .trim_matches('"')
                         .to_string();
+                    let gsm_info = payload
+                        .error_info
+                        .as_ref()
+                        .and_then(crate::gsm::lookup);
                     let response = UpdateScoreResponse {
                         message: "Gateway score updated successfully".to_string(),
                         merchant_id: merchant_id.clone(),
                         gateway: gateway.clone(),
                         payment_id: payment_id.clone(),
+                        gsm_info,
                     };
                     crate::analytics::DomainAnalyticsEvent::record_gateway_update(
                         crate::analytics::AnalyticsFlowContext::new(
@@ -184,6 +190,7 @@ pub async fn update_gateway_score(
                                 enforce_dynamic_routing_failure: payload
                                     .enforce_dynamic_routing_failure,
                                 txn_latency: payload.txn_latency.as_ref(),
+                                error_info: payload.error_info.as_ref(),
                             },
                             response: &response,
                             selection_reason: UpdateGatewayScoreSelectionReason {

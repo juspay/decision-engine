@@ -1,4 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react'
+import { ErrorInfoFields, ErrorInfoState, GsmOptionRow, DEFAULT_ERROR_INFO } from './ErrorInfoFields'
 import { useNavigate } from 'react-router-dom'
 import useSWR from 'swr'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts'
@@ -64,6 +65,7 @@ interface SimulationConfig {
   successCount: string
   failureCount: string
 }
+
 
 interface SimulationResult {
   paymentId: string
@@ -152,6 +154,7 @@ const DEFAULT_SIMULATION_CONFIG: SimulationConfig = {
   failureCount: '3',
 }
 
+
 const DEFAULT_RULE_PARAMS: RuleEvaluateParams[] = [
   { key: 'payment_method_type', type: 'enum_variant', value: '', metadataKey: '' },
   { key: 'currency', type: 'enum_variant', value: '', metadataKey: '' },
@@ -168,6 +171,7 @@ interface ExplorerPersistedState {
   activeTab: TabType
   form: FormState
   simulationConfig: SimulationConfig
+  errorInfo: ErrorInfoState
   debitForm: DebitRoutingFormState
   ruleParams: RuleEvaluateParams[]
   fallbackConnectors: GatewayConnector[]
@@ -216,6 +220,7 @@ function getDefaultExplorerState(): ExplorerPersistedState {
     activeTab: 'batch',
     form: { ...DEFAULT_FORM },
     simulationConfig: { ...DEFAULT_SIMULATION_CONFIG },
+    errorInfo: { ...DEFAULT_ERROR_INFO },
     debitForm: { ...DEFAULT_DEBIT_FORM },
     ruleParams: cloneRuleParams(DEFAULT_RULE_PARAMS),
     fallbackConnectors: cloneConnectors(DEFAULT_FALLBACK_CONNECTORS),
@@ -290,6 +295,7 @@ function loadExplorerState(scopeKey: string): ExplorerPersistedState {
         ranking_algorithm: normalizeRankingAlgorithm(parsed.form?.ranking_algorithm),
       },
       simulationConfig: { ...defaults.simulationConfig, ...(parsed.simulationConfig || {}) },
+      errorInfo: { ...defaults.errorInfo, ...(parsed.errorInfo || {}) },
       debitForm: {
         ...defaults.debitForm,
         ...(parsed.debitForm || {}),
@@ -636,6 +642,7 @@ function setupPromptForTab(tab: TabType, detail?: string): SetupPromptState {
   }
 }
 
+
 function EmptyAuditState({ title, body }: { title: string; body: string }) {
   return (
     <div className="rounded-[22px] border border-dashed border-slate-200 bg-slate-50/80 px-6 py-12 text-center dark:border-[#2a303a] dark:bg-[#161b24]/80">
@@ -733,6 +740,7 @@ export function DecisionExplorerPage() {
   const [form, setForm] = useState<FormState>(initialState.form)
 
   const [simulationConfig, setSimulationConfig] = useState<SimulationConfig>(initialState.simulationConfig)
+  const [errorInfo, setErrorInfo] = useState<ErrorInfoState>(initialState.errorInfo)
   const [successRate, setSuccessRate] = useState(70)
 
   const [debitForm, setDebitForm] = useState<DebitRoutingFormState>(initialState.debitForm)
@@ -815,6 +823,13 @@ export function DecisionExplorerPage() {
   const previewTraceDetail = useSWR<PaymentAuditResponse>(previewTraceUrl, fetcher, {
     revalidateOnFocus: false,
   })
+
+  const { data: gsmOptionsData } = useSWR<{ rules: GsmOptionRow[] }>(
+    '/gsm/options',
+    fetcher,
+    { revalidateOnFocus: false, dedupingInterval: 300_000 },
+  )
+  const gsmRules = gsmOptionsData?.rules ?? []
 
   useEffect(() => {
     if (routingConfigUnavailable || routingKeysLoading) return
@@ -946,6 +961,7 @@ export function DecisionExplorerPage() {
     setResultDataUpdatedAtMs(nextState.resultDataUpdatedAtMs)
     setForm(nextState.form)
     setSimulationConfig(nextState.simulationConfig)
+    setErrorInfo(nextState.errorInfo)
     setDebitForm(nextState.debitForm)
     setRuleParams(nextState.ruleParams)
     setFallbackConnectors(nextState.fallbackConnectors)
@@ -1010,6 +1026,7 @@ export function DecisionExplorerPage() {
       activeTab,
       form,
       simulationConfig,
+      errorInfo,
       debitForm,
       ruleParams,
       fallbackConnectors,
@@ -1037,6 +1054,7 @@ export function DecisionExplorerPage() {
     activeTab,
     form,
     simulationConfig,
+    errorInfo,
     debitForm,
     ruleParams,
     fallbackConnectors,
@@ -1062,6 +1080,23 @@ export function DecisionExplorerPage() {
 
   function setDebitField<K extends keyof DebitRoutingFormState>(field: K, value: DebitRoutingFormState[K]) {
     setDebitForm(f => ({ ...f, [field]: value }))
+  }
+
+  function setErrorField(updates: Partial<ErrorInfoState>) {
+    setErrorInfo(f => ({ ...f, ...updates }))
+  }
+
+  function buildErrorInfo() {
+    if (!errorInfo.connector || !errorInfo.flow || !errorInfo.sub_flow) return undefined
+    return {
+      connector: errorInfo.connector,
+      flow: errorInfo.flow,
+      subFlow: errorInfo.sub_flow,
+      ...(errorInfo.error_code && { errorCode: errorInfo.error_code }),
+      ...(errorInfo.error_message && { errorMessage: errorInfo.error_message }),
+      ...(errorInfo.issuer_error_code && { issuerErrorCode: errorInfo.issuer_error_code }),
+      ...(errorInfo.card_network && { cardNetwork: errorInfo.card_network }),
+    }
   }
 
   function openSetupPrompt(tab: TabType, detail?: string) {
@@ -1172,6 +1207,7 @@ export function DecisionExplorerPage() {
         status: singleRunOutcome,
         paymentId: paymentId,
         enforceDynamicRoutingFailure: null,
+        ...(singleRunOutcome === 'FAILURE' && { errorInfo: buildErrorInfo() }),
       })
       setResult(res)
       setSingleRunPaymentId(paymentId)
@@ -1301,6 +1337,7 @@ export function DecisionExplorerPage() {
           status: outcome,
           paymentId: paymentId,
           enforceDynamicRoutingFailure: null,
+          ...(outcome === 'FAILURE' && { errorInfo: buildErrorInfo() }),
         })
 
         results.push({
@@ -2146,20 +2183,23 @@ export function DecisionExplorerPage() {
                 </div>
 
                 {activeTab === 'single' && (
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">Transaction Outcome</label>
-                    <select
-                      value={singleRunOutcome}
-                      onChange={e => setSingleRunOutcome(e.target.value as TransactionOutcome)}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-                    >
-                      <option value="CHARGED">Success (CHARGED)</option>
-                      <option value="FAILURE">Failure (FAILURE)</option>
-                    </select>
-                    <p className="mt-1 text-xs text-slate-500">
-                      After deciding the gateway, single test will post feedback with this outcome so the payment appears in Decision Audit.
-                    </p>
-                  </div>
+                  <>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">Transaction Outcome</label>
+                      <select
+                        value={singleRunOutcome}
+                        onChange={e => setSingleRunOutcome(e.target.value as TransactionOutcome)}
+                        className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      >
+                        <option value="CHARGED">Success (CHARGED)</option>
+                        <option value="FAILURE">Failure (FAILURE)</option>
+                      </select>
+                      <p className="mt-1 text-xs text-slate-500">
+                        After deciding the gateway, single test will post feedback with this outcome so the payment appears in Decision Audit.
+                      </p>
+                    </div>
+                    {singleRunOutcome === 'FAILURE' && <ErrorInfoFields info={errorInfo} onChange={setErrorField} rules={gsmRules} />}
+                  </>
                 )}
 
                 {activeTab === 'batch' && (
@@ -2209,6 +2249,9 @@ export function DecisionExplorerPage() {
                         </div>
                       </div>
                     </div>
+                    {parseInt(simulationConfig.failureCount) > 0 && (
+                      <ErrorInfoFields info={errorInfo} onChange={setErrorField} rules={gsmRules} />
+                    )}
                   </div>
                 )}
               </>
@@ -2261,13 +2304,7 @@ export function DecisionExplorerPage() {
           </CardBody>
         </Card>
 
-        <div
-          className={
-            activeTab === 'volume' && volumeDistribution.length > 0
-              ? 'min-w-0 space-y-4'
-              : 'min-w-0 space-y-4'
-          }
-        >
+        <div className="min-w-0 flex flex-col gap-4">
           {activeTab === 'debit' ? (
             debitResult ? (
               <>
@@ -2710,7 +2747,7 @@ export function DecisionExplorerPage() {
           ) : activeTab === 'batch' ? (
             hasSimulationActivity ? (
               <>
-                <Card>
+                <Card className="shrink-0">
                   <CardHeader>
                     <h3 className="text-sm font-medium text-slate-800">Simulation Progress</h3>
                   </CardHeader>
@@ -2749,11 +2786,11 @@ export function DecisionExplorerPage() {
                   </CardBody>
                 </Card>
 
-                <Card>
-                  <CardHeader>
+                <Card className="flex-1 min-h-0">
+                  <CardHeader className="shrink-0">
                     <h3 className="text-sm font-medium text-slate-800">Transaction Log</h3>
                   </CardHeader>
-                  <CardBody className="p-0 max-h-96 overflow-auto">
+                  <CardBody className="p-0 flex-1 min-h-0 overflow-auto">
                     {deferredSimulationResults.length > 0 ? (
                       <table className="w-full text-sm">
                         <thead className="bg-slate-50 dark:bg-[#0a0a0f] text-xs text-slate-500 sticky top-0">
