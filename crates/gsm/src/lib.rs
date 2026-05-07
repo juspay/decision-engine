@@ -59,7 +59,10 @@ mod tests {
         let store = ConfigGsmStore::from_csv_str(SAMPLE_CSV).expect("CSV should parse");
 
         let rule = store.find_gsm_rule("adyen", "Payment", "Authorize", "2", "Refused");
-        assert!(rule.is_some(), "rule for adyen/Payment/Authorize/2/Refused must exist");
+        assert!(
+            rule.is_some(),
+            "rule for adyen/Payment/Authorize/2/Refused must exist"
+        );
 
         let rule = rule.unwrap();
         assert_eq!(rule.decision, GsmDecision::Retry);
@@ -107,8 +110,8 @@ mod tests {
             "Authorize",
             Some("2"),
             Some("Refused"),
-            Some("51"),         // issuer code
-            Some("Visa"),       // card network
+            Some("51"),   // issuer code
+            Some("Visa"), // card network
         );
         assert!(rule.is_some());
         assert_eq!(rule.unwrap().decision, GsmDecision::Retry);

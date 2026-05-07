@@ -27,8 +27,7 @@ static GSM_STORE: Lazy<gsm::ConfigGsmStore> = Lazy::new(|| {
     }
 
     let bundled = include_str!("../crates/gsm/data/gsm.csv");
-    let store =
-        gsm::ConfigGsmStore::from_csv_str(bundled).expect("bundled GSM CSV must be valid");
+    let store = gsm::ConfigGsmStore::from_csv_str(bundled).expect("bundled GSM CSV must be valid");
     crate::logger::info!(
         tag = "GSM",
         "Loaded {} GSM rules from bundled data",

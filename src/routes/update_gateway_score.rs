@@ -160,10 +160,7 @@ pub async fn update_gateway_score(
                         .unwrap_or_else(|_| format!("{:?}", payload.status))
                         .trim_matches('"')
                         .to_string();
-                    let gsm_info = payload
-                        .error_info
-                        .as_ref()
-                        .and_then(crate::gsm::lookup);
+                    let gsm_info = payload.error_info.as_ref().and_then(crate::gsm::lookup);
                     let response = UpdateScoreResponse {
                         message: "Gateway score updated successfully".to_string(),
                         merchant_id: merchant_id.clone(),
