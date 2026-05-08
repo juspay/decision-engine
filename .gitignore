@@ -9,3 +9,4 @@ cypress/screenshots
 cypress/videos
 cypress/fixtures
 .mintlify-dev.log
+**/gsm.csv

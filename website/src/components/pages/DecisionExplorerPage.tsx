@@ -1,8 +1,9 @@
-import { useDeferredValue, useEffect, useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { ErrorInfoFields, ErrorInfoState, GsmOptionRow, DEFAULT_ERROR_INFO } from './ErrorInfoFields'
 import { useNavigate } from 'react-router-dom'
 import useSWR from 'swr'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts'
+import { Tooltip as UiTooltip } from '../ui/Tooltip'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
 import { Card, CardBody, CardHeader, SurfaceLabel } from '../ui/Card'
@@ -12,11 +13,11 @@ import { useMerchantStore } from '../../store/merchantStore'
 import { useAuthStore } from '../../store/authStore'
 import { apiPost, fetcher } from '../../lib/api'
 import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
-import { DecideGatewayResponse, GatewayConnector, PaymentAuditEvent, PaymentAuditResponse, RoutingAlgorithmName } from '../../types/api'
+import { DecideGatewayResponse, GatewayConnector, GsmInfo, PaymentAuditEvent, PaymentAuditResponse, RoutingAlgorithmName, UpdateScoreResponse } from '../../types/api'
 import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
 import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
-import { Play, RefreshCw, ChevronDown, ChevronUp, Activity, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings } from 'lucide-react'
+import { Play, RefreshCw, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Activity, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings } from 'lucide-react'
 
 const ALGORITHMS: RoutingAlgorithmName[] = [
   'SR_BASED_ROUTING',
@@ -62,8 +63,11 @@ interface DebitRoutingFormState {
 
 interface SimulationConfig {
   totalPayments: string
-  successCount: string
-  failureCount: string
+}
+
+interface GatewaySimConfig {
+  successRate: number
+  errorInfo: ErrorInfoState
 }
 
 
@@ -72,6 +76,7 @@ interface SimulationResult {
   decidedGateway: string
   status: 'CHARGED' | 'FAILURE'
   timestamp: string
+  routingApproach: string | null
 }
 
 type TransactionOutcome = 'CHARGED' | 'FAILURE'
@@ -150,9 +155,74 @@ const DEFAULT_DEBIT_FORM: DebitRoutingFormState = {
 
 const DEFAULT_SIMULATION_CONFIG: SimulationConfig = {
   totalPayments: '10',
-  successCount: '7',
-  failureCount: '3',
 }
+
+type PresetVariant = Omit<ErrorInfoState, never>
+
+interface ErrorScenarioPreset {
+  label: string
+  badge: 'protected' | 'penalized'
+  tooltip: string
+  // Keyed by connector name — only variants for eligible gateways are shown/used.
+  variants: Record<string, PresetVariant>
+}
+
+const ERROR_SCENARIO_PRESETS: ErrorScenarioPreset[] = [
+  {
+    label: 'Expired Card',
+    badge: 'protected',
+    tooltip: 'issue_with_payment_method · do_default — user error, penalty skipped',
+    variants: {
+      stripe:        { flow: 'Authorize', sub_flow: 'sub_flow', error_code: 'expired_card',    error_message: 'expired_card',    issuer_error_code: '', card_network: '' },
+      adyen:         { flow: 'Authorize', sub_flow: 'sub_flow', error_code: '6',               error_message: 'Expired Card',    issuer_error_code: '', card_network: '' },
+      cybersource:   { flow: 'Authorize', sub_flow: 'sub_flow', error_code: 'EXPIRED_CARD',    error_message: 'EXPIRED_CARD',    issuer_error_code: '', card_network: '' },
+      bankofamerica: { flow: 'Authorize', sub_flow: 'sub_flow', error_code: 'EXPIRED_CARD',    error_message: 'EXPIRED_CARD',    issuer_error_code: '', card_network: '' },
+    },
+  },
+  {
+    label: 'Wrong CVV',
+    badge: 'protected',
+    tooltip: 'processor_decline_incorrect_data · do_default — user data error, penalty skipped',
+    variants: {
+      cybersource:   { flow: 'Authorize', sub_flow: 'sub_flow', error_code: 'INVALID_CVN',     error_message: 'INVALID_CVN',     issuer_error_code: '', card_network: '' },
+      adyen:         { flow: 'Authorize', sub_flow: 'sub_flow', error_code: '11',              error_message: '3D Not Authenticated', issuer_error_code: '', card_network: '' },
+      bankofamerica: { flow: 'Authorize', sub_flow: 'sub_flow', error_code: 'INVALID_DATA',    error_message: 'INVALID_DATA',    issuer_error_code: '', card_network: '' },
+    },
+  },
+  {
+    label: 'Fraud Block',
+    badge: 'protected',
+    tooltip: 'frm_decline · do_default — FRM decision, penalty skipped',
+    variants: {
+      adyen:         { flow: 'Authorize', sub_flow: 'sub_flow', error_code: '5',               error_message: 'Blocked Card',    issuer_error_code: '', card_network: '' },
+      cybersource:   { flow: 'Authorize', sub_flow: 'sub_flow', error_code: 'DECISION_PROFILE_REJECT', error_message: 'DECISION_PROFILE_REJECT', issuer_error_code: '', card_network: '' },
+      bankofamerica: { flow: 'Authorize', sub_flow: 'sub_flow', error_code: 'No error code',   error_message: 'The order has been rejected by Decision Manager', issuer_error_code: '', card_network: '' },
+    },
+  },
+  {
+    label: 'Gateway Down',
+    badge: 'penalized',
+    tooltip: 'Gateway connectivity failure — no matching GSM rule means full penalty by default',
+    variants: {
+      // cybersource/bankofamerica have processor_downtime GSM rules → category shown in tooltip
+      cybersource:   { flow: 'Authorize', sub_flow: 'sub_flow', error_code: 'SERVER_ERROR',         error_message: 'Error - General system failure.',                    issuer_error_code: '', card_network: '' },
+      bankofamerica: { flow: 'Authorize', sub_flow: 'sub_flow', error_code: 'SERVER_ERROR',         error_message: 'Error - General system failure.',                    issuer_error_code: '', card_network: '' },
+      // stripe/adyen have no processor_downtime GSM rules → gsm_info is null → still penalized
+      stripe:        { flow: 'Authorize', sub_flow: 'sub_flow', error_code: 'payment_method_not_available', error_message: 'The payment processor is currently unavailable.', issuer_error_code: '', card_network: '' },
+      adyen:         { flow: 'Authorize', sub_flow: 'sub_flow', error_code: '900',                  error_message: 'System failure',                                     issuer_error_code: '', card_network: '' },
+    },
+  },
+  {
+    label: 'Bad Config',
+    badge: 'penalized',
+    tooltip: 'processor_decline_unauthorized · retry — gateway config fault, full penalty applied',
+    variants: {
+      adyen:  { flow: 'Authorize', sub_flow: 'sub_flow', error_code: '905_5', error_message: 'No acquirer account active and configured for Klarna.', issuer_error_code: '', card_network: '' },
+      stripe: { flow: 'Authorize', sub_flow: 'sub_flow', error_code: 'api_key_expired', error_message: 'api_key_expired', issuer_error_code: '', card_network: '' },
+    },
+  },
+]
+
 
 
 const DEFAULT_RULE_PARAMS: RuleEvaluateParams[] = [
@@ -171,6 +241,7 @@ interface ExplorerPersistedState {
   activeTab: TabType
   form: FormState
   simulationConfig: SimulationConfig
+  gatewaySimConfigs: Record<string, GatewaySimConfig>
   errorInfo: ErrorInfoState
   debitForm: DebitRoutingFormState
   ruleParams: RuleEvaluateParams[]
@@ -220,6 +291,7 @@ function getDefaultExplorerState(): ExplorerPersistedState {
     activeTab: 'batch',
     form: { ...DEFAULT_FORM },
     simulationConfig: { ...DEFAULT_SIMULATION_CONFIG },
+    gatewaySimConfigs: {},
     errorInfo: { ...DEFAULT_ERROR_INFO },
     debitForm: { ...DEFAULT_DEBIT_FORM },
     ruleParams: cloneRuleParams(DEFAULT_RULE_PARAMS),
@@ -295,6 +367,7 @@ function loadExplorerState(scopeKey: string): ExplorerPersistedState {
         ranking_algorithm: normalizeRankingAlgorithm(parsed.form?.ranking_algorithm),
       },
       simulationConfig: { ...defaults.simulationConfig, ...(parsed.simulationConfig || {}) },
+      gatewaySimConfigs: parsed.gatewaySimConfigs || defaults.gatewaySimConfigs,
       errorInfo: { ...defaults.errorInfo, ...(parsed.errorInfo || {}) },
       debitForm: {
         ...defaults.debitForm,
@@ -741,7 +814,11 @@ export function DecisionExplorerPage() {
 
   const [simulationConfig, setSimulationConfig] = useState<SimulationConfig>(initialState.simulationConfig)
   const [errorInfo, setErrorInfo] = useState<ErrorInfoState>(initialState.errorInfo)
-  const [successRate, setSuccessRate] = useState(70)
+  const [gatewaySimConfigs, setGatewaySimConfigs] = useState<Record<string, GatewaySimConfig>>({})
+  const gatewaySimConfigsRef = useRef(gatewaySimConfigs)
+  useEffect(() => { gatewaySimConfigsRef.current = gatewaySimConfigs }, [gatewaySimConfigs])
+  const simulationAbortRef = useRef(false)
+  useEffect(() => () => { simulationAbortRef.current = true }, [])
 
   const [debitForm, setDebitForm] = useState<DebitRoutingFormState>(initialState.debitForm)
 
@@ -777,6 +854,8 @@ export function DecisionExplorerPage() {
   const [previewInspectorTab, setPreviewInspectorTab] = useState<AuditInspectorTab>('summary')
   const [previewTraceLabel, setPreviewTraceLabel] = useState('Rule Evaluation Decision')
   const deferredSimulationResults = useDeferredValue(simulationResults)
+  const [txLogPage, setTxLogPage] = useState(1)
+  const TX_LOG_PAGE_SIZE = 10
 
   const routingKeyNames = useMemo(
     () => Object.keys(routingKeysConfig).sort(),
@@ -961,6 +1040,7 @@ export function DecisionExplorerPage() {
     setResultDataUpdatedAtMs(nextState.resultDataUpdatedAtMs)
     setForm(nextState.form)
     setSimulationConfig(nextState.simulationConfig)
+    setGatewaySimConfigs(nextState.gatewaySimConfigs)
     setErrorInfo(nextState.errorInfo)
     setDebitForm(nextState.debitForm)
     setRuleParams(nextState.ruleParams)
@@ -1026,6 +1106,7 @@ export function DecisionExplorerPage() {
       activeTab,
       form,
       simulationConfig,
+      gatewaySimConfigs,
       errorInfo,
       debitForm,
       ruleParams,
@@ -1054,6 +1135,7 @@ export function DecisionExplorerPage() {
     activeTab,
     form,
     simulationConfig,
+    gatewaySimConfigs,
     errorInfo,
     debitForm,
     ruleParams,
@@ -1086,16 +1168,38 @@ export function DecisionExplorerPage() {
     setErrorInfo(f => ({ ...f, ...updates }))
   }
 
-  function buildErrorInfo() {
-    if (!errorInfo.connector || !errorInfo.flow || !errorInfo.sub_flow) return undefined
+  function getGwSuccessRate(gw: string): number {
+    return gatewaySimConfigsRef.current[gw]?.successRate ?? 70
+  }
+
+  function getGwErrorInfo(gw: string): ErrorInfoState {
+    return gatewaySimConfigsRef.current[gw]?.errorInfo ?? { ...DEFAULT_ERROR_INFO }
+  }
+
+  function setGwSuccessRate(gw: string, rate: number) {
+    setGatewaySimConfigs(c => ({
+      ...c,
+      [gw]: { errorInfo: c[gw]?.errorInfo ?? { ...DEFAULT_ERROR_INFO }, successRate: rate },
+    }))
+  }
+
+  function setGwErrorInfoField(gw: string, updates: Partial<ErrorInfoState>) {
+    setGatewaySimConfigs(c => {
+      const existing = c[gw] ?? { successRate: 70, errorInfo: { ...DEFAULT_ERROR_INFO } }
+      return { ...c, [gw]: { ...existing, errorInfo: { ...existing.errorInfo, ...updates } } }
+    })
+  }
+
+  function buildErrorInfo(gateway: string, info: ErrorInfoState = errorInfo) {
+    if (!gateway || !info.flow || !info.sub_flow) return undefined
     return {
-      connector: errorInfo.connector,
-      flow: errorInfo.flow,
-      subFlow: errorInfo.sub_flow,
-      ...(errorInfo.error_code && { errorCode: errorInfo.error_code }),
-      ...(errorInfo.error_message && { errorMessage: errorInfo.error_message }),
-      ...(errorInfo.issuer_error_code && { issuerErrorCode: errorInfo.issuer_error_code }),
-      ...(errorInfo.card_network && { cardNetwork: errorInfo.card_network }),
+      connector: gateway,
+      flow: info.flow,
+      subFlow: info.sub_flow,
+      ...(info.error_code && { errorCode: info.error_code }),
+      ...(info.error_message && { errorMessage: info.error_message }),
+      ...(info.issuer_error_code && { issuerErrorCode: info.issuer_error_code }),
+      ...(info.card_network && { cardNetwork: info.card_network }),
     }
   }
 
@@ -1207,7 +1311,7 @@ export function DecisionExplorerPage() {
         status: singleRunOutcome,
         paymentId: paymentId,
         enforceDynamicRoutingFailure: null,
-        ...(singleRunOutcome === 'FAILURE' && { errorInfo: buildErrorInfo() }),
+        ...(singleRunOutcome === 'FAILURE' && { errorInfo: buildErrorInfo(res.decided_gateway) }),
       })
       setResult(res)
       setSingleRunPaymentId(paymentId)
@@ -1280,34 +1384,22 @@ export function DecisionExplorerPage() {
     if (routingConfigUnavailable) return setError('Routing key config unavailable. Fix /config/routing-keys and retry.')
 
     const total = parseInt(simulationConfig.totalPayments) || 0
-    const success = parseInt(simulationConfig.successCount) || 0
-    const failure = parseInt(simulationConfig.failureCount) || 0
 
     if (total <= 0) return setError('Total Payments must be greater than 0')
-    if (success + failure !== total) {
-      return setError('Success + Failure count must equal Total Payments')
-    }
 
     setIsSimulating(true)
     setError(null)
     setSetupPrompt(null)
     setSimulationResults([])
+    setTxLogPage(1)
+    simulationAbortRef.current = false
 
     const gateways = form.eligible_gateways.split(',').map(s => s.trim()).filter(Boolean)
     const results: SimulationResult[] = []
 
-    const outcomes: ('CHARGED' | 'FAILURE')[] = [
-      ...Array(success).fill('CHARGED'),
-      ...Array(failure).fill('FAILURE'),
-    ]
-
-    for (let i = outcomes.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [outcomes[i], outcomes[j]] = [outcomes[j], outcomes[i]]
-    }
-
     try {
       for (let i = 0; i < total; i++) {
+        if (simulationAbortRef.current) break
         const paymentId = `sim_${Date.now()}_${i}`
 
         const decideRes = await apiPost<DecideGatewayResponse>('/decide-gateway', {
@@ -1328,16 +1420,18 @@ export function DecisionExplorerPage() {
         })
 
         const decidedGateway = decideRes.decided_gateway
-        const outcome = outcomes[i]
+        const gwRate = getGwSuccessRate(decidedGateway)
+        const outcome: TransactionOutcome = Math.random() * 100 < gwRate ? 'CHARGED' : 'FAILURE'
+        const gwErrorInfo = getGwErrorInfo(decidedGateway)
 
-        await apiPost('/update-gateway-score', {
+        await apiPost<UpdateScoreResponse>('/update-gateway-score', {
           merchantId: effectiveMerchantId,
           gateway: decidedGateway,
           gatewayReferenceId: null,
           status: outcome,
           paymentId: paymentId,
           enforceDynamicRoutingFailure: null,
-          ...(outcome === 'FAILURE' && { errorInfo: buildErrorInfo() }),
+          ...(outcome === 'FAILURE' && { errorInfo: buildErrorInfo(decidedGateway, gwErrorInfo) }),
         })
 
         results.push({
@@ -1345,6 +1439,7 @@ export function DecisionExplorerPage() {
           decidedGateway,
           status: outcome,
           timestamp: new Date().toISOString(),
+          routingApproach: decideRes.routing_approach ?? null,
         })
 
         setSimulationResults([...results])
@@ -1507,6 +1602,11 @@ export function DecisionExplorerPage() {
       : 0
   const hasSimulationActivity = isSimulating || completedSimulationCount > 0
 
+  const eligibleGatewaysParsed = useMemo(
+    () => form.eligible_gateways.split(',').map(s => s.trim().toLowerCase()).filter(Boolean),
+    [form.eligible_gateways],
+  )
+
   const gatewayStats = deferredSimulationResults.reduce((acc, curr) => {
     if (!acc[curr.decidedGateway]) {
       acc[curr.decidedGateway] = { total: 0, success: 0, failure: 0 }
@@ -1517,7 +1617,11 @@ export function DecisionExplorerPage() {
     return acc
   }, {} as Record<string, { total: number; success: number; failure: number }>)
 
-  const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
+  const hedgingHits = deferredSimulationResults.filter(
+    r => r.routingApproach === 'SR_V3_HEDGING',
+  ).length
+
+const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
   const debitNetworkRows = debitResult?.debit_routing_output?.co_badged_card_networks_info || []
   const volumeColorIndex = useMemo(
     () => new Map(volumeDistribution.map((item, index) => [item.name, index] as const)),
@@ -1655,7 +1759,7 @@ export function DecisionExplorerPage() {
     } else if (activeTab === 'batch') {
       setForm(defaults.form)
       setSimulationConfig(defaults.simulationConfig)
-      setSuccessRate(70)
+      setGatewaySimConfigs({})
       setSimulationResults(defaults.simulationResults)
       setIsSimulating(false)
     } else if (activeTab === 'rule') {
@@ -1728,28 +1832,28 @@ export function DecisionExplorerPage() {
       <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-1 dark:border-[#242b36] dark:bg-[#0c1118]">
         <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-4">
           <button
-            onClick={() => setActiveTab('batch')}
+            onClick={() => { simulationAbortRef.current = true; setActiveTab('batch') }}
             className={`rounded-xl border px-4 py-3 text-left text-sm font-semibold transition ${explorerModeButtonClass(activeTab === 'batch')}`}
           >
             <span className="block">Auth-rate</span>
             <span className="mt-1 block text-[11px] font-medium text-slate-400 dark:text-[#738097]">Score simulation</span>
           </button>
           <button
-            onClick={() => setActiveTab('rule')}
+            onClick={() => { simulationAbortRef.current = true; setActiveTab('rule') }}
             className={`rounded-xl border px-4 py-3 text-left text-sm font-semibold transition ${explorerModeButtonClass(activeTab === 'rule')}`}
           >
             <span className="block">Rule based</span>
             <span className="mt-1 block text-[11px] font-medium text-slate-400 dark:text-[#738097]">Policy evaluator</span>
           </button>
           <button
-            onClick={() => setActiveTab('volume')}
+            onClick={() => { simulationAbortRef.current = true; setActiveTab('volume') }}
             className={`rounded-xl border px-4 py-3 text-left text-sm font-semibold transition ${explorerModeButtonClass(activeTab === 'volume')}`}
           >
             <span className="block">Volume split</span>
             <span className="mt-1 block text-[11px] font-medium text-slate-400 dark:text-[#738097]">Distribution run</span>
           </button>
           <button
-            onClick={() => setActiveTab('debit')}
+            onClick={() => { simulationAbortRef.current = true; setActiveTab('debit') }}
             className={`rounded-xl border px-4 py-3 text-left text-sm font-semibold transition ${explorerModeButtonClass(activeTab === 'debit')}`}
           >
             <span className="block">Debit routing</span>
@@ -2182,6 +2286,21 @@ export function DecisionExplorerPage() {
                   </div>
                 </div>
 
+                <div
+                  className="flex items-center justify-between rounded-lg border border-slate-200 dark:border-[#222226] px-3 py-2.5 cursor-pointer select-none"
+                  onClick={() => set('elimination_enabled', !form.elimination_enabled)}
+                >
+                  <div>
+                    <p className="text-xs font-medium text-slate-700 dark:text-slate-200">Elimination</p>
+                    <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">
+                      Gateways that drop below the score threshold are removed from routing entirely
+                    </p>
+                  </div>
+                  <div className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${form.elimination_enabled ? 'bg-brand-600' : 'bg-slate-200 dark:bg-[#2a2a35]'}`}>
+                    <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${form.elimination_enabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                  </div>
+                </div>
+
                 {activeTab === 'single' && (
                   <>
                     <div>
@@ -2198,60 +2317,89 @@ export function DecisionExplorerPage() {
                         After deciding the gateway, single test will post feedback with this outcome so the payment appears in Decision Audit.
                       </p>
                     </div>
-                    {singleRunOutcome === 'FAILURE' && <ErrorInfoFields info={errorInfo} onChange={setErrorField} rules={gsmRules} />}
+                    {singleRunOutcome === 'FAILURE' && <ErrorInfoFields info={errorInfo} onChange={setErrorField} rules={gsmRules} eligibleGateways={eligibleGatewaysParsed} />}
                   </>
                 )}
 
                 {activeTab === 'batch' && (
-                  <div className="border-t border-slate-200 dark:border-[#1c1c24] pt-4 mt-4 space-y-3">
+                  <div className="border-t border-slate-200 dark:border-[#1c1c24] pt-4 mt-4 space-y-4">
                     <h3 className="text-sm font-medium text-slate-800 dark:text-slate-200 flex items-center gap-2">
                       <Activity size={14} />
                       Simulation
                     </h3>
-                    <div className="flex items-end gap-3">
-                      <div className="w-28">
-                        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Payments</label>
-                        <input
-                          type="number"
-                          min={1}
-                          max={1000}
-                          value={simulationConfig.totalPayments}
-                          onChange={e => {
-                            const total = Math.max(1, parseInt(e.target.value) || 1)
-                            const s = Math.round(total * successRate / 100)
-                            setSimulationConfig({ totalPayments: String(total), successCount: String(s), failureCount: String(total - s) })
-                          }}
-                          className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-                        />
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex justify-between mb-1">
-                          <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Success Rate</label>
-                          <span className="text-xs font-semibold text-brand-600 dark:text-sky-400">{successRate}%</span>
-                        </div>
-                        <input
-                          type="range"
-                          min={0}
-                          max={100}
-                          value={successRate}
-                          onChange={e => {
-                            const rate = parseInt(e.target.value)
-                            const total = parseInt(simulationConfig.totalPayments) || 10
-                            const s = Math.round(total * rate / 100)
-                            setSuccessRate(rate)
-                            setSimulationConfig({ totalPayments: String(total), successCount: String(s), failureCount: String(total - s) })
-                          }}
-                          className="w-full accent-brand-600"
-                        />
-                        <div className="flex justify-between mt-1 text-[10px] text-slate-400">
-                          <span>{simulationConfig.successCount} success</span>
-                          <span>{simulationConfig.failureCount} failure</span>
-                        </div>
-                      </div>
+                    <div className="w-28">
+                      <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Payments</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={1000}
+                        value={simulationConfig.totalPayments}
+                        onChange={e => {
+                          const total = Math.max(1, parseInt(e.target.value) || 1)
+                          setSimulationConfig({ totalPayments: String(total) })
+                        }}
+                        className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      />
                     </div>
-                    {parseInt(simulationConfig.failureCount) > 0 && (
-                      <ErrorInfoFields info={errorInfo} onChange={setErrorField} rules={gsmRules} />
-                    )}
+
+                    {eligibleGatewaysParsed.map(gw => {
+                      const gwRate = getGwSuccessRate(gw)
+                      const gwErrInfo = getGwErrorInfo(gw)
+                      const hasFailures = gwRate < 100
+                      return (
+                        <div key={gw} className="border-t border-slate-200 dark:border-[#1c1c24] pt-3 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 capitalize">{gw}</span>
+                            <span className="text-xs font-semibold text-brand-600 dark:text-sky-400">{gwRate}% success</span>
+                          </div>
+                          <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            value={gwRate}
+                            onChange={e => setGwSuccessRate(gw, parseInt(e.target.value))}
+                            className="w-full accent-brand-600"
+                          />
+                          {hasFailures && (
+                            <div className="space-y-2 pt-1">
+                              <p className="text-xs font-medium text-slate-600 dark:text-slate-400">Failure scenario</p>
+                              <div className="flex flex-wrap gap-1.5">
+                                {ERROR_SCENARIO_PRESETS.filter(p => p.variants[gw]).map(preset => {
+                                  const variant = preset.variants[gw]
+                                  const isActive = variant != null &&
+                                    gwErrInfo.error_code === variant.error_code &&
+                                    gwErrInfo.flow === variant.flow
+                                  return (
+                                    <UiTooltip key={preset.label} text={preset.tooltip}>
+                                      <button
+                                        type="button"
+                                        onClick={() => setGwErrorInfoField(gw, { ...variant })}
+                                        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset transition-colors ${
+                                          isActive
+                                            ? preset.badge === 'protected'
+                                              ? 'bg-emerald-50 text-emerald-700 ring-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-300 dark:ring-emerald-700'
+                                              : 'bg-red-50 text-red-700 ring-red-300 dark:bg-red-900/30 dark:text-red-300 dark:ring-red-700'
+                                            : 'bg-slate-50 text-slate-600 ring-slate-200 hover:bg-slate-100 dark:bg-[#1c1c24] dark:text-slate-400 dark:ring-[#2a2a35] dark:hover:bg-[#222230]'
+                                        }`}
+                                      >
+                                        <span className={`h-1.5 w-1.5 rounded-full ${preset.badge === 'protected' ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                                        {preset.label}
+                                      </button>
+                                    </UiTooltip>
+                                  )
+                                })}
+                              </div>
+                              <ErrorInfoFields
+                                info={gwErrInfo}
+                                onChange={updates => setGwErrorInfoField(gw, updates)}
+                                rules={gsmRules}
+                                eligibleGateways={[gw]}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
                 )}
               </>
@@ -2766,82 +2914,177 @@ export function DecisionExplorerPage() {
                       <p className="mt-2 text-xs text-slate-500">
                         {completedSimulationCount} of {totalSimulationPayments || 0} payments processed.
                       </p>
+                      {completedSimulationCount > 0 && (
+                        <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-100 dark:border-[#1c1c24]">
+                          <span className="text-xs text-slate-500">Hedging (SR_V3_HEDGING)</span>
+                          {hedgingHits > 0 ? (
+                            <span className="text-xs font-semibold text-brand-600 dark:text-sky-400">
+                              {hedgingHits} / {completedSimulationCount} decisions ({Math.round((hedgingHits / completedSimulationCount) * 100)}%)
+                            </span>
+                          ) : (
+                            <UiTooltip text="Enable ENABLE_EXPLORE_AND_EXPLOIT_ON_SRV3_{PMT} or ENABLE_MERCHANT_ON_VOLUME_DISTRIBUTION_FEATURE_SR_V3 in Redis">
+                              <span className="text-xs font-medium text-amber-600 dark:text-amber-400 cursor-help">
+                                0 — feature flag not set
+                              </span>
+                            </UiTooltip>
+                          )}
+                        </div>
+                      )}
                     </div>
 
-                    {Object.keys(gatewayStats).length > 0 && (
-                      <div className="space-y-2">
-                        <h4 className="text-xs font-medium text-slate-700">Gateway Selection Summary</h4>
-                        {Object.entries(gatewayStats).map(([gateway, stats]) => (
-                          <div key={gateway} className="flex items-center justify-between text-sm">
-                            <span className="font-medium">{gateway}</span>
-                            <div className="flex gap-3 text-xs">
-                              <span className="text-emerald-600">{stats.success} ✓</span>
-                              <span className="text-red-500">{stats.failure} ✗</span>
-                              <span className="text-slate-500">({stats.total} total)</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                    {Object.keys(gatewayStats).length > 0 && (() => {
+                      const totalRouted = Object.values(gatewayStats).reduce((s, g) => s + g.total, 0)
+                      const dominated = Object.keys(gatewayStats).length === 1
+                      return (
+                        <div className="space-y-2">
+                          <h4 className="text-xs font-medium text-slate-700 dark:text-slate-300">Gateway Selection Summary</h4>
+                          {Object.entries(gatewayStats).map(([gateway, stats]) => {
+                            const share = totalRouted > 0 ? Math.round((stats.total / totalRouted) * 100) : 0
+                            const srPct = stats.total > 0 ? Math.round((stats.success / stats.total) * 100) : 0
+                            return (
+                              <div key={gateway} className="space-y-0.5">
+                                <div className="flex items-center justify-between text-xs">
+                                  <span className="font-medium text-slate-800 dark:text-slate-200">{gateway}</span>
+                                  <div className="flex gap-2 text-[11px]">
+                                    <span className="text-emerald-600">{stats.success} ✓</span>
+                                    <span className="text-red-500">{stats.failure} ✗</span>
+                                    <span className="font-semibold text-emerald-600">{srPct}% SR</span>
+                                    <span className="font-semibold text-slate-500">{share}% traffic</span>
+                                  </div>
+                                </div>
+                                <div className="w-full h-1 rounded-full bg-slate-100 dark:bg-[#1c1c24] overflow-hidden">
+                                  <div className="h-1 rounded-full bg-brand-500 transition-[width] duration-300" style={{ width: `${share}%` }} />
+                                </div>
+                              </div>
+                            )
+                          })}
+                          {dominated && eligibleGatewaysParsed.length > 1 && (
+                            <p className="text-[11px] text-slate-400 pt-0.5">
+                              SR routing concentrates traffic on the highest-scoring gateway. Run with a "Gateway Down" scenario to see score drop and traffic shift to the next gateway.
+                            </p>
+                          )}
+                        </div>
+                      )
+                    })()}
+
                   </CardBody>
                 </Card>
 
                 <Card className="flex-1 min-h-0">
-                  <CardHeader className="shrink-0">
-                    <h3 className="text-sm font-medium text-slate-800">Transaction Log</h3>
-                  </CardHeader>
-                  <CardBody className="p-0 flex-1 min-h-0 overflow-auto">
-                    {deferredSimulationResults.length > 0 ? (
-                      <table className="w-full text-sm">
-                        <thead className="bg-slate-50 dark:bg-[#0a0a0f] text-xs text-slate-500 sticky top-0">
-                          <tr>
-                            <th className="text-left px-3 py-2">#</th>
-                            <th className="text-left px-3 py-2">Payment ID</th>
-                            <th className="text-left px-3 py-2">Gateway</th>
-                            <th className="text-left px-3 py-2">Outcome</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-[#1c1c24]">
-                          {deferredSimulationResults.map((res, idx) => (
-                            <tr key={res.paymentId} className="hover:bg-slate-100 dark:bg-[#0f0f16]">
-                              <td className="px-3 py-2 text-slate-500">{idx + 1}</td>
-                              <td className="px-3 py-2">
-                                <button
-                                  type="button"
-                                  title={res.paymentId}
-                                  onClick={() => openAuditModal(res.paymentId)}
-                                  className="group flex items-start gap-3 text-left"
-                                >
-                                  <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-brand-500/10 text-[11px] font-semibold uppercase tracking-[0.16em] text-brand-600 dark:text-brand-300">
-                                    {idx + 1}
-                                  </span>
-                                  <span className="min-w-0">
-                                    <span className="block truncate font-mono text-xs font-semibold text-slate-900 transition group-hover:text-brand-600 dark:text-white">
-                                      {res.paymentId}
-                                    </span>
-                                    <span className="mt-1 block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 transition group-hover:text-brand-500">
-                                      View audit
-                                    </span>
-                                  </span>
-                                </button>
-                              </td>
-                              <td className="px-3 py-2 font-medium">{res.decidedGateway}</td>
-                              <td className="px-3 py-2">
-                                <Badge variant={res.status === 'CHARGED' ? 'green' : 'red'}>
-                                  {res.status}
-                                </Badge>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    ) : (
-                      <div className="flex items-center gap-3 px-4 py-6 text-sm text-slate-500">
-                        <Spinner size={16} />
-                        Waiting for the first simulated payment result…
-                      </div>
-                    )}
-                  </CardBody>
+                  {(() => {
+                    const total = deferredSimulationResults.length
+                    const totalPages = Math.max(1, Math.ceil(total / TX_LOG_PAGE_SIZE))
+                    const safePage = Math.min(txLogPage, totalPages)
+                    const pageStart = (safePage - 1) * TX_LOG_PAGE_SIZE
+                    const pageResults = deferredSimulationResults.slice(pageStart, pageStart + TX_LOG_PAGE_SIZE)
+                    return (
+                      <>
+                        <CardHeader className="shrink-0 flex flex-row items-center justify-between gap-3">
+                          <h3 className="text-sm font-medium text-slate-800 dark:text-white">Transaction Log</h3>
+                          {total > 0 && (
+                            <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                              <span>{pageStart + 1}–{Math.min(pageStart + TX_LOG_PAGE_SIZE, total)} of {total}</span>
+                              <button
+                                type="button"
+                                disabled={safePage <= 1}
+                                onClick={() => setTxLogPage(p => Math.max(1, p - 1))}
+                                className="rounded p-0.5 hover:bg-slate-100 dark:hover:bg-[#1c1c24] disabled:opacity-30 disabled:cursor-not-allowed"
+                              >
+                                <ChevronLeft size={14} />
+                              </button>
+                              <input
+                                type="number"
+                                min={1}
+                                max={totalPages}
+                                value={safePage}
+                                onChange={e => {
+                                  const v = parseInt(e.target.value)
+                                  if (!isNaN(v)) setTxLogPage(Math.min(totalPages, Math.max(1, v)))
+                                }}
+                                className="w-10 rounded border border-slate-200 dark:border-[#222226] bg-transparent px-1 py-0.5 text-center text-xs tabular-nums focus:outline-none focus:ring-1 focus:ring-brand-500 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                              />
+                              <span className="text-slate-400">/ {totalPages}</span>
+                              <button
+                                type="button"
+                                disabled={safePage >= totalPages}
+                                onClick={() => setTxLogPage(p => Math.min(totalPages, p + 1))}
+                                className="rounded p-0.5 hover:bg-slate-100 dark:hover:bg-[#1c1c24] disabled:opacity-30 disabled:cursor-not-allowed"
+                              >
+                                <ChevronRight size={14} />
+                              </button>
+                            </div>
+                          )}
+                        </CardHeader>
+                        <CardBody className="p-0 flex-1 min-h-0 overflow-auto">
+                          {total > 0 ? (
+                            <table className="w-full text-sm">
+                              <thead className="bg-slate-50 dark:bg-[#0a0a0f] text-xs text-slate-500 sticky top-0">
+                                <tr>
+                                  <th className="text-left px-3 py-2">#</th>
+                                  <th className="text-left px-3 py-2">Payment ID</th>
+                                  <th className="text-left px-3 py-2">Gateway</th>
+                                  <th className="text-left px-3 py-2">Routing</th>
+                                  <th className="text-left px-3 py-2">Outcome</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-[#1c1c24]">
+                                {pageResults.map((res) => {
+                                  const globalIdx = deferredSimulationResults.indexOf(res)
+                                  return (
+                                    <tr key={res.paymentId} className="hover:bg-slate-100 dark:bg-[#0f0f16]">
+                                      <td className="px-3 py-2 text-slate-500">{globalIdx + 1}</td>
+                                      <td className="px-3 py-2">
+                                        <button
+                                          type="button"
+                                          title={res.paymentId}
+                                          onClick={() => openAuditModal(res.paymentId)}
+                                          className="group flex items-start gap-3 text-left"
+                                        >
+                                          <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-brand-500/10 text-[11px] font-semibold uppercase tracking-[0.16em] text-brand-600 dark:text-brand-300">
+                                            {globalIdx + 1}
+                                          </span>
+                                          <span className="min-w-0">
+                                            <span className="block truncate font-mono text-xs font-semibold text-slate-900 transition group-hover:text-brand-600 dark:text-white">
+                                              {res.paymentId}
+                                            </span>
+                                            <span className="mt-1 block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 transition group-hover:text-brand-500">
+                                              View audit
+                                            </span>
+                                          </span>
+                                        </button>
+                                      </td>
+                                      <td className="px-3 py-2 font-medium">{res.decidedGateway}</td>
+                                      <td className="px-3 py-2">
+                                        {res.routingApproach === 'SR_V3_HEDGING' ? (
+                                          <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700 ring-1 ring-inset ring-brand-200 dark:bg-brand-900/20 dark:text-brand-300 dark:ring-brand-800">
+                                            Hedging
+                                          </span>
+                                        ) : (
+                                          <span className="text-[11px] text-slate-400">
+                                            {res.routingApproach === 'SR_SELECTION_V3_ROUTING' ? 'SR V3' : (res.routingApproach ?? '—')}
+                                          </span>
+                                        )}
+                                      </td>
+                                      <td className="px-3 py-2">
+                                        <Badge variant={res.status === 'CHARGED' ? 'green' : 'red'}>
+                                          {res.status}
+                                        </Badge>
+                                      </td>
+                                    </tr>
+                                  )
+                                })}
+                              </tbody>
+                            </table>
+                          ) : (
+                            <div className="flex items-center gap-3 px-4 py-6 text-sm text-slate-500">
+                              <Spinner size={16} />
+                              Waiting for the first simulated payment result…
+                            </div>
+                          )}
+                        </CardBody>
+                      </>
+                    )
+                  })()}
                 </Card>
               </>
             ) : (

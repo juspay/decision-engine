@@ -1,3 +1,14 @@
+//! SR-based gateway scoring and routing decisions.
+//!
+//! The algorithm is a Non-stationary Multi-Armed Bandit with Delayed Feedback.
+//! Design goals, parameter sizing guidance, the explore-exploit mechanism, failure
+//! attribution via GSM, and implementation notes (including a bug fix to the hedging
+//! multiplier) are documented in `docs/sr-routing-algorithm.md`.
+//!
+//! References:
+//!   - <https://juspay.io/blog/juspay-orchestrator-and-merchant-controlled-routing-engine>
+//!   - <https://arxiv.org/abs/2510.16735>
+
 // use eulerhs::prelude::*;
 // use optics::core::{review, Field1};
 use crate::app::get_tenant_app_state;
@@ -295,7 +306,6 @@ pub async fn scoring_flow(
                 let should_explore = if is_explore_and_exploit_enabled {
                     Utils::route_random_traffic_to_explore(
                         hedging_percent,
-                        functional_gateways.clone(),
                         "SR_BASED_V3_ROUTING".to_string(),
                     )
                 } else {
@@ -303,7 +313,32 @@ pub async fn scoring_flow(
                 };
 
                 let initial_sr_gw_scores = if should_explore {
-                    create_score_map(functional_gateways.clone())
+                    // Exploration should target non-primary gateways to keep their scores fresh.
+                    // Give non-primary gateways score=1.0 and demote the current primary to 0.5
+                    // so exploration traffic is directed away from the already-dominant gateway.
+                    // Using a flat equal score for all gateways (the previous behaviour) wasted
+                    // ~50% of exploration budget on the primary, whose score is already fresh.
+                    let cached_scores = get_cached_scores_based_on_srv3(
+                        decider_flow,
+                        merchant_sr_v3_input_config,
+                        default_sr_v3_input_config,
+                        pm_str,
+                        gateway_scoring_data.clone(),
+                    )
+                    .await;
+                    let primary = Utils::get_max_score_gateway(&cached_scores)
+                        .map(|(gw, _)| gw);
+                    functional_gateways
+                        .iter()
+                        .map(|gw| {
+                            let score = if primary.as_deref() == Some(gw.as_str()) {
+                                0.5
+                            } else {
+                                1.0
+                            };
+                            (gw.clone(), score)
+                        })
+                        .collect()
                 } else {
                     get_cached_scores_based_on_srv3(
                         decider_flow,
@@ -3291,7 +3326,7 @@ pub fn route_random_traffic(
     let mut sorted_gw_list: Vec<_> = gws.iter().collect();
     sorted_gw_list.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
     let (head_gateway, remaining_gateways) = sorted_gw_list.split_at(1);
-    if num < hedging_percent * (remaining_gateways.len() as f64) {
+    if num < hedging_percent {
         let remaining_gateways: Vec<_> = remaining_gateways
             .iter()
             .map(|(gw, _)| ((*gw).clone(), 1.0))

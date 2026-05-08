@@ -51,7 +51,7 @@ Do not treat README claims or marketing language as definitive implementation tr
 - Server startup and wiring: `src/bin/open_router.rs` -> `src/app.rs`
 - Deployment or on-prem: `helm-charts/README.md` -> `helm-charts/templates/*` -> `docker-compose.yaml`
 - CI or verification expectations: `justfile` -> `.github/workflows/*` -> `scripts/ci-checks.sh`
-- Routing logic: `src/decider/` -> `src/euclid/` -> `src/routes/decide_gateway.rs` -> `src/routes/rule_configuration.rs` -> `src/routes/update_gateway_score.rs`
+- Routing logic: `docs/sr-routing-algorithm.md` (algorithm design, parameter sizing, GSM failure attribution, known fixes) -> `src/decider/` -> `src/euclid/` -> `src/routes/decide_gateway.rs` -> `src/routes/rule_configuration.rs` -> `src/routes/update_gateway_score.rs`
 - Tenant behavior: `src/tenant.rs` -> `src/custom_extractors.rs` -> `src/app.rs`
 
 ## Canonical Startup Paths
@@ -141,7 +141,7 @@ Rules:
 - Prod or on-prem readiness question:
   verify against Helm, compose, config defaults, secrets handling, probes, CI, and runtime code
 - Routing logic question:
-  inspect `src/routes/decide_gateway.rs`, `src/decider/`, `src/euclid/`, and feedback/update-score flows
+  read `docs/sr-routing-algorithm.md` first for algorithm intent, then inspect `src/routes/decide_gateway.rs`, `src/decider/`, `src/euclid/`, and feedback/update-score flows
 - Tenant question:
   inspect `src/tenant.rs`, `src/custom_extractors.rs`, route handlers, and config-backed tenant wiring
 

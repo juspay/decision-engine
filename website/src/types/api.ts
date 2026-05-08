@@ -378,6 +378,27 @@ export interface PaymentAuditEvent {
   created_at_ms: number
 }
 
+export interface GsmInfo {
+  decision: string
+  stepUpPossible: boolean
+  clearPanPossible: boolean
+  alternateNetworkPossible: boolean
+  unifiedCode: string | null
+  unifiedMessage: string | null
+  errorCategory: string | null
+  standardisedCode: string | null
+  description: string | null
+  userGuidanceMessage: string | null
+}
+
+export interface UpdateScoreResponse {
+  message: string
+  merchant_id: string
+  gateway: string
+  payment_id: string
+  gsm_info: GsmInfo | null
+}
+
 export interface PaymentAuditResponse {
   merchant_id: string
   range: AnalyticsRangeValue

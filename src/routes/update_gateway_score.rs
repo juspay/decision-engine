@@ -160,7 +160,13 @@ pub async fn update_gateway_score(
                         .unwrap_or_else(|_| format!("{:?}", payload.status))
                         .trim_matches('"')
                         .to_string();
-                    let gsm_info = payload.error_info.as_ref().and_then(crate::gsm::lookup);
+                    // Connector must be the gateway that processed the payment, not caller-supplied.
+                    let gsm_info = payload.error_info.as_ref().and_then(|ei| {
+                        crate::gsm::lookup(&crate::gsm::GsmErrorInfo {
+                            connector: payload.gateway.clone(),
+                            ..ei.clone()
+                        })
+                    });
                     let response = UpdateScoreResponse {
                         message: "Gateway score updated successfully".to_string(),
                         merchant_id: merchant_id.clone(),

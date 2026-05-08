@@ -250,10 +250,10 @@ pub struct UpdateScorePayload {
     pub payment_id: String,
     pub enforce_dynamic_routing_failure: Option<bool>,
     pub txn_latency: Option<TransactionLatency>,
-    /// Optional error context from the failed payment. When present, the response
-    /// will include `gsm_info` with the retry decision and unified error details.
-    #[serde(default)]
-    pub error_info: Option<GsmErrorInfo>,
+    /// Optional gateway error details used for GSM-based scoring filter.
+    /// When present and the per-merchant flag is enabled, user/issuer-originated
+    /// failures are skipped so the gateway is not penalized for non-gateway errors.
+    pub error_info: Option<crate::gsm::GsmErrorInfo>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

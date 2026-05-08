@@ -303,6 +303,17 @@ pub fn ecDB() -> Database {
     Database::ECDB
 }
 
+/// When enabled for a merchant, failures classified by GSM as user/issuer-originated
+/// are skipped for gateway penalization.
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct GsmBasedScoringFilterEnabledMerchant;
+
+impl SC::ServiceConfigKey for GsmBasedScoringFilterEnabledMerchant {
+    fn get_key(&self) -> std::string::String {
+        "gsm_based_scoring_filter_enabled_merchant".to_string()
+    }
+}
+
 // Original Haskell function: kvRedis
 pub fn kvRedis() -> String {
     "kv_redis".into()

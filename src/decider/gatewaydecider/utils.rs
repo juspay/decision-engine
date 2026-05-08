@@ -2973,15 +2973,13 @@ pub fn set_outage_dimension(
 
 pub fn route_random_traffic_to_explore(
     hedging_percent: f64,
-    functional_gateways: Vec<String>,
     tag: String,
 ) -> bool {
     let num = generate_random_number(
         format!("GatewayDecider::routeRandomTrafficToExplore::{}", tag),
         (0.0, 100.0),
     );
-    let explore_hedging_percent = hedging_percent * (functional_gateways.len() as f64);
-    num < explore_hedging_percent
+    num < hedging_percent
 }
 
 pub fn is_reset_eligible(
