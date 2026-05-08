@@ -568,6 +568,31 @@ impl RedisConnectionWrapper {
             .await
             .change_context(errors::RedisError::GetFailed)
     }
+
+    /// SET key value EX ttl NX — returns true if the key was set, false if it already existed.
+    ///
+    /// Uses Option<bool> internally because fred maps a Redis nil response (key already exists)
+    /// to Ok(None) for Option types, while bool would produce a parse error on nil.
+    pub async fn set_key_if_not_exists(
+        &self,
+        key: &str,
+        value: &str,
+        ttl: i64,
+    ) -> Result<bool, errors::RedisError> {
+        let result: Option<bool> = self
+            .conn
+            .pool
+            .set(
+                key,
+                value,
+                Some(Expiration::EX(ttl)),
+                Some(SetOptions::NX),
+                false,
+            )
+            .await
+            .change_context(errors::RedisError::SetHashFailed)?;
+        Ok(result.unwrap_or(false))
+    }
     #[cfg(not(feature = "redis_compression"))]
     pub async fn setx(
         &self,
