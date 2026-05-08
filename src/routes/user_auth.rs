@@ -148,6 +148,81 @@ pub async fn signup(
         }
     }
 
+    if global_config.user_auth.email_verification_enabled {
+        let token = uuid::Uuid::new_v4().to_string();
+        let redis_key = format!("{}{}", EMAIL_VERIFICATION_PREFIX, token);
+
+        let verification_url = format!(
+            "{}/verify-email?token={}",
+            global_config.email.base_url, token
+        );
+
+        let email_client = APP_STATE
+            .get()
+            .map(|s| s.email_client.clone())
+            .ok_or(UserAuthError::StorageError)?;
+
+        // Send the email before writing anything to the DB so that a delivery
+        // failure leaves no orphaned user record (which would block re-registration).
+        email_client
+            .send_email(
+                crate::email::templates::EmailVerificationTemplate {
+                    user_email: payload.email.clone(),
+                    verification_url,
+                }
+                .into_message(),
+            )
+            .await
+            .change_context(UserAuthError::EmailSendFailed)?;
+
+        let new_user = NewUser {
+            user_id: user_id.clone(),
+            email: payload.email.clone(),
+            password_hash,
+            merchant_id: requested_merchant_id.clone(),
+            role: "admin".to_string(),
+            #[cfg(feature = "mysql")]
+            is_active: 1,
+            #[cfg(feature = "postgres")]
+            is_active: true,
+            #[cfg(feature = "mysql")]
+            email_verified: 0,
+            #[cfg(feature = "postgres")]
+            email_verified: false,
+            created_at: now,
+        };
+
+        crate::generics::generic_insert(&app_state.db, new_user)
+            .await
+            .change_context(UserAuthError::StorageError)?;
+
+        if let Some(merchant_id) = requested_merchant_id.as_ref() {
+            let new_user_merchant = NewUserMerchant {
+                user_id: user_id.clone(),
+                merchant_id: merchant_id.clone(),
+                role: "admin".to_string(),
+                created_at: now,
+            };
+
+            crate::generics::generic_insert(&app_state.db, new_user_merchant)
+                .await
+                .change_context(UserAuthError::StorageError)?;
+        }
+
+        app_state
+            .redis_conn
+            .set_key_with_ttl(&redis_key, &user_id, EMAIL_VERIFICATION_TTL_SECONDS)
+            .await
+            .change_context(UserAuthError::StorageError)?;
+
+        return Ok(Json(SignupResponse::VerificationPending(
+            SignupVerificationPendingResponse {
+                message: "Account created. Please check your email to verify your address before logging in.".to_string(),
+                email_verification_required: true,
+            },
+        )));
+    }
+
     let new_user = NewUser {
         user_id: user_id.clone(),
         email: payload.email.clone(),
@@ -159,13 +234,9 @@ pub async fn signup(
         #[cfg(feature = "postgres")]
         is_active: true,
         #[cfg(feature = "mysql")]
-        email_verified: if global_config.user_auth.email_verification_enabled {
-            0
-        } else {
-            1
-        },
+        email_verified: 1,
         #[cfg(feature = "postgres")]
-        email_verified: !global_config.user_auth.email_verification_enabled,
+        email_verified: true,
         created_at: now,
     };
 
@@ -184,45 +255,6 @@ pub async fn signup(
         crate::generics::generic_insert(&app_state.db, new_user_merchant)
             .await
             .change_context(UserAuthError::StorageError)?;
-    }
-
-    if global_config.user_auth.email_verification_enabled {
-        let token = uuid::Uuid::new_v4().to_string();
-        let redis_key = format!("{}{}", EMAIL_VERIFICATION_PREFIX, token);
-
-        app_state
-            .redis_conn
-            .set_key_with_ttl(&redis_key, &user_id, EMAIL_VERIFICATION_TTL_SECONDS)
-            .await
-            .change_context(UserAuthError::StorageError)?;
-
-        let verification_url = format!(
-            "{}/verify-email?token={}",
-            global_config.email.base_url, token
-        );
-
-        let email_client = APP_STATE
-            .get()
-            .map(|s| s.email_client.clone())
-            .ok_or(UserAuthError::StorageError)?;
-
-        email_client
-            .send_email(
-                crate::email::templates::EmailVerificationTemplate {
-                    user_email: payload.email.clone(),
-                    verification_url,
-                }
-                .into_message(),
-            )
-            .await
-            .change_context(UserAuthError::EmailSendFailed)?;
-
-        return Ok(Json(SignupResponse::VerificationPending(
-            SignupVerificationPendingResponse {
-                message: "Account created. Please check your email to verify your address before logging in.".to_string(),
-                email_verification_required: true,
-            },
-        )));
     }
 
     let token = auth::generate_jwt(

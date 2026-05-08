@@ -59,8 +59,12 @@ impl AwsSesEmailClient {
 #[async_trait::async_trait]
 impl EmailClient for AwsSesEmailClient {
     async fn health_check(&self) -> error_stack::Result<(), EmailError> {
+        // get_account() requires ses:GetAccount which send-only roles don't have.
+        // Checking the sender identity requires only ses:GetEmailIdentity and directly
+        // validates the address that will be used for sending.
         self.client
-            .get_account()
+            .get_email_identity()
+            .email_identity(&self.sender_email)
             .send()
             .await
             .change_context(EmailError::SendFailed)?;
