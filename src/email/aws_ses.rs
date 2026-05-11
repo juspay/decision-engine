@@ -1,6 +1,8 @@
 use aws_config::BehaviorVersion;
 use aws_sdk_sesv2::types::{Body, Content, Destination, EmailContent, Message};
+use aws_smithy_runtime::client::http::hyper_014::HyperClientBuilder;
 use error_stack::ResultExt;
+use hyper_proxy::{Intercept, Proxy, ProxyConnector};
 
 use crate::config::AwsSesEmailConfig;
 
@@ -18,6 +20,7 @@ impl AwsSesEmailClient {
     ) -> error_stack::Result<Self, EmailError> {
         let region = aws_sdk_sesv2::config::Region::new(config.region.clone());
 
+        // Credential resolution intentionally uses no proxy — STS is reachable via VPC endpoint.
         let aws_config = if let (Some(role_arn), Some(session_name)) =
             (&config.email_role_arn, &config.sts_role_session_name)
         {
@@ -47,13 +50,37 @@ impl AwsSesEmailClient {
                 .await
         };
 
-        let client = aws_sdk_sesv2::Client::new(&aws_config);
+        // Proxy is applied only at the SES service-client level so that credential
+        // resolution (STS AssumeRole, IMDS) continues to use the direct VPC path.
+        let ses_config = {
+            let mut builder = aws_sdk_sesv2::config::Builder::from(&aws_config);
+            if let Some(proxy_url) = &config.proxy_url {
+                let http_client = build_proxied_http_client(proxy_url)
+                    .change_context(EmailError::MissingConfig)?;
+                builder = builder.http_client(http_client);
+            }
+            builder.build()
+        };
+
+        let client = aws_sdk_sesv2::Client::from_conf(ses_config);
 
         Ok(Self {
             client,
             sender_email,
         })
     }
+}
+
+fn build_proxied_http_client(
+    proxy_url: &str,
+) -> Result<aws_smithy_runtime_api::client::http::SharedHttpClient, EmailError> {
+    let proxy_uri = proxy_url
+        .parse::<hyper014::Uri>()
+        .map_err(|_| EmailError::MissingConfig)?;
+    let proxy = Proxy::new(Intercept::All, proxy_uri);
+    let connector = ProxyConnector::from_proxy(hyper014::client::HttpConnector::new(), proxy)
+        .map_err(|_| EmailError::MissingConfig)?;
+    Ok(HyperClientBuilder::new().build(connector))
 }
 
 #[async_trait::async_trait]

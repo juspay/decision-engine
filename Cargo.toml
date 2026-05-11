@@ -25,6 +25,10 @@ redis_compression = ["dep:zstd"]
 aws-config = { version = "1.5.5" }
 aws-sdk-kms = { version = "1.40.0", optional = true }
 aws-sdk-sesv2 = { version = "1" }
+aws-smithy-runtime = { version = "1", features = ["connector-hyper-0-14-x"] }
+aws-smithy-runtime-api = { version = "1" }
+hyper-proxy = "0.9.1"
+hyper014 = { package = "hyper", version = "0.14", features = ["client"] }
 lettre = { version = "0.11", features = ["tokio1", "tokio1-native-tls"] }
 base64 = "0.22.1"
 gethostname = "0.5.0"

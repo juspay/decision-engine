@@ -233,6 +233,10 @@ pub struct AwsSesEmailConfig {
     pub email_role_arn: Option<String>,
     /// STS session name used when assuming the role
     pub sts_role_session_name: Option<String>,
+    /// HTTP proxy URL for SES API calls (e.g. "http://squid-proxy:3128"). Use an `http://` scheme
+    /// even when proxying HTTPS destinations — the proxy uses CONNECT tunneling. Required in private
+    /// subnets without a SES VPC endpoint.
+    pub proxy_url: Option<String>,
 }
 
 #[derive(Clone, Debug)]
