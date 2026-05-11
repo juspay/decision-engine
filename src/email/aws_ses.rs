@@ -1,6 +1,8 @@
 use aws_config::BehaviorVersion;
 use aws_sdk_sesv2::types::{Body, Content, Destination, EmailContent, Message};
+use aws_smithy_runtime::client::http::hyper_014::HyperClientBuilder;
 use error_stack::ResultExt;
+use hyper_proxy::{Intercept, Proxy, ProxyConnector};
 
 use crate::config::AwsSesEmailConfig;
 
@@ -35,16 +37,27 @@ impl AwsSesEmailClient {
                     .build()
                     .await;
 
-            aws_config::defaults(BehaviorVersion::latest())
+            let mut loader = aws_config::defaults(BehaviorVersion::latest())
                 .region(region)
-                .credentials_provider(assume_role_provider)
-                .load()
-                .await
+                .credentials_provider(assume_role_provider);
+
+            if let Some(proxy_url) = &config.proxy_url {
+                let http_client = build_proxied_http_client(proxy_url)
+                    .change_context(EmailError::MissingConfig)?;
+                loader = loader.http_client(http_client);
+            }
+
+            loader.load().await
         } else {
-            aws_config::defaults(BehaviorVersion::latest())
-                .region(region)
-                .load()
-                .await
+            let mut loader = aws_config::defaults(BehaviorVersion::latest()).region(region);
+
+            if let Some(proxy_url) = &config.proxy_url {
+                let http_client = build_proxied_http_client(proxy_url)
+                    .change_context(EmailError::MissingConfig)?;
+                loader = loader.http_client(http_client);
+            }
+
+            loader.load().await
         };
 
         let client = aws_sdk_sesv2::Client::new(&aws_config);
@@ -54,6 +67,18 @@ impl AwsSesEmailClient {
             sender_email,
         })
     }
+}
+
+fn build_proxied_http_client(
+    proxy_url: &str,
+) -> Result<aws_smithy_runtime::client::http::hyper_014::HyperClient, EmailError> {
+    let proxy_uri = proxy_url
+        .parse::<hyper014::Uri>()
+        .map_err(|_| EmailError::MissingConfig)?;
+    let proxy = Proxy::new(Intercept::All, proxy_uri);
+    let connector = ProxyConnector::from_proxy(hyper014::client::HttpConnector::new(), proxy)
+        .map_err(|_| EmailError::MissingConfig)?;
+    Ok(HyperClientBuilder::new().build(connector))
 }
 
 #[async_trait::async_trait]

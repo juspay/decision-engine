@@ -748,6 +748,7 @@ active_email_client = "no_email_client"
 region = "us-east-1"
 email_role_arn = "arn:aws:iam::123456789012:role/SES-role"
 sts_role_session_name = "ses_session"
+# proxy_url = "http://<squid-proxy-host>:<port>"   # required in private subnets without a SES VPC endpoint
 
 [email.smtp]
 host = "localhost"
