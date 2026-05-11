@@ -1875,7 +1875,7 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                     activeTab === 'debit' ? 'Network Routing' :
                       'Simulation'}
               </SurfaceLabel>
-              <h2 className="mt-3 font-medium text-slate-800 dark:text-white">
+              <h2 className="mt-1.5 font-medium text-slate-800 dark:text-white">
                 {activeTab === 'rule' ? 'Rule Evaluation Parameters' :
                   activeTab === 'volume' ? 'Volume Split Configuration' :
                     activeTab === 'debit' ? 'Debit Routing Parameters' :
@@ -1883,7 +1883,7 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
               </h2>
             </div>
           </CardHeader>
-          <CardBody className="space-y-4 !px-5 !py-5">
+          <CardBody className="space-y-3 !px-5 !py-4">
             {!effectiveMerchantId && (
               <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-3 py-2">
                 Set a merchant ID in the top bar first.
@@ -2221,17 +2221,17 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
               </div>
             ) : (
               <>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-3 gap-2">
                   <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1">Amount</label>
                     <input value={form.amount} onChange={e => set('amount', e.target.value)}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500" />
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500" />
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1">Currency</label>
                     <select value={form.currency} onChange={e => set('currency', e.target.value)}
                       disabled={routingConfigUnavailable || routingKeysLoading}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
                       {currencyOptions.map(c => <option key={c}>{c}</option>)}
                     </select>
                   </div>
@@ -2239,7 +2239,7 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                     <label className="block text-xs font-medium text-slate-600 mb-1">Payment Method Type</label>
                     <select value={form.payment_method_type} onChange={e => set('payment_method_type', e.target.value)}
                       disabled={routingConfigUnavailable || routingKeysLoading}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
                       {paymentMethodTypeOptions.map(p => <option key={p}>{p}</option>)}
                     </select>
                   </div>
@@ -2247,7 +2247,7 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                     <label className="block text-xs font-medium text-slate-600 mb-1">Payment Method</label>
                     <select value={form.payment_method} onChange={e => set('payment_method', e.target.value)}
                       disabled={routingConfigUnavailable || routingKeysLoading}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
                       {paymentMethodOptions.map(p => <option key={p}>{p}</option>)}
                     </select>
                   </div>
@@ -2255,7 +2255,7 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                     <label className="block text-xs font-medium text-slate-600 mb-1">Card Brand</label>
                     <select value={form.card_brand} onChange={e => set('card_brand', e.target.value)}
                       disabled={routingConfigUnavailable || routingKeysLoading}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
                       {cardBrandOptions.map(b => <option key={b}>{b}</option>)}
                     </select>
                   </div>
@@ -2263,7 +2263,7 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                     <label className="block text-xs font-medium text-slate-600 mb-1">Auth Type</label>
                     <select value={form.auth_type} onChange={e => set('auth_type', e.target.value)}
                       disabled={routingConfigUnavailable || routingKeysLoading}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
                       {authTypeOptions.map(a => <option key={a}>{a}</option>)}
                     </select>
                   </div>
@@ -2273,31 +2273,31 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                   <label className="block text-xs font-medium text-slate-600 mb-1">Eligible Gateways (comma-separated)</label>
                   <input value={form.eligible_gateways} onChange={e => set('eligible_gateways', e.target.value)}
                     placeholder="stripe, adyen"
-                    className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500" />
+                    className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500" />
                 </div>
 
-                <div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">Algorithm</label>
-                    <select value={form.ranking_algorithm} onChange={e => set('ranking_algorithm', e.target.value as RoutingAlgorithmName)}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
+                <div className="rounded-lg border border-slate-200 dark:border-[#222226] overflow-hidden">
+                  <div className="flex items-center gap-3 px-3 py-2 border-b border-slate-100 dark:border-[#1e1e28]">
+                    <span className="text-xs font-medium text-slate-500 dark:text-slate-400 w-24 shrink-0">Algorithm</span>
+                    <select
+                      value={form.ranking_algorithm}
+                      onChange={e => set('ranking_algorithm', e.target.value as RoutingAlgorithmName)}
+                      className="w-full bg-transparent text-sm font-medium text-slate-700 dark:text-slate-200 focus:outline-none cursor-pointer"
+                    >
                       {ALGORITHMS.map(a => <option key={a} value={a}>{ALGORITHM_LABELS[a]}</option>)}
                     </select>
                   </div>
-                </div>
-
-                <div
-                  className="flex items-center justify-between rounded-lg border border-slate-200 dark:border-[#222226] px-3 py-2.5 cursor-pointer select-none"
-                  onClick={() => set('elimination_enabled', !form.elimination_enabled)}
-                >
-                  <div>
-                    <p className="text-xs font-medium text-slate-700 dark:text-slate-200">Elimination</p>
-                    <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">
-                      Gateways that drop below the score threshold are removed from routing entirely
-                    </p>
-                  </div>
-                  <div className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${form.elimination_enabled ? 'bg-brand-600' : 'bg-slate-200 dark:bg-[#2a2a35]'}`}>
-                    <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${form.elimination_enabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                  <div
+                    className="flex items-center justify-between px-3 py-2 cursor-pointer select-none"
+                    onClick={() => set('elimination_enabled', !form.elimination_enabled)}
+                  >
+                    <div className="flex items-center gap-2 min-w-0 pr-3">
+                      <span className="text-xs font-medium text-slate-700 dark:text-slate-200 shrink-0">Elimination</span>
+                      <span className="text-[11px] text-slate-400 dark:text-slate-500 truncate">Gateways that drop below the score threshold are removed from routing entirely</span>
+                    </div>
+                    <div className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${form.elimination_enabled ? 'bg-brand-600' : 'bg-slate-200 dark:bg-[#2a2a35]'}`}>
+                      <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${form.elimination_enabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                    </div>
                   </div>
                 </div>
 
@@ -2322,91 +2322,93 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                 )}
 
                 {activeTab === 'batch' && (
-                  <div className="border-t border-slate-200 dark:border-[#1c1c24] pt-4 mt-4 space-y-4">
-                    <h3 className="text-sm font-medium text-slate-800 dark:text-slate-200 flex items-center gap-2">
-                      <Activity size={14} />
-                      Simulation
-                    </h3>
-                    <div className="w-28">
-                      <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Payments</label>
-                      <input
-                        type="number"
-                        min={1}
-                        max={1000}
-                        value={simulationConfig.totalPayments}
-                        onChange={e => {
-                          const total = Math.max(1, parseInt(e.target.value) || 1)
-                          setSimulationConfig({ totalPayments: String(total) })
-                        }}
-                        className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-                      />
+                  <div className="border-t border-slate-200 dark:border-[#1c1c24] pt-3">
+                    <div className="flex items-center justify-between mb-2.5">
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-[#4e5870] flex items-center gap-1.5">
+                        <Activity size={11} />
+                        Simulation
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400">Payments</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={1000}
+                          value={simulationConfig.totalPayments}
+                          onChange={e => {
+                            const total = Math.max(1, parseInt(e.target.value) || 1)
+                            setSimulationConfig({ totalPayments: String(total) })
+                          }}
+                          className="w-16 border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm text-center focus:outline-none focus:ring-1 focus:ring-brand-500"
+                        />
+                      </div>
                     </div>
-
-                    {eligibleGatewaysParsed.map(gw => {
-                      const gwRate = getGwSuccessRate(gw)
-                      const gwErrInfo = getGwErrorInfo(gw)
-                      const hasFailures = gwRate < 100
-                      return (
-                        <div key={gw} className="border-t border-slate-200 dark:border-[#1c1c24] pt-3 space-y-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 capitalize">{gw}</span>
-                            <span className="text-xs font-semibold text-brand-600 dark:text-sky-400">{gwRate}% success</span>
-                          </div>
-                          <input
-                            type="range"
-                            min={0}
-                            max={100}
-                            value={gwRate}
-                            onChange={e => setGwSuccessRate(gw, parseInt(e.target.value))}
-                            className="w-full accent-brand-600"
-                          />
-                          {hasFailures && (
-                            <div className="space-y-2 pt-1">
-                              <p className="text-xs font-medium text-slate-600 dark:text-slate-400">Failure scenario</p>
-                              <div className="flex flex-wrap gap-1.5">
-                                {ERROR_SCENARIO_PRESETS.filter(p => p.variants[gw]).map(preset => {
-                                  const variant = preset.variants[gw]
-                                  const isActive = variant != null &&
-                                    gwErrInfo.error_code === variant.error_code &&
-                                    gwErrInfo.flow === variant.flow
-                                  return (
-                                    <UiTooltip key={preset.label} text={preset.tooltip}>
-                                      <button
-                                        type="button"
-                                        onClick={() => setGwErrorInfoField(gw, { ...variant })}
-                                        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset transition-colors ${
-                                          isActive
-                                            ? preset.badge === 'protected'
-                                              ? 'bg-emerald-50 text-emerald-700 ring-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-300 dark:ring-emerald-700'
-                                              : 'bg-red-50 text-red-700 ring-red-300 dark:bg-red-900/30 dark:text-red-300 dark:ring-red-700'
-                                            : 'bg-slate-50 text-slate-600 ring-slate-200 hover:bg-slate-100 dark:bg-[#1c1c24] dark:text-slate-400 dark:ring-[#2a2a35] dark:hover:bg-[#222230]'
-                                        }`}
-                                      >
-                                        <span className={`h-1.5 w-1.5 rounded-full ${preset.badge === 'protected' ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                                        {preset.label}
-                                      </button>
-                                    </UiTooltip>
-                                  )
-                                })}
-                              </div>
-                              <ErrorInfoFields
-                                info={gwErrInfo}
-                                onChange={updates => setGwErrorInfoField(gw, updates)}
-                                rules={gsmRules}
-                                eligibleGateways={[gw]}
-                              />
+                    <div className="grid grid-cols-2 gap-2">
+                      {eligibleGatewaysParsed.map(gw => {
+                        const gwRate = getGwSuccessRate(gw)
+                        const gwErrInfo = getGwErrorInfo(gw)
+                        const hasFailures = gwRate < 100
+                        return (
+                          <div key={gw} className="rounded-lg border border-slate-200 dark:border-[#222226] p-2.5 space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 capitalize">{gw}</span>
+                              <span className="text-xs font-semibold text-brand-600 dark:text-sky-400">{gwRate}%</span>
                             </div>
-                          )}
-                        </div>
-                      )
-                    })}
+                            <input
+                              type="range"
+                              min={0}
+                              max={100}
+                              value={gwRate}
+                              onChange={e => setGwSuccessRate(gw, parseInt(e.target.value))}
+                              className="w-full accent-brand-600"
+                            />
+                            {hasFailures && (
+                              <div className="space-y-1.5">
+                                <div className="flex flex-wrap gap-1">
+                                  {ERROR_SCENARIO_PRESETS.filter(p => p.variants[gw]).map(preset => {
+                                    const variant = preset.variants[gw]
+                                    const isActive = variant != null &&
+                                      gwErrInfo.error_code === variant.error_code &&
+                                      gwErrInfo.flow === variant.flow
+                                    return (
+                                      <UiTooltip key={preset.label} text={preset.tooltip}>
+                                        <button
+                                          type="button"
+                                          onClick={() => setGwErrorInfoField(gw, { ...variant })}
+                                          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset transition-colors ${
+                                            isActive
+                                              ? preset.badge === 'protected'
+                                                ? 'bg-emerald-50 text-emerald-700 ring-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-300 dark:ring-emerald-700'
+                                                : 'bg-red-50 text-red-700 ring-red-300 dark:bg-red-900/30 dark:text-red-300 dark:ring-red-700'
+                                              : 'bg-slate-50 text-slate-600 ring-slate-200 hover:bg-slate-100 dark:bg-[#1c1c24] dark:text-slate-400 dark:ring-[#2a2a35] dark:hover:bg-[#222230]'
+                                          }`}
+                                        >
+                                          <span className={`h-1.5 w-1.5 rounded-full ${preset.badge === 'protected' ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                                          {preset.label}
+                                        </button>
+                                      </UiTooltip>
+                                    )
+                                  })}
+                                </div>
+                                <ErrorInfoFields
+                                  info={gwErrInfo}
+                                  onChange={updates => setGwErrorInfoField(gw, updates)}
+                                  rules={gsmRules}
+                                  eligibleGateways={[gw]}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
                   </div>
                 )}
               </>
             )}
-
+          </CardBody>
+          <div className="border-t border-slate-200 dark:border-[#2a303a] px-5 py-4 space-y-3">
             <ErrorMessage error={error} />
-
             {activeTab === 'rule' ? (
               <Button onClick={runRuleEvaluation} disabled={loading || routingConfigUnavailable} className="w-full justify-center">
                 {loading ? <><Spinner size={14} /> Evaluating…</> : <><Play size={14} /> Evaluate Rules</>}
@@ -2449,7 +2451,7 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                 {loading ? <><Spinner size={14} /> Running…</> : <><Play size={14} /> Run Single Transaction</>}
               </Button>
             )}
-          </CardBody>
+          </div>
         </Card>
 
         <div className="min-w-0 flex flex-col gap-4">

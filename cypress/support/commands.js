@@ -1,5 +1,8 @@
 const factory = require('./test-data-factory')
 const dashboardSessionCache = new Map()
+// Bearer token for the currently active session. Set by ensureDashboardSession and
+// included automatically by requestApi so all protected routes receive proper auth.
+let currentSessionToken = null
 
 function getApiBaseUrl() {
   return Cypress.env('API_BASE_URL') || 'http://localhost:8080'
@@ -78,6 +81,11 @@ function requestApi(method, path, options = {}) {
       'Content-Type': 'application/json',
       'x-tenant-id': 'public',
       'x-admin-secret': getAdminSecret(),
+      // Automatically include the active session token so protected routes pass
+      // the authenticate middleware. Explicit headers.Authorization takes priority.
+      ...(currentSessionToken && !headers.Authorization
+        ? { Authorization: `Bearer ${currentSessionToken}` }
+        : {}),
       ...headers,
     }
 
@@ -232,14 +240,19 @@ Cypress.Commands.add('ensureMerchantAccount', (merchantId) => {
       merchant_id: merchantId,
       gateway_success_rate_based_decider_input: null,
     },
-  }).then((response) => {
-    if (response.status === 200) {
-      return cy.wrap({ merchantId, response: response.body })
-    }
+  }).then((createResponse) => {
+    // Establish a session immediately after the merchant exists so that all
+    // subsequent calls (which may hit protected routes) carry a Bearer token.
+    return cy.ensureDashboardSession(merchantId).then(() => {
+      if (createResponse.status === 200) {
+        return cy.wrap({ merchantId, response: createResponse.body })
+      }
 
-    return requestApi('GET', `/merchant-account/${merchantId}`).then((getResponse) =>
-      cy.wrap({ merchantId, response: getResponse.body }),
-    )
+      // Merchant already exists — fetch its details (now authenticated).
+      return requestApi('GET', `/merchant-account/${merchantId}`).then((getResponse) =>
+        cy.wrap({ merchantId, response: getResponse.body }),
+      )
+    })
   })
 })
 
@@ -252,7 +265,15 @@ Cypress.Commands.add('createMerchantAccount', (merchantId, options = {}) => {
       gateway_success_rate_based_decider_input: null,
       ...(options.body || {}),
     },
-  }).then((response) => cy.wrap({ merchantId: id, response: response.body, status: response.status }))
+  }).then((response) => {
+    if (response.status === 200) {
+      // Establish a session so subsequent protected calls (GET, DELETE, etc.) are authenticated.
+      return cy.ensureDashboardSession(id).then(() =>
+        cy.wrap({ merchantId: id, response: response.body, status: response.status }),
+      )
+    }
+    return cy.wrap({ merchantId: id, response: response.body, status: response.status })
+  })
 })
 
 Cypress.Commands.add('getMerchantAccount', (merchantId, options = {}) => {
@@ -580,6 +601,7 @@ Cypress.Commands.add('ensureDashboardSession', (merchantId) => {
   const cachedSession = dashboardSessionCache.get(merchantId)
 
   if (cachedSession) {
+    currentSessionToken = cachedSession.token
     return cy.wrap(cachedSession)
   }
 
@@ -591,7 +613,7 @@ Cypress.Commands.add('ensureDashboardSession', (merchantId) => {
       merchant_id: merchantId,
     },
   }).then((response) => {
-    if (response.status === 200) {
+    if (response.status === 200 && response.body.token) {
       const session = {
         token: response.body.token,
         user: {
@@ -602,6 +624,7 @@ Cypress.Commands.add('ensureDashboardSession', (merchantId) => {
         },
       }
       dashboardSessionCache.set(merchantId, session)
+      currentSessionToken = session.token
       return cy.wrap(session)
     }
 
@@ -618,6 +641,7 @@ Cypress.Commands.add('ensureDashboardSession', (merchantId) => {
         },
       }
       dashboardSessionCache.set(merchantId, session)
+      currentSessionToken = session.token
       return cy.wrap(session)
     })
   })
