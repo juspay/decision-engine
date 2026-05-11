@@ -313,32 +313,7 @@ pub async fn scoring_flow(
                 };
 
                 let initial_sr_gw_scores = if should_explore {
-                    // Exploration should target non-primary gateways to keep their scores fresh.
-                    // Give non-primary gateways score=1.0 and demote the current primary to 0.5
-                    // so exploration traffic is directed away from the already-dominant gateway.
-                    // Using a flat equal score for all gateways (the previous behaviour) wasted
-                    // ~50% of exploration budget on the primary, whose score is already fresh.
-                    let cached_scores = get_cached_scores_based_on_srv3(
-                        decider_flow,
-                        merchant_sr_v3_input_config,
-                        default_sr_v3_input_config,
-                        pm_str,
-                        gateway_scoring_data.clone(),
-                    )
-                    .await;
-                    let primary = Utils::get_max_score_gateway(&cached_scores)
-                        .map(|(gw, _)| gw);
-                    functional_gateways
-                        .iter()
-                        .map(|gw| {
-                            let score = if primary.as_deref() == Some(gw.as_str()) {
-                                0.5
-                            } else {
-                                1.0
-                            };
-                            (gw.clone(), score)
-                        })
-                        .collect()
+                    create_score_map(functional_gateways.clone())
                 } else {
                     get_cached_scores_based_on_srv3(
                         decider_flow,
