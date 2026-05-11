@@ -168,7 +168,9 @@ pub async fn signup(
             .await
             .change_context(UserAuthError::StorageError)?;
         if !acquired {
-            return Err(error::ContainerError::from(UserAuthError::EmailAlreadyExists));
+            return Err(error::ContainerError::from(
+                UserAuthError::EmailAlreadyExists,
+            ));
         }
 
         let email_client = APP_STATE
