@@ -73,7 +73,7 @@ impl AwsSesEmailClient {
 
 fn build_proxied_http_client(
     proxy_url: &str,
-) -> Result<aws_smithy_runtime::client::http::hyper_014::HyperClient, EmailError> {
+) -> Result<aws_smithy_runtime_api::client::http::SharedHttpClient, EmailError> {
     let proxy_uri = proxy_url
         .parse::<hyper014::Uri>()
         .map_err(|_| EmailError::MissingConfig)?;
