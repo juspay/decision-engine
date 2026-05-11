@@ -86,6 +86,8 @@ pub struct CreateMerchantResponse {
 
 const EMAIL_VERIFICATION_PREFIX: &str = "email_verification:";
 const EMAIL_VERIFICATION_TTL_SECONDS: i64 = 86400; // 24 hours
+const PENDING_SIGNUP_PREFIX: &str = "pending_signup:";
+const PENDING_SIGNUP_TTL_SECONDS: i64 = 300; // 5 minutes
 
 #[axum::debug_handler]
 pub async fn signup(
@@ -148,6 +150,120 @@ pub async fn signup(
         }
     }
 
+    if global_config.user_auth.email_verification_enabled {
+        let token = uuid::Uuid::new_v4().to_string();
+        let redis_key = format!("{}{}", EMAIL_VERIFICATION_PREFIX, token);
+        let pending_key = format!("{}{}", PENDING_SIGNUP_PREFIX, payload.email);
+
+        let verification_url = format!(
+            "{}/verify-email?token={}",
+            global_config.email.base_url, token
+        );
+
+        // Acquire a short-lived NX lock to prevent concurrent duplicate signups
+        // for the same email from each racing past the DB uniqueness check above.
+        let acquired = app_state
+            .redis_conn
+            .set_key_if_not_exists(&pending_key, "1", PENDING_SIGNUP_TTL_SECONDS)
+            .await
+            .change_context(UserAuthError::StorageError)?;
+        if !acquired {
+            return Err(error::ContainerError::from(
+                UserAuthError::EmailAlreadyExists,
+            ));
+        }
+
+        let email_client = APP_STATE
+            .get()
+            .map(|s| s.email_client.clone())
+            .ok_or(UserAuthError::StorageError)?;
+
+        // Send the email before any DB or Redis writes so that a delivery failure
+        // leaves no records behind and the user can retry registration immediately.
+        let send_result = email_client
+            .send_email(
+                crate::email::templates::EmailVerificationTemplate {
+                    user_email: payload.email.clone(),
+                    verification_url,
+                }
+                .into_message(),
+            )
+            .await;
+        if send_result.is_err() {
+            let _ = app_state.redis_conn.delete_key(&pending_key).await;
+        }
+        send_result.change_context(UserAuthError::EmailSendFailed)?;
+
+        // Write the verification token before creating DB records so that if a
+        // DB insert fails the token does not reference a non-existent user.
+        let token_result = app_state
+            .redis_conn
+            .set_key_with_ttl(&redis_key, &user_id, EMAIL_VERIFICATION_TTL_SECONDS)
+            .await;
+        if token_result.is_err() {
+            let _ = app_state.redis_conn.delete_key(&pending_key).await;
+        }
+        token_result.change_context(UserAuthError::StorageError)?;
+
+        let new_user = NewUser {
+            user_id: user_id.clone(),
+            email: payload.email.clone(),
+            password_hash,
+            merchant_id: requested_merchant_id.clone(),
+            role: "admin".to_string(),
+            #[cfg(feature = "mysql")]
+            is_active: 1,
+            #[cfg(feature = "postgres")]
+            is_active: true,
+            #[cfg(feature = "mysql")]
+            email_verified: 0,
+            #[cfg(feature = "postgres")]
+            email_verified: false,
+            created_at: now,
+        };
+
+        let user_insert_result = crate::generics::generic_insert(&app_state.db, new_user).await;
+        if user_insert_result.is_err() {
+            let _ = app_state.redis_conn.delete_key(&redis_key).await;
+            let _ = app_state.redis_conn.delete_key(&pending_key).await;
+        }
+        user_insert_result.change_context(UserAuthError::StorageError)?;
+
+        if let Some(merchant_id) = requested_merchant_id.as_ref() {
+            let new_user_merchant = NewUserMerchant {
+                user_id: user_id.clone(),
+                merchant_id: merchant_id.clone(),
+                role: "admin".to_string(),
+                created_at: now,
+            };
+
+            let merchant_insert_result =
+                crate::generics::generic_insert(&app_state.db, new_user_merchant).await;
+            if merchant_insert_result.is_err() {
+                let conn = app_state.db.get_conn().await.ok();
+                if let Some(conn) = conn {
+                    let _ = crate::generics::generic_delete::<
+                        <User as diesel::associations::HasTable>::Table,
+                        _,
+                    >(&conn, dsl::user_id.eq(user_id.clone()))
+                    .await;
+                }
+                let _ = app_state.redis_conn.delete_key(&redis_key).await;
+                let _ = app_state.redis_conn.delete_key(&pending_key).await;
+            }
+            merchant_insert_result.change_context(UserAuthError::StorageError)?;
+        }
+
+        let _ = app_state.redis_conn.delete_key(&pending_key).await;
+
+        return Ok(Json(SignupResponse::VerificationPending(
+            SignupVerificationPendingResponse {
+                message: "Account created. Please check your email to verify your address before logging in.".to_string(),
+                email_verification_required: true,
+            },
+        )));
+    }
+
     let new_user = NewUser {
         user_id: user_id.clone(),
         email: payload.email.clone(),
@@ -159,13 +275,9 @@ pub async fn signup(
         #[cfg(feature = "postgres")]
         is_active: true,
         #[cfg(feature = "mysql")]
-        email_verified: if global_config.user_auth.email_verification_enabled {
-            0
-        } else {
-            1
-        },
+        email_verified: 1,
         #[cfg(feature = "postgres")]
-        email_verified: !global_config.user_auth.email_verification_enabled,
+        email_verified: true,
         created_at: now,
     };
 
@@ -184,45 +296,6 @@ pub async fn signup(
         crate::generics::generic_insert(&app_state.db, new_user_merchant)
             .await
             .change_context(UserAuthError::StorageError)?;
-    }
-
-    if global_config.user_auth.email_verification_enabled {
-        let token = uuid::Uuid::new_v4().to_string();
-        let redis_key = format!("{}{}", EMAIL_VERIFICATION_PREFIX, token);
-
-        app_state
-            .redis_conn
-            .set_key_with_ttl(&redis_key, &user_id, EMAIL_VERIFICATION_TTL_SECONDS)
-            .await
-            .change_context(UserAuthError::StorageError)?;
-
-        let verification_url = format!(
-            "{}/verify-email?token={}",
-            global_config.email.base_url, token
-        );
-
-        let email_client = APP_STATE
-            .get()
-            .map(|s| s.email_client.clone())
-            .ok_or(UserAuthError::StorageError)?;
-
-        email_client
-            .send_email(
-                crate::email::templates::EmailVerificationTemplate {
-                    user_email: payload.email.clone(),
-                    verification_url,
-                }
-                .into_message(),
-            )
-            .await
-            .change_context(UserAuthError::EmailSendFailed)?;
-
-        return Ok(Json(SignupResponse::VerificationPending(
-            SignupVerificationPendingResponse {
-                message: "Account created. Please check your email to verify your address before logging in.".to_string(),
-                email_verification_required: true,
-            },
-        )));
     }
 
     let token = auth::generate_jwt(
