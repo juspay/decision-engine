@@ -20,6 +20,7 @@ impl AwsSesEmailClient {
     ) -> error_stack::Result<Self, EmailError> {
         let region = aws_sdk_sesv2::config::Region::new(config.region.clone());
 
+        // Credential resolution intentionally uses no proxy — STS is reachable via VPC endpoint.
         let aws_config = if let (Some(role_arn), Some(session_name)) =
             (&config.email_role_arn, &config.sts_role_session_name)
         {
@@ -37,30 +38,31 @@ impl AwsSesEmailClient {
                     .build()
                     .await;
 
-            let mut loader = aws_config::defaults(BehaviorVersion::latest())
+            aws_config::defaults(BehaviorVersion::latest())
                 .region(region)
-                .credentials_provider(assume_role_provider);
-
-            if let Some(proxy_url) = &config.proxy_url {
-                let http_client = build_proxied_http_client(proxy_url)
-                    .change_context(EmailError::MissingConfig)?;
-                loader = loader.http_client(http_client);
-            }
-
-            loader.load().await
+                .credentials_provider(assume_role_provider)
+                .load()
+                .await
         } else {
-            let mut loader = aws_config::defaults(BehaviorVersion::latest()).region(region);
-
-            if let Some(proxy_url) = &config.proxy_url {
-                let http_client = build_proxied_http_client(proxy_url)
-                    .change_context(EmailError::MissingConfig)?;
-                loader = loader.http_client(http_client);
-            }
-
-            loader.load().await
+            aws_config::defaults(BehaviorVersion::latest())
+                .region(region)
+                .load()
+                .await
         };
 
-        let client = aws_sdk_sesv2::Client::new(&aws_config);
+        // Proxy is applied only at the SES service-client level so that credential
+        // resolution (STS AssumeRole, IMDS) continues to use the direct VPC path.
+        let ses_config = {
+            let mut builder = aws_sdk_sesv2::config::Builder::from(&aws_config);
+            if let Some(proxy_url) = &config.proxy_url {
+                let http_client = build_proxied_http_client(proxy_url)
+                    .change_context(EmailError::MissingConfig)?;
+                builder = builder.http_client(http_client);
+            }
+            builder.build()
+        };
+
+        let client = aws_sdk_sesv2::Client::from_conf(ses_config);
 
         Ok(Self {
             client,
