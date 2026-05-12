@@ -95,13 +95,15 @@ mod tests {
         // No issuer code — should fall back to connector error code path
         let rule = get_gsm_rule(
             &store,
-            "adyen",
-            "Payment",
-            "Authorize",
-            Some("2"),
-            Some("Refused"),
-            None,
-            None,
+            &GsmErrorInfo {
+                connector: "adyen".to_string(),
+                flow: "Payment".to_string(),
+                sub_flow: "Authorize".to_string(),
+                error_code: Some("2".to_string()),
+                error_message: Some("Refused".to_string()),
+                issuer_error_code: None,
+                card_network: None,
+            },
         );
         assert!(rule.is_some());
         assert_eq!(rule.unwrap().decision, GsmDecision::Retry);
@@ -114,13 +116,15 @@ mod tests {
         // Use an issuer code that has no matching rule so the lookup falls back to connector code.
         let rule = get_gsm_rule(
             &store,
-            "adyen",
-            "Payment",
-            "Authorize",
-            Some("2"),
-            Some("Refused"),
-            Some("9999"), // issuer code with no matching rule
-            Some("UnknownNetwork"),
+            &GsmErrorInfo {
+                connector: "adyen".to_string(),
+                flow: "Payment".to_string(),
+                sub_flow: "Authorize".to_string(),
+                error_code: Some("2".to_string()),
+                error_message: Some("Refused".to_string()),
+                issuer_error_code: Some("9999".to_string()), // issuer code with no matching rule
+                card_network: Some("UnknownNetwork".to_string()),
+            },
         );
         assert!(rule.is_some());
         assert_eq!(rule.unwrap().decision, GsmDecision::Retry);

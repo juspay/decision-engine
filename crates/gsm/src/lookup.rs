@@ -19,27 +19,30 @@ fn issuer_lookup_key(card_network: &str, issuer_code: &str) -> String {
 ///    `connector_error_message`, defaulting to empty string if absent.
 pub fn get_gsm_rule<'a, S: GsmLookup>(
     store: &'a S,
-    connector: &str,
-    flow: &str,
-    sub_flow: &str,
-    connector_error_code: Option<&str>,
-    connector_error_message: Option<&str>,
-    issuer_error_code: Option<&str>,
-    card_network: Option<&str>,
+    error_info: &GsmErrorInfo,
 ) -> Option<&'a GsmRule> {
-    if let (Some(network), Some(issuer_code)) = (card_network, issuer_error_code) {
+    if let (Some(network), Some(issuer_code)) = (
+        error_info.card_network.as_deref(),
+        error_info.issuer_error_code.as_deref(),
+    ) {
         let key = issuer_lookup_key(network, issuer_code);
-        if let Some(rule) = store.find_gsm_rule(connector, flow, sub_flow, &key, &key) {
+        if let Some(rule) = store.find_gsm_rule(
+            &error_info.connector,
+            &error_info.flow,
+            &error_info.sub_flow,
+            &key,
+            &key,
+        ) {
             return Some(rule);
         }
     }
 
     store.find_gsm_rule(
-        connector,
-        flow,
-        sub_flow,
-        connector_error_code.unwrap_or(""),
-        connector_error_message.unwrap_or(""),
+        &error_info.connector,
+        &error_info.flow,
+        &error_info.sub_flow,
+        error_info.error_code.as_deref().unwrap_or(""),
+        error_info.error_message.as_deref().unwrap_or(""),
     )
 }
 
@@ -49,16 +52,7 @@ pub fn lookup_from_error_info<S: GsmLookup>(
     store: &S,
     error_info: &GsmErrorInfo,
 ) -> Option<GsmInfo> {
-    let rule = get_gsm_rule(
-        store,
-        &error_info.connector,
-        &error_info.flow,
-        &error_info.sub_flow,
-        error_info.error_code.as_deref(),
-        error_info.error_message.as_deref(),
-        error_info.issuer_error_code.as_deref(),
-        error_info.card_network.as_deref(),
-    )?;
+    let rule = get_gsm_rule(store, error_info)?;
 
     Some(GsmInfo {
         decision: rule.decision.to_string(),

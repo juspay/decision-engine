@@ -47,11 +47,8 @@ pub enum KnownFeature {
 }
 
 impl KnownFeature {
-    fn all() -> &'static [KnownFeature] {
-        &[
-            KnownFeature::GsmScoringFilter,
-            KnownFeature::ExploreExploitSrv3,
-        ]
+    fn all() -> &'static [Self] {
+        &[Self::GsmScoringFilter, Self::ExploreExploitSrv3]
     }
 
     fn from_slug(s: &str) -> Option<Self> {
