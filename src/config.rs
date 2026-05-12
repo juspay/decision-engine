@@ -57,6 +57,10 @@ pub struct GlobalConfig {
     pub admin_secret: AdminSecretConfig,
     #[serde(default)]
     pub email: EmailConfig,
+    #[serde(default)]
+    pub gsm_scenarios: GsmScenariosConfig,
+    #[serde(default)]
+    pub gsm: GsmConfig,
 }
 
 #[derive(Clone, serde::Deserialize, Debug)]
@@ -722,6 +726,72 @@ mod tests {
             _ => assert!(false),
         }
     }
+}
+
+/// One simulation scenario entry from `[[gsm_scenarios.scenarios]]` in the TOML config.
+/// Drives the Decision Explorer UI preset buttons and determines whether a matching
+/// failure should penalise the gateway.
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct GsmSimulationScenario {
+    /// Machine-readable key, e.g. `"expired_card"`.
+    pub key: String,
+    /// Human-readable label shown in the UI, e.g. `"Expired Card"`.
+    pub label: String,
+    /// `true` → full penalty on the gateway; `false` → penalty skipped.
+    pub penalise: bool,
+    /// Must match `GsmRule.error_category`.
+    pub error_category: String,
+    /// When set, the rule's `decision` must also match. `None` matches any decision.
+    #[serde(default)]
+    pub decision: Option<String>,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, Default)]
+pub struct GsmScenariosConfig {
+    #[serde(default)]
+    pub scenarios: Vec<GsmSimulationScenario>,
+}
+
+/// Where to load the GSM CSV from at startup.
+///
+/// ```toml
+/// # default — rules compiled into the binary
+/// [gsm]
+/// source = "bundled"
+///
+/// # local file — useful for mounting a volume in Docker
+/// [gsm]
+/// source = "file"
+/// path = "config/gsm.csv"
+///
+/// # S3 — for sandbox / production environments
+/// [gsm]
+/// source = "s3"
+/// bucket = "my-bucket"
+/// key = "gsm/gsm.csv"
+/// region = "us-east-1"   # optional; falls back to AWS_REGION env var
+/// ```
+#[derive(Clone, Debug, serde::Deserialize, Default)]
+pub struct GsmConfig {
+    #[serde(default)]
+    pub source: GsmSourceType,
+    /// Path on disk — required when `source = "file"`.
+    pub path: Option<String>,
+    /// S3 bucket name — required when `source = "s3"`.
+    pub bucket: Option<String>,
+    /// S3 object key — required when `source = "s3"`.
+    pub key: Option<String>,
+    /// AWS region — optional when `source = "s3"`, falls back to `AWS_REGION`.
+    pub region: Option<String>,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum GsmSourceType {
+    #[default]
+    Bundled,
+    File,
+    S3,
 }
 
 /// Represents a key configuration in the TOML file

@@ -4,7 +4,10 @@ import { DebitRoutingFlagResponse } from '../types/api'
 
 export function useDebitRoutingFlag(merchantId?: string) {
   const path = merchantId ? `/merchant-account/${merchantId}/debit-routing` : null
-  const { data, error, isLoading, mutate } = useSWR<DebitRoutingFlagResponse>(path, fetcher)
+  const { data, error, isLoading, mutate } = useSWR<DebitRoutingFlagResponse>(path, fetcher, {
+    revalidateOnFocus: false,
+    dedupingInterval: 300_000,
+  })
 
   async function setDebitRoutingEnabled(enabled: boolean) {
     if (!merchantId || !path) {

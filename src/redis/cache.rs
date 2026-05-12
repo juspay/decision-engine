@@ -153,25 +153,20 @@ where
     }
 
     match get_from_redis_cache(&prefixed_key).await {
-        Ok(redis_value) => {
+        Ok(redis_value) if !redis_value.is_empty() => {
             logger::debug!(
                 tag = "redis_cache",
                 action = "hit",
                 "Redis cache hit for key: {}",
                 key
             );
-            if redis_value.is_empty() {
-                set_to_memory_cache(&prefixed_key, "", ttl_seconds_u64).await;
-                return None;
-            }
-
             set_to_memory_cache(&prefixed_key, &redis_value, ttl_seconds_u64).await;
             return match &decode_fn {
                 Some(func) => func(redis_value),
                 None => extractValue(redis_value),
             };
         }
-        Err(_) => {
+        _ => {
             logger::debug!(
                 tag = "redis_cache",
                 action = "miss",
@@ -195,13 +190,13 @@ where
                 }
             }
             None => {
-                set_to_redis_cache(&prefixed_key, "", ttl_seconds).await;
+                // Only cache the negative result in memory, not Redis, so a subsequent
+                // SET in Redis can be picked up after the memory TTL expires.
                 set_to_memory_cache(&prefixed_key, "", ttl_seconds_u64).await;
                 None
             }
         },
         Ok(None) => {
-            set_to_redis_cache(&prefixed_key, "", ttl_seconds).await;
             set_to_memory_cache(&prefixed_key, "", ttl_seconds_u64).await;
             None
         }

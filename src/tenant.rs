@@ -63,6 +63,8 @@ impl GlobalAppState {
                     ),
                 )?;
 
+        crate::gsm::init(&global_config.gsm).await;
+
         let email_client = global_config.email.build_client().await.change_context(
             crate::error::ConfigurationError::InvalidConfigurationValueError("email".to_string()),
         )?;

@@ -78,7 +78,9 @@ pub struct GsmRule {
 #[serde(rename_all = "camelCase")]
 pub struct GsmErrorInfo {
     pub connector: String,
+    #[serde(default)]
     pub flow: String,
+    #[serde(default)]
     pub sub_flow: String,
     pub error_code: Option<String>,
     pub error_message: Option<String>,
@@ -103,7 +105,7 @@ pub struct GsmInfo {
     pub user_guidance_message: Option<String>,
 }
 
-/// One row in the `/gsm/options` response — the 5-tuple the store is keyed on.
+/// One row in the `/gsm/options` response.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GsmOptionRow {
@@ -112,4 +114,7 @@ pub struct GsmOptionRow {
     pub sub_flow: String,
     pub error_code: String,
     pub error_message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_category: Option<String>,
+    pub decision: String,
 }

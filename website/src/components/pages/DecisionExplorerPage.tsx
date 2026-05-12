@@ -1,5 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { ErrorInfoFields, ErrorInfoState, GsmOptionRow, DEFAULT_ERROR_INFO } from './ErrorInfoFields'
+import { PenaltyClassificationGuide, GsmScenario } from './PenaltyClassificationGuide'
 import { useNavigate } from 'react-router-dom'
 import useSWR from 'swr'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts'
@@ -13,7 +14,7 @@ import { useMerchantStore } from '../../store/merchantStore'
 import { useAuthStore } from '../../store/authStore'
 import { apiPost, fetcher } from '../../lib/api'
 import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
-import { DecideGatewayResponse, GatewayConnector, GsmInfo, PaymentAuditEvent, PaymentAuditResponse, RoutingAlgorithmName, UpdateScoreResponse } from '../../types/api'
+import { DecideGatewayResponse, GatewayConnector, PaymentAuditEvent, PaymentAuditResponse, RoutingAlgorithmName, UpdateScoreResponse } from '../../types/api'
 import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
 import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
@@ -44,7 +45,6 @@ interface FormState {
   auth_type: string
   eligible_gateways: string
   ranking_algorithm: RoutingAlgorithmName
-  elimination_enabled: boolean
 }
 
 interface DebitRoutingFormState {
@@ -68,18 +68,18 @@ interface SimulationConfig {
 interface GatewaySimConfig {
   successRate: number
   errorInfo: ErrorInfoState
+  failureMode: 'decline' | 'timeout'
 }
-
 
 interface SimulationResult {
   paymentId: string
   decidedGateway: string
-  status: 'CHARGED' | 'FAILURE'
+  status: 'CHARGED' | 'FAILURE' | 'PENDING_VBV'
   timestamp: string
   routingApproach: string | null
 }
 
-type TransactionOutcome = 'CHARGED' | 'FAILURE'
+type TransactionOutcome = 'CHARGED' | 'FAILURE' | 'PENDING_VBV'
 
 type AuditInspectorTab = 'summary' | 'input' | 'response' | 'raw'
 
@@ -136,7 +136,6 @@ const DEFAULT_FORM: FormState = {
   auth_type: '',
   eligible_gateways: 'stripe, adyen',
   ranking_algorithm: 'SR_BASED_ROUTING',
-  elimination_enabled: false,
 }
 
 const DEFAULT_DEBIT_FORM: DebitRoutingFormState = {
@@ -163,67 +162,8 @@ interface ErrorScenarioPreset {
   label: string
   badge: 'protected' | 'penalized'
   tooltip: string
-  // Keyed by connector name — only variants for eligible gateways are shown/used.
   variants: Record<string, PresetVariant>
 }
-
-const ERROR_SCENARIO_PRESETS: ErrorScenarioPreset[] = [
-  {
-    label: 'Expired Card',
-    badge: 'protected',
-    tooltip: 'issue_with_payment_method · do_default — user error, penalty skipped',
-    variants: {
-      stripe:        { flow: 'Authorize', sub_flow: 'sub_flow', error_code: 'expired_card',    error_message: 'expired_card',    issuer_error_code: '', card_network: '' },
-      adyen:         { flow: 'Authorize', sub_flow: 'sub_flow', error_code: '6',               error_message: 'Expired Card',    issuer_error_code: '', card_network: '' },
-      cybersource:   { flow: 'Authorize', sub_flow: 'sub_flow', error_code: 'EXPIRED_CARD',    error_message: 'EXPIRED_CARD',    issuer_error_code: '', card_network: '' },
-      bankofamerica: { flow: 'Authorize', sub_flow: 'sub_flow', error_code: 'EXPIRED_CARD',    error_message: 'EXPIRED_CARD',    issuer_error_code: '', card_network: '' },
-    },
-  },
-  {
-    label: 'Wrong CVV',
-    badge: 'protected',
-    tooltip: 'processor_decline_incorrect_data · do_default — user data error, penalty skipped',
-    variants: {
-      cybersource:   { flow: 'Authorize', sub_flow: 'sub_flow', error_code: 'INVALID_CVN',     error_message: 'INVALID_CVN',     issuer_error_code: '', card_network: '' },
-      adyen:         { flow: 'Authorize', sub_flow: 'sub_flow', error_code: '11',              error_message: '3D Not Authenticated', issuer_error_code: '', card_network: '' },
-      bankofamerica: { flow: 'Authorize', sub_flow: 'sub_flow', error_code: 'INVALID_DATA',    error_message: 'INVALID_DATA',    issuer_error_code: '', card_network: '' },
-    },
-  },
-  {
-    label: 'Fraud Block',
-    badge: 'protected',
-    tooltip: 'frm_decline · do_default — FRM decision, penalty skipped',
-    variants: {
-      adyen:         { flow: 'Authorize', sub_flow: 'sub_flow', error_code: '5',               error_message: 'Blocked Card',    issuer_error_code: '', card_network: '' },
-      cybersource:   { flow: 'Authorize', sub_flow: 'sub_flow', error_code: 'DECISION_PROFILE_REJECT', error_message: 'DECISION_PROFILE_REJECT', issuer_error_code: '', card_network: '' },
-      bankofamerica: { flow: 'Authorize', sub_flow: 'sub_flow', error_code: 'No error code',   error_message: 'The order has been rejected by Decision Manager', issuer_error_code: '', card_network: '' },
-    },
-  },
-  {
-    label: 'Gateway Down',
-    badge: 'penalized',
-    tooltip: 'Gateway connectivity failure — no matching GSM rule means full penalty by default',
-    variants: {
-      // cybersource/bankofamerica have processor_downtime GSM rules → category shown in tooltip
-      cybersource:   { flow: 'Authorize', sub_flow: 'sub_flow', error_code: 'SERVER_ERROR',         error_message: 'Error - General system failure.',                    issuer_error_code: '', card_network: '' },
-      bankofamerica: { flow: 'Authorize', sub_flow: 'sub_flow', error_code: 'SERVER_ERROR',         error_message: 'Error - General system failure.',                    issuer_error_code: '', card_network: '' },
-      // stripe/adyen have no processor_downtime GSM rules → gsm_info is null → still penalized
-      stripe:        { flow: 'Authorize', sub_flow: 'sub_flow', error_code: 'payment_method_not_available', error_message: 'The payment processor is currently unavailable.', issuer_error_code: '', card_network: '' },
-      adyen:         { flow: 'Authorize', sub_flow: 'sub_flow', error_code: '900',                  error_message: 'System failure',                                     issuer_error_code: '', card_network: '' },
-    },
-  },
-  {
-    label: 'Bad Config',
-    badge: 'penalized',
-    tooltip: 'processor_decline_unauthorized · retry — gateway config fault, full penalty applied',
-    variants: {
-      adyen:  { flow: 'Authorize', sub_flow: 'sub_flow', error_code: '905_5', error_message: 'No acquirer account active and configured for Klarna.', issuer_error_code: '', card_network: '' },
-      stripe: { flow: 'Authorize', sub_flow: 'sub_flow', error_code: 'api_key_expired', error_message: 'api_key_expired', issuer_error_code: '', card_network: '' },
-    },
-  },
-]
-
-
 
 const DEFAULT_RULE_PARAMS: RuleEvaluateParams[] = [
   { key: 'payment_method_type', type: 'enum_variant', value: '', metadataKey: '' },
@@ -391,6 +331,10 @@ function toUpperOptions(values: string[] = []): string[] {
 
 function uniqueUpperOptions(values: string[] = []): string[] {
   return Array.from(new Set(toUpperOptions(values)))
+}
+
+function formatOptionLabel(value: string): string {
+  return value.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase())
 }
 
 function extractVolumeConnector(response: RuleEvaluateResponse) {
@@ -817,6 +761,7 @@ export function DecisionExplorerPage() {
   const [gatewaySimConfigs, setGatewaySimConfigs] = useState<Record<string, GatewaySimConfig>>({})
   const gatewaySimConfigsRef = useRef(gatewaySimConfigs)
   useEffect(() => { gatewaySimConfigsRef.current = gatewaySimConfigs }, [gatewaySimConfigs])
+  const eliminationEnabled = Object.values(gatewaySimConfigs).some(c => c.failureMode === 'timeout')
   const simulationAbortRef = useRef(false)
   useEffect(() => () => { simulationAbortRef.current = true }, [])
 
@@ -840,6 +785,7 @@ export function DecisionExplorerPage() {
   const [simulationResults, setSimulationResults] = useState<SimulationResult[]>(initialState.simulationResults)
   const [isSimulating, setIsSimulating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
   const [setupPrompt, setSetupPrompt] = useState<SetupPromptState | null>(null)
   const [loading, setLoading] = useState(false)
   const [filterOpen, setFilterOpen] = useState(false)
@@ -856,6 +802,7 @@ export function DecisionExplorerPage() {
   const deferredSimulationResults = useDeferredValue(simulationResults)
   const [txLogPage, setTxLogPage] = useState(1)
   const TX_LOG_PAGE_SIZE = 10
+  const [showPenaltyGuide, setShowPenaltyGuide] = useState(false)
 
   const routingKeyNames = useMemo(
     () => Object.keys(routingKeysConfig).sort(),
@@ -909,6 +856,47 @@ export function DecisionExplorerPage() {
     { revalidateOnFocus: false, dedupingInterval: 300_000 },
   )
   const gsmRules = gsmOptionsData?.rules ?? []
+
+  const { data: gsmScenariosData } = useSWR<{ scenarios: GsmScenario[] }>(
+    '/gsm/scenarios',
+    fetcher,
+    { revalidateOnFocus: false, dedupingInterval: 300_000 },
+  )
+  const gsmScenarios = gsmScenariosData?.scenarios ?? []
+
+  const { data: eliminationConfig } = useSWR<{ config: { data: { threshold: number } } } | null>(
+    effectiveMerchantId ? ['rule-elimination', effectiveMerchantId] : null,
+    () => apiPost<{ config: { data: { threshold: number } } }>('/rule/get', { merchant_id: effectiveMerchantId, algorithm: 'elimination' }).catch(() => null),
+    { revalidateOnFocus: false, dedupingInterval: 60_000 },
+  )
+  const eliminationConfigured = eliminationConfig?.config?.data?.threshold != null
+
+  const errorScenarioPresets = useMemo<ErrorScenarioPreset[]>(() => {
+    const variantsByScenario: Record<string, Record<string, PresetVariant>> = {}
+    for (const rule of gsmRules) {
+      if (rule.subFlow !== 'Authorize' && rule.flow !== 'Authorize') continue
+      const scenario = gsmScenarios.find(s =>
+        s.errorCategory === rule.errorCategory &&
+        (!s.decision || s.decision === rule.decision)
+      )
+      if (!scenario) continue
+      if (!variantsByScenario[scenario.key]) variantsByScenario[scenario.key] = {}
+      variantsByScenario[scenario.key][rule.connector] = {
+        error_code: rule.errorCode,
+        error_message: rule.errorMessage,
+        issuer_error_code: '',
+        card_network: '',
+      }
+    }
+    return gsmScenarios
+      .map(s => ({
+        label: s.label,
+        badge: (s.penalise ? 'penalized' : 'protected') as 'penalized' | 'protected',
+        tooltip: `${s.errorCategory}${s.decision ? ` · ${s.decision}` : ''} — ${s.penalise ? 'full penalty applied' : 'penalty skipped'}`,
+        variants: variantsByScenario[s.key] ?? {},
+      }))
+      .filter(p => Object.keys(p.variants).length > 0)
+  }, [gsmRules, gsmScenarios])
 
   useEffect(() => {
     if (routingConfigUnavailable || routingKeysLoading) return
@@ -1168,34 +1156,52 @@ export function DecisionExplorerPage() {
     setErrorInfo(f => ({ ...f, ...updates }))
   }
 
+  function getGwSimConfig(gw: string): GatewaySimConfig {
+    return gatewaySimConfigsRef.current[gw] ?? { successRate: 70, errorInfo: { ...DEFAULT_ERROR_INFO }, failureMode: 'decline' }
+  }
+
   function getGwSuccessRate(gw: string): number {
-    return gatewaySimConfigsRef.current[gw]?.successRate ?? 70
+    return getGwSimConfig(gw).successRate
   }
 
   function getGwErrorInfo(gw: string): ErrorInfoState {
-    return gatewaySimConfigsRef.current[gw]?.errorInfo ?? { ...DEFAULT_ERROR_INFO }
+    return getGwSimConfig(gw).errorInfo
+  }
+
+  function getGwFailureMode(gw: string): 'decline' | 'timeout' {
+    return getGwSimConfig(gw).failureMode
   }
 
   function setGwSuccessRate(gw: string, rate: number) {
     setGatewaySimConfigs(c => ({
       ...c,
-      [gw]: { errorInfo: c[gw]?.errorInfo ?? { ...DEFAULT_ERROR_INFO }, successRate: rate },
+      [gw]: { ...getGwSimConfig(gw), ...c[gw], successRate: rate },
+    }))
+  }
+
+  function setGwFailureMode(gw: string, mode: 'decline' | 'timeout') {
+    setGatewaySimConfigs(c => ({
+      ...c,
+      [gw]: { ...getGwSimConfig(gw), ...c[gw], failureMode: mode },
     }))
   }
 
   function setGwErrorInfoField(gw: string, updates: Partial<ErrorInfoState>) {
     setGatewaySimConfigs(c => {
-      const existing = c[gw] ?? { successRate: 70, errorInfo: { ...DEFAULT_ERROR_INFO } }
+      const existing = c[gw] ?? { successRate: 70, errorInfo: { ...DEFAULT_ERROR_INFO }, failureMode: 'decline' as const }
       return { ...c, [gw]: { ...existing, errorInfo: { ...existing.errorInfo, ...updates } } }
     })
   }
 
   function buildErrorInfo(gateway: string, info: ErrorInfoState = errorInfo) {
-    if (!gateway || !info.flow || !info.sub_flow) return undefined
+    if (!gateway) return undefined
+    const rule = gsmRules.find(r => r.connector === gateway && r.errorCode === info.error_code)
+    // flow and subFlow are required by the backend; skip errorInfo entirely if they can't be resolved
+    if (!rule?.flow || !rule?.subFlow) return undefined
     return {
       connector: gateway,
-      flow: info.flow,
-      subFlow: info.sub_flow,
+      flow: rule.flow,
+      subFlow: rule.subFlow,
       ...(info.error_code && { errorCode: info.error_code }),
       ...(info.error_message && { errorMessage: info.error_message }),
       ...(info.issuer_error_code && { issuerErrorCode: info.issuer_error_code }),
@@ -1302,7 +1308,7 @@ export function DecisionExplorerPage() {
         },
         eligibleGatewayList: gateways,
         rankingAlgorithm: form.ranking_algorithm,
-        eliminationEnabled: form.elimination_enabled,
+        eliminationEnabled: eliminationEnabled,
       })
       await apiPost('/update-gateway-score', {
         merchantId: effectiveMerchantId,
@@ -1416,12 +1422,14 @@ export function DecisionExplorerPage() {
           },
           eligibleGatewayList: gateways,
           rankingAlgorithm: form.ranking_algorithm,
-          eliminationEnabled: form.elimination_enabled,
+          eliminationEnabled: eliminationEnabled,
         })
 
         const decidedGateway = decideRes.decided_gateway
         const gwRate = getGwSuccessRate(decidedGateway)
-        const outcome: TransactionOutcome = Math.random() * 100 < gwRate ? 'CHARGED' : 'FAILURE'
+        const isSuccess = Math.random() * 100 < gwRate
+        const failureMode = getGwFailureMode(decidedGateway)
+        const outcome: TransactionOutcome = isSuccess ? 'CHARGED' : (failureMode === 'timeout' ? 'PENDING_VBV' : 'FAILURE')
         const gwErrorInfo = getGwErrorInfo(decidedGateway)
 
         await apiPost<UpdateScoreResponse>('/update-gateway-score', {
@@ -2232,7 +2240,7 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                     <select value={form.currency} onChange={e => set('currency', e.target.value)}
                       disabled={routingConfigUnavailable || routingKeysLoading}
                       className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
-                      {currencyOptions.map(c => <option key={c}>{c}</option>)}
+                      {currencyOptions.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
                   </div>
                   <div>
@@ -2240,7 +2248,7 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                     <select value={form.payment_method_type} onChange={e => set('payment_method_type', e.target.value)}
                       disabled={routingConfigUnavailable || routingKeysLoading}
                       className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
-                      {paymentMethodTypeOptions.map(p => <option key={p}>{p}</option>)}
+                      {paymentMethodTypeOptions.map(p => <option key={p} value={p}>{formatOptionLabel(p)}</option>)}
                     </select>
                   </div>
                   <div>
@@ -2248,7 +2256,7 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                     <select value={form.payment_method} onChange={e => set('payment_method', e.target.value)}
                       disabled={routingConfigUnavailable || routingKeysLoading}
                       className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
-                      {paymentMethodOptions.map(p => <option key={p}>{p}</option>)}
+                      {paymentMethodOptions.map(p => <option key={p} value={p}>{formatOptionLabel(p)}</option>)}
                     </select>
                   </div>
                   <div>
@@ -2256,7 +2264,7 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                     <select value={form.card_brand} onChange={e => set('card_brand', e.target.value)}
                       disabled={routingConfigUnavailable || routingKeysLoading}
                       className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
-                      {cardBrandOptions.map(b => <option key={b}>{b}</option>)}
+                      {cardBrandOptions.map(b => <option key={b} value={b}>{formatOptionLabel(b)}</option>)}
                     </select>
                   </div>
                   <div>
@@ -2264,7 +2272,7 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                     <select value={form.auth_type} onChange={e => set('auth_type', e.target.value)}
                       disabled={routingConfigUnavailable || routingKeysLoading}
                       className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
-                      {authTypeOptions.map(a => <option key={a}>{a}</option>)}
+                      {authTypeOptions.map(a => <option key={a} value={a}>{formatOptionLabel(a)}</option>)}
                     </select>
                   </div>
                 </div>
@@ -2287,18 +2295,6 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                       {ALGORITHMS.map(a => <option key={a} value={a}>{ALGORITHM_LABELS[a]}</option>)}
                     </select>
                   </div>
-                  <div
-                    className="flex items-center justify-between px-3 py-2 cursor-pointer select-none"
-                    onClick={() => set('elimination_enabled', !form.elimination_enabled)}
-                  >
-                    <div className="flex items-center gap-2 min-w-0 pr-3">
-                      <span className="text-xs font-medium text-slate-700 dark:text-slate-200 shrink-0">Elimination</span>
-                      <span className="text-[11px] text-slate-400 dark:text-slate-500 truncate">Gateways that drop below the score threshold are removed from routing entirely</span>
-                    </div>
-                    <div className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${form.elimination_enabled ? 'bg-brand-600' : 'bg-slate-200 dark:bg-[#2a2a35]'}`}>
-                      <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${form.elimination_enabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
-                    </div>
-                  </div>
                 </div>
 
                 {activeTab === 'single' && (
@@ -2317,7 +2313,7 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                         After deciding the gateway, single test will post feedback with this outcome so the payment appears in Decision Audit.
                       </p>
                     </div>
-                    {singleRunOutcome === 'FAILURE' && <ErrorInfoFields info={errorInfo} onChange={setErrorField} rules={gsmRules} eligibleGateways={eligibleGatewaysParsed} />}
+                    {singleRunOutcome === 'FAILURE' && <ErrorInfoFields info={errorInfo} onChange={setErrorField} rules={gsmRules} />}
                   </>
                 )}
 
@@ -2339,14 +2335,15 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                             const total = Math.max(1, parseInt(e.target.value) || 1)
                             setSimulationConfig({ totalPayments: String(total) })
                           }}
-                          className="w-16 border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm text-center focus:outline-none focus:ring-1 focus:ring-brand-500"
+                          className="w-16 border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm text-center focus:outline-none focus:ring-1 focus:ring-brand-500 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                         />
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                       {eligibleGatewaysParsed.map(gw => {
-                        const gwRate = getGwSuccessRate(gw)
-                        const gwErrInfo = getGwErrorInfo(gw)
+                        const gwRate = gatewaySimConfigs[gw]?.successRate ?? 70
+                        const gwErrInfo = gatewaySimConfigs[gw]?.errorInfo ?? { ...DEFAULT_ERROR_INFO }
+                        const gwFailureMode = gatewaySimConfigs[gw]?.failureMode ?? 'decline'
                         const hasFailures = gwRate < 100
                         return (
                           <div key={gw} className="rounded-lg border border-slate-200 dark:border-[#222226] p-2.5 space-y-1.5">
@@ -2363,13 +2360,37 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                               className="w-full accent-brand-600"
                             />
                             {hasFailures && (
+                              <div className="flex rounded-md overflow-hidden border border-slate-200 dark:border-[#222226] text-[10px] font-medium">
+                                <button
+                                  type="button"
+                                  onClick={() => setGwFailureMode(gw, 'decline')}
+                                  className={`flex-1 py-0.5 transition-colors ${gwFailureMode === 'decline' ? 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
+                                >
+                                  Decline
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setGwFailureMode(gw, 'timeout')}
+                                  className={`flex-1 py-0.5 border-l border-slate-200 dark:border-[#222226] transition-colors ${gwFailureMode === 'timeout' ? 'bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
+                                >
+                                  Timeout
+                                </button>
+                              </div>
+                            )}
+                            {hasFailures && gwFailureMode === 'timeout' && (
+                              <div className={`text-[10px] px-2 py-1 rounded ${eliminationConfigured ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400' : 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400'}`}>
+                                {eliminationConfigured
+                                  ? `Gateway will be removed from routing when its score drops below ${eliminationConfig!.config.data.threshold} threshold.`
+                                  : 'Elimination is not configured. Set it up in SR Routing settings for this to take effect.'}
+                              </div>
+                            )}
+                            {hasFailures && gwFailureMode === 'decline' && (
                               <div className="space-y-1.5">
                                 <div className="flex flex-wrap gap-1">
-                                  {ERROR_SCENARIO_PRESETS.filter(p => p.variants[gw]).map(preset => {
+                                  {errorScenarioPresets.filter(p => p.variants[gw]).map(preset => {
                                     const variant = preset.variants[gw]
                                     const isActive = variant != null &&
-                                      gwErrInfo.error_code === variant.error_code &&
-                                      gwErrInfo.flow === variant.flow
+                                      gwErrInfo.error_code === variant.error_code
                                     return (
                                       <UiTooltip key={preset.label} text={preset.tooltip}>
                                         <button
@@ -2394,7 +2415,7 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                                   info={gwErrInfo}
                                   onChange={updates => setGwErrorInfoField(gw, updates)}
                                   rules={gsmRules}
-                                  eligibleGateways={[gw]}
+                                  connector={gw}
                                 />
                               </div>
                             )}
@@ -2898,48 +2919,51 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
             hasSimulationActivity ? (
               <>
                 <Card className="shrink-0">
-                  <CardHeader>
-                    <h3 className="text-sm font-medium text-slate-800">Simulation Progress</h3>
-                  </CardHeader>
-                  <CardBody>
-                    <div className="mb-4">
-                      <div className="flex justify-between text-xs text-slate-600 mb-1">
-                        <span>Progress</span>
-                        <span>{simulationProgressPercentage}%</span>
-                      </div>
-                      <div className="w-full overflow-hidden rounded-full bg-gray-200 h-2">
-                        <div
-                          className={`h-2 rounded-full bg-brand-500 transition-[width] duration-300 ease-out ${isSimulating && completedSimulationCount === 0 ? 'animate-pulse' : ''}`}
-                          style={{ width: `${simulationProgressPercentage}%` }}
-                        />
-                      </div>
-                      <p className="mt-2 text-xs text-slate-500">
-                        {completedSimulationCount} of {totalSimulationPayments || 0} payments processed.
-                      </p>
-                      {completedSimulationCount > 0 && (
-                        <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-100 dark:border-[#1c1c24]">
-                          <span className="text-xs text-slate-500">Hedging (SR_V3_HEDGING)</span>
-                          {hedgingHits > 0 ? (
-                            <span className="text-xs font-semibold text-brand-600 dark:text-sky-400">
-                              {hedgingHits} / {completedSimulationCount} decisions ({Math.round((hedgingHits / completedSimulationCount) * 100)}%)
-                            </span>
-                          ) : (
-                            <UiTooltip text="Enable ENABLE_EXPLORE_AND_EXPLOIT_ON_SRV3_{PMT} or ENABLE_MERCHANT_ON_VOLUME_DISTRIBUTION_FEATURE_SR_V3 in Redis">
-                              <span className="text-xs font-medium text-amber-600 dark:text-amber-400 cursor-help">
-                                0 — feature flag not set
+                  <CardHeader className="!py-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="text-sm font-medium text-slate-800 dark:text-white">Gateway Selection Summary</h3>
+                      <div className="flex items-center gap-1.5">
+                        {totalSimulationPayments > 0 && (() => {
+                          const r = 6
+                          const circ = 2 * Math.PI * r
+                          const offset = circ * (1 - simulationProgressPercentage / 100)
+                          return (
+                            <svg width="16" height="16" viewBox="0 0 16 16" className="-rotate-90">
+                              <circle cx="8" cy="8" r={r} fill="none" strokeWidth="2" className="stroke-slate-200 dark:stroke-slate-700" />
+                              <circle
+                                cx="8" cy="8" r={r} fill="none" strokeWidth="2" strokeLinecap="round"
+                                strokeDasharray={circ} strokeDashoffset={offset}
+                                className="stroke-brand-500 transition-[stroke-dashoffset] duration-300"
+                              />
+                            </svg>
+                          )
+                        })()}
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                          {completedSimulationCount} / {totalSimulationPayments || 0}
+                        </span>
+                        {completedSimulationCount > 0 && (
+                          <>
+                            <span className="text-slate-300 dark:text-slate-600">·</span>
+                            {hedgingHits > 0 ? (
+                              <span className="text-[11px] font-medium text-brand-600 dark:text-sky-400">
+                                {Math.round((hedgingHits / completedSimulationCount) * 100)}% hedged
                               </span>
-                            </UiTooltip>
-                          )}
-                        </div>
-                      )}
+                            ) : (
+                              <UiTooltip text="Enable ENABLE_EXPLORE_AND_EXPLOIT_ON_SRV3_{PMT} or ENABLE_MERCHANT_ON_VOLUME_DISTRIBUTION_FEATURE_SR_V3 in Redis">
+                                <span className="text-[11px] text-amber-500 dark:text-amber-400 cursor-help">0 hedged</span>
+                              </UiTooltip>
+                            )}
+                          </>
+                        )}
+                      </div>
                     </div>
-
+                  </CardHeader>
+                  <CardBody className="!pt-3">
                     {Object.keys(gatewayStats).length > 0 && (() => {
                       const totalRouted = Object.values(gatewayStats).reduce((s, g) => s + g.total, 0)
                       const dominated = Object.keys(gatewayStats).length === 1
                       return (
                         <div className="space-y-2">
-                          <h4 className="text-xs font-medium text-slate-700 dark:text-slate-300">Gateway Selection Summary</h4>
                           {Object.entries(gatewayStats).map(([gateway, stats]) => {
                             const share = totalRouted > 0 ? Math.round((stats.total / totalRouted) * 100) : 0
                             const srPct = stats.total > 0 ? Math.round((stats.success / stats.total) * 100) : 0
@@ -2968,7 +2992,6 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                         </div>
                       )
                     })()}
-
                   </CardBody>
                 </Card>
 
@@ -3068,7 +3091,7 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                                         )}
                                       </td>
                                       <td className="px-3 py-2">
-                                        <Badge variant={res.status === 'CHARGED' ? 'green' : 'red'}>
+                                        <Badge variant={res.status === 'CHARGED' ? 'green' : res.status === 'PENDING_VBV' ? 'orange' : 'red'}>
                                           {res.status}
                                         </Badge>
                                       </td>
@@ -3090,12 +3113,33 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                 </Card>
               </>
             ) : (
-              <Card>
-                <CardBody className="py-16 text-center">
-                  <Activity size={32} className="text-gray-300 mx-auto mb-3" />
-                  <p className="text-slate-400 text-sm">Configure simulation parameters and click "Run Auth-Rate Simulation" to test auth-rate based routing.</p>
-                </CardBody>
-              </Card>
+              <div className="space-y-3">
+                <button
+                  type="button"
+                  onClick={() => setShowPenaltyGuide(v => !v)}
+                  className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-[#222226] bg-white dark:bg-[#0c0f17] px-3 py-2 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-[#131720] transition-colors w-full"
+                >
+                  <span className={`transition-transform ${showPenaltyGuide ? 'rotate-90' : ''}`}>▶</span>
+                  Penalty Classification Guide
+                </button>
+                {showPenaltyGuide && (
+                  <PenaltyClassificationGuide
+                    merchantId={effectiveMerchantId}
+                    gsmScenarios={gsmScenarios}
+                    gsmRules={gsmRules}
+                    decideParams={{
+                      amount: form.amount,
+                      currency: form.currency,
+                      paymentMethodType: form.payment_method_type,
+                      paymentMethod: form.payment_method,
+                      authType: form.auth_type,
+                      cardBrand: form.card_brand,
+                      rankingAlgorithm: form.ranking_algorithm,
+                      eligibleGateways: form.eligible_gateways,
+                    }}
+                  />
+                )}
+              </div>
             )
           ) : (
             result ? (

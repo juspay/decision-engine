@@ -757,3 +757,39 @@ payjustnow = { country = "ZA", currency = "ZAR" }
 
 [pm_filters.payjustnowinstore]
 payjustnow = { country = "ZA", currency = "ZAR" }
+
+[gsm]
+source = "bundled"
+
+[[gsm_scenarios.scenarios]]
+key = "expired_card"
+label = "Expired Card"
+penalise = false
+error_category = "issue_with_payment_method"
+decision = "do_default"
+
+[[gsm_scenarios.scenarios]]
+key = "wrong_cvv"
+label = "Wrong CVV"
+penalise = false
+error_category = "processor_decline_incorrect_data"
+
+[[gsm_scenarios.scenarios]]
+key = "fraud_block"
+label = "Fraud Block"
+penalise = false
+error_category = "frm_decline"
+
+[[gsm_scenarios.scenarios]]
+key = "gateway_down"
+label = "Gateway Down"
+penalise = true
+error_category = "processor_downtime"
+
+[[gsm_scenarios.scenarios]]
+key = "bad_config"
+label = "Bad Config"
+penalise = true
+error_category = "processor_decline_unauthorized"
+decision = "retry"
+

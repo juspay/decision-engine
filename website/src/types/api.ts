@@ -170,6 +170,16 @@ export interface DebitRoutingFlagResponse {
   debit_routing_enabled: boolean
 }
 
+export interface MerchantFeatureEntry {
+  feature: string
+  enabled: boolean
+}
+
+export interface MerchantFeaturesResponse {
+  merchant_id: string
+  features: MerchantFeatureEntry[]
+}
+
 export interface CreateMerchantRequest {
   merchant_id: string
   gateway_success_rate_based_decider_input: null

@@ -2,8 +2,7 @@
 //!
 //! The algorithm is a Non-stationary Multi-Armed Bandit with Delayed Feedback.
 //! Design goals, parameter sizing guidance, the explore-exploit mechanism, failure
-//! attribution via GSM, and implementation notes (including a bug fix to the hedging
-//! multiplier) are documented in `docs/sr-routing-algorithm.md`.
+//! attribution via GSM
 //!
 //! References:
 //!   - <https://juspay.io/blog/juspay-orchestrator-and-merchant-controlled-routing-engine>
@@ -312,17 +311,30 @@ pub async fn scoring_flow(
                     false
                 };
 
+                let sr_scores = get_cached_scores_based_on_srv3(
+                    decider_flow,
+                    merchant_sr_v3_input_config,
+                    default_sr_v3_input_config,
+                    pm_str,
+                    gateway_scoring_data.clone(),
+                )
+                .await;
+
                 let initial_sr_gw_scores = if should_explore {
-                    create_score_map(functional_gateways.clone())
+                    let top_gateway =
+                        Utils::get_max_score_gateway(&sr_scores).map(|(gw, _)| gw);
+                    functional_gateways
+                        .iter()
+                        .map(|gw| {
+                            let score = match &top_gateway {
+                                Some(top) if top == gw => 0.5,
+                                _ => 1.0,
+                            };
+                            (gw.clone(), score)
+                        })
+                        .collect()
                 } else {
-                    get_cached_scores_based_on_srv3(
-                        decider_flow,
-                        merchant_sr_v3_input_config,
-                        default_sr_v3_input_config,
-                        pm_str,
-                        gateway_scoring_data.clone(),
-                    )
-                    .await
+                    sr_scores
                 };
 
                 let initial_sr_gw_scores_list = toListOfGatewayScore(initial_sr_gw_scores.clone());

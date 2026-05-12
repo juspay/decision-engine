@@ -466,13 +466,34 @@ pub async fn check_and_update_gateway_score_(
             C::kvRedis(),
         )
         .await;
+        logger::debug!(
+            action = "GSM_SCORING_FILTER_CHECK",
+            tag = "GSM_SCORING_FILTER_CHECK",
+            "GSM scoring filter: enabled={} merchant={} gateway={} flow={} sub_flow={} \
+             error_code={:?} error_message={:?}",
+            gsm_filter_enabled,
+            api_payload.merchant_id,
+            api_payload.gateway,
+            error_info.flow,
+            error_info.sub_flow,
+            error_info.error_code,
+            error_info.error_message,
+        );
         if gsm_filter_enabled {
             // Connector must be the gateway that processed the payment.
             let effective_error_info = crate::gsm::GsmErrorInfo {
                 connector: api_payload.gateway.clone(),
                 ..error_info.clone()
             };
-            if let Some(gsm_info) = crate::gsm::lookup(&effective_error_info) {
+            let gsm_lookup_result = crate::gsm::lookup(&effective_error_info);
+            logger::debug!(
+                action = "GSM_SCORING_FILTER_LOOKUP",
+                tag = "GSM_SCORING_FILTER_LOOKUP",
+                "GSM lookup: connector={} -> {:?}",
+                api_payload.gateway,
+                gsm_lookup_result.as_ref().map(|g| (&g.error_category, &g.decision)),
+            );
+            if let Some(gsm_info) = gsm_lookup_result {
                 if is_gateway_healthy_failure(&gsm_info) {
                     logger::info!(
                         action = "GSM_SCORING_FILTER_SKIP",
@@ -488,6 +509,14 @@ pub async fn check_and_update_gateway_score_(
                 }
             }
         }
+    } else {
+        logger::debug!(
+            action = "GSM_SCORING_FILTER_NO_ERROR_INFO",
+            tag = "GSM_SCORING_FILTER_NO_ERROR_INFO",
+            "GSM scoring filter skipped: no error_info in payload for merchant={} gateway={}",
+            api_payload.merchant_id,
+            api_payload.gateway,
+        );
     }
 
     let redis_key = format!(

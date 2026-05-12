@@ -11,7 +11,8 @@ import { Spinner } from '../ui/Spinner'
 import { useMerchantStore } from '../../store/merchantStore'
 import { apiPost } from '../../lib/api'
 import { PAYMENT_METHOD_TYPES, PAYMENT_METHODS } from '../../lib/constants'
-import { Plus, Trash2, Eye, ChevronDown, Info } from 'lucide-react'
+import { Plus, Trash2, Eye, ChevronDown, Info, PowerOff } from 'lucide-react'
+import { useMerchantFeatures, type KnownFeature } from '../../hooks/useMerchantFeatures'
 
 // ---- Schema ----
 const subLevelSchema = z.object({
@@ -416,14 +417,13 @@ export function SRRoutingPage() {
                 <div className="space-y-2">
                   <h3 className="font-semibold text-slate-700 dark:text-slate-200">Hedging %</h3>
                   <p>
-                    Hedging sends a fixed percentage of traffic to backup gateways even when a primary gateway
-                    dominates. This keeps backup gateway scores fresh so the algorithm can shift traffic
-                    instantly when the primary fails — without waiting for the backup to accumulate enough
-                    transactions to be trusted.
+                    The exploration rate for the Explore-exploit feature. When Explore-exploit (Card, SRv3) is
+                    enabled, this percentage of traffic is probabilistically routed to non-top gateways,
+                    keeping their scores fresh so the algorithm can respond quickly when the primary degrades.
                   </p>
                   <p className="text-amber-600 dark:text-amber-400">
-                    If hedging is too low, backup scores go stale. When the primary goes down, the algorithm
-                    sees no reliable data for the backup and failover is slow.
+                    Too low = backup scores go stale = slow failover when the top gateway drops. Has no effect
+                    if Explore-exploit is disabled.
                   </p>
                   <p>Set hedging so the backup fills one bucket within your acceptable failover window:</p>
                   <div className="rounded-lg bg-slate-50 dark:bg-[#0f0f16] border border-slate-200 dark:border-[#1c1c24] px-3 py-2 font-mono text-[11px] space-y-1">
@@ -529,7 +529,7 @@ export function SRRoutingPage() {
                   className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 w-full focus:outline-none focus:ring-1 focus:ring-brand-500"
                 />
                 <p className="text-[11px] text-slate-400 dark:text-slate-500 leading-relaxed">
-                  Traffic % always sent to backup gateways to keep their scores fresh. Too low = slow failover.
+                  Exploration rate used by Explore-exploit (Card, SRv3). Has no effect if that flag is disabled.
                 </p>
               </label>
 
@@ -662,8 +662,114 @@ export function SRRoutingPage() {
         </form>
 
         <EliminationConfig merchantId={merchantId} />
+        <SRFeatureFlags merchantId={merchantId} />
         </>
       )}
+    </div>
+  )
+}
+
+const SR_FEATURES: { feature: KnownFeature; title: string; description: string }[] = [
+  {
+    feature: 'gsm-scoring-filter',
+    title: 'GSM scoring filter',
+    description:
+      'Skip gateway penalization for failures classified by GSM as user or issuer-originated. Keeps gateway scores accurate by excluding faults that are not the gateway\'s responsibility.',
+  },
+  {
+    feature: 'explore-exploit-srv3',
+    title: 'Explore-exploit on SRv3 (Card)',
+    description:
+      'Enable epsilon-greedy exploration for card transactions on SRv3. When enabled, the Hedging % setting controls what fraction of traffic is routed to non-top gateways to keep their scores fresh. Without this flag, Hedging % has no effect.',
+  },
+]
+
+function SRFeatureFlags({ merchantId }: { merchantId: string | null }) {
+  const features = useMerchantFeatures(merchantId ?? undefined)
+  const [toggling, setToggling] = useState<KnownFeature | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  async function toggle(feature: KnownFeature, enabled: boolean) {
+    setToggling(feature)
+    setMessage(null)
+    setError(null)
+    try {
+      await features.setFeatureEnabled(feature, enabled)
+      const label = SR_FEATURES.find((f) => f.feature === feature)?.title ?? feature
+      setMessage(`${label} ${enabled ? 'enabled' : 'disabled'}.`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setToggling(null)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Scoring behaviour flags</h2>
+        <p className="text-xs text-slate-500 mt-0.5">
+          Merchant-level toggles that affect how SR scores are computed and how traffic is explored.
+        </p>
+      </div>
+
+      {error && (
+        <p className="rounded-lg border border-red-500/20 bg-red-500/8 px-3 py-2 text-xs text-red-500">{error}</p>
+      )}
+      {message && (
+        <p className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-3 py-2 text-xs text-emerald-500">{message}</p>
+      )}
+
+      <Card>
+        {SR_FEATURES.map(({ feature, title, description }, idx) => {
+          const enabled = features.isEnabled(feature)
+          return (
+            <div
+              key={feature}
+              className={`flex flex-wrap items-center justify-between gap-4 px-5 py-4 ${
+                idx > 0 ? 'border-t border-slate-100 dark:border-[#222226]' : ''
+              }`}
+            >
+              <div className="max-w-2xl">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-medium text-slate-800 dark:text-white">{title}</span>
+                  {features.isLoading ? (
+                    <Badge variant="gray">Checking</Badge>
+                  ) : enabled ? (
+                    <Badge variant="green">Enabled</Badge>
+                  ) : (
+                    <Badge variant="gray">Disabled</Badge>
+                  )}
+                </div>
+                <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#9aa6bb]">{description}</p>
+              </div>
+              <div>
+                {enabled ? (
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    onClick={() => toggle(feature, false)}
+                    disabled={!merchantId || toggling === feature || features.isLoading}
+                  >
+                    <PowerOff size={13} />
+                    {toggling === feature ? 'Disabling' : 'Disable'}
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    onClick={() => toggle(feature, true)}
+                    disabled={!merchantId || toggling === feature || features.isLoading}
+                  >
+                    {toggling === feature ? 'Enabling' : 'Enable'}
+                  </Button>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </Card>
     </div>
   )
 }
