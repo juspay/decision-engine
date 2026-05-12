@@ -491,7 +491,9 @@ pub async fn check_and_update_gateway_score_(
                 tag = "GSM_SCORING_FILTER_LOOKUP",
                 "GSM lookup: connector={} -> {:?}",
                 api_payload.gateway,
-                gsm_lookup_result.as_ref().map(|g| (&g.error_category, &g.decision)),
+                gsm_lookup_result
+                    .as_ref()
+                    .map(|g| (&g.error_category, &g.decision)),
             );
             if let Some(gsm_info) = gsm_lookup_result {
                 if is_gateway_healthy_failure(&gsm_info) {

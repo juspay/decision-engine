@@ -2971,10 +2971,7 @@ pub fn set_outage_dimension(
     set_outage_dimension_level(decider_flow, dimension)
 }
 
-pub fn route_random_traffic_to_explore(
-    hedging_percent: f64,
-    tag: String,
-) -> bool {
+pub fn route_random_traffic_to_explore(hedging_percent: f64, tag: String) -> bool {
     let num = generate_random_number(
         format!("GatewayDecider::routeRandomTrafficToExplore::{}", tag),
         (0.0, 100.0),

@@ -48,7 +48,10 @@ pub enum KnownFeature {
 
 impl KnownFeature {
     fn all() -> &'static [KnownFeature] {
-        &[KnownFeature::GsmScoringFilter, KnownFeature::ExploreExploitSrv3]
+        &[
+            KnownFeature::GsmScoringFilter,
+            KnownFeature::ExploreExploitSrv3,
+        ]
     }
 
     fn from_slug(s: &str) -> Option<Self> {
@@ -436,7 +439,10 @@ pub async fn get_merchant_features(
             });
         }
 
-        Ok(Json(MerchantFeaturesResponse { merchant_id, features }))
+        Ok(Json(MerchantFeaturesResponse {
+            merchant_id,
+            features,
+        }))
     }
     .await;
 
@@ -492,7 +498,10 @@ pub async fn update_merchant_feature(
             API_REQUEST_COUNTER
                 .with_label_values(&["merchant_feature_update", "success"])
                 .inc();
-            Ok(Json(MerchantFeaturesResponse { merchant_id, features }))
+            Ok(Json(MerchantFeaturesResponse {
+                merchant_id,
+                features,
+            }))
         }
         Err(e) => {
             API_REQUEST_COUNTER

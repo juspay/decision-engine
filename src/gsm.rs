@@ -26,7 +26,11 @@ pub async fn init(config: &GsmConfig) {
 fn load_bundled() -> gsm::ConfigGsmStore {
     let bundled = include_str!("../crates/gsm/data/gsm.csv");
     let store = gsm::ConfigGsmStore::from_csv_str(bundled).expect("bundled GSM CSV must be valid");
-    crate::logger::info!(tag = "GSM", "Loaded {} GSM rules from bundled data", store.len());
+    crate::logger::info!(
+        tag = "GSM",
+        "Loaded {} GSM rules from bundled data",
+        store.len()
+    );
     store
 }
 
@@ -38,7 +42,12 @@ fn load_file(config: &GsmConfig) -> gsm::ConfigGsmStore {
 
     match gsm::ConfigGsmStore::from_csv_file(path) {
         Ok(store) => {
-            crate::logger::info!(tag = "GSM", "Loaded {} GSM rules from {}", store.len(), path);
+            crate::logger::info!(
+                tag = "GSM",
+                "Loaded {} GSM rules from {}",
+                store.len(),
+                path
+            );
             store
         }
         Err(e) => panic!("Failed to load GSM from file {path}: {e}"),

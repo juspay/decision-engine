@@ -45,7 +45,11 @@ pub async fn gsm_scenarios() -> Json<GsmScenariosResponse> {
         .get()
         .expect("GlobalAppState not initialised");
     Json(GsmScenariosResponse {
-        scenarios: app_state.global_config.gsm_scenarios.scenarios.iter()
+        scenarios: app_state
+            .global_config
+            .gsm_scenarios
+            .scenarios
+            .iter()
             .map(GsmScenarioView::from)
             .collect(),
     })
