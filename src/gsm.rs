@@ -1,1 +1,1 @@
-pub use gsm::{GsmConfig, GsmErrorInfo, GsmInfo, GsmOptionRow, init, lookup, options};
+pub use gsm::{init, lookup, options, GsmConfig, GsmErrorInfo, GsmInfo, GsmOptionRow};

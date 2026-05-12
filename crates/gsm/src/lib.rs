@@ -119,7 +119,7 @@ mod tests {
             "Authorize",
             Some("2"),
             Some("Refused"),
-            Some("9999"),          // issuer code with no matching rule
+            Some("9999"), // issuer code with no matching rule
             Some("UnknownNetwork"),
         );
         assert!(rule.is_some());

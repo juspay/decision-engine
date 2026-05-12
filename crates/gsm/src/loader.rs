@@ -31,7 +31,11 @@ pub fn get_store() -> &'static ConfigGsmStore {
 fn load_bundled() -> ConfigGsmStore {
     let bundled = include_str!("../data/gsm.csv");
     let store = ConfigGsmStore::from_csv_str(bundled).expect("bundled GSM CSV must be valid");
-    tracing::info!(tag = "GSM", count = store.len(), "Loaded GSM rules from bundled data");
+    tracing::info!(
+        tag = "GSM",
+        count = store.len(),
+        "Loaded GSM rules from bundled data"
+    );
     store
 }
 
@@ -42,7 +46,12 @@ fn load_file(config: &GsmConfig) -> ConfigGsmStore {
         .expect("[gsm] source = \"file\" requires a `path` field");
     match ConfigGsmStore::from_csv_file(path) {
         Ok(store) => {
-            tracing::info!(tag = "GSM", count = store.len(), path, "Loaded GSM rules from file");
+            tracing::info!(
+                tag = "GSM",
+                count = store.len(),
+                path,
+                "Loaded GSM rules from file"
+            );
             store
         }
         Err(e) => panic!("Failed to load GSM from file {path}: {e}"),
