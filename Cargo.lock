@@ -2345,9 +2345,13 @@ dependencies = [
 name = "gsm"
 version = "0.1.0"
 dependencies = [
+ "aws-config",
+ "aws-sdk-s3",
  "csv",
+ "once_cell",
  "serde",
  "thiserror 2.0.12",
+ "tracing",
 ]
 
 [[package]]
@@ -3571,7 +3575,6 @@ dependencies = [
  "async-trait",
  "aws-config",
  "aws-sdk-kms",
- "aws-sdk-s3",
  "aws-sdk-sesv2",
  "axum",
  "axum-server",

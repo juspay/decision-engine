@@ -8,7 +8,6 @@
 //! ```rust,no_run
 //! use gsm::{ConfigGsmStore, GsmLookup};
 //!
-//! // Load from a CSV exported from hyperswitch's gateway_status_map table.
 //! let store = ConfigGsmStore::from_csv_file("config/gsm.csv").unwrap();
 //!
 //! // O(1) lookup — safe to call on every payment decision.
@@ -18,29 +17,39 @@
 //! }
 //! ```
 //!
-//! # Using with hyperswitch-prism (embed rules at compile time)
+//! # Static store with runtime source selection (requires `loader` feature)
 //!
 //! ```rust,ignore
-//! static GSM_CSV: &str = include_str!("../data/gsm.csv");
-//! let store = ConfigGsmStore::from_csv_str(GSM_CSV).unwrap();
+//! // Called once at startup — source driven by [gsm] in your TOML config.
+//! gsm::init(&config.gsm).await;
+//!
+//! // Thereafter, zero-cost sync lookups from anywhere.
+//! let info = gsm::lookup(&error_info);
 //! ```
 //!
 //! # Implementing your own backing store
 //!
 //! Implement [`GsmLookup`] on any type that can resolve a 5-tuple key to a [`GsmRule`].
-//! hyperswitch can implement it on its async `Store` wrapper for future integration.
 
 pub mod config;
 pub mod error;
 pub mod interface;
 pub mod lookup;
+pub mod source;
 pub mod types;
+
+#[cfg(feature = "loader")]
+pub mod loader;
 
 pub use config::ConfigGsmStore;
 pub use error::GsmError;
 pub use interface::GsmLookup;
 pub use lookup::{get_gsm_rule, lookup_from_error_info};
+pub use source::{GsmConfig, GsmSourceKind};
 pub use types::{GsmDecision, GsmErrorInfo, GsmInfo, GsmOptionRow, GsmRule};
+
+#[cfg(feature = "loader")]
+pub use loader::{get_store, init, lookup, options};
 
 #[cfg(test)]
 mod tests {
@@ -102,7 +111,7 @@ mod tests {
     fn get_gsm_rule_issuer_lookup_misses_then_falls_back() {
         let store = ConfigGsmStore::from_csv_str(SAMPLE_CSV).expect("CSV should parse");
 
-        // Issuer lookup will miss (no issuer rules in sample CSV), falls back to connector code
+        // Use an issuer code that has no matching rule so the lookup falls back to connector code.
         let rule = get_gsm_rule(
             &store,
             "adyen",
@@ -110,8 +119,8 @@ mod tests {
             "Authorize",
             Some("2"),
             Some("Refused"),
-            Some("51"),   // issuer code
-            Some("Visa"), // card network
+            Some("9999"),          // issuer code with no matching rule
+            Some("UnknownNetwork"),
         );
         assert!(rule.is_some());
         assert_eq!(rule.unwrap().decision, GsmDecision::Retry);
