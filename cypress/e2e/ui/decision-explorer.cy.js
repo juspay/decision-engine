@@ -20,8 +20,8 @@ describe('Decision Explorer UI', () => {
         cy.contains('button', 'Auth-rate').click()
         cy.contains('button', 'Run Auth-Rate Simulation').should('be.visible')
         cy.contains('Payments').should('be.visible')       // label for count input
-        // Look for Success Rate label specifically within the form controls
-        cy.get('label').contains('Success Rate').should('be.visible')
+        // Each gateway shows a percentage span (e.g. "70%") next to a range slider.
+        cy.get('input[type="range"]').first().should('be.visible')
       })
       .then(() => cy.cleanupTestData(merchantId))
   })

@@ -55,7 +55,7 @@ impl MemberAddedTemplate {
               <table cellpadding="0" cellspacing="0" role="presentation" style="margin:0 0 8px;">
                 <tr>
                   <td style="background-color:#4371ff;border-radius:12px;">
-                    <a href="{base_url}"
+                    <a href="{base_url}/login"
                        style="display:inline-block;background-color:#4371ff;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;padding:14px 32px;border-radius:12px;letter-spacing:-0.01em;">
                       Go to Decision Engine &rarr;
                     </a>
@@ -270,7 +270,7 @@ impl InviteUserTemplate {
               <table cellpadding="0" cellspacing="0" role="presentation" style="margin:0 0 8px;">
                 <tr>
                   <td style="background-color:#4371ff;border-radius:12px;">
-                    <a href="{base_url}"
+                    <a href="{base_url}/login"
                        style="display:inline-block;background-color:#4371ff;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;padding:14px 32px;border-radius:12px;letter-spacing:-0.01em;">
                       Sign in to Decision Engine &rarr;
                     </a>

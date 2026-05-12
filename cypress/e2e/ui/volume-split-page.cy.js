@@ -28,8 +28,10 @@ describe('Volume Split UI', () => {
 
     cy.contains('button', 'Create Rule').click()
     cy.wait('@createVolumeSplit', { timeout: 20000 })
-    cy.contains('created successfully', { timeout: 15000 }).should('be.visible')
-    cy.contains('button', 'Activate').click()
+    // The component shows "Rule created: <id>" + "Activate Now" button on success,
+    // not the raw success string (which is suppressed when createdId is set).
+    cy.contains('Rule created:', { timeout: 15000 }).should('be.visible')
+    cy.contains('button', 'Activate Now').click()
     cy.contains('Rule activated.', { timeout: 15000 }).should('be.visible')
     cy.contains('Active Volume Split').scrollIntoView().should('exist')
   })

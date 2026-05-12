@@ -1,7 +1,10 @@
-import { useDeferredValue, useEffect, useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { ErrorInfoFields, ErrorInfoState, GsmOptionRow, DEFAULT_ERROR_INFO } from './ErrorInfoFields'
+import { PenaltyClassificationGuide, GsmScenario } from './PenaltyClassificationGuide'
 import { useNavigate } from 'react-router-dom'
 import useSWR from 'swr'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts'
+import { Tooltip as UiTooltip } from '../ui/Tooltip'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
 import { Card, CardBody, CardHeader, SurfaceLabel } from '../ui/Card'
@@ -11,11 +14,11 @@ import { useMerchantStore } from '../../store/merchantStore'
 import { useAuthStore } from '../../store/authStore'
 import { apiPost, fetcher } from '../../lib/api'
 import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
-import { DecideGatewayResponse, GatewayConnector, PaymentAuditEvent, PaymentAuditResponse, RoutingAlgorithmName } from '../../types/api'
+import { DecideGatewayResponse, GatewayConnector, PaymentAuditEvent, PaymentAuditResponse, RoutingAlgorithmName, UpdateScoreResponse } from '../../types/api'
 import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
 import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
-import { Play, RefreshCw, ChevronDown, ChevronUp, Activity, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings } from 'lucide-react'
+import { Play, RefreshCw, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Activity, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings } from 'lucide-react'
 
 const ALGORITHMS: RoutingAlgorithmName[] = [
   'SR_BASED_ROUTING',
@@ -42,7 +45,6 @@ interface FormState {
   auth_type: string
   eligible_gateways: string
   ranking_algorithm: RoutingAlgorithmName
-  elimination_enabled: boolean
 }
 
 interface DebitRoutingFormState {
@@ -61,18 +63,23 @@ interface DebitRoutingFormState {
 
 interface SimulationConfig {
   totalPayments: string
-  successCount: string
-  failureCount: string
+}
+
+interface GatewaySimConfig {
+  successRate: number
+  errorInfo: ErrorInfoState
+  failureMode: 'decline' | 'timeout'
 }
 
 interface SimulationResult {
   paymentId: string
   decidedGateway: string
-  status: 'CHARGED' | 'FAILURE'
+  status: 'CHARGED' | 'FAILURE' | 'PENDING_VBV'
   timestamp: string
+  routingApproach: string | null
 }
 
-type TransactionOutcome = 'CHARGED' | 'FAILURE'
+type TransactionOutcome = 'CHARGED' | 'FAILURE' | 'PENDING_VBV'
 
 type AuditInspectorTab = 'summary' | 'input' | 'response' | 'raw'
 
@@ -129,7 +136,6 @@ const DEFAULT_FORM: FormState = {
   auth_type: '',
   eligible_gateways: 'stripe, adyen',
   ranking_algorithm: 'SR_BASED_ROUTING',
-  elimination_enabled: false,
 }
 
 const DEFAULT_DEBIT_FORM: DebitRoutingFormState = {
@@ -148,8 +154,15 @@ const DEFAULT_DEBIT_FORM: DebitRoutingFormState = {
 
 const DEFAULT_SIMULATION_CONFIG: SimulationConfig = {
   totalPayments: '10',
-  successCount: '7',
-  failureCount: '3',
+}
+
+type PresetVariant = Omit<ErrorInfoState, never>
+
+interface ErrorScenarioPreset {
+  label: string
+  badge: 'protected' | 'penalized'
+  tooltip: string
+  variants: Record<string, PresetVariant>
 }
 
 const DEFAULT_RULE_PARAMS: RuleEvaluateParams[] = [
@@ -168,6 +181,8 @@ interface ExplorerPersistedState {
   activeTab: TabType
   form: FormState
   simulationConfig: SimulationConfig
+  gatewaySimConfigs: Record<string, GatewaySimConfig>
+  errorInfo: ErrorInfoState
   debitForm: DebitRoutingFormState
   ruleParams: RuleEvaluateParams[]
   fallbackConnectors: GatewayConnector[]
@@ -216,6 +231,8 @@ function getDefaultExplorerState(): ExplorerPersistedState {
     activeTab: 'batch',
     form: { ...DEFAULT_FORM },
     simulationConfig: { ...DEFAULT_SIMULATION_CONFIG },
+    gatewaySimConfigs: {},
+    errorInfo: { ...DEFAULT_ERROR_INFO },
     debitForm: { ...DEFAULT_DEBIT_FORM },
     ruleParams: cloneRuleParams(DEFAULT_RULE_PARAMS),
     fallbackConnectors: cloneConnectors(DEFAULT_FALLBACK_CONNECTORS),
@@ -290,6 +307,8 @@ function loadExplorerState(scopeKey: string): ExplorerPersistedState {
         ranking_algorithm: normalizeRankingAlgorithm(parsed.form?.ranking_algorithm),
       },
       simulationConfig: { ...defaults.simulationConfig, ...(parsed.simulationConfig || {}) },
+      gatewaySimConfigs: parsed.gatewaySimConfigs || defaults.gatewaySimConfigs,
+      errorInfo: { ...defaults.errorInfo, ...(parsed.errorInfo || {}) },
       debitForm: {
         ...defaults.debitForm,
         ...(parsed.debitForm || {}),
@@ -312,6 +331,10 @@ function toUpperOptions(values: string[] = []): string[] {
 
 function uniqueUpperOptions(values: string[] = []): string[] {
   return Array.from(new Set(toUpperOptions(values)))
+}
+
+function formatOptionLabel(value: string): string {
+  return value.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase())
 }
 
 function extractVolumeConnector(response: RuleEvaluateResponse) {
@@ -636,6 +659,7 @@ function setupPromptForTab(tab: TabType, detail?: string): SetupPromptState {
   }
 }
 
+
 function EmptyAuditState({ title, body }: { title: string; body: string }) {
   return (
     <div className="rounded-[22px] border border-dashed border-slate-200 bg-slate-50/80 px-6 py-12 text-center dark:border-[#2a303a] dark:bg-[#161b24]/80">
@@ -733,7 +757,13 @@ export function DecisionExplorerPage() {
   const [form, setForm] = useState<FormState>(initialState.form)
 
   const [simulationConfig, setSimulationConfig] = useState<SimulationConfig>(initialState.simulationConfig)
-  const [successRate, setSuccessRate] = useState(70)
+  const [errorInfo, setErrorInfo] = useState<ErrorInfoState>(initialState.errorInfo)
+  const [gatewaySimConfigs, setGatewaySimConfigs] = useState<Record<string, GatewaySimConfig>>({})
+  const gatewaySimConfigsRef = useRef(gatewaySimConfigs)
+  useEffect(() => { gatewaySimConfigsRef.current = gatewaySimConfigs }, [gatewaySimConfigs])
+  const eliminationEnabled = Object.values(gatewaySimConfigs).some(c => c.failureMode === 'timeout')
+  const simulationAbortRef = useRef(false)
+  useEffect(() => () => { simulationAbortRef.current = true }, [])
 
   const [debitForm, setDebitForm] = useState<DebitRoutingFormState>(initialState.debitForm)
 
@@ -755,6 +785,7 @@ export function DecisionExplorerPage() {
   const [simulationResults, setSimulationResults] = useState<SimulationResult[]>(initialState.simulationResults)
   const [isSimulating, setIsSimulating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
   const [setupPrompt, setSetupPrompt] = useState<SetupPromptState | null>(null)
   const [loading, setLoading] = useState(false)
   const [filterOpen, setFilterOpen] = useState(false)
@@ -769,6 +800,9 @@ export function DecisionExplorerPage() {
   const [previewInspectorTab, setPreviewInspectorTab] = useState<AuditInspectorTab>('summary')
   const [previewTraceLabel, setPreviewTraceLabel] = useState('Rule Evaluation Decision')
   const deferredSimulationResults = useDeferredValue(simulationResults)
+  const [txLogPage, setTxLogPage] = useState(1)
+  const TX_LOG_PAGE_SIZE = 10
+  const [showPenaltyGuide, setShowPenaltyGuide] = useState(false)
 
   const routingKeyNames = useMemo(
     () => Object.keys(routingKeysConfig).sort(),
@@ -815,6 +849,54 @@ export function DecisionExplorerPage() {
   const previewTraceDetail = useSWR<PaymentAuditResponse>(previewTraceUrl, fetcher, {
     revalidateOnFocus: false,
   })
+
+  const { data: gsmOptionsData } = useSWR<{ rules: GsmOptionRow[] }>(
+    '/gsm/options',
+    fetcher,
+    { revalidateOnFocus: false, dedupingInterval: 300_000 },
+  )
+  const gsmRules = gsmOptionsData?.rules ?? []
+
+  const { data: gsmScenariosData } = useSWR<{ scenarios: GsmScenario[] }>(
+    '/gsm/scenarios',
+    fetcher,
+    { revalidateOnFocus: false, dedupingInterval: 300_000 },
+  )
+  const gsmScenarios = gsmScenariosData?.scenarios ?? []
+
+  const { data: eliminationConfig } = useSWR<{ config: { data: { threshold: number } } } | null>(
+    effectiveMerchantId ? ['rule-elimination', effectiveMerchantId] : null,
+    () => apiPost<{ config: { data: { threshold: number } } }>('/rule/get', { merchant_id: effectiveMerchantId, algorithm: 'elimination' }).catch(() => null),
+    { revalidateOnFocus: false, dedupingInterval: 60_000 },
+  )
+  const eliminationConfigured = eliminationConfig?.config?.data?.threshold != null
+
+  const errorScenarioPresets = useMemo<ErrorScenarioPreset[]>(() => {
+    const variantsByScenario: Record<string, Record<string, PresetVariant>> = {}
+    for (const rule of gsmRules) {
+      if (rule.subFlow !== 'Authorize' && rule.flow !== 'Authorize') continue
+      const scenario = gsmScenarios.find(s =>
+        s.errorCategory === rule.errorCategory &&
+        (!s.decision || s.decision === rule.decision)
+      )
+      if (!scenario) continue
+      if (!variantsByScenario[scenario.key]) variantsByScenario[scenario.key] = {}
+      variantsByScenario[scenario.key][rule.connector] = {
+        error_code: rule.errorCode,
+        error_message: rule.errorMessage,
+        issuer_error_code: '',
+        card_network: '',
+      }
+    }
+    return gsmScenarios
+      .map(s => ({
+        label: s.label,
+        badge: (s.penalise ? 'penalized' : 'protected') as 'penalized' | 'protected',
+        tooltip: `${s.errorCategory}${s.decision ? ` · ${s.decision}` : ''} — ${s.penalise ? 'full penalty applied' : 'penalty skipped'}`,
+        variants: variantsByScenario[s.key] ?? {},
+      }))
+      .filter(p => Object.keys(p.variants).length > 0)
+  }, [gsmRules, gsmScenarios])
 
   useEffect(() => {
     if (routingConfigUnavailable || routingKeysLoading) return
@@ -946,6 +1028,8 @@ export function DecisionExplorerPage() {
     setResultDataUpdatedAtMs(nextState.resultDataUpdatedAtMs)
     setForm(nextState.form)
     setSimulationConfig(nextState.simulationConfig)
+    setGatewaySimConfigs(nextState.gatewaySimConfigs)
+    setErrorInfo(nextState.errorInfo)
     setDebitForm(nextState.debitForm)
     setRuleParams(nextState.ruleParams)
     setFallbackConnectors(nextState.fallbackConnectors)
@@ -1010,6 +1094,8 @@ export function DecisionExplorerPage() {
       activeTab,
       form,
       simulationConfig,
+      gatewaySimConfigs,
+      errorInfo,
       debitForm,
       ruleParams,
       fallbackConnectors,
@@ -1037,6 +1123,8 @@ export function DecisionExplorerPage() {
     activeTab,
     form,
     simulationConfig,
+    gatewaySimConfigs,
+    errorInfo,
     debitForm,
     ruleParams,
     fallbackConnectors,
@@ -1062,6 +1150,63 @@ export function DecisionExplorerPage() {
 
   function setDebitField<K extends keyof DebitRoutingFormState>(field: K, value: DebitRoutingFormState[K]) {
     setDebitForm(f => ({ ...f, [field]: value }))
+  }
+
+  function setErrorField(updates: Partial<ErrorInfoState>) {
+    setErrorInfo(f => ({ ...f, ...updates }))
+  }
+
+  function getGwSimConfig(gw: string): GatewaySimConfig {
+    return gatewaySimConfigsRef.current[gw] ?? { successRate: 70, errorInfo: { ...DEFAULT_ERROR_INFO }, failureMode: 'decline' }
+  }
+
+  function getGwSuccessRate(gw: string): number {
+    return getGwSimConfig(gw).successRate
+  }
+
+  function getGwErrorInfo(gw: string): ErrorInfoState {
+    return getGwSimConfig(gw).errorInfo
+  }
+
+  function getGwFailureMode(gw: string): 'decline' | 'timeout' {
+    return getGwSimConfig(gw).failureMode
+  }
+
+  function setGwSuccessRate(gw: string, rate: number) {
+    setGatewaySimConfigs(c => ({
+      ...c,
+      [gw]: { ...getGwSimConfig(gw), ...c[gw], successRate: rate },
+    }))
+  }
+
+  function setGwFailureMode(gw: string, mode: 'decline' | 'timeout') {
+    setGatewaySimConfigs(c => ({
+      ...c,
+      [gw]: { ...getGwSimConfig(gw), ...c[gw], failureMode: mode },
+    }))
+  }
+
+  function setGwErrorInfoField(gw: string, updates: Partial<ErrorInfoState>) {
+    setGatewaySimConfigs(c => {
+      const existing = c[gw] ?? { successRate: 70, errorInfo: { ...DEFAULT_ERROR_INFO }, failureMode: 'decline' as const }
+      return { ...c, [gw]: { ...existing, errorInfo: { ...existing.errorInfo, ...updates } } }
+    })
+  }
+
+  function buildErrorInfo(gateway: string, info: ErrorInfoState = errorInfo) {
+    if (!gateway) return undefined
+    const rule = gsmRules.find(r => r.connector === gateway && r.errorCode === info.error_code)
+    // flow and subFlow are required by the backend; skip errorInfo entirely if they can't be resolved
+    if (!rule?.flow || !rule?.subFlow) return undefined
+    return {
+      connector: gateway,
+      flow: rule.flow,
+      subFlow: rule.subFlow,
+      ...(info.error_code && { errorCode: info.error_code }),
+      ...(info.error_message && { errorMessage: info.error_message }),
+      ...(info.issuer_error_code && { issuerErrorCode: info.issuer_error_code }),
+      ...(info.card_network && { cardNetwork: info.card_network }),
+    }
   }
 
   function openSetupPrompt(tab: TabType, detail?: string) {
@@ -1163,7 +1308,7 @@ export function DecisionExplorerPage() {
         },
         eligibleGatewayList: gateways,
         rankingAlgorithm: form.ranking_algorithm,
-        eliminationEnabled: form.elimination_enabled,
+        eliminationEnabled: eliminationEnabled,
       })
       await apiPost('/update-gateway-score', {
         merchantId: effectiveMerchantId,
@@ -1172,6 +1317,7 @@ export function DecisionExplorerPage() {
         status: singleRunOutcome,
         paymentId: paymentId,
         enforceDynamicRoutingFailure: null,
+        ...(singleRunOutcome === 'FAILURE' && { errorInfo: buildErrorInfo(res.decided_gateway) }),
       })
       setResult(res)
       setSingleRunPaymentId(paymentId)
@@ -1244,34 +1390,22 @@ export function DecisionExplorerPage() {
     if (routingConfigUnavailable) return setError('Routing key config unavailable. Fix /config/routing-keys and retry.')
 
     const total = parseInt(simulationConfig.totalPayments) || 0
-    const success = parseInt(simulationConfig.successCount) || 0
-    const failure = parseInt(simulationConfig.failureCount) || 0
 
     if (total <= 0) return setError('Total Payments must be greater than 0')
-    if (success + failure !== total) {
-      return setError('Success + Failure count must equal Total Payments')
-    }
 
     setIsSimulating(true)
     setError(null)
     setSetupPrompt(null)
     setSimulationResults([])
+    setTxLogPage(1)
+    simulationAbortRef.current = false
 
     const gateways = form.eligible_gateways.split(',').map(s => s.trim()).filter(Boolean)
     const results: SimulationResult[] = []
 
-    const outcomes: ('CHARGED' | 'FAILURE')[] = [
-      ...Array(success).fill('CHARGED'),
-      ...Array(failure).fill('FAILURE'),
-    ]
-
-    for (let i = outcomes.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [outcomes[i], outcomes[j]] = [outcomes[j], outcomes[i]]
-    }
-
     try {
       for (let i = 0; i < total; i++) {
+        if (simulationAbortRef.current) break
         const paymentId = `sim_${Date.now()}_${i}`
 
         const decideRes = await apiPost<DecideGatewayResponse>('/decide-gateway', {
@@ -1288,19 +1422,24 @@ export function DecisionExplorerPage() {
           },
           eligibleGatewayList: gateways,
           rankingAlgorithm: form.ranking_algorithm,
-          eliminationEnabled: form.elimination_enabled,
+          eliminationEnabled: eliminationEnabled,
         })
 
         const decidedGateway = decideRes.decided_gateway
-        const outcome = outcomes[i]
+        const gwRate = getGwSuccessRate(decidedGateway)
+        const isSuccess = Math.random() * 100 < gwRate
+        const failureMode = getGwFailureMode(decidedGateway)
+        const outcome: TransactionOutcome = isSuccess ? 'CHARGED' : (failureMode === 'timeout' ? 'PENDING_VBV' : 'FAILURE')
+        const gwErrorInfo = getGwErrorInfo(decidedGateway)
 
-        await apiPost('/update-gateway-score', {
+        await apiPost<UpdateScoreResponse>('/update-gateway-score', {
           merchantId: effectiveMerchantId,
           gateway: decidedGateway,
           gatewayReferenceId: null,
           status: outcome,
           paymentId: paymentId,
           enforceDynamicRoutingFailure: null,
+          ...(outcome === 'FAILURE' && { errorInfo: buildErrorInfo(decidedGateway, gwErrorInfo) }),
         })
 
         results.push({
@@ -1308,6 +1447,7 @@ export function DecisionExplorerPage() {
           decidedGateway,
           status: outcome,
           timestamp: new Date().toISOString(),
+          routingApproach: decideRes.routing_approach ?? null,
         })
 
         setSimulationResults([...results])
@@ -1470,6 +1610,11 @@ export function DecisionExplorerPage() {
       : 0
   const hasSimulationActivity = isSimulating || completedSimulationCount > 0
 
+  const eligibleGatewaysParsed = useMemo(
+    () => form.eligible_gateways.split(',').map(s => s.trim().toLowerCase()).filter(Boolean),
+    [form.eligible_gateways],
+  )
+
   const gatewayStats = deferredSimulationResults.reduce((acc, curr) => {
     if (!acc[curr.decidedGateway]) {
       acc[curr.decidedGateway] = { total: 0, success: 0, failure: 0 }
@@ -1480,7 +1625,11 @@ export function DecisionExplorerPage() {
     return acc
   }, {} as Record<string, { total: number; success: number; failure: number }>)
 
-  const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
+  const hedgingHits = deferredSimulationResults.filter(
+    r => r.routingApproach === 'SR_V3_HEDGING',
+  ).length
+
+const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
   const debitNetworkRows = debitResult?.debit_routing_output?.co_badged_card_networks_info || []
   const volumeColorIndex = useMemo(
     () => new Map(volumeDistribution.map((item, index) => [item.name, index] as const)),
@@ -1618,7 +1767,7 @@ export function DecisionExplorerPage() {
     } else if (activeTab === 'batch') {
       setForm(defaults.form)
       setSimulationConfig(defaults.simulationConfig)
-      setSuccessRate(70)
+      setGatewaySimConfigs({})
       setSimulationResults(defaults.simulationResults)
       setIsSimulating(false)
     } else if (activeTab === 'rule') {
@@ -1691,28 +1840,28 @@ export function DecisionExplorerPage() {
       <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-1 dark:border-[#242b36] dark:bg-[#0c1118]">
         <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-4">
           <button
-            onClick={() => setActiveTab('batch')}
+            onClick={() => { simulationAbortRef.current = true; setActiveTab('batch') }}
             className={`rounded-xl border px-4 py-3 text-left text-sm font-semibold transition ${explorerModeButtonClass(activeTab === 'batch')}`}
           >
             <span className="block">Auth-rate</span>
             <span className="mt-1 block text-[11px] font-medium text-slate-400 dark:text-[#738097]">Score simulation</span>
           </button>
           <button
-            onClick={() => setActiveTab('rule')}
+            onClick={() => { simulationAbortRef.current = true; setActiveTab('rule') }}
             className={`rounded-xl border px-4 py-3 text-left text-sm font-semibold transition ${explorerModeButtonClass(activeTab === 'rule')}`}
           >
             <span className="block">Rule based</span>
             <span className="mt-1 block text-[11px] font-medium text-slate-400 dark:text-[#738097]">Policy evaluator</span>
           </button>
           <button
-            onClick={() => setActiveTab('volume')}
+            onClick={() => { simulationAbortRef.current = true; setActiveTab('volume') }}
             className={`rounded-xl border px-4 py-3 text-left text-sm font-semibold transition ${explorerModeButtonClass(activeTab === 'volume')}`}
           >
             <span className="block">Volume split</span>
             <span className="mt-1 block text-[11px] font-medium text-slate-400 dark:text-[#738097]">Distribution run</span>
           </button>
           <button
-            onClick={() => setActiveTab('debit')}
+            onClick={() => { simulationAbortRef.current = true; setActiveTab('debit') }}
             className={`rounded-xl border px-4 py-3 text-left text-sm font-semibold transition ${explorerModeButtonClass(activeTab === 'debit')}`}
           >
             <span className="block">Debit routing</span>
@@ -1734,7 +1883,7 @@ export function DecisionExplorerPage() {
                     activeTab === 'debit' ? 'Network Routing' :
                       'Simulation'}
               </SurfaceLabel>
-              <h2 className="mt-3 font-medium text-slate-800 dark:text-white">
+              <h2 className="mt-1.5 font-medium text-slate-800 dark:text-white">
                 {activeTab === 'rule' ? 'Rule Evaluation Parameters' :
                   activeTab === 'volume' ? 'Volume Split Configuration' :
                     activeTab === 'debit' ? 'Debit Routing Parameters' :
@@ -1742,7 +1891,7 @@ export function DecisionExplorerPage() {
               </h2>
             </div>
           </CardHeader>
-          <CardBody className="space-y-4 !px-5 !py-5">
+          <CardBody className="space-y-3 !px-5 !py-4">
             {!effectiveMerchantId && (
               <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-3 py-2">
                 Set a merchant ID in the top bar first.
@@ -2080,50 +2229,50 @@ export function DecisionExplorerPage() {
               </div>
             ) : (
               <>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-3 gap-2">
                   <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1">Amount</label>
                     <input value={form.amount} onChange={e => set('amount', e.target.value)}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500" />
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500" />
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1">Currency</label>
                     <select value={form.currency} onChange={e => set('currency', e.target.value)}
                       disabled={routingConfigUnavailable || routingKeysLoading}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
-                      {currencyOptions.map(c => <option key={c}>{c}</option>)}
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
+                      {currencyOptions.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1">Payment Method Type</label>
                     <select value={form.payment_method_type} onChange={e => set('payment_method_type', e.target.value)}
                       disabled={routingConfigUnavailable || routingKeysLoading}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
-                      {paymentMethodTypeOptions.map(p => <option key={p}>{p}</option>)}
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
+                      {paymentMethodTypeOptions.map(p => <option key={p} value={p}>{formatOptionLabel(p)}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1">Payment Method</label>
                     <select value={form.payment_method} onChange={e => set('payment_method', e.target.value)}
                       disabled={routingConfigUnavailable || routingKeysLoading}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
-                      {paymentMethodOptions.map(p => <option key={p}>{p}</option>)}
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
+                      {paymentMethodOptions.map(p => <option key={p} value={p}>{formatOptionLabel(p)}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1">Card Brand</label>
                     <select value={form.card_brand} onChange={e => set('card_brand', e.target.value)}
                       disabled={routingConfigUnavailable || routingKeysLoading}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
-                      {cardBrandOptions.map(b => <option key={b}>{b}</option>)}
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
+                      {cardBrandOptions.map(b => <option key={b} value={b}>{formatOptionLabel(b)}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1">Auth Type</label>
                     <select value={form.auth_type} onChange={e => set('auth_type', e.target.value)}
                       disabled={routingConfigUnavailable || routingKeysLoading}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
-                      {authTypeOptions.map(a => <option key={a}>{a}</option>)}
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
+                      {authTypeOptions.map(a => <option key={a} value={a}>{formatOptionLabel(a)}</option>)}
                     </select>
                   </div>
                 </div>
@@ -2132,45 +2281,51 @@ export function DecisionExplorerPage() {
                   <label className="block text-xs font-medium text-slate-600 mb-1">Eligible Gateways (comma-separated)</label>
                   <input value={form.eligible_gateways} onChange={e => set('eligible_gateways', e.target.value)}
                     placeholder="stripe, adyen"
-                    className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500" />
+                    className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500" />
                 </div>
 
-                <div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">Algorithm</label>
-                    <select value={form.ranking_algorithm} onChange={e => set('ranking_algorithm', e.target.value as RoutingAlgorithmName)}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
+                <div className="rounded-lg border border-slate-200 dark:border-[#222226] overflow-hidden">
+                  <div className="flex items-center gap-3 px-3 py-2 border-b border-slate-100 dark:border-[#1e1e28]">
+                    <span className="text-xs font-medium text-slate-500 dark:text-slate-400 w-24 shrink-0">Algorithm</span>
+                    <select
+                      value={form.ranking_algorithm}
+                      onChange={e => set('ranking_algorithm', e.target.value as RoutingAlgorithmName)}
+                      className="w-full bg-transparent text-sm font-medium text-slate-700 dark:text-slate-200 focus:outline-none cursor-pointer"
+                    >
                       {ALGORITHMS.map(a => <option key={a} value={a}>{ALGORITHM_LABELS[a]}</option>)}
                     </select>
                   </div>
                 </div>
 
                 {activeTab === 'single' && (
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">Transaction Outcome</label>
-                    <select
-                      value={singleRunOutcome}
-                      onChange={e => setSingleRunOutcome(e.target.value as TransactionOutcome)}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-                    >
-                      <option value="CHARGED">Success (CHARGED)</option>
-                      <option value="FAILURE">Failure (FAILURE)</option>
-                    </select>
-                    <p className="mt-1 text-xs text-slate-500">
-                      After deciding the gateway, single test will post feedback with this outcome so the payment appears in Decision Audit.
-                    </p>
-                  </div>
+                  <>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">Transaction Outcome</label>
+                      <select
+                        value={singleRunOutcome}
+                        onChange={e => setSingleRunOutcome(e.target.value as TransactionOutcome)}
+                        className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      >
+                        <option value="CHARGED">Success (CHARGED)</option>
+                        <option value="FAILURE">Failure (FAILURE)</option>
+                      </select>
+                      <p className="mt-1 text-xs text-slate-500">
+                        After deciding the gateway, single test will post feedback with this outcome so the payment appears in Decision Audit.
+                      </p>
+                    </div>
+                    {singleRunOutcome === 'FAILURE' && <ErrorInfoFields info={errorInfo} onChange={setErrorField} rules={gsmRules} />}
+                  </>
                 )}
 
                 {activeTab === 'batch' && (
-                  <div className="border-t border-slate-200 dark:border-[#1c1c24] pt-4 mt-4 space-y-3">
-                    <h3 className="text-sm font-medium text-slate-800 dark:text-slate-200 flex items-center gap-2">
-                      <Activity size={14} />
-                      Simulation
-                    </h3>
-                    <div className="flex items-end gap-3">
-                      <div className="w-28">
-                        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Payments</label>
+                  <div className="border-t border-slate-200 dark:border-[#1c1c24] pt-3">
+                    <div className="flex items-center justify-between mb-2.5">
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-[#4e5870] flex items-center gap-1.5">
+                        <Activity size={11} />
+                        Simulation
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400">Payments</span>
                         <input
                           type="number"
                           min={1}
@@ -2178,44 +2333,103 @@ export function DecisionExplorerPage() {
                           value={simulationConfig.totalPayments}
                           onChange={e => {
                             const total = Math.max(1, parseInt(e.target.value) || 1)
-                            const s = Math.round(total * successRate / 100)
-                            setSimulationConfig({ totalPayments: String(total), successCount: String(s), failureCount: String(total - s) })
+                            setSimulationConfig({ totalPayments: String(total) })
                           }}
-                          className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                          className="w-16 border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm text-center focus:outline-none focus:ring-1 focus:ring-brand-500 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                         />
                       </div>
-                      <div className="flex-1">
-                        <div className="flex justify-between mb-1">
-                          <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Success Rate</label>
-                          <span className="text-xs font-semibold text-brand-600 dark:text-sky-400">{successRate}%</span>
-                        </div>
-                        <input
-                          type="range"
-                          min={0}
-                          max={100}
-                          value={successRate}
-                          onChange={e => {
-                            const rate = parseInt(e.target.value)
-                            const total = parseInt(simulationConfig.totalPayments) || 10
-                            const s = Math.round(total * rate / 100)
-                            setSuccessRate(rate)
-                            setSimulationConfig({ totalPayments: String(total), successCount: String(s), failureCount: String(total - s) })
-                          }}
-                          className="w-full accent-brand-600"
-                        />
-                        <div className="flex justify-between mt-1 text-[10px] text-slate-400">
-                          <span>{simulationConfig.successCount} success</span>
-                          <span>{simulationConfig.failureCount} failure</span>
-                        </div>
-                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {eligibleGatewaysParsed.map(gw => {
+                        const gwRate = gatewaySimConfigs[gw]?.successRate ?? 70
+                        const gwErrInfo = gatewaySimConfigs[gw]?.errorInfo ?? { ...DEFAULT_ERROR_INFO }
+                        const gwFailureMode = gatewaySimConfigs[gw]?.failureMode ?? 'decline'
+                        const hasFailures = gwRate < 100
+                        return (
+                          <div key={gw} className="rounded-lg border border-slate-200 dark:border-[#222226] p-2.5 space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 capitalize">{gw}</span>
+                              <span className="text-xs font-semibold text-brand-600 dark:text-sky-400">{gwRate}%</span>
+                            </div>
+                            <input
+                              type="range"
+                              min={0}
+                              max={100}
+                              value={gwRate}
+                              onChange={e => setGwSuccessRate(gw, parseInt(e.target.value))}
+                              className="w-full accent-brand-600"
+                            />
+                            {hasFailures && (
+                              <div className="flex rounded-md overflow-hidden border border-slate-200 dark:border-[#222226] text-[10px] font-medium">
+                                <button
+                                  type="button"
+                                  onClick={() => setGwFailureMode(gw, 'decline')}
+                                  className={`flex-1 py-0.5 transition-colors ${gwFailureMode === 'decline' ? 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
+                                >
+                                  Decline
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setGwFailureMode(gw, 'timeout')}
+                                  className={`flex-1 py-0.5 border-l border-slate-200 dark:border-[#222226] transition-colors ${gwFailureMode === 'timeout' ? 'bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
+                                >
+                                  Timeout
+                                </button>
+                              </div>
+                            )}
+                            {hasFailures && gwFailureMode === 'timeout' && (
+                              <div className={`text-[10px] px-2 py-1 rounded ${eliminationConfigured ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400' : 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400'}`}>
+                                {eliminationConfigured
+                                  ? `Gateway will be removed from routing when its score drops below ${eliminationConfig!.config.data.threshold} threshold.`
+                                  : 'Elimination is not configured. Set it up in SR Routing settings for this to take effect.'}
+                              </div>
+                            )}
+                            {hasFailures && gwFailureMode === 'decline' && (
+                              <div className="space-y-1.5">
+                                <div className="flex flex-wrap gap-1">
+                                  {errorScenarioPresets.filter(p => p.variants[gw]).map(preset => {
+                                    const variant = preset.variants[gw]
+                                    const isActive = variant != null &&
+                                      gwErrInfo.error_code === variant.error_code
+                                    return (
+                                      <UiTooltip key={preset.label} text={preset.tooltip}>
+                                        <button
+                                          type="button"
+                                          onClick={() => setGwErrorInfoField(gw, { ...variant })}
+                                          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset transition-colors ${
+                                            isActive
+                                              ? preset.badge === 'protected'
+                                                ? 'bg-emerald-50 text-emerald-700 ring-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-300 dark:ring-emerald-700'
+                                                : 'bg-red-50 text-red-700 ring-red-300 dark:bg-red-900/30 dark:text-red-300 dark:ring-red-700'
+                                              : 'bg-slate-50 text-slate-600 ring-slate-200 hover:bg-slate-100 dark:bg-[#1c1c24] dark:text-slate-400 dark:ring-[#2a2a35] dark:hover:bg-[#222230]'
+                                          }`}
+                                        >
+                                          <span className={`h-1.5 w-1.5 rounded-full ${preset.badge === 'protected' ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                                          {preset.label}
+                                        </button>
+                                      </UiTooltip>
+                                    )
+                                  })}
+                                </div>
+                                <ErrorInfoFields
+                                  info={gwErrInfo}
+                                  onChange={updates => setGwErrorInfoField(gw, updates)}
+                                  rules={gsmRules}
+                                  connector={gw}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
                 )}
               </>
             )}
-
+          </CardBody>
+          <div className="border-t border-slate-200 dark:border-[#2a303a] px-5 py-4 space-y-3">
             <ErrorMessage error={error} />
-
             {activeTab === 'rule' ? (
               <Button onClick={runRuleEvaluation} disabled={loading || routingConfigUnavailable} className="w-full justify-center">
                 {loading ? <><Spinner size={14} /> Evaluating…</> : <><Play size={14} /> Evaluate Rules</>}
@@ -2258,16 +2472,10 @@ export function DecisionExplorerPage() {
                 {loading ? <><Spinner size={14} /> Running…</> : <><Play size={14} /> Run Single Transaction</>}
               </Button>
             )}
-          </CardBody>
+          </div>
         </Card>
 
-        <div
-          className={
-            activeTab === 'volume' && volumeDistribution.length > 0
-              ? 'min-w-0 space-y-4'
-              : 'min-w-0 space-y-4'
-          }
-        >
+        <div className="min-w-0 flex flex-col gap-4">
           {activeTab === 'debit' ? (
             debitResult ? (
               <>
@@ -2710,110 +2918,228 @@ export function DecisionExplorerPage() {
           ) : activeTab === 'batch' ? (
             hasSimulationActivity ? (
               <>
-                <Card>
-                  <CardHeader>
-                    <h3 className="text-sm font-medium text-slate-800">Simulation Progress</h3>
-                  </CardHeader>
-                  <CardBody>
-                    <div className="mb-4">
-                      <div className="flex justify-between text-xs text-slate-600 mb-1">
-                        <span>Progress</span>
-                        <span>{simulationProgressPercentage}%</span>
+                <Card className="shrink-0">
+                  <CardHeader className="!py-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="text-sm font-medium text-slate-800 dark:text-white">Gateway Selection Summary</h3>
+                      <div className="flex items-center gap-1.5">
+                        {totalSimulationPayments > 0 && (() => {
+                          const r = 6
+                          const circ = 2 * Math.PI * r
+                          const offset = circ * (1 - simulationProgressPercentage / 100)
+                          return (
+                            <svg width="16" height="16" viewBox="0 0 16 16" className="-rotate-90">
+                              <circle cx="8" cy="8" r={r} fill="none" strokeWidth="2" className="stroke-slate-200 dark:stroke-slate-700" />
+                              <circle
+                                cx="8" cy="8" r={r} fill="none" strokeWidth="2" strokeLinecap="round"
+                                strokeDasharray={circ} strokeDashoffset={offset}
+                                className="stroke-brand-500 transition-[stroke-dashoffset] duration-300"
+                              />
+                            </svg>
+                          )
+                        })()}
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                          {completedSimulationCount} / {totalSimulationPayments || 0}
+                        </span>
+                        {completedSimulationCount > 0 && (
+                          <>
+                            <span className="text-slate-300 dark:text-slate-600">·</span>
+                            {hedgingHits > 0 ? (
+                              <span className="text-[11px] font-medium text-brand-600 dark:text-sky-400">
+                                {Math.round((hedgingHits / completedSimulationCount) * 100)}% hedged
+                              </span>
+                            ) : (
+                              <UiTooltip text="Enable ENABLE_EXPLORE_AND_EXPLOIT_ON_SRV3_{PMT} or ENABLE_MERCHANT_ON_VOLUME_DISTRIBUTION_FEATURE_SR_V3 in Redis">
+                                <span className="text-[11px] text-amber-500 dark:text-amber-400 cursor-help">0 hedged</span>
+                              </UiTooltip>
+                            )}
+                          </>
+                        )}
                       </div>
-                      <div className="w-full overflow-hidden rounded-full bg-gray-200 h-2">
-                        <div
-                          className={`h-2 rounded-full bg-brand-500 transition-[width] duration-300 ease-out ${isSimulating && completedSimulationCount === 0 ? 'animate-pulse' : ''}`}
-                          style={{ width: `${simulationProgressPercentage}%` }}
-                        />
-                      </div>
-                      <p className="mt-2 text-xs text-slate-500">
-                        {completedSimulationCount} of {totalSimulationPayments || 0} payments processed.
-                      </p>
                     </div>
-
-                    {Object.keys(gatewayStats).length > 0 && (
-                      <div className="space-y-2">
-                        <h4 className="text-xs font-medium text-slate-700">Gateway Selection Summary</h4>
-                        {Object.entries(gatewayStats).map(([gateway, stats]) => (
-                          <div key={gateway} className="flex items-center justify-between text-sm">
-                            <span className="font-medium">{gateway}</span>
-                            <div className="flex gap-3 text-xs">
-                              <span className="text-emerald-600">{stats.success} ✓</span>
-                              <span className="text-red-500">{stats.failure} ✗</span>
-                              <span className="text-slate-500">({stats.total} total)</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                  </CardHeader>
+                  <CardBody className="!pt-3">
+                    {Object.keys(gatewayStats).length > 0 && (() => {
+                      const totalRouted = Object.values(gatewayStats).reduce((s, g) => s + g.total, 0)
+                      const dominated = Object.keys(gatewayStats).length === 1
+                      return (
+                        <div className="space-y-2">
+                          {Object.entries(gatewayStats).map(([gateway, stats]) => {
+                            const share = totalRouted > 0 ? Math.round((stats.total / totalRouted) * 100) : 0
+                            const srPct = stats.total > 0 ? Math.round((stats.success / stats.total) * 100) : 0
+                            return (
+                              <div key={gateway} className="space-y-0.5">
+                                <div className="flex items-center justify-between text-xs">
+                                  <span className="font-medium text-slate-800 dark:text-slate-200">{gateway}</span>
+                                  <div className="flex gap-2 text-[11px]">
+                                    <span className="text-emerald-600">{stats.success} ✓</span>
+                                    <span className="text-red-500">{stats.failure} ✗</span>
+                                    <span className="font-semibold text-emerald-600">{srPct}% SR</span>
+                                    <span className="font-semibold text-slate-500">{share}% traffic</span>
+                                  </div>
+                                </div>
+                                <div className="w-full h-1 rounded-full bg-slate-100 dark:bg-[#1c1c24] overflow-hidden">
+                                  <div className="h-1 rounded-full bg-brand-500 transition-[width] duration-300" style={{ width: `${share}%` }} />
+                                </div>
+                              </div>
+                            )
+                          })}
+                          {dominated && eligibleGatewaysParsed.length > 1 && (
+                            <p className="text-[11px] text-slate-400 pt-0.5">
+                              SR routing concentrates traffic on the highest-scoring gateway. Run with a "Gateway Down" scenario to see score drop and traffic shift to the next gateway.
+                            </p>
+                          )}
+                        </div>
+                      )
+                    })()}
                   </CardBody>
                 </Card>
 
-                <Card>
-                  <CardHeader>
-                    <h3 className="text-sm font-medium text-slate-800">Transaction Log</h3>
-                  </CardHeader>
-                  <CardBody className="p-0 max-h-96 overflow-auto">
-                    {deferredSimulationResults.length > 0 ? (
-                      <table className="w-full text-sm">
-                        <thead className="bg-slate-50 dark:bg-[#0a0a0f] text-xs text-slate-500 sticky top-0">
-                          <tr>
-                            <th className="text-left px-3 py-2">#</th>
-                            <th className="text-left px-3 py-2">Payment ID</th>
-                            <th className="text-left px-3 py-2">Gateway</th>
-                            <th className="text-left px-3 py-2">Outcome</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-[#1c1c24]">
-                          {deferredSimulationResults.map((res, idx) => (
-                            <tr key={res.paymentId} className="hover:bg-slate-100 dark:bg-[#0f0f16]">
-                              <td className="px-3 py-2 text-slate-500">{idx + 1}</td>
-                              <td className="px-3 py-2">
-                                <button
-                                  type="button"
-                                  title={res.paymentId}
-                                  onClick={() => openAuditModal(res.paymentId)}
-                                  className="group flex items-start gap-3 text-left"
-                                >
-                                  <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-brand-500/10 text-[11px] font-semibold uppercase tracking-[0.16em] text-brand-600 dark:text-brand-300">
-                                    {idx + 1}
-                                  </span>
-                                  <span className="min-w-0">
-                                    <span className="block truncate font-mono text-xs font-semibold text-slate-900 transition group-hover:text-brand-600 dark:text-white">
-                                      {res.paymentId}
-                                    </span>
-                                    <span className="mt-1 block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 transition group-hover:text-brand-500">
-                                      View audit
-                                    </span>
-                                  </span>
-                                </button>
-                              </td>
-                              <td className="px-3 py-2 font-medium">{res.decidedGateway}</td>
-                              <td className="px-3 py-2">
-                                <Badge variant={res.status === 'CHARGED' ? 'green' : 'red'}>
-                                  {res.status}
-                                </Badge>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    ) : (
-                      <div className="flex items-center gap-3 px-4 py-6 text-sm text-slate-500">
-                        <Spinner size={16} />
-                        Waiting for the first simulated payment result…
-                      </div>
-                    )}
-                  </CardBody>
+                <Card className="flex-1 min-h-0">
+                  {(() => {
+                    const total = deferredSimulationResults.length
+                    const totalPages = Math.max(1, Math.ceil(total / TX_LOG_PAGE_SIZE))
+                    const safePage = Math.min(txLogPage, totalPages)
+                    const pageStart = (safePage - 1) * TX_LOG_PAGE_SIZE
+                    const pageResults = deferredSimulationResults.slice(pageStart, pageStart + TX_LOG_PAGE_SIZE)
+                    return (
+                      <>
+                        <CardHeader className="shrink-0 flex flex-row items-center justify-between gap-3">
+                          <h3 className="text-sm font-medium text-slate-800 dark:text-white">Transaction Log</h3>
+                          {total > 0 && (
+                            <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                              <span>{pageStart + 1}–{Math.min(pageStart + TX_LOG_PAGE_SIZE, total)} of {total}</span>
+                              <button
+                                type="button"
+                                disabled={safePage <= 1}
+                                onClick={() => setTxLogPage(p => Math.max(1, p - 1))}
+                                className="rounded p-0.5 hover:bg-slate-100 dark:hover:bg-[#1c1c24] disabled:opacity-30 disabled:cursor-not-allowed"
+                              >
+                                <ChevronLeft size={14} />
+                              </button>
+                              <input
+                                type="number"
+                                min={1}
+                                max={totalPages}
+                                value={safePage}
+                                onChange={e => {
+                                  const v = parseInt(e.target.value)
+                                  if (!isNaN(v)) setTxLogPage(Math.min(totalPages, Math.max(1, v)))
+                                }}
+                                className="w-10 rounded border border-slate-200 dark:border-[#222226] bg-transparent px-1 py-0.5 text-center text-xs tabular-nums focus:outline-none focus:ring-1 focus:ring-brand-500 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                              />
+                              <span className="text-slate-400">/ {totalPages}</span>
+                              <button
+                                type="button"
+                                disabled={safePage >= totalPages}
+                                onClick={() => setTxLogPage(p => Math.min(totalPages, p + 1))}
+                                className="rounded p-0.5 hover:bg-slate-100 dark:hover:bg-[#1c1c24] disabled:opacity-30 disabled:cursor-not-allowed"
+                              >
+                                <ChevronRight size={14} />
+                              </button>
+                            </div>
+                          )}
+                        </CardHeader>
+                        <CardBody className="p-0 flex-1 min-h-0 overflow-auto">
+                          {total > 0 ? (
+                            <table className="w-full text-sm">
+                              <thead className="bg-slate-50 dark:bg-[#0a0a0f] text-xs text-slate-500 sticky top-0">
+                                <tr>
+                                  <th className="text-left px-3 py-2">#</th>
+                                  <th className="text-left px-3 py-2">Payment ID</th>
+                                  <th className="text-left px-3 py-2">Gateway</th>
+                                  <th className="text-left px-3 py-2">Routing</th>
+                                  <th className="text-left px-3 py-2">Outcome</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-[#1c1c24]">
+                                {pageResults.map((res) => {
+                                  const globalIdx = deferredSimulationResults.indexOf(res)
+                                  return (
+                                    <tr key={res.paymentId} className="hover:bg-slate-100 dark:bg-[#0f0f16]">
+                                      <td className="px-3 py-2 text-slate-500">{globalIdx + 1}</td>
+                                      <td className="px-3 py-2">
+                                        <button
+                                          type="button"
+                                          title={res.paymentId}
+                                          onClick={() => openAuditModal(res.paymentId)}
+                                          className="group flex items-start gap-3 text-left"
+                                        >
+                                          <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-brand-500/10 text-[11px] font-semibold uppercase tracking-[0.16em] text-brand-600 dark:text-brand-300">
+                                            {globalIdx + 1}
+                                          </span>
+                                          <span className="min-w-0">
+                                            <span className="block truncate font-mono text-xs font-semibold text-slate-900 transition group-hover:text-brand-600 dark:text-white">
+                                              {res.paymentId}
+                                            </span>
+                                            <span className="mt-1 block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 transition group-hover:text-brand-500">
+                                              View audit
+                                            </span>
+                                          </span>
+                                        </button>
+                                      </td>
+                                      <td className="px-3 py-2 font-medium">{res.decidedGateway}</td>
+                                      <td className="px-3 py-2">
+                                        {res.routingApproach === 'SR_V3_HEDGING' ? (
+                                          <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700 ring-1 ring-inset ring-brand-200 dark:bg-brand-900/20 dark:text-brand-300 dark:ring-brand-800">
+                                            Hedging
+                                          </span>
+                                        ) : (
+                                          <span className="text-[11px] text-slate-400">
+                                            {res.routingApproach === 'SR_SELECTION_V3_ROUTING' ? 'SR V3' : (res.routingApproach ?? '—')}
+                                          </span>
+                                        )}
+                                      </td>
+                                      <td className="px-3 py-2">
+                                        <Badge variant={res.status === 'CHARGED' ? 'green' : res.status === 'PENDING_VBV' ? 'orange' : 'red'}>
+                                          {res.status}
+                                        </Badge>
+                                      </td>
+                                    </tr>
+                                  )
+                                })}
+                              </tbody>
+                            </table>
+                          ) : (
+                            <div className="flex items-center gap-3 px-4 py-6 text-sm text-slate-500">
+                              <Spinner size={16} />
+                              Waiting for the first simulated payment result…
+                            </div>
+                          )}
+                        </CardBody>
+                      </>
+                    )
+                  })()}
                 </Card>
               </>
             ) : (
-              <Card>
-                <CardBody className="py-16 text-center">
-                  <Activity size={32} className="text-gray-300 mx-auto mb-3" />
-                  <p className="text-slate-400 text-sm">Configure simulation parameters and click "Run Auth-Rate Simulation" to test auth-rate based routing.</p>
-                </CardBody>
-              </Card>
+              <div className="space-y-3">
+                <button
+                  type="button"
+                  onClick={() => setShowPenaltyGuide(v => !v)}
+                  className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-[#222226] bg-white dark:bg-[#0c0f17] px-3 py-2 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-[#131720] transition-colors w-full"
+                >
+                  <span className={`transition-transform ${showPenaltyGuide ? 'rotate-90' : ''}`}>▶</span>
+                  Penalty Classification Guide
+                </button>
+                {showPenaltyGuide && (
+                  <PenaltyClassificationGuide
+                    merchantId={effectiveMerchantId}
+                    gsmScenarios={gsmScenarios}
+                    gsmRules={gsmRules}
+                    decideParams={{
+                      amount: form.amount,
+                      currency: form.currency,
+                      paymentMethodType: form.payment_method_type,
+                      paymentMethod: form.payment_method,
+                      authType: form.auth_type,
+                      cardBrand: form.card_brand,
+                      rankingAlgorithm: form.ranking_algorithm,
+                      eligibleGateways: form.eligible_gateways,
+                    }}
+                  />
+                )}
+              </div>
             )
           ) : (
             result ? (

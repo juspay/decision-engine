@@ -170,6 +170,16 @@ export interface DebitRoutingFlagResponse {
   debit_routing_enabled: boolean
 }
 
+export interface MerchantFeatureEntry {
+  feature: string
+  enabled: boolean
+}
+
+export interface MerchantFeaturesResponse {
+  merchant_id: string
+  features: MerchantFeatureEntry[]
+}
+
 export interface CreateMerchantRequest {
   merchant_id: string
   gateway_success_rate_based_decider_input: null
@@ -376,6 +386,27 @@ export interface PaymentAuditEvent {
   details?: string | null
   details_json?: Record<string, unknown> | null
   created_at_ms: number
+}
+
+export interface GsmInfo {
+  decision: string
+  stepUpPossible: boolean
+  clearPanPossible: boolean
+  alternateNetworkPossible: boolean
+  unifiedCode: string | null
+  unifiedMessage: string | null
+  errorCategory: string | null
+  standardisedCode: string | null
+  description: string | null
+  userGuidanceMessage: string | null
+}
+
+export interface UpdateScoreResponse {
+  message: string
+  merchant_id: string
+  gateway: string
+  payment_id: string
+  gsm_info: GsmInfo | null
 }
 
 export interface PaymentAuditResponse {

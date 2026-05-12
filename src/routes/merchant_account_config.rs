@@ -1,5 +1,6 @@
 use crate::app::APP_STATE;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
+use crate::redis::types::{FeatureConf, MerchantFeature as FeatureMerchant};
 use crate::types::merchant as ETM;
 use crate::types::service_configuration;
 use crate::{error, logger};
@@ -34,6 +35,131 @@ pub struct DebitRoutingResponse {
 
 fn debit_routing_config_name(merchant_id: &str) -> String {
     format!("DEBIT_ROUTING_ENABLED_{}", merchant_id)
+}
+
+/// All merchant-level feature flags that can be toggled from the dashboard.
+/// Adding a new feature here is the only change needed on the backend.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum KnownFeature {
+    GsmScoringFilter,
+    ExploreExploitSrv3,
+}
+
+impl KnownFeature {
+    fn all() -> &'static [Self] {
+        &[Self::GsmScoringFilter, Self::ExploreExploitSrv3]
+    }
+
+    fn from_slug(s: &str) -> Option<Self> {
+        match s {
+            "gsm-scoring-filter" => Some(Self::GsmScoringFilter),
+            "explore-exploit-srv3" => Some(Self::ExploreExploitSrv3),
+            _ => None,
+        }
+    }
+
+    /// The service_configuration key that holds the FeatureConf for this feature.
+    /// This is the single source of truth — no per-merchant keys are used.
+    fn feature_conf_key(&self) -> &'static str {
+        match self {
+            Self::GsmScoringFilter => "gsm_based_scoring_filter_enabled_merchant",
+            Self::ExploreExploitSrv3 => "ENABLE_EXPLORE_AND_EXPLOIT_ON_SRV3_CARD",
+        }
+    }
+
+    /// Reads the FeatureConf directly from service_configuration (bypasses Redis/memory
+    /// cache) so the dashboard always shows the current persisted state. Falls back to
+    /// the Redis-cached path for features whose FeatureConf lives only in Redis.
+    async fn read_effective(&self, merchant_id: &str) -> bool {
+        let key = self.feature_conf_key();
+
+        let conf = service_configuration::find_config_by_name(key.to_string())
+            .await
+            .unwrap_or(None)
+            .and_then(|c| c.value)
+            .and_then(|v| serde_json::from_str::<FeatureConf>(&v).ok());
+
+        if let Some(conf) = conf {
+            return crate::redis::feature::check_merchant_enabled(
+                Some(conf),
+                merchant_id.to_string(),
+                key.to_string(),
+            );
+        }
+
+        // FeatureConf not in service_configuration — may exist only in Redis
+        // (e.g. explore-exploit configs that were never migrated to DB).
+        crate::redis::feature::is_feature_enabled(
+            key.to_string(),
+            merchant_id.to_string(),
+            crate::feedback::constants::kvRedis(),
+        )
+        .await
+    }
+
+    /// Updates the FeatureConf row in service_configuration by adding or removing
+    /// the merchant. This is the only write path — no per-merchant keys involved.
+    async fn update_conf(
+        &self,
+        merchant_id: &str,
+        enabled: bool,
+    ) -> error_stack::Result<(), crate::generics::MeshError> {
+        let key = self.feature_conf_key().to_string();
+
+        let existing = service_configuration::find_config_by_name(key.clone())
+            .await
+            .unwrap_or(None);
+
+        let exists = existing.is_some();
+
+        let mut conf: FeatureConf = existing
+            .and_then(|c| c.value)
+            .and_then(|v| serde_json::from_str(&v).ok())
+            .unwrap_or(FeatureConf {
+                enableAll: false,
+                enableAllRollout: None,
+                disableAny: None,
+                merchants: Some(vec![]),
+            });
+
+        let mut merchants = conf.merchants.take().unwrap_or_default();
+        merchants.retain(|m| m.merchantId.to_lowercase() != merchant_id.to_lowercase());
+        if enabled {
+            merchants.push(FeatureMerchant {
+                merchantId: merchant_id.to_string(),
+                rollout: 100,
+            });
+        }
+        conf.merchants = Some(merchants);
+
+        let serialized = serde_json::to_string(&conf)
+            .map_err(|e| error_stack::report!(e))
+            .change_context(crate::generics::MeshError::Others)?;
+
+        if exists {
+            service_configuration::update_config(key, Some(serialized)).await
+        } else {
+            service_configuration::insert_config(key, Some(serialized)).await
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MerchantFeatureEntry {
+    pub feature: KnownFeature,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MerchantFeaturesResponse {
+    pub merchant_id: String,
+    pub features: Vec<MerchantFeatureEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateFeatureRequest {
+    pub enabled: bool,
 }
 
 #[axum::debug_handler]
@@ -273,6 +399,110 @@ pub async fn update_debit_routing(
         Err(e) => {
             API_REQUEST_COUNTER
                 .with_label_values(&["merchant_debit_routing_update", "failure"])
+                .inc();
+            Err(e.into())
+        }
+    };
+
+    timer.observe_duration();
+    response
+}
+
+#[axum::debug_handler]
+pub async fn get_merchant_features(
+    Path(merchant_id): Path<String>,
+) -> Result<
+    Json<MerchantFeaturesResponse>,
+    error::ContainerError<error::MerchantAccountConfigurationError>,
+> {
+    API_REQUEST_TOTAL_COUNTER
+        .with_label_values(&["merchant_features_get"])
+        .inc();
+    let timer = API_LATENCY_HISTOGRAM
+        .with_label_values(&["merchant_features_get"])
+        .start_timer();
+
+    let response = async {
+        ETM::merchant_account::load_merchant_by_merchant_id(merchant_id.clone())
+            .await
+            .ok_or(error::MerchantAccountConfigurationError::MerchantNotFound)?;
+
+        let mut features = Vec::new();
+        for feature in KnownFeature::all() {
+            let enabled = feature.read_effective(&merchant_id).await;
+            features.push(MerchantFeatureEntry {
+                feature: feature.clone(),
+                enabled,
+            });
+        }
+
+        Ok(Json(MerchantFeaturesResponse {
+            merchant_id,
+            features,
+        }))
+    }
+    .await;
+
+    match &response {
+        Ok(_) => API_REQUEST_COUNTER
+            .with_label_values(&["merchant_features_get", "success"])
+            .inc(),
+        Err(_) => API_REQUEST_COUNTER
+            .with_label_values(&["merchant_features_get", "failure"])
+            .inc(),
+    }
+
+    timer.observe_duration();
+    response
+}
+
+#[axum::debug_handler]
+pub async fn update_merchant_feature(
+    Path((merchant_id, feature_slug)): Path<(String, String)>,
+    Json(payload): Json<UpdateFeatureRequest>,
+) -> Result<
+    Json<MerchantFeaturesResponse>,
+    error::ContainerError<error::MerchantAccountConfigurationError>,
+> {
+    API_REQUEST_TOTAL_COUNTER
+        .with_label_values(&["merchant_feature_update"])
+        .inc();
+    let timer = API_LATENCY_HISTOGRAM
+        .with_label_values(&["merchant_feature_update"])
+        .start_timer();
+
+    let feature = KnownFeature::from_slug(&feature_slug)
+        .ok_or(error::MerchantAccountConfigurationError::InvalidConfiguration)?;
+
+    ETM::merchant_account::load_merchant_by_merchant_id(merchant_id.clone())
+        .await
+        .ok_or(error::MerchantAccountConfigurationError::MerchantNotFound)?;
+
+    let result = feature
+        .update_conf(&merchant_id, payload.enabled)
+        .await
+        .change_context(error::MerchantAccountConfigurationError::StorageError);
+
+    let response = match result {
+        Ok(_) => {
+            let mut features = Vec::new();
+            for f in KnownFeature::all() {
+                features.push(MerchantFeatureEntry {
+                    feature: f.clone(),
+                    enabled: f.read_effective(&merchant_id).await,
+                });
+            }
+            API_REQUEST_COUNTER
+                .with_label_values(&["merchant_feature_update", "success"])
+                .inc();
+            Ok(Json(MerchantFeaturesResponse {
+                merchant_id,
+                features,
+            }))
+        }
+        Err(e) => {
+            API_REQUEST_COUNTER
+                .with_label_values(&["merchant_feature_update", "failure"])
                 .inc();
             Err(e.into())
         }

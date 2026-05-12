@@ -38,6 +38,7 @@ pub mod error;
 pub mod euclid;
 pub mod feedback;
 pub mod generics;
+pub mod gsm;
 pub mod logger;
 pub mod merchant_config_util;
 pub mod metrics;

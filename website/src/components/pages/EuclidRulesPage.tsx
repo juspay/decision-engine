@@ -1110,6 +1110,11 @@ export function EuclidRulesPage() {
       return
     }
     if (!ruleName.trim()) { setSubmitError('Rule name is required.'); return }
+    if (ruleBlocks.some(b =>
+      (b.outputType === 'priority' && b.priorityGateways.length === 0) ||
+      (b.outputType === 'volume_split' && b.volumeSplitEntries.length === 0) ||
+      (b.outputType === 'volume_split_priority' && b.volumeSplitPriorityEntries.length === 0)
+    )) { setSubmitError('Enter a gateway name here, then click Add to include it in the rule output.'); return }
     if (codeParseError) { setSubmitError(`Fix syntax error: ${codeParseError}`); return }
     setSubmitting(true)
     setSubmitError(null)

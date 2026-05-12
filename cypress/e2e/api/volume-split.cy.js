@@ -54,11 +54,13 @@ describe('Volume Split Routing API', () => {
     })
 
     cy.then(() => {
-      const stripeShare = ((counts.get('stripe') || 0) / 100) * 100
-      const paytmShare = ((counts.get('paytm') || 0) / 100) * 100
+      const stripeCount = counts.get('stripe') || 0
+      const paytmCount = counts.get('paytm') || 0
 
-      expect(stripeShare).to.be.within(58, 82)
-      expect(paytmShare).to.be.within(18, 42)
+      // Tolerance of ±20 around the configured 70/30 split (≈ ±4σ for n=100,p=0.7)
+      // keeps the failure rate below 0.001% while still catching a broken distribution.
+      expect(stripeCount).to.be.within(50, 90)
+      expect(paytmCount).to.be.within(10, 50)
     })
   })
 })

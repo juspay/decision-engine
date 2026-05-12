@@ -18,8 +18,8 @@ clippy *FLAGS:
     FEATURES="$(cargo metadata --all-features --format-version 1 --no-deps | \
         jq -r '
             [ ( .workspace_members | sort ) as $package_ids
-                | .packages[] | select( IN(.id; $package_ids[]) ) | .features | keys[] 
-                | select( . != "mysql" and . != "postgres" and . != "default" and . != "release") 
+                | .packages[] | select( IN(.id; $package_ids[]) ) | select(.name != "gsm") | .features | keys[]
+                | select( . != "mysql" and . != "postgres" and . != "default" and . != "release")
             ]
             | unique
             | join(",")
@@ -38,8 +38,8 @@ check *FLAGS:
     FEATURES="$(cargo metadata --all-features --format-version 1 --no-deps | \
         jq -r '
             [ ( .workspace_members | sort ) as $package_ids
-                | .packages[] | select( IN(.id; $package_ids[]) ) | .features | keys[] 
-                | select( . != "mysql" and . != "postgres" and . != "default" and . != "release") 
+                | .packages[] | select( IN(.id; $package_ids[]) ) | select(.name != "gsm") | .features | keys[]
+                | select( . != "mysql" and . != "postgres" and . != "default" and . != "release")
             ]
             | unique
             | join(",")
