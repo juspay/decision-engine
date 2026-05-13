@@ -1,4 +1,5 @@
 use crate::app::get_tenant_app_state;
+use crate::redis::cache::{evict_service_config, write_through_service_config};
 #[cfg(feature = "mysql")]
 use crate::storage::schema::service_configuration::dsl;
 #[cfg(feature = "postgres")]
@@ -31,9 +32,10 @@ pub async fn insert_config(
     value: Option<String>,
 ) -> error_stack::Result<(), crate::generics::MeshError> {
     let app_state = get_tenant_app_state().await;
+    let cached_value = value.clone().unwrap_or_default();
 
     let config = ServiceConfigurationNew {
-        name,
+        name: name.clone(),
         value,
         new_value: None,
         previous_value: None,
@@ -42,6 +44,7 @@ pub async fn insert_config(
 
     crate::generics::generic_insert(&app_state.db, config).await?;
 
+    write_through_service_config(name, &cached_value).await;
     Ok(())
 }
 
@@ -50,20 +53,21 @@ pub async fn update_config(
     value: Option<String>,
 ) -> error_stack::Result<(), crate::generics::MeshError> {
     let app_state = get_tenant_app_state().await;
+    let cached_value = value.clone().unwrap_or_default();
     let values = ServiceConfigurationUpdate { value };
     let conn = &app_state
         .db
         .get_conn()
         .await
         .map_err(|_| crate::generics::MeshError::DatabaseConnectionError)?;
-    // Use Diesel's query builder with multiple conditions
     crate::generics::generic_update::<
         <ServiceConfiguration as HasTable>::Table,
         ServiceConfigurationUpdate,
         _,
-    >(conn, dsl::name.eq(name), values)
+    >(conn, dsl::name.eq(name.clone()), values)
     .await?;
 
+    write_through_service_config(name, &cached_value).await;
     Ok(())
 }
 
@@ -75,12 +79,12 @@ pub async fn delete_config(name: String) -> Result<(), crate::generics::MeshErro
         .get_conn()
         .await
         .map_err(|_| crate::generics::MeshError::DatabaseConnectionError)?;
-    // Use Diesel's query builder with multiple conditions
     crate::generics::generic_delete::<<ServiceConfiguration as HasTable>::Table, _>(
         conn,
-        dsl::name.eq(name),
+        dsl::name.eq(name.clone()),
     )
     .await?;
 
+    evict_service_config(name).await;
     Ok(())
 }

@@ -9,6 +9,7 @@ use crate::storage::types::{
 // use types::utils::dbconfig::get_euler_db_conf;
 // use types::locker::id::{LockerId, to_locker_id};
 use crate::app::get_tenant_app_state;
+use crate::redis::mem_cache::GLOBAL_CACHE;
 use crate::types::merchant::id::{to_merchant_id, to_merchant_pid, MerchantId, MerchantPId};
 // use juspay::extra::parsing::{Parsed, Step, around, defaulting, lift_pure, mandated, non_negative, parse_field, project};
 // use juspay::extra::secret::SecretContext;
@@ -223,9 +224,14 @@ impl TryFrom<DBMerchantAccount> for MerchantAccount {
 // }
 
 pub async fn load_merchant_by_merchant_id(merchant_id: String) -> Option<MerchantAccount> {
-    // Perform the query using Diesel's generic_find_all
+    let cache_key = format!("merchant_acct_{}", merchant_id);
+
+    if let Ok(cached) = GLOBAL_CACHE.get::<MerchantAccount>(&cache_key) {
+        return Some(cached);
+    }
+
     let app_state = get_tenant_app_state().await;
-    match crate::generics::generic_find_all::<
+    let result = match crate::generics::generic_find_all::<
         <DBMerchantAccount as HasTable>::Table,
         _,
         DBMerchantAccount,
@@ -235,8 +241,15 @@ pub async fn load_merchant_by_merchant_id(merchant_id: String) -> Option<Merchan
         Ok(mut db_results) => db_results
             .pop()
             .and_then(|db_merchant| MerchantAccount::try_from(db_merchant).ok()),
-        Err(_) => None, // Silently handle errors and return None
+        Err(_) => None,
+    };
+
+    if let Some(ref merchant) = result {
+        let ttl = app_state.config.cache_config.service_config_ttl as u64;
+        let _ = GLOBAL_CACHE.store(cache_key, merchant.clone(), Some(ttl));
     }
+
+    result
 }
 
 pub async fn insert_merchant_account<T>(
@@ -281,12 +294,12 @@ pub async fn update_merchant_account(
         gateway_success_rate_based_decider_input: value,
     };
     let conn = &app_state.db.get_conn().await?;
-    // Use Diesel's query builder with multiple conditions
     crate::generics::generic_update::<
         <DBMerchantAccount as HasTable>::Table,
         MerchantAccountUpdate,
         _,
-    >(conn, dsl::merchant_id.eq(merchant_id), values)
+    >(conn, dsl::merchant_id.eq(merchant_id.clone()), values)
     .await?;
+    let _ = GLOBAL_CACHE.remove(&format!("merchant_acct_{}", merchant_id));
     Ok(())
 }

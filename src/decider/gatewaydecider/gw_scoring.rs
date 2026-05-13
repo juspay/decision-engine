@@ -321,17 +321,7 @@ pub async fn scoring_flow(
                 .await;
 
                 let initial_sr_gw_scores = if should_explore {
-                    let top_gateway = Utils::get_max_score_gateway(&sr_scores).map(|(gw, _)| gw);
-                    functional_gateways
-                        .iter()
-                        .map(|gw| {
-                            let score = match &top_gateway {
-                                Some(top) if top == gw => 0.5,
-                                _ => 1.0,
-                            };
-                            (gw.clone(), score)
-                        })
-                        .collect()
+                    create_score_map(functional_gateways.clone())
                 } else {
                     sr_scores
                 };

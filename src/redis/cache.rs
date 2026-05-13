@@ -250,6 +250,26 @@ where
     }
 }
 
+/// Write-through: update both Redis and memory cache after a successful DB write.
+/// Call this after `update_config` or `insert_config` succeeds.
+pub async fn write_through_service_config(key: String, value: &str) {
+    let app_state = get_tenant_app_state().await;
+    let prefixed_key = app_state.config.cache_config.add_prefix(&key);
+    let ttl = app_state.config.cache_config.service_config_ttl;
+    set_to_redis_cache(&prefixed_key, value, ttl).await;
+    set_to_memory_cache(&prefixed_key, value, Some(ttl as u64)).await;
+}
+
+/// Evict a service_config key from both Redis and memory cache after a DB delete.
+/// Caches an empty string (consistent with how `findByNameFromRedisHelper` signals "not found").
+pub async fn evict_service_config(key: String) {
+    let app_state = get_tenant_app_state().await;
+    let prefixed_key = app_state.config.cache_config.add_prefix(&key);
+    let ttl = app_state.config.cache_config.service_config_ttl;
+    set_to_redis_cache(&prefixed_key, "", ttl).await;
+    set_to_memory_cache(&prefixed_key, "", Some(ttl as u64)).await;
+}
+
 pub fn extractValue<A>(value: String) -> Option<A>
 where
     A: for<'de> Deserialize<'de>,
