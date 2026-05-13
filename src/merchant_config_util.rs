@@ -25,12 +25,13 @@
 use josekit::Value;
 
 use crate::{
+    app::get_tenant_app_state,
     decider::{
         configs::env_vars::enable_merchant_config_entity_lookup,
         gatewaydecider::constants::MerchantConfigEntityLevelLookupCutover,
     },
     logger,
-    redis::{cache::findByNameFromRedis, types::ServiceConfigKey},
+    redis::{cache::findByNameFromRedis, mem_cache::GLOBAL_CACHE, types::ServiceConfigKey},
     types::{
         country::country_iso::CountryISO,
         merchant::id::MerchantPId,
@@ -146,25 +147,34 @@ pub async fn isMerchantEnabledForPaymentFlows(
     merchant_id: MerchantPId,
     payment_flows: Vec<PaymentFlow>,
 ) -> bool {
+    let flow_texts: Vec<String> = payment_flows.iter().map(payment_flows_to_text).collect();
+    let cache_key = format!("mc_pf_arr_{}_{}", merchant_id.0, flow_texts.join("_"));
+
+    if let Ok(cached) = GLOBAL_CACHE.get::<bool>(&cache_key) {
+        return cached;
+    }
+
     let mc_arr = load_merchant_config_by_mpid_category_and_name(
         merchant_id,
         config_category_to_text(ConfigCategory::PaymentFlow),
-        payment_flows
-            .iter()
-            .map(|pf: &PaymentFlow| payment_flows_to_text(pf))
-            .collect::<Vec<_>>()
-            .join(","),
+        flow_texts.join(","),
     )
     .await;
     let is_valid_length = mc_arr.iter().count() == payment_flows.len();
     let are_all_pfs_enabled = mc_arr.iter().all(|mc| mc.status == ConfigStatus::ENABLED);
     if !is_valid_length {
-        logMerConfigLengthMisMatchError(
-            payment_flows.iter().map(payment_flows_to_text).collect(),
-            mc_arr.into_iter().collect(),
-        );
+        logMerConfigLengthMisMatchError(flow_texts, mc_arr.into_iter().collect());
     }
-    is_valid_length && are_all_pfs_enabled
+    let result = is_valid_length && are_all_pfs_enabled;
+
+    let ttl = get_tenant_app_state()
+        .await
+        .config
+        .cache_config
+        .service_config_ttl as u64;
+    let _ = GLOBAL_CACHE.store(cache_key, result, Some(ttl));
+
+    result
 }
 
 // // Original Haskell function: isMerchantEnabledForPaymentFlow
@@ -280,17 +290,32 @@ pub async fn isPaymentFlowEnabledForMerchant(
     payment_flow: PaymentFlow,
 ) -> bool {
     let config_name = payment_flows_to_text(&payment_flow);
+    let cache_key = format!("mc_pf_{}_{}", merchant_p_id.0, config_name);
+
+    if let Ok(cached) = GLOBAL_CACHE.get::<bool>(&cache_key) {
+        return cached;
+    }
+
     let config_category = config_category_to_text(ConfigCategory::PaymentFlow);
     let config_status = config_status_to_text(ConfigStatus::ENABLED);
 
-    load_merchant_config_by_mpid_category_name_and_status(
+    let result = load_merchant_config_by_mpid_category_name_and_status(
         merchant_p_id,
         config_category,
         config_name,
         config_status,
     )
     .await
-    .is_some()
+    .is_some();
+
+    let ttl = get_tenant_app_state()
+        .await
+        .config
+        .cache_config
+        .service_config_ttl as u64;
+    let _ = GLOBAL_CACHE.store(cache_key, result, Some(ttl));
+
+    result
 }
 
 // // Original Haskell function: isMerchantEnabledForFeature

@@ -382,34 +382,36 @@ export function SRRoutingPage() {
 
                 {/* Bucket Size */}
                 <div className="space-y-2">
-                  <h3 className="font-semibold text-slate-700 dark:text-slate-200">Bucket Size</h3>
+                  <h3 className="font-semibold text-slate-700 dark:text-slate-200">Score Memory Size</h3>
                   <p>
-                    The algorithm recalculates each gateway's score after every <em>bucket_size</em> transactions on
-                    that gateway. Smaller buckets react faster to outages but produce noisier scores.
-                    Larger buckets are more stable but slower to shift traffic when a gateway degrades.
+                    Each gateway's success rate is calculated from its most recent payments — not its entire
+                    history. This setting controls <strong>how many recent payments</strong> are considered.
+                    Think of it like a restaurant rating that only reflects the last N reviews, so a venue that
+                    improves quickly can recover its rating without being dragged down by old data.
                   </p>
-                  <div className="rounded-lg bg-slate-50 dark:bg-[#0f0f16] border border-slate-200 dark:border-[#1c1c24] px-3 py-2 font-mono text-[11px]">
-                    detection time ≈ bucket_size ÷ (txns_per_hr ÷ num_gateways ÷ 60) &nbsp;minutes
-                  </div>
+                  <ul className="list-disc list-inside space-y-1 text-[13px] text-slate-600 dark:text-slate-400">
+                    <li><span className="font-semibold">Smaller</span> — reacts faster when a gateway's performance changes, but can be noisy (a temporary bad hour looks like a real problem)</li>
+                    <li><span className="font-semibold">Larger</span> — more stable and reliable ratings, but takes longer to adapt when a gateway genuinely improves or degrades</li>
+                  </ul>
                   <table className="w-full text-[11px] border-collapse">
                     <thead>
                       <tr className="text-left text-slate-500 border-b border-slate-200 dark:border-[#1c1c24]">
-                        <th className="py-1 pr-4 font-medium">Volume</th>
-                        <th className="py-1 pr-4 font-medium">Recommended bucket</th>
-                        <th className="py-1 font-medium">Detection time</th>
+                        <th className="py-1 pr-4 font-medium">Payment volume</th>
+                        <th className="py-1 pr-4 font-medium">Recommended</th>
+                        <th className="py-1 font-medium">How long before a rating change is noticed</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-[#1c1c24]">
-                      <tr><td className="py-1 pr-4">&lt; 500 txns/hr</td><td className="py-1 pr-4 font-semibold">20</td><td className="py-1 text-slate-500">~2–5 min</td></tr>
-                      <tr><td className="py-1 pr-4">500–2000 txns/hr</td><td className="py-1 pr-4 font-semibold">50</td><td className="py-1 text-slate-500">~1–2 min</td></tr>
-                      <tr><td className="py-1 pr-4">2000–5000 txns/hr</td><td className="py-1 pr-4 font-semibold">100</td><td className="py-1 text-slate-500">~1–2 min</td></tr>
-                      <tr><td className="py-1 pr-4">&gt; 5000 txns/hr</td><td className="py-1 pr-4 font-semibold">200</td><td className="py-1 text-slate-500">~1–2 min</td></tr>
+                      <tr><td className="py-1 pr-4">&lt; 500 / hour</td><td className="py-1 pr-4 font-semibold">20</td><td className="py-1 text-slate-500">~60 min</td></tr>
+                      <tr><td className="py-1 pr-4">500–2000 / hour</td><td className="py-1 pr-4 font-semibold">50</td><td className="py-1 text-slate-500">~40 min</td></tr>
+                      <tr><td className="py-1 pr-4">2000–5000 / hour</td><td className="py-1 pr-4 font-semibold">100</td><td className="py-1 text-slate-500">~20 min</td></tr>
+                      <tr><td className="py-1 pr-4">&gt; 5000 / hour</td><td className="py-1 pr-4 font-semibold">200</td><td className="py-1 text-slate-500">~16 min</td></tr>
                     </tbody>
                   </table>
                   <p className="text-slate-500 dark:text-slate-400">
-                    A bucket size of 50 reliably detects a 10%+ drop in success rate. Detecting a 1% difference
-                    requires ~5500 transactions per bucket — not practical. Size your bucket to catch real outages,
-                    not marginal noise.
+                    If a gateway goes completely down, it is removed from routing within minutes by a separate
+                    real-time outage detector — you don't need to set this small to handle outages.
+                    This setting is for catching gradual performance drifts over time.
                   </p>
                 </div>
 
@@ -417,33 +419,30 @@ export function SRRoutingPage() {
                 <div className="space-y-2">
                   <h3 className="font-semibold text-slate-700 dark:text-slate-200">Hedging %</h3>
                   <p>
-                    The exploration rate for the Explore-exploit feature. When Explore-exploit (Card, SRv3) is
-                    enabled, this percentage of traffic is probabilistically routed to non-top gateways,
-                    keeping their scores fresh so the algorithm can respond quickly when the primary degrades.
+                    To keep every gateway's rating up to date, the system periodically sends a small percentage
+                    of payments to each gateway — even ones that are not currently the top performer. This is
+                    like regularly sending mystery shoppers to every vendor so you always have a fresh,
+                    accurate rating for each one, and can quickly spot when the best option changes.
                   </p>
                   <p className="text-amber-600 dark:text-amber-400">
-                    Too low = backup scores go stale = slow failover when the top gateway drops. Has no effect
-                    if Explore-exploit is disabled.
+                    Setting this too low means gateways that aren't winning most traffic won't have enough
+                    fresh data — so if your top gateway suddenly degrades, the system will be slow to notice
+                    and switch. Only applies when the Explore-exploit feature is enabled.
                   </p>
-                  <p>Set hedging so the backup fills one bucket within your acceptable failover window:</p>
-                  <div className="rounded-lg bg-slate-50 dark:bg-[#0f0f16] border border-slate-200 dark:border-[#1c1c24] px-3 py-2 font-mono text-[11px] space-y-1">
-                    <div>hedging% = (bucket_size ÷ failover_minutes) ÷ txns_per_minute × 100</div>
-                    <div className="text-slate-400">— e.g. bucket=50, 5 min window, 60 txns/min → (50÷5)÷60×100 ≈ 17%</div>
-                  </div>
                   <table className="w-full text-[11px] border-collapse">
                     <thead>
                       <tr className="text-left text-slate-500 border-b border-slate-200 dark:border-[#1c1c24]">
-                        <th className="py-1 pr-4 font-medium">Volume</th>
-                        <th className="py-1 pr-4 font-medium">Bucket</th>
-                        <th className="py-1 pr-4 font-medium">Failover window</th>
-                        <th className="py-1 font-medium">Recommended hedging</th>
+                        <th className="py-1 pr-4 font-medium">Payment volume</th>
+                        <th className="py-1 pr-4 font-medium">Score Memory Size</th>
+                        <th className="py-1 pr-4 font-medium">How quickly ratings stay fresh</th>
+                        <th className="py-1 font-medium">Recommended</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-[#1c1c24]">
-                      <tr><td className="py-1 pr-4">&lt; 500/hr</td><td className="py-1 pr-4">20</td><td className="py-1 pr-4">10 min</td><td className="py-1 font-semibold">~7%</td></tr>
-                      <tr><td className="py-1 pr-4">500–2000/hr</td><td className="py-1 pr-4">50</td><td className="py-1 pr-4">5 min</td><td className="py-1 font-semibold">~15%</td></tr>
-                      <tr><td className="py-1 pr-4">2000–5000/hr</td><td className="py-1 pr-4">100</td><td className="py-1 pr-4">5 min</td><td className="py-1 font-semibold">~20%</td></tr>
-                      <tr><td className="py-1 pr-4">&gt; 5000/hr</td><td className="py-1 pr-4">200</td><td className="py-1 pr-4">5 min</td><td className="py-1 font-semibold">~20%</td></tr>
+                      <tr><td className="py-1 pr-4">&lt; 500 / hour</td><td className="py-1 pr-4">20</td><td className="py-1 pr-4">within ~60 min</td><td className="py-1 font-semibold">~8%</td></tr>
+                      <tr><td className="py-1 pr-4">500–2000 / hour</td><td className="py-1 pr-4">50</td><td className="py-1 pr-4">within ~40 min</td><td className="py-1 font-semibold">~15%</td></tr>
+                      <tr><td className="py-1 pr-4">2000–5000 / hour</td><td className="py-1 pr-4">100</td><td className="py-1 pr-4">within ~20 min</td><td className="py-1 font-semibold">~17%</td></tr>
+                      <tr><td className="py-1 pr-4">&gt; 5000 / hour</td><td className="py-1 pr-4">200</td><td className="py-1 pr-4">within ~15 min</td><td className="py-1 font-semibold">~19%</td></tr>
                     </tbody>
                   </table>
                 </div>
@@ -452,25 +451,33 @@ export function SRRoutingPage() {
                 <div className="space-y-2">
                   <h3 className="font-semibold text-slate-700 dark:text-slate-200">Default Success Rate</h3>
                   <p>
-                    The prior score assigned to any gateway that has no transaction history yet (e.g. newly added
-                    gateways). Set this close to your historical average across all gateways — typically
-                    <span className="font-semibold"> 0.80–0.95</span>.
+                    When a new payment gateway is added, it has no transaction history yet. Rather than
+                    treating it as untrusted, the system gives it a <strong>perfect starting rating</strong> so
+                    it immediately gets a fair share of test traffic to prove itself. Its rating then adjusts
+                    naturally based on real results.
                   </p>
                   <p className="text-slate-500 dark:text-slate-400">
-                    Too high → new or poor-quality gateways receive too much traffic before proving themselves.
-                    Too low → new gateways are starved of traffic and take longer to build a reliable score.
+                    This starting score is fixed at the maximum — this field is not active and changing it has
+                    no effect.
                   </p>
                 </div>
 
                 {/* Feedback Latency Window */}
                 <div className="space-y-2">
-                  <h3 className="font-semibold text-slate-700 dark:text-slate-200">Feedback Latency Window</h3>
+                  <h3 className="font-semibold text-slate-700 dark:text-slate-200">Timeout Grace Period</h3>
                   <p>
-                    When a score update (feedback) arrives, the system measures how long has passed since the
-                    transaction was created. If that elapsed time is within this window, the failure is
-                    classified as a standard penalty; if it exceeds the window, it is classified as an SR V3
-                    penalty. This affects which scoring path is applied, not whether the gateway is filtered
-                    during routing. Unit is <span className="font-semibold">seconds</span>. Default is 300 s (5 min).
+                    When a payment times out — meaning the gateway didn't respond in time rather than
+                    explicitly failing — this setting controls how the system interprets it. If the timeout
+                    happens quickly after the payment attempt, it looks like a temporary outage. If it happens
+                    much later, it's treated as a general performance issue instead.
+                  </p>
+                  <ul className="list-disc list-inside space-y-1 text-[13px] text-slate-600 dark:text-slate-400">
+                    <li><span className="font-semibold">Within this period</span> — counted as a temporary outage, triggers fast rerouting</li>
+                    <li><span className="font-semibold">After this period</span> — counted as a general quality issue, affects the gateway's long-term rating</li>
+                  </ul>
+                  <p className="text-slate-500 dark:text-slate-400">
+                    Explicit payment failures are always counted as quality issues regardless of timing.
+                    Default is 5 minutes — suitable for most integrations.
                   </p>
                 </div>
 
@@ -481,15 +488,15 @@ export function SRRoutingPage() {
           <Card>
             <CardHeader>
               <div>
-                <h2 className="text-sm font-semibold text-slate-800">Default Success Rate Config</h2>
+                <h2 className="text-sm font-semibold text-slate-800">Routing Settings</h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Base settings used when there is no payment-method-specific override.
+                  Default values used for all payment types unless overridden below.
                 </p>
               </div>
             </CardHeader>
             <CardBody className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <label className="space-y-1">
-                <span className="text-xs text-slate-500">Bucket Size</span>
+                <span className="text-xs text-slate-500">Score Memory Size</span>
                 <input
                   type="number"
                   {...register('defaultBucketSize')}
@@ -499,12 +506,12 @@ export function SRRoutingPage() {
                   <p className="text-xs text-red-500">{errors.defaultBucketSize.message}</p>
                 )}
                 <p className="text-[11px] text-slate-400 dark:text-slate-500 leading-relaxed">
-                  Transactions per score recalculation. Smaller = faster reaction. Aim for a 1–5 min fill time at your volume.
+                  How many recent test payments are used to calculate each gateway's rating. Higher = more stable but slower to adapt. Lower = reacts faster but may overreact to short blips.
                 </p>
               </label>
 
               <label className="space-y-1">
-                <span className="text-xs text-slate-500">Success Rate</span>
+                <span className="text-xs text-slate-500">Starting Rating for New Gateways</span>
                 <input
                   type="number"
                   step="0.1"
@@ -515,7 +522,7 @@ export function SRRoutingPage() {
                   className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 w-full focus:outline-none focus:ring-1 focus:ring-brand-500"
                 />
                 <p className="text-[11px] text-slate-400 dark:text-slate-500 leading-relaxed">
-                  Prior score for gateways with no history yet. Set near your expected average (0.80–0.95).
+                  Not active — new gateways always start with a perfect rating automatically.
                 </p>
               </label>
 
@@ -529,12 +536,12 @@ export function SRRoutingPage() {
                   className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 w-full focus:outline-none focus:ring-1 focus:ring-brand-500"
                 />
                 <p className="text-[11px] text-slate-400 dark:text-slate-500 leading-relaxed">
-                  Exploration rate used by Explore-exploit (Card, SRv3). Has no effect if that flag is disabled.
+                  Percentage of payments used to keep all gateway ratings fresh. Only applies when the Explore-exploit feature is on.
                 </p>
               </label>
 
               <label className="space-y-1">
-                <span className="text-xs text-slate-500">Feedback Latency Window (s)</span>
+                <span className="text-xs text-slate-500">Timeout Grace Period (seconds)</span>
                 <input
                   type="number"
                   {...register('defaultLatencyThreshold')}
@@ -542,7 +549,7 @@ export function SRRoutingPage() {
                   className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 w-full focus:outline-none focus:ring-1 focus:ring-brand-500"
                 />
                 <p className="text-[11px] text-slate-400 dark:text-slate-500 leading-relaxed">
-                  Seconds after txn creation within which feedback is a standard penalty; beyond it uses the SR V3 penalty path. Default 300 s.
+                  How long after a payment attempt a timeout is treated as a temporary outage vs a general performance issue. Default is 300 s (5 min).
                 </p>
               </label>
 
@@ -680,7 +687,7 @@ const SR_FEATURES: { feature: KnownFeature; title: string; description: string }
     feature: 'explore-exploit-srv3',
     title: 'Explore-exploit on SRv3 (Card)',
     description:
-      'Enable epsilon-greedy exploration for card transactions on SRv3. When enabled, the Hedging % setting controls what fraction of traffic is routed to non-top gateways to keep their scores fresh. Without this flag, Hedging % has no effect.',
+      'Keeps all gateway ratings fresh by regularly sending a small share of payments to every gateway — not just the top performer. This ensures the system can quickly detect when a backup gateway becomes better than the current top, and reroute accordingly. The Hedging % setting controls how large this share is.',
   },
 ]
 

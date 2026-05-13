@@ -1,10 +1,10 @@
 use crate::app::get_tenant_app_state;
 use crate::decider::gatewaydecider::types::{self, DeciderFlow};
-use crate::euclid::errors::EuclidErrors;
 use crate::euclid::types::SrDimensionConfig;
 use crate::feedback::gateway_elimination_scoring::flow::{
     eliminationV2RewardFactor, getPenaltyFactor,
 };
+use crate::redis::cache::findByNameFromRedis;
 use crate::redis::feature::{is_feature_enabled, RedisCompressionConfigCombined, RedisDataStruct};
 use crate::redis::types::ServiceConfigKey;
 use crate::types::card::card_type::card_type_to_text;
@@ -15,13 +15,11 @@ use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
 use crate::types::money::internal::Money;
 use crate::types::payment::payment_method_type_const::*;
 use crate::types::payment_flow::{payment_flows_to_text, PaymentFlow};
-use crate::types::service_configuration::find_config_by_name;
 use crate::types::user_eligibility_info::{
     get_eligibility_info, identifier_name_to_text, IdentifierName,
 };
 use crate::utils::generate_random_number;
 use crate::{feedback, logger};
-use error_stack::ResultExt;
 use fred::prelude::{KeysInterface, ListInterface};
 use masking::PeekInterface;
 use masking::Secret;
@@ -2479,23 +2477,7 @@ pub async fn get_unified_sr_key(
 
     let name = format!("SR_DIMENSION_CONFIG_{}", merchant_id);
 
-    let service_config = find_config_by_name(name.clone())
-        .await
-        .change_context(EuclidErrors::StorageError)
-        .and_then(|opt_config| {
-            opt_config.and_then(|config| config.value).ok_or_else(|| {
-                error_stack::report!(EuclidErrors::InvalidSrDimensionConfig(
-                    "SR dimension config not found".to_string()
-                ))
-            })
-        })
-        .and_then(|config| {
-            serde_json::from_str::<SrDimensionConfig>(&config).change_context(
-                EuclidErrors::InvalidSrDimensionConfig(
-                    "Failed to parse SR dimension config".to_string(),
-                ),
-            )
-        });
+    let service_config: Option<SrDimensionConfig> = findByNameFromRedis(name.clone()).await;
 
     let udfs = service_config
         .as_ref()

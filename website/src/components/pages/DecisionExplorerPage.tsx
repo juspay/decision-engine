@@ -18,7 +18,7 @@ import { DecideGatewayResponse, GatewayConnector, PaymentAuditEvent, PaymentAudi
 import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
 import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
-import { Play, RefreshCw, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Activity, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings } from 'lucide-react'
+import { Play, RefreshCw, ChevronDown, ChevronUp, Activity, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings } from 'lucide-react'
 
 const ALGORITHMS: RoutingAlgorithmName[] = [
   'SR_BASED_ROUTING',
@@ -77,6 +77,7 @@ interface SimulationResult {
   status: 'CHARGED' | 'FAILURE' | 'PENDING_VBV'
   timestamp: string
   routingApproach: string | null
+  gatewayPriorityMap: Record<string, number> | null
 }
 
 type TransactionOutcome = 'CHARGED' | 'FAILURE' | 'PENDING_VBV'
@@ -758,7 +759,7 @@ export function DecisionExplorerPage() {
 
   const [simulationConfig, setSimulationConfig] = useState<SimulationConfig>(initialState.simulationConfig)
   const [errorInfo, setErrorInfo] = useState<ErrorInfoState>(initialState.errorInfo)
-  const [gatewaySimConfigs, setGatewaySimConfigs] = useState<Record<string, GatewaySimConfig>>({})
+  const [gatewaySimConfigs, setGatewaySimConfigs] = useState<Record<string, GatewaySimConfig>>(initialState.gatewaySimConfigs)
   const gatewaySimConfigsRef = useRef(gatewaySimConfigs)
   useEffect(() => { gatewaySimConfigsRef.current = gatewaySimConfigs }, [gatewaySimConfigs])
   const eliminationEnabled = Object.values(gatewaySimConfigs).some(c => c.failureMode === 'timeout')
@@ -785,6 +786,10 @@ export function DecisionExplorerPage() {
   const [simulationResults, setSimulationResults] = useState<SimulationResult[]>(initialState.simulationResults)
   const [isSimulating, setIsSimulating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [addGwDraft, setAddGwDraft] = useState('')
+  const [addGwOpen, setAddGwOpen] = useState(false)
+  const addGwInputRef = useRef<HTMLInputElement>(null)
+  const txLogRef = useRef<HTMLDivElement>(null)
 
   const [setupPrompt, setSetupPrompt] = useState<SetupPromptState | null>(null)
   const [loading, setLoading] = useState(false)
@@ -800,8 +805,6 @@ export function DecisionExplorerPage() {
   const [previewInspectorTab, setPreviewInspectorTab] = useState<AuditInspectorTab>('summary')
   const [previewTraceLabel, setPreviewTraceLabel] = useState('Rule Evaluation Decision')
   const deferredSimulationResults = useDeferredValue(simulationResults)
-  const [txLogPage, setTxLogPage] = useState(1)
-  const TX_LOG_PAGE_SIZE = 10
   const [showPenaltyGuide, setShowPenaltyGuide] = useState(false)
 
   const routingKeyNames = useMemo(
@@ -1397,64 +1400,78 @@ export function DecisionExplorerPage() {
     setError(null)
     setSetupPrompt(null)
     setSimulationResults([])
-    setTxLogPage(1)
     simulationAbortRef.current = false
 
     const gateways = form.eligible_gateways.split(',').map(s => s.trim()).filter(Boolean)
     const results: SimulationResult[] = []
+    const MAX_CONSECUTIVE_ERRORS = 3
+    let consecutiveErrors = 0
 
     try {
       for (let i = 0; i < total; i++) {
         if (simulationAbortRef.current) break
         const paymentId = `sim_${Date.now()}_${i}`
 
-        const decideRes = await apiPost<DecideGatewayResponse>('/decide-gateway', {
-          merchantId: effectiveMerchantId,
-          paymentInfo: {
+        try {
+          const decideRes = await apiPost<DecideGatewayResponse>('/decide-gateway', {
+            merchantId: effectiveMerchantId,
+            paymentInfo: {
+              paymentId: paymentId,
+              amount: parseFloat(form.amount) || 1000,
+              currency: form.currency,
+              paymentType: 'ORDER_PAYMENT',
+              paymentMethodType: form.payment_method_type,
+              paymentMethod: form.payment_method,
+              authType: form.auth_type,
+              cardBrand: form.card_brand,
+            },
+            eligibleGatewayList: gateways,
+            rankingAlgorithm: form.ranking_algorithm,
+            eliminationEnabled: eliminationEnabled,
+          })
+
+          const decidedGateway = decideRes.decided_gateway
+          const gwRate = getGwSuccessRate(decidedGateway)
+          const isSuccess = Math.random() * 100 < gwRate
+          const failureMode = getGwFailureMode(decidedGateway)
+          const outcome: TransactionOutcome = isSuccess ? 'CHARGED' : (failureMode === 'timeout' ? 'PENDING_VBV' : 'FAILURE')
+          const gwErrorInfo = getGwErrorInfo(decidedGateway)
+
+          await apiPost<UpdateScoreResponse>('/update-gateway-score', {
+            merchantId: effectiveMerchantId,
+            gateway: decidedGateway,
+            gatewayReferenceId: null,
+            status: outcome,
             paymentId: paymentId,
-            amount: parseFloat(form.amount) || 1000,
-            currency: form.currency,
-            paymentType: 'ORDER_PAYMENT',
-            paymentMethodType: form.payment_method_type,
-            paymentMethod: form.payment_method,
-            authType: form.auth_type,
-            cardBrand: form.card_brand,
-          },
-          eligibleGatewayList: gateways,
-          rankingAlgorithm: form.ranking_algorithm,
-          eliminationEnabled: eliminationEnabled,
-        })
+            enforceDynamicRoutingFailure: null,
+            ...(outcome === 'FAILURE' && { errorInfo: buildErrorInfo(decidedGateway, gwErrorInfo) }),
+          })
 
-        const decidedGateway = decideRes.decided_gateway
-        const gwRate = getGwSuccessRate(decidedGateway)
-        const isSuccess = Math.random() * 100 < gwRate
-        const failureMode = getGwFailureMode(decidedGateway)
-        const outcome: TransactionOutcome = isSuccess ? 'CHARGED' : (failureMode === 'timeout' ? 'PENDING_VBV' : 'FAILURE')
-        const gwErrorInfo = getGwErrorInfo(decidedGateway)
+          results.push({
+            paymentId,
+            decidedGateway,
+            status: outcome,
+            timestamp: new Date().toISOString(),
+            routingApproach: decideRes.routing_approach ?? null,
+            gatewayPriorityMap: decideRes.gateway_priority_map ?? null,
+          })
 
-        await apiPost<UpdateScoreResponse>('/update-gateway-score', {
-          merchantId: effectiveMerchantId,
-          gateway: decidedGateway,
-          gatewayReferenceId: null,
-          status: outcome,
-          paymentId: paymentId,
-          enforceDynamicRoutingFailure: null,
-          ...(outcome === 'FAILURE' && { errorInfo: buildErrorInfo(decidedGateway, gwErrorInfo) }),
-        })
+          setSimulationResults([...results])
+          markExplorerRunDataUpdated()
+          consecutiveErrors = 0
+        } catch (e: unknown) {
+          consecutiveErrors++
+          if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+            handleRunError(e, 'batch', `Simulation stopped after ${MAX_CONSECUTIVE_ERRORS} consecutive backend errors. Check that the server is running.`)
+            return
+          }
+          // transient error — wait and skip this iteration
+          await new Promise(resolve => setTimeout(resolve, 1000))
+          continue
+        }
 
-        results.push({
-          paymentId,
-          decidedGateway,
-          status: outcome,
-          timestamp: new Date().toISOString(),
-          routingApproach: decideRes.routing_approach ?? null,
-        })
-
-        setSimulationResults([...results])
-        markExplorerRunDataUpdated()
+        await new Promise(resolve => setTimeout(resolve, 50))
       }
-    } catch (e: unknown) {
-      handleRunError(e, 'batch', 'Simulation failed')
     } finally {
       setIsSimulating(false)
     }
@@ -1625,8 +1642,43 @@ export function DecisionExplorerPage() {
     return acc
   }, {} as Record<string, { total: number; success: number; failure: number }>)
 
+  // Plot the gatewayPriorityMap score (algorithm's internal SR score) for each
+  // gateway over time. For each sample point we search backwards to find the
+  // most recent result that contained a score for that gateway, avoiding spikes
+  // from results where the map was null or the gateway was absent.
+  const gatewaySparklines = useMemo(() => {
+    const results = deferredSimulationResults
+    if (results.length < 2) return { series: {} as Record<string, number[]>, paymentNums: [] as number[] }
+
+    const MAX_PTS = 200
+    const step = Math.max(1, Math.floor(results.length / MAX_PTS))
+    const sampled = results.filter((_, i) => i % step === 0 || i === results.length - 1)
+    const paymentNums = sampled.map((_, i) => {
+      const originalIdx = Math.min(i * step, results.length - 1)
+      return originalIdx + 1
+    })
+
+    const series: Record<string, number[]> = {}
+    Object.keys(gatewayStats).forEach(gw => {
+      series[gw] = sampled.map((_, sampleIdx) => {
+        const upToOriginalIdx = Math.min(sampleIdx * step, results.length - 1)
+        // Search backwards for the most recent non-hedging result with a score for this gateway.
+        // Hedging results use exploration scores (1.0 for all gateways) which don't reflect real SR.
+        for (let i = upToOriginalIdx; i >= 0; i--) {
+          if (results[i].routingApproach?.includes('HEDGING')) continue
+          const score = results[i].gatewayPriorityMap?.[gw]
+          if (score !== undefined && score !== null) {
+            return Math.round(score * 100)
+          }
+        }
+        return 0
+      })
+    })
+    return { series, paymentNums }
+  }, [deferredSimulationResults, gatewayStats])
+
   const hedgingHits = deferredSimulationResults.filter(
-    r => r.routingApproach === 'SR_V3_HEDGING',
+    r => r.routingApproach?.includes('HEDGING'),
   ).length
 
 const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
@@ -1723,6 +1775,13 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
     if (!selectedPreviewPaymentId) return
     void previewTraceDetail.mutate()
   }, [selectedPreviewPaymentId])
+
+  useEffect(() => {
+    const el = txLogRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+  }, [deferredSimulationResults.length])
+
 
   function openAuditModal(paymentId: string) {
     setSelectedPreviewPaymentId(null)
@@ -2277,12 +2336,6 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Eligible Gateways (comma-separated)</label>
-                  <input value={form.eligible_gateways} onChange={e => set('eligible_gateways', e.target.value)}
-                    placeholder="stripe, adyen"
-                    className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500" />
-                </div>
 
                 <div className="rounded-lg border border-slate-200 dark:border-[#222226] overflow-hidden">
                   <div className="flex items-center gap-3 px-3 py-2 border-b border-slate-100 dark:border-[#1e1e28]">
@@ -2329,10 +2382,11 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                         <input
                           type="number"
                           min={1}
-                          max={1000}
+                          max={5000}
                           value={simulationConfig.totalPayments}
-                          onChange={e => {
-                            const total = Math.max(1, parseInt(e.target.value) || 1)
+                          onChange={e => setSimulationConfig({ totalPayments: e.target.value })}
+                          onBlur={e => {
+                            const total = Math.max(1, Math.min(5000, parseInt(e.target.value) || 1))
                             setSimulationConfig({ totalPayments: String(total) })
                           }}
                           className="w-16 border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm text-center focus:outline-none focus:ring-1 focus:ring-brand-500 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
@@ -2349,7 +2403,17 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                           <div key={gw} className="rounded-lg border border-slate-200 dark:border-[#222226] p-2.5 space-y-1.5">
                             <div className="flex items-center justify-between">
                               <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 capitalize">{gw}</span>
-                              <span className="text-xs font-semibold text-brand-600 dark:text-sky-400">{gwRate}%</span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs font-semibold text-brand-600 dark:text-sky-400">{gwRate}%</span>
+                                <button
+                                  type="button"
+                                  disabled={isSimulating}
+                                  onClick={() => set('eligible_gateways', eligibleGatewaysParsed.filter(g => g !== gw).join(', '))}
+                                  className="text-slate-300 hover:text-red-400 dark:text-slate-600 dark:hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                >
+                                  <X size={12} />
+                                </button>
+                              </div>
                             </div>
                             <input
                               type="range"
@@ -2360,18 +2424,20 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                               className="w-full accent-brand-600"
                             />
                             {hasFailures && (
-                              <div className="flex rounded-md overflow-hidden border border-slate-200 dark:border-[#222226] text-[10px] font-medium">
+                              <div className={`flex rounded-md overflow-hidden border text-[10px] font-medium ${isSimulating ? 'border-slate-100 dark:border-[#1c1c24] opacity-50 cursor-not-allowed' : 'border-slate-200 dark:border-[#222226]'}`}>
                                 <button
                                   type="button"
+                                  disabled={isSimulating}
                                   onClick={() => setGwFailureMode(gw, 'decline')}
-                                  className={`flex-1 py-0.5 transition-colors ${gwFailureMode === 'decline' ? 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
+                                  className={`flex-1 py-0.5 transition-colors disabled:pointer-events-none ${gwFailureMode === 'decline' ? 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
                                 >
                                   Decline
                                 </button>
                                 <button
                                   type="button"
+                                  disabled={isSimulating}
                                   onClick={() => setGwFailureMode(gw, 'timeout')}
-                                  className={`flex-1 py-0.5 border-l border-slate-200 dark:border-[#222226] transition-colors ${gwFailureMode === 'timeout' ? 'bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
+                                  className={`flex-1 py-0.5 border-l border-slate-200 dark:border-[#222226] transition-colors disabled:pointer-events-none ${gwFailureMode === 'timeout' ? 'bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
                                 >
                                   Timeout
                                 </button>
@@ -2422,6 +2488,42 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                           </div>
                         )
                       })}
+                      {/* Add connector card */}
+                      {addGwOpen ? (
+                        <div className="rounded-lg border border-brand-300 dark:border-brand-700 p-2.5 flex flex-col gap-1.5">
+                          <input
+                            ref={addGwInputRef}
+                            type="text"
+                            value={addGwDraft}
+                            onChange={e => setAddGwDraft(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') {
+                                const gw = addGwDraft.trim().toLowerCase()
+                                if (gw && !eligibleGatewaysParsed.includes(gw)) {
+                                  set('eligible_gateways', [...eligibleGatewaysParsed, gw].join(', '))
+                                }
+                                setAddGwDraft('')
+                                setAddGwOpen(false)
+                              }
+                              if (e.key === 'Escape') { setAddGwDraft(''); setAddGwOpen(false) }
+                            }}
+                            onBlur={() => { setAddGwDraft(''); setAddGwOpen(false) }}
+                            placeholder="e.g. stripe"
+                            autoFocus
+                            className="w-full bg-transparent text-xs font-medium text-slate-700 dark:text-slate-200 placeholder-slate-400 focus:outline-none"
+                          />
+                          <p className="text-[10px] text-slate-400">Enter to add · Esc to cancel</p>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={isSimulating}
+                          onClick={() => { setAddGwOpen(true); setTimeout(() => addGwInputRef.current?.focus(), 0) }}
+                          className="rounded-lg border border-dashed border-slate-300 dark:border-[#2a2a3a] p-2.5 flex items-center justify-center gap-1.5 text-xs text-slate-400 hover:text-brand-600 hover:border-brand-400 dark:hover:text-brand-400 dark:hover:border-brand-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          <Plus size={12} /> Add connector
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -2455,11 +2557,16 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                 )}
               </Button>
             ) : activeTab === 'batch' ? (
-              <Button onClick={runSimulation} disabled={isSimulating || !effectiveMerchantId || routingConfigUnavailable} className="w-full justify-center">
+              <Button
+                onClick={isSimulating ? () => { simulationAbortRef.current = true } : runSimulation}
+                disabled={!effectiveMerchantId || routingConfigUnavailable}
+                variant={isSimulating ? 'secondary' : 'primary'}
+                className="w-full justify-center"
+              >
                 {isSimulating ? (
                   <>
-                    <Spinner size={14} />
-                    Simulating {simulationResults.length}/{simulationConfig.totalPayments || 0}...
+                    <X size={14} />
+                    Stop ({simulationResults.length}/{simulationConfig.totalPayments || 0})
                   </>
                 ) : (
                   <>
@@ -2961,155 +3068,219 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                   <CardBody className="!pt-3">
                     {Object.keys(gatewayStats).length > 0 && (() => {
                       const totalRouted = Object.values(gatewayStats).reduce((s, g) => s + g.total, 0)
-                      const dominated = Object.keys(gatewayStats).length === 1
+                      const sortedGateways = Object.entries(gatewayStats).sort((a, b) => b[1].total - a[1].total)
+                      const GW_COLORS = ['#3b82f6', '#8b5cf6', '#f97316', '#ec4899', '#14b8a6']
+                      const hasAnySpark = sortedGateways.some(([gw]) => (gatewaySparklines.series[gw]?.length ?? 0) >= 2)
                       return (
-                        <div className="space-y-2">
-                          {Object.entries(gatewayStats).map(([gateway, stats]) => {
-                            const share = totalRouted > 0 ? Math.round((stats.total / totalRouted) * 100) : 0
-                            const srPct = stats.total > 0 ? Math.round((stats.success / stats.total) * 100) : 0
-                            return (
-                              <div key={gateway} className="space-y-0.5">
-                                <div className="flex items-center justify-between text-xs">
-                                  <span className="font-medium text-slate-800 dark:text-slate-200">{gateway}</span>
-                                  <div className="flex gap-2 text-[11px]">
-                                    <span className="text-emerald-600">{stats.success} ✓</span>
-                                    <span className="text-red-500">{stats.failure} ✗</span>
-                                    <span className="font-semibold text-emerald-600">{srPct}% SR</span>
-                                    <span className="font-semibold text-slate-500">{share}% traffic</span>
+                        <div className="flex gap-4">
+                          {/* per-gateway stat rows */}
+                          <div className="flex-1 space-y-2 min-w-0">
+                            {sortedGateways.map(([gateway, stats], idx) => {
+                              const share = totalRouted > 0 ? Math.round((stats.total / totalRouted) * 100) : 0
+                              const srPct = stats.total > 0 ? Math.round((stats.success / stats.total) * 100) : 0
+                              return (
+                                <div key={gateway} className="space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: GW_COLORS[idx % GW_COLORS.length] }} />
+                                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 w-20 truncate shrink-0">{gateway}</span>
+                                    <div className="flex-1 h-1.5 rounded-full bg-slate-100 dark:bg-[#1c1c24] overflow-hidden">
+                                      <div className="h-full rounded-full transition-[width] duration-300" style={{ width: `${share}%`, backgroundColor: GW_COLORS[idx % GW_COLORS.length] }} />
+                                    </div>
+                                    <div className="flex items-center gap-2 text-[11px] shrink-0">
+                                      <span className="text-slate-400 dark:text-slate-500">{share}%</span>
+                                      <span className={`font-semibold tabular-nums ${srPct >= 80 ? 'text-emerald-600 dark:text-emerald-400' : srPct >= 50 ? 'text-amber-500' : 'text-red-500'}`}>{srPct}% SR</span>
+                                      <span className="text-emerald-600 dark:text-emerald-400 tabular-nums">{stats.success}✓</span>
+                                      <span className="text-red-400 tabular-nums">{stats.failure}✗</span>
+                                    </div>
                                   </div>
                                 </div>
-                                <div className="w-full h-1 rounded-full bg-slate-100 dark:bg-[#1c1c24] overflow-hidden">
-                                  <div className="h-1 rounded-full bg-brand-500 transition-[width] duration-300" style={{ width: `${share}%` }} />
+                              )
+                            })}
+                          </div>
+                          {/* combined multi-line SR chart — scrollable, fixed y-axis */}
+                          {hasAnySpark && (() => {
+                            const { series, paymentNums } = gatewaySparklines
+                            const numPts = paymentNums.length
+                            const PT_W = 7        // px per data point
+                            const CHART_H = Math.max(64, sortedGateways.length * 28)
+                            const XAXIS_H = 14    // room for x-axis labels
+                            const AXIS_W = 28     // fixed y-axis width
+                            const CW = Math.max(200, numPts * PT_W)
+                            const H = CHART_H + XAXIS_H
+                            const pad = 6
+                            const xPos = (i: number) => (i / Math.max(numPts - 1, 1)) * CW
+
+                            // Dynamic Y range: observed min/max across all series, padded by 5pts
+                            const allVals = sortedGateways.flatMap(([gw]) => series[gw]?.filter(v => v > 0) ?? [])
+                            const obsMin = allVals.length ? Math.min(...allVals) : 0
+                            const obsMax = allVals.length ? Math.max(...allVals) : 100
+                            const yMin = Math.max(0, obsMin - 5)
+                            const yMax = Math.min(100, obsMax + 5)
+                            const yRange = yMax - yMin || 1
+
+                            const yPos = (v: number) => pad + ((yMax - v) / yRange) * (CHART_H - pad * 2)
+
+                            // Pick ~4 round tick values within [yMin, yMax]
+                            const tickStep = yRange <= 10 ? 2 : yRange <= 30 ? 5 : 10
+                            const tickStart = Math.ceil(yMin / tickStep) * tickStep
+                            const ticks: number[] = []
+                            for (let t = tickStart; t <= yMax; t += tickStep) ticks.push(t)
+
+                            const makeLine = (pts: number[]) => {
+                              if (pts.length < 2) return ''
+                              const coords = pts.map((v, i) => [xPos(i), yPos(v)])
+                              let d = `M ${coords[0][0]},${coords[0][1]}`
+                              for (let i = 1; i < coords.length; i++) {
+                                const cpx = (coords[i][0] - coords[i - 1][0]) * 0.4
+                                d += ` C ${coords[i-1][0]+cpx},${coords[i-1][1]} ${coords[i][0]-cpx},${coords[i][1]} ${coords[i][0]},${coords[i][1]}`
+                              }
+                              return d
+                            }
+                            // Show ~6 evenly-spaced x labels
+                            const xLabelStep = Math.max(1, Math.floor(numPts / 6))
+                            const xLabels = paymentNums
+                              .map((n, i) => ({ n, i }))
+                              .filter(({ i }) => i % xLabelStep === 0 || i === numPts - 1)
+                            return (
+                              <div className="relative shrink-0" style={{ width: 200 + AXIS_W }}>
+                                {/* scrollable chart area */}
+                                <div
+                                  className="overflow-x-auto"
+                                  style={{ width: 200, scrollbarWidth: 'none' }}
+                                  ref={el => { if (el) el.scrollLeft = el.scrollWidth }}
+                                >
+                                  <svg width={CW} height={H} viewBox={`0 0 ${CW} ${H}`} style={{ display: 'block' }}>
+                                    {/* horizontal grid lines */}
+                                    {ticks.map(t => (
+                                      <line key={t} x1={0} y1={yPos(t)} x2={CW} y2={yPos(t)}
+                                        stroke="#e2e8f0" strokeWidth="0.5" strokeDasharray="2,2" />
+                                    ))}
+                                    {/* gateway lines */}
+                                    {sortedGateways.map(([gw], idx) => {
+                                      const pts = series[gw]
+                                      if (!pts || pts.length < 2) return null
+                                      const color = GW_COLORS[idx % GW_COLORS.length]
+                                      const line = makeLine(pts)
+                                      const area = `${line} L ${xPos(pts.length - 1)},${CHART_H} L 0,${CHART_H} Z`
+                                      return (
+                                        <g key={gw}>
+                                          <path d={area} fill={color} fillOpacity={0.07} />
+                                          <path d={line} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                                        </g>
+                                      )
+                                    })}
+                                    {/* x-axis baseline */}
+                                    <line x1={0} y1={CHART_H} x2={CW} y2={CHART_H} stroke="#e2e8f0" strokeWidth="0.5" />
+                                    {/* x-axis labels */}
+                                    {xLabels.map(({ n, i }, labelIdx) => (
+                                      <text key={i} x={xPos(i)} y={CHART_H + 10} fontSize="7"
+                                        fill="#94a3b8" fontFamily="monospace"
+                                        textAnchor={labelIdx === 0 ? 'start' : labelIdx === xLabels.length - 1 ? 'end' : 'middle'}>
+                                        {n}
+                                      </text>
+                                    ))}
+                                  </svg>
+                                </div>
+                                {/* fixed y-axis */}
+                                <div className="absolute top-0 right-0" style={{ width: AXIS_W }}>
+                                  <svg width={AXIS_W} height={CHART_H} viewBox={`0 0 ${AXIS_W} ${CHART_H}`} style={{ display: 'block' }}>
+                                    <line x1={2} y1={pad} x2={2} y2={CHART_H - pad} stroke="#cbd5e1" strokeWidth="0.5" />
+                                    {ticks.map(t => (
+                                      <g key={t}>
+                                        <line x1={0} y1={yPos(t)} x2={4} y2={yPos(t)} stroke="#cbd5e1" strokeWidth="0.5" />
+                                        <text x={6} y={yPos(t) + 3} fontSize="7" fill="#94a3b8" fontFamily="monospace">{t}%</text>
+                                      </g>
+                                    ))}
+                                  </svg>
                                 </div>
                               </div>
                             )
-                          })}
-                          {dominated && eligibleGatewaysParsed.length > 1 && (
-                            <p className="text-[11px] text-slate-400 pt-0.5">
-                              SR routing concentrates traffic on the highest-scoring gateway. Run with a "Gateway Down" scenario to see score drop and traffic shift to the next gateway.
-                            </p>
-                          )}
+                          })()}
+                          {!hasAnySpark && null}
                         </div>
                       )
                     })()}
+                    {Object.keys(gatewayStats).length === 1 && eligibleGatewaysParsed.length > 1 && (
+                      <p className="text-[11px] text-slate-400 pt-1">
+                        SR routing concentrates traffic on the highest-scoring gateway. Run with a "Gateway Down" scenario to see score drop and traffic shift to the next gateway.
+                      </p>
+                    )}
                   </CardBody>
                 </Card>
 
-                <Card className="flex-1 min-h-0">
-                  {(() => {
-                    const total = deferredSimulationResults.length
-                    const totalPages = Math.max(1, Math.ceil(total / TX_LOG_PAGE_SIZE))
-                    const safePage = Math.min(txLogPage, totalPages)
-                    const pageStart = (safePage - 1) * TX_LOG_PAGE_SIZE
-                    const pageResults = deferredSimulationResults.slice(pageStart, pageStart + TX_LOG_PAGE_SIZE)
-                    return (
-                      <>
-                        <CardHeader className="shrink-0 flex flex-row items-center justify-between gap-3">
-                          <h3 className="text-sm font-medium text-slate-800 dark:text-white">Transaction Log</h3>
-                          {total > 0 && (
-                            <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-                              <span>{pageStart + 1}–{Math.min(pageStart + TX_LOG_PAGE_SIZE, total)} of {total}</span>
-                              <button
-                                type="button"
-                                disabled={safePage <= 1}
-                                onClick={() => setTxLogPage(p => Math.max(1, p - 1))}
-                                className="rounded p-0.5 hover:bg-slate-100 dark:hover:bg-[#1c1c24] disabled:opacity-30 disabled:cursor-not-allowed"
-                              >
-                                <ChevronLeft size={14} />
-                              </button>
-                              <input
-                                type="number"
-                                min={1}
-                                max={totalPages}
-                                value={safePage}
-                                onChange={e => {
-                                  const v = parseInt(e.target.value)
-                                  if (!isNaN(v)) setTxLogPage(Math.min(totalPages, Math.max(1, v)))
-                                }}
-                                className="w-10 rounded border border-slate-200 dark:border-[#222226] bg-transparent px-1 py-0.5 text-center text-xs tabular-nums focus:outline-none focus:ring-1 focus:ring-brand-500 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                              />
-                              <span className="text-slate-400">/ {totalPages}</span>
-                              <button
-                                type="button"
-                                disabled={safePage >= totalPages}
-                                onClick={() => setTxLogPage(p => Math.min(totalPages, p + 1))}
-                                className="rounded p-0.5 hover:bg-slate-100 dark:hover:bg-[#1c1c24] disabled:opacity-30 disabled:cursor-not-allowed"
-                              >
-                                <ChevronRight size={14} />
-                              </button>
-                            </div>
-                          )}
-                        </CardHeader>
-                        <CardBody className="p-0 flex-1 min-h-0 overflow-auto">
-                          {total > 0 ? (
-                            <table className="w-full text-sm">
-                              <thead className="bg-slate-50 dark:bg-[#0a0a0f] text-xs text-slate-500 sticky top-0">
-                                <tr>
-                                  <th className="text-left px-3 py-2">#</th>
-                                  <th className="text-left px-3 py-2">Payment ID</th>
-                                  <th className="text-left px-3 py-2">Gateway</th>
-                                  <th className="text-left px-3 py-2">Routing</th>
-                                  <th className="text-left px-3 py-2">Outcome</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-[#1c1c24]">
-                                {pageResults.map((res) => {
-                                  const globalIdx = deferredSimulationResults.indexOf(res)
-                                  return (
-                                    <tr key={res.paymentId} className="hover:bg-slate-100 dark:bg-[#0f0f16]">
-                                      <td className="px-3 py-2 text-slate-500">{globalIdx + 1}</td>
-                                      <td className="px-3 py-2">
-                                        <button
-                                          type="button"
-                                          title={res.paymentId}
-                                          onClick={() => openAuditModal(res.paymentId)}
-                                          className="group flex items-start gap-3 text-left"
-                                        >
-                                          <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-brand-500/10 text-[11px] font-semibold uppercase tracking-[0.16em] text-brand-600 dark:text-brand-300">
-                                            {globalIdx + 1}
-                                          </span>
-                                          <span className="min-w-0">
-                                            <span className="block truncate font-mono text-xs font-semibold text-slate-900 transition group-hover:text-brand-600 dark:text-white">
-                                              {res.paymentId}
-                                            </span>
-                                            <span className="mt-1 block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 transition group-hover:text-brand-500">
-                                              View audit
-                                            </span>
-                                          </span>
-                                        </button>
-                                      </td>
-                                      <td className="px-3 py-2 font-medium">{res.decidedGateway}</td>
-                                      <td className="px-3 py-2">
-                                        {res.routingApproach === 'SR_V3_HEDGING' ? (
-                                          <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700 ring-1 ring-inset ring-brand-200 dark:bg-brand-900/20 dark:text-brand-300 dark:ring-brand-800">
-                                            Hedging
-                                          </span>
-                                        ) : (
-                                          <span className="text-[11px] text-slate-400">
-                                            {res.routingApproach === 'SR_SELECTION_V3_ROUTING' ? 'SR V3' : (res.routingApproach ?? '—')}
-                                          </span>
-                                        )}
-                                      </td>
-                                      <td className="px-3 py-2">
-                                        <Badge variant={res.status === 'CHARGED' ? 'green' : res.status === 'PENDING_VBV' ? 'orange' : 'red'}>
-                                          {res.status}
-                                        </Badge>
-                                      </td>
-                                    </tr>
-                                  )
-                                })}
-                              </tbody>
-                            </table>
-                          ) : (
-                            <div className="flex items-center gap-3 px-4 py-6 text-sm text-slate-500">
-                              <Spinner size={16} />
-                              Waiting for the first simulated payment result…
-                            </div>
-                          )}
-                        </CardBody>
-                      </>
-                    )
-                  })()}
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between gap-3">
+                    <h3 className="text-sm font-medium text-slate-800 dark:text-white">Transaction Log</h3>
+                    {deferredSimulationResults.length > 0 && (
+                      <span className="text-xs text-slate-400 tabular-nums">{deferredSimulationResults.length} transactions</span>
+                    )}
+                  </CardHeader>
+                  <CardBody className="p-0">
+                    {deferredSimulationResults.length > 0 ? (
+                      <div ref={txLogRef} className="max-h-[480px] overflow-auto">
+                        <table className="w-full text-sm">
+                          <thead className="bg-slate-50 dark:bg-[#0a0a0f] text-xs text-slate-500 sticky top-0">
+                            <tr>
+                              <th className="text-left px-3 py-2">#</th>
+                              <th className="text-left px-3 py-2">Payment ID</th>
+                              <th className="text-left px-3 py-2">Gateway</th>
+                              <th className="text-left px-3 py-2">Routing</th>
+                              <th className="text-left px-3 py-2">Outcome</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-[#1c1c24]">
+                            {deferredSimulationResults.map((res, idx) => (
+                              <tr key={res.paymentId} className="hover:bg-slate-100 dark:bg-[#0f0f16]">
+                                <td className="px-3 py-2 text-slate-500">{idx + 1}</td>
+                                <td className="px-3 py-2">
+                                  <button
+                                    type="button"
+                                    title={res.paymentId}
+                                    onClick={() => openAuditModal(res.paymentId)}
+                                    className="group flex items-start gap-3 text-left"
+                                  >
+                                    <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-brand-500/10 text-[11px] font-semibold uppercase tracking-[0.16em] text-brand-600 dark:text-brand-300">
+                                      {idx + 1}
+                                    </span>
+                                    <span className="min-w-0">
+                                      <span className="block truncate font-mono text-xs font-semibold text-slate-900 transition group-hover:text-brand-600 dark:text-white">
+                                        {res.paymentId}
+                                      </span>
+                                      <span className="mt-1 block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 transition group-hover:text-brand-500">
+                                        View audit
+                                      </span>
+                                    </span>
+                                  </button>
+                                </td>
+                                <td className="px-3 py-2 font-medium">{res.decidedGateway}</td>
+                                <td className="px-3 py-2">
+                                  {res.routingApproach?.includes('HEDGING') ? (
+                                    <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700 ring-1 ring-inset ring-brand-200 dark:bg-brand-900/20 dark:text-brand-300 dark:ring-brand-800">
+                                      Hedging
+                                    </span>
+                                  ) : (
+                                    <span className="text-[11px] text-slate-400">
+                                      {res.routingApproach === 'SR_SELECTION_V3_ROUTING' ? 'SR V3' : (res.routingApproach ?? '—')}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2">
+                                  <Badge variant={res.status === 'CHARGED' ? 'green' : res.status === 'PENDING_VBV' ? 'orange' : 'red'}>
+                                    {res.status}
+                                  </Badge>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-3 px-4 py-6 text-sm text-slate-500">
+                        <Spinner size={16} />
+                        Waiting for the first simulated payment result…
+                      </div>
+                    )}
+                  </CardBody>
                 </Card>
               </>
             ) : (

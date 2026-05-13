@@ -32,6 +32,24 @@ describe('Merchant CRUD API', () => {
       expect(response.merchant_id).to.eq(testMerchantId)
     })
 
+    // Must return non-200 immediately after deletion — validates cache eviction
+    // on delete so a cached entry doesn't ghost the deleted merchant.
+    cy.getMerchantAccount(testMerchantId, { failOnStatusCode: false }).then(({ status }) => {
+      expect(status).to.not.eq(200)
+    })
+  })
+
+  it('deleted merchant is not served from cache on immediate re-fetch', () => {
+    cy.createMerchantAccount(testMerchantId)
+
+    // Warm the cache with a successful GET
+    cy.getMerchantAccount(testMerchantId).then(({ response }) => {
+      expect(response).to.haveValidMerchantGetResponse()
+    })
+
+    cy.deleteMerchantAccount(testMerchantId)
+
+    // The cache must be evicted — stale hit would return 200 here
     cy.getMerchantAccount(testMerchantId, { failOnStatusCode: false }).then(({ status }) => {
       expect(status).to.not.eq(200)
     })
