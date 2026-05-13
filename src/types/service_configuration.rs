@@ -55,7 +55,9 @@ pub async fn update_config(
     value: Option<String>,
 ) -> error_stack::Result<(), crate::generics::MeshError> {
     let app_state = get_tenant_app_state().await;
-    let values = ServiceConfigurationUpdate { value: value.clone() };
+    let values = ServiceConfigurationUpdate {
+        value: value.clone(),
+    };
     let conn = &app_state
         .db
         .get_conn()

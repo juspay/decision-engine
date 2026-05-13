@@ -173,7 +173,8 @@ where
             logger::debug!(
                 tag = "redis_cache",
                 action = "negative_hit",
-                "Redis negative cache hit for key: {}", key
+                "Redis negative cache hit for key: {}",
+                key
             );
             set_to_memory_cache(&prefixed_key, "", ttl_seconds_u64).await;
             return None;
