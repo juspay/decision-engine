@@ -25,9 +25,11 @@ export default defineConfig(({ command }) => {
       proxy.on('error', (err, req, res) => {
         console.log(`\n[PROXY ERROR] ${new Date().toISOString()}`)
         console.log(`Error forwarding ${req.url}:`, err.message)
-        if (res && !res.headersSent) {
-          res.writeHead(502, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ error: 'Backend unavailable', message: err.message }))
+        // res can be a net.Socket (WebSocket upgrade) — only write an HTTP
+        // response when it actually has writeHead (i.e. is ServerResponse).
+        if (res && typeof (res as any).writeHead === 'function' && !(res as any).headersSent) {
+          ;(res as any).writeHead(502, { 'Content-Type': 'application/json' })
+          ;(res as any).end(JSON.stringify({ error: 'Backend unavailable', message: err.message }))
         }
       })
     },

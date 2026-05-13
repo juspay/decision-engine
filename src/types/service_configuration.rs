@@ -32,11 +32,10 @@ pub async fn insert_config(
     value: Option<String>,
 ) -> error_stack::Result<(), crate::generics::MeshError> {
     let app_state = get_tenant_app_state().await;
-    let cached_value = value.clone().unwrap_or_default();
 
     let config = ServiceConfigurationNew {
         name: name.clone(),
-        value,
+        value: value.clone(),
         new_value: None,
         previous_value: None,
         new_value_status: None,
@@ -44,7 +43,10 @@ pub async fn insert_config(
 
     crate::generics::generic_insert(&app_state.db, config).await?;
 
-    write_through_service_config(name, &cached_value).await;
+    match value {
+        Some(v) => write_through_service_config(name, &v).await,
+        None => evict_service_config(name).await,
+    }
     Ok(())
 }
 
@@ -53,8 +55,7 @@ pub async fn update_config(
     value: Option<String>,
 ) -> error_stack::Result<(), crate::generics::MeshError> {
     let app_state = get_tenant_app_state().await;
-    let cached_value = value.clone().unwrap_or_default();
-    let values = ServiceConfigurationUpdate { value };
+    let values = ServiceConfigurationUpdate { value: value.clone() };
     let conn = &app_state
         .db
         .get_conn()
@@ -67,7 +68,10 @@ pub async fn update_config(
     >(conn, dsl::name.eq(name.clone()), values)
     .await?;
 
-    write_through_service_config(name, &cached_value).await;
+    match value {
+        Some(v) => write_through_service_config(name, &v).await,
+        None => evict_service_config(name).await,
+    }
     Ok(())
 }
 

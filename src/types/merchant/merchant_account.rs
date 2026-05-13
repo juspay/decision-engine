@@ -278,10 +278,11 @@ pub async fn delete_merchant_account(
     // Use Diesel's query builder with multiple conditions
     crate::generics::generic_delete::<<DBMerchantAccount as HasTable>::Table, _>(
         conn,
-        dsl::merchant_id.eq(merchant_id),
+        dsl::merchant_id.eq(merchant_id.clone()),
     )
     .await?;
 
+    let _ = GLOBAL_CACHE.remove(&format!("merchant_acct_{}", merchant_id));
     Ok(())
 }
 

@@ -166,6 +166,18 @@ where
                 None => extractValue(redis_value),
             };
         }
+        Ok(_) => {
+            // Empty string is a negative-cache sentinel written by evict_service_config.
+            // Propagate it to the memory cache so subsequent lookups in this process
+            // short-circuit here instead of falling through to the DB again.
+            logger::debug!(
+                tag = "redis_cache",
+                action = "negative_hit",
+                "Redis negative cache hit for key: {}", key
+            );
+            set_to_memory_cache(&prefixed_key, "", ttl_seconds_u64).await;
+            return None;
+        }
         _ => {
             logger::debug!(
                 tag = "redis_cache",
