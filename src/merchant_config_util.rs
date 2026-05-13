@@ -163,14 +163,15 @@ pub async fn isMerchantEnabledForPaymentFlows(
     let is_valid_length = mc_arr.iter().count() == payment_flows.len();
     let are_all_pfs_enabled = mc_arr.iter().all(|mc| mc.status == ConfigStatus::ENABLED);
     if !is_valid_length {
-        logMerConfigLengthMisMatchError(
-            flow_texts,
-            mc_arr.into_iter().collect(),
-        );
+        logMerConfigLengthMisMatchError(flow_texts, mc_arr.into_iter().collect());
     }
     let result = is_valid_length && are_all_pfs_enabled;
 
-    let ttl = get_tenant_app_state().await.config.cache_config.service_config_ttl as u64;
+    let ttl = get_tenant_app_state()
+        .await
+        .config
+        .cache_config
+        .service_config_ttl as u64;
     let _ = GLOBAL_CACHE.store(cache_key, result, Some(ttl));
 
     result
