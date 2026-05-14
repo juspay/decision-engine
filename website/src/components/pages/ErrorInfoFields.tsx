@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { RotateCcw, ChevronDown } from 'lucide-react'
 import { Combobox } from '../ui/Combobox'
 import { Tooltip } from '../ui/Tooltip'
 
@@ -35,8 +35,8 @@ interface ErrorInfoFieldsProps {
 }
 
 const inputClass =
-  'w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500'
-const labelClass = 'block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1'
+  'w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500 text-slate-800 dark:text-slate-100 placeholder-slate-400'
+const labelClass = 'block text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1'
 
 export function ErrorInfoFields({ info, onChange, rules, connector }: ErrorInfoFieldsProps) {
   const [open, setOpen] = useState(false)
@@ -69,37 +69,45 @@ export function ErrorInfoFields({ info, onChange, rules, connector }: ErrorInfoF
   const hasValues = Object.values(info).some(Boolean)
 
   return (
-    <div className="border-t border-slate-200 dark:border-[#1c1c24] pt-3 mt-1">
-      <div className="flex items-center gap-1">
-        <button
-          type="button"
-          onClick={() => setOpen(o => !o)}
-          className="flex flex-1 items-center justify-between text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100"
-        >
-          <span>Error Info</span>
-          <svg
-            className={`h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
-            viewBox="0 0 20 20"
-            fill="currentColor"
-          >
-            <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-          </svg>
-        </button>
-        {hasValues && (
-          <Tooltip text="Clear all fields">
-            <button
-              type="button"
-              onClick={() => onChange({ error_code: '', error_message: '', issuer_error_code: '', card_network: '' })}
-              className="ml-1 rounded p-0.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-[#1c1c24] hover:text-slate-600 dark:hover:text-slate-200"
-            >
-              <RefreshCw size={12} />
-            </button>
-          </Tooltip>
-        )}
-      </div>
+    <div className="rounded-lg border border-slate-200 dark:border-[#222226] overflow-hidden">
+      {/* Header row */}
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-2.5 py-2 bg-slate-50 dark:bg-[#0d0d13] hover:bg-slate-100 dark:hover:bg-[#111118] transition-colors"
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 shrink-0">
+            Decline Error
+          </span>
+          {hasValues && info.error_code && (
+            <span className="truncate font-mono text-[10px] text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/30 px-1.5 py-0.5 rounded">
+              {info.error_code}
+            </span>
+          )}
+          {!hasValues && (
+            <span className="text-[10px] text-slate-400 dark:text-slate-600">not set</span>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {hasValues && (
+            <Tooltip text="Clear error info">
+              <span
+                role="button"
+                onClick={e => { e.stopPropagation(); onChange({ error_code: '', error_message: '', issuer_error_code: '', card_network: '' }) }}
+                className="rounded p-0.5 text-slate-400 hover:text-red-400 transition-colors"
+              >
+                <RotateCcw size={11} />
+              </span>
+            </Tooltip>
+          )}
+          <ChevronDown size={13} className={`text-slate-400 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+        </div>
+      </button>
 
+      {/* Expanded fields */}
       {open && (
-        <div className="space-y-2 mt-2">
+        <div className="px-2.5 py-2.5 space-y-2 border-t border-slate-200 dark:border-[#222226]">
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className={labelClass}>Error Code</label>
@@ -107,25 +115,16 @@ export function ErrorInfoFields({ info, onChange, rules, connector }: ErrorInfoF
                 value={info.error_code}
                 onChange={v => onChange({ error_code: v, error_message: '' })}
                 options={errorCodes}
-                placeholder="declined"
+                placeholder="e.g. declined"
                 className={inputClass}
               />
             </div>
             <div>
-              <label className={labelClass}>Issuer Error Code</label>
+              <label className={labelClass}>Issuer Code</label>
               <input
                 value={info.issuer_error_code}
                 onChange={e => onChange({ issuer_error_code: e.target.value })}
-                placeholder="51"
-                className={inputClass}
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Card Network</label>
-              <input
-                value={info.card_network}
-                onChange={e => onChange({ card_network: e.target.value })}
-                placeholder="Visa"
+                placeholder="e.g. 51"
                 className={inputClass}
               />
             </div>
@@ -136,7 +135,16 @@ export function ErrorInfoFields({ info, onChange, rules, connector }: ErrorInfoF
               value={info.error_message}
               onChange={v => onChange({ error_message: v })}
               options={errorMessages}
-              placeholder="Insufficient funds"
+              placeholder="e.g. Insufficient funds"
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label className={labelClass}>Card Network</label>
+            <input
+              value={info.card_network}
+              onChange={e => onChange({ card_network: e.target.value })}
+              placeholder="e.g. Visa"
               className={inputClass}
             />
           </div>
