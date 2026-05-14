@@ -11,6 +11,7 @@ import { Card, CardBody, CardHeader, SurfaceLabel } from '../ui/Card'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { Spinner } from '../ui/Spinner'
 import { useMerchantStore } from '../../store/merchantStore'
+import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
 import { useAuthStore } from '../../store/authStore'
 import { apiPost, fetcher } from '../../lib/api'
 import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
@@ -744,6 +745,8 @@ export function DecisionExplorerPage() {
     authUser?.email || '',
     effectiveMerchantId,
   )
+  const merchantFeatures = useMerchantFeatures(effectiveMerchantId || undefined)
+  const gsmScoringFilterEnabled = merchantFeatures.isEnabled('gsm-scoring-filter')
   const debitRoutingFlag = useDebitRoutingFlag(effectiveMerchantId)
   const { routingKeysConfig, isLoading: routingKeysLoading, error: routingKeysError } = useDynamicRoutingConfig()
   const hasRoutingKeys = Object.keys(routingKeysConfig).length > 0
@@ -1018,6 +1021,7 @@ export function DecisionExplorerPage() {
     setError(null)
     setSetupPrompt(null)
     setLoading(false)
+    simulationAbortRef.current = true
     setIsSimulating(false)
   }
 
@@ -1061,6 +1065,7 @@ export function DecisionExplorerPage() {
     setError(null)
     setSetupPrompt(null)
     setLoading(false)
+    simulationAbortRef.current = true
     setIsSimulating(false)
   }
 
@@ -1090,6 +1095,8 @@ export function DecisionExplorerPage() {
 
   useEffect(() => {
     if (stateScopeKey !== currentScopeKey) return
+    // Skip persisting mid-run — results are flushed once the run completes.
+    if (isSimulating || loading) return
 
     const nextState: ExplorerPersistedState = {
       scopeKey: currentScopeKey,
@@ -1122,6 +1129,8 @@ export function DecisionExplorerPage() {
   }, [
     currentScopeKey,
     stateScopeKey,
+    isSimulating,
+    loading,
     resultDataUpdatedAtMs,
     activeTab,
     form,
@@ -1406,6 +1415,7 @@ export function DecisionExplorerPage() {
     const results: SimulationResult[] = []
     const MAX_CONSECUTIVE_ERRORS = 3
     let consecutiveErrors = 0
+    let lastUIUpdate = 0
 
     try {
       for (let i = 0; i < total; i++) {
@@ -1456,23 +1466,26 @@ export function DecisionExplorerPage() {
             gatewayPriorityMap: decideRes.gateway_priority_map ?? null,
           })
 
-          setSimulationResults([...results])
-          markExplorerRunDataUpdated()
           consecutiveErrors = 0
+
+          const now = Date.now()
+          if (now - lastUIUpdate > 150 || i === total - 1) {
+            setSimulationResults([...results])
+            markExplorerRunDataUpdated()
+            lastUIUpdate = now
+          }
         } catch (e: unknown) {
           consecutiveErrors++
           if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
             handleRunError(e, 'batch', `Simulation stopped after ${MAX_CONSECUTIVE_ERRORS} consecutive backend errors. Check that the server is running.`)
             return
           }
-          // transient error — wait and skip this iteration
           await new Promise(resolve => setTimeout(resolve, 1000))
           continue
         }
-
-        await new Promise(resolve => setTimeout(resolve, 50))
       }
     } finally {
+      setSimulationResults([...results])
       setIsSimulating(false)
     }
   }
@@ -1571,10 +1584,7 @@ export function DecisionExplorerPage() {
             const response = await apiPost<RuleEvaluateResponse>('/routing/evaluate', {
               created_by: effectiveMerchantId,
               payment_id: paymentId,
-              fallback_output: [
-                { gateway_name: 'stripe', gateway_id: 'gateway_001' },
-                { gateway_name: 'adyen', gateway_id: 'gateway_002' },
-              ],
+              fallback_output: fallbackConnectors.filter(c => c.gateway_name),
               parameters: {},
             })
 
@@ -1602,7 +1612,7 @@ export function DecisionExplorerPage() {
         }
 
         setVolumeProgress(logEntries.length)
-        setVolumeEvaluationLog(logEntries)
+        setVolumeEvaluationLog([...logEntries])
         setVolumeDistribution(buildDistribution(logEntries.length))
         markExplorerRunDataUpdated()
       }
@@ -1632,7 +1642,7 @@ export function DecisionExplorerPage() {
     [form.eligible_gateways],
   )
 
-  const gatewayStats = deferredSimulationResults.reduce((acc, curr) => {
+  const gatewayStats = useMemo(() => deferredSimulationResults.reduce((acc, curr) => {
     if (!acc[curr.decidedGateway]) {
       acc[curr.decidedGateway] = { total: 0, success: 0, failure: 0 }
     }
@@ -1640,52 +1650,72 @@ export function DecisionExplorerPage() {
     if (curr.status === 'CHARGED') acc[curr.decidedGateway].success++
     else acc[curr.decidedGateway].failure++
     return acc
-  }, {} as Record<string, { total: number; success: number; failure: number }>)
+  }, {} as Record<string, { total: number; success: number; failure: number }>), [deferredSimulationResults])
 
-  // Plot the gatewayPriorityMap score (algorithm's internal SR score) for each
-  // gateway over time. For each sample point we search backwards to find the
-  // most recent result that contained a score for that gateway, avoiding spikes
-  // from results where the map was null or the gateway was absent.
+  // Single forward pass: carry the last seen non-hedging score for each gateway forward,
+  // sampling every `step` results. O(n) vs the previous O(n × MAX_PTS) backward search.
   const gatewaySparklines = useMemo(() => {
     const results = deferredSimulationResults
-    if (results.length < 2) return { series: {} as Record<string, number[]>, paymentNums: [] as number[] }
+    const empty = { series: {} as Record<string, number[]>, paymentNums: [] as number[], yMin: 0, yMax: 100 }
+    if (results.length < 2) return empty
 
     const MAX_PTS = 200
     const step = Math.max(1, Math.floor(results.length / MAX_PTS))
-    const sampled = results.filter((_, i) => i % step === 0 || i === results.length - 1)
-    const paymentNums = sampled.map((_, i) => {
-      const originalIdx = Math.min(i * step, results.length - 1)
-      return originalIdx + 1
-    })
-
+    const gateways = Object.keys(gatewayStats)
+    const lastScore: Record<string, number> = {}
     const series: Record<string, number[]> = {}
-    Object.keys(gatewayStats).forEach(gw => {
-      series[gw] = sampled.map((_, sampleIdx) => {
-        const upToOriginalIdx = Math.min(sampleIdx * step, results.length - 1)
-        // Search backwards for the most recent non-hedging result with a score for this gateway.
-        // Hedging results use exploration scores (1.0 for all gateways) which don't reflect real SR.
-        for (let i = upToOriginalIdx; i >= 0; i--) {
-          if (results[i].routingApproach?.includes('HEDGING')) continue
-          const score = results[i].gatewayPriorityMap?.[gw]
-          if (score !== undefined && score !== null) {
-            return Math.round(score * 100)
-          }
+    gateways.forEach(gw => { series[gw] = [] })
+    const paymentNums: number[] = []
+
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i]
+      if (!r.routingApproach?.includes('HEDGING') && r.gatewayPriorityMap) {
+        for (const gw of gateways) {
+          const score = r.gatewayPriorityMap[gw]
+          if (score !== undefined && score !== null) lastScore[gw] = Math.round(score * 100)
         }
-        return 0
-      })
-    })
-    return { series, paymentNums }
+      }
+      if (i % step === 0 || i === results.length - 1) {
+        paymentNums.push(i + 1)
+        for (const gw of gateways) series[gw].push(lastScore[gw] ?? 0)
+      }
+    }
+
+    // Compute y-axis range here to avoid flatMap+spread in render
+    let obsMin = 100, obsMax = 0
+    for (const gw of gateways) {
+      for (const v of series[gw]) {
+        if (v > 0) { if (v < obsMin) obsMin = v; if (v > obsMax) obsMax = v }
+      }
+    }
+    if (obsMin > obsMax) { obsMin = 0; obsMax = 100 }
+    const yMin = Math.max(0, obsMin - 5)
+    const yMax = Math.min(100, obsMax + 5)
+
+    return { series, paymentNums, yMin, yMax }
   }, [deferredSimulationResults, gatewayStats])
 
-  const hedgingHits = deferredSimulationResults.filter(
-    r => r.routingApproach?.includes('HEDGING'),
-  ).length
+  const hedgingHits = useMemo(
+    () => deferredSimulationResults.filter(r => r.routingApproach?.includes('HEDGING')).length,
+    [deferredSimulationResults],
+  )
 
-const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
+  const pieData = useMemo(
+    () => volumeDistribution.map(d => ({ name: d.name, value: d.count })),
+    [volumeDistribution],
+  )
   const debitNetworkRows = debitResult?.debit_routing_output?.co_badged_card_networks_info || []
   const volumeColorIndex = useMemo(
     () => new Map(volumeDistribution.map((item, index) => [item.name, index] as const)),
     [volumeDistribution],
+  )
+  const sortedGatewayStats = useMemo(
+    () => Object.entries(gatewayStats).sort((a, b) => b[1].total - a[1].total),
+    [gatewayStats],
+  )
+  const totalRoutedPayments = useMemo(
+    () => Object.values(gatewayStats).reduce((s, g) => s + g.total, 0),
+    [gatewayStats],
   )
   const sortedVolumeDistribution = useMemo(
     () => [...volumeDistribution].sort((a, b) => b.count - a.count),
@@ -2288,62 +2318,28 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
               </div>
             ) : (
               <>
-                <div className="grid grid-cols-3 gap-2">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">Amount</label>
-                    <input value={form.amount} onChange={e => set('amount', e.target.value)}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500" />
+                <div className="space-y-2">
+                  <div className="grid grid-cols-3 gap-x-3 gap-y-2.5">
+                    {([
+                      { label: 'Amount', content: <input value={form.amount} onChange={e => set('amount', e.target.value)} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500" /> },
+                      { label: 'Currency', content: <select value={form.currency} onChange={e => set('currency', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{currencyOptions.map(c => <option key={c} value={c}>{c}</option>)}</select> },
+                      { label: 'Method Type', content: <select value={form.payment_method_type} onChange={e => set('payment_method_type', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{paymentMethodTypeOptions.map(p => <option key={p} value={p}>{formatOptionLabel(p)}</option>)}</select> },
+                      { label: 'Payment Method', content: <select value={form.payment_method} onChange={e => set('payment_method', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{paymentMethodOptions.map(p => <option key={p} value={p}>{formatOptionLabel(p)}</option>)}</select> },
+                      { label: 'Card Brand', content: <select value={form.card_brand} onChange={e => set('card_brand', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{cardBrandOptions.map(b => <option key={b} value={b}>{formatOptionLabel(b)}</option>)}</select> },
+                      { label: 'Auth Type', content: <select value={form.auth_type} onChange={e => set('auth_type', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{authTypeOptions.map(a => <option key={a} value={a}>{formatOptionLabel(a)}</option>)}</select> },
+                    ] as { label: string; content: React.ReactNode }[]).map(({ label, content }) => (
+                      <div key={label}>
+                        <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">{label}</label>
+                        {content}
+                      </div>
+                    ))}
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">Currency</label>
-                    <select value={form.currency} onChange={e => set('currency', e.target.value)}
-                      disabled={routingConfigUnavailable || routingKeysLoading}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
-                      {currencyOptions.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">Payment Method Type</label>
-                    <select value={form.payment_method_type} onChange={e => set('payment_method_type', e.target.value)}
-                      disabled={routingConfigUnavailable || routingKeysLoading}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
-                      {paymentMethodTypeOptions.map(p => <option key={p} value={p}>{formatOptionLabel(p)}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">Payment Method</label>
-                    <select value={form.payment_method} onChange={e => set('payment_method', e.target.value)}
-                      disabled={routingConfigUnavailable || routingKeysLoading}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
-                      {paymentMethodOptions.map(p => <option key={p} value={p}>{formatOptionLabel(p)}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">Card Brand</label>
-                    <select value={form.card_brand} onChange={e => set('card_brand', e.target.value)}
-                      disabled={routingConfigUnavailable || routingKeysLoading}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
-                      {cardBrandOptions.map(b => <option key={b} value={b}>{formatOptionLabel(b)}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">Auth Type</label>
-                    <select value={form.auth_type} onChange={e => set('auth_type', e.target.value)}
-                      disabled={routingConfigUnavailable || routingKeysLoading}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
-                      {authTypeOptions.map(a => <option key={a} value={a}>{formatOptionLabel(a)}</option>)}
-                    </select>
-                  </div>
-                </div>
-
-
-                <div className="rounded-lg border border-slate-200 dark:border-[#222226] overflow-hidden">
-                  <div className="flex items-center gap-3 px-3 py-2 border-b border-slate-100 dark:border-[#1e1e28]">
-                    <span className="text-xs font-medium text-slate-500 dark:text-slate-400 w-24 shrink-0">Algorithm</span>
+                    <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">Algorithm</label>
                     <select
                       value={form.ranking_algorithm}
                       onChange={e => set('ranking_algorithm', e.target.value as RoutingAlgorithmName)}
-                      className="w-full bg-transparent text-sm font-medium text-slate-700 dark:text-slate-200 focus:outline-none cursor-pointer"
+                      className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm font-medium text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 cursor-pointer"
                     >
                       {ALGORITHMS.map(a => <option key={a} value={a}>{ALGORITHM_LABELS[a]}</option>)}
                     </select>
@@ -2371,14 +2367,15 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                 )}
 
                 {activeTab === 'batch' && (
-                  <div className="border-t border-slate-200 dark:border-[#1c1c24] pt-3">
-                    <div className="flex items-center justify-between mb-2.5">
-                      <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-[#4e5870] flex items-center gap-1.5">
-                        <Activity size={11} />
-                        Simulation
-                      </span>
+                  <div className="border-t border-slate-100 dark:border-[#1c1c24] pt-4 space-y-3">
+                    {/* Simulation header */}
+                    <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
-                        <span className="text-[11px] text-slate-500 dark:text-slate-400">Payments</span>
+                        <Activity size={11} className="text-slate-400 dark:text-slate-500" />
+                        <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Simulation</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Payments</label>
                         <input
                           type="number"
                           min={1}
@@ -2389,22 +2386,34 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                             const total = Math.max(1, Math.min(5000, parseInt(e.target.value) || 1))
                             setSimulationConfig({ totalPayments: String(total) })
                           }}
-                          className="w-16 border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm text-center focus:outline-none focus:ring-1 focus:ring-brand-500 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                          className="w-20 bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                         />
                       </div>
                     </div>
+
+                    {/* Gateway cards */}
                     <div className="grid grid-cols-2 gap-2">
                       {eligibleGatewaysParsed.map(gw => {
                         const gwRate = gatewaySimConfigs[gw]?.successRate ?? 70
                         const gwErrInfo = gatewaySimConfigs[gw]?.errorInfo ?? { ...DEFAULT_ERROR_INFO }
                         const gwFailureMode = gatewaySimConfigs[gw]?.failureMode ?? 'decline'
                         const hasFailures = gwRate < 100
+                        const rateColor = gwRate >= 80 ? 'text-emerald-600 dark:text-emerald-400' : gwRate >= 50 ? 'text-amber-500 dark:text-amber-400' : 'text-red-500 dark:text-red-400'
+                        const trackColor = gwRate >= 80 ? '#10b981' : gwRate >= 50 ? '#f59e0b' : '#ef4444'
                         return (
-                          <div key={gw} className="rounded-lg border border-slate-200 dark:border-[#222226] p-2.5 space-y-1.5">
+                          <div key={gw} className="rounded-xl border border-slate-200 dark:border-[#222226] bg-white dark:bg-[#0a0a10] p-2.5 space-y-2">
+                            {/* Card header */}
                             <div className="flex items-center justify-between">
-                              <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 capitalize">{gw}</span>
+                              <div className="flex items-center gap-2">
+                                <div className="flex h-5 w-5 items-center justify-center rounded-md bg-slate-100 dark:bg-[#1a1a24] text-[9px] font-bold text-slate-600 dark:text-slate-300 uppercase">
+                                  {gw.charAt(0)}
+                                </div>
+                                <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 capitalize">{gw}</span>
+                              </div>
                               <div className="flex items-center gap-1.5">
-                                <span className="text-xs font-semibold text-brand-600 dark:text-sky-400">{gwRate}%</span>
+                                <UiTooltip text="Simulated success rate for this gateway">
+                                  <span className={`text-xs font-bold tabular-nums ${rateColor}`}>{gwRate}% success</span>
+                                </UiTooltip>
                                 <button
                                   type="button"
                                   disabled={isSimulating}
@@ -2415,21 +2424,28 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                                 </button>
                               </div>
                             </div>
-                            <input
-                              type="range"
-                              min={0}
-                              max={100}
-                              value={gwRate}
-                              onChange={e => setGwSuccessRate(gw, parseInt(e.target.value))}
-                              className="w-full accent-brand-600"
-                            />
+
+                            {/* Slider */}
+                            <div className="space-y-1">
+                              <input
+                                type="range"
+                                min={0}
+                                max={100}
+                                value={gwRate}
+                                onChange={e => setGwSuccessRate(gw, parseInt(e.target.value))}
+                                style={{ accentColor: trackColor }}
+                                className="w-full h-1.5 cursor-pointer"
+                              />
+                            </div>
+
+                            {/* Failure mode toggle */}
                             {hasFailures && (
-                              <div className={`flex rounded-md overflow-hidden border text-[10px] font-medium ${isSimulating ? 'border-slate-100 dark:border-[#1c1c24] opacity-50 cursor-not-allowed' : 'border-slate-200 dark:border-[#222226]'}`}>
+                              <div className={`grid grid-cols-2 rounded-lg overflow-hidden border text-[10px] font-semibold ${isSimulating ? 'opacity-50 pointer-events-none border-slate-100 dark:border-[#1c1c24]' : 'border-slate-200 dark:border-[#222226]'}`}>
                                 <button
                                   type="button"
                                   disabled={isSimulating}
                                   onClick={() => setGwFailureMode(gw, 'decline')}
-                                  className={`flex-1 py-0.5 transition-colors disabled:pointer-events-none ${gwFailureMode === 'decline' ? 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
+                                  className={`py-1 transition-colors ${gwFailureMode === 'decline' ? 'bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
                                 >
                                   Decline
                                 </button>
@@ -2437,91 +2453,109 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                                   type="button"
                                   disabled={isSimulating}
                                   onClick={() => setGwFailureMode(gw, 'timeout')}
-                                  className={`flex-1 py-0.5 border-l border-slate-200 dark:border-[#222226] transition-colors disabled:pointer-events-none ${gwFailureMode === 'timeout' ? 'bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
+                                  className={`py-1 border-l border-slate-200 dark:border-[#222226] transition-colors ${gwFailureMode === 'timeout' ? 'bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
                                 >
                                   Timeout
                                 </button>
                               </div>
                             )}
+
                             {hasFailures && gwFailureMode === 'timeout' && (
-                              <div className={`text-[10px] px-2 py-1 rounded ${eliminationConfigured ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400' : 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400'}`}>
+                              <p className={`text-[10px] px-2 py-1.5 rounded-lg ${eliminationConfigured ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400' : 'bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400'}`}>
                                 {eliminationConfigured
-                                  ? `Gateway will be removed from routing when its score drops below ${eliminationConfig!.config.data.threshold} threshold.`
-                                  : 'Elimination is not configured. Set it up in SR Routing settings for this to take effect.'}
-                              </div>
+                                  ? `Removed from routing below ${eliminationConfig!.config.data.threshold} threshold.`
+                                  : 'Elimination not configured. Set it up in SR Routing settings.'}
+                              </p>
                             )}
+
                             {hasFailures && gwFailureMode === 'decline' && (
-                              <div className="space-y-1.5">
-                                <div className="flex flex-wrap gap-1">
-                                  {errorScenarioPresets.filter(p => p.variants[gw]).map(preset => {
-                                    const variant = preset.variants[gw]
-                                    const isActive = variant != null &&
-                                      gwErrInfo.error_code === variant.error_code
-                                    return (
-                                      <UiTooltip key={preset.label} text={preset.tooltip}>
-                                        <button
-                                          type="button"
-                                          onClick={() => setGwErrorInfoField(gw, { ...variant })}
-                                          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset transition-colors ${
-                                            isActive
-                                              ? preset.badge === 'protected'
-                                                ? 'bg-emerald-50 text-emerald-700 ring-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-300 dark:ring-emerald-700'
-                                                : 'bg-red-50 text-red-700 ring-red-300 dark:bg-red-900/30 dark:text-red-300 dark:ring-red-700'
-                                              : 'bg-slate-50 text-slate-600 ring-slate-200 hover:bg-slate-100 dark:bg-[#1c1c24] dark:text-slate-400 dark:ring-[#2a2a35] dark:hover:bg-[#222230]'
-                                          }`}
-                                        >
-                                          <span className={`h-1.5 w-1.5 rounded-full ${preset.badge === 'protected' ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                                          {preset.label}
-                                        </button>
-                                      </UiTooltip>
-                                    )
-                                  })}
-                                </div>
-                                <ErrorInfoFields
-                                  info={gwErrInfo}
-                                  onChange={updates => setGwErrorInfoField(gw, updates)}
-                                  rules={gsmRules}
-                                  connector={gw}
-                                />
+                              <div className="space-y-2">
+                                {!gsmScoringFilterEnabled ? (
+                                  <p className="text-[10px] px-2 py-1.5 rounded-lg border border-slate-200 dark:border-[#2a2a35] bg-slate-50 dark:bg-[#1c1c24] text-slate-500 dark:text-slate-400">
+                                    GSM scoring filter disabled. Enable it in SR Routing settings.
+                                  </p>
+                                ) : (
+                                  <>
+                                    <div className="flex flex-wrap gap-1">
+                                      {errorScenarioPresets.filter(p => p.variants[gw]).map(preset => {
+                                        const variant = preset.variants[gw]
+                                        const isActive = variant != null && gwErrInfo.error_code === variant.error_code
+                                        return (
+                                          <UiTooltip key={preset.label} text={preset.tooltip}>
+                                            <button
+                                              type="button"
+                                              onClick={() => setGwErrorInfoField(gw, { ...variant })}
+                                              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset transition-colors ${
+                                                isActive
+                                                  ? preset.badge === 'protected'
+                                                    ? 'bg-emerald-50 text-emerald-700 ring-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-300 dark:ring-emerald-700'
+                                                    : 'bg-red-50 text-red-700 ring-red-300 dark:bg-red-900/30 dark:text-red-300 dark:ring-red-700'
+                                                  : 'bg-slate-50 text-slate-600 ring-slate-200 hover:bg-slate-100 dark:bg-[#1c1c24] dark:text-slate-400 dark:ring-[#2a2a35] dark:hover:bg-[#222230]'
+                                              }`}
+                                            >
+                                              <span className={`h-1.5 w-1.5 rounded-full ${preset.badge === 'protected' ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                                              {preset.label}
+                                            </button>
+                                          </UiTooltip>
+                                        )
+                                      })}
+                                    </div>
+                                    <ErrorInfoFields
+                                      info={gwErrInfo}
+                                      onChange={updates => setGwErrorInfoField(gw, updates)}
+                                      rules={gsmRules}
+                                      connector={gw}
+                                    />
+                                  </>
+                                )}
                               </div>
                             )}
                           </div>
                         )
                       })}
-                      {/* Add connector card */}
+
+                      {/* Add connector */}
                       {addGwOpen ? (
-                        <div className="rounded-lg border border-brand-300 dark:border-brand-700 p-2.5 flex flex-col gap-1.5">
-                          <input
-                            ref={addGwInputRef}
-                            type="text"
-                            value={addGwDraft}
-                            onChange={e => setAddGwDraft(e.target.value)}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter') {
-                                const gw = addGwDraft.trim().toLowerCase()
-                                if (gw && !eligibleGatewaysParsed.includes(gw)) {
-                                  set('eligible_gateways', [...eligibleGatewaysParsed, gw].join(', '))
+                        <div className="col-span-2 space-y-1.5">
+                          <div className="relative">
+                            <input
+                              ref={addGwInputRef}
+                              type="text"
+                              value={addGwDraft}
+                              onChange={e => setAddGwDraft(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  const gw = addGwDraft.trim().toLowerCase()
+                                  if (gw && !eligibleGatewaysParsed.includes(gw)) {
+                                    set('eligible_gateways', [...eligibleGatewaysParsed, gw].join(', '))
+                                  }
+                                  setAddGwDraft('')
+                                  setAddGwOpen(false)
                                 }
-                                setAddGwDraft('')
-                                setAddGwOpen(false)
-                              }
-                              if (e.key === 'Escape') { setAddGwDraft(''); setAddGwOpen(false) }
-                            }}
-                            onBlur={() => { setAddGwDraft(''); setAddGwOpen(false) }}
-                            placeholder="e.g. stripe"
-                            autoFocus
-                            className="w-full bg-transparent text-xs font-medium text-slate-700 dark:text-slate-200 placeholder-slate-400 focus:outline-none"
-                          />
-                          <p className="text-[10px] text-slate-400">Enter to add · Esc to cancel</p>
+                                if (e.key === 'Escape') { setAddGwDraft(''); setAddGwOpen(false) }
+                              }}
+                              onBlur={() => { setAddGwDraft(''); setAddGwOpen(false) }}
+                              placeholder="e.g. stripe"
+                              autoFocus
+                              className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-brand-300 dark:border-brand-700 rounded-lg px-3 py-1.5 pr-16 text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                            />
+                            <kbd className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-[#1c1c24] border border-slate-200 dark:border-[#2a2a35] px-1.5 py-0.5 rounded font-mono">
+                              Enter ↵
+                            </kbd>
+                          </div>
+                          <p className="text-[10px] text-slate-400 dark:text-slate-500">Press Enter to add · Esc to cancel</p>
                         </div>
                       ) : (
                         <button
                           type="button"
                           disabled={isSimulating}
                           onClick={() => { setAddGwOpen(true); setTimeout(() => addGwInputRef.current?.focus(), 0) }}
-                          className="rounded-lg border border-dashed border-slate-300 dark:border-[#2a2a3a] p-2.5 flex items-center justify-center gap-1.5 text-xs text-slate-400 hover:text-brand-600 hover:border-brand-400 dark:hover:text-brand-400 dark:hover:border-brand-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                          className="rounded-xl border border-dashed border-slate-200 dark:border-[#2a2a3a] flex flex-col items-center justify-center gap-1 min-h-[88px] text-slate-400 hover:text-brand-600 hover:border-brand-400 dark:hover:text-brand-400 dark:hover:border-brand-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                         >
-                          <Plus size={12} /> Add connector
+                          <div className="flex h-7 w-7 items-center justify-center rounded-full border border-dashed border-current">
+                            <Plus size={12} />
+                          </div>
+                          <span className="text-[10px] font-semibold uppercase tracking-wider">Add connector</span>
                         </button>
                       )}
                     </div>
@@ -2838,13 +2872,15 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-[#263141]">
-                          {volumeEvaluationLog.map((entry, idx) => (
+                          {volumeEvaluationLog.slice(-200).map((entry, idx) => {
+                            const absIdx = Math.max(0, volumeEvaluationLog.length - 200) + idx
+                            return (
                             <tr
                               key={entry.paymentId}
                               className="cursor-pointer transition hover:bg-slate-50 dark:hover:bg-[#151d2a]"
                               onClick={() => openPreviewModal(entry.paymentId, 'Volume Split Decision')}
                             >
-                              <td className="px-4 py-2 font-mono text-xs text-slate-500">{idx + 1}</td>
+                              <td className="px-4 py-2 font-mono text-xs text-slate-500">{absIdx + 1}</td>
                               <td className="max-w-[260px] truncate px-4 py-2 font-mono text-xs text-slate-600 dark:text-[#aab5c8]">{entry.paymentId}</td>
                               <td className="px-4 py-2">
                                 <div className="flex items-center gap-2">
@@ -2868,7 +2904,7 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                                 </button>
                               </td>
                             </tr>
-                          ))}
+                          )})}
                         </tbody>
                       </table>
                     </div>
@@ -3066,9 +3102,9 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                     </div>
                   </CardHeader>
                   <CardBody className="!pt-3">
-                    {Object.keys(gatewayStats).length > 0 && (() => {
-                      const totalRouted = Object.values(gatewayStats).reduce((s, g) => s + g.total, 0)
-                      const sortedGateways = Object.entries(gatewayStats).sort((a, b) => b[1].total - a[1].total)
+                    {sortedGatewayStats.length > 0 && (() => {
+                      const totalRouted = totalRoutedPayments
+                      const sortedGateways = sortedGatewayStats
                       const GW_COLORS = ['#3b82f6', '#8b5cf6', '#f97316', '#ec4899', '#14b8a6']
                       const hasAnySpark = sortedGateways.some(([gw]) => (gatewaySparklines.series[gw]?.length ?? 0) >= 2)
                       return (
@@ -3086,11 +3122,16 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                                     <div className="flex-1 h-1.5 rounded-full bg-slate-100 dark:bg-[#1c1c24] overflow-hidden">
                                       <div className="h-full rounded-full transition-[width] duration-300" style={{ width: `${share}%`, backgroundColor: GW_COLORS[idx % GW_COLORS.length] }} />
                                     </div>
-                                    <div className="flex items-center gap-2 text-[11px] shrink-0">
-                                      <span className="text-slate-400 dark:text-slate-500">{share}%</span>
-                                      <span className={`font-semibold tabular-nums ${srPct >= 80 ? 'text-emerald-600 dark:text-emerald-400' : srPct >= 50 ? 'text-amber-500' : 'text-red-500'}`}>{srPct}% SR</span>
-                                      <span className="text-emerald-600 dark:text-emerald-400 tabular-nums">{stats.success}✓</span>
-                                      <span className="text-red-400 tabular-nums">{stats.failure}✗</span>
+                                    <div className="flex items-center gap-2.5 text-[11px] shrink-0">
+                                      <span className={`font-bold tabular-nums ${srPct >= 80 ? 'text-emerald-600 dark:text-emerald-400' : srPct >= 50 ? 'text-amber-500' : 'text-red-500'}`}>{srPct}% SR</span>
+                                      <span className="text-slate-300 dark:text-slate-600">·</span>
+                                      <span className="text-slate-400 dark:text-slate-500 tabular-nums">{share}% routed</span>
+                                      <span className="text-slate-300 dark:text-slate-600">·</span>
+                                      <span className="tabular-nums text-slate-500 dark:text-slate-400">
+                                        <span className="text-emerald-600 dark:text-emerald-400">{stats.success}</span>
+                                        <span className="text-slate-300 dark:text-slate-600 mx-0.5">/</span>
+                                        <span className="text-red-400">{stats.failure}</span>
+                                      </span>
                                     </div>
                                   </div>
                                 </div>
@@ -3110,12 +3151,7 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                             const pad = 6
                             const xPos = (i: number) => (i / Math.max(numPts - 1, 1)) * CW
 
-                            // Dynamic Y range: observed min/max across all series, padded by 5pts
-                            const allVals = sortedGateways.flatMap(([gw]) => series[gw]?.filter(v => v > 0) ?? [])
-                            const obsMin = allVals.length ? Math.min(...allVals) : 0
-                            const obsMax = allVals.length ? Math.max(...allVals) : 100
-                            const yMin = Math.max(0, obsMin - 5)
-                            const yMax = Math.min(100, obsMax + 5)
+                            const { yMin, yMax } = gatewaySparklines
                             const yRange = yMax - yMin || 1
 
                             const yPos = (v: number) => pad + ((yMax - v) / yRange) * (CHART_H - pad * 2)
@@ -3216,46 +3252,39 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                     )}
                   </CardHeader>
                   <CardBody className="p-0">
+
                     {deferredSimulationResults.length > 0 ? (
                       <div ref={txLogRef} className="max-h-[480px] overflow-auto">
                         <table className="w-full text-sm">
-                          <thead className="bg-slate-50 dark:bg-[#0a0a0f] text-xs text-slate-500 sticky top-0">
+                          <thead className="bg-slate-50 dark:bg-[#0a0a0f] text-[11px] text-slate-400 dark:text-slate-500 sticky top-0 border-b border-slate-100 dark:border-[#1c1c24]">
                             <tr>
-                              <th className="text-left px-3 py-2">#</th>
+                              <th className="text-left px-3 py-2 w-10">#</th>
                               <th className="text-left px-3 py-2">Payment ID</th>
-                              <th className="text-left px-3 py-2">Gateway</th>
+                              <th className="text-left px-3 py-2 whitespace-nowrap">Gateway</th>
                               <th className="text-left px-3 py-2">Routing</th>
                               <th className="text-left px-3 py-2">Outcome</th>
+                              <th className="w-8" />
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-[#1c1c24]">
-                            {deferredSimulationResults.map((res, idx) => (
-                              <tr key={res.paymentId} className="hover:bg-slate-100 dark:bg-[#0f0f16]">
-                                <td className="px-3 py-2 text-slate-500">{idx + 1}</td>
-                                <td className="px-3 py-2">
-                                  <button
-                                    type="button"
-                                    title={res.paymentId}
-                                    onClick={() => openAuditModal(res.paymentId)}
-                                    className="group flex items-start gap-3 text-left"
-                                  >
-                                    <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-brand-500/10 text-[11px] font-semibold uppercase tracking-[0.16em] text-brand-600 dark:text-brand-300">
-                                      {idx + 1}
-                                    </span>
-                                    <span className="min-w-0">
-                                      <span className="block truncate font-mono text-xs font-semibold text-slate-900 transition group-hover:text-brand-600 dark:text-white">
-                                        {res.paymentId}
-                                      </span>
-                                      <span className="mt-1 block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 transition group-hover:text-brand-500">
-                                        View audit
-                                      </span>
-                                    </span>
-                                  </button>
+                          <tbody className="divide-y divide-slate-100 dark:divide-[#1a1a22]">
+                            {deferredSimulationResults.map((res, idx) => {
+                              const absIdx = idx
+                              return (
+                              <tr
+                                key={res.paymentId}
+                                className="group cursor-pointer hover:bg-slate-50 dark:hover:bg-[#0d0d14] transition-colors"
+                                onClick={() => openAuditModal(res.paymentId)}
+                              >
+                                <td className="px-3 py-2 text-[11px] text-slate-400 tabular-nums">{absIdx + 1}</td>
+                                <td className="px-3 py-2 max-w-[180px]">
+                                  <span className="block truncate font-mono text-xs text-slate-700 dark:text-slate-300 group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">
+                                    {res.paymentId}
+                                  </span>
                                 </td>
-                                <td className="px-3 py-2 font-medium">{res.decidedGateway}</td>
+                                <td className="px-3 py-2 text-xs font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap">{res.decidedGateway}</td>
                                 <td className="px-3 py-2">
                                   {res.routingApproach?.includes('HEDGING') ? (
-                                    <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700 ring-1 ring-inset ring-brand-200 dark:bg-brand-900/20 dark:text-brand-300 dark:ring-brand-800">
+                                    <span className="inline-flex items-center rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700 ring-1 ring-inset ring-brand-200 dark:bg-brand-900/20 dark:text-brand-300 dark:ring-brand-800">
                                       Hedging
                                     </span>
                                   ) : (
@@ -3269,8 +3298,15 @@ const pieData = volumeDistribution.map(d => ({ name: d.name, value: d.count }))
                                     {res.status}
                                   </Badge>
                                 </td>
+                                <td className="pr-3 py-2">
+                                  <span className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 dark:text-slate-500">
+                                    <svg viewBox="0 0 16 16" fill="none" className="w-3.5 h-3.5" stroke="currentColor" strokeWidth="1.5">
+                                      <path d="M3 8h10M9 4l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
+                                    </svg>
+                                  </span>
+                                </td>
                               </tr>
-                            ))}
+                            )})}
                           </tbody>
                         </table>
                       </div>
