@@ -24,6 +24,7 @@ pub enum CardType {
     Crypto,
     Blank,
     Pan,
+    Cbdc
 }
 
 impl fmt::Display for CardType {
@@ -54,6 +55,7 @@ impl TryFrom<String> for CardType {
             "CRYPTO" => Ok(Self::Crypto),
             "BLANK" => Ok(Self::Blank),
             "PAN" => Ok(Self::Pan),
+            "CBDC" => Ok(Self::Cbdc),
             _ => Err(ApiError::ParsingError("Invalid Card Type")),
         }
     }
@@ -78,6 +80,7 @@ pub fn card_type_to_text(card_type: &CardType) -> String {
         CardType::Crypto => "CRYPTO".into(),
         CardType::Blank => "BLANK".into(),
         CardType::Pan => "PAN".into(),
+        CardType::Cbdc => "CBDC".into(),
     }
 }
 
