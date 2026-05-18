@@ -2,6 +2,7 @@
 
 export interface DecideGatewayResponse {
   decided_gateway: string
+  fallback_gateways: string[]
   routing_approach: string
   gateway_priority_map: Record<string, number> | null
   routing_dimension: string | null
@@ -239,6 +240,25 @@ export interface GatewayScoreSeriesPoint {
   score_value: number
 }
 
+export interface SmartRetryTrigger {
+  gateway: string
+  error_code: string | null
+  count: number
+}
+
+export interface SmartRetryFallback {
+  gateway: string
+  retried: number
+  recovered: number
+}
+
+export interface SmartRetryStats {
+  retried_count: number
+  recovered_count: number
+  by_trigger: SmartRetryTrigger[]
+  by_fallback: SmartRetryFallback[]
+}
+
 export interface AnalyticsOverviewResponse {
   merchant_id: string
   kpis: AnalyticsKpi[]
@@ -246,6 +266,7 @@ export interface AnalyticsOverviewResponse {
   top_scores: GatewayScoreSnapshot[]
   top_errors: AnalyticsErrorSummary[]
   top_rules: AnalyticsRuleHit[]
+  smart_retry_stats: SmartRetryStats
 }
 
 export interface AnalyticsRouteHit {

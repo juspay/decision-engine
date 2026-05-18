@@ -37,6 +37,7 @@ struct UpdateGatewayScoreRequestDetail<'a> {
     enforce_dynamic_routing_failure: Option<bool>,
     txn_latency: Option<&'a crate::types::txn_details::types::TransactionLatency>,
     error_info: Option<&'a crate::feedback::types::GsmErrorInfo>,
+    is_smart_retry: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -194,6 +195,7 @@ pub async fn update_gateway_score(
                                     .enforce_dynamic_routing_failure,
                                 txn_latency: payload.txn_latency.as_ref(),
                                 error_info: payload.error_info.as_ref(),
+                                is_smart_retry: payload.is_smart_retry,
                             },
                             response: &response,
                             selection_reason: UpdateGatewayScoreSelectionReason {

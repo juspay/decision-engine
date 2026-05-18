@@ -1,18 +1,10 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Play, ChevronDown } from 'lucide-react'
 import { Card, CardBody, CardHeader } from '../ui/Card'
 import { Spinner } from '../ui/Spinner'
 import { apiPost } from '../../lib/api'
 import { DecideGatewayResponse, RoutingAlgorithmName } from '../../types/api'
-import { GsmOptionRow } from './ErrorInfoFields'
-
-export interface GsmScenario {
-  key: string
-  label: string
-  penalise: boolean
-  errorCategory: string
-  decision?: string
-}
+import { GsmOptionRow, penalizedByUnifiedMessage } from './ErrorInfoFields'
 
 interface ScenarioTestResult {
   scoreBefore: number | null
@@ -34,15 +26,27 @@ export interface DecideParams {
 
 interface Props {
   merchantId: string | null
-  gsmScenarios: GsmScenario[]
   gsmRules: GsmOptionRow[]
   decideParams: DecideParams
 }
 
-export function PenaltyClassificationGuide({ merchantId, gsmScenarios, gsmRules, decideParams }: Props) {
+export function PenaltyClassificationGuide({ merchantId, gsmRules, decideParams }: Props) {
   const [expandedScenario, setExpandedScenario] = useState<string | null>(null)
   const [scenarioConnector, setScenarioConnector] = useState<Record<string, string>>({})
   const [scenarioTestResults, setScenarioTestResults] = useState<Record<string, ScenarioTestResult>>({})
+
+  const categories = useMemo(() => {
+    const authorizeRules = gsmRules.filter(r => r.subFlow === 'Authorize' || r.flow === 'Authorize')
+    const messages = [...new Set(authorizeRules.map(r => r.unifiedMessage).filter(Boolean) as string[])]
+    return messages
+      .map(msg => {
+        const penalized = penalizedByUnifiedMessage(msg) !== false
+        const rulesForMsg = authorizeRules.filter(r => r.unifiedMessage === msg)
+        const connectors = [...new Set(rulesForMsg.map(r => r.connector))]
+        return { key: msg, label: msg, penalized, connectors, rulesForMsg }
+      })
+      .sort((a, b) => Number(a.penalized) - Number(b.penalized))
+  }, [gsmRules])
 
   async function runScenarioTest(scenarioKey: string, connector: string, errorCode: string, errorMessage: string, flow: string, subFlow: string) {
     if (!merchantId) return
@@ -125,12 +129,12 @@ export function PenaltyClassificationGuide({ merchantId, gsmScenarios, gsmRules,
         </div>
       </CardHeader>
       <CardBody className="space-y-4">
-        {gsmScenarios.length === 0 ? (
-          <p className="text-xs text-slate-400">Loading scenario config…</p>
+        {gsmRules.length === 0 ? (
+          <p className="text-xs text-slate-400">Loading GSM rules…</p>
         ) : (
           <>
             {(['protected', 'penalized'] as const).map(kind => {
-              const group = gsmScenarios.filter(s => (s.penalise ? 'penalized' : 'protected') === kind)
+              const group = categories.filter(c => (c.penalized ? 'penalized' : 'protected') === kind)
               if (!group.length) return null
               const isProtected = kind === 'protected'
               return (
@@ -140,15 +144,13 @@ export function PenaltyClassificationGuide({ merchantId, gsmScenarios, gsmRules,
                   </p>
                   <div className="space-y-2">
                     {group.map(scenario => {
-                      const matchingRules = gsmRules.filter(r =>
-                        r.errorCategory === scenario.errorCategory &&
-                        (!scenario.decision || r.decision === scenario.decision) &&
-                        (r.subFlow === 'Authorize' || r.flow === 'Authorize')
-                      )
-                      const connectors = [...new Set(matchingRules.map(r => r.connector))]
+                      const matchingRules = scenario.rulesForMsg.slice(0, 20)
+                      const connectors = scenario.connectors
                       const isExpanded = expandedScenario === scenario.key
                       const selectedConn = scenarioConnector[scenario.key] ?? connectors[0] ?? ''
-                      const selectedRule = matchingRules.find(r => r.connector === selectedConn)
+                      const selectedRule =
+                        matchingRules.find(r => r.connector === selectedConn && r.subFlow === 'Authorize') ??
+                        matchingRules.find(r => r.connector === selectedConn)
                       const testResult = scenarioTestResults[scenario.key]
                       const scoreDelta = testResult?.scoreBefore != null && testResult?.scoreAfter != null
                         ? testResult.scoreAfter - testResult.scoreBefore
@@ -172,9 +174,6 @@ export function PenaltyClassificationGuide({ merchantId, gsmScenarios, gsmRules,
                           >
                             <div className="flex items-center gap-2 min-w-0">
                               <span className="text-xs font-semibold text-slate-800 dark:text-slate-100">{scenario.label}</span>
-                              <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500 truncate hidden sm:block">
-                                {scenario.errorCategory}{scenario.decision ? ` · ${scenario.decision}` : ''}
-                              </span>
                             </div>
                             <div className="flex items-center gap-2 shrink-0 ml-2">
                               <span className="text-[10px] text-slate-400">{connectors.length} connector{connectors.length !== 1 ? 's' : ''}</span>
@@ -184,13 +183,9 @@ export function PenaltyClassificationGuide({ merchantId, gsmScenarios, gsmRules,
 
                           {isExpanded && (
                             <div className="px-3 py-3 space-y-3 border-t border-slate-100 dark:border-[#1c1c24] bg-white dark:bg-[#0d1117]">
-                              <div className="text-[11px] text-slate-500 dark:text-slate-400 space-y-0.5">
-                                <span className="font-medium text-slate-700 dark:text-slate-300">Rule: </span>
-                                <span className="font-mono">{scenario.errorCategory}</span>
-                                {scenario.decision
-                                  ? <span> with decision <span className="font-mono">{scenario.decision}</span></span>
-                                  : <span> (any decision)</span>
-                                }
+                              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                                <span className="font-medium text-slate-700 dark:text-slate-300">Unified message: </span>
+                                <span className="font-mono">{scenario.key}</span>
                               </div>
 
                               {connectors.length > 0 && (
@@ -304,7 +299,7 @@ export function PenaltyClassificationGuide({ merchantId, gsmScenarios, gsmRules,
               )
             })}
             <p className="text-[11px] text-slate-400 dark:text-slate-500 pt-1 border-t border-slate-100 dark:border-[#1c1c24]">
-              Errors with no matching GSM rule are always penalised. Configure simulation parameters on the left and run to observe score changes live.
+              Errors with no matching GSM rule, or calls made without <span className="font-mono">error_info</span>, are always penalised. The GSM scoring filter must be enabled under SR Routing settings for skip-penalty logic to apply. Configure simulation parameters on the left and run to observe score changes live.
             </p>
           </>
         )}

@@ -254,6 +254,11 @@ pub struct UpdateScorePayload {
     /// When present and the per-merchant flag is enabled, user/issuer-originated
     /// failures are skipped so the gateway is not penalized for non-gateway errors.
     pub error_info: Option<crate::gsm::GsmErrorInfo>,
+    /// Set to true by the orchestrator when this call is a smart-retry attempt
+    /// (i.e. a fallback gateway chosen after a GSM-guided retry decision).
+    /// When present, the engine emits a SmartRetryDecision analytics event capturing
+    /// which gateway was retried and whether it recovered the payment.
+    pub is_smart_retry: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

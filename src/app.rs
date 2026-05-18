@@ -417,7 +417,6 @@ where
             axum::routing::get(crate::euclid::handlers::routing_rules::get_routing_config),
         )
         .route("/gsm/options", get(routes::gsm::gsm_options))
-        .route("/gsm/scenarios", get(routes::gsm::gsm_scenarios))
         .route("/update-score", post(routes::update_score::update_score))
         .route(
             "/decide-gateway",
