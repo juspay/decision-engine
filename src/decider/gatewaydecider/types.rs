@@ -1291,6 +1291,7 @@ pub fn toListOfGatewayScore(m: GatewayScoreMap) -> Vec<GatewayScore> {
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct DecidedGateway {
     pub decided_gateway: String,
+    pub fallback_gateways: Vec<String>,
     pub gateway_priority_map: Option<AValue>,
     pub filter_wise_gateways: Option<AValue>,
     pub priority_logic_tag: Option<String>,

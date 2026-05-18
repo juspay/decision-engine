@@ -132,6 +132,28 @@ pub struct AnalyticsKpi {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SmartRetryTrigger {
+    pub gateway: String,
+    pub error_code: Option<String>,
+    pub count: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SmartRetryFallback {
+    pub gateway: String,
+    pub retried: u64,
+    pub recovered: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SmartRetryStats {
+    pub retried_count: u64,
+    pub recovered_count: u64,
+    pub by_trigger: Vec<SmartRetryTrigger>,
+    pub by_fallback: Vec<SmartRetryFallback>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsOverviewResponse {
     pub merchant_id: String,
     pub kpis: Vec<AnalyticsKpi>,
@@ -139,6 +161,7 @@ pub struct AnalyticsOverviewResponse {
     pub top_scores: Vec<GatewayScoreSnapshot>,
     pub top_errors: Vec<AnalyticsErrorSummary>,
     pub top_rules: Vec<AnalyticsRuleHit>,
+    pub smart_retry_stats: SmartRetryStats,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

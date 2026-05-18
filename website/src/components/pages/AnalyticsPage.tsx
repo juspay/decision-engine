@@ -27,6 +27,7 @@ import {
   AnalyticsRoutingStatsResponse,
   PaymentAuditResponse,
   RoutingFilterOptions,
+  SmartRetryStats,
 } from '../../types/api'
 import { Button } from '../ui/Button'
 import { Card, CardBody, CardHeader } from '../ui/Card'
@@ -744,6 +745,123 @@ function analyticsRouteLabel(route: string) {
   if (route === '/update_gateway') return 'Update Gateway'
   if (route === '/rule_evaluate') return 'Rule Evaluate'
   return route
+}
+
+function SmartRetrySection({ stats }: { stats: SmartRetryStats | null }) {
+  if (!stats || stats.retried_count === 0) return null
+  const recoveryRate = Math.round((stats.recovered_count / stats.retried_count) * 100)
+  const rateColor = recoveryRate >= 70
+    ? 'text-emerald-600 dark:text-emerald-400'
+    : recoveryRate >= 40 ? 'text-amber-500' : 'text-red-500'
+
+  return (
+    <div className="space-y-4">
+      {/* Summary row */}
+      <Card>
+        <CardHeader>
+          <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Smart Retry</h2>
+          <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+            Payments retried on a fallback gateway after GSM classified the failure as retryable.
+          </p>
+        </CardHeader>
+        <CardBody>
+          <div className="grid grid-cols-3 gap-4">
+            <div className="rounded-lg bg-slate-50 dark:bg-[#111114] px-4 py-3">
+              <p className="text-xs text-slate-500 dark:text-slate-400">Retried</p>
+              <p className="mt-1 text-2xl font-bold text-slate-800 dark:text-white tabular-nums">{stats.retried_count}</p>
+            </div>
+            <div className="rounded-lg bg-slate-50 dark:bg-[#111114] px-4 py-3">
+              <p className="text-xs text-slate-500 dark:text-slate-400">Recovered</p>
+              <p className="mt-1 text-2xl font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{stats.recovered_count}</p>
+            </div>
+            <div className="rounded-lg bg-slate-50 dark:bg-[#111114] px-4 py-3">
+              <p className="text-xs text-slate-500 dark:text-slate-400">Recovery rate</p>
+              <p className={`mt-1 text-2xl font-bold tabular-nums ${rateColor}`}>{recoveryRate}%</p>
+            </div>
+          </div>
+        </CardBody>
+      </Card>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* By trigger — which connectors failed with a retryable error */}
+        {stats.by_trigger.length > 0 && (
+          <Card>
+            <CardHeader>
+              <h3 className="text-sm font-semibold text-slate-800 dark:text-white">Retry triggers by connector</h3>
+              <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                Connectors whose failures were classified as retryable by GSM.
+              </p>
+            </CardHeader>
+            <CardBody className="p-0">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 dark:bg-[#0a0a0f] text-[11px] text-slate-400 dark:text-slate-500 border-b border-slate-100 dark:border-[#1c1c24]">
+                  <tr>
+                    <th className="text-left px-4 py-2">Connector</th>
+                    <th className="text-left px-4 py-2">Error code</th>
+                    <th className="text-right px-4 py-2">Count</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-[#1a1a22]">
+                  {stats.by_trigger.map((row, i) => (
+                    <tr key={i} className="hover:bg-slate-50 dark:hover:bg-[#0d0d14]">
+                      <td className="px-4 py-2 text-xs font-medium text-slate-700 dark:text-slate-300">{row.gateway}</td>
+                      <td className="px-4 py-2">
+                        {row.error_code
+                          ? <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">{row.error_code}</span>
+                          : <span className="text-[11px] text-slate-400">—</span>}
+                      </td>
+                      <td className="px-4 py-2 text-right tabular-nums text-xs text-slate-600 dark:text-slate-300">{row.count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </CardBody>
+          </Card>
+        )}
+
+        {/* By fallback — which connectors were used as fallback and how well they recovered */}
+        {stats.by_fallback.length > 0 && (
+          <Card>
+            <CardHeader>
+              <h3 className="text-sm font-semibold text-slate-800 dark:text-white">Recovery by fallback connector</h3>
+              <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                Connectors used as the retry fallback and their recovery outcomes.
+              </p>
+            </CardHeader>
+            <CardBody className="p-0">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 dark:bg-[#0a0a0f] text-[11px] text-slate-400 dark:text-slate-500 border-b border-slate-100 dark:border-[#1c1c24]">
+                  <tr>
+                    <th className="text-left px-4 py-2">Connector</th>
+                    <th className="text-right px-4 py-2">Retried</th>
+                    <th className="text-right px-4 py-2">Recovered</th>
+                    <th className="text-right px-4 py-2">Rate</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-[#1a1a22]">
+                  {stats.by_fallback.map((row, i) => {
+                    const rate = row.retried > 0 ? Math.round((row.recovered / row.retried) * 100) : 0
+                    return (
+                      <tr key={i} className="hover:bg-slate-50 dark:hover:bg-[#0d0d14]">
+                        <td className="px-4 py-2 text-xs font-medium text-slate-700 dark:text-slate-300">{row.gateway}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-xs text-slate-600 dark:text-slate-300">{row.retried}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-xs text-emerald-600 dark:text-emerald-400">{row.recovered}</td>
+                        <td className="px-4 py-2 text-right">
+                          <span className={`text-xs font-semibold tabular-nums ${rate >= 70 ? 'text-emerald-600 dark:text-emerald-400' : rate >= 40 ? 'text-amber-500' : 'text-red-500'}`}>
+                            {rate}%
+                          </span>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </CardBody>
+          </Card>
+        )}
+      </div>
+    </div>
+  )
 }
 
 export function AnalyticsPage() {
@@ -1694,6 +1812,8 @@ export function AnalyticsPage() {
             expanded={routingAlignmentOpen}
             onToggle={() => setRoutingAlignmentOpen((value) => !value)}
           />
+
+          <SmartRetrySection stats={overview.data?.smart_retry_stats ?? null} />
 
           <Card className="overflow-visible">
         <CardHeader>

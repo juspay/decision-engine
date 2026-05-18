@@ -19,6 +19,8 @@ struct OverviewCountRow {
     score_count: u64,
     rule_hit_count: u64,
     error_count: u64,
+    smart_retry_count: u64,
+    smart_retry_recovered_count: u64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -27,6 +29,8 @@ pub struct OverviewCounts {
     pub score_count: u64,
     pub rule_hit_count: u64,
     pub error_count: u64,
+    pub smart_retry_count: u64,
+    pub smart_retry_recovered_count: u64,
 }
 
 pub async fn load(
@@ -52,6 +56,14 @@ pub async fn load(
             "countIf(flow_type IN {}) AS error_count",
             static_flow_type_in_sql(OVERVIEW_ERROR_FLOW_TYPES)
         ),
+        format!(
+            "countIf(flow_type = '{}' AND JSONExtractBool(assumeNotNull(details), 'request', 'is_smart_retry') = true) AS smart_retry_count",
+            FlowType::UpdateGatewayScoreUpdate.as_str()
+        ),
+        format!(
+            "countIf(flow_type = '{}' AND JSONExtractBool(assumeNotNull(details), 'request', 'is_smart_retry') = true AND lowerUTF8(status) = 'charged') AS smart_retry_recovered_count",
+            FlowType::UpdateGatewayScoreUpdate.as_str()
+        ),
     ]);
     builder.extend_filters(base_window_filters(start_ms, end_ms));
     builder.extend_filters(merchant_filter(&query.merchant_id));
@@ -62,5 +74,7 @@ pub async fn load(
         score_count: row.score_count,
         rule_hit_count: row.rule_hit_count,
         error_count: row.error_count,
+        smart_retry_count: row.smart_retry_count,
+        smart_retry_recovered_count: row.smart_retry_recovered_count,
     })
 }

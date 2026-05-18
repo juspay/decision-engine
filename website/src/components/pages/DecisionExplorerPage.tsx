@@ -1,6 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
-import { ErrorInfoFields, ErrorInfoState, GsmOptionRow, DEFAULT_ERROR_INFO } from './ErrorInfoFields'
-import { PenaltyClassificationGuide, GsmScenario } from './PenaltyClassificationGuide'
+import { ErrorInfoFields, ErrorInfoState, GsmOptionRow, DEFAULT_ERROR_INFO, penalizedByUnifiedMessage } from './ErrorInfoFields'
+import { PenaltyClassificationGuide } from './PenaltyClassificationGuide'
 import { useNavigate } from 'react-router-dom'
 import useSWR from 'swr'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts'
@@ -68,8 +68,18 @@ interface SimulationConfig {
 
 interface GatewaySimConfig {
   successRate: number
-  errorInfo: ErrorInfoState
   failureMode: 'decline' | 'timeout'
+  gsmDecision: 'retry' | 'do_default'
+  penalized: boolean
+  errorInfo: ErrorInfoState
+}
+
+const DEFAULT_GW_SIM_CONFIG: GatewaySimConfig = {
+  successRate: 70,
+  failureMode: 'decline',
+  gsmDecision: 'retry',
+  penalized: true,
+  errorInfo: { ...DEFAULT_ERROR_INFO },
 }
 
 interface SimulationResult {
@@ -79,6 +89,8 @@ interface SimulationResult {
   timestamp: string
   routingApproach: string | null
   gatewayPriorityMap: Record<string, number> | null
+  retryGateway?: string
+  retryStatus?: 'CHARGED' | 'FAILURE' | 'PENDING_VBV'
 }
 
 type TransactionOutcome = 'CHARGED' | 'FAILURE' | 'PENDING_VBV'
@@ -158,14 +170,6 @@ const DEFAULT_SIMULATION_CONFIG: SimulationConfig = {
   totalPayments: '10',
 }
 
-type PresetVariant = Omit<ErrorInfoState, never>
-
-interface ErrorScenarioPreset {
-  label: string
-  badge: 'protected' | 'penalized'
-  tooltip: string
-  variants: Record<string, PresetVariant>
-}
 
 const DEFAULT_RULE_PARAMS: RuleEvaluateParams[] = [
   { key: 'payment_method_type', type: 'enum_variant', value: '', metadataKey: '' },
@@ -202,6 +206,7 @@ interface ExplorerPersistedState {
   responseOpen: boolean
   debitResponseOpen: boolean
   volumeResponseOpen: boolean
+  smartRetryEnabled: boolean
 }
 
 function cloneRuleParams(params: RuleEvaluateParams[]) {
@@ -252,6 +257,7 @@ function getDefaultExplorerState(): ExplorerPersistedState {
     responseOpen: false,
     debitResponseOpen: false,
     volumeResponseOpen: false,
+    smartRetryEnabled: false,
   }
 }
 
@@ -788,9 +794,12 @@ export function DecisionExplorerPage() {
   const [volumeProgress, setVolumeProgress] = useState(initialState.volumeProgress)
   const [simulationResults, setSimulationResults] = useState<SimulationResult[]>(initialState.simulationResults)
   const [isSimulating, setIsSimulating] = useState(false)
+  const [smartRetryEnabled, setSmartRetryEnabled] = useState(initialState.smartRetryEnabled)
   const [error, setError] = useState<string | null>(null)
   const [addGwDraft, setAddGwDraft] = useState('')
   const [addGwOpen, setAddGwOpen] = useState(false)
+  const [expandedGateways, setExpandedGateways] = useState<Set<string>>(new Set())
+  const toggleGateway = (gw: string) => setExpandedGateways(prev => { const next = new Set(prev); next.has(gw) ? next.delete(gw) : next.add(gw); return next })
   const addGwInputRef = useRef<HTMLInputElement>(null)
   const txLogRef = useRef<HTMLDivElement>(null)
 
@@ -863,13 +872,6 @@ export function DecisionExplorerPage() {
   )
   const gsmRules = gsmOptionsData?.rules ?? []
 
-  const { data: gsmScenariosData } = useSWR<{ scenarios: GsmScenario[] }>(
-    '/gsm/scenarios',
-    fetcher,
-    { revalidateOnFocus: false, dedupingInterval: 300_000 },
-  )
-  const gsmScenarios = gsmScenariosData?.scenarios ?? []
-
   const { data: eliminationConfig } = useSWR<{ config: { data: { threshold: number } } } | null>(
     effectiveMerchantId ? ['rule-elimination', effectiveMerchantId] : null,
     () => apiPost<{ config: { data: { threshold: number } } }>('/rule/get', { merchant_id: effectiveMerchantId, algorithm: 'elimination' }).catch(() => null),
@@ -877,32 +879,6 @@ export function DecisionExplorerPage() {
   )
   const eliminationConfigured = eliminationConfig?.config?.data?.threshold != null
 
-  const errorScenarioPresets = useMemo<ErrorScenarioPreset[]>(() => {
-    const variantsByScenario: Record<string, Record<string, PresetVariant>> = {}
-    for (const rule of gsmRules) {
-      if (rule.subFlow !== 'Authorize' && rule.flow !== 'Authorize') continue
-      const scenario = gsmScenarios.find(s =>
-        s.errorCategory === rule.errorCategory &&
-        (!s.decision || s.decision === rule.decision)
-      )
-      if (!scenario) continue
-      if (!variantsByScenario[scenario.key]) variantsByScenario[scenario.key] = {}
-      variantsByScenario[scenario.key][rule.connector] = {
-        error_code: rule.errorCode,
-        error_message: rule.errorMessage,
-        issuer_error_code: '',
-        card_network: '',
-      }
-    }
-    return gsmScenarios
-      .map(s => ({
-        label: s.label,
-        badge: (s.penalise ? 'penalized' : 'protected') as 'penalized' | 'protected',
-        tooltip: `${s.errorCategory}${s.decision ? ` · ${s.decision}` : ''} — ${s.penalise ? 'full penalty applied' : 'penalty skipped'}`,
-        variants: variantsByScenario[s.key] ?? {},
-      }))
-      .filter(p => Object.keys(p.variants).length > 0)
-  }, [gsmRules, gsmScenarios])
 
   useEffect(() => {
     if (routingConfigUnavailable || routingKeysLoading) return
@@ -1123,6 +1099,7 @@ export function DecisionExplorerPage() {
       responseOpen,
       debitResponseOpen,
       volumeResponseOpen,
+      smartRetryEnabled,
     }
 
     saveExplorerState(currentScopeKey, nextState)
@@ -1154,6 +1131,7 @@ export function DecisionExplorerPage() {
     responseOpen,
     debitResponseOpen,
     volumeResponseOpen,
+    smartRetryEnabled,
   ])
 
   function set<K extends keyof FormState>(field: K, value: FormState[K]) {
@@ -1169,15 +1147,11 @@ export function DecisionExplorerPage() {
   }
 
   function getGwSimConfig(gw: string): GatewaySimConfig {
-    return gatewaySimConfigsRef.current[gw] ?? { successRate: 70, errorInfo: { ...DEFAULT_ERROR_INFO }, failureMode: 'decline' }
+    return gatewaySimConfigsRef.current[gw] ?? { ...DEFAULT_GW_SIM_CONFIG }
   }
 
   function getGwSuccessRate(gw: string): number {
     return getGwSimConfig(gw).successRate
-  }
-
-  function getGwErrorInfo(gw: string): ErrorInfoState {
-    return getGwSimConfig(gw).errorInfo
   }
 
   function getGwFailureMode(gw: string): 'decline' | 'timeout' {
@@ -1185,30 +1159,88 @@ export function DecisionExplorerPage() {
   }
 
   function setGwSuccessRate(gw: string, rate: number) {
-    setGatewaySimConfigs(c => ({
-      ...c,
-      [gw]: { ...getGwSimConfig(gw), ...c[gw], successRate: rate },
-    }))
+    setGatewaySimConfigs(c => ({ ...c, [gw]: { ...getGwSimConfig(gw), ...c[gw], successRate: rate } }))
   }
 
   function setGwFailureMode(gw: string, mode: 'decline' | 'timeout') {
-    setGatewaySimConfigs(c => ({
-      ...c,
-      [gw]: { ...getGwSimConfig(gw), ...c[gw], failureMode: mode },
-    }))
+    setGatewaySimConfigs(c => ({ ...c, [gw]: { ...getGwSimConfig(gw), ...c[gw], failureMode: mode } }))
+  }
+
+  // Finds a real error code for `connector` that produces the desired GSM decision + penalty.
+  function resolveSimErrorInfo(connector: string, gsmDecision: 'retry' | 'do_default', penalized: boolean) {
+    const penalizedMessages = new Set(['Issue with Configurations', 'Technical issue with PSP', 'Something went wrong'])
+    const notPenalizedMessages = new Set(['Issue with Payment Method details', 'Issue with Integration'])
+    const targetMessages = penalized ? penalizedMessages : notPenalizedMessages
+    return gsmRules.find(r =>
+      r.connector === connector &&
+      (r.subFlow === 'Authorize' || r.flow === 'Authorize') &&
+      r.decision === gsmDecision &&
+      r.unifiedMessage != null &&
+      targetMessages.has(r.unifiedMessage) &&
+      !!r.errorCode && r.errorCode.toLowerCase() !== 'no error code'
+    )
+  }
+
+  function resolvedErrorInfo(connector: string, gsmDecision: 'retry' | 'do_default', penalized: boolean): ErrorInfoState {
+    const rule = resolveSimErrorInfo(connector, gsmDecision, penalized)
+    return rule
+      ? { error_code: rule.errorCode, error_message: rule.errorMessage, issuer_error_code: '', card_network: '' }
+      : { ...DEFAULT_ERROR_INFO }
+  }
+
+  function setGwGsmDecision(gw: string, decision: 'retry' | 'do_default') {
+    setGatewaySimConfigs(c => {
+      const prev = getGwSimConfig(gw)
+      return { ...c, [gw]: { ...prev, ...c[gw], gsmDecision: decision, errorInfo: resolvedErrorInfo(gw, decision, (c[gw] ?? prev).penalized) } }
+    })
+  }
+
+  function setGwPenalized(gw: string, penalized: boolean) {
+    setGatewaySimConfigs(c => {
+      const prev = getGwSimConfig(gw)
+      return { ...c, [gw]: { ...prev, ...c[gw], penalized, errorInfo: resolvedErrorInfo(gw, (c[gw] ?? prev).gsmDecision, penalized) } }
+    })
   }
 
   function setGwErrorInfoField(gw: string, updates: Partial<ErrorInfoState>) {
     setGatewaySimConfigs(c => {
-      const existing = c[gw] ?? { successRate: 70, errorInfo: { ...DEFAULT_ERROR_INFO }, failureMode: 'decline' as const }
-      return { ...c, [gw]: { ...existing, errorInfo: { ...existing.errorInfo, ...updates } } }
+      const prev = getGwSimConfig(gw)
+      const existing = c[gw] ?? prev
+      const newErrorInfo = { ...existing.errorInfo, ...updates }
+      let newGsmDecision = existing.gsmDecision
+      let newPenalized = existing.penalized
+      // Sync selects when the error code changes
+      if (updates.error_code) {
+        const rule =
+          gsmRules.find(r => r.connector === gw && r.errorCode === updates.error_code && (r.subFlow === 'Authorize' || r.flow === 'Authorize')) ??
+          gsmRules.find(r => r.connector === gw && r.errorCode === updates.error_code)
+        if (rule?.decision === 'retry' || rule?.decision === 'do_default') newGsmDecision = rule.decision
+        const p = penalizedByUnifiedMessage(rule?.unifiedMessage)
+        if (p !== null) newPenalized = p
+      }
+      return { ...c, [gw]: { ...prev, ...existing, errorInfo: newErrorInfo, gsmDecision: newGsmDecision, penalized: newPenalized } }
     })
+  }
+
+  // Uses stored errorInfo (auto-populated from toggles or manually overridden by user).
+  function buildSimErrorInfo(gateway: string) {
+    if (!gateway) return undefined
+    const info = getGwSimConfig(gateway).errorInfo
+    if (!info.error_code) return undefined
+    const rule = gsmRules.find(r => r.connector === gateway && r.errorCode === info.error_code)
+    if (!rule?.flow || !rule?.subFlow) return undefined
+    return {
+      connector: gateway,
+      flow: rule.flow,
+      subFlow: rule.subFlow,
+      errorCode: info.error_code,
+      ...(info.error_message && { errorMessage: info.error_message }),
+    }
   }
 
   function buildErrorInfo(gateway: string, info: ErrorInfoState = errorInfo) {
     if (!gateway) return undefined
     const rule = gsmRules.find(r => r.connector === gateway && r.errorCode === info.error_code)
-    // flow and subFlow are required by the backend; skip errorInfo entirely if they can't be resolved
     if (!rule?.flow || !rule?.subFlow) return undefined
     return {
       connector: gateway,
@@ -1322,7 +1354,7 @@ export function DecisionExplorerPage() {
         rankingAlgorithm: form.ranking_algorithm,
         eliminationEnabled: eliminationEnabled,
       })
-      await apiPost('/update-gateway-score', {
+      const scoreRes = await apiPost<UpdateScoreResponse>('/update-gateway-score', {
         merchantId: effectiveMerchantId,
         gateway: res.decided_gateway,
         gatewayReferenceId: null,
@@ -1331,8 +1363,32 @@ export function DecisionExplorerPage() {
         enforceDynamicRoutingFailure: null,
         ...(singleRunOutcome === 'FAILURE' && { errorInfo: buildErrorInfo(res.decided_gateway) }),
       })
-      setResult(res)
-      setSingleRunPaymentId(paymentId)
+
+      // Smart retry: if the failure is retryable and we have a fallback, attempt the next gateway
+      if (
+        smartRetryEnabled &&
+        gsmScoringFilterEnabled &&
+        singleRunOutcome === 'FAILURE' &&
+        scoreRes.gsm_info?.decision === 'retry' &&
+        res.fallback_gateways.length > 0
+      ) {
+        const retryGateway = res.fallback_gateways[0]
+        await apiPost('/update-gateway-score', {
+          merchantId: effectiveMerchantId,
+          gateway: retryGateway,
+          gatewayReferenceId: null,
+          status: 'CHARGED',
+          paymentId: paymentId,
+          enforceDynamicRoutingFailure: null,
+          isSmartRetry: true,
+        })
+        setResult({ ...res, decided_gateway: retryGateway })
+        setSingleRunPaymentId(paymentId)
+      } else {
+        setResult(res)
+        setSingleRunPaymentId(paymentId)
+      }
+
       markExplorerRunDataUpdated()
     } catch (e: unknown) {
       handleRunError(e, 'single')
@@ -1445,17 +1501,43 @@ export function DecisionExplorerPage() {
           const isSuccess = Math.random() * 100 < gwRate
           const failureMode = getGwFailureMode(decidedGateway)
           const outcome: TransactionOutcome = isSuccess ? 'CHARGED' : (failureMode === 'timeout' ? 'PENDING_VBV' : 'FAILURE')
-          const gwErrorInfo = getGwErrorInfo(decidedGateway)
 
-          await apiPost<UpdateScoreResponse>('/update-gateway-score', {
+          const scoreRes = await apiPost<UpdateScoreResponse>('/update-gateway-score', {
             merchantId: effectiveMerchantId,
             gateway: decidedGateway,
             gatewayReferenceId: null,
             status: outcome,
             paymentId: paymentId,
             enforceDynamicRoutingFailure: null,
-            ...(outcome === 'FAILURE' && { errorInfo: buildErrorInfo(decidedGateway, gwErrorInfo) }),
+            ...(outcome === 'FAILURE' && { errorInfo: buildSimErrorInfo(decidedGateway) }),
           })
+
+          let retryGateway: string | undefined
+          let retryStatus: TransactionOutcome | undefined
+
+          if (
+            smartRetryEnabled &&
+            gsmScoringFilterEnabled &&
+            outcome === 'FAILURE' &&
+            scoreRes.gsm_info?.decision === 'retry' &&
+            decideRes.fallback_gateways.length > 0
+          ) {
+            retryGateway = decideRes.fallback_gateways[0]
+            const retryGwRate = getGwSuccessRate(retryGateway)
+            const retrySuccess = Math.random() * 100 < retryGwRate
+            const retryFailureMode = getGwFailureMode(retryGateway)
+            retryStatus = retrySuccess ? 'CHARGED' : (retryFailureMode === 'timeout' ? 'PENDING_VBV' : 'FAILURE')
+            await apiPost('/update-gateway-score', {
+              merchantId: effectiveMerchantId,
+              gateway: retryGateway,
+              gatewayReferenceId: null,
+              status: retryStatus,
+              paymentId: paymentId,
+              enforceDynamicRoutingFailure: null,
+              isSmartRetry: true,
+              ...(retryStatus === 'FAILURE' && { errorInfo: buildSimErrorInfo(retryGateway) }),
+            })
+          }
 
           results.push({
             paymentId,
@@ -1464,6 +1546,8 @@ export function DecisionExplorerPage() {
             timestamp: new Date().toISOString(),
             routingApproach: decideRes.routing_approach ?? null,
             gatewayPriorityMap: decideRes.gateway_priority_map ?? null,
+            retryGateway,
+            retryStatus,
           })
 
           consecutiveErrors = 0
@@ -1642,6 +1726,26 @@ export function DecisionExplorerPage() {
     [form.eligible_gateways],
   )
 
+  // Auto-populate errorInfo for any gateway whose config has no error code yet,
+  // once GSM rules have loaded from the API.
+  useEffect(() => {
+    if (gsmRules.length === 0 || eligibleGatewaysParsed.length === 0) return
+    setGatewaySimConfigs(prev => {
+      let changed = false
+      const next = { ...prev }
+      for (const gw of eligibleGatewaysParsed) {
+        if (prev[gw]?.errorInfo?.error_code) continue
+        const config = prev[gw] ?? { ...DEFAULT_GW_SIM_CONFIG }
+        const resolved = resolveSimErrorInfo(gw, config.gsmDecision, config.penalized)
+        if (resolved) {
+          next[gw] = { ...config, errorInfo: { error_code: resolved.errorCode, error_message: resolved.errorMessage, issuer_error_code: '', card_network: '' } }
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [gsmRules, eligibleGatewaysParsed])
+
   const gatewayStats = useMemo(() => deferredSimulationResults.reduce((acc, curr) => {
     if (!acc[curr.decidedGateway]) {
       acc[curr.decidedGateway] = { total: 0, success: 0, failure: 0 }
@@ -1699,6 +1803,12 @@ export function DecisionExplorerPage() {
     () => deferredSimulationResults.filter(r => r.routingApproach?.includes('HEDGING')).length,
     [deferredSimulationResults],
   )
+
+  const smartRetryStats = useMemo(() => {
+    const triggered = deferredSimulationResults.filter(r => r.retryGateway !== undefined).length
+    const recovered = deferredSimulationResults.filter(r => r.retryStatus === 'CHARGED').length
+    return { triggered, recovered }
+  }, [deferredSimulationResults])
 
   const pieData = useMemo(
     () => volumeDistribution.map(d => ({ name: d.name, value: d.count })),
@@ -1847,14 +1957,32 @@ export function DecisionExplorerPage() {
   function resetCurrentTabState() {
     const defaults = getDefaultExplorerState()
 
+    // Reset form fields to the first available option from routing config so
+    // required fields like currency are never sent as empty strings.
+    function populatedForm(base: FormState): FormState {
+      const next = { ...base }
+      if (currencyOptions.length > 0 && !currencyOptions.includes(next.currency))
+        next.currency = currencyOptions[0]
+      if (paymentMethodTypeOptions.length > 0 && !paymentMethodTypeOptions.includes(next.payment_method_type))
+        next.payment_method_type = paymentMethodTypeOptions[0]
+      const methodsForType = toUpperOptions(routingKeysConfig[next.payment_method_type.toLowerCase()]?.values || [])
+      if (methodsForType.length > 0 && !methodsForType.includes(next.payment_method))
+        next.payment_method = methodsForType[0]
+      if (authTypeOptions.length > 0 && !authTypeOptions.includes(next.auth_type))
+        next.auth_type = authTypeOptions[0]
+      if (cardBrandOptions.length > 0 && !cardBrandOptions.includes(next.card_brand))
+        next.card_brand = cardBrandOptions[0]
+      return next
+    }
+
     if (activeTab === 'single') {
-      setForm(defaults.form)
+      setForm(populatedForm(defaults.form))
       setResult(defaults.result)
       setSingleRunPaymentId(defaults.singleRunPaymentId)
       setSingleRunOutcome(defaults.singleRunOutcome)
       setResponseOpen(defaults.responseOpen)
     } else if (activeTab === 'batch') {
-      setForm(defaults.form)
+      setForm(populatedForm(defaults.form))
       setSimulationConfig(defaults.simulationConfig)
       setGatewaySimConfigs({})
       setSimulationResults(defaults.simulationResults)
@@ -2367,15 +2495,15 @@ export function DecisionExplorerPage() {
                 )}
 
                 {activeTab === 'batch' && (
-                  <div className="border-t border-slate-100 dark:border-[#1c1c24] pt-4 space-y-3">
+                  <div className="border-t border-slate-100 dark:border-[#1c1c24] pt-4 space-y-4">
                     {/* Simulation header */}
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <Activity size={11} className="text-slate-400 dark:text-slate-500" />
-                        <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Simulation</span>
-                      </div>
                       <div className="flex items-center gap-2">
-                        <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Payments</label>
+                        <Activity size={13} className="text-slate-400 dark:text-slate-500" />
+                        <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Simulation</span>
+                      </div>
+                      <div className="flex items-center gap-2.5">
+                        <label className="text-xs font-medium text-slate-500 dark:text-slate-400">Payments</label>
                         <input
                           type="number"
                           min={1}
@@ -2386,137 +2514,177 @@ export function DecisionExplorerPage() {
                             const total = Math.max(1, Math.min(5000, parseInt(e.target.value) || 1))
                             setSimulationConfig({ totalPayments: String(total) })
                           }}
-                          className="w-20 bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                          className="w-24 bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-2 text-sm font-semibold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                         />
                       </div>
                     </div>
 
-                    {/* Gateway cards */}
-                    <div className="grid grid-cols-2 gap-2">
+                    {/* Gateway accordion rows */}
+                    <div className="space-y-2">
                       {eligibleGatewaysParsed.map(gw => {
                         const gwRate = gatewaySimConfigs[gw]?.successRate ?? 70
-                        const gwErrInfo = gatewaySimConfigs[gw]?.errorInfo ?? { ...DEFAULT_ERROR_INFO }
                         const gwFailureMode = gatewaySimConfigs[gw]?.failureMode ?? 'decline'
+                        const gwGsmDecision = gatewaySimConfigs[gw]?.gsmDecision ?? 'retry'
+                        const gwPenalized = gatewaySimConfigs[gw]?.penalized ?? true
                         const hasFailures = gwRate < 100
-                        const rateColor = gwRate >= 80 ? 'text-emerald-600 dark:text-emerald-400' : gwRate >= 50 ? 'text-amber-500 dark:text-amber-400' : 'text-red-500 dark:text-red-400'
+                        const isOpen = expandedGateways.has(gw)
+                        const ratePillClass = gwRate >= 80
+                          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                          : gwRate >= 50
+                            ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                            : 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300'
                         const trackColor = gwRate >= 80 ? '#10b981' : gwRate >= 50 ? '#f59e0b' : '#ef4444'
-                        return (
-                          <div key={gw} className="rounded-xl border border-slate-200 dark:border-[#222226] bg-white dark:bg-[#0a0a10] p-2.5 space-y-2">
-                            {/* Card header */}
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <div className="flex h-5 w-5 items-center justify-center rounded-md bg-slate-100 dark:bg-[#1a1a24] text-[9px] font-bold text-slate-600 dark:text-slate-300 uppercase">
-                                  {gw.charAt(0)}
-                                </div>
-                                <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 capitalize">{gw}</span>
-                              </div>
-                              <div className="flex items-center gap-1.5">
-                                <UiTooltip text="Simulated success rate for this gateway">
-                                  <span className={`text-xs font-bold tabular-nums ${rateColor}`}>{gwRate}% success</span>
-                                </UiTooltip>
-                                <button
-                                  type="button"
-                                  disabled={isSimulating}
-                                  onClick={() => set('eligible_gateways', eligibleGatewaysParsed.filter(g => g !== gw).join(', '))}
-                                  className="text-slate-300 hover:text-red-400 dark:text-slate-600 dark:hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                                >
-                                  <X size={12} />
-                                </button>
-                              </div>
-                            </div>
 
-                            {/* Slider */}
-                            <div className="space-y-1">
-                              <input
-                                type="range"
-                                min={0}
-                                max={100}
-                                value={gwRate}
-                                onChange={e => setGwSuccessRate(gw, parseInt(e.target.value))}
-                                style={{ accentColor: trackColor }}
-                                className="w-full h-1.5 cursor-pointer"
+                        return (
+                          <div key={gw} className="rounded-xl border border-slate-200 dark:border-[#222226] bg-white dark:bg-[#0a0a10] overflow-hidden">
+                            {/* Header row — avatar · name · slider · rate · × · chevron */}
+                            <div
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => toggleGateway(gw)}
+                              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleGateway(gw) } }}
+                              className="flex items-center gap-2.5 px-3 pt-3 pb-5 cursor-pointer hover:bg-slate-50 dark:hover:bg-[#0f0f18] transition-colors select-none"
+                            >
+                              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 dark:bg-[#1a1a24] text-xs font-bold text-slate-600 dark:text-slate-300 uppercase shrink-0">
+                                {gw.charAt(0)}
+                              </div>
+                              <span className="text-sm font-semibold text-slate-800 dark:text-slate-100 capitalize shrink-0 w-16 truncate">{gw}</span>
+                              {/* Inline slider — labels are absolute so wrapper height = track height only, keeping items-center aligned */}
+                              <div className="relative flex-1 min-w-0 mr-2">
+                                <input
+                                  type="range"
+                                  min={0}
+                                  max={100}
+                                  value={gwRate}
+                                  onChange={e => setGwSuccessRate(gw, parseInt(e.target.value))}
+                                  onClick={e => e.stopPropagation()}
+                                  onMouseDown={e => e.stopPropagation()}
+                                  style={{ accentColor: trackColor }}
+                                  className="w-full h-2 cursor-pointer"
+                                />
+                                <div className="absolute top-full left-0 right-2 flex justify-between pointer-events-none">
+                                  <span className="text-[9px] text-slate-400 dark:text-slate-500 tabular-nums">0</span>
+                                  <span className="text-[9px] text-slate-400 dark:text-slate-500 tabular-nums">100%</span>
+                                </div>
+                              </div>
+                              <UiTooltip text="Simulated success rate for this gateway">
+                                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-bold tabular-nums shrink-0 ${ratePillClass}`}>
+                                  {gwRate}%
+                                </span>
+                              </UiTooltip>
+                              {hasFailures && gwFailureMode === 'decline' && gsmScoringFilterEnabled && smartRetryEnabled && !!gatewaySimConfigs[gw]?.errorInfo?.error_code && (
+                                <span className="inline-flex items-center gap-1 text-[10px] text-slate-400 dark:text-slate-500 shrink-0">
+                                  <span className={`font-medium ${gwGsmDecision === 'retry' ? 'text-amber-500 dark:text-amber-400' : 'text-slate-500 dark:text-slate-400'}`}>{gwGsmDecision === 'retry' ? 'retry' : 'no retry'}</span>
+                                  <span>·</span>
+                                  <span className={gwPenalized ? 'text-red-500 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}>{gwPenalized ? 'penalized' : 'no penalty'}</span>
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                disabled={isSimulating}
+                                onClick={e => {
+                                  e.stopPropagation()
+                                  const remaining = eligibleGatewaysParsed.filter(g => g !== gw)
+                                  set('eligible_gateways', remaining.join(', '))
+                                  setExpandedGateways(prev => { const next = new Set(prev); next.delete(gw); return next })
+                                }}
+                                className="text-slate-300 hover:text-red-400 dark:text-slate-600 dark:hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors shrink-0"
+                              >
+                                <X size={13} />
+                              </button>
+                              <ChevronDown
+                                size={13}
+                                className={`text-slate-400 dark:text-slate-500 transition-transform duration-200 shrink-0 ${isOpen ? 'rotate-180' : ''}`}
                               />
                             </div>
 
-                            {/* Failure mode toggle */}
-                            {hasFailures && (
-                              <div className={`grid grid-cols-2 rounded-lg overflow-hidden border text-[10px] font-semibold ${isSimulating ? 'opacity-50 pointer-events-none border-slate-100 dark:border-[#1c1c24]' : 'border-slate-200 dark:border-[#222226]'}`}>
-                                <button
-                                  type="button"
-                                  disabled={isSimulating}
-                                  onClick={() => setGwFailureMode(gw, 'decline')}
-                                  className={`py-1 transition-colors ${gwFailureMode === 'decline' ? 'bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
-                                >
-                                  Decline
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={isSimulating}
-                                  onClick={() => setGwFailureMode(gw, 'timeout')}
-                                  className={`py-1 border-l border-slate-200 dark:border-[#222226] transition-colors ${gwFailureMode === 'timeout' ? 'bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
-                                >
-                                  Timeout
-                                </button>
-                              </div>
-                            )}
-
-                            {hasFailures && gwFailureMode === 'timeout' && (
-                              <p className={`text-[10px] px-2 py-1.5 rounded-lg ${eliminationConfigured ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400' : 'bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400'}`}>
-                                {eliminationConfigured
-                                  ? `Removed from routing below ${eliminationConfig!.config.data.threshold} threshold.`
-                                  : 'Elimination not configured. Set it up in SR Routing settings.'}
-                              </p>
-                            )}
-
-                            {hasFailures && gwFailureMode === 'decline' && (
-                              <div className="space-y-2">
-                                {!gsmScoringFilterEnabled ? (
-                                  <p className="text-[10px] px-2 py-1.5 rounded-lg border border-slate-200 dark:border-[#2a2a35] bg-slate-50 dark:bg-[#1c1c24] text-slate-500 dark:text-slate-400">
-                                    GSM scoring filter disabled. Enable it in SR Routing settings.
-                                  </p>
-                                ) : (
-                                  <>
-                                    <div className="flex flex-wrap gap-1">
-                                      {errorScenarioPresets.filter(p => p.variants[gw]).map(preset => {
-                                        const variant = preset.variants[gw]
-                                        const isActive = variant != null && gwErrInfo.error_code === variant.error_code
-                                        return (
-                                          <UiTooltip key={preset.label} text={preset.tooltip}>
-                                            <button
-                                              type="button"
-                                              onClick={() => setGwErrorInfoField(gw, { ...variant })}
-                                              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset transition-colors ${
-                                                isActive
-                                                  ? preset.badge === 'protected'
-                                                    ? 'bg-emerald-50 text-emerald-700 ring-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-300 dark:ring-emerald-700'
-                                                    : 'bg-red-50 text-red-700 ring-red-300 dark:bg-red-900/30 dark:text-red-300 dark:ring-red-700'
-                                                  : 'bg-slate-50 text-slate-600 ring-slate-200 hover:bg-slate-100 dark:bg-[#1c1c24] dark:text-slate-400 dark:ring-[#2a2a35] dark:hover:bg-[#222230]'
-                                              }`}
-                                            >
-                                              <span className={`h-1.5 w-1.5 rounded-full ${preset.badge === 'protected' ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                                              {preset.label}
-                                            </button>
-                                          </UiTooltip>
-                                        )
-                                      })}
+                            {/* Expandable body — failure mode + error scenarios only */}
+                            <div className={`grid transition-all duration-200 ease-in-out ${isOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+                              <div className="overflow-hidden min-h-0">
+                                <div className="px-4 pb-4 pt-3 space-y-3 border-t border-slate-100 dark:border-[#1c1c24]">
+                                  {/* Failure mode toggle */}
+                                  {hasFailures && (
+                                    <div className={`grid grid-cols-2 rounded-lg overflow-hidden border text-xs font-semibold ${isSimulating ? 'opacity-50 pointer-events-none border-slate-100 dark:border-[#1c1c24]' : 'border-slate-200 dark:border-[#222226]'}`}>
+                                      <button
+                                        type="button"
+                                        disabled={isSimulating}
+                                        onClick={() => setGwFailureMode(gw, 'decline')}
+                                        className={`py-2 transition-colors ${gwFailureMode === 'decline' ? 'bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
+                                      >
+                                        Decline
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={isSimulating}
+                                        onClick={() => setGwFailureMode(gw, 'timeout')}
+                                        className={`py-2 border-l border-slate-200 dark:border-[#222226] transition-colors ${gwFailureMode === 'timeout' ? 'bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
+                                      >
+                                        Timeout
+                                      </button>
                                     </div>
-                                    <ErrorInfoFields
-                                      info={gwErrInfo}
-                                      onChange={updates => setGwErrorInfoField(gw, updates)}
-                                      rules={gsmRules}
-                                      connector={gw}
-                                    />
-                                  </>
-                                )}
+                                  )}
+
+                                  {hasFailures && gwFailureMode === 'timeout' && (
+                                    <p className={`text-xs px-3 py-2 rounded-lg ${eliminationConfigured ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400' : 'bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400'}`}>
+                                      {eliminationConfigured
+                                        ? `Removed from routing below ${eliminationConfig!.config.data.threshold} threshold.`
+                                        : 'Elimination not configured. Set it up in SR Routing settings.'}
+                                    </p>
+                                  )}
+
+                                  {hasFailures && gwFailureMode === 'decline' && (
+                                    <div className="space-y-2">
+                                      {!gsmScoringFilterEnabled ? (
+                                        <p className="text-xs px-3 py-2 rounded-lg border border-slate-200 dark:border-[#2a2a35] bg-slate-50 dark:bg-[#1c1c24] text-slate-500 dark:text-slate-400">
+                                          GSM scoring filter disabled. Enable it in SR Routing settings.
+                                        </p>
+                                      ) : (<>
+                                      <div className="grid grid-cols-2 gap-2">
+                                        <div>
+                                          <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">GSM Decision</label>
+                                          <select
+                                            value={gwGsmDecision}
+                                            disabled={isSimulating}
+                                            onChange={e => setGwGsmDecision(gw, e.target.value as 'retry' | 'do_default')}
+                                            className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
+                                          >
+                                            <option value="retry">Retry</option>
+                                            <option value="do_default">Do Default</option>
+                                          </select>
+                                        </div>
+                                        <div>
+                                          <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">Score Impact</label>
+                                          <select
+                                            value={gwPenalized ? 'penalized' : 'skipped'}
+                                            disabled={isSimulating}
+                                            onChange={e => setGwPenalized(gw, e.target.value === 'penalized')}
+                                            className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
+                                          >
+                                            <option value="penalized">Penalized</option>
+                                            <option value="skipped">Penalty skipped</option>
+                                          </select>
+                                        </div>
+                                      </div>
+                                      <ErrorInfoFields
+                                        info={gatewaySimConfigs[gw]?.errorInfo ?? DEFAULT_ERROR_INFO}
+                                        onChange={updates => setGwErrorInfoField(gw, updates)}
+                                        rules={gsmRules}
+                                        connector={gw}
+                                        showClassification={false}
+                                      />
+                                      </>)}
+                                    </div>
+                                  )}
+                                </div>
                               </div>
-                            )}
+                            </div>
                           </div>
                         )
                       })}
 
                       {/* Add connector */}
                       {addGwOpen ? (
-                        <div className="col-span-2 space-y-1.5">
+                        <div className="space-y-1.5">
                           <div className="relative">
                             <input
                               ref={addGwInputRef}
@@ -2528,6 +2696,7 @@ export function DecisionExplorerPage() {
                                   const gw = addGwDraft.trim().toLowerCase()
                                   if (gw && !eligibleGatewaysParsed.includes(gw)) {
                                     set('eligible_gateways', [...eligibleGatewaysParsed, gw].join(', '))
+                                    setExpandedGateways(prev => new Set(prev).add(gw))
                                   }
                                   setAddGwDraft('')
                                   setAddGwOpen(false)
@@ -2537,25 +2706,23 @@ export function DecisionExplorerPage() {
                               onBlur={() => { setAddGwDraft(''); setAddGwOpen(false) }}
                               placeholder="e.g. stripe"
                               autoFocus
-                              className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-brand-300 dark:border-brand-700 rounded-lg px-3 py-1.5 pr-16 text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                              className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-brand-300 dark:border-brand-700 rounded-lg px-3 py-2 pr-16 text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-brand-500"
                             />
-                            <kbd className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-[#1c1c24] border border-slate-200 dark:border-[#2a2a35] px-1.5 py-0.5 rounded font-mono">
+                            <kbd className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-[#1c1c24] border border-slate-200 dark:border-[#2a2a35] px-1.5 py-0.5 rounded font-mono">
                               Enter ↵
                             </kbd>
                           </div>
-                          <p className="text-[10px] text-slate-400 dark:text-slate-500">Press Enter to add · Esc to cancel</p>
+                          <p className="text-xs text-slate-400 dark:text-slate-500">Press Enter to add · Esc to cancel</p>
                         </div>
                       ) : (
                         <button
                           type="button"
                           disabled={isSimulating}
                           onClick={() => { setAddGwOpen(true); setTimeout(() => addGwInputRef.current?.focus(), 0) }}
-                          className="rounded-xl border border-dashed border-slate-200 dark:border-[#2a2a3a] flex flex-col items-center justify-center gap-1 min-h-[88px] text-slate-400 hover:text-brand-600 hover:border-brand-400 dark:hover:text-brand-400 dark:hover:border-brand-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                          className="w-full rounded-xl border border-dashed border-slate-200 dark:border-[#2a2a3a] flex items-center justify-center gap-2 h-11 text-slate-400 hover:text-brand-600 hover:border-brand-400 dark:hover:text-brand-400 dark:hover:border-brand-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                         >
-                          <div className="flex h-7 w-7 items-center justify-center rounded-full border border-dashed border-current">
-                            <Plus size={12} />
-                          </div>
-                          <span className="text-[10px] font-semibold uppercase tracking-wider">Add connector</span>
+                          <Plus size={14} />
+                          <span className="text-xs font-semibold uppercase tracking-wider">Add connector</span>
                         </button>
                       )}
                     </div>
@@ -2591,27 +2758,57 @@ export function DecisionExplorerPage() {
                 )}
               </Button>
             ) : activeTab === 'batch' ? (
-              <Button
-                onClick={isSimulating ? () => { simulationAbortRef.current = true } : runSimulation}
-                disabled={!effectiveMerchantId || routingConfigUnavailable}
-                variant={isSimulating ? 'secondary' : 'primary'}
-                className="w-full justify-center"
-              >
-                {isSimulating ? (
-                  <>
-                    <X size={14} />
-                    Stop ({simulationResults.length}/{simulationConfig.totalPayments || 0})
-                  </>
-                ) : (
-                  <>
-                    <Activity size={14} /> Run Auth-Rate Simulation
-                  </>
-                )}
-              </Button>
+              <>
+                <label className={`flex items-center gap-2 select-none ${gsmScoringFilterEnabled ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
+                  <input
+                    type="checkbox"
+                    checked={smartRetryEnabled}
+                    onChange={e => setSmartRetryEnabled(e.target.checked)}
+                    disabled={!gsmScoringFilterEnabled}
+                    className="rounded border-slate-300 dark:border-slate-600 disabled:cursor-not-allowed"
+                  />
+                  <span className="text-xs text-slate-600 dark:text-slate-400">
+                    Smart retry — on GSM <code className="text-[11px]">retry</code> decision, attempt next fallback gateway
+                    {!gsmScoringFilterEnabled && <span className="ml-1 text-amber-500">(enable GSM scoring filter first)</span>}
+                  </span>
+                </label>
+                <Button
+                  onClick={isSimulating ? () => { simulationAbortRef.current = true } : runSimulation}
+                  disabled={!effectiveMerchantId || routingConfigUnavailable}
+                  variant={isSimulating ? 'secondary' : 'primary'}
+                  className="w-full justify-center"
+                >
+                  {isSimulating ? (
+                    <>
+                      <X size={14} />
+                      Stop ({simulationResults.length}/{simulationConfig.totalPayments || 0})
+                    </>
+                  ) : (
+                    <>
+                      <Activity size={14} /> Run Auth-Rate Simulation
+                    </>
+                  )}
+                </Button>
+              </>
             ) : (
-              <Button onClick={run} disabled={loading || !effectiveMerchantId || routingConfigUnavailable} className="w-full justify-center">
-                {loading ? <><Spinner size={14} /> Running…</> : <><Play size={14} /> Run Single Transaction</>}
-              </Button>
+              <>
+                <label className={`flex items-center gap-2 select-none ${gsmScoringFilterEnabled ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
+                  <input
+                    type="checkbox"
+                    checked={smartRetryEnabled}
+                    onChange={e => setSmartRetryEnabled(e.target.checked)}
+                    disabled={!gsmScoringFilterEnabled}
+                    className="rounded border-slate-300 dark:border-slate-600 disabled:cursor-not-allowed"
+                  />
+                  <span className="text-xs text-slate-600 dark:text-slate-400">
+                    Smart retry — on GSM <code className="text-[11px]">retry</code> decision, attempt next fallback gateway
+                    {!gsmScoringFilterEnabled && <span className="ml-1 text-amber-500">(enable GSM scoring filter first)</span>}
+                  </span>
+                </label>
+                <Button onClick={run} disabled={loading || !effectiveMerchantId || routingConfigUnavailable} className="w-full justify-center">
+                  {loading ? <><Spinner size={14} /> Running…</> : <><Play size={14} /> Run Single Transaction</>}
+                </Button>
+              </>
             )}
           </div>
         </Card>
@@ -3096,6 +3293,16 @@ export function DecisionExplorerPage() {
                                 <span className="text-[11px] text-amber-500 dark:text-amber-400 cursor-help">0 hedged</span>
                               </UiTooltip>
                             )}
+                            {smartRetryEnabled && smartRetryStats.triggered > 0 && (
+                              <>
+                                <span className="text-slate-300 dark:text-slate-600">·</span>
+                                <UiTooltip text={`${smartRetryStats.triggered} retries triggered · ${smartRetryStats.recovered} recovered`}>
+                                  <span className="text-[11px] font-medium text-orange-500 dark:text-orange-400 cursor-help">
+                                    {smartRetryStats.triggered} retried · {smartRetryStats.recovered} recovered
+                                  </span>
+                                </UiTooltip>
+                              </>
+                            )}
                           </>
                         )}
                       </div>
@@ -3263,6 +3470,8 @@ export function DecisionExplorerPage() {
                               <th className="text-left px-3 py-2 whitespace-nowrap">Gateway</th>
                               <th className="text-left px-3 py-2">Routing</th>
                               <th className="text-left px-3 py-2">Outcome</th>
+                              {smartRetryEnabled && <th className="text-left px-3 py-2 whitespace-nowrap">Retry Gateway</th>}
+                              {smartRetryEnabled && <th className="text-left px-3 py-2">Retry Outcome</th>}
                               <th className="w-8" />
                             </tr>
                           </thead>
@@ -3298,6 +3507,20 @@ export function DecisionExplorerPage() {
                                     {res.status}
                                   </Badge>
                                 </td>
+                                {smartRetryEnabled && (
+                                  <td className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                                    {res.retryGateway ?? '—'}
+                                  </td>
+                                )}
+                                {smartRetryEnabled && (
+                                  <td className="px-3 py-2">
+                                    {res.retryStatus ? (
+                                      <Badge variant={res.retryStatus === 'CHARGED' ? 'green' : res.retryStatus === 'PENDING_VBV' ? 'orange' : 'red'}>
+                                        {res.retryStatus}
+                                      </Badge>
+                                    ) : <span className="text-xs text-slate-400">—</span>}
+                                  </td>
+                                )}
                                 <td className="pr-3 py-2">
                                   <span className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 dark:text-slate-500">
                                     <svg viewBox="0 0 16 16" fill="none" className="w-3.5 h-3.5" stroke="currentColor" strokeWidth="1.5">
@@ -3332,7 +3555,6 @@ export function DecisionExplorerPage() {
                 {showPenaltyGuide && (
                   <PenaltyClassificationGuide
                     merchantId={effectiveMerchantId}
-                    gsmScenarios={gsmScenarios}
                     gsmRules={gsmRules}
                     decideParams={{
                       amount: form.amount,

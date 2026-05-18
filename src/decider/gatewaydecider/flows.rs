@@ -387,6 +387,7 @@ pub async fn run_decider_flow(
                 .await;
                 Ok(T::DecidedGateway {
                     decided_gateway: pgw.clone(),
+                    fallback_gateways: vec![],
                     gateway_priority_map: Some(json!(HashMap::from([(pgw.to_string(), 1.0)]))),
                     filter_wise_gateways: None,
                     priority_logic_tag: None,
@@ -689,7 +690,24 @@ pub async fn run_decider_flow(
                     }
 
                     match decidedGateway {
-                        Some(decideGatewayOutput) => Ok(T::DecidedGateway {
+                        Some(decideGatewayOutput) => {
+                            let mut fallback_entries: Vec<(&String, &f64)> =
+                                currentGatewayScoreMap.iter().collect();
+                            fallback_entries.sort_by(|a, b| {
+                                b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal)
+                            });
+                            let fallback_gateways: Vec<String> = fallback_entries
+                                .into_iter()
+                                .filter_map(|(gw, _)| {
+                                    if gw != &decideGatewayOutput {
+                                        Some(gw.clone())
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect();
+                            Ok(T::DecidedGateway {
+                            fallback_gateways,
                             decided_gateway: decideGatewayOutput,
                             gateway_priority_map: gatewayPriorityMap,
                             filter_wise_gateways: None,
@@ -713,7 +731,7 @@ pub async fn run_decider_flow(
                                 .dpShouldConsumeResult
                                 .unwrap_or(false),
                             latency: None,
-                        }),
+                        })}
                         None => Err((
                             decider_flow.writer.debugFilterList.clone(),
                             decider_flow.writer.debugScoringList.clone(),

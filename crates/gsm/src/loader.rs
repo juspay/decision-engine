@@ -130,6 +130,8 @@ pub fn options() -> Vec<GsmOptionRow> {
             error_code: r.code.clone(),
             error_message: r.message.clone(),
             error_category: r.error_category.clone(),
+            unified_code: r.unified_code.clone(),
+            unified_message: r.unified_message.clone(),
             decision: r.decision.to_string(),
         })
         .collect()

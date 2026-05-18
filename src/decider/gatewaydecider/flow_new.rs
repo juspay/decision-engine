@@ -282,6 +282,7 @@ pub async fn run_decider_flow(
                 let cpu_time = cpu_start.elapsed().as_millis() as u64;
                 Ok(T::DecidedGateway {
                     decided_gateway: pgw.clone(),
+                    fallback_gateways: vec![],
                     gateway_priority_map: Some(json!(HashMap::from([(pgw.to_string(), 1.0)]))),
                     filter_wise_gateways: None,
                     priority_logic_tag: None,
@@ -600,8 +601,13 @@ pub async fn run_decider_flow(
                     match decidedGateway {
                         Some(decideGatewayOutput) => {
                             let cpu_time = cpu_start.elapsed().as_millis() as u64;
+                            let fallbacks = fallback_gateways_from_score_map(
+                                &currentGatewayScoreMap,
+                                &decideGatewayOutput,
+                            );
                             Ok(T::DecidedGateway {
                                 decided_gateway: decideGatewayOutput,
+                                fallback_gateways: fallbacks,
                                 gateway_priority_map: gatewayPriorityMap,
                                 filter_wise_gateways: None,
                                 priority_logic_tag: updatedPriorityLogicOutput
@@ -707,6 +713,24 @@ fn get_gateway_to_mga_id_map_f(allMgas: &[MerchantGatewayAccount], gateways: &[S
             )
         })
         .collect::<HashMap<_, _>>())
+}
+
+fn fallback_gateways_from_score_map(
+    score_map: &HashMap<String, f64>,
+    decided_gateway: &str,
+) -> Vec<String> {
+    let mut entries: Vec<(&String, &f64)> = score_map.iter().collect();
+    entries.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
+    entries
+        .into_iter()
+        .filter_map(|(gw, _)| {
+            if gw != decided_gateway {
+                Some(gw.clone())
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 fn add_preferred_gateways_to_priority_list(
