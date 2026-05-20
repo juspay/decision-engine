@@ -22,7 +22,7 @@ import { apiPost } from '../../lib/api'
 import { RoutingAlgorithm, RuleConfig } from '../../types/api'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
 
-type StrategyId = 'auth-rate' | 'rules' | 'volume' | 'debit'
+type StrategyId = 'auth-rate' | 'rules' | 'volume' | 'debit' | 'ab-test'
 type StrategyState = 'configured' | 'enabled' | 'not_set'
 
 interface StrategyRow {
@@ -78,6 +78,7 @@ export function RoutingHubPage() {
   const hasRuleBasedRouting = (activeAlgorithms || []).some((algorithm) => isRuleBasedAlgorithmType(algorithmType(algorithm)))
   const hasVolumeSplit = (activeAlgorithms || []).some((algorithm) => algorithmType(algorithm) === 'volume_split')
   const hasDebitRouting = debitRoutingFlag.isEnabled
+  const hasAbTest = (activeAlgorithms || []).some((algorithm) => algorithmType(algorithm) === 'ab_test')
   const readiness = [hasAuthRateConfig, hasRuleBasedRouting || hasVolumeSplit, hasDebitRouting].filter(Boolean).length
   const loading = activeLoading || srLoading || debitRoutingFlag.isLoading
   const activeRuleAlgorithm = (activeAlgorithms || []).find((algorithm) => isRuleBasedAlgorithmType(algorithmType(algorithm)))
@@ -122,6 +123,7 @@ export function RoutingHubPage() {
       rules: 'rule-based routing',
       volume: 'volume split routing',
       debit: 'debit routing',
+      'ab-test': 'A/B experiment',
     }
 
     setDeactivatingStrategy(strategyId)
@@ -210,6 +212,17 @@ export function RoutingHubPage() {
       evidence: hasDebitRouting ? 'Merchant debit-routing flag is enabled.' : 'Enable the merchant flag before running debit network decisions.',
       canDeactivate: hasDebitRouting,
     },
+    {
+      id: 'ab-test',
+      title: 'A/B Testing',
+      eyebrow: 'Experimentation',
+      description: 'Test two routing strategies against each other with statistical significance reporting.',
+      useCase: 'Best when validating a new routing algorithm, rule, or gateway before full rollout.',
+      icon: FlaskConical,
+      state: hasAbTest ? 'enabled' : 'not_set',
+      evidence: hasAbTest ? 'An A/B test experiment is running.' : 'No active experiment. Create one to start testing.',
+      canDeactivate: false,
+    },
   ]
 
   const nextAction = !merchantId
@@ -243,6 +256,7 @@ export function RoutingHubPage() {
     rules: 'Rule-Based Routing',
     volume: 'Volume Split Routing',
     debit: 'Debit Routing',
+    'ab-test': 'A/B Testing',
   }
 
   return (

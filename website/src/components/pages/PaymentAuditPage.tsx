@@ -30,7 +30,7 @@ const ROUTE_OPTIONS = [
 ]
 const INSPECTOR_TABS = ['summary', 'input', 'response', 'raw'] as const
 const DEBIT_ROUTING_APPROACH = 'NTW_BASED_ROUTING'
-const CATCH_UP_REFRESH_DELAYS_MS = [750, 2000, 4000]
+
 
 type AuditFilters = {
   paymentId: string
@@ -532,7 +532,7 @@ export function PaymentAuditPage() {
 
   const auditSearch = useSWR<PaymentAuditResponse>(searchUrl, fetcher, {
     revalidateOnFocus: false,
-    revalidateOnMount: true,
+    dedupingInterval: 5000,
   })
 
   const selectedSummary = useMemo(() => {
@@ -580,24 +580,9 @@ export function PaymentAuditPage() {
 
   const auditDetail = useSWR<PaymentAuditResponse>(detailUrl, fetcher, {
     revalidateOnFocus: false,
-    revalidateOnMount: true,
+    dedupingInterval: 5000,
   })
 
-  useEffect(() => {
-    const revalidateAudit = () => {
-      void auditSearch.mutate()
-      void auditDetail.mutate()
-    }
-
-    revalidateAudit()
-    const timers = CATCH_UP_REFRESH_DELAYS_MS.map((delay) =>
-      window.setTimeout(revalidateAudit, delay),
-    )
-
-    return () => {
-      timers.forEach((timer) => window.clearTimeout(timer))
-    }
-  }, [location.key, mode])
 
   const timeline = auditDetail.data?.timeline || []
 

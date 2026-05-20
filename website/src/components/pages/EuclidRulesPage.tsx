@@ -1073,10 +1073,21 @@ export function EuclidRulesPage() {
   const activeVolumeAlgorithm = (activeAlgorithms || []).find(
     (a) => (a.algorithm_data || a.algorithm)?.type === 'volume_split'
   )
+  const activeAbTestAlgorithm = (activeAlgorithms || []).find(
+    (a) => (a.algorithm_data || a.algorithm)?.type === 'ab_test'
+  )
+  const abTestArmIds = activeAbTestAlgorithm
+    ? (() => {
+        const d = (activeAbTestAlgorithm.algorithm_data || activeAbTestAlgorithm.algorithm)?.data as
+          | { control_algorithm_id?: string; variant_algorithm_id?: string }
+          | undefined
+        return new Set([d?.control_algorithm_id, d?.variant_algorithm_id].filter(Boolean) as string[])
+      })()
+    : new Set<string>()
   const ruleAlgorithms = (allAlgorithms || [])
     .filter((algo) => {
       const algorithm = algo.algorithm_data || algo.algorithm
-      return algorithm?.type !== 'volume_split'
+      return algorithm?.type !== 'volume_split' && algorithm?.type !== 'ab_test'
     })
     .sort((a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime())
 
@@ -1278,13 +1289,14 @@ function switchToCode() {
                 <div>
                   {ruleAlgorithms.map((algo) => {
                     const isActive = activeIds.has(algo.id)
+                    const isInAbTest = abTestArmIds.has(algo.id)
                     const isExpanded = expandedRuleIds.has(algo.id)
 
                     return (
                       <div
                         key={algo.id}
                         className={`border-b border-slate-100 dark:border-[#1e2330] last:border-b-0 transition-colors ${
-                          isActive ? 'bg-emerald-50/50 dark:bg-emerald-900/10' : ''
+                          isActive ? 'bg-emerald-50/50 dark:bg-emerald-900/10' : isInAbTest ? 'bg-purple-50/40 dark:bg-purple-900/10' : ''
                         }`}
                       >
                         <div className="px-6 pt-3 pb-2">
@@ -1297,13 +1309,18 @@ function switchToCode() {
                             >
                               <div className="flex items-center gap-1.5">
                                 <p className={`truncate font-medium group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors ${
-                                  isActive ? 'text-emerald-900 dark:text-emerald-100' : 'text-slate-900 dark:text-white'
+                                  isActive ? 'text-emerald-900 dark:text-emerald-100' : isInAbTest ? 'text-purple-900 dark:text-purple-100' : 'text-slate-900 dark:text-white'
                                 }`}>
                                   {algo.name}
                                 </p>
                                 {isActive && (
                                   <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">
                                     ● Active
+                                  </span>
+                                )}
+                                {!isActive && isInAbTest && (
+                                  <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300">
+                                    ⚗ In A/B test
                                   </span>
                                 )}
                                 {isExpanded
@@ -1402,6 +1419,11 @@ function switchToCode() {
           {activeVolumeAlgorithm && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
               <strong>Volume Split is active</strong> — activating a rule-based rule will automatically deactivate it.
+            </div>
+          )}
+          {activeAbTestAlgorithm && (
+            <div className="rounded-lg border border-purple-200 bg-purple-50 px-3 py-2 text-xs text-purple-700 dark:border-purple-500/30 dark:bg-purple-500/10 dark:text-purple-300">
+              <strong>A/B experiment "{activeAbTestAlgorithm.name}" is active</strong> — rules marked "In A/B test" are used as experiment arms. Activating a rule directly will stop the experiment.
             </div>
           )}
           {activateError && <ErrorMessage error={activateError} />}

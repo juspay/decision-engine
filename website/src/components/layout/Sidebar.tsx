@@ -13,6 +13,7 @@ import {
   Moon,
   Sun,
   Users,
+  FlaskConical,
   Key,
   ChevronDown,
   KeyRound,
@@ -143,6 +144,7 @@ export function Sidebar() {
         <SideLink to="/routing/rules" icon={BookOpen} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Rule-Based</SideLink>
         <SideLink to="/routing/volume" icon={PieChart} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Volume Split</SideLink>
         <SideLink to="/routing/debit" icon={Network} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Debit Routing</SideLink>
+        <SideLink to="/routing/ab-testing" icon={FlaskConical} indent selectedPath={selectedPath} onNavigate={setPendingPath}>A/B Testing</SideLink>
 
         <div className="flex items-center gap-2 px-3 pb-3 pt-8">
           <span className="text-[11px] font-bold uppercase tracking-widest text-slate-400 dark:text-[#6d768a]">

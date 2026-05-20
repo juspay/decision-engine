@@ -409,6 +409,7 @@ pub fn derive_payment_audit_summary_kind(
                 | FlowType::RoutingEvaluatePriority
                 | FlowType::RoutingEvaluateVolumeSplit
                 | FlowType::RoutingEvaluateAdvanced
+                | FlowType::RoutingEvaluateAbTest
                 | FlowType::RoutingEvaluatePreview
                 | FlowType::RoutingEvaluateError
         )

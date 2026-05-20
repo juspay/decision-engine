@@ -1,4 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { RuleEvaluationPanel } from './RuleEvaluationPanel'
 import { ErrorInfoFields, ErrorInfoState, GsmOptionRow, DEFAULT_ERROR_INFO, penalizedByUnifiedMessage } from './ErrorInfoFields'
 import { PenaltyClassificationGuide } from './PenaltyClassificationGuide'
 import { useNavigate } from 'react-router-dom'
@@ -740,6 +741,12 @@ function InspectorJsonPanel({
   )
 }
 
+// ---------------------------------------------------------------------------
+// Extracts RuleEvaluateParams from a routing algorithm's Euclid conditions.
+// Walks all rules and statements, collecting unique lhs keys with their first
+// concrete value. Non-Advanced algorithms (Priority/Single) have no conditions
+// so return an empty array.
+// ---------------------------------------------------------------------------
 export function DecisionExplorerPage() {
   const navigate = useNavigate()
   const { merchantId } = useMerchantStore()
@@ -776,6 +783,8 @@ export function DecisionExplorerPage() {
   useEffect(() => () => { simulationAbortRef.current = true }, [])
 
   const [debitForm, setDebitForm] = useState<DebitRoutingFormState>(initialState.debitForm)
+
+  const [ruleResetSignal, setRuleResetSignal] = useState(0)
 
   const [ruleParams, setRuleParams] = useState<RuleEvaluateParams[]>(initialState.ruleParams)
 
@@ -1911,10 +1920,6 @@ export function DecisionExplorerPage() {
 
   const previewInspectorModel = useMemo(() => buildInspectorModel(selectedPreviewEvent), [selectedPreviewEvent])
 
-  useEffect(() => {
-    if (!selectedPreviewPaymentId) return
-    void previewTraceDetail.mutate()
-  }, [selectedPreviewPaymentId])
 
   useEffect(() => {
     const el = txLogRef.current
@@ -1988,17 +1993,7 @@ export function DecisionExplorerPage() {
       setSimulationResults(defaults.simulationResults)
       setIsSimulating(false)
     } else if (activeTab === 'rule') {
-      setRuleParams(defaults.ruleParams.map(p =>
-        p.type === 'enum_variant' && p.value === ''
-          ? { ...p, value: routingKeysConfig[p.key]?.values?.[0] || '' }
-          : p
-      ))
-      setFallbackConnectors(defaults.fallbackConnectors)
-      setRuleResult(defaults.ruleResult)
-      setSelectedPreviewPaymentId(null)
-      setSelectedPreviewEventId(null)
-      setPreviewInspectorTab('summary')
-      setPreviewTraceLabel('Rule Evaluation Decision')
+      setRuleResetSignal(n => n + 1)
     } else if (activeTab === 'volume') {
       setVolumePayments(defaults.volumePayments)
       setRuleResult(defaults.ruleResult)
@@ -2087,10 +2082,24 @@ export function DecisionExplorerPage() {
         </div>
       </div>
 
+      {activeTab === 'rule' && (
+        <RuleEvaluationPanel
+          merchantId={effectiveMerchantId}
+          routingKeysConfig={routingKeysConfig}
+          routingConfigUnavailable={routingConfigUnavailable}
+          routingKeysLoading={routingKeysLoading}
+          resetSignal={ruleResetSignal}
+          onRunComplete={markExplorerRunDataUpdated}
+          onOpenTrace={openPreviewModal}
+        />
+      )}
+
       <div className={activeTab === 'volume'
         ? 'grid grid-cols-1 gap-5 xl:grid-cols-[minmax(340px,420px)_minmax(0,1fr)]'
         : 'grid grid-cols-1 gap-6 lg:grid-cols-2'
-      }>
+      }
+        style={activeTab === 'rule' ? { display: 'none' } : undefined}
+      >
         <Card className="!rounded-2xl self-start">
           <CardHeader className="!px-5 !py-4">
             <div>
@@ -2134,7 +2143,9 @@ export function DecisionExplorerPage() {
 
                 {/* Parameters */}
                 <div className="space-y-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-[#4e5870]">Parameters</p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-[#4e5870]">Parameters</p>
+                  </div>
                   <div className="space-y-1.5">
                     {ruleParams.map((param, idx) => (
                       <div key={idx} className="space-y-1.5">
@@ -2759,7 +2770,7 @@ export function DecisionExplorerPage() {
               </Button>
             ) : activeTab === 'batch' ? (
               <>
-                <label className={`flex items-center gap-2 select-none ${gsmScoringFilterEnabled ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
+                {/* <label className={`flex items-center gap-2 select-none ${gsmScoringFilterEnabled ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
                   <input
                     type="checkbox"
                     checked={smartRetryEnabled}
@@ -2771,7 +2782,7 @@ export function DecisionExplorerPage() {
                     Smart retry — on GSM <code className="text-[11px]">retry</code> decision, attempt next fallback gateway
                     {!gsmScoringFilterEnabled && <span className="ml-1 text-amber-500">(enable GSM scoring filter first)</span>}
                   </span>
-                </label>
+                </label> */}
                 <Button
                   onClick={isSimulating ? () => { simulationAbortRef.current = true } : runSimulation}
                   disabled={!effectiveMerchantId || routingConfigUnavailable}
@@ -2792,7 +2803,7 @@ export function DecisionExplorerPage() {
               </>
             ) : (
               <>
-                <label className={`flex items-center gap-2 select-none ${gsmScoringFilterEnabled ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
+                {/* <label className={`flex items-center gap-2 select-none ${gsmScoringFilterEnabled ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
                   <input
                     type="checkbox"
                     checked={smartRetryEnabled}
@@ -2804,7 +2815,7 @@ export function DecisionExplorerPage() {
                     Smart retry — on GSM <code className="text-[11px]">retry</code> decision, attempt next fallback gateway
                     {!gsmScoringFilterEnabled && <span className="ml-1 text-amber-500">(enable GSM scoring filter first)</span>}
                   </span>
-                </label>
+                </label> */}
                 <Button onClick={run} disabled={loading || !effectiveMerchantId || routingConfigUnavailable} className="w-full justify-center">
                   {loading ? <><Spinner size={14} /> Running…</> : <><Play size={14} /> Run Single Transaction</>}
                 </Button>

@@ -45,6 +45,19 @@ pub enum StaticRoutingAlgorithm {
     Priority(Vec<ConnectorInfo>),
     VolumeSplit(Vec<super::ast::VolumeSplit<ConnectorInfo>>),
     Advanced(Program),
+    AbTest(ABTestData),
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ABTestData {
+    pub control_algorithm_id: String,
+    pub variant_algorithm_id: String,
+    /// Percentage of traffic routed to the variant arm (1–49).
+    pub variant_split_pct: u8,
+    /// Minimum transactions to collect before reporting a significance verdict.
+    pub min_sample_size: u32,
+    /// Auto-pause threshold: if variant auth rate drops more than this many pp below control, flag for pause.
+    pub guardrail_threshold_pp: f64,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, strum::Display)]

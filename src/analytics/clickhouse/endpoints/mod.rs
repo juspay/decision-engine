@@ -1,4 +1,5 @@
 pub mod decisions;
+pub mod experiment_results;
 pub mod gateway_scores;
 pub mod log_summaries;
 pub mod overview;

@@ -86,6 +86,8 @@ pub enum FlowType {
     RoutingEvaluateRequestHit,
     RoutingEvaluatePreview,
     RoutingEvaluateError,
+    RoutingCreateAbTest,
+    RoutingEvaluateAbTest,
 }
 
 impl FlowType {
@@ -150,6 +152,8 @@ impl FlowType {
             Self::RoutingEvaluateRequestHit => "routing_evaluate_request_hit",
             Self::RoutingEvaluatePreview => "routing_evaluate_preview",
             Self::RoutingEvaluateError => "routing_evaluate_error",
+            Self::RoutingCreateAbTest => "routing_create_ab_test",
+            Self::RoutingEvaluateAbTest => "routing_evaluate_ab_test",
         }
     }
 }
@@ -371,6 +375,7 @@ pub fn refine_routing_create_flow_type(algorithm: &StaticRoutingAlgorithm) -> Fl
         StaticRoutingAlgorithm::Priority(_) => FlowType::RoutingCreatePriority,
         StaticRoutingAlgorithm::VolumeSplit(_) => FlowType::RoutingCreateVolumeSplit,
         StaticRoutingAlgorithm::Advanced(_) => FlowType::RoutingCreateAdvanced,
+        StaticRoutingAlgorithm::AbTest(_) => FlowType::RoutingCreateAbTest,
     }
 }
 
@@ -380,6 +385,7 @@ pub fn refine_routing_evaluate_flow_type(algorithm: &StaticRoutingAlgorithm) -> 
         StaticRoutingAlgorithm::Priority(_) => FlowType::RoutingEvaluatePriority,
         StaticRoutingAlgorithm::VolumeSplit(_) => FlowType::RoutingEvaluateVolumeSplit,
         StaticRoutingAlgorithm::Advanced(_) => FlowType::RoutingEvaluateAdvanced,
+        StaticRoutingAlgorithm::AbTest(_) => FlowType::RoutingEvaluateAbTest,
     }
 }
 

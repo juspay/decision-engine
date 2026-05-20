@@ -478,6 +478,20 @@ pub async fn preview_trace(
         .await
 }
 
+pub async fn experiment_results(
+    _state: &crate::app::TenantAppState,
+    query: &ExperimentResultsQuery,
+) -> Result<ExperimentResultsResponse, error::ApiError> {
+    let global_state = crate::app::APP_STATE
+        .get()
+        .ok_or(error::ApiError::DatabaseError)?;
+    global_state
+        .analytics_runtime
+        .read_store()
+        .experiment_results(query)
+        .await
+}
+
 pub fn format_range(query: &AnalyticsQuery) -> String {
     if query.start_ms.is_some() && query.end_ms.is_some() {
         return "custom".to_string();

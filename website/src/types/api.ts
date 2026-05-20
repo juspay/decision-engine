@@ -43,11 +43,20 @@ export interface VolumeSplitItem {
   output: GatewayConnector
 }
 
+export interface ABTestAlgorithmData {
+  control_algorithm_id: string
+  variant_algorithm_id: string
+  variant_split_pct: number
+  min_sample_size: number
+  guardrail_threshold_pp: number
+}
+
 export type RoutingAlgorithmData =
   | GatewayConnector[]              // priority
   | VolumeSplitItem[]              // volume_split
   | GatewayConnector               // single
   | EuclidAlgorithmData            // advanced
+  | ABTestAlgorithmData            // ab_test
 
 export interface EuclidRule {
   name: string
@@ -91,14 +100,41 @@ export interface RoutingAlgorithm {
   modified_at?: string
   // Backend returns algorithm_data, not algorithm
   algorithm_data?: {
-    type: 'priority' | 'volume_split' | 'single' | 'advanced'
+    type: 'priority' | 'volume_split' | 'single' | 'advanced' | 'ab_test'
     data: RoutingAlgorithmData
   }
   // For convenience, map algorithm_data to algorithm in the component
   algorithm?: {
-    type: 'priority' | 'volume_split' | 'single' | 'advanced'
+    type: 'priority' | 'volume_split' | 'single' | 'advanced' | 'ab_test'
     data: RoutingAlgorithmData
   }
+}
+
+export type ExperimentVerdict =
+  | 'collecting_data'
+  | 'not_significant'
+  | 'variant_wins'
+  | 'variant_loses'
+  | 'guardrail_breached'
+
+export interface ExperimentArmMetrics {
+  arm: string
+  transaction_count: number
+  success_count: number
+  auth_rate: number
+  avg_latency_ms: number | null
+}
+
+export interface ExperimentResultsResponse {
+  experiment_id: string
+  merchant_id: string
+  control: ExperimentArmMetrics
+  variant: ExperimentArmMetrics
+  delta_pp: number
+  p_value: number | null
+  confidence_interval: [number, number] | null
+  verdict: ExperimentVerdict
+  min_sample_size: number
 }
 
 export interface CreateRoutingRequest {

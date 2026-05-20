@@ -8,6 +8,7 @@ import { PaymentAuditPage } from './components/pages/PaymentAuditPage'
 import { RoutingHubPage } from './components/pages/RoutingHubPage'
 import { SRRoutingPage } from './components/pages/SRRoutingPage'
 import { VolumeSplitPage } from './components/pages/VolumeSplitPage'
+import { ABTestingPage } from './components/pages/ABTestingPage'
 import { AppShell } from './components/layout/AppShell'
 import { AuthGuard } from './components/layout/AuthGuard'
 import { AuthPage } from './pages/AuthPage'
@@ -32,6 +33,7 @@ export default function App() {
           <Route path="routing/rules" element={<EuclidRulesPage />} />
           <Route path="routing/volume" element={<VolumeSplitPage />} />
           <Route path="routing/debit" element={<DebitRoutingPage />} />
+          <Route path="routing/ab-testing" element={<ABTestingPage />} />
           <Route path="decisions" element={<DecisionExplorerPage />} />
           <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="audit" element={<PaymentAuditPage />} />
