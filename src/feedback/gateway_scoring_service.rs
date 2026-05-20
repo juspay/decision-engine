@@ -568,6 +568,15 @@ pub async fn check_and_update_gateway_score_(
             )
             .await;
 
+            // Emit AB test outcome event if this payment was part of an experiment.
+            let is_success = is_transaction_success(api_payload.status.clone());
+            crate::decider::gatewaydecider::ab_test::emit_if_in_flight(
+                &api_payload.payment_id,
+                &api_payload.merchant_id,
+                is_success,
+            )
+            .await;
+
             // Return success response
             Ok("Success".to_string())
         }

@@ -14,7 +14,15 @@ pub async fn load(
         query.payment_id.as_deref(),
         query.request_id.as_deref(),
     );
-    let (total_results, results) = if let Some(lookup_key) = requested_lookup_key.clone() {
+    fn is_success(status: Option<&str>) -> bool {
+        matches!(status.map(|s| s.to_uppercase()).as_deref(), Some("SUCCESS" | "CHARGED" | "AUTHORIZED"))
+    }
+    fn is_failure(status: Option<&str>) -> bool {
+        let upper = status.map(|s| s.to_uppercase());
+        matches!(upper.as_deref(), Some(s) if s == "FAILURE" || s.contains("FAILED") || s.contains("DECLINED"))
+    }
+
+    let (total_results, total_success, total_failure, results) = if let Some(lookup_key) = requested_lookup_key.clone() {
         let results =
             metrics::audit_summaries::load_exact(client, query, preview_only, &lookup_key)
                 .await
@@ -30,9 +38,11 @@ pub async fn load(
                     );
                     error
                 })?;
-        (results.len(), results)
+        let success = results.iter().filter(|r| is_success(r.latest_status.as_deref())).count();
+        let failure = results.iter().filter(|r| is_failure(r.latest_status.as_deref())).count();
+        (results.len(), success, failure, results)
     } else {
-        let total_results = metrics::audit_summaries::count(client, query, preview_only)
+        let (total_results, total_success, total_failure) = metrics::audit_summaries::count(client, query, preview_only)
             .await
             .map_err(|error| {
                 crate::logger::error!(
@@ -58,7 +68,7 @@ pub async fn load(
                 );
                 error
             })?;
-        (total_results, results)
+        (total_results, total_success, total_failure, results)
     };
     let page = query.page;
     let page_size = query.page_size;
@@ -114,6 +124,8 @@ pub async fn load(
         page,
         page_size,
         total_results,
+        total_success,
+        total_failure,
         results,
         timeline,
     })

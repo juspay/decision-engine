@@ -110,6 +110,18 @@ pub async fn decider_full_payload_hs_function(
         dpRedisCompressionConfig: None,
     };
 
+    // AB test intercept — must run before SR routing. Feature-flagged per merchant.
+    // Disabled by default; enable via service config AB_TEST_REAL_PAYMENTS_ENABLED_{merchant_id}.
+    match super::ab_test::intercept(&dreq_).await {
+        super::ab_test::AbTestIntercept::StaticArm { result, experiment_id: _, variant_arm: _ } => {
+            return Ok(*result);
+        }
+        super::ab_test::AbTestIntercept::SrArm { .. } => {
+            // Carry on with normal SR routing — the outcome will be recorded at score update time.
+        }
+        super::ab_test::AbTestIntercept::Disabled => {}
+    }
+
     let is_hybrid_routing = dreq_.ranking_algorithm == Some(RankingAlgorithm::NtwSrHybridRouting);
 
     if dreq_.ranking_algorithm == Some(RankingAlgorithm::NtwBasedRouting) || is_hybrid_routing {

@@ -137,6 +137,20 @@ export interface ExperimentResultsResponse {
   min_sample_size: number
 }
 
+export interface ExperimentTransaction {
+  payment_id: string
+  variant_arm: string
+  gateway: string | null
+  status: string | null
+  created_at_ms: number
+}
+
+export interface ExperimentTransactionsResponse {
+  experiment_id: string
+  total: number
+  transactions: ExperimentTransaction[]
+}
+
 export interface CreateRoutingRequest {
   name: string
   description: string
@@ -480,6 +494,8 @@ export interface PaymentAuditResponse {
   page: number
   page_size: number
   total_results: number
+  total_success: number
+  total_failure: number
   results: PaymentAuditSummary[]
   timeline: PaymentAuditEvent[]
 }

@@ -1,9 +1,10 @@
 use crate::analytics::{
     decisions as fetch_decisions, experiment_results as fetch_experiment_results,
+    experiment_transactions as fetch_experiment_transactions,
     gateway_scores as fetch_gateway_scores, log_summaries as fetch_log_summaries,
     overview as fetch_overview, payment_audit as fetch_payment_audit,
     preview_trace as fetch_preview_trace, routing_stats as fetch_routing_stats, AnalyticsQuery,
-    ExperimentResultsQuery, PaymentAuditQuery,
+    ExperimentResultsQuery, ExperimentTransactionsQuery, PaymentAuditQuery,
 };
 use crate::custom_extractors::{AuthenticatedAnalyticsContext, TenantStateResolver};
 use crate::error;
@@ -95,6 +96,10 @@ pub fn serve() -> axum::Router<Arc<crate::tenant::GlobalAppState>> {
         .route(
             "/experiment/:experiment_id/results",
             axum::routing::get(experiment_results),
+        )
+        .route(
+            "/experiment/:experiment_id/transactions",
+            axum::routing::get(experiment_transactions),
         )
 }
 
@@ -199,4 +204,30 @@ pub async fn experiment_results(
         guardrail_threshold_pp: params.guardrail_threshold_pp.unwrap_or(3.0),
     };
     Ok(Json(fetch_experiment_results(&state, &query).await?))
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ExperimentTransactionsParams {
+    pub start_ms: Option<i64>,
+    pub page: Option<u64>,
+    pub page_size: Option<u64>,
+}
+
+pub async fn experiment_transactions(
+    TenantStateResolver(state): TenantStateResolver,
+    AuthenticatedAnalyticsContext(auth_context): AuthenticatedAnalyticsContext,
+    axum::extract::Path(experiment_id): axum::extract::Path<String>,
+    Query(params): Query<ExperimentTransactionsParams>,
+) -> Result<
+    Json<crate::analytics::ExperimentTransactionsResponse>,
+    error::ContainerError<error::ApiError>,
+> {
+    let query = ExperimentTransactionsQuery {
+        experiment_id,
+        merchant_id: auth_context.merchant_id.clone(),
+        start_ms: params.start_ms,
+        page: params.page.unwrap_or(1),
+        page_size: params.page_size.unwrap_or(50).min(100),
+    };
+    Ok(Json(fetch_experiment_transactions(&state, &query).await?))
 }

@@ -154,6 +154,8 @@ pub async fn update_gateway_score(
                 trace_id.clone(),
                 None,
             );
+            // Check before check_and_update_gateway_score_ consumes the inflight key.
+            let is_ab_test_payment = crate::decider::gatewaydecider::ab_test::is_static_arm_inflight(&payment_id).await;
             let result = check_and_update_gateway_score_(payload.clone()).await;
             match result {
                 Ok(_success) => {
@@ -175,7 +177,9 @@ pub async fn update_gateway_score(
                         payment_id: payment_id.clone(),
                         gsm_info,
                     };
-                    crate::analytics::DomainAnalyticsEvent::record_gateway_update(
+                    // AB test payments (static arm) are tracked via RoutingEvaluateAbTest outcome
+                    // events — skip UpdateGatewayScoreUpdate so they don't appear in auth-rate audit.
+                    if !is_ab_test_payment { crate::analytics::DomainAnalyticsEvent::record_gateway_update(
                         crate::analytics::AnalyticsFlowContext::new(
                             crate::analytics::ApiFlow::DynamicRouting,
                             crate::analytics::FlowType::UpdateGatewayScoreUpdate,
@@ -208,7 +212,7 @@ pub async fn update_gateway_score(
                         global_request_id.clone(),
                         trace_id.clone(),
                         Some("score_updated".to_string()),
-                    );
+                    ); }
                     API_REQUEST_COUNTER
                         .with_label_values(&["update_gateway_score", "success"])
                         .inc();

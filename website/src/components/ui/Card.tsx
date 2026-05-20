@@ -14,7 +14,7 @@ export function Card({ children, className = '', onClick }: CardProps) {
     <>
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#3b82f6]/25 to-transparent dark:via-[#3b82f6]/30" />
       <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.55),transparent_26%)] dark:bg-[linear-gradient(180deg,rgba(255,255,255,0.02),transparent_26%)]" />
-      <div className="relative min-w-0 flex flex-col">{children}</div>
+      <div className="relative min-w-0 flex flex-col h-full">{children}</div>
     </>
   )
 

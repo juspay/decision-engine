@@ -646,6 +646,7 @@ pub enum GatewayDeciderApproach {
     SrV3DowntimeHedging,
     SrV3GlobalDowntimeHedging,
     NtwBasedRouting,
+    AbTestStaticAlgorithm,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -1518,6 +1519,7 @@ impl fmt::Display for GatewayDeciderApproach {
             Self::NtwBasedRouting => {
                 write!(f, "NTW_BASED_ROUTING")
             }
+            Self::AbTestStaticAlgorithm => write!(f, "AB_TEST_STATIC_ALGORITHM"),
         }
     }
 }

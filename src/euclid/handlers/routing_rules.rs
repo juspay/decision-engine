@@ -98,35 +98,6 @@ fn serialize_routing_evaluate_analytics_details(
     })
 }
 
-fn serialize_ab_test_analytics_details(
-    request: &RoutingRequest,
-    response: &RoutingEvaluateResponse,
-    rule_name: Option<&str>,
-    experiment_id: &str,
-    variant_arm: &str,
-) -> Option<String> {
-    crate::analytics::serialize_details(&serde_json::json!({
-        "request": request,
-        "response": response,
-        "rule_name": rule_name,
-        "preview_kind": "routing_evaluate_ab_test",
-        "experiment_id": experiment_id,
-        "variant_arm": variant_arm,
-    }))
-}
-
-/// Deterministic arm assignment using djb2 hash of payment_id.
-/// Returns "variant" if hash % 100 < variant_split_pct, else "control".
-fn assign_ab_test_arm(payment_id: &str, variant_split_pct: u8) -> &'static str {
-    let hash = payment_id
-        .bytes()
-        .fold(5381u64, |acc, b| acc.wrapping_mul(33).wrapping_add(b as u64));
-    if (hash % 100) < variant_split_pct as u64 {
-        "variant"
-    } else {
-        "control"
-    }
-}
 
 fn serialize_routing_evaluate_error_analytics_details(
     request: &RoutingRequest,
@@ -542,7 +513,7 @@ pub async fn routing_evaluate(
             Ok(data) => data,
             Err(e) => return fail_preview(e.into(), "routing_algorithm_parse_failed"),
         };
-    let preview_flow_type = crate::analytics::refine_routing_evaluate_flow_type(&algorithm_data);
+    let mut preview_flow_type = crate::analytics::refine_routing_evaluate_flow_type(&algorithm_data);
 
     // Populated by the AbTest arm to tag analytics events with experiment context.
     let mut ab_experiment_id: Option<String> = None;
@@ -618,118 +589,32 @@ pub async fn routing_evaluate(
             }
 
             StaticRoutingAlgorithm::AbTest(ab_data) => {
-                // Deterministic arm assignment: hash the payment_id to pick control or variant.
-                let arm = assign_ab_test_arm(
-                    payload.payment_id.as_deref().unwrap_or(""),
+                let payment_id = payload.payment_id.as_deref().unwrap_or("");
+                let arm = crate::decider::gatewaydecider::ab_test::assign_arm(
+                    payment_id,
                     ab_data.variant_split_pct,
                 );
                 let arm_algorithm_id = if arm == "variant" {
-                    &ab_data.variant_algorithm_id
+                    ab_data.variant_algorithm_id.as_str()
                 } else {
-                    &ab_data.control_algorithm_id
+                    ab_data.control_algorithm_id.as_str()
                 };
-
                 logger::debug!(
-                    "A/B test routing: payment_id={:?} assigned to arm={}",
-                    payload.payment_id,
-                    arm
+                    "A/B test routing evaluate: payment_id={:?} arm={} algorithm={}",
+                    payload.payment_id, arm, arm_algorithm_id
                 );
-
-                // Load the arm's routing algorithm
-                let arm_algorithm = match crate::generics::generic_find_one::<
-                    <RoutingAlgorithm as HasTable>::Table,
-                    _,
-                    RoutingAlgorithm,
-                >(&state.db, dsl::id.eq(arm_algorithm_id.clone()))
-                .await
-                .change_context(EuclidErrors::StorageError)
-                {
-                    Ok(algo) => algo,
-                    Err(e) => return fail_preview(e.into(), "ab_test_arm_algorithm_fetch_failed"),
-                };
-
-                let arm_algorithm_data: StaticRoutingAlgorithm =
-                    match serde_json::from_str(&arm_algorithm.algorithm_data).map_err(|e| {
-                        EuclidErrors::InvalidRequest(format!(
-                            "Invalid arm algorithm data format: {}",
-                            e
-                        ))
-                    }) {
-                        Ok(data) => data,
-                        Err(e) => {
-                            return fail_preview(e.into(), "ab_test_arm_algorithm_parse_failed")
-                        }
-                    };
-
-                // Record the experiment context in analytics details
                 ab_experiment_id = Some(active_routing_algorithm_id.clone());
                 ab_variant_arm = Some(arm.to_string());
 
-                // Evaluate the selected arm's algorithm
-                match arm_algorithm_data {
-                    StaticRoutingAlgorithm::Single(conn) => {
-                        let out_enum = Output::Single(*conn.clone());
-                        match evaluate_output(&out_enum).map_err(|_| {
-                            EuclidErrors::FailedToEvaluateOutput(format!(
-                                "ab_test arm single: {}",
-                                conn.gateway_name
-                            ))
-                        }) {
-                            Ok((_, eval)) => (out_enum, eval, Some(format!("ab_test_{arm}_straight_through"))),
-                            Err(e) => return fail_preview(e.into(), "ab_test_output_evaluation_failed"),
-                        }
+                let result = crate::decider::gatewaydecider::ab_test::preview::evaluate_arm(
+                    arm, arm_algorithm_id, &payload, default_output_present, &state.db,
+                ).await;
+                match result {
+                    Ok(r) => {
+                        preview_flow_type = r.flow_type;
+                        (r.output, r.evaluated_output, r.rule_name)
                     }
-                    StaticRoutingAlgorithm::Priority(connectors) => {
-                        let out_enum = Output::Priority(connectors.clone());
-                        match evaluate_output(&out_enum).map_err(|_| {
-                            EuclidErrors::FailedToEvaluateOutput("ab_test arm priority".into())
-                        }) {
-                            Ok((_, eval)) => (out_enum, eval, Some(format!("ab_test_{arm}_priority"))),
-                            Err(e) => return fail_preview(e.into(), "ab_test_output_evaluation_failed"),
-                        }
-                    }
-                    StaticRoutingAlgorithm::VolumeSplit(splits) => {
-                        let out_enum = Output::VolumeSplit(splits.clone());
-                        match evaluate_output(&out_enum).map_err(|_| {
-                            EuclidErrors::FailedToEvaluateOutput("ab_test arm volume_split".into())
-                        }) {
-                            Ok((_, eval)) => (out_enum, eval, Some(format!("ab_test_{arm}_volume_split"))),
-                            Err(e) => return fail_preview(e.into(), "ab_test_output_evaluation_failed"),
-                        }
-                    }
-                    StaticRoutingAlgorithm::Advanced(program) => {
-                        let ctx = Context::new(payload.parameters.clone());
-                        match InterpreterBackend::eval_program(&program, &ctx).map_err(|e| {
-                            EuclidErrors::InvalidRequest(format!(
-                                "AB test arm interpreter error: {:?}",
-                                e.error_type
-                            ))
-                        }) {
-                            Ok(mut ir) => {
-                                // Apply fallback_output when no rule matched (same behaviour as the
-                                // non-AB-test Advanced path).
-                                if default_output_present && ir.output == program.default_selection {
-                                    if let Some(fallback_connector) = payload.fallback_output.clone() {
-                                        ir.rule_name = Some("default_fallback".to_string());
-                                        ir.output = Output::Priority(fallback_connector.clone());
-                                        ir.evaluated_output =
-                                            vec![fallback_connector.first().cloned().unwrap_or_default()];
-                                    }
-                                }
-                                (ir.output, ir.evaluated_output, ir.rule_name)
-                            }
-                            Err(e) => return fail_preview(e.into(), "ab_test_interpreter_failed"),
-                        }
-                    }
-                    StaticRoutingAlgorithm::AbTest(_) => {
-                        return fail_preview(
-                            EuclidErrors::InvalidRequest(
-                                "Nested ab_test algorithms are not supported".into(),
-                            )
-                            .into(),
-                            "ab_test_nested_not_supported",
-                        );
-                    }
+                    Err(e) => return fail_preview(e, "ab_test_evaluation_failed"),
                 }
             }
         };
@@ -761,7 +646,7 @@ pub async fn routing_evaluate(
 
     logger::debug!("Response: {response:?}");
     let analytics_details = match (&ab_experiment_id, &ab_variant_arm) {
-        (Some(exp_id), Some(arm)) => serialize_ab_test_analytics_details(
+        (Some(exp_id), Some(arm)) => crate::decider::gatewaydecider::ab_test::preview::serialize_analytics_details(
             &payload,
             &response,
             rule_name.as_deref(),

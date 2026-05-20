@@ -5,7 +5,7 @@ use serde::Deserialize;
 
 use crate::analytics::models::*;
 use crate::analytics::store::AnalyticsReadStore;
-use crate::analytics::models::{ExperimentResultsQuery, ExperimentResultsResponse};
+use crate::analytics::models::{ExperimentResultsQuery, ExperimentResultsResponse, ExperimentTransactionsQuery, ExperimentTransactionsResponse};
 use crate::config::ClickHouseAnalyticsConfig;
 use crate::error::ApiError;
 
@@ -119,5 +119,12 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
         query: &ExperimentResultsQuery,
     ) -> Result<ExperimentResultsResponse, ApiError> {
         endpoints::experiment_results::load(&self.client, query).await
+    }
+
+    async fn experiment_transactions(
+        &self,
+        query: &ExperimentTransactionsQuery,
+    ) -> Result<ExperimentTransactionsResponse, ApiError> {
+        endpoints::experiment_transactions::load(&self.client, query).await
     }
 }

@@ -30,7 +30,6 @@ pub const PAYMENT_AUDIT_PREVIEW_FLOW_TYPES: &[FlowType] = &[
     FlowType::RoutingEvaluatePriority,
     FlowType::RoutingEvaluateVolumeSplit,
     FlowType::RoutingEvaluateAdvanced,
-    FlowType::RoutingEvaluateAbTest,
     FlowType::RoutingEvaluatePreview,
     FlowType::RoutingEvaluateError,
 ];

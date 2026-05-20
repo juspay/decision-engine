@@ -450,6 +450,8 @@ pub struct PaymentAuditResponse {
     pub page: usize,
     pub page_size: usize,
     pub total_results: usize,
+    pub total_success: usize,
+    pub total_failure: usize,
     pub results: Vec<PaymentAuditSummary>,
     pub timeline: Vec<PaymentAuditEvent>,
 }
@@ -500,6 +502,30 @@ pub struct ExperimentResultsQuery {
     pub end_ms: Option<i64>,
     pub min_sample_size: u32,
     pub guardrail_threshold_pp: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExperimentTransaction {
+    pub payment_id: String,
+    pub variant_arm: String,
+    pub gateway: Option<String>,
+    pub status: Option<String>,
+    pub created_at_ms: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExperimentTransactionsResponse {
+    pub experiment_id: String,
+    pub total: u64,
+    pub transactions: Vec<ExperimentTransaction>,
+}
+
+pub struct ExperimentTransactionsQuery {
+    pub experiment_id: String,
+    pub merchant_id: String,
+    pub start_ms: Option<i64>,
+    pub page: u64,
+    pub page_size: u64,
 }
 
 #[cfg(test)]

@@ -44,17 +44,23 @@ fn debit_routing_config_name(merchant_id: &str) -> String {
 pub enum KnownFeature {
     GsmScoringFilter,
     ExploreExploitSrv3,
+    AbTestRealPayments,
 }
 
 impl KnownFeature {
     fn all() -> &'static [Self] {
-        &[Self::GsmScoringFilter, Self::ExploreExploitSrv3]
+        &[
+            Self::GsmScoringFilter,
+            Self::ExploreExploitSrv3,
+            Self::AbTestRealPayments,
+        ]
     }
 
     fn from_slug(s: &str) -> Option<Self> {
         match s {
             "gsm-scoring-filter" => Some(Self::GsmScoringFilter),
             "explore-exploit-srv3" => Some(Self::ExploreExploitSrv3),
+            "ab-test-real-payments" => Some(Self::AbTestRealPayments),
             _ => None,
         }
     }
@@ -65,6 +71,7 @@ impl KnownFeature {
         match self {
             Self::GsmScoringFilter => "gsm_based_scoring_filter_enabled_merchant",
             Self::ExploreExploitSrv3 => "ENABLE_EXPLORE_AND_EXPLOIT_ON_SRV3_CARD",
+            Self::AbTestRealPayments => "ab_test_real_payments_enabled",
         }
     }
 

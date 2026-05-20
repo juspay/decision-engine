@@ -11,7 +11,7 @@ import { Spinner } from '../ui/Spinner'
 import { useMerchantStore } from '../../store/merchantStore'
 import { apiPost } from '../../lib/api'
 import { PAYMENT_METHOD_TYPES, PAYMENT_METHODS } from '../../lib/constants'
-import { Plus, Trash2, Eye, ChevronDown, Info, PowerOff } from 'lucide-react'
+import { Plus, Trash2, Eye, PowerOff } from 'lucide-react'
 import { useMerchantFeatures, type KnownFeature } from '../../hooks/useMerchantFeatures'
 
 // ---- Schema ----
@@ -150,8 +150,11 @@ function CurrentConfigDetails({ config }: { config: SRConfigResponse['config'] }
   )
 }
 
+type SRTab = 'scoring' | 'elimination' | 'flags'
+
 export function SRRoutingPage() {
   const { merchantId } = useMerchantStore()
+  const [activeTab, setActiveTab] = useState<SRTab>('scoring')
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState(false)
@@ -160,7 +163,6 @@ export function SRRoutingPage() {
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
-  const [showGuide, setShowGuide] = useState(false)
 
   const { data: existing, isLoading, mutate } = useSWR<SRConfigResponse>(
     merchantId ? ['rule-sr', merchantId] : null,
@@ -276,400 +278,196 @@ export function SRRoutingPage() {
   const lastModifiedDate = lastModifiedAt ? new Date(lastModifiedAt) : null
   const hasLastModified = Boolean(lastModifiedDate && !Number.isNaN(lastModifiedDate.getTime()))
 
+  const tabClass = (tab: SRTab) =>
+    `px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+      activeTab === tab
+        ? 'border-brand-500 text-brand-600 dark:text-brand-400'
+        : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+    }`
+
   return (
-    <div className="space-y-6 max-w-5xl">
-      <div>
-        <h1 className="text-2xl font-semibold text-slate-900">Auth-Rate Based Routing</h1>
+    <div className="space-y-6 max-w-4xl">
+      {/* Page header */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Auth-Rate Based Routing</h1>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            Dynamic gateway scoring based on real-time success rates.
+          </p>
+        </div>
+        {merchantId && !isLoading && existing?.config?.data && (
+          <div className="flex items-center gap-2">
+            <Badge variant="green">Active</Badge>
+            {hasLastModified && lastModifiedDate && (
+              <span className="text-xs text-slate-400">
+                Saved {lastModifiedDate.toLocaleString()}
+              </span>
+            )}
+            <Button type="button" variant="ghost" size="sm" onClick={() => setShowCurrentConfig(v => !v)}>
+              <Eye size={14} className="mr-1" />{showCurrentConfig ? 'Hide config' : 'View config'}
+            </Button>
+            <Button
+              type="button" variant="secondary" size="sm" disabled={deleting}
+              onClick={() => { if (confirm('Clear the Success Rate configuration? This disables SR-based routing.')) handleDelete() }}
+            >
+              <Trash2 size={14} className="mr-1" />{deleting ? 'Clearing…' : 'Clear'}
+            </Button>
+          </div>
+        )}
       </div>
 
       {!merchantId && (
-        <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-800">
+        <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-800 dark:border-yellow-800/30 dark:bg-yellow-900/20 dark:text-yellow-400">
           Set a Merchant ID in the top bar to load and save configuration.
         </div>
       )}
 
-      {/* Status Card */}
-      {merchantId && !isLoading && (
+      {/* Expanded config view */}
+      {showCurrentConfig && existing?.config?.data && (
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between gap-4">
-            <div className="min-w-0">
-              <h2 className="text-sm font-semibold text-slate-800 dark:text-white">
-                {existing?.config?.data ? 'Current Active Configuration' : 'Configuration Status'}
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                {existing?.config?.data
-                  ? (
-                    <>
-                      Success Rate routing is configured and active
-                      {hasLastModified && lastModifiedDate ? (
-                        <span className="ml-1">· Last saved {lastModifiedDate.toLocaleString()}</span>
-                      ) : null}
-                    </>
-                  )
-                  : 'No Success Rate configuration found'}
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <Badge variant={existing?.config?.data ? 'green' : 'gray'}>
-                {existing?.config?.data ? 'Active' : 'Not Configured'}
-              </Badge>
-              {existing?.config?.data ? (
-                <>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setShowCurrentConfig(!showCurrentConfig)}
-                  >
-                    <Eye size={14} className="mr-1" />
-                    {showCurrentConfig ? 'Hide' : 'View'}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => {
-                      if (confirm('Are you sure you want to clear the Success Rate configuration? This will disable SR-based routing.')) {
-                        handleDelete()
-                      }
-                    }}
-                    disabled={deleting}
-                  >
-                    <Trash2 size={14} className="mr-1" />
-                    {deleting ? 'Clearing...' : 'Clear Configuration'}
-                  </Button>
-                </>
-              ) : null}
-            </div>
-          </CardHeader>
-          {existing?.config?.data && (deleteError || showCurrentConfig) && (
-            <CardBody className="border-t border-slate-100 dark:border-[#222226]">
-              {deleteError && (
-                <p className={`text-xs text-red-500 ${showCurrentConfig ? 'mb-3' : ''}`}>{deleteError}</p>
-              )}
-              {showCurrentConfig ? (
-                <CurrentConfigDetails config={existing.config} />
-              ) : null}
-            </CardBody>
-          )}
+          <CardBody>
+            <CurrentConfigDetails config={existing.config} />
+          </CardBody>
         </Card>
       )}
+      {deleteError && <p className="text-xs text-red-500">{deleteError}</p>}
+
+      {/* Tab navigation */}
+      <div className="border-b border-slate-200 dark:border-[#1c1c23]">
+        <nav className="-mb-px flex gap-1">
+          <button type="button" className={tabClass('scoring')} onClick={() => setActiveTab('scoring')}>Scoring</button>
+          <button type="button" className={tabClass('elimination')} onClick={() => setActiveTab('elimination')}>Elimination</button>
+          <button type="button" className={tabClass('flags')} onClick={() => setActiveTab('flags')}>Feature Flags</button>
+        </nav>
+      </div>
 
       {isLoading ? (
         <div className="flex justify-center py-12"><Spinner /></div>
       ) : (
         <>
-        <form onSubmit={handleSubmit(onSave)} className="space-y-6">
+          {/* ── Scoring tab ── */}
+          {activeTab === 'scoring' && (
+            <form onSubmit={handleSubmit(onSave)} className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Scoring defaults</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">Applied to all payment types unless a sub-level override exists.</p>
+                </CardHeader>
+                <CardBody className="grid gap-6 md:grid-cols-3">
+                  <label className="space-y-1.5">
+                    <span className="text-xs font-medium text-slate-600 dark:text-slate-300">Bucket Size</span>
+                    <input
+                      type="number"
+                      {...register('defaultBucketSize')}
+                      className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 w-full focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    />
+                    {errors.defaultBucketSize && <p className="text-xs text-red-500">{errors.defaultBucketSize.message}</p>}
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      How many recent payments factor into each gateway's score. Smaller = faster adaptation, higher = more stable. Recommended: 50–200 depending on volume.
+                    </p>
+                  </label>
 
-          {/* Configuration Guide */}
-          <Card>
-            <div
-              className="flex flex-row items-center justify-between cursor-pointer select-none min-w-0 border-b border-slate-200 px-6 py-5 dark:border-[#2a303a]"
-              onClick={() => setShowGuide(v => !v)}
-            >
-              <div className="flex items-center gap-2">
-                <Info size={14} className="text-slate-400 dark:text-slate-500 shrink-0" />
-                <h2 className="text-sm font-semibold text-slate-800 dark:text-white">How to configure these settings</h2>
-              </div>
-              <ChevronDown
-                size={14}
-                className={`text-slate-400 transition-transform duration-200 ${showGuide ? 'rotate-180' : ''}`}
-              />
-            </div>
+                  <label className="space-y-1.5">
+                    <span className="text-xs font-medium text-slate-600 dark:text-slate-300">Hedging %</span>
+                    <input
+                      type="number" step="0.1"
+                      {...register('defaultHedgingPercent')}
+                      placeholder="e.g. 10"
+                      className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 w-full focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    />
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      Share of traffic sent to non-top gateways to keep their scores fresh. Only active when Explore-exploit is enabled under Feature Flags.
+                    </p>
+                  </label>
 
-            {showGuide && (
-              <CardBody className="border-t border-slate-100 dark:border-[#222226] space-y-6 text-xs text-slate-600 dark:text-[#b2bdd1]">
+                  <label className="space-y-1.5">
+                    <span className="text-xs font-medium text-slate-600 dark:text-slate-300">Latency Threshold (s)</span>
+                    <input
+                      type="number"
+                      {...register('defaultLatencyThreshold')}
+                      placeholder="300"
+                      className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 w-full focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    />
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      Timeouts within this window are treated as temporary outages; outside it as a performance issue. Default: 300 s.
+                    </p>
+                  </label>
+                </CardBody>
+              </Card>
 
-                {/* Bucket Size */}
-                <div className="space-y-2">
-                  <h3 className="font-semibold text-slate-700 dark:text-slate-200">Score Memory Size</h3>
-                  <p>
-                    Each gateway's success rate is calculated from its most recent payments — not its entire
-                    history. This setting controls <strong>how many recent payments</strong> are considered.
-                    Think of it like a restaurant rating that only reflects the last N reviews, so a venue that
-                    improves quickly can recover its rating without being dragged down by old data.
-                  </p>
-                  <ul className="list-disc list-inside space-y-1 text-[13px] text-slate-600 dark:text-slate-400">
-                    <li><span className="font-semibold">Smaller</span> — reacts faster when a gateway's performance changes, but can be noisy (a temporary bad hour looks like a real problem)</li>
-                    <li><span className="font-semibold">Larger</span> — more stable and reliable ratings, but takes longer to adapt when a gateway genuinely improves or degrades</li>
-                  </ul>
-                  <table className="w-full text-[11px] border-collapse">
-                    <thead>
-                      <tr className="text-left text-slate-500 border-b border-slate-200 dark:border-[#1c1c24]">
-                        <th className="py-1 pr-4 font-medium">Payment volume</th>
-                        <th className="py-1 pr-4 font-medium">Recommended</th>
-                        <th className="py-1 font-medium">How long before a rating change is noticed</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-[#1c1c24]">
-                      <tr><td className="py-1 pr-4">&lt; 500 / hour</td><td className="py-1 pr-4 font-semibold">20</td><td className="py-1 text-slate-500">~60 min</td></tr>
-                      <tr><td className="py-1 pr-4">500–2000 / hour</td><td className="py-1 pr-4 font-semibold">50</td><td className="py-1 text-slate-500">~40 min</td></tr>
-                      <tr><td className="py-1 pr-4">2000–5000 / hour</td><td className="py-1 pr-4 font-semibold">100</td><td className="py-1 text-slate-500">~20 min</td></tr>
-                      <tr><td className="py-1 pr-4">&gt; 5000 / hour</td><td className="py-1 pr-4 font-semibold">200</td><td className="py-1 text-slate-500">~16 min</td></tr>
-                    </tbody>
-                  </table>
-                  <p className="text-slate-500 dark:text-slate-400">
-                    If a gateway goes completely down, it is removed from routing within minutes by a separate
-                    real-time outage detector — you don't need to set this small to handle outages.
-                    This setting is for catching gradual performance drifts over time.
-                  </p>
-                </div>
-
-                {/* Hedging */}
-                <div className="space-y-2">
-                  <h3 className="font-semibold text-slate-700 dark:text-slate-200">Hedging %</h3>
-                  <p>
-                    To keep every gateway's rating up to date, the system periodically sends a small percentage
-                    of payments to each gateway — even ones that are not currently the top performer. This is
-                    like regularly sending mystery shoppers to every vendor so you always have a fresh,
-                    accurate rating for each one, and can quickly spot when the best option changes.
-                  </p>
-                  <p className="text-amber-600 dark:text-amber-400">
-                    Setting this too low means gateways that aren't winning most traffic won't have enough
-                    fresh data — so if your top gateway suddenly degrades, the system will be slow to notice
-                    and switch. Only applies when the Explore-exploit feature is enabled.
-                  </p>
-                  <table className="w-full text-[11px] border-collapse">
-                    <thead>
-                      <tr className="text-left text-slate-500 border-b border-slate-200 dark:border-[#1c1c24]">
-                        <th className="py-1 pr-4 font-medium">Payment volume</th>
-                        <th className="py-1 pr-4 font-medium">Score Memory Size</th>
-                        <th className="py-1 pr-4 font-medium">How quickly ratings stay fresh</th>
-                        <th className="py-1 font-medium">Recommended</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-[#1c1c24]">
-                      <tr><td className="py-1 pr-4">&lt; 500 / hour</td><td className="py-1 pr-4">20</td><td className="py-1 pr-4">within ~60 min</td><td className="py-1 font-semibold">~8%</td></tr>
-                      <tr><td className="py-1 pr-4">500–2000 / hour</td><td className="py-1 pr-4">50</td><td className="py-1 pr-4">within ~40 min</td><td className="py-1 font-semibold">~15%</td></tr>
-                      <tr><td className="py-1 pr-4">2000–5000 / hour</td><td className="py-1 pr-4">100</td><td className="py-1 pr-4">within ~20 min</td><td className="py-1 font-semibold">~17%</td></tr>
-                      <tr><td className="py-1 pr-4">&gt; 5000 / hour</td><td className="py-1 pr-4">200</td><td className="py-1 pr-4">within ~15 min</td><td className="py-1 font-semibold">~19%</td></tr>
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Default Success Rate */}
-                <div className="space-y-2">
-                  <h3 className="font-semibold text-slate-700 dark:text-slate-200">Default Success Rate</h3>
-                  <p>
-                    When a new payment gateway is added, it has no transaction history yet. Rather than
-                    treating it as untrusted, the system gives it a <strong>perfect starting rating</strong> so
-                    it immediately gets a fair share of test traffic to prove itself. Its rating then adjusts
-                    naturally based on real results.
-                  </p>
-                  <p className="text-slate-500 dark:text-slate-400">
-                    This starting score is fixed at the maximum — this field is not active and changing it has
-                    no effect.
-                  </p>
-                </div>
-
-                {/* Feedback Latency Window */}
-                <div className="space-y-2">
-                  <h3 className="font-semibold text-slate-700 dark:text-slate-200">Timeout Grace Period</h3>
-                  <p>
-                    When a payment times out — meaning the gateway didn't respond in time rather than
-                    explicitly failing — this setting controls how the system interprets it. If the timeout
-                    happens quickly after the payment attempt, it looks like a temporary outage. If it happens
-                    much later, it's treated as a general performance issue instead.
-                  </p>
-                  <ul className="list-disc list-inside space-y-1 text-[13px] text-slate-600 dark:text-slate-400">
-                    <li><span className="font-semibold">Within this period</span> — counted as a temporary outage, triggers fast rerouting</li>
-                    <li><span className="font-semibold">After this period</span> — counted as a general quality issue, affects the gateway's long-term rating</li>
-                  </ul>
-                  <p className="text-slate-500 dark:text-slate-400">
-                    Explicit payment failures are always counted as quality issues regardless of timing.
-                    Default is 5 minutes — suitable for most integrations.
-                  </p>
-                </div>
-
-              </CardBody>
-            )}
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <div>
-                <h2 className="text-sm font-semibold text-slate-800">Routing Settings</h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Default values used for all payment types unless overridden below.
-                </p>
-              </div>
-            </CardHeader>
-            <CardBody className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <label className="space-y-1">
-                <span className="text-xs text-slate-500">Score Memory Size</span>
-                <input
-                  type="number"
-                  {...register('defaultBucketSize')}
-                  className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 w-full focus:outline-none focus:ring-1 focus:ring-brand-500"
-                />
-                {errors.defaultBucketSize && (
-                  <p className="text-xs text-red-500">{errors.defaultBucketSize.message}</p>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <div>
+                    <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Sub-level overrides</h2>
+                    <p className="text-xs text-slate-500 mt-0.5">Optional per payment-method-type overrides for the settings above.</p>
+                  </div>
+                  <Button type="button" variant="secondary" size="sm" onClick={addSubLevelOverride}>
+                    <Plus size={14} /> Add Override
+                  </Button>
+                </CardHeader>
+                {subLevelOverridesOpen && (
+                  <CardBody className="overflow-x-auto p-0">
+                    {fields.length ? (
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-left text-xs text-slate-500 border-b border-slate-200 dark:border-[#1c1c24] bg-slate-50 dark:bg-[#0a0a0f]">
+                            <th className="px-4 py-2">Method Type</th>
+                            <th className="px-4 py-2">Method</th>
+                            <th className="px-4 py-2">Memory Size</th>
+                            <th className="px-4 py-2">Hedging %</th>
+                            <th className="px-4 py-2">Timeout Grace (s)</th>
+                            <th className="px-4 py-2" />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {fields.map((field, idx) => {
+                            const methodType = watchedRows?.[idx]?.paymentMethodType || ''
+                            const methodOptions = PAYMENT_METHODS[methodType] || []
+                            return (
+                              <tr key={field.id} className="border-b border-slate-200 dark:border-[#1c1c24] hover:bg-slate-50 dark:bg-[#0f0f16] transition-colors">
+                                <td className="px-4 py-2">
+                                  <select {...register(`subLevelInputConfig.${idx}.paymentMethodType`)} className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
+                                    {PAYMENT_METHOD_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                                  </select>
+                                </td>
+                                <td className="px-4 py-2">
+                                  <select {...register(`subLevelInputConfig.${idx}.paymentMethod`)} className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
+                                    {(methodOptions.length ? methodOptions : ['credit', 'debit']).map((m) => <option key={m} value={m}>{m}</option>)}
+                                  </select>
+                                </td>
+                                <td className="px-4 py-2"><input type="number" {...register(`subLevelInputConfig.${idx}.bucketSize`)} className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500" /></td>
+                                <td className="px-4 py-2"><input type="number" step="0.1" {...register(`subLevelInputConfig.${idx}.hedgingPercent`)} placeholder="—" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500" /></td>
+                                <td className="px-4 py-2"><input type="number" {...register(`subLevelInputConfig.${idx}.latencyThreshold`)} placeholder="—" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-24 focus:outline-none focus:ring-1 focus:ring-brand-500" /></td>
+                                <td className="px-4 py-2"><button type="button" onClick={() => removeSubLevelOverride(idx)} className="text-slate-400 hover:text-red-500"><Trash2 size={14} /></button></td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <div className="px-4 py-6 text-sm text-slate-500">No overrides yet — defaults apply to all payment types.</div>
+                    )}
+                  </CardBody>
                 )}
-                <p className="text-[11px] text-slate-400 dark:text-slate-500 leading-relaxed">
-                  How many recent test payments are used to calculate each gateway's rating. Higher = more stable but slower to adapt. Lower = reacts faster but may overreact to short blips.
-                </p>
-              </label>
+              </Card>
 
-              <label className="space-y-1">
-                <span className="text-xs text-slate-500">Starting Rating for New Gateways</span>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  max="1"
-                  {...register('defaultSuccessRate')}
-                  placeholder="0.5"
-                  className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 w-full focus:outline-none focus:ring-1 focus:ring-brand-500"
-                />
-                <p className="text-[11px] text-slate-400 dark:text-slate-500 leading-relaxed">
-                  Not active — new gateways always start with a perfect rating automatically.
-                </p>
-              </label>
-
-              <label className="space-y-1">
-                <span className="text-xs text-slate-500">Hedging %</span>
-                <input
-                  type="number"
-                  step="0.1"
-                  {...register('defaultHedgingPercent')}
-                  placeholder="null"
-                  className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 w-full focus:outline-none focus:ring-1 focus:ring-brand-500"
-                />
-                <p className="text-[11px] text-slate-400 dark:text-slate-500 leading-relaxed">
-                  Percentage of payments used to keep all gateway ratings fresh. Only applies when the Explore-exploit feature is on.
-                </p>
-              </label>
-
-              <label className="space-y-1">
-                <span className="text-xs text-slate-500">Timeout Grace Period (seconds)</span>
-                <input
-                  type="number"
-                  {...register('defaultLatencyThreshold')}
-                  placeholder="300"
-                  className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 w-full focus:outline-none focus:ring-1 focus:ring-brand-500"
-                />
-                <p className="text-[11px] text-slate-400 dark:text-slate-500 leading-relaxed">
-                  How long after a payment attempt a timeout is treated as a temporary outage vs a general performance issue. Default is 300 s (5 min).
-                </p>
-              </label>
-
-            </CardBody>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-800">Sub-Level Overrides</h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Optional overrides for specific payment method type and method combinations.
-                </p>
-              </div>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={addSubLevelOverride}
-              >
-                <Plus size={14} /> Add Level
-              </Button>
-            </CardHeader>
-            {subLevelOverridesOpen ? (
-              <CardBody className="overflow-x-auto p-0">
-              {fields.length ? (
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-xs text-slate-500 border-b border-slate-200 dark:border-[#1c1c24] bg-slate-50 dark:bg-[#0a0a0f]">
-                      <th className="px-4 py-2">Payment Method Type</th>
-                      <th className="px-4 py-2">Payment Method</th>
-                      <th className="px-4 py-2">Bucket Size</th>
-                      <th className="px-4 py-2">Hedging %</th>
-                      <th className="px-4 py-2">Feedback Latency Window (s)</th>
-                      <th className="px-4 py-2" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {fields.map((field, idx) => {
-                      const methodType = watchedRows?.[idx]?.paymentMethodType || ''
-                      const methodOptions = PAYMENT_METHODS[methodType] || []
-                      return (
-                        <tr key={field.id} className="border-b border-slate-200 dark:border-[#1c1c24] hover:bg-slate-100 dark:bg-[#0f0f16] transition-colors">
-                          <td className="px-4 py-2">
-                            <select
-                              {...register(`subLevelInputConfig.${idx}.paymentMethodType`)}
-                              className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-                            >
-                              {PAYMENT_METHOD_TYPES.map((t) => (
-                                <option key={t} value={t}>{t}</option>
-                              ))}
-                            </select>
-                          </td>
-                          <td className="px-4 py-2">
-                            <select
-                              {...register(`subLevelInputConfig.${idx}.paymentMethod`)}
-                              className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-                            >
-                              {(methodOptions.length ? methodOptions : ['credit', 'debit']).map((m) => (
-                                <option key={m} value={m}>{m}</option>
-                              ))}
-                            </select>
-                          </td>
-                          <td className="px-4 py-2">
-                            <input
-                              type="number"
-                              {...register(`subLevelInputConfig.${idx}.bucketSize`)}
-                              className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                            />
-                          </td>
-                          <td className="px-4 py-2">
-                            <input
-                              type="number"
-                              step="0.1"
-                              {...register(`subLevelInputConfig.${idx}.hedgingPercent`)}
-                              placeholder="null"
-                              className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                            />
-                          </td>
-                          <td className="px-4 py-2">
-                            <input
-                              type="number"
-                              {...register(`subLevelInputConfig.${idx}.latencyThreshold`)}
-                              placeholder="null"
-                              className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-24 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                            />
-                          </td>
-                          <td className="px-4 py-2">
-                            <button type="button" onClick={() => removeSubLevelOverride(idx)} className="text-slate-400 hover:text-red-500">
-                              <Trash2 size={14} />
-                            </button>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              ) : (
-                <div className="px-4 py-8 text-sm text-slate-500">
-                  No sub-level overrides configured. The default row above is the only active configuration.
+              <ErrorMessage error={saveError} />
+              {saveSuccess && (
+                <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-4 py-3 text-sm text-emerald-400">
+                  Configuration saved.
                 </div>
               )}
-              </CardBody>
-            ) : null}
-          </Card>
-
-          <ErrorMessage error={saveError} />
-          {saveSuccess && (
-            <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-4 py-3 text-sm text-emerald-400">
-              Configuration saved successfully.
-            </div>
+              <Button type="submit" disabled={saving || !merchantId}>
+                {saving ? <><Spinner size={14} /> Saving…</> : 'Save Scoring Config'}
+              </Button>
+            </form>
           )}
 
-          <Button type="submit" disabled={saving || !merchantId}>
-            {saving ? <><Spinner size={14} /> Saving…</> : 'Save Configuration'}
-          </Button>
-        </form>
+          {/* ── Elimination tab ── */}
+          {activeTab === 'elimination' && <EliminationConfig merchantId={merchantId} />}
 
-        <EliminationConfig merchantId={merchantId} />
-        <SRFeatureFlags merchantId={merchantId} />
+          {/* ── Feature Flags tab ── */}
+          {activeTab === 'flags' && <SRFeatureFlags merchantId={merchantId} />}
         </>
       )}
     </div>
@@ -688,6 +486,12 @@ const SR_FEATURES: { feature: KnownFeature; title: string; description: string }
     title: 'Explore-exploit on SRv3 (Card)',
     description:
       'Keeps all gateway ratings fresh by regularly sending a small share of payments to every gateway — not just the top performer. This ensures the system can quickly detect when a backup gateway becomes better than the current top, and reroute accordingly. The Hedging % setting controls how large this share is.',
+  },
+  {
+    feature: 'ab-test-real-payments',
+    title: 'A/B test on real payments',
+    description:
+      'Routes live production traffic through the active A/B test algorithm. When enabled, each payment is deterministically assigned to a control or variant arm based on its payment ID. Disable at any time to fall back to standard SR routing with no impact on in-flight payments.',
   },
 ]
 

@@ -2,7 +2,7 @@ import useSWR from 'swr'
 import { apiPost, fetcher } from '../lib/api'
 import { MerchantFeaturesResponse } from '../types/api'
 
-export type KnownFeature = 'gsm-scoring-filter' | 'explore-exploit-srv3'
+export type KnownFeature = 'gsm-scoring-filter' | 'explore-exploit-srv3' | 'ab-test-real-payments'
 
 export function useMerchantFeatures(merchantId?: string) {
   const path = merchantId ? `/merchant-account/${merchantId}/features` : null

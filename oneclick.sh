@@ -454,19 +454,16 @@ fi
 echo "Running Postgres migrations..."
 just migrate-pg
 
-echo "Starting Decision Engine server..."
+# Start backend, npm install, and docs in parallel — none of them depend on each other.
+echo "Starting Decision Engine server, installing dashboard dependencies, and starting docs preview..."
+
 cargo run --no-default-features --features postgres &
 SERVER_PID=$!
 
-if ! wait_for_backend; then
-    cleanup 1
-fi
-
-echo "Installing dashboard dependencies..."
 cd "$SCRIPT_DIR/website"
-npm install --silent
+npm install --silent &
+NPM_PID=$!
 
-echo "Starting docs preview..."
 cd "$SCRIPT_DIR/docs"
 rm -f "$DOCS_LOG_PATH"
 if [ "${DOCS_PORT}" != "3000" ]; then
@@ -480,7 +477,9 @@ fi
 PORT="$DOCS_PORT" mint dev --no-open >"$DOCS_LOG_PATH" 2>&1 &
 DOCS_PID=$!
 
-if ! wait_for_docs; then
+# Dashboard needs npm install to finish first.
+if ! wait $NPM_PID; then
+    echo "npm install failed."
     cleanup 1
 fi
 
@@ -490,6 +489,15 @@ npm run dev &
 DASHBOARD_PID=$!
 
 cd "$SCRIPT_DIR"
+
+# Wait for backend and docs — they were compiling/starting in parallel this whole time.
+if ! wait_for_backend; then
+    cleanup 1
+fi
+
+if ! wait_for_docs; then
+    cleanup 1
+fi
 
 echo ""
 echo "=========================================="

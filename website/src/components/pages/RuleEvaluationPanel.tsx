@@ -173,6 +173,10 @@ export function RuleEvaluationPanel({
     { revalidateOnFocus: false },
   )
 
+  const activeAbTest = activeAlgorithms?.find(
+    a => (a.algorithm_data || a.algorithm)?.type === 'ab_test',
+  ) ?? null
+
   // ---- local state ----
   const [ruleParams, setRuleParams] = useState<RuleEvaluateParams[]>(DEFAULT_RULE_PARAMS)
   const [fallbackConnectors, setFallbackConnectors] = useState<GatewayConnector[]>(DEFAULT_FALLBACK_CONNECTORS)
@@ -203,9 +207,6 @@ export function RuleEvaluationPanel({
   useEffect(() => {
     if (!activeAlgorithms || !allAlgorithms || routingKeysLoading || routingConfigUnavailable) return
 
-    const activeAbTest = activeAlgorithms.find(
-      a => (a.algorithm_data || a.algorithm)?.type === 'ab_test',
-    )
     const activeRuleBased = activeAlgorithms.find(a => {
       const t = (a.algorithm_data || a.algorithm)?.type
       return t === 'advanced' || t === 'priority' || t === 'single'
@@ -216,9 +217,20 @@ export function RuleEvaluationPanel({
 
     if (!source && activeAbTest) {
       const abData = (activeAbTest.algorithm_data || activeAbTest.algorithm)?.data as ABTestAlgorithmData | undefined
-      if (abData?.control_algorithm_id) {
-        source = allAlgorithms.find(a => a.id === abData.control_algorithm_id)
+      // Try control arm first, then variant — sr_routing has no saved algorithm to extract from.
+      const controlAlgo = abData?.control_algorithm_id
+        ? allAlgorithms.find(a => a.id === abData.control_algorithm_id)
+        : undefined
+      const variantAlgo = abData?.variant_algorithm_id
+        ? allAlgorithms.find(a => a.id === abData.variant_algorithm_id)
+        : undefined
+
+      if (controlAlgo && extractRuleParams(controlAlgo, routingKeysConfig).length > 0) {
+        source = controlAlgo
         sourceSuffix = ' (control arm)'
+      } else if (variantAlgo && extractRuleParams(variantAlgo, routingKeysConfig).length > 0) {
+        source = variantAlgo
+        sourceSuffix = ' (variant arm)'
       }
     }
 
@@ -351,6 +363,16 @@ export function RuleEvaluationPanel({
           )}
           {routingConfigUnavailable && (
             <ErrorMessage error="Routing keys are unavailable from backend (/config/routing-keys). Rule Evaluation is disabled." />
+          )}
+
+          {activeAbTest && (
+            <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-amber-50 border border-amber-200 dark:bg-amber-900/20 dark:border-amber-700/40">
+              <span className="text-amber-500 mt-0.5 shrink-0">⚠</span>
+              <p className="text-xs text-amber-700 dark:text-amber-300 leading-relaxed">
+                <span className="font-semibold">A/B experiment "{activeAbTest.name}" is active.</span>{' '}
+                Results reflect whichever arm is assigned to the simulated payment ID — this mirrors real traffic. Stop the experiment to see baseline routing.
+              </p>
+            </div>
           )}
 
           {/* Parameters */}
