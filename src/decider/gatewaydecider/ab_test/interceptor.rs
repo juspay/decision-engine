@@ -17,6 +17,9 @@ pub enum AbTestIntercept {
     SrArm {
         experiment_id: String,
         variant_arm: String,
+        /// SR hyperparameter overrides to apply during routing. Only set for the variant arm
+        /// in SR Config Tuning experiments; None for control arm and standard A/B tests.
+        sr_config_override: Option<crate::euclid::types::SrConfigOverride>,
     },
     /// This payment is assigned to a static algorithm arm — return this result directly.
     StaticArm {
@@ -86,11 +89,17 @@ pub async fn intercept(dreq: &DomainDeciderRequestForApiCallV2) -> AbTestInterce
 
     // SR arm: gateway unknown until the decider runs — emit routing event without gateway.
     if arm_algorithm_id == "sr_routing" {
+        let sr_config_override = if arm == "variant" {
+            data.variant_sr_config.clone()
+        } else {
+            None
+        };
         emit_routing_event(payment_id, &dreq.merchant_id, &experiment_id, arm, "sr_routing", None);
         outcome::store_inflight(payment_id, &experiment_id, arm, None, false).await;
         return AbTestIntercept::SrArm {
             experiment_id,
             variant_arm: arm.to_string(),
+            sr_config_override,
         };
     }
 
@@ -147,6 +156,7 @@ pub async fn intercept(dreq: &DomainDeciderRequestForApiCallV2) -> AbTestInterce
             AbTestIntercept::SrArm {
                 experiment_id,
                 variant_arm: arm.to_string(),
+                sr_config_override: None,
             }
         }
     }

@@ -15,10 +15,10 @@ import {
   ExperimentResultsResponse,
   ExperimentTransactionsResponse,
 } from '../../types/api'
-import { ShieldAlert, PowerOff, Plus, FlaskConical, CheckCircle2, XCircle, Clock, AlertTriangle } from 'lucide-react'
+import { ShieldAlert, PowerOff, Plus, FlaskConical, CheckCircle2, XCircle, Clock, AlertTriangle, Sliders } from 'lucide-react'
 import { validateABTestForm } from '../../features/routing/abTesting/schema'
 import { toABTestCreatePayload } from '../../features/routing/abTesting/payload'
-import { ABTestFormValues } from '../../features/routing/abTesting/types'
+import { ABTestFormValues, ABTestExperimentType, SrConfigOverrideForm, DEFAULT_VARIANT_SR_CONFIG } from '../../features/routing/abTesting/types'
 
 const SAMPLE_SIZE_PRESETS = [1000, 5000, 10000, 50000]
 
@@ -59,6 +59,64 @@ function VerdictChip({ verdict }: { verdict: string }) {
   )
 }
 
+// ─── SR Config param display helpers ──────────────────────────────────────────
+
+function srParamLabel(key: string): string {
+  const map: Record<string, string> = {
+    hedging_percent: 'Hedging %',
+    elimination_threshold: 'Elimination threshold',
+  }
+  return map[key] ?? key
+}
+
+function srParamFormat(key: string, value: number): string {
+  if (key === 'hedging_percent') return `${value}%`
+  if (key === 'elimination_threshold') return `SR < ${(value * 100).toFixed(0)}%`
+  return String(value)
+}
+
+interface SrParamDiffProps {
+  abData: ABTestAlgorithmData
+}
+
+function SrParamDiff({ abData }: SrParamDiffProps) {
+  const vari = abData.variant_sr_config ?? {}
+  const keys = Object.keys(vari) as (keyof typeof vari)[]
+
+  if (keys.length === 0) return null
+
+  return (
+    <div className="rounded-xl border border-slate-200 dark:border-[#222226] overflow-hidden">
+      <div className="px-4 py-2.5 bg-slate-50 dark:bg-[#0a0a0f] border-b border-slate-200 dark:border-[#222226]">
+        <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400">Parameter overrides</p>
+      </div>
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-left text-[10px] text-slate-400 border-b border-slate-100 dark:border-[#1e2330]">
+            <th className="px-4 py-2">Parameter</th>
+            <th className="px-4 py-2 text-slate-500">Control (current config)</th>
+            <th className="px-4 py-2 text-brand-500">Variant (override)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {keys.map(k => {
+            const vv = vari[k]
+            return (
+              <tr key={String(k)} className="border-b border-slate-50 dark:border-[#131318]">
+                <td className="px-4 py-2 text-slate-500">{srParamLabel(String(k))}</td>
+                <td className="px-4 py-2 text-slate-400 italic">Live SR config</td>
+                <td className="px-4 py-2 font-mono font-semibold text-brand-600 dark:text-brand-400">
+                  {vv !== undefined ? srParamFormat(String(k), vv) : '—'}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 // ─── Experiment detail panel ──────────────────────────────────────────────────
 
 interface DetailPanelProps {
@@ -83,6 +141,7 @@ function ExperimentDetailPanel({
   onStop,
 }: DetailPanelProps) {
   const abData = (algorithm.algorithm_data || algorithm.algorithm)?.data as ABTestAlgorithmData | undefined
+  const isTuning = Boolean(abData?.variant_sr_config)
 
   const resultsUrl = abData
     ? `/analytics/experiment/${algorithm.id}/results?min_sample_size=${abData.min_sample_size}&guardrail_threshold_pp=${abData.guardrail_threshold_pp}`
@@ -107,15 +166,17 @@ function ExperimentDetailPanel({
   function routingType(variantArm: string): string {
     if (!abData) return '—'
     const algorithmId = variantArm === 'control' ? abData.control_algorithm_id : abData.variant_algorithm_id
-    return algorithmId === 'sr_routing' ? 'SR Routing' : algorithmName(algorithmId)
+    if (algorithmId === 'sr_routing') {
+      if (isTuning) return variantArm === 'variant' ? 'SR Routing (custom params)' : 'SR Routing (live config)'
+      return 'SR Routing'
+    }
+    return algorithmName(algorithmId)
   }
 
   function openAuditForTxn(paymentId: string, variantArm: string) {
     const isSr = variantArm === 'control'
       ? abData?.control_algorithm_id === 'sr_routing'
       : abData?.variant_algorithm_id === 'sr_routing'
-    // Static arm payments go through SR scoring but have no rule evaluation events,
-    // so they don't appear in either audit mode. Only SR arm payments have an audit trail.
     if (!isSr) return
     const url = `/audit?range=1d&exclude_routing_approach=NTW_BASED_ROUTING&payment_id=${encodeURIComponent(paymentId)}`
     window.open(url, '_blank')
@@ -134,6 +195,11 @@ function ExperimentDetailPanel({
         <div>
           <div className="flex items-center gap-2">
             <h2 className="text-base font-semibold text-slate-900 dark:text-white">{algorithm.name}</h2>
+            {isTuning && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300">
+                <Sliders size={9} /> SR Config Tuning
+              </span>
+            )}
             {isActive
               ? <Badge variant="green">Active</Badge>
               : <Badge variant="gray">Inactive</Badge>
@@ -155,18 +221,22 @@ function ExperimentDetailPanel({
 
       {/* Arm config */}
       {abData && (
-        <div className="grid grid-cols-2 gap-3">
-          <div className="rounded-xl border border-slate-200 dark:border-[#222226] bg-slate-50 dark:bg-[#0c0c10] px-4 py-3">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400 mb-1">Control ({controlPct}%)</p>
-            <p className="text-sm font-medium text-slate-800 dark:text-white truncate">{algorithmName(abData.control_algorithm_id)}</p>
-            <p className="text-[10px] text-slate-400 mt-0.5">Baseline</p>
+        isTuning ? (
+          <SrParamDiff abData={abData} />
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-xl border border-slate-200 dark:border-[#222226] bg-slate-50 dark:bg-[#0c0c10] px-4 py-3">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400 mb-1">Control ({controlPct}%)</p>
+              <p className="text-sm font-medium text-slate-800 dark:text-white truncate">{algorithmName(abData.control_algorithm_id)}</p>
+              <p className="text-[10px] text-slate-400 mt-0.5">Baseline</p>
+            </div>
+            <div className="rounded-xl border border-brand-200 dark:border-brand-800/50 bg-brand-50/50 dark:bg-brand-900/10 px-4 py-3">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-brand-400 mb-1">Variant ({variantPct}%)</p>
+              <p className="text-sm font-medium text-slate-800 dark:text-white truncate">{algorithmName(abData.variant_algorithm_id)}</p>
+              <p className="text-[10px] text-slate-400 mt-0.5">Being tested</p>
+            </div>
           </div>
-          <div className="rounded-xl border border-brand-200 dark:border-brand-800/50 bg-brand-50/50 dark:bg-brand-900/10 px-4 py-3">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-brand-400 mb-1">Variant ({variantPct}%)</p>
-            <p className="text-sm font-medium text-slate-800 dark:text-white truncate">{algorithmName(abData.variant_algorithm_id)}</p>
-            <p className="text-[10px] text-slate-400 mt-0.5">Being tested</p>
-          </div>
-        </div>
+        )
       )}
 
       {/* Stats */}
@@ -204,19 +274,27 @@ function ExperimentDetailPanel({
 
               {/* Arm comparison */}
               <div className="grid grid-cols-3 gap-3">
-                <div className="rounded-xl border border-slate-200 dark:border-[#222226] px-4 py-3 space-y-1">
-                  <p className="text-[10px] text-slate-400">Control ({controlPct}%)</p>
-                  <p className="text-xl font-bold text-slate-800 dark:text-white">{authRatePct(results.control.auth_rate)}</p>
-                  <p className="text-xs text-slate-400">{results.control.transaction_count.toLocaleString()} txns</p>
-                  <p className="text-xs text-slate-400">{results.control.success_count.toLocaleString()} success</p>
-                </div>
-                <div className="rounded-xl border border-brand-200 dark:border-brand-800/50 px-4 py-3 space-y-1">
-                  <p className="text-[10px] text-brand-500">Variant ({variantPct}%)</p>
-                  <p className="text-xl font-bold text-slate-800 dark:text-white">{authRatePct(results.variant.auth_rate)}</p>
-                  <p className="text-xs text-slate-400">{results.variant.transaction_count.toLocaleString()} txns</p>
-                  <p className="text-xs text-slate-400">{results.variant.success_count.toLocaleString()} success</p>
-                </div>
-                <div className="rounded-xl border border-slate-200 dark:border-[#222226] px-4 py-3 space-y-1">
+                {[
+                  { label: `Control (${controlPct}%)`, metrics: results.control, accent: false },
+                  { label: `Variant (${variantPct}%)`, metrics: results.variant, accent: true },
+                ].map(({ label, metrics, accent }) => {
+                  const unresolved = metrics.transaction_count - metrics.success_count
+                  return (
+                    <div key={label} className={`rounded-xl border px-4 py-3 space-y-1 ${accent ? 'border-brand-200 dark:border-brand-800/50' : 'border-slate-200 dark:border-[#222226]'}`}>
+                      <p className={`text-[10px] ${accent ? 'text-brand-500' : 'text-slate-400'}`}>{label}</p>
+                      <p className="text-xl font-bold text-slate-800 dark:text-white">{authRatePct(metrics.auth_rate)}</p>
+                      <p className="text-xs text-slate-400">{metrics.transaction_count.toLocaleString()} txns</p>
+                      <p className="text-xs text-emerald-600 dark:text-emerald-400">{metrics.success_count.toLocaleString()} success</p>
+                      {unresolved > 0 && (
+                        <p className="text-xs text-amber-600 dark:text-amber-400" title="Routed payments with no outcome recorded — counted against auth rate">
+                          {unresolved.toLocaleString()} no outcome
+                        </p>
+                      )}
+                    </div>
+                  )
+                })}
+
+                <div key="delta" className="rounded-xl border border-slate-200 dark:border-[#222226] px-4 py-3 space-y-1">
                   <p className="text-[10px] text-slate-400">Delta</p>
                   <p className={`text-xl font-bold ${results.delta_pp > 0 ? 'text-emerald-600 dark:text-emerald-400' : results.delta_pp < 0 ? 'text-red-500' : 'text-slate-800 dark:text-white'}`}>
                     {deltaLabel(results.delta_pp)}
@@ -309,13 +387,15 @@ function ExperimentDetailPanel({
                       {txn.gateway ?? '—'}
                     </td>
                     <td className="px-4 py-2.5">
-                      {txn.status ? (
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${
-                          txn.status === 'success'
-                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                            : 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400'
-                        }`}>{txn.status}</span>
-                      ) : <span className="text-xs text-slate-400">—</span>}
+                      {txn.status === 'success' ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">success</span>
+                      ) : txn.status === 'failure' ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400">failure</span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" title="Payment was routed but no outcome was recorded — counted against auth rate">
+                          <Clock size={9} /> no outcome
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-2.5 text-xs text-slate-400 whitespace-nowrap">
                       {formatTime(txn.created_at_ms)}
@@ -343,7 +423,6 @@ function ExperimentDetailPanel({
                       ← Prev
                     </button>
                     {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
-                      // Show first, last, current ±1, and ellipsis
                       const page = totalPages <= 7
                         ? i + 1
                         : [1, totalPages, txnPage - 1, txnPage, txnPage + 1].includes(i + 1)
@@ -389,6 +468,51 @@ function ExperimentDetailPanel({
   )
 }
 
+// ─── SR Config Tuning arm editor ──────────────────────────────────────────────
+
+interface SrArmEditorProps {
+  label: string
+  splitPct: number
+  config: SrConfigOverrideForm
+  onChange: (fn: (c: SrConfigOverrideForm) => SrConfigOverrideForm) => void
+}
+
+function SrArmEditor({ label, splitPct, config, onChange }: SrArmEditorProps) {
+  return (
+    <div className="rounded-xl border border-brand-200 dark:border-brand-800/50 bg-brand-50/30 dark:bg-brand-900/10 px-4 py-4 space-y-3">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-500">
+        {label} ({splitPct}%)
+      </p>
+
+      <div className="space-y-2.5">
+        <div>
+          <label className="block text-[11px] text-slate-500 mb-1">Hedging % (explore-exploit)</label>
+          <input
+            type="number" min={0} max={100} step={1}
+            value={config.hedgingPercent ?? ''}
+            placeholder="e.g. 5"
+            onChange={e => onChange(c => ({ ...c, hedgingPercent: e.target.value === '' ? null : Number(e.target.value) }))}
+            className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+          />
+          <p className="text-[10px] text-slate-400 mt-0.5">Share of traffic sent to non-top gateways to keep scores fresh</p>
+        </div>
+
+        <div>
+          <label className="block text-[11px] text-slate-500 mb-1">Elimination threshold (0–1)</label>
+          <input
+            type="number" min={0} max={1} step={0.01}
+            value={config.eliminationThreshold ?? ''}
+            placeholder="e.g. 0.70"
+            onChange={e => onChange(c => ({ ...c, eliminationThreshold: e.target.value === '' ? null : Number(e.target.value) }))}
+            className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+          />
+          <p className="text-[10px] text-slate-400 mt-0.5">SR score (0–1) below which a gateway is dropped from routing</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Create form ──────────────────────────────────────────────────────────────
 
 interface CreateFormProps {
@@ -408,6 +532,33 @@ function CreateForm({
   form, setForm, eligibleAlgorithms, saving, error, success, createdId,
   merchantId, onCreate, onActivateCreated,
 }: CreateFormProps) {
+  const isTuningMode = form.experimentType === 'sr_config_tuning'
+
+  const { data: srConfig } = useSWR(
+    isTuningMode && merchantId ? ['rule-sr-ab', merchantId] : null,
+    () => apiPost<{ config: { data: { defaultHedgingPercent: number | null } } }>(
+      '/rule/get', { merchant_id: merchantId, algorithm: 'successRate' }
+    ),
+    { shouldRetryOnError: false, revalidateOnFocus: false }
+  )
+  const { data: elimConfig } = useSWR(
+    isTuningMode && merchantId ? ['rule-elim-ab', merchantId] : null,
+    () => apiPost<{ config: { data: { threshold: number } } }>(
+      '/rule/get', { merchant_id: merchantId, algorithm: 'elimination' }
+    ),
+    { shouldRetryOnError: false, revalidateOnFocus: false }
+  )
+
+  const liveHedging = srConfig?.config?.data?.defaultHedgingPercent ?? null
+  const liveElimination = elimConfig?.config?.data?.threshold ?? null
+
+  const tabClass = (type: ABTestExperimentType) =>
+    `px-3 py-1.5 text-xs font-medium rounded-md border transition-colors ${
+      form.experimentType === type
+        ? 'bg-slate-900 text-white border-slate-900 dark:bg-white dark:text-slate-900 dark:border-white'
+        : 'border-slate-200 dark:border-[#222226] text-slate-600 dark:text-slate-400 hover:border-slate-400 dark:hover:border-slate-500'
+    }`
+
   return (
     <Card>
       <CardHeader>
@@ -415,53 +566,115 @@ function CreateForm({
         <p className="text-xs text-slate-500 mt-0.5">Define the arms and safety parameters for this experiment.</p>
       </CardHeader>
       <CardBody className="space-y-5">
+
+        {/* Experiment type toggle */}
+        <div>
+          <label className="block text-xs text-slate-500 mb-2">Experiment type</label>
+          <div className="flex items-center gap-2">
+            <button type="button" className={tabClass('algorithm_comparison')} onClick={() => setForm(f => ({ ...f, experimentType: 'algorithm_comparison' }))}>
+              Algorithm comparison
+            </button>
+            <button type="button" className={tabClass('sr_config_tuning')} onClick={() => setForm(f => ({ ...f, experimentType: 'sr_config_tuning' }))}>
+              <Sliders size={12} className="inline mr-1" />SR config tuning
+            </button>
+          </div>
+          <p className="mt-1.5 text-[11px] text-slate-400">
+            {form.experimentType === 'algorithm_comparison'
+              ? 'Compare two different routing strategies (e.g. SR vs priority list).'
+              : 'Same SR algorithm, different hyperparameters — tune bucket size, hedging %, elimination threshold, or scoring weights.'
+            }
+          </p>
+        </div>
+
+        {/* Name */}
         <div>
           <label className="block text-xs text-slate-500 mb-1">Experiment name *</label>
           <input
             className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-            placeholder="e.g. Stripe vs Checkout.com"
+            placeholder={form.experimentType === 'sr_config_tuning' ? 'e.g. Hedging 10% vs 5%' : 'e.g. Stripe vs Checkout.com'}
             value={form.name}
             onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
           />
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs text-slate-500 mb-1">Control arm *</label>
-            <p className="text-[11px] text-slate-400 mb-1.5">Your current strategy — the baseline.</p>
-            <select
-              className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-              value={form.controlAlgorithmId}
-              onChange={e => setForm(f => ({ ...f, controlAlgorithmId: e.target.value }))}
-            >
-              <option value="">Select algorithm</option>
-              <option value="sr_routing" disabled={form.variantAlgorithmId === 'sr_routing'}>SR Routing (Dynamic)</option>
-              {eligibleAlgorithms.map(a => (
-                <option key={a.id} value={a.id} disabled={a.id === form.variantAlgorithmId}>
-                  {a.name} ({(a.algorithm_data || a.algorithm)?.type})
-                </option>
-              ))}
-            </select>
+        {/* ── Algorithm comparison arms ── */}
+        {form.experimentType === 'algorithm_comparison' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs text-slate-500 mb-1">Control arm *</label>
+              <p className="text-[11px] text-slate-400 mb-1.5">Your current strategy — the baseline.</p>
+              <select
+                className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                value={form.controlAlgorithmId}
+                onChange={e => setForm(f => ({ ...f, controlAlgorithmId: e.target.value }))}
+              >
+                <option value="">Select algorithm</option>
+                <option value="sr_routing" disabled={form.variantAlgorithmId === 'sr_routing'}>SR Routing (Dynamic)</option>
+                {eligibleAlgorithms.map(a => (
+                  <option key={a.id} value={a.id} disabled={a.id === form.variantAlgorithmId}>
+                    {a.name} ({(a.algorithm_data || a.algorithm)?.type})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-500 mb-1">Variant arm *</label>
+              <p className="text-[11px] text-slate-400 mb-1.5">The new strategy you want to test.</p>
+              <select
+                className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                value={form.variantAlgorithmId}
+                onChange={e => setForm(f => ({ ...f, variantAlgorithmId: e.target.value }))}
+              >
+                <option value="">Select algorithm</option>
+                <option value="sr_routing" disabled={form.controlAlgorithmId === 'sr_routing'}>SR Routing (Dynamic)</option>
+                {eligibleAlgorithms.map(a => (
+                  <option key={a.id} value={a.id} disabled={a.id === form.controlAlgorithmId}>
+                    {a.name} ({(a.algorithm_data || a.algorithm)?.type})
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
-          <div>
-            <label className="block text-xs text-slate-500 mb-1">Variant arm *</label>
-            <p className="text-[11px] text-slate-400 mb-1.5">The new strategy you want to test.</p>
-            <select
-              className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-              value={form.variantAlgorithmId}
-              onChange={e => setForm(f => ({ ...f, variantAlgorithmId: e.target.value }))}
-            >
-              <option value="">Select algorithm</option>
-              <option value="sr_routing" disabled={form.controlAlgorithmId === 'sr_routing'}>SR Routing (Dynamic)</option>
-              {eligibleAlgorithms.map(a => (
-                <option key={a.id} value={a.id} disabled={a.id === form.controlAlgorithmId}>
-                  {a.name} ({(a.algorithm_data || a.algorithm)?.type})
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
+        )}
 
+        {/* ── SR Config Tuning arms ── */}
+        {form.experimentType === 'sr_config_tuning' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {/* Control — live config, non-editable */}
+            <div className="rounded-xl border border-slate-200 dark:border-[#222226] bg-slate-50/50 dark:bg-[#0c0c10] px-4 py-4 space-y-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                Control ({100 - form.variantSplitPct}%) — current config
+              </p>
+              <div className="space-y-2.5">
+                <div>
+                  <p className="text-[11px] text-slate-500 mb-0.5">Hedging % (explore-exploit)</p>
+                  <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                    {liveHedging !== null ? `${liveHedging}%` : <span className="text-slate-400 italic text-xs">Not configured</span>}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] text-slate-500 mb-0.5">Elimination threshold</p>
+                  <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                    {liveElimination !== null ? `SR < ${(liveElimination * 100).toFixed(0)}%` : <span className="text-slate-400 italic text-xs">Not configured</span>}
+                  </p>
+                </div>
+              </div>
+              <p className="text-[10px] text-slate-400 pt-1 border-t border-slate-100 dark:border-[#1e2330]">
+                Edit in <span className="font-medium">SR Routing → Scoring / Elimination</span>
+              </p>
+            </div>
+
+            {/* Variant — editable overrides */}
+            <SrArmEditor
+              label="Variant"
+              splitPct={form.variantSplitPct}
+              config={form.variantSrConfig}
+              onChange={fn => setForm(f => ({ ...f, variantSrConfig: fn(f.variantSrConfig) }))}
+            />
+          </div>
+        )}
+
+        {/* Traffic split */}
         <div>
           <label className="block text-xs text-slate-500 mb-1">
             Variant traffic — <span className="font-semibold text-slate-700 dark:text-slate-300">{form.variantSplitPct}% variant / {100 - form.variantSplitPct}% control</span>
@@ -476,6 +689,7 @@ function CreateForm({
           <div className="flex justify-between text-[10px] text-slate-400 mt-0.5"><span>5%</span><span>30%</span></div>
         </div>
 
+        {/* Min sample */}
         <div>
           <label className="block text-xs text-slate-500 mb-1">Minimum sample size</label>
           <p className="text-[11px] text-slate-400 mb-2">Transactions needed before reporting a significance verdict.</p>
@@ -502,6 +716,7 @@ function CreateForm({
           </div>
         </div>
 
+        {/* Guardrail */}
         <div>
           <label className="block text-xs text-slate-500 mb-1">Safety guardrail (pp)</label>
           <p className="text-[11px] text-slate-400 mb-2">Flag if variant auth rate drops more than this many percentage points below control.</p>
@@ -536,6 +751,17 @@ function CreateForm({
 
 // ─── Page ──────────────────────────────────────────────────────────────────────
 
+const DEFAULT_FORM: ABTestFormValues = {
+  name: '',
+  experimentType: 'algorithm_comparison',
+  controlAlgorithmId: '',
+  variantAlgorithmId: '',
+  variantSplitPct: 10,
+  minSampleSize: 5000,
+  guardrailThresholdPp: 3,
+  variantSrConfig: { ...DEFAULT_VARIANT_SR_CONFIG },
+}
+
 export function ABTestingPage() {
   const { merchantId } = useMerchantStore()
   const { mutate: mutateCache } = useSWRConfig()
@@ -553,18 +779,13 @@ export function ABTestingPage() {
   const savedAbTests = allAlgorithms?.filter(r => (r.algorithm_data || r.algorithm)?.type === 'ab_test') ?? []
   const eligibleAlgorithms = allAlgorithms?.filter(r => (r.algorithm_data || r.algorithm)?.type !== 'ab_test') ?? []
 
-  // Panel state — selectedId is persisted in the URL (?experiment=...)
   const [searchParams, setSearchParams] = useSearchParams()
   const selectedId = searchParams.get('experiment')
   const [showCreate, setShowCreate] = useState(false)
 
   const selectedAlgo = savedAbTests.find(a => a.id === selectedId) ?? null
 
-  // Form state
-  const [form, setForm] = useState<ABTestFormValues>({
-    name: '', controlAlgorithmId: '', variantAlgorithmId: '',
-    variantSplitPct: 10, minSampleSize: 5000, guardrailThresholdPp: 3,
-  })
+  const [form, setForm] = useState<ABTestFormValues>({ ...DEFAULT_FORM })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
@@ -596,9 +817,8 @@ export function ABTestingPage() {
       const id = result.rule_id || result.id
       setCreatedId(id)
       setSuccess(`"${form.name}" created.`)
-      setForm({ name: '', controlAlgorithmId: '', variantAlgorithmId: '', variantSplitPct: 10, minSampleSize: 5000, guardrailThresholdPp: 3 })
+      setForm({ ...DEFAULT_FORM })
       await mutateAll()
-      // Auto-select the newly created experiment
       setSearchParams({ experiment: id }, { replace: true })
       setShowCreate(false)
     } catch (e: unknown) {
@@ -641,7 +861,6 @@ export function ABTestingPage() {
     return allAlgorithms?.find(a => a.id === id)?.name ?? id
   }
 
-  // Default: show active experiment detail, or first experiment, or create form
   const rightPanelContent = (() => {
     if (showCreate) return 'create'
     if (selectedAlgo) return 'detail'
@@ -687,6 +906,7 @@ export function ABTestingPage() {
                 const abData = (algo.algorithm_data || algo.algorithm)?.data as ABTestAlgorithmData | undefined
                 const isActive = activeAbTest?.id === algo.id
                 const isSelected = selectedId === algo.id
+                const isTuning = Boolean(abData?.variant_sr_config)
 
                 return (
                   <button
@@ -715,7 +935,10 @@ export function ABTestingPage() {
                     </div>
                     {abData && (
                       <p className="text-[11px] text-slate-400 mt-0.5 truncate">
-                        {algorithmName(abData.control_algorithm_id)} → {algorithmName(abData.variant_algorithm_id)}
+                        {isTuning
+                          ? 'SR config tuning'
+                          : `${algorithmName(abData.control_algorithm_id)} → ${algorithmName(abData.variant_algorithm_id)}`
+                        }
                       </p>
                     )}
                   </button>

@@ -472,6 +472,10 @@ pub struct DeciderState {
     pub sr_v3_hedging_percent: Option<f64>,
     pub gateway_reference_id: Option<String>,
     pub gateway_scoring_data: GatewayScoringData,
+    /// SR config overrides injected by an active SR Config Tuning A/B test for the variant arm.
+    /// Applied at routing time: hedging_percent overrides explore-exploit, elimination_threshold
+    /// overrides the merchant's elimination rule. Absent for control arm and non-tuning experiments.
+    pub ab_test_sr_override: Option<crate::euclid::types::SrConfigOverride>,
 }
 
 pub fn initial_decider_state(date_created: String) -> DeciderState {
@@ -542,6 +546,7 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
             udfs_consumed_for_routing: None,
             gatewayReferenceId: None,
         },
+        ab_test_sr_override: None,
     }
 }
 

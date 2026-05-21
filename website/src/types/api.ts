@@ -43,12 +43,18 @@ export interface VolumeSplitItem {
   output: GatewayConnector
 }
 
+export interface SrConfigOverride {
+  hedging_percent?: number
+  elimination_threshold?: number
+}
+
 export interface ABTestAlgorithmData {
   control_algorithm_id: string
   variant_algorithm_id: string
   variant_split_pct: number
   min_sample_size: number
   guardrail_threshold_pp: number
+  variant_sr_config?: SrConfigOverride
 }
 
 export type RoutingAlgorithmData =

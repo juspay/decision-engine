@@ -48,6 +48,21 @@ pub enum StaticRoutingAlgorithm {
     AbTest(ABTestData),
 }
 
+/// Per-arm SR hyperparameter overrides for SR Config Tuning experiments.
+/// Only routing-time parameters are supported — both are applied inside scoring_flow
+/// before gateway selection, so no isolated score pools are needed.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SrConfigOverride {
+    /// Share of traffic (0–100) sent to non-top gateways to keep scores fresh (explore-exploit).
+    /// Overrides `defaultHedgingPercent` from the merchant's SR config.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hedging_percent: Option<f64>,
+    /// SR score threshold (0–1) below which a gateway is eliminated from routing.
+    /// Overrides the merchant's elimination rule threshold.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub elimination_threshold: Option<f64>,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ABTestData {
     pub control_algorithm_id: String,
@@ -58,6 +73,10 @@ pub struct ABTestData {
     pub min_sample_size: u32,
     /// Auto-pause threshold: if variant auth rate drops more than this many pp below control, flag for pause.
     pub guardrail_threshold_pp: f64,
+    /// SR hyperparameter overrides for the variant arm (SR Config Tuning experiments only).
+    /// Absent means the variant also uses the live SR config (standard A/B test).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub variant_sr_config: Option<SrConfigOverride>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, strum::Display)]
