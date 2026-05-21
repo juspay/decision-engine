@@ -155,6 +155,48 @@ run_migration operation=default_operation migration_dir=pg_migration_dir config_
 # Run database migrations for postgres
 migrate-pg operation=default_operation *args='': (run_migration operation pg_migration_dir pg_config_file_dir database_url args)
 
+# ── Load testing ─────────────────────────────────────────────────────────────
+#
+# Prerequisites: brew install k6
+#
+# VU (Virtual User): a simulated concurrent connection that fires requests in a
+# tight loop (request → wait for response → 100ms sleep → repeat). More VUs =
+# more parallel in-flight requests. Sweet spots measured empirically:
+#   local   → 20–30 VUs  (p95 ≈ 84–150ms,  ~108–123 req/s)
+#   sandbox → 12 VUs     (p95 ≈ 412ms,       ~28 req/s)
+
+# Run load test against localhost (default: 20 VUs, 30s)
+load-test-local vus='20' duration='30s':
+    k6 run scripts/load_test_report.js \
+        -e ENV=local \
+        -e VUS={{ vus }} \
+        -e DURATION={{ duration }}
+alias ltl := load-test-local
+
+# Run load test against sandbox (default: 12 VUs, 60s — empirical saturation point)
+load-test-sandbox vus='12' duration='60s':
+    k6 run scripts/load_test_report.js \
+        -e ENV=sandbox \
+        -e VUS={{ vus }} \
+        -e DURATION={{ duration }}
+alias lts := load-test-sandbox
+
+# Run both local and sandbox back-to-back and open their HTML reports
+load-test-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "==> Local (20 VUs, 30s)"
+    k6 run scripts/load_test_report.js -e ENV=local   -e VUS=20 -e DURATION=30s
+    echo "==> Sandbox (12 VUs, 60s)"
+    k6 run scripts/load_test_report.js -e ENV=sandbox -e VUS=12 -e DURATION=60s
+    echo "==> Opening reports..."
+    open scripts/load_test_report_local_20vu.html scripts/load_test_report_sandbox_12vu.html 2>/dev/null || true
+alias lta := load-test-all
+
+# Generate a fresh local auth token (expires in 24h)
+load-test-token:
+    @bash scripts/gen_local_token.sh
+
 # Drop database if exists and then create a new 'hyperswitch_db' Database
 resurrect database_name=db_name:
     psql -U postgres -c 'DROP DATABASE IF EXISTS  {{ database_name }}';
