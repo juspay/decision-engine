@@ -803,7 +803,7 @@ export function DecisionExplorerPage() {
   const [volumeProgress, setVolumeProgress] = useState(initialState.volumeProgress)
   const [simulationResults, setSimulationResults] = useState<SimulationResult[]>(initialState.simulationResults)
   const [isSimulating, setIsSimulating] = useState(false)
-  const [smartRetryEnabled, setSmartRetryEnabled] = useState(initialState.smartRetryEnabled)
+  const [smartRetryEnabled] = useState(initialState.smartRetryEnabled)
   const [error, setError] = useState<string | null>(null)
   const [addGwDraft, setAddGwDraft] = useState('')
   const [addGwOpen, setAddGwOpen] = useState(false)
