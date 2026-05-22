@@ -277,21 +277,28 @@ pub async fn scoring_flow(
                     auth_type: txn_card_info.authType.as_ref().map(|a| a.to_string()),
                 };
 
-                let hedging_percent = Utils::get_sr_v3_hedging_percent(
-                    merchant_sr_v3_input_config.clone(),
-                    &pmt_str,
-                    pm.clone().as_str(),
-                    &sr_routing_dimensions,
-                )
-                .or_else(|| {
-                    Utils::get_sr_v3_hedging_percent(
-                        default_sr_v3_input_config.clone(),
-                        &pmt_str,
-                        pm.clone().as_str(),
-                        &sr_routing_dimensions,
-                    )
-                })
-                .unwrap_or(C::DEFAULT_SR_V3_BASED_HEDGING_PERCENT);
+                let hedging_percent = decider_flow
+                    .writer
+                    .ab_test_sr_override
+                    .as_ref()
+                    .and_then(|o| o.hedging_percent)
+                    .or_else(|| {
+                        Utils::get_sr_v3_hedging_percent(
+                            merchant_sr_v3_input_config.clone(),
+                            &pmt_str,
+                            pm.clone().as_str(),
+                            &sr_routing_dimensions,
+                        )
+                    })
+                    .or_else(|| {
+                        Utils::get_sr_v3_hedging_percent(
+                            default_sr_v3_input_config.clone(),
+                            &pmt_str,
+                            pm.clone().as_str(),
+                            &sr_routing_dimensions,
+                        )
+                    })
+                    .unwrap_or(C::DEFAULT_SR_V3_BASED_HEDGING_PERCENT);
 
                 Utils::set_sr_v3_hedging_percent(decider_flow, hedging_percent);
 
@@ -1880,6 +1887,7 @@ pub async fn get_gateway_wise_routing_inputs_for_merchant_sr(
     gateway: String,
     gateway_success_rate_merchant_input: Option<GatewaySuccessRateBasedRoutingInput>,
     default_success_rate_based_routing_input: Option<GatewaySuccessRateBasedRoutingInput>,
+    ab_test_elimination_threshold: Option<f64>,
 ) -> GatewayWiseSuccessRateBasedRoutingInput {
     let default_elimination_threshold = RService::findByNameFromRedisWithDefault(
         C::SrBasedGatewayEliminationThreshold.get_key(),
@@ -1927,8 +1935,11 @@ pub async fn get_gateway_wise_routing_inputs_for_merchant_sr(
         .map(|input| input.gatewayWiseInputs.unwrap_or_default())
         .unwrap_or_default();
 
-    let elimination_threshold = merchant_given_default_threshold
-        .unwrap_or(default_merchant_elimination_threshold.unwrap_or(default_elimination_threshold));
+    let elimination_threshold = ab_test_elimination_threshold.unwrap_or_else(|| {
+        merchant_given_default_threshold.unwrap_or(
+            default_merchant_elimination_threshold.unwrap_or(default_elimination_threshold),
+        )
+    });
 
     let elimination_threshold_updated = if is_elimination_v2_enabled {
         get_elimination_v2_threshold(
@@ -2570,6 +2581,12 @@ pub async fn update_gateway_score_based_on_success_rate(
                 vec![]
             };
 
+            let ab_test_elimination_threshold = decider_flow
+                .writer
+                .ab_test_sr_override
+                .as_ref()
+                .and_then(|o| o.elimination_threshold);
+
             let mut gateway_success_rate_inputs = vec![];
             for (gw, _) in gateway_score_global_sr.clone() {
                 gateway_success_rate_inputs.push(
@@ -2581,6 +2598,7 @@ pub async fn update_gateway_score_based_on_success_rate(
                         gw,
                         gateway_success_rate_merchant_input.clone(),
                         default_success_rate_based_routing_input.clone(),
+                        ab_test_elimination_threshold,
                     )
                     .await,
                 );

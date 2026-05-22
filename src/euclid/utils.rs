@@ -117,7 +117,8 @@ pub fn validate_routing_rule(
     match &rule.algorithm {
         StaticRoutingAlgorithm::Single(_)
         | StaticRoutingAlgorithm::Priority(_)
-        | StaticRoutingAlgorithm::VolumeSplit(_) => Ok(ValidationResult::success()),
+        | StaticRoutingAlgorithm::VolumeSplit(_)
+        | StaticRoutingAlgorithm::AbTest(_) => Ok(ValidationResult::success()),
         StaticRoutingAlgorithm::Advanced(program) => {
             let mut validation_errors: Vec<ValidationErrorDetails> = Vec::new();
 

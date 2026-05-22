@@ -33,6 +33,8 @@ struct AuditSummaryRow {
 #[derive(Debug, Clone, Deserialize, Row)]
 struct CountRow {
     total_results: u64,
+    total_success: u64,
+    total_failure: u64,
 }
 
 fn finalized_summary_fragment(query: &PaymentAuditQuery, preview_only: bool) -> SqlFragment {
@@ -235,16 +237,26 @@ pub async fn count(
     client: &clickhouse::Client,
     query: &PaymentAuditQuery,
     preview_only: bool,
-) -> Result<usize, ApiError> {
+) -> Result<(usize, usize, usize), ApiError> {
     let finalized = summary_fragment(query, preview_only);
     let mut builder = BoundQueryBuilder::from_fragment(SqlFragment::with_binds(
         format!("({})", finalized.sql()),
         finalized.binds().to_vec(),
     ));
     builder.add_select("count() AS total_results");
+    builder.add_select(
+        "countIf(upper(latest_status) IN ('SUCCESS', 'CHARGED', 'AUTHORIZED')) AS total_success",
+    );
+    builder.add_select(
+        "countIf(upper(latest_status) = 'FAILURE' OR upper(latest_status) LIKE '%FAILED%' OR upper(latest_status) LIKE '%DECLINED%') AS total_failure",
+    );
     builder.extend_filters(outer_summary_filters(query));
     let row = fetch_one::<CountRow>(builder.build(client)).await?;
-    Ok(row.total_results as usize)
+    Ok((
+        row.total_results as usize,
+        row.total_success as usize,
+        row.total_failure as usize,
+    ))
 }
 
 pub async fn load_page(

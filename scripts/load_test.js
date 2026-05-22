@@ -1,0 +1,230 @@
+/**
+ * k6 load test for /decide-gateway endpoint
+ *
+ * Usage:
+ *   # Localhost  (generate a token first: bash scripts/gen_local_token.sh)
+ *   k6 run scripts/load_test.js -e TOKEN=$(bash scripts/gen_local_token.sh)
+ *
+ *   # Sandbox
+ *   k6 run scripts/load_test.js -e ENV=sandbox -e TOKEN=<your_jwt> -e MERCHANT_ID=<merchant_id>
+ *
+ *   # Override concurrency / duration
+ *   k6 run scripts/load_test.js -e ENV=sandbox -e TOKEN=<your_jwt> -e MERCHANT_ID=<id> -e VUS=50 -e DURATION=60s
+ *
+ * Never commit TOKEN values. Pass them via shell env or a secrets manager.
+ */
+
+import http from "k6/http";
+import { check, sleep } from "k6";
+import { Rate, Trend, Counter } from "k6/metrics";
+
+// ── Environment config ────────────────────────────────────────────────────────
+
+const ENV = __ENV.ENV || "local";
+const VUS = parseInt(__ENV.VUS || "20");
+const DURATION = __ENV.DURATION || "30s";
+const RAMP_DURATION = __ENV.RAMP_DURATION || "10s";
+
+const token = __ENV.TOKEN
+if (!token) {
+  throw new Error(
+    'TOKEN is required.\n' +
+    '  Local:   k6 run scripts/load_test.js -e TOKEN=$(bash scripts/gen_local_token.sh)\n' +
+    '  Sandbox: k6 run scripts/load_test.js -e ENV=sandbox -e TOKEN=<your_jwt> -e MERCHANT_ID=<id>'
+  )
+}
+
+function fail(msg) { throw new Error(msg) }
+
+const ENVS = {
+  local: {
+    baseUrl: "http://127.0.0.1:8080",
+    token,
+    merchantId: __ENV.MERCHANT_ID || "merchant_baea25c53626",
+  },
+  sandbox: {
+    baseUrl: "https://app.hyperswitch.io/decision-engine/api",
+    token,
+    merchantId: __ENV.MERCHANT_ID || fail('MERCHANT_ID is required for sandbox'),
+  },
+};
+
+const config = ENVS[ENV];
+if (!config) {
+  throw new Error(`Unknown ENV="${ENV}". Use "local" or "sandbox".`);
+}
+
+// ── k6 options ────────────────────────────────────────────────────────────────
+
+export const options = {
+  stages: [
+    { duration: RAMP_DURATION, target: VUS }, // ramp up
+    { duration: DURATION, target: VUS }, // steady load
+    { duration: "5s", target: 0 }, // ramp down
+  ],
+  thresholds: {
+    http_req_duration: ["p(95)<500", "p(99)<1000"], // 95th pct < 500ms, 99th < 1s
+    http_req_failed: ["rate<0.01"], // error rate < 1%
+    decide_gateway_errors: ["count<5"], // custom: < 5 non-HTTP errors
+  },
+};
+
+// ── Custom metrics ────────────────────────────────────────────────────────────
+
+const gatewaySelected = new Counter("decide_gateway_selected");
+const gatewayErrors = new Counter("decide_gateway_errors");
+const latencyTrend = new Trend("decide_gateway_latency", true);
+const successRate = new Rate("decide_gateway_success_rate");
+
+// ── Payload variants (rotate to simulate realistic traffic) ───────────────────
+
+const payloads = [
+  {
+    paymentMethodType: "CARD",
+    paymentMethod: "DEBIT",
+    authType: "THREE_DS",
+    cardBrand: "VISA",
+    currency: "AED",
+    amount: 1000,
+    eligibleGatewayList: ["stripe", "adyen"],
+  },
+  {
+    paymentMethodType: "CARD",
+    paymentMethod: "CREDIT",
+    authType: "NO_THREE_DS",
+    cardBrand: "MASTERCARD",
+    currency: "USD",
+    amount: 5000,
+    eligibleGatewayList: ["stripe", "adyen", "checkout"],
+  },
+  {
+    paymentMethodType: "CARD",
+    paymentMethod: "DEBIT",
+    authType: "THREE_DS",
+    cardBrand: "AMEX",
+    currency: "EUR",
+    amount: 2500,
+    eligibleGatewayList: ["adyen", "braintree"],
+  },
+];
+
+// ── Headers ───────────────────────────────────────────────────────────────────
+
+const headers = {
+  "Content-Type": "application/json",
+  Accept: "*/*",
+  Authorization: `Bearer ${config.token}`,
+  "x-feature": "decision-engine",
+  "x-tenant-id": "public",
+};
+
+// ── Main VU function ──────────────────────────────────────────────────────────
+
+export default function () {
+  const variant = payloads[__VU % payloads.length];
+  const paymentId = `load_test_${Date.now()}_${__VU}_${__ITER}`;
+
+  const body = JSON.stringify({
+    merchantId: config.merchantId,
+    paymentInfo: {
+      paymentId,
+      amount: variant.amount,
+      currency: variant.currency,
+      paymentType: "ORDER_PAYMENT",
+      paymentMethodType: variant.paymentMethodType,
+      paymentMethod: variant.paymentMethod,
+      authType: variant.authType,
+      cardBrand: variant.cardBrand,
+    },
+    eligibleGatewayList: variant.eligibleGatewayList,
+    rankingAlgorithm: "SR_BASED_ROUTING",
+    eliminationEnabled: false,
+  });
+
+  const start = Date.now();
+  const res = http.post(`${config.baseUrl}/decide-gateway`, body, { headers });
+  const duration = Date.now() - start;
+
+  latencyTrend.add(duration);
+
+  const ok = check(res, {
+    "status is 200": (r) => r.status === 200,
+    "has decided_gateway": (r) => {
+      try {
+        const body = JSON.parse(r.body);
+        return body.decided_gateway !== undefined || body.decidedGateway !== undefined;
+      } catch {
+        return false;
+      }
+    },
+  });
+
+  successRate.add(ok);
+
+  if (res.status === 200) {
+    try {
+      const json = JSON.parse(res.body);
+      const gw = json.decided_gateway || json.decidedGateway;
+      if (gw) {
+        gatewaySelected.add(1, { gateway: gw });
+      }
+    } catch (_) {
+      gatewayErrors.add(1);
+    }
+  } else {
+    gatewayErrors.add(1);
+    if (__ENV.VERBOSE) {
+      console.error(
+        `[VU ${__VU}] HTTP ${res.status}: ${res.body?.substring(0, 200)}`
+      );
+    }
+  }
+
+  sleep(0.1); // 100ms think time between iterations
+}
+
+// ── Summary ───────────────────────────────────────────────────────────────────
+
+export function handleSummary(data) {
+  const metrics = data.metrics;
+
+  const rps = metrics.http_reqs?.values?.rate?.toFixed(1) ?? "N/A";
+  const p50 = metrics.http_req_duration?.values?.med?.toFixed(1) ?? "N/A";
+  const p95 = metrics.http_req_duration?.values?.["p(95)"]?.toFixed(1) ?? "N/A";
+  const p99 = metrics.http_req_duration?.values?.["p(99)"]?.toFixed(1) ?? "N/A";
+  const avg = metrics.http_req_duration?.values?.avg?.toFixed(1) ?? "N/A";
+  const maxLat = metrics.http_req_duration?.values?.max?.toFixed(1) ?? "N/A";
+  const errRate = (
+    (metrics.http_req_failed?.values?.rate ?? 0) * 100
+  ).toFixed(2);
+  const total = metrics.http_reqs?.values?.count ?? 0;
+  const successCount =
+    metrics.decide_gateway_selected?.values?.count ?? "N/A";
+
+  const summary = `
+╔══════════════════════════════════════════════════════════╗
+║          decide-gateway Load Test Results                ║
+║  Environment : ${ENV.padEnd(42)}║
+╠══════════════════════════════════════════════════════════╣
+║  Total Requests    : ${String(total).padEnd(36)}║
+║  Throughput        : ${(rps + " req/s").padEnd(36)}║
+╠══════════════════════════════════════════════════════════╣
+║  Latency (ms)                                            ║
+║    avg             : ${String(avg).padEnd(36)}║
+║    p50 (median)    : ${String(p50).padEnd(36)}║
+║    p95             : ${String(p95).padEnd(36)}║
+║    p99             : ${String(p99).padEnd(36)}║
+║    max             : ${String(maxLat).padEnd(36)}║
+╠══════════════════════════════════════════════════════════╣
+║  Error Rate        : ${(errRate + "%").padEnd(36)}║
+║  Successful Routes : ${String(successCount).padEnd(36)}║
+╚══════════════════════════════════════════════════════════╝
+`;
+
+  console.log(summary);
+
+  return {
+    stdout: summary,
+    "scripts/load_test_results.json": JSON.stringify(data, null, 2),
+  };
+}

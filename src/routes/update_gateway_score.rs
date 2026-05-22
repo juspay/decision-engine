@@ -154,6 +154,9 @@ pub async fn update_gateway_score(
                 trace_id.clone(),
                 None,
             );
+            // Check before check_and_update_gateway_score_ consumes the inflight key.
+            let is_ab_test_payment =
+                crate::decider::gatewaydecider::ab_test::is_static_arm_inflight(&payment_id).await;
             let result = check_and_update_gateway_score_(payload.clone()).await;
             match result {
                 Ok(_success) => {
@@ -175,40 +178,44 @@ pub async fn update_gateway_score(
                         payment_id: payment_id.clone(),
                         gsm_info,
                     };
-                    crate::analytics::DomainAnalyticsEvent::record_gateway_update(
-                        crate::analytics::AnalyticsFlowContext::new(
-                            crate::analytics::ApiFlow::DynamicRouting,
-                            crate::analytics::FlowType::UpdateGatewayScoreUpdate,
-                        ),
-                        Some(merchant_id.clone()),
-                        Some(gateway.clone()),
-                        Some(transaction_status.clone()),
-                        crate::analytics::AnalyticsRoute::UpdateGatewayScore,
-                        crate::analytics::serialize_details(&UpdateGatewayScoreSuccessDetail {
-                            request: UpdateGatewayScoreRequestDetail {
-                                merchant_id: &merchant_id,
-                                gateway: &gateway,
-                                payment_id: &payment_id,
-                                status: &transaction_status,
-                                gateway_reference_id: payload.gateway_reference_id.as_deref(),
-                                enforce_dynamic_routing_failure: payload
-                                    .enforce_dynamic_routing_failure,
-                                txn_latency: payload.txn_latency.as_ref(),
-                                error_info: payload.error_info.as_ref(),
-                                is_smart_retry: payload.is_smart_retry,
-                            },
-                            response: &response,
-                            selection_reason: UpdateGatewayScoreSelectionReason {
-                                transaction_status: &transaction_status,
-                                stage: "gateway score updated",
-                            },
-                        }),
-                        Some(response.payment_id.clone()),
-                        x_request_id.clone(),
-                        global_request_id.clone(),
-                        trace_id.clone(),
-                        Some("score_updated".to_string()),
-                    );
+                    // AB test payments (static arm) are tracked via RoutingEvaluateAbTest outcome
+                    // events — skip UpdateGatewayScoreUpdate so they don't appear in auth-rate audit.
+                    if !is_ab_test_payment {
+                        crate::analytics::DomainAnalyticsEvent::record_gateway_update(
+                            crate::analytics::AnalyticsFlowContext::new(
+                                crate::analytics::ApiFlow::DynamicRouting,
+                                crate::analytics::FlowType::UpdateGatewayScoreUpdate,
+                            ),
+                            Some(merchant_id.clone()),
+                            Some(gateway.clone()),
+                            Some(transaction_status.clone()),
+                            crate::analytics::AnalyticsRoute::UpdateGatewayScore,
+                            crate::analytics::serialize_details(&UpdateGatewayScoreSuccessDetail {
+                                request: UpdateGatewayScoreRequestDetail {
+                                    merchant_id: &merchant_id,
+                                    gateway: &gateway,
+                                    payment_id: &payment_id,
+                                    status: &transaction_status,
+                                    gateway_reference_id: payload.gateway_reference_id.as_deref(),
+                                    enforce_dynamic_routing_failure: payload
+                                        .enforce_dynamic_routing_failure,
+                                    txn_latency: payload.txn_latency.as_ref(),
+                                    error_info: payload.error_info.as_ref(),
+                                    is_smart_retry: payload.is_smart_retry,
+                                },
+                                response: &response,
+                                selection_reason: UpdateGatewayScoreSelectionReason {
+                                    transaction_status: &transaction_status,
+                                    stage: "gateway score updated",
+                                },
+                            }),
+                            Some(response.payment_id.clone()),
+                            x_request_id.clone(),
+                            global_request_id.clone(),
+                            trace_id.clone(),
+                            Some("score_updated".to_string()),
+                        );
+                    }
                     API_REQUEST_COUNTER
                         .with_label_values(&["update_gateway_score", "success"])
                         .inc();

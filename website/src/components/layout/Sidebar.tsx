@@ -13,6 +13,7 @@ import {
   Moon,
   Sun,
   Users,
+  FlaskConical,
   Key,
   ChevronDown,
   KeyRound,
@@ -127,13 +128,13 @@ export function Sidebar() {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 space-y-1 overflow-y-auto px-4 py-8">
+      <nav className="flex-1 space-y-0.5 overflow-y-auto px-4 py-4">
         <SideLink to="/" icon={LayoutDashboard} end selectedPath={selectedPath} onNavigate={setPendingPath}>Overview</SideLink>
         <SideLink to="/analytics" icon={BarChart3} selectedPath={selectedPath} onNavigate={setPendingPath}>Analytics</SideLink>
         <SideLink to="/audit" icon={Activity} selectedPath={selectedPath} onNavigate={setPendingPath}>Decision Audit</SideLink>
 
-        <div className="flex items-center gap-2 px-3 pb-3 pt-8">
-          <span className="text-[11px] font-bold uppercase tracking-widest text-slate-400 dark:text-[#6d768a]">
+        <div className="flex items-center gap-2 px-3 pb-2 pt-5">
+          <span className="text-[12px] font-bold uppercase tracking-widest text-slate-400 dark:text-[#6d768a]">
             Routing
           </span>
         </div>
@@ -143,17 +144,18 @@ export function Sidebar() {
         <SideLink to="/routing/rules" icon={BookOpen} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Rule-Based</SideLink>
         <SideLink to="/routing/volume" icon={PieChart} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Volume Split</SideLink>
         <SideLink to="/routing/debit" icon={Network} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Debit Routing</SideLink>
+        <SideLink to="/routing/ab-testing" icon={FlaskConical} indent beta selectedPath={selectedPath} onNavigate={setPendingPath}>A/B Testing</SideLink>
 
-        <div className="flex items-center gap-2 px-3 pb-3 pt-8">
-          <span className="text-[11px] font-bold uppercase tracking-widest text-slate-400 dark:text-[#6d768a]">
+        <div className="flex items-center gap-2 px-3 pb-2 pt-5">
+          <span className="text-[12px] font-bold uppercase tracking-widest text-slate-400 dark:text-[#6d768a]">
             Simulation
           </span>
         </div>
 
         <SideLink to="/decisions" icon={Search} selectedPath={selectedPath} onNavigate={setPendingPath}>Decision Explorer</SideLink>
 
-        <div className="flex items-center gap-2 px-3 pb-3 pt-8">
-          <span className="text-[11px] font-bold uppercase tracking-widest text-slate-400 dark:text-[#6d768a]">
+        <div className="flex items-center gap-2 px-3 pb-2 pt-5">
+          <span className="text-[12px] font-bold uppercase tracking-widest text-slate-400 dark:text-[#6d768a]">
             Settings
           </span>
         </div>
@@ -245,6 +247,7 @@ function SideLink({
   children,
   end,
   indent,
+  beta,
   selectedPath,
   onNavigate,
 }: {
@@ -253,6 +256,7 @@ function SideLink({
   children: React.ReactNode
   end?: boolean
   indent?: boolean
+  beta?: boolean
   selectedPath: string
   onNavigate?: (path: string) => void
 }) {
@@ -278,7 +282,7 @@ function SideLink({
         event.currentTarget.blur()
         navigate(to)
       }}
-      className={`group relative flex w-full appearance-none items-center gap-3 rounded-[16px] border-0 px-4 py-3 text-[14px] font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]/40 focus-visible:ring-offset-0 ${indent ? 'pl-8' : ''
+      className={`group relative flex w-full appearance-none items-center gap-3 rounded-[16px] border-0 px-4 py-2.5 text-[15px] font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]/40 focus-visible:ring-offset-0 ${indent ? 'pl-8' : ''
         } ${isHighlighted
           ? 'bg-transparent text-slate-950 dark:text-white'
           : 'bg-transparent text-slate-500 hover:bg-slate-900/[0.025] hover:text-slate-900 dark:text-[#8d96aa] dark:hover:bg-white/[0.035] dark:hover:text-white'
@@ -294,6 +298,11 @@ function SideLink({
         strokeWidth={isHighlighted ? 2.5 : 2}
       />
       <span className="flex-1 text-left">{children}</span>
+      {beta && (
+        <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-600 dark:bg-violet-500/15 dark:text-violet-400">
+          Beta
+        </span>
+      )}
     </button>
   )
 }

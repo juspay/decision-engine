@@ -10,3 +10,8 @@ cypress/videos
 cypress/fixtures
 .mintlify-dev.log
 **/gsm.csv
+
+# Load test outputs (generated artifacts — re-run with `just load-test-local/sandbox`)
+scripts/load_test_raw_*.json
+scripts/load_test_results.json
+scripts/load_test_report_*.html

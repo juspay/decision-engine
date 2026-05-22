@@ -512,7 +512,12 @@ pub async fn routing_evaluate(
             Ok(data) => data,
             Err(e) => return fail_preview(e.into(), "routing_algorithm_parse_failed"),
         };
-    let preview_flow_type = crate::analytics::refine_routing_evaluate_flow_type(&algorithm_data);
+    let mut preview_flow_type =
+        crate::analytics::refine_routing_evaluate_flow_type(&algorithm_data);
+
+    // Populated by the AbTest arm to tag analytics events with experiment context.
+    let mut ab_experiment_id: Option<String> = None;
+    let mut ab_variant_arm: Option<String> = None;
 
     let (output, evaluated_output, rule_name): (Output, Vec<ConnectorInfo>, Option<String>) =
         match algorithm_data {
@@ -582,6 +587,43 @@ pub async fn routing_evaluate(
                     Err(e) => return fail_preview(e.into(), "preview_interpreter_failed"),
                 }
             }
+
+            StaticRoutingAlgorithm::AbTest(ab_data) => {
+                let payment_id = payload.payment_id.as_deref().unwrap_or("");
+                let arm = crate::decider::gatewaydecider::ab_test::assign_arm(
+                    payment_id,
+                    ab_data.variant_split_pct,
+                );
+                let arm_algorithm_id = if arm == "variant" {
+                    ab_data.variant_algorithm_id.as_str()
+                } else {
+                    ab_data.control_algorithm_id.as_str()
+                };
+                logger::debug!(
+                    "A/B test routing evaluate: payment_id={:?} arm={} algorithm={}",
+                    payload.payment_id,
+                    arm,
+                    arm_algorithm_id
+                );
+                ab_experiment_id = Some(active_routing_algorithm_id.clone());
+                ab_variant_arm = Some(arm.to_string());
+
+                let result = crate::decider::gatewaydecider::ab_test::preview::evaluate_arm(
+                    arm,
+                    arm_algorithm_id,
+                    &payload,
+                    default_output_present,
+                    &state.db,
+                )
+                .await;
+                match result {
+                    Ok(r) => {
+                        preview_flow_type = r.flow_type;
+                        (r.output, r.evaluated_output, r.rule_name)
+                    }
+                    Err(e) => return fail_preview(e, "ab_test_evaluation_failed"),
+                }
+            }
         };
 
     let pm_filter_bundle = if pm_filter_graph::has_payment_method_type(&parameters) {
@@ -610,6 +652,20 @@ pub async fn routing_evaluate(
     };
 
     logger::debug!("Response: {response:?}");
+    let analytics_details = match (&ab_experiment_id, &ab_variant_arm) {
+        (Some(exp_id), Some(arm)) => {
+            crate::decider::gatewaydecider::ab_test::preview::serialize_analytics_details(
+                &payload,
+                &response,
+                rule_name.as_deref(),
+                exp_id,
+                arm,
+            )
+        }
+        _ => {
+            serialize_routing_evaluate_analytics_details(&payload, &response, rule_name.as_deref())
+        }
+    };
     crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
         crate::analytics::AnalyticsFlowContext::new(
             crate::analytics::ApiFlow::RuleBasedRouting,
@@ -620,7 +676,7 @@ pub async fn routing_evaluate(
         preview_gateway(&response),
         rule_name.clone(),
         Some(response.status.clone()),
-        serialize_routing_evaluate_analytics_details(&payload, &response, rule_name.as_deref()),
+        analytics_details,
         request_id,
         global_request_id,
         trace_id,

@@ -450,6 +450,20 @@ pub fn invalid_request_error(detail: &str, e: &impl std::fmt::Display) -> T::Err
 pub async fn check_and_update_gateway_score_(
     api_payload: FT::UpdateScorePayload,
 ) -> Result<String, T::ErrorResponse> {
+    // Emit AB test outcome unconditionally — before any early returns.
+    // emit_if_in_flight only needs payment_id, merchant_id, and is_success; it does
+    // not depend on gateway scoring data or GSM lookups, so it must not be gated on
+    // either. Moving it here ensures the outcome is recorded even when:
+    //   (a) the GSM scoring filter skips gateway penalisation, or
+    //   (b) GatewayScoringData is absent from Redis (expired/not cached).
+    let is_success = is_transaction_success(api_payload.status.clone());
+    crate::decider::gatewaydecider::ab_test::emit_if_in_flight(
+        &api_payload.payment_id,
+        &api_payload.merchant_id,
+        is_success,
+    )
+    .await;
+
     // GSM-based scoring filter: skip penalization for failures where the gateway
     // is healthy (user/issuer-originated errors). Gated per merchant so it can be
     // rolled back instantly without a deploy.

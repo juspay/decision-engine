@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import useSWR from 'swr'
-import { useLocation, useSearchParams } from 'react-router-dom'
-import { ArrowLeft } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
+import { ArrowLeft, SlidersHorizontal } from 'lucide-react'
 import { fetcher } from '../../lib/api'
 import {
   AnalyticsRange,
@@ -14,6 +14,7 @@ import { Badge } from '../ui/Badge'
 import { Spinner } from '../ui/Spinner'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { Card as GlassCard, InsetPanel, SurfaceLabel } from '../ui/Card'
+import { CopyButton } from '../ui/CopyButton'
 import { DateTimePicker } from '../ui/DateTimePicker'
 
 const RANGE_OPTIONS: AnalyticsRangeValue[] = ['15m', '1h', '12h', '1d', '1w', 'custom']
@@ -30,7 +31,7 @@ const ROUTE_OPTIONS = [
 ]
 const INSPECTOR_TABS = ['summary', 'input', 'response', 'raw'] as const
 const DEBIT_ROUTING_APPROACH = 'NTW_BASED_ROUTING'
-const CATCH_UP_REFRESH_DELAYS_MS = [750, 2000, 4000]
+
 
 type AuditFilters = {
   paymentId: string
@@ -299,6 +300,7 @@ function summaryBadgeVariant(status?: string | null): 'blue' | 'green' | 'purple
   return 'gray'
 }
 
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
@@ -321,13 +323,17 @@ function sectionButtonClass(active: boolean) {
 }
 
 function controlClassName() {
-  return 'h-11 rounded-2xl border border-slate-200 bg-white/90 px-4 text-sm text-slate-700 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.2)] outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-[#e5ecf7] dark:shadow-none'
+  return 'h-8 rounded-xl border border-slate-200 bg-white/90 pl-3 pr-3 text-xs text-slate-700 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-[#e5ecf7]'
+}
+
+function selectClassName() {
+  return `${controlClassName()} appearance-none pr-7 bg-[url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")] bg-no-repeat bg-[right_8px_center]`
 }
 
 function FilterField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label className="space-y-2">
-      <span className="block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+    <label className="flex items-center gap-3">
+      <span className="shrink-0 text-xs text-slate-400 dark:text-[#555f6e]">
         {label}
       </span>
       {children}
@@ -344,16 +350,19 @@ function EmptyState({ title, body }: { title: string; body: string }) {
   )
 }
 
-function InspectorKeyValueGrid({ rows }: { rows: Array<{ label: string; value: string }> }) {
+function InspectorKeyValueGrid({ rows }: { rows: Array<{ label: string; value: string; copyText?: string }> }) {
   if (!rows.length) return null
 
   return (
-    <div className="grid gap-3 md:grid-cols-2">
+    <div className="grid grid-cols-2 gap-x-6 gap-y-3">
       {rows.map((row) => (
-        <InsetPanel key={`${row.label}-${row.value}`} className="px-4 py-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8390a7]">{row.label}</p>
-          <p className="mt-2 text-sm text-slate-900 dark:text-white break-words">{row.value}</p>
-        </InsetPanel>
+        <div key={`${row.label}-${row.value}`}>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-[#555f6e]">{row.label}</p>
+          <div className="mt-0.5 flex items-center gap-1.5">
+            <p className="text-sm text-slate-900 dark:text-white break-all">{row.value}</p>
+            {row.copyText && <CopyButton text={row.copyText} size={12} />}
+          </div>
+        </div>
       ))}
     </div>
   )
@@ -427,11 +436,8 @@ function buildInspectorModel(event: PaymentAuditEvent | null) {
     { label: 'Stage', value: stageLabel(event) },
     { label: 'Route', value: routeLabel(event.route) },
     { label: 'Timestamp', value: formatDateTime(event.created_at_ms) },
-    { label: 'Merchant', value: event.merchant_id || 'unknown merchant' },
-    ...(event.payment_id ? [{ label: 'Payment ID', value: event.payment_id }] : []),
-    ...(event.request_id ? [{ label: 'Request ID', value: event.request_id }] : []),
-    ...(event.gateway ? [{ label: 'Gateway', value: event.gateway }] : []),
-    ...(event.status ? [{ label: 'Status', value: event.status }] : []),
+    ...(event.payment_id ? [{ label: 'Payment ID', value: event.payment_id, copyText: event.payment_id }] : []),
+    ...(event.request_id ? [{ label: 'Request ID', value: event.request_id, copyText: event.request_id }] : []),
   ]
 
   const signalRecord = cleanRecord(
@@ -466,7 +472,6 @@ function buildInspectorModel(event: PaymentAuditEvent | null) {
 }
 
 export function PaymentAuditPage() {
-  const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
 
   const initialMode = searchParams.get('routing_approach') === DEBIT_ROUTING_APPROACH
@@ -532,7 +537,7 @@ export function PaymentAuditPage() {
 
   const auditSearch = useSWR<PaymentAuditResponse>(searchUrl, fetcher, {
     revalidateOnFocus: false,
-    revalidateOnMount: true,
+    dedupingInterval: 5000,
   })
 
   const selectedSummary = useMemo(() => {
@@ -580,24 +585,9 @@ export function PaymentAuditPage() {
 
   const auditDetail = useSWR<PaymentAuditResponse>(detailUrl, fetcher, {
     revalidateOnFocus: false,
-    revalidateOnMount: true,
+    dedupingInterval: 5000,
   })
 
-  useEffect(() => {
-    const revalidateAudit = () => {
-      void auditSearch.mutate()
-      void auditDetail.mutate()
-    }
-
-    revalidateAudit()
-    const timers = CATCH_UP_REFRESH_DELAYS_MS.map((delay) =>
-      window.setTimeout(revalidateAudit, delay),
-    )
-
-    return () => {
-      timers.forEach((timer) => window.clearTimeout(timer))
-    }
-  }, [location.key, mode])
 
   const timeline = auditDetail.data?.timeline || []
 
@@ -620,12 +610,12 @@ export function PaymentAuditPage() {
   const selectedEventIsDecision = selectedEvent ? isDecideGatewayEvent(selectedEvent) : false
 
   const error = auditSearch.error?.message || auditDetail.error?.message || null
-  const loading = auditSearch.isLoading || auditDetail.isLoading
+  const loading = auditSearch.isLoading
   const resultRows = auditSearch.data?.results || []
   const totalMatches = auditSearch.data?.total_results || 0
   const totalEvents = timeline.length
-  const successCount = resultRows.filter((row) => summaryBadgeVariant(row.latest_status) === 'green').length
-  const failureCount = resultRows.filter((row) => summaryBadgeVariant(row.latest_status) === 'red').length
+  const successCount = auditSearch.data?.total_success ?? resultRows.filter((row) => summaryBadgeVariant(row.latest_status) === 'green').length
+  const failureCount = auditSearch.data?.total_failure ?? resultRows.filter((row) => summaryBadgeVariant(row.latest_status) === 'red').length
   const activeGatewayList = Array.from(
     new Set(
       resultRows.flatMap((row) => {
@@ -635,16 +625,6 @@ export function PaymentAuditPage() {
     ),
   )
   const activeGateways = activeGatewayList.length
-  const summaryCards = [
-    { label: 'Matches', value: String(totalMatches), helper: 'Window' },
-    { label: 'Success', value: String(successCount), helper: 'Current page' },
-    { label: 'Failure', value: String(failureCount), helper: 'Current page' },
-    {
-      label: 'Connectors',
-      value: String(activeGateways),
-      helper: activeGatewayList.length ? activeGatewayList.slice(0, 2).join(', ') : 'None',
-    },
-  ]
   const content = mode === 'rule_based'
     ? {
         title: 'Decision Audit',
@@ -652,7 +632,7 @@ export function PaymentAuditPage() {
         merchantPrompt: 'Audit data follows your signed-in merchant account.',
         searchTitle: 'Search Rule Decision Trail',
         searchDescription: 'Use decision payment IDs or request IDs when you have them. Gateway, status, and error code help narrow rule decision activity quickly.',
-        matchingLabel: 'Matching decisions',
+        matchingLabel: 'Matches',
         matchingDescription: 'Scan the current result set and pick a decision to open its full trace.',
         summaryLabel: 'Selected Decision Timeline',
         summaryEmpty: 'Pick a decision from the left column to see the full rule evaluation trace.',
@@ -666,7 +646,7 @@ export function PaymentAuditPage() {
           merchantPrompt: 'Audit data follows your signed-in merchant account.',
           searchTitle: 'Search Debit Routing Trail',
           searchDescription: 'Use payment or request IDs when you have them. Gateway, status, and error code help narrow debit-routing outcomes quickly.',
-          matchingLabel: 'Matching debit decisions',
+          matchingLabel: 'Matches',
           matchingDescription: 'Scan the current result set and pick a debit-routing payment to open its full event trail.',
           summaryLabel: 'Selected Debit Routing Timeline',
           summaryEmpty: 'Pick a debit-routing payment from the left column to see the full decision trail.',
@@ -679,7 +659,7 @@ export function PaymentAuditPage() {
           merchantPrompt: 'Audit data follows your signed-in merchant account.',
           searchTitle: 'Search Decision Trail',
           searchDescription: 'Use payment or request IDs when you have them. Error code, gateway, route, and status narrow results quickly.',
-          matchingLabel: 'Matching payments',
+          matchingLabel: 'Matches',
           matchingDescription: 'Scan the current result set and pick a payment to open its full event trail.',
           summaryLabel: 'Selected Payment Timeline',
           summaryEmpty: 'Pick a payment from the left column to see the full transaction trail.',
@@ -785,10 +765,12 @@ export function PaymentAuditPage() {
     )
   }
 
-  function selectSummary(lookupKey: string) {
+  function selectSummary(lookupKey: string, eventCount?: number) {
     setSelectedKey(lookupKey)
     setSelectedEventId(null)
-    setTrailFocused(true)
+    // Single-event payments have nothing to choose in the trail — keep the results
+    // list visible and let the right panel populate directly from the auto-selected event.
+    if (eventCount !== 1) setTrailFocused(true)
     syncSearch(mode, range, page, appliedFilters, lookupKey, customWindow)
   }
 
@@ -815,14 +797,6 @@ export function PaymentAuditPage() {
     syncSearch(nextMode, range, nextPage, nextFilters, undefined, customWindow)
   }
 
-  async function copyValue(value: string | null | undefined) {
-    if (!value) return
-    try {
-      await navigator.clipboard.writeText(value)
-    } catch {
-      // Ignore clipboard failures in unsupported contexts.
-    }
-  }
 
   return (
     <div className="space-y-6">
@@ -907,18 +881,15 @@ export function PaymentAuditPage() {
           </Button>
         </div>
 
-        <p className="text-sm font-medium text-slate-700 dark:text-slate-300">{content.searchTitle}</p>
-
-        <div className="flex flex-wrap items-center gap-3">
+        <form
+          className="flex flex-wrap items-center gap-3"
+          onSubmit={(e) => { e.preventDefault(); applyFilters() }}
+        >
           <input
             className={`${controlClassName()} min-w-[320px] flex-[1.4]`}
             value={filters.paymentId || filters.requestId}
             onChange={(event) => updateFilter('paymentId', event.target.value)}
-            placeholder={
-              mode === 'rule_based'
-                ? 'Decision payment ID'
-                : 'Payment ID'
-            }
+            placeholder={mode === 'rule_based' ? 'Decision payment ID' : 'Payment ID'}
           />
           <input
             className={`${controlClassName()} min-w-[180px] flex-1`}
@@ -927,7 +898,7 @@ export function PaymentAuditPage() {
             placeholder="Any gateway"
           />
           <select
-            className={`${controlClassName()} min-w-[160px]`}
+            className={`${selectClassName()} min-w-[160px]`}
             value={filters.status}
             onChange={(event) => updateFilter('status', event.target.value)}
           >
@@ -937,28 +908,30 @@ export function PaymentAuditPage() {
               </option>
             ))}
           </select>
-          <Button size="md" onClick={applyFilters} className="min-w-[116px]">
+          <Button type="submit" size="sm" className="min-w-[72px]">
             Search
           </Button>
-          <Button size="md" variant="secondary" onClick={clearFilters} className="min-w-[98px]">
+          <Button size="sm" variant="ghost" onClick={clearFilters}>
             Clear
           </Button>
           <Button
+            type="button"
             size="sm"
             variant="secondary"
             onClick={() => setShowAdvancedFilters((value) => !value)}
-            className="min-w-[116px]"
+            className={showAdvancedFilters ? 'text-brand-600 dark:text-brand-400' : ''}
           >
-            {showAdvancedFilters ? 'Less filters' : 'More filters'}
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+            Filters
           </Button>
-        </div>
+        </form>
 
         {showAdvancedFilters ? (
           <GlassCard className="p-4">
             <div className={`grid gap-3 md:grid-cols-2 ${mode === 'transactions' ? 'xl:grid-cols-3' : 'xl:grid-cols-2'}`}>
               {mode === 'transactions' ? (
                 <FilterField label="Route">
-                  <select className={controlClassName()} value={filters.route} onChange={(event) => updateFilter('route', event.target.value)}>
+                  <select className={selectClassName()} value={filters.route} onChange={(event) => updateFilter('route', event.target.value)}>
                     {ROUTE_OPTIONS.map((option) => (
                       <option key={option.value || 'all'} value={option.value}>
                         {option.label}
@@ -989,146 +962,135 @@ export function PaymentAuditPage() {
         </div>
       )}
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(360px,0.74fr)_minmax(0,1.26fr)] xl:items-start">
-        <GlassCard className="overflow-hidden">
-          <div className="border-b border-slate-200 px-4 py-4 dark:border-[#2a303a]">
-            {trailFocused ? (
-              <Button size="sm" variant="secondary" onClick={returnToResults} className="mb-4">
-                <ArrowLeft className="h-3.5 w-3.5" />
-                Back to results
-              </Button>
-            ) : null}
-
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <SurfaceLabel>{trailFocused ? 'Decision trail' : content.matchingLabel}</SurfaceLabel>
-                <h2 className="mt-2 text-lg font-semibold text-slate-900 dark:text-white">
-                  {trailFocused
-                    ? selectedSummary?.payment_id || selectedSummary?.request_id || selectedSummary?.lookup_key || 'Selected payment'
-                    : content.matchingLabel}
-                </h2>
-                <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                  {trailFocused
-                    ? 'Choose a timeline event to view scores, routing details, and payloads.'
-                    : 'Click a payment to list its decision trail.'}
-                </p>
-              </div>
-              {!trailFocused ? (
-                <Badge variant="gray">{resultRows.length} shown</Badge>
-              ) : null}
+      {auditSearch.data ? (
+        <div className="flex flex-wrap items-stretch gap-2">
+          <div className="flex items-center gap-1.5 rounded-[14px] border border-slate-200/80 bg-white/60 px-3.5 py-2 dark:border-[#23232a] dark:bg-[#0e1117]">
+            <span className="text-base font-bold tabular-nums text-slate-900 dark:text-white">{totalMatches}</span>
+            <span className="text-xs font-medium text-slate-500 dark:text-[#8a8a93]">Matches</span>
+          </div>
+          <div className="flex items-center gap-1.5 rounded-[14px] border border-emerald-200/60 bg-emerald-50/70 px-3.5 py-2 dark:border-emerald-500/20 dark:bg-emerald-500/[0.07]">
+            <span className="text-base font-bold tabular-nums text-emerald-700 dark:text-emerald-400">{successCount}</span>
+            <span className="text-xs font-medium text-emerald-600/80 dark:text-emerald-500/80">Success</span>
+          </div>
+          <div className="flex items-center gap-1.5 rounded-[14px] border border-red-200/60 bg-red-50/70 px-3.5 py-2 dark:border-red-500/20 dark:bg-red-500/[0.07]">
+            <span className="text-base font-bold tabular-nums text-red-600 dark:text-red-400">{failureCount}</span>
+            <span className="text-xs font-medium text-red-500/80 dark:text-red-400/80">Failure</span>
+          </div>
+          {activeGatewayList.length > 0 && (
+            <div className="flex items-center gap-1.5 rounded-[14px] border border-violet-200/60 bg-violet-50/70 px-3.5 py-2 dark:border-violet-500/20 dark:bg-violet-500/[0.07]">
+              <span className="text-base font-bold tabular-nums text-violet-700 dark:text-violet-400">{activeGateways}</span>
+              <span className="text-xs font-medium text-violet-600/80 dark:text-violet-400/80">Connectors</span>
+              <span className="text-[11px] text-violet-500/60 dark:text-violet-600/60">· {activeGatewayList.slice(0, 2).join(', ')}</span>
             </div>
+          )}
+        </div>
+      ) : null}
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(360px,0.74fr)_minmax(0,1.26fr)] xl:h-[calc(100vh-110px)]">
+        <GlassCard className="h-full overflow-hidden">
+          <div className="shrink-0 border-b border-slate-200 px-5 py-3 dark:border-[#2a303a]">
+            {trailFocused ? (
+              <>
+                <Button size="sm" variant="secondary" onClick={returnToResults} className="mb-3">
+                  <ArrowLeft className="h-3.5 w-3.5" />
+                  Back to results
+                </Button>
+                <div className="flex items-center justify-between gap-3">
+                  <h2 className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+                    {selectedSummary?.payment_id || selectedSummary?.request_id || selectedSummary?.lookup_key || 'Selected payment'}
+                  </h2>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className="text-xs text-slate-400 dark:text-[#555f6e]">{totalEvents} event{totalEvents === 1 ? '' : 's'}</span>
+                    {selectedSummary?.latest_status ? (
+                      <Badge variant={summaryBadgeVariant(selectedSummary.latest_status)}>
+                        {humanizeAuditValue(selectedSummary.latest_status)}
+                      </Badge>
+                    ) : null}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <SurfaceLabel>{content.matchingLabel}</SurfaceLabel>
+            )}
           </div>
 
           {!trailFocused ? (
-            <div className="space-y-3 p-4">
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                {summaryCards.map((item) => (
-                  <div
-                    key={item.label}
-                    className="min-w-0 overflow-hidden rounded-[20px] border border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-[#252d3a] dark:bg-[#0c1119]"
-                  >
-                    <p
-                      className="max-w-full truncate text-[10px] font-semibold uppercase leading-4 tracking-[0.12em] text-slate-500 dark:text-[#7d879b]"
-                      title={item.label}
-                    >
-                      {item.label}
-                    </p>
-                    <p className="mt-2 min-w-0 truncate text-xl font-semibold text-slate-950 dark:text-white">{item.value}</p>
-                    <p className="mt-1 min-w-0 truncate text-[11px] text-slate-500 dark:text-[#7d879b]">{item.helper}</p>
-                  </div>
-                ))}
-              </div>
-
-              {resultRows.length ? resultRows.map((row) => (
+            <>
+            <div className="flex-1 overflow-y-auto p-2">
+              {resultRows.length > 0 ? resultRows.map((row) => {
+                const isSelected = selectedSummary?.lookup_key === row.lookup_key
+                return (
                 <button
                   key={row.lookup_key}
                   type="button"
-                  onClick={() => selectSummary(row.lookup_key)}
-                  className={`w-full rounded-[20px] border p-4 text-left transition-all ${
-                    selectedSummary?.lookup_key === row.lookup_key
-                      ? 'border-brand-500/70 bg-slate-50 shadow-[0_14px_30px_-28px_rgba(59,130,246,0.35)] dark:border-brand-500 dark:bg-[#161b24]'
-                      : 'border-slate-200/80 bg-white/40 hover:border-slate-300 hover:bg-slate-50/80 dark:border-[#23232a] dark:bg-[#131318] dark:hover:border-[#2a303a] dark:hover:bg-[#17171d]'
+                  onClick={() => selectSummary(row.lookup_key, row.event_count)}
+                  className={`relative w-full rounded-lg px-3 py-2.5 text-left transition-all ${
+                    isSelected
+                      ? 'bg-brand-50 dark:bg-[#161b24]'
+                      : 'hover:bg-slate-50/80 dark:hover:bg-[#13131a]'
                   }`}
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
+                  {isSelected && (
+                    <span className="absolute inset-y-1.5 left-0 w-[3px] rounded-full bg-brand-500" />
+                  )}
+                  <div className="flex items-center gap-2.5">
+                    <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
                         {row.payment_id || row.request_id || row.lookup_key}
                       </p>
-                      <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                        {row.merchant_id || 'unknown merchant'} · {formatDateTime(row.last_seen_ms)}
+                      <p className="mt-0.5 truncate text-xs text-slate-400 dark:text-[#555f6e]">
+                        {compactMeta([row.latest_gateway || null, `${row.event_count} event${row.event_count === 1 ? '' : 's'}`])}
                       </p>
                     </div>
-                    <Badge variant={summaryBadgeVariant(row.latest_status)}>
-                      {humanizeAuditValue(row.latest_status) || 'Unknown'}
-                    </Badge>
+                    <div className="shrink-0 text-right">
+                      <p className="text-[11px] text-slate-400 dark:text-[#555f6e]">{formatRelative(row.last_seen_ms)}</p>
+                      <Badge variant={summaryBadgeVariant(row.latest_status)}>
+                        {humanizeAuditValue(row.latest_status) || 'Unknown'}
+                      </Badge>
+                    </div>
                   </div>
-                  <p className="mt-3 text-xs text-slate-500 dark:text-[#8a8a93]">
-                    {compactMeta([
-                      row.latest_gateway || null,
-                      `${row.event_count} events`,
-                      formatRelative(row.last_seen_ms),
-                    ])}
-                  </p>
                 </button>
-              )) : (
+              )}) : (
                 <EmptyState
                   title={content.noMatchesTitle}
                   body={content.noMatchesBody}
                 />
               )}
-
-              <div className="flex items-center gap-2 pt-1">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={page <= 1}
-                  onClick={() => {
-                    const nextPage = Math.max(1, page - 1)
-                    setPage(nextPage)
-                    setTrailFocused(false)
-                    syncSearch(mode, range, nextPage, appliedFilters, selectedKey)
-                  }}
-                >
-                  Prev
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={resultRows.length < pageSize}
-                  onClick={() => {
-                    const nextPage = page + 1
-                    setPage(nextPage)
-                    setTrailFocused(false)
-                    syncSearch(mode, range, nextPage, appliedFilters, selectedKey)
-                  }}
-                >
-                  Next
-                </Button>
-              </div>
             </div>
+            <div className="shrink-0 flex items-center gap-2 border-t border-slate-200 px-4 py-3 dark:border-[#2a303a]">
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={page <= 1}
+                onClick={() => {
+                  const nextPage = Math.max(1, page - 1)
+                  setPage(nextPage)
+                  setTrailFocused(false)
+                  syncSearch(mode, range, nextPage, appliedFilters, selectedKey)
+                }}
+              >
+                Prev
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={resultRows.length < pageSize}
+                onClick={() => {
+                  const nextPage = page + 1
+                  setPage(nextPage)
+                  setTrailFocused(false)
+                  syncSearch(mode, range, nextPage, appliedFilters, selectedKey)
+                }}
+              >
+                Next
+              </Button>
+              <span className="ml-auto text-xs text-slate-400 dark:text-[#555f6e]">Page {page}</span>
+            </div>
+            </>
           ) : (
-            <div className="space-y-4 p-5">
-              {selectedSummary ? (
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900 dark:text-white">
-                      {selectedSummary.payment_id || selectedSummary.request_id || selectedSummary.lookup_key}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                      {totalEvents} event{totalEvents === 1 ? '' : 's'} in this decision trail
-                    </p>
-                  </div>
-                  {selectedSummary.latest_status ? (
-                    <Badge variant={summaryBadgeVariant(selectedSummary.latest_status)}>
-                      {humanizeAuditValue(selectedSummary.latest_status)}
-                    </Badge>
-                  ) : null}
-                </div>
-              ) : null}
-
+            <div className="flex-1 overflow-y-auto p-2">
               {timeline.length ? (
-                <div className="space-y-3">
+                <div>
                   {timeline.map((event, index) => {
                     const selected = selectedEvent?.id === event.id
                     return (
@@ -1139,58 +1101,46 @@ export function PaymentAuditPage() {
                           setSelectedEventId(event.id)
                           setInspectorTab('summary')
                         }}
-                        className={`w-full rounded-[20px] border px-4 py-4 text-left transition ${
+                        className={`relative w-full rounded-lg px-3 py-2.5 text-left transition-all ${
                           selected
-                            ? 'border-brand-500/70 bg-slate-50 shadow-[0_14px_30px_-28px_rgba(59,130,246,0.35)] dark:border-brand-500 dark:bg-[#161b24]'
-                            : 'border-slate-200/70 bg-white/40 hover:border-slate-300 hover:bg-slate-50/80 dark:border-[#23232a] dark:bg-[#131318] dark:hover:border-[#2a303a] dark:hover:bg-[#17171d]'
+                            ? 'bg-brand-50 dark:bg-[#161b24]'
+                            : 'hover:bg-slate-50/80 dark:hover:bg-[#13131a]'
                         }`}
                       >
-                        <div className="flex items-start gap-4">
-                          <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-sm font-semibold ${
+                        {selected && (
+                          <span className="absolute inset-y-1.5 left-0 w-[3px] rounded-full bg-brand-500" />
+                        )}
+                        <div className="flex items-center gap-2.5">
+                          <div className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
                             selected
-                              ? 'border-brand-500/50 bg-brand-500/10 text-brand-300'
-                              : 'border-slate-200 text-slate-600 dark:border-[#3a284f] dark:text-[#b38cff]'
+                              ? 'bg-brand-500/15 text-brand-500 dark:text-brand-400'
+                              : 'bg-slate-100 text-slate-500 dark:bg-[#1e2330] dark:text-[#8a8a93]'
                           }`}>
                             {index + 1}
                           </div>
-
                           <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-start justify-between gap-3">
-                              <div>
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <p className="text-lg font-semibold text-slate-900 dark:text-[#7da6ff]">
-                                    {stageLabel(event)}
-                                  </p>
-                                  {event.status ? (
-                                    <Badge variant={summaryBadgeVariant(event.status)}>
-                                      {humanizeAuditValue(event.status)}
-                                    </Badge>
-                                  ) : null}
-                                </div>
-                                <p className="mt-2 text-xs text-slate-500 dark:text-[#8a8a93]">
-                                  {compactMeta([
-                                    event.gateway ? `gateway ${event.gateway}` : null,
-                                    formatDateTime(event.created_at_ms),
-                                    event.routing_approach || null,
-                                    event.payment_method_type || null,
-                                  ])}
-                                </p>
-                                <p className="mt-2 text-[11px] text-slate-500 dark:text-[#667085]">
-                                  {event.request_id || event.id}
-                                </p>
-                              </div>
-
-                              {selected ? (
-                                <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500 dark:text-[#8a8a93]">
-                                  Inspecting -&gt;
-                                </p>
-                              ) : null}
-                            </div>
-
+                            <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+                              {stageLabel(event)}
+                            </p>
+                            <p className="mt-0.5 truncate text-xs text-slate-400 dark:text-[#555f6e]">
+                              {compactMeta([
+                                event.gateway || null,
+                                event.routing_approach || null,
+                                event.payment_method_type || null,
+                              ])}
+                            </p>
                             {event.error_message ? (
-                              <p className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/[0.08] px-4 py-3 text-sm text-red-600 dark:text-red-300">
+                              <p className="mt-1 truncate text-xs text-red-500 dark:text-red-400">
                                 {event.error_message}
                               </p>
+                            ) : null}
+                          </div>
+                          <div className="shrink-0 text-right">
+                            <p className="text-[11px] text-slate-400 dark:text-[#555f6e]">{formatRelative(event.created_at_ms)}</p>
+                            {event.status ? (
+                              <Badge variant={summaryBadgeVariant(event.status)}>
+                                {humanizeAuditValue(event.status)}
+                              </Badge>
                             ) : null}
                           </div>
                         </div>
@@ -1208,20 +1158,12 @@ export function PaymentAuditPage() {
           )}
         </GlassCard>
 
-        <GlassCard className="overflow-hidden xl:sticky xl:top-6 xl:self-start">
-          <div className="border-b border-slate-200 px-6 py-5 dark:border-[#2a303a]">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <SurfaceLabel>Event inspector</SurfaceLabel>
-                <h2 className="mt-2 text-xl font-semibold text-slate-900 dark:text-white">
-                  {selectedEvent ? stageLabel(selectedEvent) : 'No event selected'}
-                </h2>
-                <p className="mt-1 text-sm text-slate-500 dark:text-[#8a8a93]">
-                  {selectedEventIsDecision
-                    ? 'View connector scores, routing details, request payload, and response payload.'
-                    : 'View gateway update outcome, request payload, and response payload.'}
-                </p>
-              </div>
+        <GlassCard className="h-full overflow-hidden">
+          <div className="shrink-0 border-b border-slate-200 px-5 py-3 dark:border-[#2a303a]">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
+                {selectedEvent ? stageLabel(selectedEvent) : 'No event selected'}
+              </h2>
               {selectedEvent?.status ? (
                 <Badge variant={summaryBadgeVariant(selectedEvent.status)}>
                   {humanizeAuditValue(selectedEvent.status)}
@@ -1230,7 +1172,7 @@ export function PaymentAuditPage() {
             </div>
           </div>
 
-          <div className="space-y-5 p-6">
+          <div className="flex-1 overflow-y-auto space-y-4 p-4">
             {selectedEvent && inspectorModel ? (
               <>
                 <div className="grid gap-3 md:grid-cols-3">
@@ -1317,14 +1259,6 @@ export function PaymentAuditPage() {
                   />
                 ) : null}
 
-                <div className="flex flex-wrap gap-2">
-                  <Button size="sm" variant="secondary" disabled={!selectedEvent.request_id} onClick={() => copyValue(selectedEvent.request_id)}>
-                    Copy request ID
-                  </Button>
-                  <Button size="sm" variant="secondary" disabled={!selectedEvent.payment_id} onClick={() => copyValue(selectedEvent.payment_id)}>
-                    Copy payment ID
-                  </Button>
-                </div>
               </>
             ) : (
               <EmptyState

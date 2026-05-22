@@ -4,6 +4,10 @@ use masking::PeekInterface;
 use serde::Deserialize;
 
 use crate::analytics::models::*;
+use crate::analytics::models::{
+    ExperimentResultsQuery, ExperimentResultsResponse, ExperimentTransactionsQuery,
+    ExperimentTransactionsResponse,
+};
 use crate::analytics::store::AnalyticsReadStore;
 use crate::config::ClickHouseAnalyticsConfig;
 use crate::error::ApiError;
@@ -111,5 +115,19 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
         query: &PaymentAuditQuery,
     ) -> Result<PaymentAuditResponse, ApiError> {
         endpoints::preview_trace::load(&self.client, query).await
+    }
+
+    async fn experiment_results(
+        &self,
+        query: &ExperimentResultsQuery,
+    ) -> Result<ExperimentResultsResponse, ApiError> {
+        endpoints::experiment_results::load(&self.client, query).await
+    }
+
+    async fn experiment_transactions(
+        &self,
+        query: &ExperimentTransactionsQuery,
+    ) -> Result<ExperimentTransactionsResponse, ApiError> {
+        endpoints::experiment_transactions::load(&self.client, query).await
     }
 }

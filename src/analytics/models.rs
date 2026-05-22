@@ -450,8 +450,83 @@ pub struct PaymentAuditResponse {
     pub page: usize,
     pub page_size: usize,
     pub total_results: usize,
+    pub total_success: usize,
+    pub total_failure: usize,
     pub results: Vec<PaymentAuditSummary>,
     pub timeline: Vec<PaymentAuditEvent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExperimentArmMetrics {
+    pub arm: String,
+    pub transaction_count: i64,
+    pub success_count: i64,
+    pub failure_count: i64,
+    pub auth_rate: f64,
+    pub avg_latency_ms: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ExperimentVerdict {
+    /// Not enough transactions yet to make a judgment.
+    CollectingData,
+    /// Enough data; difference is not statistically significant.
+    NotSignificant,
+    /// Variant is statistically significantly better than control.
+    VariantWins,
+    /// Variant is statistically significantly worse than control.
+    VariantLoses,
+    /// Variant auth rate dropped beyond the guardrail threshold — merchant should pause.
+    GuardrailBreached,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExperimentResultsResponse {
+    pub experiment_id: String,
+    pub merchant_id: String,
+    pub control: ExperimentArmMetrics,
+    pub variant: ExperimentArmMetrics,
+    /// Auth rate delta in percentage points (variant - control).
+    pub delta_pp: f64,
+    pub p_value: Option<f64>,
+    pub confidence_interval: Option<(f64, f64)>,
+    pub verdict: ExperimentVerdict,
+    /// Min sample size from experiment config; used to show progress.
+    pub min_sample_size: u32,
+}
+
+pub struct ExperimentResultsQuery {
+    pub experiment_id: String,
+    pub merchant_id: String,
+    pub start_ms: Option<i64>,
+    pub end_ms: Option<i64>,
+    pub min_sample_size: u32,
+    pub guardrail_threshold_pp: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExperimentTransaction {
+    pub payment_id: String,
+    pub variant_arm: String,
+    pub gateway: Option<String>,
+    pub status: Option<String>,
+    pub created_at_ms: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExperimentTransactionsResponse {
+    pub experiment_id: String,
+    pub total: u64,
+    pub transactions: Vec<ExperimentTransaction>,
+}
+
+pub struct ExperimentTransactionsQuery {
+    pub experiment_id: String,
+    pub merchant_id: String,
+    pub start_ms: Option<i64>,
+    pub page: u64,
+    pub page_size: u64,
 }
 
 #[cfg(test)]

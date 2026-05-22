@@ -1,8 +1,10 @@
 use crate::analytics::{
-    decisions as fetch_decisions, gateway_scores as fetch_gateway_scores,
-    log_summaries as fetch_log_summaries, overview as fetch_overview,
-    payment_audit as fetch_payment_audit, preview_trace as fetch_preview_trace,
-    routing_stats as fetch_routing_stats, AnalyticsQuery, PaymentAuditQuery,
+    decisions as fetch_decisions, experiment_results as fetch_experiment_results,
+    experiment_transactions as fetch_experiment_transactions,
+    gateway_scores as fetch_gateway_scores, log_summaries as fetch_log_summaries,
+    overview as fetch_overview, payment_audit as fetch_payment_audit,
+    preview_trace as fetch_preview_trace, routing_stats as fetch_routing_stats, AnalyticsQuery,
+    ExperimentResultsQuery, ExperimentTransactionsQuery, PaymentAuditQuery,
 };
 use crate::custom_extractors::{AuthenticatedAnalyticsContext, TenantStateResolver};
 use crate::error;
@@ -91,6 +93,14 @@ pub fn serve() -> axum::Router<Arc<crate::tenant::GlobalAppState>> {
         .route("/log-summaries", axum::routing::get(log_summaries))
         .route("/payment-audit", axum::routing::get(payment_audit))
         .route("/preview-trace", axum::routing::get(preview_trace))
+        .route(
+            "/experiment/:experiment_id/results",
+            axum::routing::get(experiment_results),
+        )
+        .route(
+            "/experiment/:experiment_id/transactions",
+            axum::routing::get(experiment_transactions),
+        )
 }
 
 pub async fn overview(
@@ -166,4 +176,56 @@ pub async fn preview_trace(
 ) -> Result<Json<crate::analytics::PaymentAuditResponse>, error::ContainerError<error::ApiError>> {
     let query = payment_audit_query_from_params(auth_context.merchant_id.clone(), &params);
     Ok(Json(fetch_preview_trace(&state, &query).await?))
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ExperimentResultsParams {
+    pub start_ms: Option<i64>,
+    pub end_ms: Option<i64>,
+    pub min_sample_size: Option<u32>,
+    pub guardrail_threshold_pp: Option<f64>,
+}
+
+pub async fn experiment_results(
+    TenantStateResolver(state): TenantStateResolver,
+    AuthenticatedAnalyticsContext(auth_context): AuthenticatedAnalyticsContext,
+    axum::extract::Path(experiment_id): axum::extract::Path<String>,
+    Query(params): Query<ExperimentResultsParams>,
+) -> Result<Json<crate::analytics::ExperimentResultsResponse>, error::ContainerError<error::ApiError>>
+{
+    let query = ExperimentResultsQuery {
+        experiment_id,
+        merchant_id: auth_context.merchant_id.clone(),
+        start_ms: params.start_ms,
+        end_ms: params.end_ms,
+        min_sample_size: params.min_sample_size.unwrap_or(1000),
+        guardrail_threshold_pp: params.guardrail_threshold_pp.unwrap_or(3.0),
+    };
+    Ok(Json(fetch_experiment_results(&state, &query).await?))
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ExperimentTransactionsParams {
+    pub start_ms: Option<i64>,
+    pub page: Option<u64>,
+    pub page_size: Option<u64>,
+}
+
+pub async fn experiment_transactions(
+    TenantStateResolver(state): TenantStateResolver,
+    AuthenticatedAnalyticsContext(auth_context): AuthenticatedAnalyticsContext,
+    axum::extract::Path(experiment_id): axum::extract::Path<String>,
+    Query(params): Query<ExperimentTransactionsParams>,
+) -> Result<
+    Json<crate::analytics::ExperimentTransactionsResponse>,
+    error::ContainerError<error::ApiError>,
+> {
+    let query = ExperimentTransactionsQuery {
+        experiment_id,
+        merchant_id: auth_context.merchant_id.clone(),
+        start_ms: params.start_ms,
+        page: params.page.unwrap_or(1),
+        page_size: params.page_size.unwrap_or(50).min(100),
+    };
+    Ok(Json(fetch_experiment_transactions(&state, &query).await?))
 }

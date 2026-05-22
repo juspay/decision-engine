@@ -155,6 +155,66 @@ run_migration operation=default_operation migration_dir=pg_migration_dir config_
 # Run database migrations for postgres
 migrate-pg operation=default_operation *args='': (run_migration operation pg_migration_dir pg_config_file_dir database_url args)
 
+# ── Load testing ─────────────────────────────────────────────────────────────
+#
+# Prerequisites: brew install k6
+#
+# VU (Virtual User): a simulated concurrent connection that fires requests in a
+# tight loop (request → wait for response → 100ms sleep → repeat). More VUs =
+# more parallel in-flight requests. Sweet spots measured empirically:
+#   local   → 20–30 VUs  (p95 ≈ 84–150ms,  ~108–123 req/s)
+#   sandbox → 12 VUs     (p95 ≈ 412ms,       ~28 req/s)
+
+# Run load test against localhost (default: 20 VUs, 30s)
+# TOKEN is auto-generated from the local JWT secret if not set.
+load-test-local vus='20' duration='30s':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    TOKEN="${TOKEN:-$(bash scripts/gen_local_token.sh)}"
+    k6 run scripts/load_test_report.js \
+        -e ENV=local \
+        -e TOKEN="$TOKEN" \
+        -e VUS={{ vus }} \
+        -e DURATION={{ duration }}
+alias ltl := load-test-local
+
+# Run load test against sandbox (default: 12 VUs, 60s — empirical saturation point)
+# Requires TOKEN and MERCHANT_ID to be set in the environment.
+#   export TOKEN=<your_jwt>
+#   export MERCHANT_ID=<your_merchant_id>
+load-test-sandbox vus='12' duration='60s':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${TOKEN:?TOKEN must be set (export TOKEN=<your_jwt>)}"
+    : "${MERCHANT_ID:?MERCHANT_ID must be set (export MERCHANT_ID=<your_merchant_id>)}"
+    k6 run scripts/load_test_report.js \
+        -e ENV=sandbox \
+        -e TOKEN="$TOKEN" \
+        -e MERCHANT_ID="$MERCHANT_ID" \
+        -e VUS={{ vus }} \
+        -e DURATION={{ duration }}
+alias lts := load-test-sandbox
+
+# Run both local and sandbox back-to-back and open their HTML reports
+# Requires TOKEN and MERCHANT_ID for sandbox (see load-test-sandbox).
+load-test-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    LOCAL_TOKEN="${TOKEN:-$(bash scripts/gen_local_token.sh)}"
+    : "${TOKEN:?TOKEN must be set for sandbox}"
+    : "${MERCHANT_ID:?MERCHANT_ID must be set for sandbox}"
+    echo "==> Local (20 VUs, 30s)"
+    k6 run scripts/load_test_report.js -e ENV=local   -e TOKEN="$LOCAL_TOKEN" -e VUS=20 -e DURATION=30s
+    echo "==> Sandbox (12 VUs, 60s)"
+    k6 run scripts/load_test_report.js -e ENV=sandbox -e TOKEN="$TOKEN" -e MERCHANT_ID="$MERCHANT_ID" -e VUS=12 -e DURATION=60s
+    echo "==> Opening reports..."
+    open scripts/load_test_report_local_20vu.html scripts/load_test_report_sandbox_12vu.html 2>/dev/null || true
+alias lta := load-test-all
+
+# Generate a fresh local auth token (expires in 24h)
+load-test-token:
+    @bash scripts/gen_local_token.sh
+
 # Drop database if exists and then create a new 'hyperswitch_db' Database
 resurrect database_name=db_name:
     psql -U postgres -c 'DROP DATABASE IF EXISTS  {{ database_name }}';

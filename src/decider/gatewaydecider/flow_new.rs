@@ -110,6 +110,27 @@ pub async fn decider_full_payload_hs_function(
         dpRedisCompressionConfig: None,
     };
 
+    // AB test intercept — must run before SR routing. Feature-flagged per merchant.
+    // Disabled by default; enable via service config AB_TEST_REAL_PAYMENTS_ENABLED_{merchant_id}.
+    let mut ab_test_sr_override: Option<crate::euclid::types::SrConfigOverride> = None;
+    match super::ab_test::intercept(&dreq_).await {
+        super::ab_test::AbTestIntercept::StaticArm {
+            result,
+            experiment_id: _,
+            variant_arm: _,
+        } => {
+            return Ok(*result);
+        }
+        super::ab_test::AbTestIntercept::SrArm {
+            sr_config_override, ..
+        } => {
+            // Carry on with normal SR routing. If this is a variant arm in an SR Config Tuning
+            // experiment, sr_config_override carries the per-arm overrides to apply at routing time.
+            ab_test_sr_override = sr_config_override;
+        }
+        super::ab_test::AbTestIntercept::Disabled => {}
+    }
+
     let is_hybrid_routing = dreq_.ranking_algorithm == Some(RankingAlgorithm::NtwSrHybridRouting);
 
     if dreq_.ranking_algorithm == Some(RankingAlgorithm::NtwBasedRouting) || is_hybrid_routing {
@@ -165,6 +186,7 @@ pub async fn decider_full_payload_hs_function(
             dreq_.clone().elimination_enabled,
             false,
             cpu_start,
+            ab_test_sr_override,
         )
         .await
     }
@@ -182,6 +204,7 @@ async fn perform_hybrid_routing(
         dreq_.clone().elimination_enabled,
         false,
         cpu_start,
+        None,
     )
     .await;
 
@@ -219,6 +242,7 @@ pub async fn run_decider_flow(
     eliminationEnabled: Option<bool>,
     is_legacy_decider_flow: bool,
     cpu_start: Instant,
+    ab_test_sr_override: Option<crate::euclid::types::SrConfigOverride>,
 ) -> Result<T::DecidedGateway, T::ErrorResponse> {
     let txnCreationTime = deciderParams
         .dpTxnDetail
@@ -228,6 +252,7 @@ pub async fn run_decider_flow(
         .replace(" ", "T")
         .replace(" UTC", "Z");
     let mut deciderState = T::initial_decider_state(txnCreationTime.clone());
+    deciderState.ab_test_sr_override = ab_test_sr_override;
     let mut logger = HashMap::new();
 
     let mut decider_flow =
