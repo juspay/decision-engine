@@ -27,12 +27,12 @@ pub async fn load(
 
     builder.extend_selects([
         "JSONExtractString(assumeNotNull(details), 'variant_arm') AS arm".to_string(),
-        // Each payment produces a routing event (status = 'ab_test_decision') later
-        // replaced by an outcome event (status = 'success'/'failure') via ReplacingMergeTree.
-        // count() therefore gives one row per payment after deduplication.
-        "count() AS total".to_string(),
-        "countIf(lowerUTF8(status) = 'success') AS success_count".to_string(),
-        "countIf(lowerUTF8(status) = 'failure') AS failure_count".to_string(),
+        // Each payment emits two events: a routing event (status = 'ab_test_decision')
+        // and an outcome event (status = 'success'/'failure'). count() would double-count
+        // every resolved payment. Use uniqExact(payment_id) to count each payment once.
+        "uniqExact(payment_id) AS total".to_string(),
+        "uniqExactIf(payment_id, lowerUTF8(status) = 'success') AS success_count".to_string(),
+        "uniqExactIf(payment_id, lowerUTF8(status) = 'failure') AS failure_count".to_string(),
         "avgIf(average_latency, average_latency > 0) AS avg_latency_ms".to_string(),
     ]);
 
