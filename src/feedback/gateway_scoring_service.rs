@@ -407,32 +407,26 @@ pub fn update_gateway_score_lock(
 /// Returns true when the GSM rule indicates the failure is user/issuer-originated
 /// and the gateway itself is healthy, meaning the gateway should not be penalized.
 ///
-/// The `decision` field is used to disambiguate categories that can contain both
-/// user errors and gateway/config errors:
+/// Matching is done on `unified_message` (the UE-code family):
 ///
-///   processor_decline_incorrect_data  – always skip: wrong CVV/address/field, user data
-///   frm_decline                       – always skip: fraud/risk engine, not the gateway
-///   issue_with_payment_method         – skip only on do_default; retry surfaces
-///                                       PROCESSOR_ERROR / PROCESSOR_DECLINED which
-///                                       indicates gateway involvement
-///   processor_decline_unauthorized    – skip only on do_default; retry surfaces
-///                                       api_key_expired / missing merchant key /
-///                                       no acquirer configured — gateway config faults
+///   "Issue with Payment Method details" (UE_1000) – card/user error: expired card,
+///     wrong CVV, insufficient funds, blocked card, FRM decline on card data.
+///     The gateway processed the request correctly — penalising it would be wrong.
 ///
-/// step_up_possible == true means the gateway is functional but needs 3-D Secure.
+///   All other unified_messages (UE_2000 Issue with Configurations, UE_3000 Technical
+///   issue with PSP, UE_4000 Issue with Integration, "Something went wrong") indicate
+///   a gateway, config, or integration fault and receive full penalty.
 ///
-/// processor_downtime, empty category, and unknown categories always get full penalty.
+/// step_up_possible == true overrides everything: the gateway is functional but the
+/// transaction needs a 3-D Secure step-up.
 fn is_gateway_healthy_failure(gsm_info: &crate::gsm::GsmInfo) -> bool {
     if gsm_info.step_up_possible {
         return true;
     }
-    match gsm_info.error_category.as_deref() {
-        Some("processor_decline_incorrect_data") | Some("frm_decline") => true,
-        Some("issue_with_payment_method") | Some("processor_decline_unauthorized") => {
-            gsm_info.decision == "do_default"
-        }
-        _ => false,
-    }
+    matches!(
+        gsm_info.unified_message.as_deref(),
+        Some("Issue with Payment Method details")
+    )
 }
 
 pub fn invalid_request_error(detail: &str, e: &impl std::fmt::Display) -> T::ErrorResponse {
@@ -493,7 +487,7 @@ pub async fn check_and_update_gateway_score_(
                 api_payload.gateway,
                 gsm_lookup_result
                     .as_ref()
-                    .map(|g| (&g.error_category, &g.decision)),
+                    .map(|g| (&g.unified_message, &g.decision)),
             );
             if let Some(gsm_info) = gsm_lookup_result {
                 if is_gateway_healthy_failure(&gsm_info) {
@@ -501,10 +495,10 @@ pub async fn check_and_update_gateway_score_(
                         action = "GSM_SCORING_FILTER_SKIP",
                         tag = "GSM_SCORING_FILTER_SKIP",
                         "Skipping gateway penalization for merchant={} gateway={} \
-                         error_category={:?} step_up_possible={}: user-originated failure",
+                         unified_message={:?} step_up_possible={}: user-originated failure",
                         api_payload.merchant_id,
                         api_payload.gateway,
-                        gsm_info.error_category,
+                        gsm_info.unified_message,
                         gsm_info.step_up_possible,
                     );
                     return Ok("Success".to_string());
@@ -1331,95 +1325,61 @@ mod tests {
     use super::is_gateway_healthy_failure;
     use crate::gsm::GsmInfo;
 
-    fn gsm_info(error_category: Option<&str>, decision: &str, step_up_possible: bool) -> GsmInfo {
+    fn gsm_info(unified_message: Option<&str>, step_up_possible: bool) -> GsmInfo {
         GsmInfo {
-            decision: decision.to_string(),
+            decision: "do_default".to_string(),
             step_up_possible,
             clear_pan_possible: false,
             alternate_network_possible: false,
             unified_code: None,
-            unified_message: None,
-            error_category: error_category.map(str::to_string),
+            unified_message: unified_message.map(str::to_string),
+            error_category: None,
             standardised_code: None,
             description: None,
             user_guidance_message: None,
         }
     }
 
-    // ── Skip-penalty cases ────────────────────────────────────────────────────
+    // ── Skip-penalty cases (UE_1000 — Issue with Payment Method details) ─────
 
     #[test]
-    fn processor_decline_incorrect_data_do_default_skips_penalty() {
-        // e.g. adyen: wrong billing address / CVV mismatch
+    fn payment_method_details_expired_card_skips_penalty() {
+        // e.g. adyen code 6: Expired Card
         assert!(is_gateway_healthy_failure(&gsm_info(
-            Some("processor_decline_incorrect_data"),
-            "do_default",
+            Some("Issue with Payment Method details"),
             false
         )));
     }
 
     #[test]
-    fn processor_decline_incorrect_data_retry_skips_penalty() {
-        // e.g. bankofamerica MISSING_FIELD / INVALID_DATA — still a data error
+    fn payment_method_details_wrong_cvv_skips_penalty() {
+        // e.g. adyen code 24: CVC Declined
         assert!(is_gateway_healthy_failure(&gsm_info(
-            Some("processor_decline_incorrect_data"),
-            "retry",
+            Some("Issue with Payment Method details"),
             false
         )));
     }
 
     #[test]
-    fn frm_decline_do_default_skips_penalty() {
-        // e.g. cybersource Decision Manager reject
+    fn payment_method_details_frm_skips_penalty() {
+        // e.g. adyen code 5: Blocked Card (frm_decline + do_default → UE_1000)
         assert!(is_gateway_healthy_failure(&gsm_info(
-            Some("frm_decline"),
-            "do_default",
+            Some("Issue with Payment Method details"),
             false
         )));
     }
 
     #[test]
-    fn frm_decline_retry_skips_penalty() {
-        // e.g. adyen FRAUD — FRM decision, try another gateway
-        assert!(is_gateway_healthy_failure(&gsm_info(
-            Some("frm_decline"),
-            "retry",
-            false
-        )));
-    }
-
-    #[test]
-    fn issue_with_payment_method_do_default_skips_penalty() {
-        // e.g. stripe: expired card, wrong card number, wrong CVV
-        assert!(is_gateway_healthy_failure(&gsm_info(
-            Some("issue_with_payment_method"),
-            "do_default",
-            false
-        )));
-    }
-
-    #[test]
-    fn processor_decline_unauthorized_do_default_skips_penalty() {
-        // e.g. adyen: insufficient funds, card blocked by issuer
-        assert!(is_gateway_healthy_failure(&gsm_info(
-            Some("processor_decline_unauthorized"),
-            "do_default",
-            false
-        )));
-    }
-
-    #[test]
-    fn step_up_possible_skips_penalty_regardless_of_category() {
+    fn step_up_possible_skips_penalty_regardless_of_message() {
         // e.g. paypal DECLINED_SCA_REQUIRED — gateway functional, needs 3DS
-        assert!(is_gateway_healthy_failure(&gsm_info(None, "retry", true)));
+        assert!(is_gateway_healthy_failure(&gsm_info(None, true)));
     }
 
     #[test]
-    fn step_up_possible_skips_penalty_even_with_processor_downtime_category() {
-        // step_up overrides even an otherwise-penalizable category
+    fn step_up_possible_overrides_technical_psp_message() {
+        // step_up_possible takes priority even when unified_message signals a PSP issue
         assert!(is_gateway_healthy_failure(&gsm_info(
-            Some("processor_downtime"),
-            "retry",
+            Some("Technical issue with PSP"),
             true
         )));
     }
@@ -1427,82 +1387,52 @@ mod tests {
     // ── Full-penalty cases ────────────────────────────────────────────────────
 
     #[test]
-    fn issue_with_payment_method_retry_applies_full_penalty() {
-        // e.g. bankofamerica PROCESSOR_ERROR / PROCESSOR_DECLINED — gateway involvement
+    fn issue_with_configurations_applies_full_penalty() {
+        // UE_2000: acquirer not configured, API key expired, missing merchant key
         assert!(!is_gateway_healthy_failure(&gsm_info(
-            Some("issue_with_payment_method"),
-            "retry",
+            Some("Issue with Configurations"),
             false
         )));
     }
 
     #[test]
-    fn processor_decline_unauthorized_retry_applies_full_penalty() {
-        // e.g. stripe api_key_expired, adyen missing merchant key,
-        //      adyen no acquirer account configured for Klarna
+    fn technical_issue_with_psp_applies_full_penalty() {
+        // UE_3000: gateway/PSP down, refused, transaction not permitted
         assert!(!is_gateway_healthy_failure(&gsm_info(
-            Some("processor_decline_unauthorized"),
-            "retry",
+            Some("Technical issue with PSP"),
             false
         )));
     }
 
     #[test]
-    fn processor_downtime_do_default_applies_full_penalty() {
-        // e.g. cybersource / trustpay: gateway/PSP is down
+    fn issue_with_integration_applies_full_penalty() {
+        // UE_4000: missing required fields, integration misconfiguration
         assert!(!is_gateway_healthy_failure(&gsm_info(
-            Some("processor_downtime"),
-            "do_default",
+            Some("Issue with Integration"),
             false
         )));
     }
 
     #[test]
-    fn processor_downtime_retry_applies_full_penalty() {
-        // e.g. bankofamerica SERVER_ERROR — still gateway downtime
+    fn something_went_wrong_applies_full_penalty() {
+        // e.g. HTTP 401 response — unknown/unclassified gateway fault
         assert!(!is_gateway_healthy_failure(&gsm_info(
-            Some("processor_downtime"),
-            "retry",
+            Some("Something went wrong"),
             false
         )));
     }
 
     #[test]
-    fn empty_category_do_default_applies_full_penalty() {
-        // No classification — safe default is to keep the penalty
-        assert!(!is_gateway_healthy_failure(&gsm_info(
-            Some(""),
-            "do_default",
-            false
-        )));
+    fn no_unified_message_applies_full_penalty() {
+        // GSM rule matched but unified_message field is absent — safe default
+        assert!(!is_gateway_healthy_failure(&gsm_info(None, false)));
     }
 
     #[test]
-    fn empty_category_retry_applies_full_penalty() {
-        // Transient/unknown errors without step_up still penalize the gateway
+    fn unknown_message_applies_full_penalty() {
+        // Forward-compatibility: unrecognised future messages default to full penalty
         assert!(!is_gateway_healthy_failure(&gsm_info(
-            Some(""),
-            "retry",
-            false
-        )));
-    }
-
-    #[test]
-    fn no_category_applies_full_penalty() {
-        // GSM rule matched but error_category field is absent
-        assert!(!is_gateway_healthy_failure(&gsm_info(
-            None,
-            "do_default",
-            false
-        )));
-    }
-
-    #[test]
-    fn unknown_category_applies_full_penalty() {
-        // Forward-compatibility: unrecognised future categories default to full penalty
-        assert!(!is_gateway_healthy_failure(&gsm_info(
-            Some("some_future_category"),
-            "do_default",
+            Some("some_future_message"),
             false
         )));
     }

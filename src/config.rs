@@ -58,8 +58,6 @@ pub struct GlobalConfig {
     #[serde(default)]
     pub email: EmailConfig,
     #[serde(default)]
-    pub gsm_scenarios: GsmScenariosConfig,
-    #[serde(default)]
     pub gsm: GsmConfig,
 }
 
@@ -730,30 +728,6 @@ mod tests {
             _ => assert!(false),
         }
     }
-}
-
-/// One simulation scenario entry from `[[gsm_scenarios.scenarios]]` in the TOML config.
-/// Drives the Decision Explorer UI preset buttons and determines whether a matching
-/// failure should penalise the gateway.
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-pub struct GsmSimulationScenario {
-    /// Machine-readable key, e.g. `"expired_card"`.
-    pub key: String,
-    /// Human-readable label shown in the UI, e.g. `"Expired Card"`.
-    pub label: String,
-    /// `true` → full penalty on the gateway; `false` → penalty skipped.
-    pub penalise: bool,
-    /// Must match `GsmRule.error_category`.
-    pub error_category: String,
-    /// When set, the rule's `decision` must also match. `None` matches any decision.
-    #[serde(default)]
-    pub decision: Option<String>,
-}
-
-#[derive(Clone, Debug, serde::Deserialize, Default)]
-pub struct GsmScenariosConfig {
-    #[serde(default)]
-    pub scenarios: Vec<GsmSimulationScenario>,
 }
 
 pub use gsm::{GsmConfig, GsmSourceKind};

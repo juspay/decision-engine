@@ -387,6 +387,7 @@ pub async fn run_decider_flow(
                 .await;
                 Ok(T::DecidedGateway {
                     decided_gateway: pgw.clone(),
+                    fallback_gateways: vec![],
                     gateway_priority_map: Some(json!(HashMap::from([(pgw.to_string(), 1.0)]))),
                     filter_wise_gateways: None,
                     priority_logic_tag: None,
@@ -689,31 +690,50 @@ pub async fn run_decider_flow(
                     }
 
                     match decidedGateway {
-                        Some(decideGatewayOutput) => Ok(T::DecidedGateway {
-                            decided_gateway: decideGatewayOutput,
-                            gateway_priority_map: gatewayPriorityMap,
-                            filter_wise_gateways: None,
-                            priority_logic_tag: updatedPriorityLogicOutput
-                                .priority_logic_tag
-                                .clone(),
-                            routing_approach: finalDeciderApproach.clone(),
-                            gateway_before_evaluation: topGatewayBeforeSRDowntimeEvaluation.clone(),
-                            priority_logic_output: Some(updatedPriorityLogicOutput),
-                            debit_routing_output: None,
-                            reset_approach: decider_flow.writer.reset_approach.clone(),
-                            routing_dimension: decider_flow.writer.routing_dimension.clone(),
-                            routing_dimension_level: decider_flow
-                                .writer
-                                .routing_dimension_level
-                                .clone(),
-                            is_scheduled_outage: decider_flow.writer.isScheduledOutage,
-                            is_dynamic_mga_enabled: decider_flow.writer.is_dynamic_mga_enabled,
-                            gateway_mga_id_map: Some(gatewayMgaIdMap),
-                            is_rust_based_decider: deciderParams
-                                .dpShouldConsumeResult
-                                .unwrap_or(false),
-                            latency: None,
-                        }),
+                        Some(decideGatewayOutput) => {
+                            let mut fallback_entries: Vec<(&String, &f64)> =
+                                currentGatewayScoreMap.iter().collect();
+                            fallback_entries.sort_by(|a, b| {
+                                b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal)
+                            });
+                            let fallback_gateways: Vec<String> = fallback_entries
+                                .into_iter()
+                                .filter_map(|(gw, _)| {
+                                    if gw != &decideGatewayOutput {
+                                        Some(gw.clone())
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect();
+                            Ok(T::DecidedGateway {
+                                fallback_gateways,
+                                decided_gateway: decideGatewayOutput,
+                                gateway_priority_map: gatewayPriorityMap,
+                                filter_wise_gateways: None,
+                                priority_logic_tag: updatedPriorityLogicOutput
+                                    .priority_logic_tag
+                                    .clone(),
+                                routing_approach: finalDeciderApproach.clone(),
+                                gateway_before_evaluation: topGatewayBeforeSRDowntimeEvaluation
+                                    .clone(),
+                                priority_logic_output: Some(updatedPriorityLogicOutput),
+                                debit_routing_output: None,
+                                reset_approach: decider_flow.writer.reset_approach.clone(),
+                                routing_dimension: decider_flow.writer.routing_dimension.clone(),
+                                routing_dimension_level: decider_flow
+                                    .writer
+                                    .routing_dimension_level
+                                    .clone(),
+                                is_scheduled_outage: decider_flow.writer.isScheduledOutage,
+                                is_dynamic_mga_enabled: decider_flow.writer.is_dynamic_mga_enabled,
+                                gateway_mga_id_map: Some(gatewayMgaIdMap),
+                                is_rust_based_decider: deciderParams
+                                    .dpShouldConsumeResult
+                                    .unwrap_or(false),
+                                latency: None,
+                            })
+                        }
                         None => Err((
                             decider_flow.writer.debugFilterList.clone(),
                             decider_flow.writer.debugScoringList.clone(),

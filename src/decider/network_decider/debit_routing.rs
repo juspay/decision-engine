@@ -33,6 +33,7 @@ pub async fn perform_debit_routing(
                     return Ok(gateway_decider_types::DecidedGateway {
                         // This field should not be consumed when the request is made to /decide-gateway with the rankingAlgorithm set to NtwBasedRouting.
                         decided_gateway: first_connector_from_request.unwrap_or("".to_string()),
+                        fallback_gateways: vec![],
                         gateway_priority_map: None,
                         filter_wise_gateways: None,
                         priority_logic_tag: None,

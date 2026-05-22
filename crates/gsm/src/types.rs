@@ -116,5 +116,9 @@ pub struct GsmOptionRow {
     pub error_message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_category: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unified_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unified_message: Option<String>,
     pub decision: String,
 }
