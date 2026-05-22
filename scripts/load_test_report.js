@@ -78,6 +78,10 @@ const gwStripe = new Counter("gw_stripe");
 const gwAdyen = new Counter("gw_adyen");
 const gwOther = new Counter("gw_other");
 
+// Latency breakdown: pod-reported vs network overhead
+const serverLatency = new Trend("server_latency_ms", true);
+const networkLatency = new Trend("network_latency_ms", true);
+
 const payloads = [
   { method: "DEBIT", auth: "THREE_DS", brand: "VISA", currency: "AED", amount: 1000, gateways: ["stripe", "adyen"] },
   { method: "CREDIT", auth: "NO_THREE_DS", brand: "MASTERCARD", currency: "USD", amount: 5000, gateways: ["stripe", "adyen", "checkout"] },
@@ -133,6 +137,12 @@ export default function () {
       if (gw === "stripe") gwStripe.add(1);
       else if (gw === "adyen") gwAdyen.add(1);
       else gwOther.add(1);
+
+      const podMs = json.latency;
+      if (typeof podMs === "number" && podMs >= 0) {
+        serverLatency.add(podMs);
+        networkLatency.add(Math.max(0, res.timings.duration - podMs));
+      }
     } catch (_) { gatewayErrors.add(1); }
   } else {
     gatewayErrors.add(1);
@@ -182,6 +192,17 @@ export function handleSummary(data) {
   const gwAdyenN    = m.gw_adyen?.values?.count ?? 0;
   const gwOtherN    = m.gw_other?.values?.count ?? 0;
   const gwTotal     = gwStripeN + gwAdyenN + gwOtherN || 1;
+
+  const svrAvg      = m.server_latency_ms?.values?.avg?.toFixed(1);
+  const svrP50      = m.server_latency_ms?.values?.med?.toFixed(1);
+  const svrP95      = m.server_latency_ms?.values?.["p(95)"]?.toFixed(1);
+  const netAvg      = m.network_latency_ms?.values?.avg?.toFixed(1);
+  const netP50      = m.network_latency_ms?.values?.med?.toFixed(1);
+  const netP95      = m.network_latency_ms?.values?.["p(95)"]?.toFixed(1);
+  const hasLatencyBreakdown = svrAvg !== undefined;
+  const networkPct  = hasLatencyBreakdown
+    ? ((parseFloat(netAvg) / parseFloat(avg)) * 100).toFixed(0)
+    : null;
 
   const p95Pass     = parseFloat(p95) <= 500;
   const p99Pass     = parseFloat(p99) <= 1000;
@@ -435,6 +456,37 @@ export function handleSummary(data) {
     </div>
   </div>
 
+  <!-- Server vs Network Latency Breakdown -->
+  ${hasLatencyBreakdown ? `
+  <div class="section">
+    <div class="section-title">Server vs Network Latency Breakdown</div>
+    <p style="color:#718096;font-size:13px;margin-bottom:16px;">
+      <strong style="color:#e2e8f0">Server-side</strong> = time reported by the pod (<code>response.latency</code>).
+      <strong style="color:#e2e8f0">Network overhead</strong> = k6 round-trip − server-side = ingress + egress + load balancer.
+      ${networkPct !== null ? `Network accounts for <strong style="color:${parseInt(networkPct)>50?'#f6ad55':'#68d391'}">${networkPct}%</strong> of total latency.` : ''}
+    </p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div class="card">
+        <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#63b3ed;margin-bottom:12px">🖥 Server-side (pod)</div>
+        <table>
+          <tr><th>Metric</th><th>Value</th></tr>
+          <tr><td>avg</td><td>${svrAvg} ms</td></tr>
+          <tr><td>p50</td><td>${svrP50} ms</td></tr>
+          <tr><td>p95</td><td>${svrP95} ms</td></tr>
+        </table>
+      </div>
+      <div class="card">
+        <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#f6ad55;margin-bottom:12px">🌐 Network overhead</div>
+        <table>
+          <tr><th>Metric</th><th>Value</th></tr>
+          <tr><td>avg</td><td>${netAvg} ms</td></tr>
+          <tr><td>p50</td><td>${netP50} ms</td></tr>
+          <tr><td>p95</td><td>${netP95} ms</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>` : ''}
+
   <!-- Full Metrics Table -->
   <div class="section">
     <div class="section-title">Full Metrics</div>
@@ -443,13 +495,16 @@ export function handleSummary(data) {
         <tr><th>Metric</th><th>Value</th><th>Assessment</th></tr>
         <tr><td>Total requests</td><td>${totalReqs}</td><td>—</td></tr>
         <tr><td>Throughput</td><td>${rps} req/s</td><td>${statusBadge(rps, 100, 30, " req/s", false)}</td></tr>
-        <tr><td>avg latency</td><td>${avg} ms</td><td>${statusBadge(avg, 200, 500)}</td></tr>
+        <tr><td>avg latency (round-trip)</td><td>${avg} ms</td><td>${statusBadge(avg, 200, 500)}</td></tr>
         <tr><td>p50 (median)</td><td>${med} ms</td><td>${statusBadge(med, 200, 500)}</td></tr>
         <tr><td>p90 latency</td><td>${p90} ms</td><td>${statusBadge(p90, 300, 800)}</td></tr>
         <tr><td>p95 latency</td><td>${p95} ms</td><td>${statusBadge(p95, 300, 500)}</td></tr>
         <tr><td>p99 latency</td><td>${p99} ms</td><td>${statusBadge(p99, 500, 1000)}</td></tr>
         <tr><td>max latency</td><td>${maxLat} ms</td><td>—</td></tr>
         <tr><td>min latency</td><td>${minLat} ms</td><td>—</td></tr>
+        ${hasLatencyBreakdown ? `
+        <tr><td>Server-side avg</td><td>${svrAvg} ms</td><td>—</td></tr>
+        <tr><td>Network overhead avg</td><td>${netAvg} ms</td><td>—</td></tr>` : ''}
         <tr><td>Avg connect time</td><td>${connTime} ms</td><td>—</td></tr>
         <tr><td>Avg TTFB (waiting)</td><td>${waitTime} ms</td><td>—</td></tr>
         <tr><td>Error rate</td><td>${errRate}%</td><td>${statusBadge(errRate, 0.1, 1, "%")}</td></tr>

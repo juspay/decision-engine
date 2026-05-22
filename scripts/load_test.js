@@ -39,20 +39,22 @@ function fail(msg) { throw new Error(msg) }
 const ENVS = {
   local: {
     baseUrl: "http://127.0.0.1:8080",
-    token,
     merchantId: __ENV.MERCHANT_ID || "merchant_baea25c53626",
   },
   sandbox: {
     baseUrl: "https://app.hyperswitch.io/decision-engine/api",
-    token,
-    merchantId: __ENV.MERCHANT_ID || fail('MERCHANT_ID is required for sandbox'),
+    merchantId: __ENV.MERCHANT_ID || null,
   },
 };
 
-const config = ENVS[ENV];
-if (!config) {
+const envDefaults = ENVS[ENV];
+if (!envDefaults) {
   throw new Error(`Unknown ENV="${ENV}". Use "local" or "sandbox".`);
 }
+if (ENV === "sandbox" && !envDefaults.merchantId) {
+  fail('MERCHANT_ID is required for sandbox: -e MERCHANT_ID=<id>');
+}
+const config = { ...envDefaults, token };
 
 // ── k6 options ────────────────────────────────────────────────────────────────
 
@@ -75,6 +77,11 @@ const gatewaySelected = new Counter("decide_gateway_selected");
 const gatewayErrors = new Counter("decide_gateway_errors");
 const latencyTrend = new Trend("decide_gateway_latency", true);
 const successRate = new Rate("decide_gateway_success_rate");
+
+// Latency breakdown: server-side (from response.latency) vs network overhead
+// network = k6 round-trip duration - server-side latency reported by the pod
+const serverLatency = new Trend("server_latency_ms", true);
+const networkLatency = new Trend("network_latency_ms", true);
 
 // ── Payload variants (rotate to simulate realistic traffic) ───────────────────
 
@@ -168,6 +175,14 @@ export default function () {
       if (gw) {
         gatewaySelected.add(1, { gateway: gw });
       }
+      // response.latency is the server-side processing time reported by the pod.
+      // Subtracting it from the k6 round-trip gives the network + infra overhead.
+      const podMs = json.latency;
+      if (typeof podMs === "number" && podMs >= 0) {
+        const roundTripMs = res.timings.duration;
+        serverLatency.add(podMs);
+        networkLatency.add(Math.max(0, roundTripMs - podMs));
+      }
     } catch (_) {
       gatewayErrors.add(1);
     }
@@ -198,8 +213,27 @@ export function handleSummary(data) {
     (metrics.http_req_failed?.values?.rate ?? 0) * 100
   ).toFixed(2);
   const total = metrics.http_reqs?.values?.count ?? 0;
-  const successCount =
-    metrics.decide_gateway_selected?.values?.count ?? "N/A";
+  const successCount = metrics.decide_gateway_selected?.values?.count ?? "N/A";
+
+  const svrAvg = metrics.server_latency_ms?.values?.avg?.toFixed(1) ?? "N/A";
+  const svrP50 = metrics.server_latency_ms?.values?.med?.toFixed(1) ?? "N/A";
+  const svrP95 = metrics.server_latency_ms?.values?.["p(95)"]?.toFixed(1) ?? "N/A";
+  const netAvg = metrics.network_latency_ms?.values?.avg?.toFixed(1) ?? "N/A";
+  const netP50 = metrics.network_latency_ms?.values?.med?.toFixed(1) ?? "N/A";
+  const netP95 = metrics.network_latency_ms?.values?.["p(95)"]?.toFixed(1) ?? "N/A";
+  const hasLatencyBreakdown = metrics.server_latency_ms !== undefined;
+
+  const latencyBreakdown = hasLatencyBreakdown ? `
+╠══════════════════════════════════════════════════════════╣
+║  Server-side latency (pod, ms)                           ║
+║    avg             : ${String(svrAvg).padEnd(36)}║
+║    p50             : ${String(svrP50).padEnd(36)}║
+║    p95             : ${String(svrP95).padEnd(36)}║
+╠══════════════════════════════════════════════════════════╣
+║  Network overhead  (round-trip − pod, ms)                ║
+║    avg             : ${String(netAvg).padEnd(36)}║
+║    p50             : ${String(netP50).padEnd(36)}║
+║    p95             : ${String(netP95).padEnd(36)}║` : "";
 
   const summary = `
 ╔══════════════════════════════════════════════════════════╗
@@ -209,12 +243,12 @@ export function handleSummary(data) {
 ║  Total Requests    : ${String(total).padEnd(36)}║
 ║  Throughput        : ${(rps + " req/s").padEnd(36)}║
 ╠══════════════════════════════════════════════════════════╣
-║  Latency (ms)                                            ║
+║  Round-trip latency (ms)                                 ║
 ║    avg             : ${String(avg).padEnd(36)}║
 ║    p50 (median)    : ${String(p50).padEnd(36)}║
 ║    p95             : ${String(p95).padEnd(36)}║
 ║    p99             : ${String(p99).padEnd(36)}║
-║    max             : ${String(maxLat).padEnd(36)}║
+║    max             : ${String(maxLat).padEnd(36)}║${latencyBreakdown}
 ╠══════════════════════════════════════════════════════════╣
 ║  Error Rate        : ${(errRate + "%").padEnd(36)}║
 ║  Successful Routes : ${String(successCount).padEnd(36)}║
