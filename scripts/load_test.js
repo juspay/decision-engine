@@ -2,7 +2,10 @@
  * k6 load test for /decide-gateway endpoint
  *
  * Usage:
- *   # Localhost  (generate a token first: bash scripts/gen_local_token.sh)
+ *   # Local (auto-provisions user + merchant on first run — no token needed)
+ *   k6 run scripts/load_test.js
+ *
+ *   # Local with explicit token override
  *   k6 run scripts/load_test.js -e TOKEN=$(bash scripts/gen_local_token.sh)
  *
  *   # Sandbox
@@ -25,21 +28,12 @@ const VUS = parseInt(__ENV.VUS || "20");
 const DURATION = __ENV.DURATION || "30s";
 const RAMP_DURATION = __ENV.RAMP_DURATION || "10s";
 
-const token = __ENV.TOKEN
-if (!token) {
-  throw new Error(
-    'TOKEN is required.\n' +
-    '  Local:   k6 run scripts/load_test.js -e TOKEN=$(bash scripts/gen_local_token.sh)\n' +
-    '  Sandbox: k6 run scripts/load_test.js -e ENV=sandbox -e TOKEN=<your_jwt> -e MERCHANT_ID=<id>'
-  )
-}
-
-function fail(msg) { throw new Error(msg) }
+function fail(msg) { throw new Error(msg); }
 
 const ENVS = {
   local: {
     baseUrl: "http://127.0.0.1:8080",
-    merchantId: __ENV.MERCHANT_ID || "merchant_baea25c53626",
+    merchantId: __ENV.MERCHANT_ID || null,
   },
   sandbox: {
     baseUrl: "https://app.hyperswitch.io/decision-engine/api",
@@ -51,23 +45,23 @@ const envDefaults = ENVS[ENV];
 if (!envDefaults) {
   throw new Error(`Unknown ENV="${ENV}". Use "local" or "sandbox".`);
 }
-if (ENV === "sandbox" && !envDefaults.merchantId) {
-  fail('MERCHANT_ID is required for sandbox: -e MERCHANT_ID=<id>');
+if (ENV === "sandbox") {
+  if (!__ENV.TOKEN) fail('TOKEN is required for sandbox: -e TOKEN=<your_jwt>');
+  if (!envDefaults.merchantId) fail('MERCHANT_ID is required for sandbox: -e MERCHANT_ID=<id>');
 }
-const config = { ...envDefaults, token };
 
 // ── k6 options ────────────────────────────────────────────────────────────────
 
 export const options = {
   stages: [
-    { duration: RAMP_DURATION, target: VUS }, // ramp up
-    { duration: DURATION, target: VUS }, // steady load
-    { duration: "5s", target: 0 }, // ramp down
+    { duration: RAMP_DURATION, target: VUS },
+    { duration: DURATION, target: VUS },
+    { duration: "5s", target: 0 },
   ],
   thresholds: {
-    http_req_duration: ["p(95)<500", "p(99)<1000"], // 95th pct < 500ms, 99th < 1s
-    http_req_failed: ["rate<0.01"], // error rate < 1%
-    decide_gateway_errors: ["count<5"], // custom: < 5 non-HTTP errors
+    http_req_duration: ["p(95)<500", "p(99)<1000"],
+    http_req_failed: ["rate<0.01"],
+    decide_gateway_errors: ["count<5"],
   },
 };
 
@@ -115,24 +109,96 @@ const payloads = [
   },
 ];
 
-// ── Headers ───────────────────────────────────────────────────────────────────
+// ── Setup: provision user + merchant for local; validate token for sandbox ────
 
-const headers = {
-  "Content-Type": "application/json",
-  Accept: "*/*",
-  Authorization: `Bearer ${config.token}`,
-  "x-feature": "decision-engine",
-  "x-tenant-id": "public",
-};
+const LOAD_TEST_EMAIL = "loadtest@decision-engine.local";
+const LOAD_TEST_PASSWORD = "LoadTest#123456";
+
+export function setup() {
+  const baseUrl = envDefaults.baseUrl;
+  const jsonHeaders = { "Content-Type": "application/json" };
+
+  // Sandbox: token must be provided via env, nothing to provision
+  if (ENV !== "local") {
+    return { token: __ENV.TOKEN, merchantId: envDefaults.merchantId };
+  }
+
+  // Local with explicit token override: skip provisioning
+  if (__ENV.TOKEN) {
+    const merchantId = envDefaults.merchantId;
+    if (!merchantId) fail('MERCHANT_ID is required when using TOKEN override: -e MERCHANT_ID=<id>');
+    return { token: __ENV.TOKEN, merchantId };
+  }
+
+  // ── Auto-provision: login, or signup then create merchant ──────────────────
+
+  // 1. Try login first (idempotent — works on every subsequent run)
+  const loginRes = http.post(
+    `${baseUrl}/auth/login`,
+    JSON.stringify({ email: LOAD_TEST_EMAIL, password: LOAD_TEST_PASSWORD }),
+    { headers: jsonHeaders }
+  );
+
+  let token, merchantId;
+
+  if (loginRes.status === 200) {
+    const body = JSON.parse(loginRes.body);
+    token = body.token;
+    merchantId = body.merchant_id;
+  } else {
+    // 2. First run: signup
+    const signupRes = http.post(
+      `${baseUrl}/auth/signup`,
+      JSON.stringify({ email: LOAD_TEST_EMAIL, password: LOAD_TEST_PASSWORD }),
+      { headers: jsonHeaders }
+    );
+    if (signupRes.status !== 200) {
+      fail(`Signup failed (${signupRes.status}): ${signupRes.body}`);
+    }
+    const signupBody = JSON.parse(signupRes.body);
+    token = signupBody.token;
+    merchantId = signupBody.merchant_id;
+  }
+
+  // 3. Create merchant if the user has none yet
+  if (!merchantId) {
+    const authHeaders = { ...jsonHeaders, Authorization: `Bearer ${token}` };
+    const merchantRes = http.post(
+      `${baseUrl}/onboarding/merchant`,
+      JSON.stringify({ merchant_name: "Load Test Merchant" }),
+      { headers: authHeaders }
+    );
+    if (merchantRes.status !== 200) {
+      fail(`Merchant creation failed (${merchantRes.status}): ${merchantRes.body}`);
+    }
+    const mBody = JSON.parse(merchantRes.body);
+    token = mBody.token; // refreshed token with merchant_id embedded
+    merchantId = mBody.merchant_id;
+  }
+
+  console.log(`[setup] using merchant_id=${merchantId}`);
+  return { token, merchantId };
+}
 
 // ── Main VU function ──────────────────────────────────────────────────────────
 
-export default function () {
+export default function (data) {
+  const token = data.token;
+  const merchantId = data.merchantId;
+
+  const headers = {
+    "Content-Type": "application/json",
+    Accept: "*/*",
+    Authorization: `Bearer ${token}`,
+    "x-feature": "decision-engine",
+    "x-tenant-id": "public",
+  };
+
   const variant = payloads[__VU % payloads.length];
   const paymentId = `load_test_${Date.now()}_${__VU}_${__ITER}`;
 
   const body = JSON.stringify({
-    merchantId: config.merchantId,
+    merchantId,
     paymentInfo: {
       paymentId,
       amount: variant.amount,
@@ -149,7 +215,7 @@ export default function () {
   });
 
   const start = Date.now();
-  const res = http.post(`${config.baseUrl}/decide-gateway`, body, { headers });
+  const res = http.post(`${envDefaults.baseUrl}/decide-gateway`, body, { headers });
   const duration = Date.now() - start;
 
   latencyTrend.add(duration);
