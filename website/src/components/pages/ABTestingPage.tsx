@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import useSWR, { useSWRConfig } from 'swr'
 import { Card, CardBody, CardHeader } from '../ui/Card'
@@ -278,16 +278,19 @@ function ExperimentDetailPanel({
                   { label: `Control (${controlPct}%)`, metrics: results.control, accent: false },
                   { label: `Variant (${variantPct}%)`, metrics: results.variant, accent: true },
                 ].map(({ label, metrics, accent }) => {
-                  const unresolved = metrics.transaction_count - metrics.success_count
+                  const noOutcome = metrics.transaction_count - metrics.success_count - metrics.failure_count
                   return (
                     <div key={label} className={`rounded-xl border px-4 py-3 space-y-1 ${accent ? 'border-brand-200 dark:border-brand-800/50' : 'border-slate-200 dark:border-[#222226]'}`}>
                       <p className={`text-[10px] ${accent ? 'text-brand-500' : 'text-slate-400'}`}>{label}</p>
                       <p className="text-xl font-bold text-slate-800 dark:text-white">{authRatePct(metrics.auth_rate)}</p>
                       <p className="text-xs text-slate-400">{metrics.transaction_count.toLocaleString()} txns</p>
                       <p className="text-xs text-emerald-600 dark:text-emerald-400">{metrics.success_count.toLocaleString()} success</p>
-                      {unresolved > 0 && (
-                        <p className="text-xs text-amber-600 dark:text-amber-400" title="Routed payments with no outcome recorded — counted against auth rate">
-                          {unresolved.toLocaleString()} no outcome
+                      {metrics.failure_count > 0 && (
+                        <p className="text-xs text-red-500 dark:text-red-400">{metrics.failure_count.toLocaleString()} failure</p>
+                      )}
+                      {noOutcome > 0 && (
+                        <p className="text-xs text-amber-600 dark:text-amber-400" title="Routed payments with no outcome recorded yet">
+                          {noOutcome.toLocaleString()} no outcome
                         </p>
                       )}
                     </div>
@@ -793,6 +796,13 @@ export function ABTestingPage() {
 
   const [pendingActivateId, setPendingActivateId] = useState<string | null>(null)
   const [pendingDeactivateId, setPendingDeactivateId] = useState<string | null>(null)
+
+  // Auto-select the active experiment when the page loads with no selection
+  useEffect(() => {
+    if (!selectedId && !showCreate && activeAbTest) {
+      setSearchParams({ experiment: activeAbTest.id }, { replace: true })
+    }
+  }, [activeAbTest?.id])
 
   function selectExperiment(id: string) {
     setSearchParams({ experiment: id }, { replace: true })

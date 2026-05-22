@@ -461,6 +461,7 @@ pub struct ExperimentArmMetrics {
     pub arm: String,
     pub transaction_count: i64,
     pub success_count: i64,
+    pub failure_count: i64,
     pub auth_rate: f64,
     pub avg_latency_ms: Option<f64>,
 }

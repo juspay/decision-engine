@@ -127,6 +127,7 @@ export interface ExperimentArmMetrics {
   arm: string
   transaction_count: number
   success_count: number
+  failure_count: number
   auth_rate: number
   avg_latency_ms: number | null
 }

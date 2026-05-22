@@ -15,6 +15,7 @@ struct ArmRow {
     arm: String,
     total: u64,
     success_count: u64,
+    failure_count: u64,
     avg_latency_ms: Option<f64>,
 }
 
@@ -26,8 +27,12 @@ pub async fn load(
 
     builder.extend_selects([
         "JSONExtractString(assumeNotNull(details), 'variant_arm') AS arm".to_string(),
+        // Each payment produces a routing event (status = 'ab_test_decision') later
+        // replaced by an outcome event (status = 'success'/'failure') via ReplacingMergeTree.
+        // count() therefore gives one row per payment after deduplication.
         "count() AS total".to_string(),
         "countIf(lowerUTF8(status) = 'success') AS success_count".to_string(),
+        "countIf(lowerUTF8(status) = 'failure') AS failure_count".to_string(),
         "avgIf(average_latency, average_latency > 0) AS avg_latency_ms".to_string(),
     ]);
 
@@ -91,6 +96,7 @@ fn arm_metrics(arm: &str, row: Option<&ArmRow>) -> ExperimentArmMetrics {
             arm: arm.to_string(),
             transaction_count: 0,
             success_count: 0,
+            failure_count: 0,
             auth_rate: 0.0,
             avg_latency_ms: None,
         },
@@ -104,6 +110,7 @@ fn arm_metrics(arm: &str, row: Option<&ArmRow>) -> ExperimentArmMetrics {
                 arm: arm.to_string(),
                 transaction_count: r.total as i64,
                 success_count: r.success_count as i64,
+                failure_count: r.failure_count as i64,
                 auth_rate,
                 avg_latency_ms: r.avg_latency_ms.filter(|&v| v > 0.0),
             }

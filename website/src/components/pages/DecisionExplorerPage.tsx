@@ -1231,31 +1231,44 @@ export function DecisionExplorerPage() {
     })
   }
 
+  // Resolves the best-matching GSM rule for a connector+errorCode pair.
+  // Mirrors the priority used in ErrorInfoFields: prefer subFlow=Authorize
+  // (payment-auth path, newer rules) over flow=Authorize (general auth flow),
+  // then fall back to any rule for that error code.
+  function resolveGsmRule(connector: string, errorCode: string) {
+    return (
+      gsmRules.find(r => r.connector === connector && r.errorCode === errorCode && r.subFlow === 'Authorize') ??
+      gsmRules.find(r => r.connector === connector && r.errorCode === errorCode && r.flow === 'Authorize') ??
+      gsmRules.find(r => r.connector === connector && r.errorCode === errorCode)
+    )
+  }
+
   // Uses stored errorInfo (auto-populated from toggles or manually overridden by user).
   function buildSimErrorInfo(gateway: string) {
     if (!gateway) return undefined
     const info = getGwSimConfig(gateway).errorInfo
     if (!info.error_code) return undefined
-    const rule = gsmRules.find(r => r.connector === gateway && r.errorCode === info.error_code)
-    if (!rule?.flow || !rule?.subFlow) return undefined
+    const rule = resolveGsmRule(gateway, info.error_code)
     return {
       connector: gateway,
-      flow: rule.flow,
-      subFlow: rule.subFlow,
+      ...(rule?.flow && { flow: rule.flow }),
+      ...(rule?.subFlow && { subFlow: rule.subFlow }),
       errorCode: info.error_code,
       ...(info.error_message && { errorMessage: info.error_message }),
+      ...(info.issuer_error_code && { issuerErrorCode: info.issuer_error_code }),
+      ...(info.card_network && { cardNetwork: info.card_network }),
     }
   }
 
   function buildErrorInfo(gateway: string, info: ErrorInfoState = errorInfo) {
     if (!gateway) return undefined
-    const rule = gsmRules.find(r => r.connector === gateway && r.errorCode === info.error_code)
-    if (!rule?.flow || !rule?.subFlow) return undefined
+    if (!info.error_code) return undefined
+    const rule = resolveGsmRule(gateway, info.error_code)
     return {
       connector: gateway,
-      flow: rule.flow,
-      subFlow: rule.subFlow,
-      ...(info.error_code && { errorCode: info.error_code }),
+      ...(rule?.flow && { flow: rule.flow }),
+      ...(rule?.subFlow && { subFlow: rule.subFlow }),
+      errorCode: info.error_code,
       ...(info.error_message && { errorMessage: info.error_message }),
       ...(info.issuer_error_code && { issuerErrorCode: info.issuer_error_code }),
       ...(info.card_network && { cardNetwork: info.card_network }),
