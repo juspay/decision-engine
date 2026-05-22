@@ -1,13 +1,10 @@
-use crate::analytics::{
-    AnalyticsFlowContext, ApiFlow, FlowType,
-    serialize_details,
-};
-use crate::decider::gatewaydecider::types::{
-    DecidedGateway, DomainDeciderRequestForApiCallV2, GatewayDeciderApproach, ResetApproach,
-};
 use super::config::{self, AbTestConfig};
 use super::evaluator;
 use super::outcome;
+use crate::analytics::{serialize_details, AnalyticsFlowContext, ApiFlow, FlowType};
+use crate::decider::gatewaydecider::types::{
+    DecidedGateway, DomainDeciderRequestForApiCallV2, GatewayDeciderApproach, ResetApproach,
+};
 use crate::logger;
 
 pub enum AbTestIntercept {
@@ -28,7 +25,6 @@ pub enum AbTestIntercept {
         variant_arm: String,
     },
 }
-
 
 /// Emit a routing-time `RoutingEvaluateAbTest` event so the rule-based Decision Audit
 /// shows the actual decision details (arm, gateway, algorithm) rather than just the
@@ -68,8 +64,10 @@ pub async fn intercept(dreq: &DomainDeciderRequestForApiCallV2) -> AbTestInterce
         return AbTestIntercept::Disabled;
     }
 
-    let Some(AbTestConfig { experiment_id, data }) =
-        config::load_active_ab_test(&dreq.merchant_id).await
+    let Some(AbTestConfig {
+        experiment_id,
+        data,
+    }) = config::load_active_ab_test(&dreq.merchant_id).await
     else {
         return AbTestIntercept::Disabled;
     };
@@ -84,7 +82,10 @@ pub async fn intercept(dreq: &DomainDeciderRequestForApiCallV2) -> AbTestInterce
 
     logger::debug!(
         "ab_test intercept: payment_id={} merchant={} experiment={} arm={}",
-        payment_id, dreq.merchant_id, experiment_id, arm
+        payment_id,
+        dreq.merchant_id,
+        experiment_id,
+        arm
     );
 
     // SR arm: gateway unknown until the decider runs — emit routing event without gateway.
@@ -94,7 +95,14 @@ pub async fn intercept(dreq: &DomainDeciderRequestForApiCallV2) -> AbTestInterce
         } else {
             None
         };
-        emit_routing_event(payment_id, &dreq.merchant_id, &experiment_id, arm, "sr_routing", None);
+        emit_routing_event(
+            payment_id,
+            &dreq.merchant_id,
+            &experiment_id,
+            arm,
+            "sr_routing",
+            None,
+        );
         outcome::store_inflight(payment_id, &experiment_id, arm, None, false).await;
         return AbTestIntercept::SrArm {
             experiment_id,
@@ -151,7 +159,14 @@ pub async fn intercept(dreq: &DomainDeciderRequestForApiCallV2) -> AbTestInterce
                 "ab_test intercept: static arm evaluation failed for '{}', falling back to SR routing",
                 arm_algorithm_id
             );
-            emit_routing_event(payment_id, &dreq.merchant_id, &experiment_id, arm, arm_algorithm_id, None);
+            emit_routing_event(
+                payment_id,
+                &dreq.merchant_id,
+                &experiment_id,
+                arm,
+                arm_algorithm_id,
+                None,
+            );
             outcome::store_inflight(payment_id, &experiment_id, arm, None, false).await;
             AbTestIntercept::SrArm {
                 experiment_id,

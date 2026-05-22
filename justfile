@@ -166,29 +166,47 @@ migrate-pg operation=default_operation *args='': (run_migration operation pg_mig
 #   sandbox → 12 VUs     (p95 ≈ 412ms,       ~28 req/s)
 
 # Run load test against localhost (default: 20 VUs, 30s)
+# TOKEN is auto-generated from the local JWT secret if not set.
 load-test-local vus='20' duration='30s':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    TOKEN="${TOKEN:-$(bash scripts/gen_local_token.sh)}"
     k6 run scripts/load_test_report.js \
         -e ENV=local \
+        -e TOKEN="$TOKEN" \
         -e VUS={{ vus }} \
         -e DURATION={{ duration }}
 alias ltl := load-test-local
 
 # Run load test against sandbox (default: 12 VUs, 60s — empirical saturation point)
+# Requires TOKEN and MERCHANT_ID to be set in the environment.
+#   export TOKEN=<your_jwt>
+#   export MERCHANT_ID=<your_merchant_id>
 load-test-sandbox vus='12' duration='60s':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${TOKEN:?TOKEN must be set (export TOKEN=<your_jwt>)}"
+    : "${MERCHANT_ID:?MERCHANT_ID must be set (export MERCHANT_ID=<your_merchant_id>)}"
     k6 run scripts/load_test_report.js \
         -e ENV=sandbox \
+        -e TOKEN="$TOKEN" \
+        -e MERCHANT_ID="$MERCHANT_ID" \
         -e VUS={{ vus }} \
         -e DURATION={{ duration }}
 alias lts := load-test-sandbox
 
 # Run both local and sandbox back-to-back and open their HTML reports
+# Requires TOKEN and MERCHANT_ID for sandbox (see load-test-sandbox).
 load-test-all:
     #!/usr/bin/env bash
     set -euo pipefail
+    LOCAL_TOKEN="${TOKEN:-$(bash scripts/gen_local_token.sh)}"
+    : "${TOKEN:?TOKEN must be set for sandbox}"
+    : "${MERCHANT_ID:?MERCHANT_ID must be set for sandbox}"
     echo "==> Local (20 VUs, 30s)"
-    k6 run scripts/load_test_report.js -e ENV=local   -e VUS=20 -e DURATION=30s
+    k6 run scripts/load_test_report.js -e ENV=local   -e TOKEN="$LOCAL_TOKEN" -e VUS=20 -e DURATION=30s
     echo "==> Sandbox (12 VUs, 60s)"
-    k6 run scripts/load_test_report.js -e ENV=sandbox -e VUS=12 -e DURATION=60s
+    k6 run scripts/load_test_report.js -e ENV=sandbox -e TOKEN="$TOKEN" -e MERCHANT_ID="$MERCHANT_ID" -e VUS=12 -e DURATION=60s
     echo "==> Opening reports..."
     open scripts/load_test_report_local_20vu.html scripts/load_test_report_sandbox_12vu.html 2>/dev/null || true
 alias lta := load-test-all

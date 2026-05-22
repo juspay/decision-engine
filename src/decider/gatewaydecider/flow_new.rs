@@ -114,10 +114,16 @@ pub async fn decider_full_payload_hs_function(
     // Disabled by default; enable via service config AB_TEST_REAL_PAYMENTS_ENABLED_{merchant_id}.
     let mut ab_test_sr_override: Option<crate::euclid::types::SrConfigOverride> = None;
     match super::ab_test::intercept(&dreq_).await {
-        super::ab_test::AbTestIntercept::StaticArm { result, experiment_id: _, variant_arm: _ } => {
+        super::ab_test::AbTestIntercept::StaticArm {
+            result,
+            experiment_id: _,
+            variant_arm: _,
+        } => {
             return Ok(*result);
         }
-        super::ab_test::AbTestIntercept::SrArm { sr_config_override, .. } => {
+        super::ab_test::AbTestIntercept::SrArm {
+            sr_config_override, ..
+        } => {
             // Carry on with normal SR routing. If this is a variant arm in an SR Config Tuning
             // experiment, sr_config_override carries the per-arm overrides to apply at routing time.
             ab_test_sr_override = sr_config_override;

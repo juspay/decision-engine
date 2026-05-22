@@ -1,9 +1,8 @@
-use crate::app::get_tenant_app_state;
 use crate::analytics::{
-    AnalyticsFlowContext, AnalyticsRoute, ApiFlow, FlowType,
-    events::DomainAnalyticsEvent,
-    service::serialize_details,
+    events::DomainAnalyticsEvent, service::serialize_details, AnalyticsFlowContext, AnalyticsRoute,
+    ApiFlow, FlowType,
 };
+use crate::app::get_tenant_app_state;
 use crate::logger;
 use serde::{Deserialize, Serialize};
 
@@ -51,8 +50,16 @@ pub async fn store_inflight(
         gateway: gateway.map(str::to_string),
         is_static_arm,
     };
-    if let Err(e) = state.redis_conn.set_key_with_ttl(&key, ctx, INFLIGHT_TTL_SECS).await {
-        logger::warn!("ab_test outcome: failed to store inflight context for {}: {:?}", payment_id, e);
+    if let Err(e) = state
+        .redis_conn
+        .set_key_with_ttl(&key, ctx, INFLIGHT_TTL_SECS)
+        .await
+    {
+        logger::warn!(
+            "ab_test outcome: failed to store inflight context for {}: {:?}",
+            payment_id,
+            e
+        );
     }
 }
 
@@ -99,6 +106,9 @@ pub async fn emit_if_in_flight(payment_id: &str, merchant_id: &str, is_success: 
 
     logger::debug!(
         "ab_test outcome: emitted {} for payment_id={} experiment={} arm={}",
-        status, payment_id, ctx.experiment_id, ctx.variant_arm
+        status,
+        payment_id,
+        ctx.experiment_id,
+        ctx.variant_arm
     );
 }

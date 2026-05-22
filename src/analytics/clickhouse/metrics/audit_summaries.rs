@@ -252,7 +252,11 @@ pub async fn count(
     );
     builder.extend_filters(outer_summary_filters(query));
     let row = fetch_one::<CountRow>(builder.build(client)).await?;
-    Ok((row.total_results as usize, row.total_success as usize, row.total_failure as usize))
+    Ok((
+        row.total_results as usize,
+        row.total_success as usize,
+        row.total_failure as usize,
+    ))
 }
 
 pub async fn load_page(

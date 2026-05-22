@@ -1,9 +1,9 @@
 use crate::app::get_tenant_app_state;
 use crate::euclid::types::{RoutingAlgorithm, StaticRoutingAlgorithm};
 use crate::generics::generic_find_one;
+use crate::logger;
 use diesel::associations::HasTable;
 use diesel::prelude::*;
-use crate::logger;
 
 #[cfg(feature = "mysql")]
 use crate::storage::schema::routing_algorithm::dsl;
@@ -16,35 +16,39 @@ pub struct StaticArmResult {
     pub rule_name: Option<String>,
 }
 
-pub async fn evaluate_static_arm(
-    algorithm_id: &str,
-    payment_id: &str,
-) -> Option<StaticArmResult> {
+pub async fn evaluate_static_arm(algorithm_id: &str, payment_id: &str) -> Option<StaticArmResult> {
     let state = get_tenant_app_state().await;
 
-    let algorithm = generic_find_one::<
-        <RoutingAlgorithm as HasTable>::Table,
-        _,
-        RoutingAlgorithm,
-    >(&state.db, dsl::id.eq(algorithm_id.to_string()))
+    let algorithm = generic_find_one::<<RoutingAlgorithm as HasTable>::Table, _, RoutingAlgorithm>(
+        &state.db,
+        dsl::id.eq(algorithm_id.to_string()),
+    )
     .await
     .ok()?;
 
     let parsed: StaticRoutingAlgorithm = serde_json::from_str(&algorithm.algorithm_data)
-        .inspect_err(|e| logger::error!("ab_test evaluator: failed to parse algorithm {}: {}", algorithm_id, e))
+        .inspect_err(|e| {
+            logger::error!(
+                "ab_test evaluator: failed to parse algorithm {}: {}",
+                algorithm_id,
+                e
+            )
+        })
         .ok()?;
 
     match parsed {
-        StaticRoutingAlgorithm::Single(conn) => {
-            Some(StaticArmResult {
-                decided_gateway: conn.gateway_name.clone(),
-                fallback_gateways: vec![],
-                rule_name: Some("ab_test_static_single".to_string()),
-            })
-        }
+        StaticRoutingAlgorithm::Single(conn) => Some(StaticArmResult {
+            decided_gateway: conn.gateway_name.clone(),
+            fallback_gateways: vec![],
+            rule_name: Some("ab_test_static_single".to_string()),
+        }),
         StaticRoutingAlgorithm::Priority(connectors) => {
             let first = connectors.first()?;
-            let fallbacks = connectors.iter().skip(1).map(|c| c.gateway_name.clone()).collect();
+            let fallbacks = connectors
+                .iter()
+                .skip(1)
+                .map(|c| c.gateway_name.clone())
+                .collect();
             Some(StaticArmResult {
                 decided_gateway: first.gateway_name.clone(),
                 fallback_gateways: fallbacks,
@@ -53,9 +57,9 @@ pub async fn evaluate_static_arm(
         }
         StaticRoutingAlgorithm::VolumeSplit(splits) => {
             // Deterministic split via djb2 hash of payment_id (same as arm assignment)
-            let hash = payment_id
-                .bytes()
-                .fold(5381u64, |acc, b| acc.wrapping_mul(33).wrapping_add(b as u64));
+            let hash = payment_id.bytes().fold(5381u64, |acc, b| {
+                acc.wrapping_mul(33).wrapping_add(b as u64)
+            });
             let total_weight: u64 = splits.iter().map(|s| s.split as u64).sum();
             if total_weight == 0 {
                 return None;
@@ -85,7 +89,10 @@ pub async fn evaluate_static_arm(
             None
         }
         StaticRoutingAlgorithm::AbTest(_) => {
-            logger::error!("ab_test evaluator: nested ab_test arm '{}' — skipping", algorithm_id);
+            logger::error!(
+                "ab_test evaluator: nested ab_test arm '{}' — skipping",
+                algorithm_id
+            );
             None
         }
     }

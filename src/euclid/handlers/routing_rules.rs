@@ -98,7 +98,6 @@ fn serialize_routing_evaluate_analytics_details(
     })
 }
 
-
 fn serialize_routing_evaluate_error_analytics_details(
     request: &RoutingRequest,
     status: &str,
@@ -513,7 +512,8 @@ pub async fn routing_evaluate(
             Ok(data) => data,
             Err(e) => return fail_preview(e.into(), "routing_algorithm_parse_failed"),
         };
-    let mut preview_flow_type = crate::analytics::refine_routing_evaluate_flow_type(&algorithm_data);
+    let mut preview_flow_type =
+        crate::analytics::refine_routing_evaluate_flow_type(&algorithm_data);
 
     // Populated by the AbTest arm to tag analytics events with experiment context.
     let mut ab_experiment_id: Option<String> = None;
@@ -601,14 +601,21 @@ pub async fn routing_evaluate(
                 };
                 logger::debug!(
                     "A/B test routing evaluate: payment_id={:?} arm={} algorithm={}",
-                    payload.payment_id, arm, arm_algorithm_id
+                    payload.payment_id,
+                    arm,
+                    arm_algorithm_id
                 );
                 ab_experiment_id = Some(active_routing_algorithm_id.clone());
                 ab_variant_arm = Some(arm.to_string());
 
                 let result = crate::decider::gatewaydecider::ab_test::preview::evaluate_arm(
-                    arm, arm_algorithm_id, &payload, default_output_present, &state.db,
-                ).await;
+                    arm,
+                    arm_algorithm_id,
+                    &payload,
+                    default_output_present,
+                    &state.db,
+                )
+                .await;
                 match result {
                     Ok(r) => {
                         preview_flow_type = r.flow_type;
@@ -646,14 +653,18 @@ pub async fn routing_evaluate(
 
     logger::debug!("Response: {response:?}");
     let analytics_details = match (&ab_experiment_id, &ab_variant_arm) {
-        (Some(exp_id), Some(arm)) => crate::decider::gatewaydecider::ab_test::preview::serialize_analytics_details(
-            &payload,
-            &response,
-            rule_name.as_deref(),
-            exp_id,
-            arm,
-        ),
-        _ => serialize_routing_evaluate_analytics_details(&payload, &response, rule_name.as_deref()),
+        (Some(exp_id), Some(arm)) => {
+            crate::decider::gatewaydecider::ab_test::preview::serialize_analytics_details(
+                &payload,
+                &response,
+                rule_name.as_deref(),
+                exp_id,
+                arm,
+            )
+        }
+        _ => {
+            serialize_routing_evaluate_analytics_details(&payload, &response, rule_name.as_deref())
+        }
     };
     crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
         crate::analytics::AnalyticsFlowContext::new(

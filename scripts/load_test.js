@@ -2,17 +2,16 @@
  * k6 load test for /decide-gateway endpoint
  *
  * Usage:
- *   # Localhost
- *   k6 run scripts/load_test.js
+ *   # Localhost  (generate a token first: bash scripts/gen_local_token.sh)
+ *   k6 run scripts/load_test.js -e TOKEN=$(bash scripts/gen_local_token.sh)
  *
  *   # Sandbox
- *   k6 run scripts/load_test.js -e ENV=sandbox
+ *   k6 run scripts/load_test.js -e ENV=sandbox -e TOKEN=<your_jwt> -e MERCHANT_ID=<merchant_id>
  *
  *   # Override concurrency / duration
- *   k6 run scripts/load_test.js -e ENV=sandbox -e VUS=50 -e DURATION=60s
+ *   k6 run scripts/load_test.js -e ENV=sandbox -e TOKEN=<your_jwt> -e MERCHANT_ID=<id> -e VUS=50 -e DURATION=60s
  *
- *   # With custom auth token
- *   k6 run scripts/load_test.js -e TOKEN=<your_jwt>
+ * Never commit TOKEN values. Pass them via shell env or a secrets manager.
  */
 
 import http from "k6/http";
@@ -26,21 +25,27 @@ const VUS = parseInt(__ENV.VUS || "20");
 const DURATION = __ENV.DURATION || "30s";
 const RAMP_DURATION = __ENV.RAMP_DURATION || "10s";
 
+const token = __ENV.TOKEN
+if (!token) {
+  throw new Error(
+    'TOKEN is required.\n' +
+    '  Local:   k6 run scripts/load_test.js -e TOKEN=$(bash scripts/gen_local_token.sh)\n' +
+    '  Sandbox: k6 run scripts/load_test.js -e ENV=sandbox -e TOKEN=<your_jwt> -e MERCHANT_ID=<id>'
+  )
+}
+
+function fail(msg) { throw new Error(msg) }
+
 const ENVS = {
   local: {
     baseUrl: "http://127.0.0.1:8080",
-    // Re-generate with: bash scripts/gen_local_token.sh (or login via /auth/signup + /onboarding/merchant)
-    token:
-      __ENV.TOKEN ||
-      "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZGM4OWJiYy03MDI2LTQ3YzItYjA4YS04NmNlMDZmYjE3NjMiLCJ1c2VyX2lkIjoiYWRjODliYmMtNzAyNi00N2MyLWIwOGEtODZjZTA2ZmIxNzYzIiwiZW1haWwiOiJsb2FkdGVzdEB0ZXN0LmNvbSIsIm1lcmNoYW50X2lkIjoibWVyY2hhbnRfYmFlYTI1YzUzNjI2Iiwicm9sZSI6ImFkbWluIiwianRpIjoiY2ZhY2MzZjQtOTkwZi00NGY3LTg5ZWEtZGNjODRiMzhmZDg1IiwiaWF0IjoxNzc5MzcwNjk5LCJleHAiOjE3Nzk0NTcwOTl9.T44OI_8-j1Pw6zr2WEoxcpBbvYL_I3ygpSKMZz0JKZA",
-    merchantId: "merchant_baea25c53626",
+    token,
+    merchantId: __ENV.MERCHANT_ID || "merchant_baea25c53626",
   },
   sandbox: {
     baseUrl: "https://app.hyperswitch.io/decision-engine/api",
-    token:
-      __ENV.TOKEN ||
-      "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxNmVjNmY0YS05Njc3LTRjNzktOTgzOC1mMjRlMTQ4MDk5MjEiLCJ1c2VyX2lkIjoiMTZlYzZmNGEtOTY3Ny00Yzc5LTk4MzgtZjI0ZTE0ODA5OTIxIiwiZW1haWwiOiJ0ZXN0QGdtYWlsLmNvbSIsIm1lcmNoYW50X2lkIjoibWVyY2hhbnRfNjIxYjFkMTRlNDk5Iiwicm9sZSI6ImFkbWluIiwianRpIjoiMzAzMWQ4Y2MtMjkxNC00ZjE3LTllODItYjBkMWUwZGI5MjY5IiwiaWF0IjoxNzc5MzcwMTc4LCJleHAiOjE3Nzk0NTY1Nzh9.NJiV4-a1YODBNqOLK3tOPU1eAdzfQTDJq33OojSvLy8",
-    merchantId: "merchant_621b1d14e499",
+    token,
+    merchantId: __ENV.MERCHANT_ID || fail('MERCHANT_ID is required for sandbox'),
   },
 };
 

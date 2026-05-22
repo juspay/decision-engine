@@ -191,10 +191,8 @@ pub async fn experiment_results(
     AuthenticatedAnalyticsContext(auth_context): AuthenticatedAnalyticsContext,
     axum::extract::Path(experiment_id): axum::extract::Path<String>,
     Query(params): Query<ExperimentResultsParams>,
-) -> Result<
-    Json<crate::analytics::ExperimentResultsResponse>,
-    error::ContainerError<error::ApiError>,
-> {
+) -> Result<Json<crate::analytics::ExperimentResultsResponse>, error::ContainerError<error::ApiError>>
+{
     let query = ExperimentResultsQuery {
         experiment_id,
         merchant_id: auth_context.merchant_id.clone(),

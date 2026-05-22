@@ -43,9 +43,13 @@ const labelClass = 'block text-[10px] font-semibold uppercase tracking-wider tex
 
 export function penalizedByUnifiedMessage(message: string | undefined | null): boolean | null {
   switch (message) {
+    // UE_1000 — card/user error (expired card, wrong CVV, FRM decline).
+    // Gateway processed correctly; penalty is skipped on the backend.
     case 'Issue with Payment Method details':
-    case 'Issue with Integration':
       return false
+    // UE_2000 / UE_3000 / UE_4000 — config, PSP, or integration fault.
+    // Backend applies full penalty for all of these.
+    case 'Issue with Integration':
     case 'Issue with Configurations':
     case 'Technical issue with PSP':
     case 'Something went wrong':

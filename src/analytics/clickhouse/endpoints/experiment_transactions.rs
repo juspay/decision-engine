@@ -83,8 +83,8 @@ pub async fn load(
         "SELECT
             payment_id,
             ifNull(argMax(JSONExtractString(assumeNotNull(details), 'variant_arm'), created_at_ms), '') AS variant_arm,
-            ifNull(argMax(assumeNotNull(gateway), created_at_ms), '') AS gateway,
-            ifNull(argMax(assumeNotNull(status), created_at_ms), '') AS status,
+            ifNull(argMax(ifNull(gateway, ''), created_at_ms), '') AS gateway,
+            ifNull(argMax(ifNull(status, ''), created_at_ms), '') AS status,
             max(created_at_ms) AS ts
          FROM {DOMAIN_TABLE}
          WHERE {inner_filters}
@@ -111,8 +111,16 @@ pub async fn load(
                 Some(ExperimentTransaction {
                     payment_id: r.payment_id?,
                     variant_arm: r.variant_arm,
-                    gateway: if r.gateway.is_empty() { None } else { Some(r.gateway) },
-                    status: if r.status.is_empty() { None } else { Some(r.status) },
+                    gateway: if r.gateway.is_empty() {
+                        None
+                    } else {
+                        Some(r.gateway)
+                    },
+                    status: if r.status.is_empty() {
+                        None
+                    } else {
+                        Some(r.status)
+                    },
                     created_at_ms: r.ts,
                 })
             })

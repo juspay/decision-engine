@@ -1,19 +1,21 @@
 use crate::app::get_tenant_app_state;
-use crate::euclid::types::{ABTestData, RoutingAlgorithm, RoutingAlgorithmMapper, StaticRoutingAlgorithm};
-use crate::types::service_configuration;
+use crate::euclid::types::{
+    ABTestData, RoutingAlgorithm, RoutingAlgorithmMapper, StaticRoutingAlgorithm,
+};
 use crate::generics::generic_find_one;
+use crate::types::service_configuration;
 use diesel::associations::HasTable;
 use diesel::prelude::*;
 
 #[cfg(feature = "mysql")]
-use crate::storage::schema::routing_algorithm_mapper::dsl as mapper_dsl;
-#[cfg(feature = "mysql")]
 use crate::storage::schema::routing_algorithm::dsl as algo_dsl;
+#[cfg(feature = "mysql")]
+use crate::storage::schema::routing_algorithm_mapper::dsl as mapper_dsl;
 
 #[cfg(feature = "postgres")]
-use crate::storage::schema_pg::routing_algorithm_mapper::dsl as mapper_dsl;
-#[cfg(feature = "postgres")]
 use crate::storage::schema_pg::routing_algorithm::dsl as algo_dsl;
+#[cfg(feature = "postgres")]
+use crate::storage::schema_pg::routing_algorithm_mapper::dsl as mapper_dsl;
 
 /// service_configuration key for the FeatureConf blob — same key the UI reads/writes.
 const FEATURE_CONF_KEY: &str = "ab_test_real_payments_enabled";
@@ -45,22 +47,21 @@ pub async fn load_active_ab_test(merchant_id: &str) -> Option<AbTestConfig> {
     let state = get_tenant_app_state().await;
 
     // Load the active routing algorithm mapper for this merchant
-    let mapper = generic_find_one::<
-        <RoutingAlgorithmMapper as HasTable>::Table,
-        _,
-        RoutingAlgorithmMapper,
-    >(&state.db, mapper_dsl::created_by.eq(merchant_id.to_string()))
-    .await
-    .ok()?;
+    let mapper =
+        generic_find_one::<<RoutingAlgorithmMapper as HasTable>::Table, _, RoutingAlgorithmMapper>(
+            &state.db,
+            mapper_dsl::created_by.eq(merchant_id.to_string()),
+        )
+        .await
+        .ok()?;
 
     let experiment_id = mapper.routing_algorithm_id.clone();
 
     // Load the routing algorithm record
-    let algorithm = generic_find_one::<
-        <RoutingAlgorithm as HasTable>::Table,
-        _,
-        RoutingAlgorithm,
-    >(&state.db, algo_dsl::id.eq(experiment_id.clone()))
+    let algorithm = generic_find_one::<<RoutingAlgorithm as HasTable>::Table, _, RoutingAlgorithm>(
+        &state.db,
+        algo_dsl::id.eq(experiment_id.clone()),
+    )
     .await
     .ok()?;
 
@@ -68,7 +69,10 @@ pub async fn load_active_ab_test(merchant_id: &str) -> Option<AbTestConfig> {
     let parsed: StaticRoutingAlgorithm = serde_json::from_str(&algorithm.algorithm_data).ok()?;
 
     match parsed {
-        StaticRoutingAlgorithm::AbTest(data) => Some(AbTestConfig { experiment_id, data }),
+        StaticRoutingAlgorithm::AbTest(data) => Some(AbTestConfig {
+            experiment_id,
+            data,
+        }),
         _ => None,
     }
 }

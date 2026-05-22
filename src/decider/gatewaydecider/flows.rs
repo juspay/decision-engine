@@ -707,31 +707,33 @@ pub async fn run_decider_flow(
                                 })
                                 .collect();
                             Ok(T::DecidedGateway {
-                            fallback_gateways,
-                            decided_gateway: decideGatewayOutput,
-                            gateway_priority_map: gatewayPriorityMap,
-                            filter_wise_gateways: None,
-                            priority_logic_tag: updatedPriorityLogicOutput
-                                .priority_logic_tag
-                                .clone(),
-                            routing_approach: finalDeciderApproach.clone(),
-                            gateway_before_evaluation: topGatewayBeforeSRDowntimeEvaluation.clone(),
-                            priority_logic_output: Some(updatedPriorityLogicOutput),
-                            debit_routing_output: None,
-                            reset_approach: decider_flow.writer.reset_approach.clone(),
-                            routing_dimension: decider_flow.writer.routing_dimension.clone(),
-                            routing_dimension_level: decider_flow
-                                .writer
-                                .routing_dimension_level
-                                .clone(),
-                            is_scheduled_outage: decider_flow.writer.isScheduledOutage,
-                            is_dynamic_mga_enabled: decider_flow.writer.is_dynamic_mga_enabled,
-                            gateway_mga_id_map: Some(gatewayMgaIdMap),
-                            is_rust_based_decider: deciderParams
-                                .dpShouldConsumeResult
-                                .unwrap_or(false),
-                            latency: None,
-                        })}
+                                fallback_gateways,
+                                decided_gateway: decideGatewayOutput,
+                                gateway_priority_map: gatewayPriorityMap,
+                                filter_wise_gateways: None,
+                                priority_logic_tag: updatedPriorityLogicOutput
+                                    .priority_logic_tag
+                                    .clone(),
+                                routing_approach: finalDeciderApproach.clone(),
+                                gateway_before_evaluation: topGatewayBeforeSRDowntimeEvaluation
+                                    .clone(),
+                                priority_logic_output: Some(updatedPriorityLogicOutput),
+                                debit_routing_output: None,
+                                reset_approach: decider_flow.writer.reset_approach.clone(),
+                                routing_dimension: decider_flow.writer.routing_dimension.clone(),
+                                routing_dimension_level: decider_flow
+                                    .writer
+                                    .routing_dimension_level
+                                    .clone(),
+                                is_scheduled_outage: decider_flow.writer.isScheduledOutage,
+                                is_dynamic_mga_enabled: decider_flow.writer.is_dynamic_mga_enabled,
+                                gateway_mga_id_map: Some(gatewayMgaIdMap),
+                                is_rust_based_decider: deciderParams
+                                    .dpShouldConsumeResult
+                                    .unwrap_or(false),
+                                latency: None,
+                            })
+                        }
                         None => Err((
                             decider_flow.writer.debugFilterList.clone(),
                             decider_flow.writer.debugScoringList.clone(),

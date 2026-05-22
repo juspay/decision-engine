@@ -4,8 +4,11 @@ use masking::PeekInterface;
 use serde::Deserialize;
 
 use crate::analytics::models::*;
+use crate::analytics::models::{
+    ExperimentResultsQuery, ExperimentResultsResponse, ExperimentTransactionsQuery,
+    ExperimentTransactionsResponse,
+};
 use crate::analytics::store::AnalyticsReadStore;
-use crate::analytics::models::{ExperimentResultsQuery, ExperimentResultsResponse, ExperimentTransactionsQuery, ExperimentTransactionsResponse};
 use crate::config::ClickHouseAnalyticsConfig;
 use crate::error::ApiError;
 

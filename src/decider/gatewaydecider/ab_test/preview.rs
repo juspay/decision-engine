@@ -71,13 +71,12 @@ pub async fn evaluate_arm(
     .change_context(EuclidErrors::StorageError)?;
 
     let arm_algorithm_data: StaticRoutingAlgorithm =
-        serde_json::from_str(&arm_algorithm.algorithm_data)
-            .map_err(|e| {
-                ContainerError::from(EuclidErrors::InvalidRequest(format!(
-                    "Invalid arm algorithm data format: {}",
-                    e
-                )))
-            })?;
+        serde_json::from_str(&arm_algorithm.algorithm_data).map_err(|e| {
+            ContainerError::from(EuclidErrors::InvalidRequest(format!(
+                "Invalid arm algorithm data format: {}",
+                e
+            )))
+        })?;
 
     let flow_type = crate::analytics::refine_routing_evaluate_flow_type(&arm_algorithm_data);
 
@@ -90,7 +89,11 @@ pub async fn evaluate_arm(
                     conn.gateway_name
                 )))
             })?;
-            (out_enum, eval, Some(format!("ab_test_{arm}_straight_through")))
+            (
+                out_enum,
+                eval,
+                Some(format!("ab_test_{arm}_straight_through")),
+            )
         }
         StaticRoutingAlgorithm::Priority(connectors) => {
             let out_enum = Output::Priority(connectors.clone());
@@ -134,7 +137,12 @@ pub async fn evaluate_arm(
         }
     };
 
-    Ok(AbTestArmOutput { output, evaluated_output, rule_name, flow_type })
+    Ok(AbTestArmOutput {
+        output,
+        evaluated_output,
+        rule_name,
+        flow_type,
+    })
 }
 
 /// Analytics detail serialization for AB test routing evaluate (Decision Explorer preview).

@@ -49,7 +49,8 @@ pub async fn load_by_trigger(
         "lowerUTF8(status) = 'failure'".to_string(),
     ));
     builder.add_filter(FilterClause::raw(
-        "JSONExtractString(assumeNotNull(details), 'response', 'gsm_info', 'decision') = 'retry'".to_string(),
+        "JSONExtractString(assumeNotNull(details), 'response', 'gsm_info', 'decision') = 'retry'"
+            .to_string(),
     ));
     builder.extend_group_bys(["gateway", "error_code"]);
     builder.add_order_by(OrderClause::desc("count"));
@@ -62,7 +63,11 @@ pub async fn load_by_trigger(
             let gateway = row.gateway.filter(|g| !g.is_empty())?;
             Some(SmartRetryTrigger {
                 gateway,
-                error_code: if row.error_code.is_empty() { None } else { Some(row.error_code) },
+                error_code: if row.error_code.is_empty() {
+                    None
+                } else {
+                    Some(row.error_code)
+                },
                 count: row.count,
             })
         })

@@ -46,7 +46,8 @@ pub async fn load(
         query.experiment_id.replace('\'', "\\'")
     )));
     builder.add_filter(FilterClause::raw(
-        "JSONExtractString(assumeNotNull(details), 'variant_arm') IN ('control', 'variant')".to_string(),
+        "JSONExtractString(assumeNotNull(details), 'variant_arm') IN ('control', 'variant')"
+            .to_string(),
     ));
 
     if let Some(start) = query.start_ms {
@@ -180,7 +181,6 @@ fn erfc_approx(x: f64) -> f64 {
     let t = 1.0 / (1.0 + 0.3275911 * x);
     let poly = t
         * (0.254829592
-            + t * (-0.284496736
-                + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))));
+            + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))));
     poly * (-x * x).exp()
 }

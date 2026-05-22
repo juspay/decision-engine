@@ -277,15 +277,19 @@ pub async fn scoring_flow(
                     auth_type: txn_card_info.authType.as_ref().map(|a| a.to_string()),
                 };
 
-                let hedging_percent = decider_flow.writer.ab_test_sr_override
+                let hedging_percent = decider_flow
+                    .writer
+                    .ab_test_sr_override
                     .as_ref()
                     .and_then(|o| o.hedging_percent)
-                    .or_else(|| Utils::get_sr_v3_hedging_percent(
-                        merchant_sr_v3_input_config.clone(),
-                        &pmt_str,
-                        pm.clone().as_str(),
-                        &sr_routing_dimensions,
-                    ))
+                    .or_else(|| {
+                        Utils::get_sr_v3_hedging_percent(
+                            merchant_sr_v3_input_config.clone(),
+                            &pmt_str,
+                            pm.clone().as_str(),
+                            &sr_routing_dimensions,
+                        )
+                    })
                     .or_else(|| {
                         Utils::get_sr_v3_hedging_percent(
                             default_sr_v3_input_config.clone(),
@@ -1931,9 +1935,11 @@ pub async fn get_gateway_wise_routing_inputs_for_merchant_sr(
         .map(|input| input.gatewayWiseInputs.unwrap_or_default())
         .unwrap_or_default();
 
-    let elimination_threshold = ab_test_elimination_threshold
-        .unwrap_or_else(|| merchant_given_default_threshold
-            .unwrap_or(default_merchant_elimination_threshold.unwrap_or(default_elimination_threshold)));
+    let elimination_threshold = ab_test_elimination_threshold.unwrap_or_else(|| {
+        merchant_given_default_threshold.unwrap_or(
+            default_merchant_elimination_threshold.unwrap_or(default_elimination_threshold),
+        )
+    });
 
     let elimination_threshold_updated = if is_elimination_v2_enabled {
         get_elimination_v2_threshold(
@@ -2575,7 +2581,9 @@ pub async fn update_gateway_score_based_on_success_rate(
                 vec![]
             };
 
-            let ab_test_elimination_threshold = decider_flow.writer.ab_test_sr_override
+            let ab_test_elimination_threshold = decider_flow
+                .writer
+                .ab_test_sr_override
                 .as_ref()
                 .and_then(|o| o.elimination_threshold);
 
