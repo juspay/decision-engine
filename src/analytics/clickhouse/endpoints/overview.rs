@@ -1,4 +1,6 @@
-use crate::analytics::models::{AnalyticsKpi, AnalyticsOverviewResponse, AnalyticsQuery, SmartRetryStats};
+use crate::analytics::models::{
+    AnalyticsKpi, AnalyticsOverviewResponse, AnalyticsQuery, SmartRetryStats,
+};
 use crate::analytics::service::format_range;
 use crate::error::ApiError;
 
