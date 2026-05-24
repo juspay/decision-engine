@@ -527,6 +527,20 @@ where
             .await?;
     }
 
+    // Drain in-flight async feedback tasks before the runtime shuts down.
+    // close() stops new tasks from being accepted; wait() is event-driven
+    // (no polling) and resolves as soon as the last task completes.
+    let tracker = &crate::routes::update_gateway_score::FEEDBACK_TASK_TRACKER;
+    tracker.close();
+    tokio::select! {
+        _ = tracker.wait() => {
+            logger::info!("Shutdown: all feedback tasks drained cleanly");
+        }
+        _ = tokio::time::sleep(tokio::time::Duration::from_secs(5)) => {
+            logger::warn!("Shutdown: feedback tasks still pending after 5 s drain — proceeding");
+        }
+    }
+
     Ok(())
 }
 

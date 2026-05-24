@@ -19,7 +19,7 @@ use crate::decider::gatewaydecider::types::{
 use crate::feedback::gateway_scoring_service::MetricEntry;
 use crate::logger;
 use crate::merchant_config_util::{
-    isMerchantEnabledForPaymentFlows, isPaymentFlowEnabledWithHierarchyCheck,
+    isMerchantEnabledForPaymentFlows, isPaymentFlowEnabledWithHierarchyCheckCached,
 };
 use crate::redis::types::ServiceConfigKey;
 use crate::types::gateway_routing_input::{
@@ -54,6 +54,14 @@ use crate::decider::gatewaydecider::constants as C;
 use crate::decider::gatewaydecider::utils as Utils;
 use crate::types::bank_code as ETJ;
 use crate::types::gateway_outage::{self as ETGO, GatewayOutage};
+use crate::redis::mem_cache::{mem_cache_config, TypedCache};
+use once_cell::sync::Lazy;
+
+// TTL is read from [mem_cache] gw_outage_ttl_ms in the TOML config (default 30 000ms = 30s).
+// Outages change only on admin action; the stale window eliminates a per-request DB full-scan.
+// max_size = 1 because there is exactly one shared outage list per process.
+static GW_OUTAGE_CACHE: Lazy<TypedCache<Vec<GatewayOutage>>> =
+    Lazy::new(|| TypedCache::new(mem_cache_config().gw_outage_ttl_ms, 1));
 // use juspay::extra::secret::unsafe_extract_secret;
 // use juspay::extra::list as EList;
 // use juspay::extra::env as Env;
@@ -566,7 +574,7 @@ pub async fn get_cached_scores_based_on_srv3(
     let mut score_map = GatewayScoreMap::new();
     for gw in functional_gateways.clone() {
         if let Some(key) = sr_gateway_redis_key_map.get(&gw) {
-            let score = get_score_from_redis(merchant_bucket_size, key).await;
+            let score = get_cached_score_from_redis(merchant_bucket_size, key).await;
             score_map.insert(gw, score);
         }
     }
@@ -971,6 +979,30 @@ pub async fn get_score_from_redis(bucket_size: i32, redis_key: &RedisKey) -> f64
     (success_count as f64 / bucket_size as f64).clamp(0.0, 1.0)
 }
 
+/// Cached variant of `get_score_from_redis` for the routing hot-path.
+///
+/// Returns a cached score if one was stored within the 75ms TTL; otherwise
+/// fetches from Redis and populates the cache.  The cache key includes
+/// `bucket_size` because the score calculation is a function of it.
+///
+/// The analytics snapshot caller (`gateway_scoring_service.rs`) uses
+/// `get_score_from_redis` directly and intentionally bypasses this cache.
+async fn get_cached_score_from_redis(bucket_size: i32, redis_key: &RedisKey) -> f64 {
+    let cache_key = format!("{}:{}", redis_key, bucket_size);
+    if let Some(cached) = crate::redis::mem_cache::SR_SCORE_CACHE.get(&cache_key) {
+        logger::debug!(
+            tag = "get_score_from_redis",
+            action = "get_score_from_redis",
+            "SR score cache hit for redis_key {:?}",
+            redis_key
+        );
+        return cached;
+    }
+    let score = get_score_from_redis(bucket_size, redis_key).await;
+    crate::redis::mem_cache::SR_SCORE_CACHE.store(cache_key, score);
+    score
+}
+
 pub fn create_score_map(gateways: Vec<String>) -> GatewayScoreMap {
     gateways.iter().map(|gw| (gw.clone(), 1.0)).collect()
 }
@@ -1250,6 +1282,10 @@ fn check_scheduled_outage_metadata(
 }
 
 async fn get_scheduled_outage(scheduled_outage_validation_duration: i64) -> Vec<GatewayOutage> {
+    const CACHE_KEY: &str = "gw_outages";
+    if let Some(cached) = GW_OUTAGE_CACHE.get(CACHE_KEY) {
+        return cached;
+    }
     let current_time = OffsetDateTime::from(SystemTime::now());
     let primitive_time = PrimitiveDateTime::new(current_time.date(), current_time.time());
     let scheduled_outages = ETGO::getPotentialGwOutages(primitive_time).await;
@@ -1268,6 +1304,7 @@ async fn get_scheduled_outage(scheduled_outage_validation_duration: i64) -> Vec<
         validated_outages.len(),
         scheduled_outages.len()
     );
+    GW_OUTAGE_CACHE.store(CACHE_KEY.to_string(), validated_outages.clone());
     validated_outages
 }
 
@@ -2481,7 +2518,7 @@ pub async fn update_gateway_score_based_on_success_rate(
     let merchant_acc = decider_flow.get().dpMerchantAccount.clone();
     let txn_detail = decider_flow.get().dpTxnDetail.clone();
     let txn_card_info = decider_flow.get().dpTxnCardInfo.clone();
-    let enable_success_rate_based_gateway_elimination = isPaymentFlowEnabledWithHierarchyCheck(
+    let payment_flow_enabled = isPaymentFlowEnabledWithHierarchyCheckCached(
         merchant_acc.id,
         merchant_acc.tenantAccountId.clone(),
         ModuleName::MerchantConfig,
@@ -2491,8 +2528,9 @@ pub async fn update_gateway_score_based_on_success_rate(
         )
         .ok(),
     )
-    .await
-        || elimination_enabled == Some(true);
+    .await;
+    let enable_success_rate_based_gateway_elimination =
+        payment_flow_enabled || elimination_enabled == Some(true);
 
     logger::debug!(
         tag = "updateGatewayScoreBasedOnSuccessRate",

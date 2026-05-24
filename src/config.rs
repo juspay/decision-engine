@@ -59,6 +59,8 @@ pub struct GlobalConfig {
     pub email: EmailConfig,
     #[serde(default)]
     pub gsm: GsmConfig,
+    #[serde(default)]
+    pub mem_cache: MemCacheConfig,
 }
 
 #[derive(Clone, serde::Deserialize, Debug)]
@@ -439,6 +441,37 @@ pub struct CacheConfig {
 impl CacheConfig {
     pub fn add_prefix(&self, key: &str) -> String {
         format!("{}{}", self.service_config_redis_prefix, key)
+    }
+}
+
+/// TTL configuration for the in-process memory caches that sit in front of
+/// Redis / DB on the routing hot-path.
+#[derive(Clone, serde::Deserialize, Debug)]
+pub struct MemCacheConfig {
+    /// SR score in-process cache TTL in milliseconds (default: 75).
+    #[serde(default = "MemCacheConfig::default_sr_score_ttl_ms")]
+    pub sr_score_ttl_ms: u64,
+    /// Gateway outage list cache TTL in milliseconds (default: 30 000 = 30s).
+    #[serde(default = "MemCacheConfig::default_gw_outage_ttl_ms")]
+    pub gw_outage_ttl_ms: u64,
+    /// Per-merchant payment-flow config cache TTL in milliseconds (default: 60 000 = 60s).
+    #[serde(default = "MemCacheConfig::default_payment_flow_ttl_ms")]
+    pub payment_flow_ttl_ms: u64,
+}
+
+impl MemCacheConfig {
+    fn default_sr_score_ttl_ms() -> u64 { 75 }
+    fn default_gw_outage_ttl_ms() -> u64 { 30_000 }
+    fn default_payment_flow_ttl_ms() -> u64 { 60_000 }
+}
+
+impl Default for MemCacheConfig {
+    fn default() -> Self {
+        Self {
+            sr_score_ttl_ms: Self::default_sr_score_ttl_ms(),
+            gw_outage_ttl_ms: Self::default_gw_outage_ttl_ms(),
+            payment_flow_ttl_ms: Self::default_payment_flow_ttl_ms(),
+        }
     }
 }
 

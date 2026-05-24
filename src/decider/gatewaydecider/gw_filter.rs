@@ -1,7 +1,7 @@
 use crate::decider::gatewaydecider::types::*;
 use crate::decider::gatewaydecider::utils as Utils;
 use crate::decider::storage::utils::gateway_card_info as ETGCIS;
-use crate::merchant_config_util::isPaymentFlowEnabledWithHierarchyCheck;
+use crate::merchant_config_util::isPaymentFlowEnabledWithHierarchyCheckCached;
 use crate::redis::feature::{is_feature_enabled, is_feature_enabled_by_dimension};
 use crate::redis::types::ServiceConfigKey;
 use crate::types::bank_code::find_bank_code;
@@ -674,7 +674,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
                 )
                 .await;
                 if isMerchantEnabledForCvvLessV2Flow {
-                    let configResp = isPaymentFlowEnabledWithHierarchyCheck(
+                    let configResp = isPaymentFlowEnabledWithHierarchyCheckCached(
                         mAcc.id,
                         mAcc.tenantAccountId,
                         TC::MerchantConfig,

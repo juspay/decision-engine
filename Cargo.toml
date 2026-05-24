@@ -54,6 +54,7 @@ async-bb8-diesel = { git = "https://github.com/jarnura/async-bb8-diesel", rev = 
 redis_interface = { git = "https://github.com/juspay/hyperswitch.git", tag = "2024.09.30.0" }
 # Tokio Dependencies
 tokio = { version = "1.44.2", features = ["macros", "rt-multi-thread", "signal"] }
+tokio-util = { version = "0.7", features = ["rt"] }
 axum = { version = "0.7.5", features = ["macros"] }
 axum-server = { version = "0.7.1", features = ["tls-rustls"] }
 tower = { version = "0.5.0", features = ["limit", "buffer", "load-shed"] }
@@ -142,6 +143,28 @@ unreachable = "warn"
 unwrap_in_result = "warn"
 unwrap_used = "warn"
 use_self = "warn"
+
+[profile.release]
+# ThinLTO: lets LLVM optimize across crate boundaries (inlining, dead-code elimination).
+# codegen-units=1: single compilation unit enables better intra-crate optimization.
+# Together these typically give 5-15% speed improvement with ~2-3x slower link step.
+lto = "thin"
+codegen-units = 1
+
+[profile.release-fast]
+# Fast-compile variant for local iteration and ablation tests.
+# Inherits all release optimisations (opt-level=3, no debug info) but skips LTO
+# and uses parallel codegen, cutting build time from ~10 min to ~2 min.
+# Runtime is within ~5-10% of the full release profile — adequate for benchmarking.
+inherits = "release"
+lto = false
+codegen-units = 16
+
+[profile.release-profiling]
+# Profiling build: release-fast speed + line-tables-only debug info for samply/flamegraph.
+# Never deploy this — debug info bloats the binary ~3x and is only useful for profiling.
+inherits = "release-fast"
+debug = "line-tables-only"
 
 [[bin]]
 name = "open_router"

@@ -134,6 +134,7 @@ curl http://localhost:8080/health
 | [API Overview](docs/api-overview.md) | Entrypoint to API examples, OpenAPI schema, and route access rules |
 | [Configuration Guide](docs/configuration.md) | All config options explained |
 | [Deep Dive Blog](https://juspay.io/blog/juspay-orchestrator-and-merchant-controlled-routing-engine) | How the routing logic works |
+| [Performance Benchmarks](docs/benchmarks.mdx) | Throughput and latency of the `/decide-gateway` endpoint under sustained load |
 
 ---
 

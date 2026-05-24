@@ -1,6 +1,6 @@
 [log.console]
 enabled = true
-level = "DEBUG"
+level = "INFO"
 log_format = "json"
 
 [server]
@@ -44,6 +44,11 @@ max_in_flight_commands = 5000
 default_command_timeout = 30
 unresponsive_timeout = 10
 max_feed_count = 200
+
+[mem_cache]
+sr_score_ttl_ms = 75
+gw_outage_ttl_ms = 30000
+payment_flow_ttl_ms = 60000
 
 [cache]
 tti = 7200          # i.e. 2 hours

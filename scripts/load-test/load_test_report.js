@@ -2,14 +2,14 @@
  * k6 load test with detailed HTML report generation
  *
  * Usage:
- *   # Localhost  (generate a token first: bash scripts/gen_local_token.sh)
- *   k6 run scripts/load_test_report.js -e TOKEN=$(bash scripts/gen_local_token.sh)
+ *   # Localhost  (generate a token first: bash scripts/load-test/gen_local_token.sh)
+ *   k6 run scripts/load-test/load_test_report.js -e TOKEN=$(bash scripts/load-test/gen_local_token.sh)
  *
  *   # Sandbox
- *   k6 run scripts/load_test_report.js -e ENV=sandbox -e TOKEN=<your_jwt> -e MERCHANT_ID=<merchant_id>
+ *   k6 run scripts/load-test/load_test_report.js -e ENV=sandbox -e TOKEN=<your_jwt> -e MERCHANT_ID=<merchant_id>
  *
  *   # Custom load
- *   k6 run scripts/load_test_report.js -e ENV=sandbox -e TOKEN=<your_jwt> -e MERCHANT_ID=<merchant_id> -e VUS=12 -e DURATION=60s
+ *   k6 run scripts/load-test/load_test_report.js -e ENV=sandbox -e TOKEN=<your_jwt> -e MERCHANT_ID=<merchant_id> -e VUS=12 -e DURATION=60s
  *
  * Never commit TOKEN values. Pass them via shell env or a secrets manager.
  */
@@ -30,8 +30,8 @@ const token = __ENV.TOKEN
 if (!token) {
   throw new Error(
     'TOKEN is required.\n' +
-    '  Local:   k6 run scripts/load_test_report.js -e TOKEN=$(bash scripts/gen_local_token.sh)\n' +
-    '  Sandbox: k6 run scripts/load_test_report.js -e ENV=sandbox -e TOKEN=<your_jwt> -e MERCHANT_ID=<id>'
+    '  Local:   k6 run scripts/load-test/load_test_report.js -e TOKEN=$(bash scripts/load-test/gen_local_token.sh)\n' +
+    '  Sandbox: k6 run scripts/load-test/load_test_report.js -e ENV=sandbox -e TOKEN=<your_jwt> -e MERCHANT_ID=<id>'
   )
 }
 
@@ -528,11 +528,11 @@ export function handleSummary(data) {
 </body>
 </html>`;
 
-  const filename = `scripts/load_test_report_${ENV}_${VUS}vu.html`;
+  const filename = `scripts/load-test/load_test_report_${ENV}_${VUS}vu.html`;
 
   return {
     stdout: textSummary(data, { indent: " ", enableColors: true }),
     [filename]: html,
-    [`scripts/load_test_raw_${ENV}_${VUS}vu.json`]: JSON.stringify(data, null, 2),
+    [`scripts/load-test/load_test_raw_${ENV}_${VUS}vu.json`]: JSON.stringify(data, null, 2),
   };
 }
