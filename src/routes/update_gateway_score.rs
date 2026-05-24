@@ -25,8 +25,8 @@ use crate::metrics::API_LATENCY_HISTOGRAM;
 use crate::metrics::API_REQUEST_COUNTER;
 use crate::metrics::API_REQUEST_TOTAL_COUNTER;
 use axum::extract::Json;
-use serde::Serialize;
 use once_cell::sync::Lazy;
+use serde::Serialize;
 use tokio_util::task::TaskTracker;
 
 // Tracks in-flight async score update tasks. Checked during graceful shutdown

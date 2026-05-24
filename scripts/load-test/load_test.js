@@ -423,7 +423,7 @@ export function handleSummary(data) {
 ║    p50             : ${String(svrP50).padEnd(36)}║
 ║    p95             : ${String(svrP95).padEnd(36)}║
 ╠══════════════════════════════════════════════════════════╣
-║  Network overhead  (round-trip − pod, ms)                ║
+║  HTTP overhead     (round-trip − pod, ms)                ║
 ║    avg             : ${String(netAvg).padEnd(36)}║
 ║    p50             : ${String(netP50).padEnd(36)}║
 ║    p95             : ${String(netP95).padEnd(36)}║${fbAvg !== null ? `
@@ -459,6 +459,6 @@ export function handleSummary(data) {
 
   return {
     stdout: summary,
-    [`scripts/load-test/load_test_results_${ALGORITHM}.json`]: JSON.stringify(data, null, 2),
+    [`${__ENV.RESULTS_DIR || "scripts/load-test/"}load_test_results_${ALGORITHM}.json`]: JSON.stringify(data, null, 2),
   };
 }

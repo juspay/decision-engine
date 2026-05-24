@@ -460,9 +460,15 @@ pub struct MemCacheConfig {
 }
 
 impl MemCacheConfig {
-    fn default_sr_score_ttl_ms() -> u64 { 75 }
-    fn default_gw_outage_ttl_ms() -> u64 { 30_000 }
-    fn default_payment_flow_ttl_ms() -> u64 { 60_000 }
+    fn default_sr_score_ttl_ms() -> u64 {
+        75
+    }
+    fn default_gw_outage_ttl_ms() -> u64 {
+        30_000
+    }
+    fn default_payment_flow_ttl_ms() -> u64 {
+        60_000
+    }
 }
 
 impl Default for MemCacheConfig {

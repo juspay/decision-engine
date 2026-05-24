@@ -528,11 +528,12 @@ export function handleSummary(data) {
 </body>
 </html>`;
 
-  const filename = `scripts/load-test/load_test_report_${ENV}_${VUS}vu.html`;
+  const dir = __ENV.RESULTS_DIR || "scripts/load-test/";
+  const filename = `${dir}load_test_report_${ENV}_${VUS}vu.html`;
 
   return {
     stdout: textSummary(data, { indent: " ", enableColors: true }),
     [filename]: html,
-    [`scripts/load-test/load_test_raw_${ENV}_${VUS}vu.json`]: JSON.stringify(data, null, 2),
+    [`${dir}load_test_raw_${ENV}_${VUS}vu.json`]: JSON.stringify(data, null, 2),
   };
 }

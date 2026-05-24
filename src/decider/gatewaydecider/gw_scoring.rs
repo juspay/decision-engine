@@ -52,9 +52,9 @@ use crate::redis::cache::{self as RService, findByNameFromRedis};
 // use eulerhs::art::v2::types::ArtRecordable;
 use crate::decider::gatewaydecider::constants as C;
 use crate::decider::gatewaydecider::utils as Utils;
+use crate::redis::mem_cache::{mem_cache_config, TypedCache};
 use crate::types::bank_code as ETJ;
 use crate::types::gateway_outage::{self as ETGO, GatewayOutage};
-use crate::redis::mem_cache::{mem_cache_config, TypedCache};
 use once_cell::sync::Lazy;
 
 // TTL is read from [mem_cache] gw_outage_ttl_ms in the TOML config (default 30 000ms = 30s).

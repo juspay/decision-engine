@@ -56,7 +56,11 @@ fn routing_algo_cache_key(merchant_id: &str) -> String {
     format!("{}{}", ROUTING_ALGO_CACHE_PREFIX, merchant_id)
 }
 
-async fn cache_routing_algorithm(state: &crate::app::TenantAppState, merchant_id: &str, algorithm: &RoutingAlgorithm) {
+async fn cache_routing_algorithm(
+    state: &crate::app::TenantAppState,
+    merchant_id: &str,
+    algorithm: &RoutingAlgorithm,
+) {
     let key = routing_algo_cache_key(merchant_id);
     let value = CachedRoutingAlgorithm {
         id: algorithm.id.clone(),
@@ -408,7 +412,9 @@ async fn fetch_algorithm_from_db_and_cache(
         db_mapper_dsl::created_by.eq(merchant_id.to_string()),
     )
     .await
-    .change_context(EuclidErrors::ActiveRoutingAlgorithmNotFound(merchant_id.to_string()))
+    .change_context(EuclidErrors::ActiveRoutingAlgorithmNotFound(
+        merchant_id.to_string(),
+    ))
     .map_err(ContainerError::from)?
     .routing_algorithm_id;
 
@@ -419,7 +425,11 @@ async fn fetch_algorithm_from_db_and_cache(
     >(&state.db, dsl::id.eq(active_routing_algorithm_id.clone()))
     .await
     .inspect_err(|&e| {
-        logger::error!(?e, "Failed to fetch RoutingAlgorithm for ID {:?}", active_routing_algorithm_id);
+        logger::error!(
+            ?e,
+            "Failed to fetch RoutingAlgorithm for ID {:?}",
+            active_routing_algorithm_id
+        );
     })
     .change_context(EuclidErrors::StorageError)
     .map_err(ContainerError::from)?;
@@ -552,34 +562,37 @@ pub async fn routing_evaluate(
     // Cache miss : run the original 2-query DB path and back-fill the cache.
     let cache_key = routing_algo_cache_key(&payload.created_by);
 
-    let algorithm: RoutingAlgorithm =
-        match state.redis_conn.get_key::<CachedRoutingAlgorithm>(&cache_key, "CachedRoutingAlgorithm").await {
-            Ok(cached) => {
-                logger::debug!(
-                    merchant_id = %payload.created_by,
-                    algorithm_id = %cached.id,
-                    "routing_evaluate: cache hit"
-                );
-                RoutingAlgorithm {
-                    id: cached.id,
-                    created_by: payload.created_by.clone(),
-                    name: String::new(),
-                    description: String::new(),
-                    metadata: None,
-                    algorithm_data: cached.algorithm_data,
-                    algorithm_for: String::new(),
-                    created_at: time::PrimitiveDateTime::MIN,
-                    modified_at: time::PrimitiveDateTime::MIN,
-                }
+    let algorithm: RoutingAlgorithm = match state
+        .redis_conn
+        .get_key::<CachedRoutingAlgorithm>(&cache_key, "CachedRoutingAlgorithm")
+        .await
+    {
+        Ok(cached) => {
+            logger::debug!(
+                merchant_id = %payload.created_by,
+                algorithm_id = %cached.id,
+                "routing_evaluate: cache hit"
+            );
+            RoutingAlgorithm {
+                id: cached.id,
+                created_by: payload.created_by.clone(),
+                name: String::new(),
+                description: String::new(),
+                metadata: None,
+                algorithm_data: cached.algorithm_data,
+                algorithm_for: String::new(),
+                created_at: time::PrimitiveDateTime::MIN,
+                modified_at: time::PrimitiveDateTime::MIN,
             }
-            Err(_) => {
-                // Cache miss or stale entry — fetch from DB and back-fill
-                match fetch_algorithm_from_db_and_cache(&state, &payload.created_by).await {
-                    Ok(algo) => algo,
-                    Err(e) => return fail_preview(e, "active_routing_lookup_failed"),
-                }
+        }
+        Err(_) => {
+            // Cache miss or stale entry — fetch from DB and back-fill
+            match fetch_algorithm_from_db_and_cache(&state, &payload.created_by).await {
+                Ok(algo) => algo,
+                Err(e) => return fail_preview(e, "active_routing_lookup_failed"),
             }
-        };
+        }
+    };
 
     logger::debug!("Fetched routing algorithm: {:?}", algorithm);
     let algorithm_data: StaticRoutingAlgorithm =

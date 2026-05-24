@@ -5,15 +5,20 @@ description: "Throughput and latency of the /decide-gateway and /routing/evaluat
 
 ## Overview
 
-This page documents measured performance of two routing endpoints under sustained
-concurrent load. All figures are from k6 load tests against a single containerised pod.
+The decision engine contributes **~6 ms** (server-side average) to a payment routing
+decision at typical load. A single 2-core pod sustains **835 req/s peak** with zero
+errors, and throughput scales linearly with additional pods — both routing modes are
+stateless and share no per-request mutable state.
+
+These figures are from k6 load tests against a single containerised pod. All latency
+numbers in the tables below represent the server-side processing time reported in each
+`/decide-gateway` response — the time the pod spends on the routing decision itself,
+excluding network distance to and from your application.
 
 | Endpoint | Algorithm | Use case |
 |----------|-----------|----------|
 | `POST /decide-gateway` | SR_BASED_ROUTING | Success-rate driven gateway selection |
 | `POST /routing/evaluate` | RULE_BASED_ROUTING | Priority-rule evaluation using the active configured routing rule |
-
-Throughput scales linearly with additional pods — both routing modes are stateless.
 
 ---
 
@@ -47,8 +52,8 @@ Throughput scales linearly with additional pods — both routing modes are state
 - **Round-trip (RT)** — total time measured by the load generator, including local network.
 - **Server-side** — processing time reported by the pod in the `/decide-gateway` response
   `latency` field, isolating pure compute. Not available for `/routing/evaluate`.
-- **Network** — round-trip minus server-side (local container overhead here; add your
-  production network RTT on top).
+- **HTTP overhead** — round-trip minus server-side: HTTP framing, request routing, and response
+  serialisation outside the handler's timer. Add your production network RTT on top of this.
 
 ---
 
@@ -59,7 +64,7 @@ Amex Debit/EUR), 2–3 eligible gateways each.
 
 ### Throughput and latency
 
-| VUs | Throughput | RT avg | RT p50 | RT p95 | Server avg | Server p50 | Server p95 | Net avg | Net p95 |
+| VUs | Throughput | RT avg | RT p50 | RT p95 | Server avg | Server p50 | Server p95 | HTTP avg | HTTP p95 |
 |----:|-----------:|-------:|-------:|-------:|-----------:|-----------:|-----------:|--------:|--------:|
 | 5   | 38 req/s   | 8 ms   | 7 ms   | 15 ms  | 5 ms       | 4 ms       | 10 ms      | 3 ms    | 6 ms    |
 | 20  | 147 req/s  | 10 ms  | 8 ms   | 20 ms  | 6 ms       | 5 ms       | 14 ms      | 4 ms    | 9 ms    |
@@ -68,15 +73,15 @@ Amex Debit/EUR), 2–3 eligible gateways each.
 <Tip>
 Every `/decide-gateway` response includes a `latency` field (milliseconds) reporting
 the pod's own processing time. Use this in your monitoring to separate compute time
-from network overhead in production.
+from HTTP stack overhead in production.
 </Tip>
 
 **Key observations**
 - Server-side p95 holds at **14 ms up to 147 req/s** (20 VUs) — gateway outages and
   payment-flow config are served from in-process caches, eliminating per-request DB queries.
 - At 50 VUs (345 req/s), server p95 is **23 ms**.
-- Round-trip closely tracks server-side because there is no geographic network distance
-  in this environment. Add your production RTT on top.
+- The HTTP overhead column (round-trip − server-side) reflects HTTP framing and serialisation
+  cost, not network distance. Add your production RTT on top of the round-trip figures.
 
 <Note>
 These figures model realistic client behaviour with a 100 ms pause between requests.

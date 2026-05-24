@@ -245,7 +245,7 @@ if [[ "$ENV" == "local" ]]; then
     echo "$(date +%H:%M:%S) threads=$THREADS"
     sleep 1
   done) > "$THREAD_FILE" &
-  MON_THR=$!
+  MON_THREAD_COUNT=$!
 
   (while [[ ! -f "$STOP_FILE" ]]; do
     OPS=$(redis-cli -p "$REDIS_PORT" INFO stats 2>/dev/null | grep instantaneous_ops_per_sec | grep -oE '[0-9]+' || echo "?")
@@ -288,7 +288,7 @@ done
 # ── stop local monitors ───────────────────────────────────────────────────────
 if [[ "$ENV" == "local" ]]; then
   touch "$STOP_FILE"
-  wait $MON_CPU $MON_THR $MON_REDIS 2>/dev/null || true
+  wait $MON_CPU $MON_THREAD_COUNT $MON_REDIS 2>/dev/null || true
 fi
 
 # ── comparison summary ────────────────────────────────────────────────────────
