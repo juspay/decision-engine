@@ -31,7 +31,11 @@ use crate::{
         gatewaydecider::constants::MerchantConfigEntityLevelLookupCutover,
     },
     logger,
-    redis::{cache::findByNameFromRedis, mem_cache::GLOBAL_CACHE, types::ServiceConfigKey},
+    redis::{
+        cache::findByNameFromRedis,
+        mem_cache::{mem_cache_config, TypedCache, GLOBAL_CACHE},
+        types::ServiceConfigKey,
+    },
     types::{
         country::country_iso::CountryISO,
         merchant::id::MerchantPId,
@@ -56,6 +60,20 @@ use crate::{
         },
     },
 };
+
+use once_cell::sync::Lazy;
+
+// ── Payment-flow config cache ─────────────────────────────────────────────────
+//
+// 60-second TTL per (merchant, module, payment_flow, country) combination.
+// Payment flow config changes only via the admin dashboard, so a 60-second
+// stale window eliminates a per-request DB round-trip on the routing hot-path
+// without meaningful operational impact.
+//
+// TTL is read from [mem_cache] payment_flow_ttl_ms in the TOML config (default 60 000ms = 60s).
+// Uses TypedCache (Mutex + try_lock) — non-blocking, safe on single-core.
+static PAYMENT_FLOW_CACHE: Lazy<TypedCache<bool>> =
+    Lazy::new(|| TypedCache::new(mem_cache_config().payment_flow_ttl_ms, 10_000));
 
 // Converted data types
 // Original Haskell data type: CONFIG_VALUE_STATUS
@@ -565,6 +583,41 @@ pub async fn isPaymentFlowEnabledWithHierarchyCheck(
                 )
             }),
     }
+}
+
+/// Cached variant of [`isPaymentFlowEnabledWithHierarchyCheck`] for the routing hot-path.
+///
+/// TTL: 60 seconds keyed on all five parameters.  Callers that require
+/// guaranteed-fresh data (e.g. validation endpoints) should call the uncached
+/// version directly.
+pub async fn isPaymentFlowEnabledWithHierarchyCheckCached(
+    merchant_p_id: MerchantPId,
+    m_tenant_account_id: Option<String>,
+    module_name: ModuleName,
+    payment_flow: PaymentFlow,
+    m_iso_country_code: Option<CountryISO>,
+) -> bool {
+    let cache_key = format!(
+        "pf:{}:{}:{:?}:{}:{:?}",
+        merchant_p_id.0,
+        m_tenant_account_id.as_deref().unwrap_or(""),
+        module_name,
+        payment_flows_to_text(&payment_flow),
+        m_iso_country_code,
+    );
+    if let Some(cached) = PAYMENT_FLOW_CACHE.get(&cache_key) {
+        return cached;
+    }
+    let result = isPaymentFlowEnabledWithHierarchyCheck(
+        merchant_p_id,
+        m_tenant_account_id,
+        module_name,
+        payment_flow,
+        m_iso_country_code,
+    )
+    .await;
+    PAYMENT_FLOW_CACHE.store(cache_key, result);
+    result
 }
 
 fn checkIfEnabledByTenant(config_value: &str, error_tag: &str) -> bool {

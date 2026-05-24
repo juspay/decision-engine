@@ -187,6 +187,8 @@ services:
       - dashboard-mysql-ghcr
       - dashboard-mysql-local
     restart: unless-stopped
+    volumes:
+      - ./docs:/docs
     expose:
       - "3000"
     networks:

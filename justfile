@@ -159,61 +159,54 @@ migrate-pg operation=default_operation *args='': (run_migration operation pg_mig
 #
 # Prerequisites: brew install k6
 #
+# All load-test scripts live in scripts/load-test/.
+# benchmark.sh runs stepped VU levels, captures CPU/thread/Redis stats (local),
+# and prints a before/after comparison table (sandbox).
+#
 # VU (Virtual User): a simulated concurrent connection that fires requests in a
-# tight loop (request → wait for response → 100ms sleep → repeat). More VUs =
-# more parallel in-flight requests. Sweet spots measured empirically:
-#   local   → 20–30 VUs  (p95 ≈ 84–150ms,  ~108–123 req/s)
-#   sandbox → 12 VUs     (p95 ≈ 412ms,       ~28 req/s)
+# tight loop (request → wait for response → 100ms sleep → repeat).
+# Measured sweet spots:
+#   local   (2 vCPU / INFO logs) → 20 VUs  (~140 req/s, p95 ≈ 40ms)
+#   sandbox (500m req / 1000m limit) → 12 VUs (~66 req/s, p95 ≈ 78ms)
 
-# Run load test against localhost (default: 20 VUs, 30s)
-# TOKEN is auto-generated from the local JWT secret if not set.
-load-test-local vus='20' duration='30s':
-    #!/usr/bin/env bash
-    set -euo pipefail
-    TOKEN="${TOKEN:-$(bash scripts/gen_local_token.sh)}"
-    k6 run scripts/load_test_report.js \
-        -e ENV=local \
-        -e TOKEN="$TOKEN" \
-        -e VUS={{ vus }} \
-        -e DURATION={{ duration }}
+# Stepped benchmark against local container (auto-provisions user+merchant)
+# Captures CPU%, thread count, Redis ops alongside the k6 run.
+load-test-local vus='5,20,50' duration='30s':
+    @bash scripts/load-test/benchmark.sh --vus {{ vus }} --duration {{ duration }}
 alias ltl := load-test-local
 
-# Run load test against sandbox (default: 12 VUs, 60s — empirical saturation point)
-# Requires TOKEN and MERCHANT_ID to be set in the environment.
-#   export TOKEN=<your_jwt>
-#   export MERCHANT_ID=<your_merchant_id>
-load-test-sandbox vus='12' duration='60s':
+# Stepped benchmark against sandbox with before/after comparison table.
+# Requires TOKEN and MERCHANT_ID:
+#   export TOKEN=<your_jwt>  export MERCHANT_ID=<your_merchant_id>
+load-test-sandbox vus='5,12,20' duration='30s':
     #!/usr/bin/env bash
     set -euo pipefail
     : "${TOKEN:?TOKEN must be set (export TOKEN=<your_jwt>)}"
     : "${MERCHANT_ID:?MERCHANT_ID must be set (export MERCHANT_ID=<your_merchant_id>)}"
-    k6 run scripts/load_test_report.js \
-        -e ENV=sandbox \
-        -e TOKEN="$TOKEN" \
-        -e MERCHANT_ID="$MERCHANT_ID" \
-        -e VUS={{ vus }} \
-        -e DURATION={{ duration }}
+    bash scripts/load-test/benchmark.sh \
+        --env sandbox \
+        --vus {{ vus }} \
+        --duration {{ duration }} \
+        -t "$TOKEN" \
+        -m "$MERCHANT_ID"
 alias lts := load-test-sandbox
 
-# Run both local and sandbox back-to-back and open their HTML reports
-# Requires TOKEN and MERCHANT_ID for sandbox (see load-test-sandbox).
-load-test-all:
+# HTML report run — single VU level, generates a self-contained HTML file.
+# Opens the report automatically when done.
+load-test-report vus='20' duration='30s':
     #!/usr/bin/env bash
     set -euo pipefail
-    LOCAL_TOKEN="${TOKEN:-$(bash scripts/gen_local_token.sh)}"
-    : "${TOKEN:?TOKEN must be set for sandbox}"
-    : "${MERCHANT_ID:?MERCHANT_ID must be set for sandbox}"
-    echo "==> Local (20 VUs, 30s)"
-    k6 run scripts/load_test_report.js -e ENV=local   -e TOKEN="$LOCAL_TOKEN" -e VUS=20 -e DURATION=30s
-    echo "==> Sandbox (12 VUs, 60s)"
-    k6 run scripts/load_test_report.js -e ENV=sandbox -e TOKEN="$TOKEN" -e MERCHANT_ID="$MERCHANT_ID" -e VUS=12 -e DURATION=60s
-    echo "==> Opening reports..."
-    open scripts/load_test_report_local_20vu.html scripts/load_test_report_sandbox_12vu.html 2>/dev/null || true
-alias lta := load-test-all
+    k6 run scripts/load-test/load_test_report.js \
+        -e ENV=local \
+        -e VUS={{ vus }} \
+        -e DURATION={{ duration }}
+    REPORT="scripts/load-test/load_test_report_local_{{ vus }}vu.html"
+    [ -f "$REPORT" ] && open "$REPORT" 2>/dev/null || true
+alias ltr := load-test-report
 
-# Generate a fresh local auth token (expires in 24h)
+# Generate a fresh local auth token (expires in 24h) — useful for manual curl calls
 load-test-token:
-    @bash scripts/gen_local_token.sh
+    @bash scripts/load-test/gen_local_token.sh
 
 # Drop database if exists and then create a new 'hyperswitch_db' Database
 resurrect database_name=db_name:

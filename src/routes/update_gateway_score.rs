@@ -25,7 +25,13 @@ use crate::metrics::API_LATENCY_HISTOGRAM;
 use crate::metrics::API_REQUEST_COUNTER;
 use crate::metrics::API_REQUEST_TOTAL_COUNTER;
 use axum::extract::Json;
+use once_cell::sync::Lazy;
 use serde::Serialize;
+use tokio_util::task::TaskTracker;
+
+// Tracks in-flight async score update tasks. Checked during graceful shutdown
+// to ensure no feedback writes are dropped when the pod receives SIGTERM.
+pub static FEEDBACK_TASK_TRACKER: Lazy<TaskTracker> = Lazy::new(TaskTracker::new);
 
 #[derive(Debug, Serialize)]
 struct UpdateGatewayScoreRequestDetail<'a> {
@@ -154,105 +160,142 @@ pub async fn update_gateway_score(
                 trace_id.clone(),
                 None,
             );
-            // Check before check_and_update_gateway_score_ consumes the inflight key.
+            // Must happen before check_and_update_gateway_score_ consumes the inflight key.
             let is_ab_test_payment =
                 crate::decider::gatewaydecider::ab_test::is_static_arm_inflight(&payment_id).await;
-            let result = check_and_update_gateway_score_(payload.clone()).await;
-            match result {
-                Ok(_success) => {
-                    let transaction_status = serde_json::to_string(&payload.status)
-                        .unwrap_or_else(|_| format!("{:?}", payload.status))
-                        .trim_matches('"')
-                        .to_string();
-                    // Connector must be the gateway that processed the payment, not caller-supplied.
-                    let gsm_info = payload.error_info.as_ref().and_then(|ei| {
-                        crate::gsm::lookup(&crate::gsm::GsmErrorInfo {
-                            connector: payload.gateway.clone(),
-                            ..ei.clone()
-                        })
-                    });
-                    let response = UpdateScoreResponse {
-                        message: "Gateway score updated successfully".to_string(),
-                        merchant_id: merchant_id.clone(),
-                        gateway: gateway.clone(),
-                        payment_id: payment_id.clone(),
-                        gsm_info,
-                    };
-                    // AB test payments (static arm) are tracked via RoutingEvaluateAbTest outcome
-                    // events — skip UpdateGatewayScoreUpdate so they don't appear in auth-rate audit.
-                    if !is_ab_test_payment {
-                        crate::analytics::DomainAnalyticsEvent::record_gateway_update(
+
+            // GSM lookup is a fast in-memory lookup — compute it synchronously so the
+            // caller gets the result immediately without waiting for the score update.
+            let gsm_info = payload.error_info.as_ref().and_then(|ei| {
+                crate::gsm::lookup(&crate::gsm::GsmErrorInfo {
+                    connector: payload.gateway.clone(),
+                    ..ei.clone()
+                })
+            });
+
+            let response = UpdateScoreResponse {
+                message: "Gateway score updated successfully".to_string(),
+                merchant_id: merchant_id.clone(),
+                gateway: gateway.clone(),
+                payment_id: payment_id.clone(),
+                gsm_info,
+            };
+
+            // Spawn the Redis score update so the caller is not blocked waiting for it.
+            // Analytics and outcome metrics are recorded inside the task.
+            let spawn_payment_id = payment_id.clone();
+            let spawn_merchant_id = merchant_id.clone();
+            let handle = FEEDBACK_TASK_TRACKER.spawn(async move {
+                let transaction_status = serde_json::to_string(&payload.status)
+                    .unwrap_or_else(|_| format!("{:?}", payload.status))
+                    .trim_matches('"')
+                    .to_string();
+
+                match check_and_update_gateway_score_(payload.clone()).await {
+                    Ok(_) => {
+                        if !is_ab_test_payment {
+                            crate::analytics::DomainAnalyticsEvent::record_gateway_update(
+                                crate::analytics::AnalyticsFlowContext::new(
+                                    crate::analytics::ApiFlow::DynamicRouting,
+                                    crate::analytics::FlowType::UpdateGatewayScoreUpdate,
+                                ),
+                                Some(merchant_id.clone()),
+                                Some(gateway.clone()),
+                                Some(transaction_status.clone()),
+                                crate::analytics::AnalyticsRoute::UpdateGatewayScore,
+                                crate::analytics::serialize_details(
+                                    &UpdateGatewayScoreSuccessDetail {
+                                        request: UpdateGatewayScoreRequestDetail {
+                                            merchant_id: &merchant_id,
+                                            gateway: &gateway,
+                                            payment_id: &payment_id,
+                                            status: &transaction_status,
+                                            gateway_reference_id: payload
+                                                .gateway_reference_id
+                                                .as_deref(),
+                                            enforce_dynamic_routing_failure: payload
+                                                .enforce_dynamic_routing_failure,
+                                            txn_latency: payload.txn_latency.as_ref(),
+                                            error_info: payload.error_info.as_ref(),
+                                            is_smart_retry: payload.is_smart_retry,
+                                        },
+                                        response: &UpdateScoreResponse {
+                                            message: "Gateway score updated successfully"
+                                                .to_string(),
+                                            merchant_id: merchant_id.clone(),
+                                            gateway: gateway.clone(),
+                                            payment_id: payment_id.clone(),
+                                            gsm_info: None,
+                                        },
+                                        selection_reason: UpdateGatewayScoreSelectionReason {
+                                            transaction_status: &transaction_status,
+                                            stage: "gateway score updated",
+                                        },
+                                    },
+                                ),
+                                Some(payment_id.clone()),
+                                x_request_id.clone(),
+                                global_request_id.clone(),
+                                trace_id.clone(),
+                                Some("score_updated".to_string()),
+                            );
+                        }
+                        API_REQUEST_COUNTER
+                            .with_label_values(&["update_gateway_score", "success"])
+                            .inc();
+                    }
+                    Err(e) => {
+                        API_REQUEST_COUNTER
+                            .with_label_values(&["update_gateway_score", "failure"])
+                            .inc();
+                        crate::analytics::DomainAnalyticsEvent::record_error(
                             crate::analytics::AnalyticsFlowContext::new(
                                 crate::analytics::ApiFlow::DynamicRouting,
-                                crate::analytics::FlowType::UpdateGatewayScoreUpdate,
+                                crate::analytics::FlowType::UpdateGatewayScoreError,
                             ),
-                            Some(merchant_id.clone()),
-                            Some(gateway.clone()),
-                            Some(transaction_status.clone()),
                             crate::analytics::AnalyticsRoute::UpdateGatewayScore,
-                            crate::analytics::serialize_details(&UpdateGatewayScoreSuccessDetail {
-                                request: UpdateGatewayScoreRequestDetail {
-                                    merchant_id: &merchant_id,
-                                    gateway: &gateway,
-                                    payment_id: &payment_id,
-                                    status: &transaction_status,
-                                    gateway_reference_id: payload.gateway_reference_id.as_deref(),
-                                    enforce_dynamic_routing_failure: payload
-                                        .enforce_dynamic_routing_failure,
-                                    txn_latency: payload.txn_latency.as_ref(),
-                                    error_info: payload.error_info.as_ref(),
-                                    is_smart_retry: payload.is_smart_retry,
-                                },
-                                response: &response,
-                                selection_reason: UpdateGatewayScoreSelectionReason {
-                                    transaction_status: &transaction_status,
-                                    stage: "gateway score updated",
-                                },
+                            Some(merchant_id.clone()),
+                            Some(payment_id.clone()),
+                            x_request_id,
+                            global_request_id,
+                            trace_id,
+                            Some(gateway.clone()),
+                            None,
+                            e.error_code.clone(),
+                            e.error_message.clone(),
+                            crate::analytics::serialize_details(&UpdateGatewayScoreFailureDetail {
+                                payment_id: &payment_id,
+                                request_id: None,
                             }),
-                            Some(response.payment_id.clone()),
-                            x_request_id.clone(),
-                            global_request_id.clone(),
-                            trace_id.clone(),
-                            Some("score_updated".to_string()),
+                            Some("score_update_failed".to_string()),
+                            None,
+                        );
+                        crate::logger::error!(
+                            merchant_id = %merchant_id,
+                            gateway = %gateway,
+                            payment_id = %payment_id,
+                            error = ?e,
+                            "Async gateway score update failed"
                         );
                     }
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["update_gateway_score", "success"])
-                        .inc();
-                    timer.observe_duration();
-                    Ok(Json(response))
                 }
-                Err(e) => {
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["update_gateway_score", "failure"])
-                        .inc();
-                    crate::analytics::DomainAnalyticsEvent::record_error(
-                        crate::analytics::AnalyticsFlowContext::new(
-                            crate::analytics::ApiFlow::DynamicRouting,
-                            crate::analytics::FlowType::UpdateGatewayScoreError,
-                        ),
-                        crate::analytics::AnalyticsRoute::UpdateGatewayScore,
-                        Some(merchant_id.clone()),
-                        Some(payment_id.clone()),
-                        x_request_id.clone(),
-                        global_request_id.clone(),
-                        trace_id.clone(),
-                        Some(gateway.clone()),
-                        None,
-                        e.error_code.clone(),
-                        e.error_message.clone(),
-                        crate::analytics::serialize_details(&UpdateGatewayScoreFailureDetail {
-                            payment_id: &payment_id,
-                            request_id: x_request_id.as_deref(),
-                        }),
-                        Some("score_update_failed".to_string()),
-                        None,
-                    );
-                    timer.observe_duration();
-                    println!("Error: {:?}", e);
-                    Err(e)
+            });
+
+            // Log if the spawned task panicked — otherwise panics are silently swallowed.
+            tokio::spawn(async move {
+                if let Err(e) = handle.await {
+                    if e.is_panic() {
+                        crate::logger::error!(
+                            merchant_id = %spawn_merchant_id,
+                            payment_id = %spawn_payment_id,
+                            "Async gateway score update task panicked"
+                        );
+                    }
                 }
-            }
+            });
+
+            timer.observe_duration();
+            Ok(Json(response))
         }
         Err(e) => {
             crate::logger::debug!(tag = "UpdateScoreRequest", "Error: {:?}", e);

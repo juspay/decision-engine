@@ -1,3 +1,16 @@
 # Local profile variants are now defined directly in docker-compose.yaml.
 # This override file is intentionally kept minimal for backward compatibility.
-services: {}
+services:
+  # Pin to latest image and add resource limits for profiling
+  open-router-pg-ghcr:
+    image: ghcr.io/juspay/decision-engine/postgres:v1.4.13
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2g
+
+  # Fix prometheus scrape target to match the container network alias
+  prometheus:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

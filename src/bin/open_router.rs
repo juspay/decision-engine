@@ -23,6 +23,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .expect("Failed to fetch raw application secrets");
 
+    open_router::redis::mem_cache::init(global_config.mem_cache.clone());
+
     log_startup_configuration(&global_config);
 
     let global_app_state = GlobalAppState::new(global_config.clone())

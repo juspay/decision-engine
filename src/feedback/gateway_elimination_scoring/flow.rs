@@ -587,7 +587,7 @@ pub async fn getAllUnifiedKeys(
     )
     .await;
     let is_key_enabled_for_merchant_gateway_scoring = gateway_scoring_data.eliminationEnabled
-        || MCU::isPaymentFlowEnabledWithHierarchyCheck(
+        || MCU::isPaymentFlowEnabledWithHierarchyCheckCached(
             mer_acc_p_id,
             mer_acc.tenantAccountId.clone(),
             ModuleEnum::MerchantConfig,
@@ -605,7 +605,7 @@ pub async fn getAllUnifiedKeys(
     )
     .await;
     let is_gateway_scoring_enabled_for_merchant_outage =
-        MCU::isPaymentFlowEnabledWithHierarchyCheck(
+        MCU::isPaymentFlowEnabledWithHierarchyCheckCached(
             mer_acc_p_id,
             mer_acc.tenantAccountId,
             ModuleEnum::MerchantConfig,

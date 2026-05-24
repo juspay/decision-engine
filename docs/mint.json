@@ -84,7 +84,8 @@
       "pages": [
         "analytics",
         "payment-audit",
-        "clickhouse-analytics"
+        "clickhouse-analytics",
+        "benchmarks"
       ]
     },
     {

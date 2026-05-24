@@ -33,6 +33,51 @@ use crate::app::get_tenant_app_state;
 
 use crate::error::ContainerError;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
+
+// ── Routing algorithm Redis cache ─────────────────────────────────────────────
+//
+// Caches the active routing algorithm per merchant to avoid 2 DB queries on
+// every /routing/evaluate call. Written on activate, deleted on deactivate,
+// read-with-fallback on evaluate.
+//
+// Key  : DE_routing_algo_eval:{merchant_id}
+// Value: JSON { id, algorithm_data }
+// TTL  : cache_config.service_config_ttl (default 300s)
+
+const ROUTING_ALGO_CACHE_PREFIX: &str = "DE_routing_algo_eval:";
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct CachedRoutingAlgorithm {
+    id: String,
+    algorithm_data: String,
+}
+
+fn routing_algo_cache_key(merchant_id: &str) -> String {
+    format!("{}{}", ROUTING_ALGO_CACHE_PREFIX, merchant_id)
+}
+
+async fn cache_routing_algorithm(
+    state: &crate::app::TenantAppState,
+    merchant_id: &str,
+    algorithm: &RoutingAlgorithm,
+) {
+    let key = routing_algo_cache_key(merchant_id);
+    let value = CachedRoutingAlgorithm {
+        id: algorithm.id.clone(),
+        algorithm_data: algorithm.algorithm_data.clone(),
+    };
+    let ttl = state.config.cache_config.service_config_ttl;
+    if let Err(e) = state.redis_conn.set_key_with_ttl(&key, value, ttl).await {
+        logger::warn!(error = ?e, merchant_id = %merchant_id, "Failed to cache routing algorithm in Redis — falling back to DB on next evaluate");
+    }
+}
+
+async fn invalidate_routing_algorithm_cache(state: &crate::app::TenantAppState, merchant_id: &str) {
+    let key = routing_algo_cache_key(merchant_id);
+    if let Err(e) = state.redis_conn.delete_key(&key).await {
+        logger::warn!(error = ?e, merchant_id = %merchant_id, "Failed to invalidate routing algorithm cache");
+    }
+}
 use serde::Serialize;
 use serde_json::{json, Value};
 
@@ -347,6 +392,53 @@ pub async fn routing_create(
     Ok(Json(response))
 }
 
+// Fetches the active routing algorithm from DB (2 queries) and back-fills Redis cache.
+// Extracted to keep `routing_evaluate` readable and to reuse on cache miss / parse error.
+async fn fetch_algorithm_from_db_and_cache(
+    state: &crate::app::TenantAppState,
+    merchant_id: &str,
+) -> Result<RoutingAlgorithm, ContainerError<EuclidErrors>> {
+    #[cfg(feature = "mysql")]
+    use crate::storage::schema::routing_algorithm_mapper::dsl as db_mapper_dsl;
+    #[cfg(feature = "postgres")]
+    use crate::storage::schema_pg::routing_algorithm_mapper::dsl as db_mapper_dsl;
+
+    let active_routing_algorithm_id = crate::generics::generic_find_one::<
+        <RoutingAlgorithmMapper as HasTable>::Table,
+        _,
+        RoutingAlgorithmMapper,
+    >(
+        &state.db,
+        db_mapper_dsl::created_by.eq(merchant_id.to_string()),
+    )
+    .await
+    .change_context(EuclidErrors::ActiveRoutingAlgorithmNotFound(
+        merchant_id.to_string(),
+    ))
+    .map_err(ContainerError::from)?
+    .routing_algorithm_id;
+
+    let algorithm = crate::generics::generic_find_one::<
+        <RoutingAlgorithm as HasTable>::Table,
+        _,
+        RoutingAlgorithm,
+    >(&state.db, dsl::id.eq(active_routing_algorithm_id.clone()))
+    .await
+    .inspect_err(|&e| {
+        logger::error!(
+            ?e,
+            "Failed to fetch RoutingAlgorithm for ID {:?}",
+            active_routing_algorithm_id
+        );
+    })
+    .change_context(EuclidErrors::StorageError)
+    .map_err(ContainerError::from)?;
+
+    // Back-fill cache so subsequent requests hit Redis
+    cache_routing_algorithm(state, merchant_id, &algorithm).await;
+    Ok(algorithm)
+}
+
 pub async fn routing_evaluate(
     headers: axum::http::HeaderMap,
     Json(payload): Json<RoutingRequest>,
@@ -414,23 +506,7 @@ pub async fn routing_evaluate(
         .as_ref()
         .is_some_and(|output| !output.is_empty());
 
-    // fetch the active routing_algorithm of the merchant
-    let active_routing_algorithm_id = match crate::generics::generic_find_one::<
-        <RoutingAlgorithmMapper as HasTable>::Table,
-        _,
-        RoutingAlgorithmMapper,
-    >(
-        &state.db,
-        mapper_dsl::created_by.eq(payload.created_by.clone()),
-    )
-    .await
-    .change_context(EuclidErrors::ActiveRoutingAlgorithmNotFound(
-        payload.created_by.clone(),
-    )) {
-        Ok(mapper) => mapper.routing_algorithm_id,
-        Err(e) => return fail_preview(e.into(), "active_routing_lookup_failed"),
-    };
-
+    // ── Parameter validation ────────────────────────────────────────────────
     let parameters = payload.parameters.clone();
 
     let routing_config = match state
@@ -480,23 +556,42 @@ pub async fn routing_evaluate(
         }
     }
 
-    let algorithm = match crate::generics::generic_find_one::<
-        <RoutingAlgorithm as HasTable>::Table,
-        _,
-        RoutingAlgorithm,
-    >(&state.db, dsl::id.eq(active_routing_algorithm_id.clone()))
-    .await
-    .inspect_err(|&e| {
-        logger::error!(
-            ?e,
-            "Failed to fetch RoutingAlgorithm for ID {:?}",
-            active_routing_algorithm_id
-        );
-    })
-    .change_context(EuclidErrors::StorageError)
+    // ── Fetch active routing algorithm (Redis cache → DB fallback) ──────────
+    //
+    // Cache hit  : skip both DB queries entirely.
+    // Cache miss : run the original 2-query DB path and back-fill the cache.
+    let cache_key = routing_algo_cache_key(&payload.created_by);
+
+    let algorithm: RoutingAlgorithm = match state
+        .redis_conn
+        .get_key::<CachedRoutingAlgorithm>(&cache_key, "CachedRoutingAlgorithm")
+        .await
     {
-        Ok(algo) => algo,
-        Err(e) => return fail_preview(e.into(), "routing_algorithm_fetch_failed"),
+        Ok(cached) => {
+            logger::debug!(
+                merchant_id = %payload.created_by,
+                algorithm_id = %cached.id,
+                "routing_evaluate: cache hit"
+            );
+            RoutingAlgorithm {
+                id: cached.id,
+                created_by: payload.created_by.clone(),
+                name: String::new(),
+                description: String::new(),
+                metadata: None,
+                algorithm_data: cached.algorithm_data,
+                algorithm_for: String::new(),
+                created_at: time::PrimitiveDateTime::MIN,
+                modified_at: time::PrimitiveDateTime::MIN,
+            }
+        }
+        Err(_) => {
+            // Cache miss or stale entry — fetch from DB and back-fill
+            match fetch_algorithm_from_db_and_cache(&state, &payload.created_by).await {
+                Ok(algo) => algo,
+                Err(e) => return fail_preview(e, "active_routing_lookup_failed"),
+            }
+        }
     };
 
     logger::debug!("Fetched routing algorithm: {:?}", algorithm);
@@ -605,7 +700,7 @@ pub async fn routing_evaluate(
                     arm,
                     arm_algorithm_id
                 );
-                ab_experiment_id = Some(active_routing_algorithm_id.clone());
+                ab_experiment_id = Some(algorithm.id.clone());
                 ab_variant_arm = Some(arm.to_string());
 
                 let result = crate::decider::gatewaydecider::ab_test::preview::evaluate_arm(
@@ -785,7 +880,8 @@ pub async fn activate_routing_rule(
     };
 
     // === Step 1: Find algorithm_for from RoutingAlgorithm table ===
-    let algorithm_for = match crate::generics::generic_find_one::<
+    // Keep the full struct so we can populate the Redis cache after a successful activate.
+    let algorithm = match crate::generics::generic_find_one::<
         <RoutingAlgorithm as HasTable>::Table,
         _,
         RoutingAlgorithm,
@@ -794,13 +890,14 @@ pub async fn activate_routing_rule(
     .change_context(EuclidErrors::RoutingAlgorithmNotFound(
         payload.routing_algorithm_id.clone(),
     )) {
-        Ok(algorithm) => algorithm.algorithm_for,
+        Ok(algo) => algo,
         Err(e) => {
             update_failure_metrics();
             timer.observe_duration();
             return Err(e.into());
         }
     };
+    let algorithm_for = algorithm.algorithm_for.clone();
 
     // === Step 2: Try to find existing entry for (created_by, algorithm_for) ===
     let maybe_existing = crate::generics::generic_find_one::<
@@ -837,6 +934,7 @@ pub async fn activate_routing_rule(
             .change_context(EuclidErrors::StorageError)
             {
                 Ok(_) => {
+                    cache_routing_algorithm(&state, &payload.created_by, &algorithm).await;
                     API_REQUEST_COUNTER
                         .with_label_values(&["activate_routing_rule", "success"])
                         .inc();
@@ -850,6 +948,8 @@ pub async fn activate_routing_rule(
                 }
             }
         }
+        // Already active with the same algorithm — refresh the cache TTL
+        cache_routing_algorithm(&state, &payload.created_by, &algorithm).await;
         API_REQUEST_COUNTER
             .with_label_values(&["activate_routing_rule", "success"])
             .inc();
@@ -858,6 +958,7 @@ pub async fn activate_routing_rule(
     }
 
     // === Step 3b: Insert new if not present ===
+    let merchant_id_for_cache = payload.created_by.clone();
     let mapper_entry = RoutingAlgorithmMapperNew::new(
         payload.created_by,
         payload.routing_algorithm_id,
@@ -869,6 +970,7 @@ pub async fn activate_routing_rule(
         .change_context(EuclidErrors::StorageError)
     {
         Ok(_) => {
+            cache_routing_algorithm(&state, &merchant_id_for_cache, &algorithm).await;
             API_REQUEST_COUNTER
                 .with_label_values(&["activate_routing_rule", "success"])
                 .inc();
@@ -963,6 +1065,7 @@ pub async fn deactivate_routing_rule(
                     payload.routing_algorithm_id,
                     payload.created_by
                 );
+                invalidate_routing_algorithm_cache(&state, &payload.created_by).await;
                 API_REQUEST_COUNTER
                     .with_label_values(&["deactivate_routing_rule", "success"])
                     .inc();

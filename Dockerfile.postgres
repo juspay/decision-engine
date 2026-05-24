@@ -20,22 +20,25 @@ RUN cargo chef prepare --recipe-path recipe.json
 # only re-runs when recipe.json changes (i.e. Cargo.toml / Cargo.lock changed).
 # A source-only change never reaches this stage.
 #
-# BUILD_MODE=release  → production binary with full optimisations (default)
-# BUILD_MODE=debug    → development binary; skips LLVM passes, ~5-6× faster to
-#                       compile. Adequate for E2E / Cypress test runs where
-#                       throughput doesn't matter.
+# BUILD_MODE=release       → production binary with LTO + codegen-units=1 (default)
+# BUILD_MODE=release-fast  → fast-compile variant (~2 min); same opt-level, no LTO.
+#                            Use for local iteration and ablation tests.
+# BUILD_MODE=debug         → unoptimised binary; skips LLVM passes, ~30s compile.
+#                            Adequate for E2E / Cypress test runs where throughput
+#                            doesn't matter.
 FROM chef AS builder
 ARG BUILD_MODE=release
 ARG EXTRA_FEATURES=""
 COPY --from=planner /open_router/recipe.json recipe.json
-RUN RELEASE_FLAG=$([ "$BUILD_MODE" = "release" ] && echo "--release" || echo "") && \
-    RUSTFLAGS="-A warnings" cargo chef cook $RELEASE_FLAG --no-default-features --features middleware,kms-aws,postgres ${EXTRA_FEATURES} --recipe-path recipe.json
+# debug has no --profile flag (it is the implicit default); all others use --profile <name>.
+RUN PROFILE_FLAG=$([ "$BUILD_MODE" = "debug" ] && echo "" || echo "--profile ${BUILD_MODE}") && \
+    RUSTFLAGS="-A warnings" cargo chef cook $PROFILE_FLAG --no-default-features --features middleware,kms-aws,postgres ${EXTRA_FEATURES} --recipe-path recipe.json
 
 # ── Stage 3: build the binary ─────────────────────────────────────────────────
 # Dependencies are already compiled above. Only changed crates are recompiled.
 COPY . .
-RUN RELEASE_FLAG=$([ "$BUILD_MODE" = "release" ] && echo "--release" || echo "") && \
-    RUSTFLAGS="-A warnings" cargo build $RELEASE_FLAG --no-default-features --features middleware,kms-aws,postgres ${EXTRA_FEATURES}
+RUN PROFILE_FLAG=$([ "$BUILD_MODE" = "debug" ] && echo "" || echo "--profile ${BUILD_MODE}") && \
+    RUSTFLAGS="-A warnings" cargo build $PROFILE_FLAG --no-default-features --features middleware,kms-aws,postgres ${EXTRA_FEATURES}
 
 
 # ── Runtime image ─────────────────────────────────────────────────────────────
