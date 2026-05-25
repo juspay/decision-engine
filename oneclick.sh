@@ -48,11 +48,30 @@ check_and_kill_ports() {
         local pids
         pids=$(lsof -t -iTCP:$port -sTCP:LISTEN 2>/dev/null || true)
         if [ -n "$pids" ]; then
-            ports_in_use+=("$port")
             while IFS= read -r pid; do
                 [ -z "$pid" ] && continue
                 local cmd
                 cmd=$(ps -p "$pid" -o command= 2>/dev/null || echo "unknown process")
+
+                # OrbStack and Docker Desktop forward container ports via their own helper
+                # processes. Killing them would take down the entire container runtime.
+                # Stop the container instead.
+                if echo "$cmd" | grep -qiE "OrbStack|com\.docker\.backend|dockerd"; then
+                    local container_id
+                    container_id=$(docker ps --filter "publish=$port" -q 2>/dev/null | head -1 || true)
+                    if [ -n "$container_id" ]; then
+                        local container_name
+                        container_name=$(docker ps --filter "publish=$port" --format "{{.Names}}" 2>/dev/null | head -1)
+                        echo "  [docker] Port $port is forwarded by container '$container_name' — stopping it..."
+                        docker stop "$container_id" >/dev/null 2>&1 || true
+                    else
+                        echo "  [skip] Port $port is held by the container runtime (OrbStack/Docker)."
+                        echo "         No matching container found. Free the port manually before retrying."
+                    fi
+                    continue
+                fi
+
+                ports_in_use+=("$port")
                 pids_to_kill+=("$pid")
                 echo "  [!] Port $port is in use by PID $pid"
                 echo "      Command: $cmd"

@@ -37,7 +37,7 @@ export function AuthGuard() {
   const clearAuth = useAuthStore((s) => s.clearAuth)
   const setMerchantId = useMerchantStore((s) => s.setMerchantId)
 
-  const { data: me, error, isLoading } = useSWR<MeResponse>(
+  const { data: me, error, isValidating } = useSWR<MeResponse>(
     token && hasHydrated ? '/auth/me' : null,
     fetcher,
     { revalidateOnFocus: false, shouldRetryOnError: false },
@@ -51,21 +51,28 @@ export function AuthGuard() {
   }, [me, token, setAuth, setMerchantId])
 
   useEffect(() => {
-    if (!error) return
+    // Don't clear auth while SWR is revalidating — the stale error may be from a previous
+    // session and the fresh request (with the new token) could still succeed.
+    if (!error || isValidating) return
     const statusCode = (error as { status?: number }).status
     if (statusCode === 401 || statusCode === 403) {
       clearAuth()
       setMerchantId('')
     }
-  }, [error, clearAuth, setMerchantId])
+  }, [error, isValidating, clearAuth, setMerchantId])
 
   if (!hasHydrated) return <SessionSpinner label="Restoring session" />
   if (!token) return <Navigate to="/login" replace />
-  if (isLoading) return <SessionSpinner label="Validating session" />
+  if (!me && !error) return <SessionSpinner label="Validating session" />
 
   if (error) {
     const statusCode = (error as { status?: number }).status
-    if (statusCode === 401 || statusCode === 403) return <Navigate to="/login" replace />
+    if (statusCode === 401 || statusCode === 403) {
+      // Wait for the in-flight revalidation before rejecting — the stale error may be from
+      // a prior expired session and the current token could be valid.
+      if (isValidating) return <SessionSpinner label="Validating session" />
+      return <Navigate to="/login" replace />
+    }
     // Transient failure (network/5xx): keep the session, let the user through.
   }
 

@@ -1,15 +1,14 @@
 import type { ElementType } from 'react'
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import useSWR, { useSWRConfig } from 'swr'
 import {
   BookOpen,
-  CheckCircle2,
+  ChevronRight,
   FlaskConical,
-  GitBranch,
   Network,
   PieChart,
   PowerOff,
-  ShieldCheck,
   TrendingUp,
 } from 'lucide-react'
 import { Card, CardBody, SurfaceLabel } from '../ui/Card'
@@ -18,8 +17,8 @@ import { Button } from '../ui/Button'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useAuthStore } from '../../store/authStore'
-import { apiPost } from '../../lib/api'
-import { RoutingAlgorithm, RuleConfig } from '../../types/api'
+import { apiPost, fetcher } from '../../lib/api'
+import { AnalyticsOverviewResponse, RoutingAlgorithm, RuleConfig, SRConfigData } from '../../types/api'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
 
 type StrategyId = 'auth-rate' | 'rules' | 'volume' | 'debit' | 'ab-test'
@@ -28,13 +27,24 @@ type StrategyState = 'configured' | 'enabled' | 'not_set'
 interface StrategyRow {
   id: StrategyId
   title: string
-  eyebrow: string
   description: string
   useCase: string
   icon: ElementType
   state: StrategyState
-  evidence: string
   canDeactivate: boolean
+  href: string
+}
+
+const strategyLabels: Record<StrategyId, string> = {
+  'auth-rate': 'Auth-Rate Configuration',
+  rules: 'Rule-Based Routing',
+  volume: 'Volume Split Routing',
+  debit: 'Debit Routing',
+  'ab-test': 'A/B Testing',
+}
+
+function formatCompactNumber(value: number) {
+  return new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(value)
 }
 
 function algorithmType(algorithm?: RoutingAlgorithm) {
@@ -43,12 +53,6 @@ function algorithmType(algorithm?: RoutingAlgorithm) {
 
 function isRuleBasedAlgorithmType(type: string) {
   return type === 'advanced' || type === 'priority' || type === 'single'
-}
-
-function stateBadge(state: StrategyState) {
-  if (state === 'enabled') return <Badge variant="green">Enabled</Badge>
-  if (state === 'configured') return <Badge variant="green">Configured</Badge>
-  return <Badge variant="gray">Not set</Badge>
 }
 
 export function RoutingHubPage() {
@@ -72,45 +76,23 @@ export function RoutingHubPage() {
     () => apiPost('/rule/get', { merchant_id: merchantId, algorithm: 'successRate' }),
   )
 
+  const { data: analyticsData } = useSWR<AnalyticsOverviewResponse>(
+    merchantId ? '/analytics/overview?range=1d' : null,
+    fetcher,
+    { shouldRetryOnError: false },
+  )
+
   const activeAlgorithm = activeAlgorithms?.[0]
-  const activeType = algorithmType(activeAlgorithm)
-  const hasAuthRateConfig = Boolean((srConfig as any)?.config?.data || srConfig?.data)
-  const hasRuleBasedRouting = (activeAlgorithms || []).some((algorithm) => isRuleBasedAlgorithmType(algorithmType(algorithm)))
-  const hasVolumeSplit = (activeAlgorithms || []).some((algorithm) => algorithmType(algorithm) === 'volume_split')
+  const srData = ((srConfig as any)?.config?.data ?? srConfig?.data) as SRConfigData | undefined
+  const hasAuthRateConfig = Boolean(srData)
+  const hasRuleBasedRouting = (activeAlgorithms || []).some((a) => isRuleBasedAlgorithmType(algorithmType(a)))
+  const hasVolumeSplit = (activeAlgorithms || []).some((a) => algorithmType(a) === 'volume_split')
   const hasDebitRouting = debitRoutingFlag.isEnabled
-  const hasAbTest = (activeAlgorithms || []).some((algorithm) => algorithmType(algorithm) === 'ab_test')
-  const readiness = [hasAuthRateConfig, hasRuleBasedRouting || hasVolumeSplit, hasDebitRouting].filter(Boolean).length
+  const hasAbTest = (activeAlgorithms || []).some((a) => algorithmType(a) === 'ab_test')
   const loading = activeLoading || srLoading || debitRoutingFlag.isLoading
-  const activeRuleAlgorithm = (activeAlgorithms || []).find((algorithm) => isRuleBasedAlgorithmType(algorithmType(algorithm)))
-  const activeVolumeAlgorithm = (activeAlgorithms || []).find((algorithm) => algorithmType(algorithm) === 'volume_split')
-  const hasRuntimeStrategy = Boolean(activeAlgorithm || hasAuthRateConfig || hasDebitRouting)
-  const activeStrategyId: StrategyId | null = isRuleBasedAlgorithmType(activeType)
-    ? 'rules'
-    : activeType === 'volume_split'
-      ? 'volume'
-      : hasAuthRateConfig
-        ? 'auth-rate'
-        : hasDebitRouting
-          ? 'debit'
-          : null
-  const runtimeName = activeAlgorithm?.name
-    || (hasAuthRateConfig ? 'Auth-rate based routing' : hasDebitRouting ? 'Debit routing' : 'No active strategy')
-  const runtimeDescription = activeAlgorithm
-    ? `${activeAlgorithm.description || 'Active routing strategy'} is currently selected for payment routing.`
-    : hasAuthRateConfig && hasDebitRouting
-      ? 'Success-rate routing is configured and debit routing is enabled.'
-      : hasAuthRateConfig
-        ? 'Success-rate routing is configured and available for runtime routing decisions.'
-        : hasDebitRouting
-          ? 'Debit network routing is enabled.'
-          : 'Configure and activate a strategy before expecting runtime routing decisions to follow a custom policy.'
-  const runtimeType = activeType
-    ? activeType.replace('_', ' ')
-    : hasAuthRateConfig
-      ? 'success rate'
-      : hasDebitRouting
-        ? 'debit'
-        : '--'
+  const activeRuleAlgorithm = (activeAlgorithms || []).find((a) => isRuleBasedAlgorithmType(algorithmType(a)))
+  const activeVolumeAlgorithm = (activeAlgorithms || []).find((a) => algorithmType(a) === 'volume_split')
+
 
   async function deactivateStrategy(strategyId: StrategyId) {
     if (!merchantId) return
@@ -118,27 +100,15 @@ export function RoutingHubPage() {
   }
 
   async function doDeactivateStrategy(strategyId: StrategyId) {
-    const labels: Record<StrategyId, string> = {
-      'auth-rate': 'auth-rate configuration',
-      rules: 'rule-based routing',
-      volume: 'volume split routing',
-      debit: 'debit routing',
-      'ab-test': 'A/B experiment',
-    }
-
     setDeactivatingStrategy(strategyId)
     setActionMessage(null)
     setActionError(null)
-
     try {
       if (strategyId === 'auth-rate') {
         await apiPost('/rule/delete', { merchant_id: merchantId, algorithm: 'successRate' })
         await mutateSrConfig(undefined, { revalidate: false })
       } else if (strategyId === 'rules' && activeRuleAlgorithm) {
-        await apiPost('/routing/deactivate', {
-          created_by: merchantId,
-          routing_algorithm_id: activeRuleAlgorithm.id,
-        })
+        await apiPost('/routing/deactivate', { created_by: merchantId, routing_algorithm_id: activeRuleAlgorithm.id })
         await Promise.all([
           mutateActiveAlgorithms(),
           mutateCache(['active-routing', merchantId]),
@@ -146,10 +116,7 @@ export function RoutingHubPage() {
           mutateCache(`/routing/list/${merchantId}`),
         ])
       } else if (strategyId === 'volume' && activeVolumeAlgorithm) {
-        await apiPost('/routing/deactivate', {
-          created_by: merchantId,
-          routing_algorithm_id: activeVolumeAlgorithm.id,
-        })
+        await apiPost('/routing/deactivate', { created_by: merchantId, routing_algorithm_id: activeVolumeAlgorithm.id })
         await Promise.all([
           mutateActiveAlgorithms(),
           mutateCache(['active-routing', merchantId]),
@@ -159,7 +126,7 @@ export function RoutingHubPage() {
       } else if (strategyId === 'debit') {
         await debitRoutingFlag.setDebitRoutingEnabled(false)
       }
-      setActionMessage(`${labels[strategyId]} deactivated.`)
+      setActionMessage(`${strategyLabels[strategyId]} deactivated.`)
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -171,96 +138,64 @@ export function RoutingHubPage() {
     {
       id: 'auth-rate',
       title: 'Auth-rate based',
-      eyebrow: 'Performance routing',
-      description: 'Use connector score updates to steer traffic toward the best authorization rate.',
-      useCase: 'Best when you want automatic gateway choice based on live success-rate signals.',
+      description: 'Steers traffic toward the best authorization rate using live connector score signals.',
+      useCase: 'Use when you want automatic gateway selection driven by real-time success-rate data.',
       icon: TrendingUp,
       state: hasAuthRateConfig ? 'configured' : 'not_set',
-      evidence: hasAuthRateConfig ? 'Score config is available for runtime decisions.' : 'Set score defaults before relying on auth-rate routing.',
       canDeactivate: hasAuthRateConfig,
+      href: 'sr',
     },
     {
       id: 'rules',
       title: 'Rule based',
-      eyebrow: 'Policy routing',
-      description: 'Enforce explicit business conditions before traffic reaches connector selection.',
-      useCase: 'Best for BIN, network, country, amount, metadata, or merchant policy overrides.',
+      description: 'Evaluates explicit business conditions before traffic reaches connector selection.',
+      useCase: 'Use for BIN, network, country, amount, metadata, or merchant policy overrides.',
       icon: BookOpen,
       state: hasRuleBasedRouting ? 'enabled' : 'not_set',
-      evidence: hasRuleBasedRouting ? 'An advanced rule algorithm is active.' : 'No active advanced rule algorithm found.',
       canDeactivate: Boolean(activeRuleAlgorithm),
+      href: 'rules',
     },
     {
       id: 'volume',
       title: 'Volume split',
-      eyebrow: 'Controlled rollout',
-      description: 'Distribute payments by configured percentages and verify actual traffic share.',
-      useCase: 'Best for ramp-ups, A/B routing, new connector rollout, and traffic balancing.',
+      description: 'Distributes payments by configured percentages across gateways.',
+      useCase: 'Use for ramp-ups, new gateway rollout, traffic balancing, or controlled migrations.',
       icon: PieChart,
       state: hasVolumeSplit ? 'enabled' : 'not_set',
-      evidence: hasVolumeSplit ? 'A volume split algorithm is active.' : 'No active volume split algorithm found.',
       canDeactivate: Boolean(activeVolumeAlgorithm),
+      href: 'volume',
     },
     {
       id: 'debit',
       title: 'Debit routing',
-      eyebrow: 'Network cost routing',
-      description: 'Enable debit-network decisions for co-badged card payment flows.',
-      useCase: 'Best when debit network cost, issuer country, and regulated-card behavior matter.',
+      description: 'Enables debit-network decisions for co-badged card payment flows.',
+      useCase: 'Use when debit network cost, issuer country, or regulated-card behavior matters.',
       icon: Network,
       state: hasDebitRouting ? 'enabled' : 'not_set',
-      evidence: hasDebitRouting ? 'Merchant debit-routing flag is enabled.' : 'Enable the merchant flag before running debit network decisions.',
       canDeactivate: hasDebitRouting,
+      href: 'debit',
     },
     {
       id: 'ab-test',
       title: 'A/B Testing',
-      eyebrow: 'Experimentation',
-      description: 'Test two routing strategies against each other with statistical significance reporting.',
-      useCase: 'Best when validating a new routing algorithm, rule, or gateway before full rollout.',
+      description: 'Tests two routing strategies against each other with statistical significance reporting.',
+      useCase: 'Use when validating a new algorithm, rule, or gateway before full rollout.',
       icon: FlaskConical,
       state: hasAbTest ? 'enabled' : 'not_set',
-      evidence: hasAbTest ? 'An A/B test experiment is running.' : 'No active experiment. Create one to start testing.',
       canDeactivate: false,
+      href: 'ab-testing',
     },
   ]
 
-  const nextAction = !merchantId
-    ? {
-        title: 'Select or create a merchant first',
-        body: 'Routing setup and live strategy state require a signed-in merchant.',
-        icon: ShieldCheck,
-      }
-    : !hasAuthRateConfig
-      ? {
-          title: 'Start with auth-rate configuration',
-          body: 'Score defaults prepare auth-rate routing before custom rules are active.',
-          icon: TrendingUp,
-        }
-      : !hasRuntimeStrategy
-        ? {
-            title: 'Activate one routing strategy',
-            body: 'Create and activate a rule-based, volume-split, or debit routing strategy before runtime traffic depends on policy.',
-            icon: GitBranch,
-          }
-        : {
-            title: 'Active strategy is ready',
-            body: 'Routing is configured and ready for live traffic.',
-            icon: FlaskConical,
-          }
+  const activeStrategies = strategies.filter((s) => s.state !== 'not_set')
 
-  const NextActionIcon = nextAction.icon
-
-  const strategyLabels: Record<StrategyId, string> = {
-    'auth-rate': 'Auth-Rate Configuration',
-    rules: 'Rule-Based Routing',
-    volume: 'Volume Split Routing',
-    debit: 'Debit Routing',
-    'ab-test': 'A/B Testing',
-  }
+  const topRules = analyticsData?.top_rules || []
+  const activeNamedAlgorithm = activeAlgorithm?.name
+    ? activeAlgorithm
+    : null
 
   return (
-    <div className="mx-auto max-w-[1380px] space-y-6">
+    <div className="space-y-6 px-5 sm:px-6 lg:px-8 xl:px-10">
       <ConfirmDialog
         open={pendingDeactivateStrategy !== null}
         title={`Deactivate ${pendingDeactivateStrategy ? strategyLabels[pendingDeactivateStrategy] : ''}?`}
@@ -270,172 +205,206 @@ export function RoutingHubPage() {
         onConfirm={() => { const s = pendingDeactivateStrategy!; setPendingDeactivateStrategy(null); doDeactivateStrategy(s) }}
         onCancel={() => setPendingDeactivateStrategy(null)}
       />
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">Routing Hub</h1>
-            <Badge variant={merchantId ? 'blue' : 'orange'}>{merchantId || 'No merchant selected'}</Badge>
-          </div>
+
+      <header>
+        <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Routing Hub</h1>
+      </header>
+
+      {actionError && (
+        <div className="rounded-lg border border-red-500/20 bg-red-500/8 px-3 py-2 text-sm text-red-600 dark:text-red-400">
+          {actionError}
         </div>
-      </div>
+      )}
+      {actionMessage && (
+        <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-3 py-2 text-sm text-emerald-600 dark:text-emerald-400">
+          {actionMessage}
+        </div>
+      )}
 
-      <section className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
+      <div className="grid gap-6 xl:grid-cols-[1.3fr_0.7fr]">
+
+        {/* ── strategy list ──────────────────────────────────── */}
         <Card>
-          <CardBody className="p-6 md:p-7">
-            <div className="flex h-full flex-col justify-between gap-8">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div>
-                  <SurfaceLabel>Runtime posture</SurfaceLabel>
-                  <h2 className="mt-4 text-4xl font-semibold tracking-[-0.04em] text-slate-950 dark:text-white">
-                    {runtimeName}
-                  </h2>
-                  <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-500 dark:text-[#9aa6bb]">
-                    {runtimeDescription}
-                  </p>
-                </div>
-                <Badge variant={hasRuntimeStrategy ? 'green' : 'gray'}>
-                  {hasRuntimeStrategy ? 'Active' : loading ? 'Checking' : 'Inactive'}
-                </Badge>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-3">
-                <PostureStat label="Ready surfaces" value={`${readiness}/3`} detail="Auth-rate, traffic policy, debit" />
-                <PostureStat label="Runtime type" value={runtimeType} detail="Active routing mode" />
-                <PostureStat label="Debit gate" value={hasDebitRouting ? 'Enabled' : 'Off'} detail="Debit routing access" />
-              </div>
-
-              {activeStrategyId ? (
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="danger"
-                    onClick={() => deactivateStrategy(activeStrategyId)}
-                    disabled={deactivatingStrategy === activeStrategyId}
+          <CardBody className="p-0">
+            <div className="px-6 pt-5">
+              <SurfaceLabel>Routing strategies</SurfaceLabel>
+            </div>
+            <div className="mt-3 divide-y divide-slate-100 dark:divide-[#1e2535]">
+              {strategies.map((strategy) => {
+                const Icon = strategy.icon
+                const active = strategy.state !== 'not_set'
+                return (
+                  <div
+                    key={strategy.id}
+                    className={`flex items-center gap-4 px-6 py-4 ${active ? 'bg-emerald-500/[0.04] dark:bg-emerald-500/[0.06]' : ''}`}
                   >
-                    <PowerOff size={16} />
-                    {deactivatingStrategy === activeStrategyId ? 'Deactivating' : 'Deactivate'}
-                  </Button>
-                </div>
-              ) : null}
-            </div>
-          </CardBody>
-        </Card>
-
-        <Card>
-          <CardBody className="p-6 md:p-7">
-            <div className="flex items-start gap-4">
-              <div className="rounded-2xl border border-brand-500/20 bg-brand-500/10 p-3 text-brand-600 dark:text-sky-300">
-                <NextActionIcon size={22} />
-              </div>
-              <div>
-                <SurfaceLabel>Routing status</SurfaceLabel>
-                <h3 className="mt-3 text-2xl font-semibold text-slate-950 dark:text-white">{nextAction.title}</h3>
-                <p className="mt-3 text-sm leading-7 text-slate-500 dark:text-[#9aa6bb]">{nextAction.body}</p>
-              </div>
-            </div>
-
-            <div className="mt-7 space-y-3 border-t border-slate-200 pt-5 dark:border-[#242b36]">
-              <RunbookStep done={hasAuthRateConfig} label="Configure" detail="Define score defaults or routing policy." />
-              <RunbookStep done={hasRuntimeStrategy} label="Activate" detail="Make one strategy live." />
-              <RunbookStep done={false} label="Verify" detail="Confirm live routing behavior with a real decision flow." />
-            </div>
-          </CardBody>
-        </Card>
-      </section>
-
-      <section className="space-y-3">
-        <div>
-          <SurfaceLabel>Routing surfaces</SurfaceLabel>
-          <h2 className="mt-2 text-xl font-semibold text-slate-950 dark:text-white">Current configuration state</h2>
-        </div>
-
-        {actionError && (
-          <div className="rounded-lg border border-red-500/20 bg-red-500/8 px-3 py-2 text-sm text-red-500">
-            {actionError}
-          </div>
-        )}
-        {actionMessage && (
-          <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-3 py-2 text-sm text-emerald-500">
-            {actionMessage}
-          </div>
-        )}
-
-        <div className="overflow-hidden rounded-[30px] border border-slate-200 bg-white dark:border-[#2a303a] dark:bg-[#11151d]">
-          {strategies.map((strategy, index) => {
-            const Icon = strategy.icon
-            return (
-              <div
-                key={strategy.id}
-                className={`grid gap-5 px-5 py-5 lg:grid-cols-[minmax(320px,520px)_minmax(280px,1fr)] lg:items-center xl:grid-cols-[minmax(360px,560px)_minmax(320px,1fr)_max-content] ${
-                  index === 0 ? '' : 'border-t border-slate-200 dark:border-[#252d3a]'
-                }`}
-              >
-                <div className="flex items-start gap-4">
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-slate-500 dark:border-[#273141] dark:bg-[#0c1119] dark:text-[#8ea0bb]">
-                    <Icon size={22} />
-                  </div>
-                  <div className="min-w-0 max-w-[470px]">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-lg font-semibold text-slate-950 dark:text-white">{strategy.title}</h3>
-                      {stateBadge(strategy.state)}
+                    <div className={`rounded-xl border p-2.5 flex-shrink-0 ${
+                      active
+                        ? 'border-emerald-200/60 bg-emerald-50 text-emerald-600 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-400'
+                        : 'border-slate-200 bg-slate-50 text-slate-400 dark:border-[#273141] dark:bg-[#0c1119] dark:text-[#6d778a]'
+                    }`}>
+                      <Icon size={17} />
                     </div>
-                    <p className="mt-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-[#6d768a]">
-                      {strategy.eyebrow}
-                    </p>
-                    <p className="mt-3 text-sm leading-6 text-slate-500 dark:text-[#9aa6bb]">
-                      {strategy.description}
-                    </p>
-                  </div>
-                </div>
 
-                <div className="max-w-[520px]">
-                  <p className="text-sm font-medium text-slate-700 dark:text-[#d8deea]">{strategy.useCase}</p>
-                  <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-[#7d879b]">{strategy.evidence}</p>
-                </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-semibold text-slate-950 dark:text-white">{strategy.title}</p>
+                        {strategy.state === 'enabled' || strategy.state === 'configured'
+                          ? <Badge variant="green">{strategy.state === 'configured' ? 'Configured' : 'Enabled'}</Badge>
+                          : <Badge variant="gray">Not set</Badge>}
+                      </div>
+                      <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#8390a7]">
+                        {strategy.description}
+                      </p>
+                      <p className="mt-0.5 text-xs leading-5 text-slate-400 dark:text-[#5a6a82]">
+                        {strategy.useCase}
+                      </p>
+                    </div>
 
-                {strategy.canDeactivate ? (
-                  <div className="flex flex-wrap justify-start gap-2 lg:col-start-2 xl:col-start-auto xl:justify-end xl:whitespace-nowrap">
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      onClick={() => deactivateStrategy(strategy.id)}
-                      disabled={deactivatingStrategy === strategy.id}
-                    >
-                      <PowerOff size={14} />
-                      {deactivatingStrategy === strategy.id ? 'Deactivating' : 'Deactivate'}
-                    </Button>
+                    <div className="flex flex-shrink-0 items-center gap-2">
+                      {strategy.canDeactivate && (
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          onClick={() => deactivateStrategy(strategy.id)}
+                          disabled={deactivatingStrategy === strategy.id}
+                        >
+                          <PowerOff size={13} />
+                          {deactivatingStrategy === strategy.id ? 'Deactivating' : 'Deactivate'}
+                        </Button>
+                      )}
+                      <Link
+                        to={strategy.href}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 dark:border-[#2a303a] dark:bg-[#11151d] dark:text-[#c4cfdf] dark:hover:bg-[#161b26]"
+                      >
+                        Configure
+                        <ChevronRight size={13} className="text-slate-400 dark:text-[#5a6a82]" />
+                      </Link>
+                    </div>
                   </div>
-                ) : null}
+                )
+              })}
+            </div>
+          </CardBody>
+        </Card>
+
+        {/* ── status panel ───────────────────────────────────── */}
+        <Card>
+          <CardBody className="p-6 space-y-6">
+
+            {/* Active strategies */}
+            <div>
+              <SurfaceLabel>Active strategies</SurfaceLabel>
+              <div className="mt-3 divide-y divide-slate-100 dark:divide-[#1e2535]">
+                {activeStrategies.length > 0 ? activeStrategies.map((s) => {
+                  const Icon = s.icon
+                  return (
+                    <div key={s.id} className="flex items-center justify-between gap-3 py-2.5">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <Icon size={14} className="flex-shrink-0 text-emerald-500" />
+                        <span className="truncate text-sm font-medium text-slate-900 dark:text-white">
+                          {s.title}
+                        </span>
+                      </div>
+                      <Badge variant="green">
+                        {s.state === 'configured' ? 'Configured' : 'Enabled'}
+                      </Badge>
+                    </div>
+                  )
+                }) : (
+                  <p className="py-2 text-sm text-slate-500 dark:text-[#8390a7]">
+                    {loading ? 'Checking…' : 'No active strategies yet'}
+                  </p>
+                )}
               </div>
-            )
-          })}
-        </div>
-      </section>
+            </div>
 
-    </div>
-  )
-}
+            {/* Running algorithm */}
+            {activeNamedAlgorithm && (
+              <div className="border-t border-slate-100 pt-6 dark:border-[#1e2535]">
+                <SurfaceLabel>Running algorithm</SurfaceLabel>
+                <p className="mt-3 text-sm font-semibold text-slate-950 dark:text-white">
+                  {activeNamedAlgorithm.name}
+                </p>
+                {activeNamedAlgorithm.description && (
+                  <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#8390a7]">
+                    {activeNamedAlgorithm.description}
+                  </p>
+                )}
+                <div className="mt-2">
+                  <Badge variant="blue">
+                    {algorithmType(activeNamedAlgorithm).replace(/_/g, ' ')}
+                  </Badge>
+                </div>
+              </div>
+            )}
 
-function PostureStat({ label, value, detail }: { label: string; value: string; detail: string }) {
-  return (
-    <div className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4 dark:border-[#273141] dark:bg-[#0c1119]">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-[#6d768a]">{label}</p>
-      <p className="mt-3 text-2xl font-semibold text-slate-950 dark:text-white">{value}</p>
-      <p className="mt-1 text-xs text-slate-500 dark:text-[#7d879b]">{detail}</p>
-    </div>
-  )
-}
+            {/* Top rules triggered */}
+            <div className="border-t border-slate-100 pt-6 dark:border-[#1e2535]">
+              <div className="flex items-center justify-between gap-2">
+                <SurfaceLabel>Rules triggered</SurfaceLabel>
+                <Badge variant="blue">Last 24h</Badge>
+              </div>
+              {topRules.length > 0 ? (
+                <div className="mt-3 space-y-2">
+                  {topRules.slice(0, 5).map((rule) => (
+                    <div key={rule.rule_name} className="flex items-center justify-between gap-3">
+                      <span className="truncate text-xs text-slate-700 dark:text-[#c4cfdf]">
+                        {rule.rule_name}
+                      </span>
+                      <span className="flex-shrink-0 text-xs font-semibold tabular-nums text-slate-950 dark:text-white">
+                        {formatCompactNumber(rule.count)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-2 text-xs text-slate-500 dark:text-[#8390a7]">
+                  No rule hits in the last 24 hours.
+                </p>
+              )}
+            </div>
 
-function RunbookStep({ done, label, detail }: { done: boolean; label: string; detail: string }) {
-  return (
-    <div className="flex items-start gap-3">
-      <div className={`mt-0.5 rounded-full ${done ? 'text-emerald-500' : 'text-slate-400 dark:text-[#6d768a]'}`}>
-        <CheckCircle2 size={17} />
+            {/* Auth-rate config */}
+            {hasAuthRateConfig && srData && (
+              <div className="border-t border-slate-100 pt-6 dark:border-[#1e2535]">
+                <div className="flex items-center justify-between gap-2">
+                  <SurfaceLabel>Auth-rate config</SurfaceLabel>
+                  <Badge variant="green">Configured</Badge>
+                </div>
+                <div className="mt-3 divide-y divide-slate-100 dark:divide-[#1e2535]">
+                  <SRRow label="Score window" value={`${srData.defaultBucketSize} requests`} />
+                  {srData.defaultHedgingPercent != null && (
+                    <SRRow label="Hedging" value={`${srData.defaultHedgingPercent}%`} />
+                  )}
+                  {srData.defaultLatencyThreshold != null && (
+                    <SRRow label="Latency threshold" value={`${srData.defaultLatencyThreshold} ms`} />
+                  )}
+                  {srData.defaultLowerResetFactor != null && (
+                    <SRRow label="Lower reset" value={String(srData.defaultLowerResetFactor)} />
+                  )}
+                  {srData.defaultUpperResetFactor != null && (
+                    <SRRow label="Upper reset" value={String(srData.defaultUpperResetFactor)} />
+                  )}
+                  {(srData.subLevelInputConfig?.length ?? 0) > 0 && (
+                    <SRRow label="Payment method overrides" value={`${srData.subLevelInputConfig!.length}`} />
+                  )}
+                </div>
+              </div>
+            )}
+
+          </CardBody>
+        </Card>
       </div>
-      <div>
-        <p className="text-sm font-semibold text-slate-900 dark:text-white">{label}</p>
-        <p className="text-xs leading-5 text-slate-500 dark:text-[#7d879b]">{detail}</p>
-      </div>
     </div>
   )
 }
 
+function SRRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-2">
+      <span className="text-xs text-slate-500 dark:text-[#8390a7]">{label}</span>
+      <span className="text-xs font-semibold tabular-nums text-slate-950 dark:text-white">{value}</span>
+    </div>
+  )
+}

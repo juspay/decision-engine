@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CalendarDays, ChevronLeft, ChevronRight, Clock3 } from 'lucide-react'
+import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Button } from './Button'
 
 type DateTimePickerProps = {
@@ -73,12 +73,12 @@ function clampToNow(date: Date) {
 }
 
 function buildCalendar(viewDate: Date): CalendarCell[] {
-  const startOfMonth = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1)
-  const startOffset = startOfMonth.getDay()
-  const start = new Date(startOfMonth)
+  const firstOfMonth = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1)
+  const startOffset = firstOfMonth.getDay()
+  const start = new Date(firstOfMonth)
   start.setDate(start.getDate() - startOffset)
 
-  return Array.from({ length: 42 }, (_, index) => {
+  const cells: CalendarCell[] = Array.from({ length: 42 }, (_, index) => {
     const date = new Date(start)
     date.setDate(start.getDate() + index)
     return {
@@ -87,6 +87,13 @@ function buildCalendar(viewDate: Date): CalendarCell[] {
       inMonth: date.getMonth() === viewDate.getMonth(),
     }
   })
+
+  // Trim the 6th row if all cells are outside the current month
+  const lastRow = cells.slice(35)
+  if (lastRow.every((cell) => !cell.inMonth)) {
+    return cells.slice(0, 35)
+  }
+  return cells
 }
 
 export function DateTimePicker({ value, onChange, className = '' }: DateTimePickerProps) {
@@ -179,47 +186,47 @@ export function DateTimePicker({ value, onChange, className = '' }: DateTimePick
           }
           setOpen((current) => !current)
         }}
-        className="flex h-11 w-full items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white/90 px-4 text-left text-sm text-slate-700 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.2)] transition focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-[#e5ecf7] dark:shadow-none"
+        className="flex h-9 w-full items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white/90 px-3 text-left text-sm text-slate-700 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.2)] transition focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-[#e5ecf7] dark:shadow-none"
       >
-        <span className="truncate">{formatDisplayValue(parsedValue)}</span>
-        <CalendarDays size={16} className="shrink-0 text-slate-400 dark:text-[#8a8a93]" />
+        <span className="truncate text-[13px]">{formatDisplayValue(parsedValue)}</span>
+        <CalendarDays size={14} className="shrink-0 text-slate-400 dark:text-[#8a8a93]" />
       </button>
 
       {open ? (
-        <div className="absolute left-0 top-[calc(100%+10px)] z-[80] w-[284px] rounded-[24px] border border-slate-200 bg-white/95 p-3 shadow-[0_24px_70px_-40px_rgba(15,23,42,0.45)] backdrop-blur dark:border-[#2a303a] dark:bg-[#11151d]/95 dark:shadow-[0_24px_70px_-40px_rgba(0,0,0,0.7)]">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-[13px] font-semibold text-slate-900 dark:text-white">{monthLabel(viewDate)}</p>
-              <p className="mt-1 text-[11px] text-slate-500 dark:text-[#8a8a93]">Choose a day and time</p>
-            </div>
+        <div className="absolute left-0 top-[calc(100%+8px)] z-[80] w-[252px] rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-[0_24px_70px_-40px_rgba(15,23,42,0.45)] backdrop-blur dark:border-[#2a303a] dark:bg-[#11151d]/95 dark:shadow-[0_24px_70px_-40px_rgba(0,0,0,0.7)]">
+          {/* Month navigation */}
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <p className="text-[12px] font-semibold text-slate-900 dark:text-white">{monthLabel(viewDate)}</p>
             <div className="flex items-center gap-1">
               <button
                 type="button"
                 onClick={() => setViewDate((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1))}
-                className="flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:border-slate-300 hover:text-slate-900 dark:border-[#2a303a] dark:text-[#8a8a93] dark:hover:text-white"
+                className="flex h-6 w-6 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-slate-300 hover:text-slate-900 dark:border-[#2a303a] dark:text-[#8a8a93] dark:hover:text-white"
               >
-                <ChevronLeft size={14} />
+                <ChevronLeft size={12} />
               </button>
               <button
                 type="button"
                 disabled={viewingCurrentOrFutureMonth}
                 onClick={() => setViewDate((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1))}
-                className="flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:border-slate-200 disabled:hover:text-slate-500 dark:border-[#2a303a] dark:text-[#8a8a93] dark:hover:text-white dark:disabled:hover:text-[#8a8a93]"
+                className="flex h-6 w-6 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:border-slate-200 disabled:hover:text-slate-500 dark:border-[#2a303a] dark:text-[#8a8a93] dark:hover:text-white dark:disabled:hover:text-[#8a8a93]"
               >
-                <ChevronRight size={14} />
+                <ChevronRight size={12} />
               </button>
             </div>
           </div>
 
-          <div className="mt-3 grid grid-cols-7 gap-1 text-center text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-[#667085]">
-            {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day) => (
-              <span key={day} className="py-2">
+          {/* Day-of-week labels */}
+          <div className="grid grid-cols-7 gap-px text-center text-[9px] font-semibold uppercase tracking-[0.1em] text-slate-400 dark:text-[#667085]">
+            {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, index) => (
+              <span key={index} className="py-0.5">
                 {day}
               </span>
             ))}
           </div>
 
-          <div className="grid grid-cols-7 gap-1">
+          {/* Calendar grid */}
+          <div className="grid grid-cols-7 gap-px">
             {calendar.map((cell) => {
               const selected = sameDay(cell.date, draftDate)
               const future = isFutureDay(cell.date, now)
@@ -229,11 +236,11 @@ export function DateTimePicker({ value, onChange, className = '' }: DateTimePick
                   type="button"
                   disabled={future}
                   onClick={() => selectDay(cell.date)}
-                  className={`flex h-9 items-center justify-center rounded-lg text-[13px] transition ${
+                  className={`flex h-7 items-center justify-center rounded-md text-[12px] transition ${
                     future
                       ? 'cursor-not-allowed text-slate-300 opacity-35 dark:text-[#4b5565]'
                       : selected
-                      ? 'bg-brand-600 text-white shadow-[0_12px_30px_-22px_rgba(59,130,246,0.7)] dark:bg-brand-500 dark:text-white'
+                      ? 'bg-brand-600 text-white shadow-[0_8px_20px_-14px_rgba(59,130,246,0.7)] dark:bg-brand-500 dark:text-white'
                       : cell.inMonth
                         ? 'text-slate-700 hover:bg-slate-100 dark:text-[#e5ecf7] dark:hover:bg-[#1a2130]'
                         : 'text-slate-300 hover:bg-slate-100 dark:text-[#4b5565] dark:hover:bg-[#161b24]'
@@ -245,19 +252,13 @@ export function DateTimePicker({ value, onChange, className = '' }: DateTimePick
             })}
           </div>
 
-          <div className="mt-3 rounded-[18px] border border-slate-200 bg-slate-50/70 p-3 dark:border-[#2a303a] dark:bg-[#161b24]">
-            <div className="mb-2 flex items-center gap-2">
-              <Clock3 size={13} className="text-slate-400 dark:text-[#8a8a93]" />
-              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8a8a93]">
-                Time
-              </p>
-            </div>
-
-            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+          {/* Time + actions */}
+          <div className="mt-2 space-y-2 border-t border-slate-100 pt-2 dark:border-[#2a303a]">
+            <div className="flex items-center gap-1.5">
               <select
                 value={pad(draftDate.getHours())}
                 onChange={(event) => updateTime('hours', event.target.value)}
-                className="h-9 rounded-xl border border-slate-200 bg-white/90 px-3 text-sm text-slate-700 dark:border-[#2a303a] dark:bg-[#11151d] dark:text-[#e5ecf7]"
+                className="h-7 w-[52px] rounded-lg border border-slate-200 bg-white/90 px-1.5 text-[12px] text-slate-700 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-[#e5ecf7]"
               >
                 {Array.from({ length: 24 }, (_, index) => {
                   const disabled = selectedDayIsToday && index > now.getHours()
@@ -269,11 +270,11 @@ export function DateTimePicker({ value, onChange, className = '' }: DateTimePick
                   )
                 })}
               </select>
-              <span className="text-sm font-semibold text-slate-400 dark:text-[#8a8a93]">:</span>
+              <span className="text-[11px] font-semibold text-slate-400 dark:text-[#8a8a93]">:</span>
               <select
                 value={pad(draftDate.getMinutes())}
                 onChange={(event) => updateTime('minutes', event.target.value)}
-                className="h-9 rounded-xl border border-slate-200 bg-white/90 px-3 text-sm text-slate-700 dark:border-[#2a303a] dark:bg-[#11151d] dark:text-[#e5ecf7]"
+                className="h-7 w-[52px] rounded-lg border border-slate-200 bg-white/90 px-1.5 text-[12px] text-slate-700 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-[#e5ecf7]"
               >
                 {Array.from({ length: 60 }, (_, index) => {
                   const disabled =
@@ -288,14 +289,15 @@ export function DateTimePicker({ value, onChange, className = '' }: DateTimePick
                   )
                 })}
               </select>
+              <button
+                type="button"
+                onClick={useNow}
+                className="ml-auto text-[11px] font-medium text-brand-600 hover:underline dark:text-brand-400"
+              >
+                Now
+              </button>
             </div>
-          </div>
-
-          <div className="mt-3 flex items-center justify-between gap-2">
-            <Button size="sm" variant="ghost" onClick={useNow}>
-              Now
-            </Button>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center justify-end gap-1.5">
               <Button size="sm" variant="secondary" onClick={() => setOpen(false)}>
                 Cancel
               </Button>
