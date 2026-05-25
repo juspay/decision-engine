@@ -718,9 +718,9 @@ function authRateColor(rate: number) {
   return 'text-red-500 dark:text-red-400'
 }
 
-function srBadgeVariant(value: number): BadgeVariant {
-  if (value >= 0.85) return 'green'
-  if (value >= 0.70) return 'orange'
+function srBadgeVariant(valuePercent: number): BadgeVariant {
+  if (valuePercent >= 85) return 'green'
+  if (valuePercent >= 70) return 'orange'
   return 'red'
 }
 
