@@ -718,9 +718,9 @@ function authRateColor(rate: number) {
   return 'text-red-500 dark:text-red-400'
 }
 
-function srBadgeVariant(valuePercent: number): BadgeVariant {
-  if (valuePercent >= 85) return 'green'
-  if (valuePercent >= 70) return 'orange'
+function srBadgeVariant(value: number): BadgeVariant {
+  if (value >= 0.85) return 'green'
+  if (value >= 0.70) return 'orange'
   return 'red'
 }
 
@@ -2199,7 +2199,7 @@ export function AnalyticsPage() {
                 {previewRows.length ? (
                   <div className="space-y-2">
                     {previewRows.slice(0, 10).map((row) => {
-                      const statusVariant: BadgeVariant = row.latest_status?.toLowerCase().includes('fail') ? 'red' : row.latest_status === 'default_selection' ? 'orange' : 'green'
+                      const statusVariant: BadgeVariant = row.latest_status?.toLowerCase()?.includes('fail') ? 'red' : row.latest_status === 'default_selection' ? 'orange' : 'green'
                       return (
                         <div
                           key={row.lookup_key}
