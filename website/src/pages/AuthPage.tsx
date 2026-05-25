@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { useAuthStore, MerchantInfo } from '../store/authStore'
 import { useMerchantStore } from '../store/merchantStore'
+import { mutate } from 'swr'
 import { apiFetch } from '../lib/api'
 import { getResolvedThemePreference, persistThemePreference } from '../lib/theme'
 import { SurfaceLabel } from '../components/ui/Card'
@@ -203,6 +204,9 @@ export function AuthPage() {
         authRes.merchants,
       )
       if (authRes.merchant_id) setMerchantId(authRes.merchant_id)
+      // Clear any stale /auth/me error from a previous expired session so AuthGuard
+      // doesn't see the cached 401 and clear the fresh token before revalidating.
+      mutate('/auth/me', undefined, { revalidate: false })
 
       const pendingRaw = localStorage.getItem('pending_merchant_name')
       const pending = pendingRaw ? (() => { try { return JSON.parse(pendingRaw) } catch { return null } })() : null

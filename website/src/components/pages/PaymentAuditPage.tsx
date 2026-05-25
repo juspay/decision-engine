@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import useSWR from 'swr'
 import { useSearchParams } from 'react-router-dom'
 import { ArrowLeft, SlidersHorizontal } from 'lucide-react'
@@ -506,6 +506,8 @@ export function PaymentAuditPage() {
   const [customEnd, setCustomEnd] = useState(() =>
     toDateTimeInputValue(initialCustomWindow.end_ms),
   )
+  const [customRangeOpen, setCustomRangeOpen] = useState(false)
+  const timeRangeControlRef = useRef<HTMLDivElement | null>(null)
   const pageSize = 12
 
   const customWindow = useMemo(() => {
@@ -516,6 +518,24 @@ export function PaymentAuditPage() {
     if (start_ms === null || end_ms === null || end_ms <= start_ms || start_ms > now || end_ms > now) return undefined
     return { start_ms, end_ms }
   }, [customEnd, customStart, range])
+
+  useEffect(() => {
+    if (!customRangeOpen) return
+    function handlePointerDown(event: MouseEvent) {
+      if (!timeRangeControlRef.current?.contains(event.target as Node)) {
+        setCustomRangeOpen(false)
+      }
+    }
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') setCustomRangeOpen(false)
+    }
+    document.addEventListener('mousedown', handlePointerDown)
+    document.addEventListener('keydown', handleEscape)
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown)
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [customRangeOpen])
 
   const auditPath = mode === 'rule_based' ? '/analytics/preview-trace' : '/analytics/payment-audit'
   const modeRoutingApproach = routingApproachForMode(mode)
@@ -750,6 +770,7 @@ export function PaymentAuditPage() {
     setPage(nextPage)
     setTrailFocused(false)
     setSelectedEventId(null)
+    setCustomRangeOpen(nextRange === 'custom')
     if (nextRange !== 'custom') {
       const preset = presetWindow(nextRange)
       setCustomStart(toDateTimeInputValue(preset.start_ms))
@@ -811,47 +832,46 @@ export function PaymentAuditPage() {
           <Button size="sm" variant="ghost" onClick={refreshAll}>
             Refresh
           </Button>
-          <div className="flex items-center gap-1 rounded-[18px] border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#161b24]">
-            {RANGE_OPTIONS.map((value) => (
-              <Button
-                key={value}
-                size="sm"
-                variant="secondary"
-                className={sectionButtonClass(range === value)}
-                onClick={() => updateRange(value)}
-              >
-                {value}
-              </Button>
-            ))}
+          <div ref={timeRangeControlRef} className="relative">
+            <div className="flex items-center gap-1 rounded-[18px] border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#161b24]">
+              {RANGE_OPTIONS.map((value) => (
+                <Button
+                  key={value}
+                  size="sm"
+                  variant="secondary"
+                  className={sectionButtonClass(range === value)}
+                  onClick={() => updateRange(value)}
+                >
+                  {value}
+                </Button>
+              ))}
+            </div>
+            {range === 'custom' && customRangeOpen ? (
+              <div className="absolute right-0 top-[calc(100%+10px)] z-[90] w-[min(92vw,560px)] rounded-[24px] border border-slate-200 bg-white/95 p-4 shadow-[0_24px_70px_-40px_rgba(15,23,42,0.45)] backdrop-blur dark:border-[#2a303a] dark:bg-[#11151d]/95 dark:shadow-[0_24px_70px_-40px_rgba(0,0,0,0.7)]">
+                <div className="flex items-center justify-between gap-4">
+                  <p className="text-sm font-semibold text-slate-900 dark:text-white">Select time range</p>
+                  <Button size="sm" variant="ghost" onClick={() => setCustomRangeOpen(false)}>Close</Button>
+                </div>
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <div>
+                    <p className="mb-1.5 text-xs font-medium text-slate-500 dark:text-[#8a8a93]">Start time</p>
+                    <DateTimePicker className="w-full" value={customStart} onChange={setCustomStart} />
+                  </div>
+                  <div>
+                    <p className="mb-1.5 text-xs font-medium text-slate-500 dark:text-[#8a8a93]">End time</p>
+                    <DateTimePicker className="w-full" value={customEnd} onChange={setCustomEnd} />
+                  </div>
+                </div>
+                {!customWindow ? (
+                  <p className="mt-3 text-xs text-red-500">
+                    Choose an end time after the start time. Future dates are not available.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
-
-      {range === 'custom' ? (
-        <GlassCard className="overflow-visible p-4">
-          <div className="grid gap-3 md:grid-cols-2">
-            <FilterField label="Start time">
-              <DateTimePicker
-                className="w-full"
-                value={customStart}
-                onChange={setCustomStart}
-              />
-            </FilterField>
-            <FilterField label="End time">
-              <DateTimePicker
-                className="w-full"
-                value={customEnd}
-                onChange={setCustomEnd}
-              />
-            </FilterField>
-          </div>
-          {!customWindow ? (
-            <p className="mt-3 text-xs text-red-500">
-              Choose an end time after the start time. Future dates are not available.
-            </p>
-          ) : null}
-        </GlassCard>
-      ) : null}
 
       <div className="space-y-4">
         <div className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-[18px] border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#11151d]">

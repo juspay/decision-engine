@@ -2,17 +2,12 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import useSWR from 'swr'
 import {
-  Area,
-  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
-  Cell,
   Legend,
   Line,
   LineChart,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -278,6 +273,7 @@ function formatPercentPointDelta(value: number | undefined, digits = 1) {
   return `${sign}${formatNumber(Math.abs(value), digits)} pp`
 }
 
+
 function readChartValue(row: Record<string, number | null>, key: string) {
   const value = row[key]
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
@@ -520,37 +516,6 @@ function InfoButton({ content }: { content: InfoContent }) {
   )
 }
 
-function HitsCard({
-  label,
-  value,
-  subtitle,
-  eyebrow = 'Endpoint hits',
-}: {
-  label: string
-  value: number
-  subtitle?: string
-  eyebrow?: string
-}) {
-  return (
-    <Card className="h-full overflow-hidden">
-      <CardBody className="flex h-full min-h-[150px] flex-col justify-between">
-        <div className="space-y-2">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
-            {eyebrow}
-          </p>
-          <p className="text-lg font-semibold text-slate-900 dark:text-white">{label}</p>
-        </div>
-        <div className="flex items-end justify-between gap-4">
-          <p className="text-5xl font-semibold tracking-tight text-slate-950 dark:text-white">
-            {formatNumber(value, 0)}
-          </p>
-          {subtitle ? <Badge variant="blue">{subtitle}</Badge> : null}
-        </div>
-      </CardBody>
-    </Card>
-  )
-}
-
 function RoutingAlignmentCard({
   summary,
   comparisonRows,
@@ -747,6 +712,18 @@ function analyticsRouteLabel(route: string) {
   return route
 }
 
+function authRateColor(rate: number) {
+  if (rate >= 0.85) return 'text-emerald-600 dark:text-emerald-400'
+  if (rate >= 0.70) return 'text-amber-500 dark:text-amber-400'
+  return 'text-red-500 dark:text-red-400'
+}
+
+function srBadgeVariant(valuePercent: number): BadgeVariant {
+  if (valuePercent >= 85) return 'green'
+  if (valuePercent >= 70) return 'orange'
+  return 'red'
+}
+
 function SmartRetrySection({ stats }: { stats: SmartRetryStats | null }) {
   if (!stats || stats.retried_count === 0) return null
   const recoveryRate = Math.round((stats.recovered_count / stats.retried_count) * 100)
@@ -869,8 +846,8 @@ export function AnalyticsPage() {
   const [range, setRange] = useState<AnalyticsRangeValue>('1d')
   const [view, setView] = useState<AnalyticsView>('transactions')
   const [routingFilters, setRoutingFilters] = useState<RoutingFilters>(EMPTY_ROUTING_FILTERS)
-  const [connectorFiltersOpen, setConnectorFiltersOpen] = useState(false)
   const [customRangeOpen, setCustomRangeOpen] = useState(false)
+  const [connectorFiltersOpen, setConnectorFiltersOpen] = useState(false)
   const [routingAlignmentOpen, setRoutingAlignmentOpen] = useState(false)
   const [showAllFilters, setShowAllFilters] = useState(false)
   const [previewListPage, setPreviewListPage] = useState(1)
@@ -1133,6 +1110,13 @@ export function AnalyticsPage() {
     () => routeHits.filter((item) => item.route !== '/rule_evaluate'),
     [routeHits],
   )
+  const overallAuthRate = useMemo(() => {
+    const scores = overview.data?.top_scores ?? []
+    const totalTx = scores.reduce((sum, s) => sum + s.transaction_count, 0)
+    if (!totalTx) return null
+    const weightedSum = scores.reduce((sum, s) => sum + s.score_value * s.transaction_count, 0)
+    return weightedSum / totalTx
+  }, [overview.data])
   const ruleEvaluateHits = useMemo(
     () => routeHits.find((item) => item.route === '/rule_evaluate')?.count || 0,
     [routeHits],
@@ -1164,6 +1148,15 @@ export function AnalyticsPage() {
       .map(([status, count]) => ({ status, count }))
       .sort((left, right) => right.count - left.count)
   }, [previewRows])
+  const previewStatusTotal = useMemo(
+    () => previewStatusSummary.reduce((sum, item) => sum + item.count, 0),
+    [previewStatusSummary],
+  )
+  const ruleMatchRate = useMemo(() => {
+    if (!previewStatusTotal) return null
+    const successCount = previewStatusSummary.find((s) => s.status === 'success')?.count ?? 0
+    return successCount / previewStatusTotal
+  }, [previewStatusSummary, previewStatusTotal])
   const chartBucketSize = useMemo(
     () => bucketSizeForWindow(range, activeQueryWindow),
     [activeQueryWindow, range],
@@ -1217,29 +1210,10 @@ export function AnalyticsPage() {
     1,
     Math.ceil(previewListTotalResults / PREVIEW_LIST_PAGE_SIZE),
   )
-  const previewListStart = previewListTotalResults
-    ? (previewListPage - 1) * PREVIEW_LIST_PAGE_SIZE + 1
-    : 0
-  const previewListEnd = previewListTotalResults
-    ? previewListStart + previewListRows.length - 1
-    : 0
   const previewGatewaysTouched = previewGatewaySummary.filter(
     (item) => item.gateway !== 'No gateway selected',
   ).length
   const previewGatewayMaxCount = previewGatewaySummary[0]?.count || 1
-  const previewGatewayMixData = useMemo(() => {
-    const total = previewGatewaySummary.reduce((sum, item) => sum + item.count, 0)
-
-    return previewGatewaySummary.map((item, index) => ({
-      name: item.gateway,
-      value: item.count,
-      percentage: total ? (item.count / total) * 100 : 0,
-      color:
-        item.gateway === 'No gateway selected'
-          ? '#64748b'
-          : CHART_COLORS[index % CHART_COLORS.length],
-    }))
-  }, [previewGatewaySummary])
   const previewIngestionPending =
     ruleEvaluateHits > 0 &&
     !previewTrace.error &&
@@ -1575,15 +1549,6 @@ export function AnalyticsPage() {
     routingAlignmentSummary.volumeLeader?.gateway,
   ])
 
-  const activeFilterSummary = useMemo(() => {
-    const parts = availableFilters.dimensions.flatMap((dimension) => {
-      const value = routingFilters.dimensions[dimension.key]
-      return value ? [`${dimension.label}: ${value}`] : []
-    })
-    if (routingFilters.gateways.length) parts.push(routingFilters.gateways.join(', '))
-    return parts.length ? parts.join(' / ') : 'All routing dimensions'
-  }, [availableFilters.dimensions, routingFilters])
-
   const visibleDimensions = useMemo(() => {
     if (showAllFilters || availableFilters.dimensions.length <= MAX_VISIBLE_DIMENSIONS) {
       return availableFilters.dimensions
@@ -1794,17 +1759,45 @@ export function AnalyticsPage() {
       <div className="relative">
       {view === 'transactions' ? (
         <div className="space-y-6">
-          <section className="space-y-5">
-            <div className="grid gap-5 lg:grid-cols-2">
-              {transactionRouteHits.map((item) => (
-                <HitsCard
-                  key={item.route}
-                  label={analyticsRouteLabel(item.route)}
-                  value={item.count}
-                />
-              ))}
-            </div>
-          </section>
+          <Card>
+            <CardBody>
+              <div className="grid gap-6 sm:grid-cols-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                    Overall auth rate
+                  </p>
+                  {overallAuthRate !== null ? (
+                    <>
+                      <p className={`mt-2 text-4xl font-semibold tabular-nums ${authRateColor(overallAuthRate)}`}>
+                        {formatPercent(overallAuthRate)}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                        Weighted across all gateways
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="mt-2 text-4xl font-semibold text-slate-300 dark:text-slate-700">—</p>
+                      <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">No score data yet</p>
+                    </>
+                  )}
+                </div>
+                {transactionRouteHits.map((item) => (
+                  <div key={item.route}>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                      {analyticsRouteLabel(item.route)}
+                    </p>
+                    <p className="mt-2 text-2xl font-semibold tabular-nums text-slate-950 dark:text-white">
+                      {formatNumber(item.count, 0)}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                      {item.route === '/decide_gateway' ? 'routing decisions' : 'score feedback calls'}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </CardBody>
+          </Card>
 
           <RoutingAlignmentCard
             summary={routingAlignmentSummary}
@@ -1831,8 +1824,8 @@ export function AnalyticsPage() {
           {gatewayShareData.rows.length ? (
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={gatewayShareData.rows}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <BarChart data={gatewayShareData.rows} barCategoryGap="35%" barGap={3}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
                   <XAxis dataKey="bucket_ms" tickFormatter={bucketTickFormatter} tick={{ fontSize: 11 }} />
                   <YAxis tick={{ fontSize: 11 }} />
                   <Tooltip
@@ -1844,18 +1837,15 @@ export function AnalyticsPage() {
                   />
                   <Legend />
                   {gatewayShareData.gateways.map((gateway, index) => (
-                    <Area
+                    <Bar
                       key={gateway}
-                      type="monotone"
                       dataKey={gateway}
-                      stroke={CHART_COLORS[index % CHART_COLORS.length]}
-                      strokeWidth={3}
                       fill={CHART_COLORS[index % CHART_COLORS.length]}
-                      fillOpacity={0.14}
                       name={gateway}
+                      radius={[3, 3, 0, 0]}
                     />
                   ))}
-                </AreaChart>
+                </BarChart>
               </ResponsiveContainer>
             </div>
           ) : (
@@ -1876,9 +1866,6 @@ export function AnalyticsPage() {
               </h2>
               <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
                 Historical connector success rate for the active filters; compare it with selected volume above.
-              </p>
-              <p className="mt-2 text-xs font-medium text-slate-600 dark:text-[#b3b3bd]">
-                Active filters: {activeFilterSummary}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -2034,7 +2021,7 @@ export function AnalyticsPage() {
           {latestConnectorSummary.length ? (
             <div className="flex flex-wrap gap-2">
               {latestConnectorSummary.map((item) => (
-                <Badge key={item.gateway} variant="blue">
+                <Badge key={item.gateway} variant={srBadgeVariant(item.value)}>
                   {item.gateway}: {formatPercent(item.value)}
                 </Badge>
               ))}
@@ -2088,33 +2075,52 @@ export function AnalyticsPage() {
         </div>
       ) : (
         <div className="space-y-6">
-          <section className="space-y-5">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Rule-based activity</h2>
-                <p className="mt-1 text-sm text-slate-500 dark:text-[#8a8a93]">
-                  Routing decisions from <code>/routing/evaluate</code>, kept separate from auth-rate transaction routing and gateway scoring.
-                </p>
+          <Card>
+            <CardBody>
+              <div className="grid gap-6 sm:grid-cols-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                    Rule match rate
+                  </p>
+                  {ruleMatchRate !== null ? (
+                    <>
+                      <p className={`mt-2 text-4xl font-semibold tabular-nums ${authRateColor(ruleMatchRate)}`}>
+                        {formatPercent(ruleMatchRate)}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                        Decisions matched to a configured rule
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="mt-2 text-4xl font-semibold text-slate-300 dark:text-slate-700">—</p>
+                      <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">No decision data yet</p>
+                    </>
+                  )}
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                    Rule Evaluate
+                  </p>
+                  <p className="mt-2 text-2xl font-semibold tabular-nums text-slate-950 dark:text-white">
+                    {formatNumber(ruleEvaluateHits, 0)}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">routing decisions</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                    Gateways active
+                  </p>
+                  <p className="mt-2 text-2xl font-semibold tabular-nums text-slate-950 dark:text-white">
+                    {previewGatewaysTouched}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">unique connectors selected</p>
+                </div>
               </div>
-              <InfoButton content={CARD_INFO.preview_hits} />
-            </div>
+            </CardBody>
+          </Card>
 
-            <div className="grid gap-5 lg:grid-cols-2">
-              <HitsCard
-                label="Rule Evaluate"
-                value={ruleEvaluateHits}
-              />
-              <HitsCard
-                label="Gateways touched"
-                value={previewGatewaysTouched}
-                subtitle="Across recent rule decisions"
-                eyebrow="Decision coverage"
-              />
-            </div>
-          </section>
-
-          <div className="grid gap-5 xl:grid-cols-2">
-            <Card className="overflow-visible">
+          <Card className="overflow-visible">
               <CardHeader>
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -2132,8 +2138,8 @@ export function AnalyticsPage() {
                 {previewConnectorSeriesData.gateways.length ? (
                   <div className="h-80">
                     <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={previewConnectorSeriesData.rows} barGap={6}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      <BarChart data={previewConnectorSeriesData.rows} barCategoryGap="35%" barGap={3}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
                         <XAxis dataKey="bucket_ms" tickFormatter={bucketTickFormatter} tick={{ fontSize: 11 }} />
                         <YAxis tick={{ fontSize: 11 }} />
                         <Tooltip
@@ -2148,7 +2154,6 @@ export function AnalyticsPage() {
                           <Bar
                             key={gateway}
                             dataKey={gateway}
-                            stackId="preview-connectors"
                             fill={
                               gateway === 'No gateway selected'
                                 ? '#64748b'
@@ -2175,114 +2180,14 @@ export function AnalyticsPage() {
               </CardBody>
             </Card>
 
-            <Card className="overflow-visible">
-              <CardHeader>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-sm font-semibold text-slate-800 dark:text-white">
-                      Gateway selection mix
-                    </h2>
-                    <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                      Connector share for selected rule decisions.
-                    </p>
-                  </div>
-                  <InfoButton content={CARD_INFO.preview_share} />
-                </div>
-              </CardHeader>
-              <CardBody>
-                {previewGatewayMixData.length ? (
-                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_240px]">
-                    <div className="relative h-80">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Tooltip
-                            formatter={(value: unknown, name: string | number, item: { payload?: { percentage?: number } }) => [
-                              `${formatNumber(value as number, 0)} decisions`,
-                              `${String(name)} (${formatPercent(item.payload?.percentage || 0)})`,
-                            ]}
-                            contentStyle={CHART_TOOLTIP_STYLE}
-                            labelStyle={CHART_TOOLTIP_LABEL_STYLE}
-                            itemStyle={CHART_TOOLTIP_ITEM_STYLE}
-                            wrapperStyle={CHART_TOOLTIP_WRAPPER_STYLE}
-                          />
-                          <Legend />
-                          <Pie
-                            data={previewGatewayMixData}
-                            dataKey="value"
-                            nameKey="name"
-                            innerRadius={72}
-                            outerRadius={108}
-                            paddingAngle={3}
-                          >
-                            {previewGatewayMixData.map((entry) => (
-                              <Cell key={entry.name} fill={entry.color} />
-                            ))}
-                          </Pie>
-                        </PieChart>
-                      </ResponsiveContainer>
-                      <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
-                          Sample size
-                        </p>
-                        <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">
-                          {previewRows.length}
-                        </p>
-                        <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                          decisions
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="space-y-3">
-                      {previewGatewayMixData.map((item) => (
-                        <div
-                          key={item.name}
-                          className="rounded-[20px] border border-slate-200 bg-white/80 px-4 py-3 dark:border-[#1d1d23] dark:bg-[#0c0c0e]"
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="flex items-center gap-2">
-                              <span
-                                className="h-2.5 w-2.5 rounded-full"
-                                style={{ backgroundColor: item.color }}
-                              />
-                              <p className="text-sm font-medium text-slate-900 dark:text-white">
-                                {item.name}
-                              </p>
-                            </div>
-                            <p className="text-xs font-semibold text-slate-500 dark:text-[#8a8a93]">
-                              {item.value}
-                            </p>
-                          </div>
-                          <p className="mt-2 text-xs text-slate-500 dark:text-[#8a8a93]">
-                            {formatPercent(item.percentage)} of decisions
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : previewIngestionPending ? (
-                  <PendingState
-                    title="Building decision connector mix"
-                    body="Recent rule decisions are still being processed. This card will update automatically once decision rows are available."
-                  />
-                ) : (
-                  <EmptyState
-                    title="No decision connector mix yet"
-                    body="Rule decisions need to return gateway selections before the mix chart can render."
-                  />
-                )}
-              </CardBody>
-            </Card>
-          </div>
-
           <div className="grid items-stretch gap-5 xl:grid-cols-2">
             <Card className="h-full overflow-visible">
               <CardHeader>
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Recent rule decisions</h2>
+                    <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Recent decisions</h2>
                     <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                      Decisions captured from <code>/routing/evaluate</code>. This does not affect transaction scoring.
+                      Latest decisions from <code>/routing/evaluate</code>.
                     </p>
                   </div>
                   <Badge variant="purple">
@@ -2291,96 +2196,41 @@ export function AnalyticsPage() {
                 </div>
               </CardHeader>
               <CardBody>
-                {!previewList.data && previewList.isLoading ? (
-                  <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-[#8a8a93]">
-                    <Spinner size={16} />
-                    Loading rule decisions…
-                  </div>
-                ) : previewList.error && !previewList.data ? (
-                  <ErrorMessage error={previewList.error.message} />
-                ) : previewListRows.length ? (
-                  <div className="space-y-4">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <p className="text-xs text-slate-500 dark:text-[#8a8a93]">
-                        Showing {previewListStart}-{previewListEnd} of {previewListTotalResults}
-                      </p>
-                      {previewList.isLoading ? (
-                        <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-[#8a8a93]">
-                          <Spinner size={14} />
-                          Loading page…
-                        </div>
-                      ) : null}
-                    </div>
-                    <div className="max-h-[520px] space-y-3 overflow-y-auto pr-1">
-                      {previewListRows.map((row) => (
+                {previewRows.length ? (
+                  <div className="space-y-2">
+                    {previewRows.slice(0, 10).map((row) => {
+                      const statusVariant: BadgeVariant = row.latest_status?.toLowerCase().includes('fail') ? 'red' : row.latest_status === 'default_selection' ? 'orange' : 'green'
+                      return (
                         <div
                           key={row.lookup_key}
-                          className="rounded-[22px] border border-slate-200 bg-white/90 px-4 py-4 dark:border-[#1d1d23] dark:bg-[#0c0c0e]"
+                          className="flex items-center justify-between gap-3 rounded-2xl border border-slate-100 bg-slate-50/60 px-3 py-2.5 dark:border-[#1d1d23] dark:bg-[#0c0c0e]"
                         >
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
-                                {row.payment_id || row.request_id || row.lookup_key}
-                              </p>
-                              <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                                {(row.merchant_id || 'unknown merchant')} · {formatDateTime(row.last_seen_ms)}
-                              </p>
-                            </div>
-                            <Badge variant="purple">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <Badge variant={statusVariant}>
                               {row.latest_status || 'decision'}
                             </Badge>
+                            {row.latest_gateway ? (
+                              <span className="truncate text-xs font-medium text-slate-700 dark:text-[#c8d3e6]">
+                                {row.latest_gateway}
+                              </span>
+                            ) : null}
                           </div>
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            <Badge variant="blue">Rule Evaluate</Badge>
-                            {row.latest_gateway ? <Badge variant="green">{row.latest_gateway}</Badge> : null}
-                            <Badge variant="gray">{row.event_count} events</Badge>
-                          </div>
+                          <span className="shrink-0 text-xs text-slate-400 dark:text-[#5a6478]">
+                            {formatDateTime(row.last_seen_ms)}
+                          </span>
                         </div>
-                      ))}
-                    </div>
-                    {previewListTotalPages > 1 ? (
-                      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4 dark:border-[#1d1d23]">
-                        <p className="text-xs text-slate-500 dark:text-[#8a8a93]">
-                          Page {previewListPage} of {previewListTotalPages}
-                        </p>
-                        <div className="flex items-center gap-2">
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={() =>
-                              setPreviewListPage((current) => Math.max(1, current - 1))
-                            }
-                            disabled={previewListPage === 1 || previewList.isLoading}
-                          >
-                            Previous
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={() =>
-                              setPreviewListPage((current) =>
-                                Math.min(previewListTotalPages, current + 1),
-                              )
-                            }
-                            disabled={
-                              previewListPage >= previewListTotalPages || previewList.isLoading
-                            }
-                          >
-                            Next
-                          </Button>
-                        </div>
-                      </div>
-                    ) : null}
+                      )
+                    })}
                   </div>
                 ) : previewIngestionPending ? (
                   <PendingState
-                    title="Waiting for decision rows"
-                    body="Recent /routing/evaluate calls were recorded. Detailed rule decision rows will appear as soon as they are ready."
+                    title="Processing recent decisions"
+                    body="Rule evaluate calls were received. Decision rows will appear as soon as they are ready."
                   />
                 ) : (
                   <EmptyState
-                    title="No rule-based activity yet"
-                    body="Rule-based activity will appear after /routing/evaluate calls in this window."
+                    title="No decisions yet"
+                    body="Recent rule decisions will appear after /routing/evaluate calls in this window."
                   />
                 )}
               </CardBody>
@@ -2434,20 +2284,36 @@ export function AnalyticsPage() {
               <Card className="h-full overflow-visible">
                 <CardHeader>
                   <div>
-                    <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Recent decision outcomes</h2>
+                    <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Decision outcomes</h2>
                     <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                      Status mix from the loaded decisions.
+                      How decisions resolved — rule match vs. default fallback.
                     </p>
                   </div>
                 </CardHeader>
                 <CardBody>
                   {previewStatusSummary.length ? (
-                    <div className="flex flex-wrap gap-2">
-                      {previewStatusSummary.map((item) => (
-                        <Badge key={item.status} variant={item.status.toLowerCase().includes('fail') ? 'red' : item.status === 'default_selection' ? 'orange' : 'purple'}>
-                          {item.status} · {item.count}
-                        </Badge>
-                      ))}
+                    <div className="space-y-4">
+                      {previewStatusSummary.map((item) => {
+                        const pct = previewStatusTotal ? (item.count / previewStatusTotal) * 100 : 0
+                        const variant: BadgeVariant = item.status.toLowerCase().includes('fail') ? 'red' : item.status === 'default_selection' ? 'orange' : 'green'
+                        const barColor = variant === 'green' ? '#22c55e' : variant === 'orange' ? '#f97316' : '#ef4444'
+                        return (
+                          <div key={item.status} className="space-y-1.5">
+                            <div className="flex items-center justify-between gap-3">
+                              <Badge variant={variant}>{item.status}</Badge>
+                              <span className="text-xs font-semibold tabular-nums text-slate-900 dark:text-white">
+                                {item.count} <span className="font-normal text-slate-500 dark:text-[#8a8a93]">({formatPercent(pct)})</span>
+                              </span>
+                            </div>
+                            <div className="h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-[#141822]">
+                              <div
+                                className="h-full rounded-full"
+                                style={{ width: `${pct}%`, backgroundColor: barColor }}
+                              />
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
                   ) : previewIngestionPending ? (
                     <PendingState

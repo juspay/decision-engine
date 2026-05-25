@@ -29,11 +29,11 @@ MAX_VUS_SAT=200
 STEP_DUR_SAT=20s
 RAMP_DUR_SAT=5s
 
-# sandbox baseline (100m CPU provisioning — used for before/after diff)
+# sandbox baseline — measured 2026-05-24, current build with hot-path caching
 SANDBOX_BASELINE='{
-  "5":  {"rps":18.5,"rt_p95":200.3,"svr_avg":38.6,"svr_p95":108.8},
-  "12": {"rps":22.5,"rt_p95":509.8,"svr_avg":226.0,"svr_p95":398.4},
-  "20": {"rps":null,"rt_p95":null,"svr_avg":null,"svr_p95":null}
+  "5":  {"rps":25.0,"rt_p95":50.0,"svr_avg":3.5,"svr_p95":5.0},
+  "20": {"rps":94.5,"rt_p95":68.0,"svr_avg":5.7,"svr_p95":12.0},
+  "50": {"rps":218.0,"rt_p95":90.0,"svr_avg":13.0,"svr_p95":29.0}
 }'
 
 while [[ $# -gt 0 ]]; do
