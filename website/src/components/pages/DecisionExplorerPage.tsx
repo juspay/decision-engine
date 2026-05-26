@@ -1179,8 +1179,8 @@ export function DecisionExplorerPage() {
 
   // Finds a real error code for `connector` that produces the desired GSM decision + penalty.
   function resolveSimErrorInfo(connector: string, gsmDecision: 'retry' | 'do_default', penalized: boolean) {
-    const penalizedMessages = new Set(['Issue with Configurations', 'Technical issue with PSP', 'Something went wrong'])
-    const notPenalizedMessages = new Set(['Issue with Payment Method details', 'Issue with Integration'])
+    const penalizedMessages = new Set(['Issue with Integration', 'Issue with Configurations', 'Technical issue with PSP', 'Something went wrong'])
+    const notPenalizedMessages = new Set(['Issue with Payment Method details'])
     const targetMessages = penalized ? penalizedMessages : notPenalizedMessages
     return gsmRules.find(r =>
       r.connector === connector &&
