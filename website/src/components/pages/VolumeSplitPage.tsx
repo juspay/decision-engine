@@ -1,16 +1,15 @@
 import { useState } from 'react'
 import useSWR, { useSWRConfig } from 'swr'
-import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts'
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
 import { Card, CardBody, CardHeader } from '../ui/Card'
 import { Button } from '../ui/Button'
-import { Badge } from '../ui/Badge'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { Spinner } from '../ui/Spinner'
 import { useMerchantStore } from '../../store/merchantStore'
 import { apiPost } from '../../lib/api'
 import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
 import { RoutingAlgorithm } from '../../types/api'
-import { Plus, Trash2, Eye, PowerOff } from 'lucide-react'
+import { Plus, Trash2, PowerOff, ChevronDown, ChevronUp } from 'lucide-react'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { validateVolumeSplitRule } from '../../features/routing/volumeSplit/schema'
 import { toVolumeSplitCreatePayload } from '../../features/routing/volumeSplit/payload'
@@ -78,7 +77,6 @@ export function VolumeSplitPage() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [createdId, setCreatedId] = useState<string | null>(null)
-  const [showCurrentConfig, setShowCurrentConfig] = useState(false)
   const [expandedRuleIds, setExpandedRuleIds] = useState<Set<string>>(new Set())
   const [deactivatingRuleId, setDeactivatingRuleId] = useState<string | null>(null)
   const [pendingActivateId, setPendingActivateId] = useState<string | null>(null)
@@ -200,27 +198,15 @@ export function VolumeSplitPage() {
 
   function toggleRuleExpand(id: string) {
     setExpandedRuleIds(prev => {
-      const newSet = new Set(prev)
-      if (newSet.has(id)) {
-        newSet.delete(id)
-      } else {
-        newSet.add(id)
-      }
-      return newSet
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
     })
   }
 
-  // Build pie data from active rule
-  const algo = activeVol ? (activeVol.algorithm_data || activeVol.algorithm) : null
-  const pieData = algo && 'data' in algo
-    ? (algo.data as { split: number; output: { gateway_name: string; gateway_id: string | null } }[]).map(item => ({
-        name: `${item.output?.gateway_name ?? '?'}${item.output?.gateway_id ? ` (${item.output.gateway_id})` : ''}`,
-        value: item.split,
-      }))
-    : []
-
   return (
-    <div className="space-y-6 max-w-5xl">
+    <div className="space-y-6">
       <ConfirmDialog
         open={pendingActivateId !== null}
         title="Switch to Volume Split Routing?"
@@ -239,169 +225,30 @@ export function VolumeSplitPage() {
         onConfirm={() => { const id = pendingDeactivateId!; setPendingDeactivateId(null); doDeactivate(id) }}
         onCancel={() => setPendingDeactivateId(null)}
       />
+
       <div>
-        <h1 className="text-2xl font-bold text-slate-900">Volume Split Routing</h1>
+        <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Volume Split Routing</h1>
       </div>
 
-      {/* Active Configuration */}
-      {activeVol && (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <h2 className="text-sm font-semibold text-slate-800">Active Volume Split</h2>
-              <p className="text-xs text-slate-500 mt-0.5">{activeVol.name}</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <Badge variant="green">Active</Badge>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowCurrentConfig(!showCurrentConfig)}
-              >
-                <Eye size={14} className="mr-1" />
-                {showCurrentConfig ? 'Hide' : 'View'}
-              </Button>
-              <Button
-                type="button"
-                variant="danger"
-                size="sm"
-                onClick={() => handleDeactivate(activeVol.id)}
-                disabled={deactivatingRuleId === activeVol.id}
-              >
-                <PowerOff size={14} />
-                {deactivatingRuleId === activeVol.id ? 'Deactivating' : 'Deactivate'}
-              </Button>
-            </div>
-          </CardHeader>
-          {showCurrentConfig && (
-            <CardBody>
-              <ResponsiveContainer width="100%" height={220}>
-                <PieChart>
-                  <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={({ name, value }) => `${name}: ${value}%`} labelLine={{ stroke: '#45454f' }}>
-                    {pieData.map((_, i) => (
-                      <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    formatter={(v) => `${v}%`}
-                    contentStyle={CHART_TOOLTIP_STYLE}
-                    labelStyle={CHART_TOOLTIP_LABEL_STYLE}
-                    itemStyle={CHART_TOOLTIP_ITEM_STYLE}
-                  />
-                  <Legend wrapperStyle={{ color: '#8e8ea0' }} />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="mt-4 text-xs text-slate-600">
-                <p><strong>Rule ID:</strong> {activeVol.id}</p>
-                <p><strong>Created:</strong> {activeVol.created_at ? new Date(activeVol.created_at).toLocaleString() : 'Unknown'}</p>
-              </div>
-            </CardBody>
-          )}
-        </Card>
-      )}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
 
-      {/* Create Rule */}
-      <Card>
-        <CardHeader>
-          <h2 className="font-medium text-slate-800">Create Volume Split Rule</h2>
-        </CardHeader>
-        <CardBody className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Rule Name</label>
-            <input
-              value={ruleName}
-              onChange={e => setRuleName(e.target.value)}
-              placeholder="e.g. ab-test-split"
-              className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm w-64 focus:outline-none focus:ring-1 focus:ring-brand-500"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <div className="hidden grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(260px,320px)_32px] gap-2 px-1 text-xs font-medium text-slate-500 md:grid">
-              <span>Gateway Name</span>
-              <span>Gateway ID</span>
-              <span>Split %</span>
-              <span />
-            </div>
-            {gateways.map((g, index) => {
-              const isInferred = g.id === inferredGatewayId
-              const label = g.gatewayName.trim() || `Gateway ${index + 1}`
-
-              return (
-              <div key={g.id} className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(260px,320px)_32px] md:items-center">
-                <input
-                  value={g.gatewayName}
-                  onChange={e => updateGateway(g.id, 'gatewayName', e.target.value)}
-                  placeholder="e.g. stripe"
-                  className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-                />
-                <input
-                  value={g.gatewayId}
-                  onChange={e => updateGateway(g.id, 'gatewayId', e.target.value)}
-                  placeholder="optional gateway_id"
-                  className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-                />
-                <div className="flex min-w-0 items-center gap-2 rounded-lg border border-slate-200 bg-transparent px-2 py-1.5 focus-within:ring-1 focus-within:ring-brand-500 dark:border-[#222226]">
-                  <span
-                    className="h-2.5 w-2.5 shrink-0 rounded-full"
-                    style={{ backgroundColor: COLORS[index % COLORS.length] }}
-                  />
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={g.split}
-                    disabled={isInferred}
-                    onChange={e => updateGateway(g.id, 'split', Number(e.target.value))}
-                    aria-label={`${label} allocation slider`}
-                    className="h-2 min-w-0 flex-1 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-                    style={{ accentColor: COLORS[index % COLORS.length] }}
-                  />
-                  <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    value={g.split}
-                    onChange={e => updateGateway(g.id, 'split', Number(e.target.value))}
-                    disabled={isInferred}
-                    aria-label={`${label} split percentage`}
-                    className="w-12 border-0 bg-transparent p-0 text-right text-sm tabular-nums focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
-                  />
-                  <span className="text-xs text-slate-500">%</span>
-                  {isInferred && gateways.length > 1 && (
-                    <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600 dark:bg-[#1a1a22] dark:text-slate-300">
-                      Auto
-                    </span>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => removeGateway(g.id)}
-                  disabled={gateways.length === 1}
-                  className="text-slate-400 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <Trash2 size={15} />
-                </button>
-              </div>
-              )
-            })}
-            <div className="flex items-center gap-3">
-              <button type="button" onClick={addGateway} className="flex items-center gap-1 text-sm text-brand-500 hover:text-brand-600">
-                <Plus size={14} /> Add Gateway
-              </button>
-              <span className={`text-xs font-medium ${total === 100 ? 'text-emerald-400' : 'text-red-400'}`}>
-                Total: {total}%{overAllocated ? ` (reduce fixed splits by ${overAllocated}%)` : total !== 100 ? ' (must be 100)' : ''}
-              </span>
-            </div>
-          </div>
-
+        {/* ── Left: saved rules list ───────────────────────────── */}
+        <div className="space-y-3 lg:col-span-1">
+          <SavedRulesList
+            merchantId={merchantId}
+            activeRuleId={activeVol?.id}
+            onActivate={handleActivate}
+            onDeactivate={handleDeactivate}
+            deactivatingRuleId={deactivatingRuleId}
+            expandedRuleIds={expandedRuleIds}
+            onToggleExpand={toggleRuleExpand}
+          />
           {activeRuleBased && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
               <strong>Rule-Based routing is active</strong> — activating a volume split rule will automatically deactivate it.
             </div>
           )}
-          <ErrorMessage error={error} />
+          {error && <ErrorMessage error={error} />}
           {success && (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-200">
               <span className="min-w-0">
@@ -414,42 +261,131 @@ export function VolumeSplitPage() {
               ) : null}
             </div>
           )}
+        </div>
 
-          <Button onClick={handleCreate} disabled={saving || !merchantId}>
-            {saving ? <><Spinner size={14} /> Creating…</> : 'Create Rule'}
-          </Button>
-        </CardBody>
-      </Card>
+        {/* ── Right: create form ───────────────────────────────── */}
+        <div className="space-y-4 lg:col-span-2">
+          <Card>
+            <CardHeader>
+              <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Create Volume Split Rule</h2>
+            </CardHeader>
+            <CardBody className="space-y-4">
+              <div>
+                <label className="mb-1 block text-xs text-slate-500 dark:text-[#8a8a93]">Rule Name *</label>
+                <input
+                  value={ruleName}
+                  onChange={e => setRuleName(e.target.value)}
+                  placeholder="e.g. ab-test-split"
+                  className="w-64 rounded-lg border border-slate-200 bg-transparent px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226]"
+                />
+              </div>
 
-      <ActiveRulesList
-        merchantId={merchantId}
-        activeRuleId={activeVol?.id}
-        onActivate={handleActivate}
-        onDeactivate={handleDeactivate}
-        deactivatingRuleId={deactivatingRuleId}
-        expandedRuleIds={expandedRuleIds}
-        onToggleExpand={toggleRuleExpand}
-      />
+              <div className="space-y-2">
+                <div className="hidden grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(260px,320px)_32px] gap-2 px-1 text-xs font-medium text-slate-500 md:grid">
+                  <span>Gateway Name</span>
+                  <span>Gateway ID</span>
+                  <span>Split %</span>
+                  <span />
+                </div>
+                {gateways.map((g, index) => {
+                  const isInferred = g.id === inferredGatewayId
+                  const label = g.gatewayName.trim() || `Gateway ${index + 1}`
+                  return (
+                    <div key={g.id} className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(260px,320px)_32px] md:items-center">
+                      <input
+                        value={g.gatewayName}
+                        onChange={e => updateGateway(g.id, 'gatewayName', e.target.value)}
+                        placeholder="e.g. stripe"
+                        className="rounded-lg border border-slate-200 bg-transparent px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226]"
+                      />
+                      <input
+                        value={g.gatewayId}
+                        onChange={e => updateGateway(g.id, 'gatewayId', e.target.value)}
+                        placeholder="optional gateway_id"
+                        className="rounded-lg border border-slate-200 bg-transparent px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226]"
+                      />
+                      <div className="flex min-w-0 items-center gap-2 rounded-lg border border-slate-200 bg-transparent px-2 py-1.5 focus-within:ring-1 focus-within:ring-brand-500 dark:border-[#222226]">
+                        <span
+                          className="h-2.5 w-2.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                        />
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          value={g.split}
+                          disabled={isInferred}
+                          onChange={e => updateGateway(g.id, 'split', Number(e.target.value))}
+                          aria-label={`${label} allocation slider`}
+                          className="h-2 min-w-0 flex-1 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                          style={{ accentColor: COLORS[index % COLORS.length] }}
+                        />
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={g.split}
+                          onChange={e => updateGateway(g.id, 'split', Number(e.target.value))}
+                          disabled={isInferred}
+                          aria-label={`${label} split percentage`}
+                          className="w-12 border-0 bg-transparent p-0 text-right text-sm tabular-nums focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
+                        />
+                        <span className="text-xs text-slate-500">%</span>
+                        {isInferred && gateways.length > 1 && (
+                          <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600 dark:bg-[#1a1a22] dark:text-slate-300">
+                            Auto
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeGateway(g.id)}
+                        disabled={gateways.length === 1}
+                        className="text-slate-400 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  )
+                })}
+                <div className="flex items-center gap-3">
+                  <button type="button" onClick={addGateway} className="flex items-center gap-1 text-sm text-brand-500 hover:text-brand-600">
+                    <Plus size={14} /> Add Gateway
+                  </button>
+                  <span className={`text-xs font-medium ${total === 100 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    Total: {total}%{overAllocated ? ` (reduce fixed splits by ${overAllocated}%)` : total !== 100 ? ' (must be 100)' : ''}
+                  </span>
+                </div>
+              </div>
+
+              <Button onClick={handleCreate} disabled={saving || !merchantId}>
+                {saving ? <><Spinner size={14} /> Creating…</> : 'Create Rule'}
+              </Button>
+            </CardBody>
+          </Card>
+        </div>
+
+      </div>
     </div>
   )
 }
 
-function ActiveRulesList({
+function SavedRulesList({
   merchantId,
   activeRuleId,
   onActivate,
   onDeactivate,
   deactivatingRuleId,
   expandedRuleIds,
-  onToggleExpand
+  onToggleExpand,
 }: {
-  merchantId: string;
-  activeRuleId?: string;
-  onActivate: (id: string) => void;
-  onDeactivate: (id: string) => void;
-  deactivatingRuleId: string | null;
-  expandedRuleIds: Set<string>;
-  onToggleExpand: (id: string) => void;
+  merchantId: string
+  activeRuleId?: string
+  onActivate: (id: string) => void
+  onDeactivate: (id: string) => void
+  deactivatingRuleId: string | null
+  expandedRuleIds: Set<string>
+  onToggleExpand: (id: string) => void
 }) {
   const { data: rules, isLoading } = useSWR<RoutingAlgorithm[]>(
     merchantId ? ['routing-list', merchantId] : null,
@@ -458,51 +394,73 @@ function ActiveRulesList({
 
   const volRules = rules?.filter(r => (r.algorithm_data || r.algorithm)?.type === 'volume_split') ?? []
 
-  if (!merchantId) return null
-  if (isLoading) return <div className="flex justify-center py-4"><Spinner /></div>
-  if (!volRules.length) return null
-
   return (
     <Card>
-      <CardHeader><h2 className="font-medium text-slate-800">Saved Volume Split Rules</h2></CardHeader>
-      <CardBody className="p-0">
-        <table className="w-full text-sm">
-          <thead className="bg-slate-50 dark:bg-[#0a0a0f] text-xs text-slate-500 uppercase tracking-wider">
-            <tr>
-              <th className="text-left px-4 py-2">Name</th>
-              <th className="text-left px-4 py-2">Split</th>
-              <th className="px-4 py-2" />
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-[#1c1c24]">
-            {volRules.map(r => {
-              const details = toVolumeSplitRuleDetailsState(r)
-              const itemText = details?.gateways.map(i => `${i.gatewayName}${i.gatewayId ? `(${i.gatewayId})` : ''}:${i.split}%`).join(' | ') || ''
-              const algorithm = r.algorithm_data || r.algorithm
-              const isExpanded = expandedRuleIds.has(r.id)
+      <CardHeader>
+        <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Saved Rules</h2>
+      </CardHeader>
+      <div>
+        {!merchantId ? (
+          <p className="px-6 py-3 text-sm text-slate-400">Set merchant ID to load rules.</p>
+        ) : isLoading ? (
+          <div className="flex justify-center py-4"><Spinner /></div>
+        ) : volRules.length === 0 ? (
+          <p className="px-6 py-3 text-sm text-slate-400">No volume split rules yet.</p>
+        ) : (
+          <div>
+            {volRules.map((r) => {
               const isActive = activeRuleId === r.id
+              const isExpanded = expandedRuleIds.has(r.id)
+              const details = toVolumeSplitRuleDetailsState(r)
+              const splitText = details?.gateways
+                .map(g => `${g.gatewayName}: ${g.split}%`)
+                .join(' · ')
+
               return (
-                <>
-                  <tr key={r.id} className="hover:bg-slate-100 dark:bg-[#0f0f16] transition-colors">
-                    <td className="px-4 py-2 font-medium text-slate-800">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span>{r.name}</span>
-                        {isActive && <Badge variant="green">Active</Badge>}
-                      </div>
-                    </td>
-                    <td className="px-4 py-2 text-slate-600 text-xs">
-                      {itemText}
-                    </td>
-                    <td className="px-4 py-2 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => onToggleExpand(r.id)}
-                        >
-                          <Eye size={14} className="mr-1" />
-                          {isExpanded ? 'Hide' : 'View'}
-                        </Button>
+                <div
+                  key={r.id}
+                  className={`border-b border-slate-100 dark:border-[#1e2330] last:border-b-0 transition-colors ${
+                    isActive ? 'bg-emerald-50/50 dark:bg-emerald-900/10' : ''
+                  }`}
+                >
+                  <div className="px-6 pt-3 pb-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => onToggleExpand(r.id)}
+                        className="group min-w-0 flex-1 text-left"
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <p className={`truncate font-medium transition-colors group-hover:text-brand-600 dark:group-hover:text-brand-400 ${
+                            isActive ? 'text-emerald-900 dark:text-emerald-100' : 'text-slate-900 dark:text-white'
+                          }`}>
+                            {r.name}
+                          </p>
+                          {isActive && (
+                            <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">
+                              ● Active
+                            </span>
+                          )}
+                          {isExpanded
+                            ? <ChevronUp size={12} className="ml-auto shrink-0 text-slate-400" />
+                            : <ChevronDown size={12} className="ml-auto shrink-0 text-slate-400" />
+                          }
+                        </div>
+                        <div className="mt-0.5 flex items-center gap-2">
+                          {splitText && (
+                            <p className="min-w-0 truncate text-[11px] text-slate-500 dark:text-[#6d7a8d]">
+                              {splitText}
+                            </p>
+                          )}
+                          {r.created_at && (
+                            <span className="ml-auto shrink-0 text-[10px] text-slate-400 dark:text-[#4e5870]">
+                              {new Date(r.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                            </span>
+                          )}
+                        </div>
+                      </button>
+
+                      <div className="flex shrink-0 items-center gap-1.5">
                         {isActive ? (
                           <Button
                             size="sm"
@@ -510,42 +468,65 @@ function ActiveRulesList({
                             onClick={() => onDeactivate(r.id)}
                             disabled={deactivatingRuleId === r.id}
                           >
-                            <PowerOff size={14} />
+                            <PowerOff size={13} />
                             {deactivatingRuleId === r.id ? 'Deactivating' : 'Deactivate'}
                           </Button>
                         ) : (
-                          <Button size="sm" variant="secondary" onClick={() => onActivate(r.id)}>
+                          <button
+                            type="button"
+                            onClick={() => onActivate(r.id)}
+                            className="inline-flex min-w-[68px] items-center justify-center rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-500 transition-colors duration-150 hover:border-brand-200 hover:bg-brand-50 hover:text-brand-600 dark:border-[#2a3040] dark:bg-[#1a1f2a] dark:text-[#8090a8] dark:hover:border-brand-800 dark:hover:bg-brand-900/20 dark:hover:text-brand-400"
+                          >
                             Activate
-                          </Button>
+                          </button>
                         )}
                       </div>
-                    </td>
-                  </tr>
-                  {isExpanded && (
-                    <tr>
-                      <td colSpan={3} className="px-4 py-3 bg-slate-50 dark:bg-[#151518]">
-                        <div className="text-xs text-slate-600 space-y-2">
-                          <p><strong>ID:</strong> {r.id}</p>
-                          <p><strong>Description:</strong> {r.description || 'N/A'}</p>
-                          {r.created_at && (
-                            <p><strong>Created:</strong> {new Date(r.created_at).toLocaleString()}</p>
-                          )}
-                          <div>
-                            <strong>Configuration:</strong>
-                            <pre className="mt-1 p-2 bg-slate-100 dark:bg-[#0f0f11] border border-transparent dark:border-[#222226] rounded text-xs overflow-auto max-h-48">
-                              {JSON.stringify(algorithm, null, 2)}
-                            </pre>
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </>
+                    </div>
+                  </div>
+
+                  {isExpanded && (() => {
+                    const pieData = details?.gateways.map(g => ({
+                      name: g.gatewayName + (g.gatewayId ? ` (${g.gatewayId})` : ''),
+                      value: g.split,
+                    })) ?? []
+                    return (
+                      <div className="border-t border-slate-100 bg-slate-50/60 px-6 py-4 dark:border-[#1e2330] dark:bg-[#0c0f17]">
+                        {pieData.length > 0 && (
+                          <ResponsiveContainer width="100%" height={200}>
+                            <PieChart>
+                              <Pie
+                                data={pieData}
+                                dataKey="value"
+                                nameKey="name"
+                                cx="50%"
+                                cy="50%"
+                                outerRadius={72}
+                                isAnimationActive={false}
+                                label={({ name, value }) => `${name}: ${value}%`}
+                                labelLine={{ stroke: '#45454f' }}
+                              >
+                                {pieData.map((_, i) => (
+                                  <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                                ))}
+                              </Pie>
+                              <Tooltip
+                                formatter={(v) => `${v}%`}
+                                contentStyle={CHART_TOOLTIP_STYLE}
+                                labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                                itemStyle={CHART_TOOLTIP_ITEM_STYLE}
+                              />
+                            </PieChart>
+                          </ResponsiveContainer>
+                        )}
+                      </div>
+                    )
+                  })()}
+                </div>
               )
             })}
-          </tbody>
-        </table>
-      </CardBody>
+          </div>
+        )}
+      </div>
     </Card>
   )
 }

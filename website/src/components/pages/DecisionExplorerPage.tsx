@@ -4,7 +4,7 @@ import { ErrorInfoFields, ErrorInfoState, GsmOptionRow, DEFAULT_ERROR_INFO, pena
 import { PenaltyClassificationGuide } from './PenaltyClassificationGuide'
 import { useNavigate } from 'react-router-dom'
 import useSWR from 'swr'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { Tooltip as UiTooltip } from '../ui/Tooltip'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
@@ -20,6 +20,7 @@ import { DecideGatewayResponse, GatewayConnector, PaymentAuditEvent, PaymentAudi
 import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
 import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
+import { FEATURE_FLAGS } from '../../lib/featureFlags'
 import { Play, RefreshCw, ChevronDown, ChevronUp, Activity, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings } from 'lucide-react'
 
 const ALGORITHMS: RoutingAlgorithmName[] = [
@@ -133,6 +134,7 @@ function approachColor(approach: string): string {
 }
 
 const COLORS = ['#0069ED', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16']
+const GW_PALETTE = ['#3b82f6', '#8b5cf6', '#f97316', '#ec4899', '#14b8a6']
 
 type VolumePaymentEntry = {
   paymentId: string
@@ -803,7 +805,7 @@ export function DecisionExplorerPage() {
   const [volumeProgress, setVolumeProgress] = useState(initialState.volumeProgress)
   const [simulationResults, setSimulationResults] = useState<SimulationResult[]>(initialState.simulationResults)
   const [isSimulating, setIsSimulating] = useState(false)
-  const [smartRetryEnabled] = useState(initialState.smartRetryEnabled)
+  const [smartRetryEnabled, setSmartRetryEnabled] = useState(initialState.smartRetryEnabled)
   const [error, setError] = useState<string | null>(null)
   const [addGwDraft, setAddGwDraft] = useState('')
   const [addGwOpen, setAddGwOpen] = useState(false)
@@ -1748,6 +1750,11 @@ export function DecisionExplorerPage() {
     [form.eligible_gateways],
   )
 
+  const gatewayColorMap = useMemo(
+    () => Object.fromEntries(eligibleGatewaysParsed.map((gw, i) => [gw, GW_PALETTE[i % GW_PALETTE.length]])),
+    [eligibleGatewaysParsed],
+  )
+
   // Auto-populate errorInfo for any gateway whose config has no error code yet,
   // once GSM rules have loaded from the API.
   useEffect(() => {
@@ -1832,10 +1839,6 @@ export function DecisionExplorerPage() {
     return { triggered, recovered }
   }, [deferredSimulationResults])
 
-  const pieData = useMemo(
-    () => volumeDistribution.map(d => ({ name: d.name, value: d.count })),
-    [volumeDistribution],
-  )
   const debitNetworkRows = debitResult?.debit_routing_output?.co_badged_card_networks_info || []
   const volumeColorIndex = useMemo(
     () => new Map(volumeDistribution.map((item, index) => [item.name, index] as const)),
@@ -2421,52 +2424,66 @@ export function DecisionExplorerPage() {
               </div>
             ) : activeTab === 'volume' ? (
               <div className="space-y-4">
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-[#283241] dark:bg-[#0b111a]">
-                  <label className="block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-[#7f8ca3]">
+                <div>
+                  <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-[#7f8ca3]">
                     Evaluation count
                   </label>
-                  <div className="mt-3 flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-[#283241] dark:bg-[#101722]">
-                    <input
-                      type="number"
-                      min="1"
-                      inputMode="numeric"
-                      value={volumePayments}
-                      onChange={e => setVolumePayments(e.target.value)}
-                      className="min-w-0 flex-1 bg-transparent text-2xl font-semibold text-slate-950 outline-none dark:text-white"
-                    />
-                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500 dark:bg-[#1d2633] dark:text-[#91a0b8]">
-                      runs
-                    </span>
+                  <div className="flex gap-2">
+                    <div className="flex flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-[#283241] dark:bg-[#101722]">
+                      <input
+                        type="number"
+                        min="1"
+                        inputMode="numeric"
+                        value={volumePayments}
+                        onChange={e => setVolumePayments(e.target.value)}
+                        className="min-w-0 flex-1 bg-transparent text-xl font-semibold text-slate-950 outline-none dark:text-white"
+                      />
+                      <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500 dark:bg-[#1d2633] dark:text-[#91a0b8]">
+                        runs
+                      </span>
+                    </div>
+                    <Button
+                      onClick={runVolumeSplit}
+                      disabled={loading || !effectiveMerchantId}
+                      className="shrink-0 dark:bg-sky-500 dark:text-white dark:hover:bg-sky-400"
+                    >
+                      {loading ? <><Spinner size={14} /> Running…</> : <><PieChartIcon size={14} /> Run</>}
+                    </Button>
                   </div>
-                  <p className="mt-3 text-xs leading-5 text-slate-500 dark:text-[#8f9bb0]">
+                  <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-[#8f9bb0]">
                     Samples the active volume split strategy through <code>/routing/evaluate</code> and records each decision trace.
                   </p>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-xl border border-slate-200 px-3 py-3 dark:border-[#283241]">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-[#77849a]">Target</p>
-                    <p className="mt-2 text-lg font-semibold text-slate-950 dark:text-white">{volumeRunTarget || '--'}</p>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-[#283241] dark:bg-[#0b111a]">
+                  <div className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-[#77849a]">Target</span>
+                      <span className="font-semibold text-slate-900 dark:text-white">{volumeRunTarget || '--'}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-[#77849a]">Completed</span>
+                      <span className="font-semibold text-slate-900 dark:text-white">
+                        {loading ? volumeProgress : volumeEvaluationCount || '--'}
+                      </span>
+                    </div>
                   </div>
-                  <div className="rounded-xl border border-slate-200 px-3 py-3 dark:border-[#283241]">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-[#77849a]">Completed</p>
-                    <p className="mt-2 text-lg font-semibold text-slate-950 dark:text-white">
-                      {loading ? volumeProgress : volumeEvaluationCount || '--'}
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-[#1d2633]">
+                    <div
+                      className={`h-full rounded-full transition-[width] ${loading ? 'bg-sky-500' : 'bg-slate-400 dark:bg-[#3a4a5c]'}`}
+                      style={{
+                        width: `${loading
+                          ? volumeProgressPercentage
+                          : (volumeEvaluationCount && volumeRunTarget ? Math.min(100, Math.round((volumeEvaluationCount / volumeRunTarget) * 100)) : 0)}%`
+                      }}
+                    />
+                  </div>
+                  {loading && (
+                    <p className="mt-1 text-right text-[10px] font-semibold text-sky-600 dark:text-sky-300">
+                      {volumeProgressPercentage}%
                     </p>
-                  </div>
+                  )}
                 </div>
-
-                {loading && activeTab === 'volume' ? (
-                  <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-3 dark:border-sky-500/25 dark:bg-sky-500/10">
-                    <div className="flex items-center justify-between text-xs font-semibold text-sky-700 dark:text-sky-200">
-                      <span>Run progress</span>
-                      <span>{volumeProgressPercentage}%</span>
-                    </div>
-                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-sky-100 dark:bg-sky-950/70">
-                      <div className="h-full rounded-full bg-sky-500" style={{ width: `${volumeProgressPercentage}%` }} />
-                    </div>
-                  </div>
-                ) : null}
               </div>
             ) : (
               <>
@@ -2550,7 +2567,7 @@ export function DecisionExplorerPage() {
                         const gwFailureMode = gatewaySimConfigs[gw]?.failureMode ?? 'decline'
                         const gwGsmDecision = gatewaySimConfigs[gw]?.gsmDecision ?? 'retry'
                         const gwPenalized = gatewaySimConfigs[gw]?.penalized ?? true
-                        const hasFailures = gwRate < 100
+
                         const isOpen = expandedGateways.has(gw)
                         const ratePillClass = gwRate >= 80
                           ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
@@ -2569,7 +2586,10 @@ export function DecisionExplorerPage() {
                               onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleGateway(gw) } }}
                               className="flex items-center gap-2.5 px-3 pt-3 pb-5 cursor-pointer hover:bg-slate-50 dark:hover:bg-[#0f0f18] transition-colors select-none"
                             >
-                              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 dark:bg-[#1a1a24] text-xs font-bold text-slate-600 dark:text-slate-300 uppercase shrink-0">
+                              <div
+                                className="flex h-7 w-7 items-center justify-center rounded-lg text-xs font-bold uppercase shrink-0"
+                                style={{ backgroundColor: `${gatewayColorMap[gw] ?? GW_PALETTE[0]}22`, color: gatewayColorMap[gw] ?? GW_PALETTE[0] }}
+                              >
                                 {gw.charAt(0)}
                               </div>
                               <span className="text-sm font-semibold text-slate-800 dark:text-slate-100 capitalize shrink-0 w-16 truncate">{gw}</span>
@@ -2596,7 +2616,7 @@ export function DecisionExplorerPage() {
                                   {gwRate}%
                                 </span>
                               </UiTooltip>
-                              {hasFailures && gwFailureMode === 'decline' && gsmScoringFilterEnabled && smartRetryEnabled && !!gatewaySimConfigs[gw]?.errorInfo?.error_code && (
+                              {FEATURE_FLAGS.GSM_RETRY_IN_SIMULATION && gwFailureMode === 'decline' && gsmScoringFilterEnabled && !!gatewaySimConfigs[gw]?.errorInfo?.error_code && (
                                 <span className="inline-flex items-center gap-1 text-[10px] text-slate-400 dark:text-slate-500 shrink-0">
                                   <span className={`font-medium ${gwGsmDecision === 'retry' ? 'text-amber-500 dark:text-amber-400' : 'text-slate-500 dark:text-slate-400'}`}>{gwGsmDecision === 'retry' ? 'retry' : 'no retry'}</span>
                                   <span>·</span>
@@ -2627,28 +2647,26 @@ export function DecisionExplorerPage() {
                               <div className="overflow-hidden min-h-0">
                                 <div className="px-4 pb-4 pt-3 space-y-3 border-t border-slate-100 dark:border-[#1c1c24]">
                                   {/* Failure mode toggle */}
-                                  {hasFailures && (
-                                    <div className={`grid grid-cols-2 rounded-lg overflow-hidden border text-xs font-semibold ${isSimulating ? 'opacity-50 pointer-events-none border-slate-100 dark:border-[#1c1c24]' : 'border-slate-200 dark:border-[#222226]'}`}>
-                                      <button
-                                        type="button"
-                                        disabled={isSimulating}
-                                        onClick={() => setGwFailureMode(gw, 'decline')}
-                                        className={`py-2 transition-colors ${gwFailureMode === 'decline' ? 'bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
-                                      >
-                                        Decline
-                                      </button>
-                                      <button
-                                        type="button"
-                                        disabled={isSimulating}
-                                        onClick={() => setGwFailureMode(gw, 'timeout')}
-                                        className={`py-2 border-l border-slate-200 dark:border-[#222226] transition-colors ${gwFailureMode === 'timeout' ? 'bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
-                                      >
-                                        Timeout
-                                      </button>
-                                    </div>
-                                  )}
+                                  <div className={`grid grid-cols-2 rounded-lg overflow-hidden border text-xs font-semibold ${isSimulating ? 'opacity-50 pointer-events-none border-slate-100 dark:border-[#1c1c24]' : 'border-slate-200 dark:border-[#222226]'}`}>
+                                    <button
+                                      type="button"
+                                      disabled={isSimulating}
+                                      onClick={() => setGwFailureMode(gw, 'decline')}
+                                      className={`py-2 transition-colors ${gwFailureMode === 'decline' ? 'bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
+                                    >
+                                      Decline
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={isSimulating}
+                                      onClick={() => setGwFailureMode(gw, 'timeout')}
+                                      className={`py-2 border-l border-slate-200 dark:border-[#222226] transition-colors ${gwFailureMode === 'timeout' ? 'bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
+                                    >
+                                      Timeout
+                                    </button>
+                                  </div>
 
-                                  {hasFailures && gwFailureMode === 'timeout' && (
+                                  {gwFailureMode === 'timeout' && (
                                     <p className={`text-xs px-3 py-2 rounded-lg ${eliminationConfigured ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400' : 'bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400'}`}>
                                       {eliminationConfigured
                                         ? `Removed from routing below ${eliminationConfig!.config.data.threshold} threshold.`
@@ -2656,33 +2674,29 @@ export function DecisionExplorerPage() {
                                     </p>
                                   )}
 
-                                  {hasFailures && gwFailureMode === 'decline' && (
+                                  {gwFailureMode === 'decline' && (
                                     <div className="space-y-2">
-                                      {!gsmScoringFilterEnabled ? (
-                                        <p className="text-xs px-3 py-2 rounded-lg border border-slate-200 dark:border-[#2a2a35] bg-slate-50 dark:bg-[#1c1c24] text-slate-500 dark:text-slate-400">
-                                          GSM scoring filter disabled. Enable it in SR Routing settings.
-                                        </p>
-                                      ) : (<>
-                                      <div className="grid grid-cols-2 gap-2">
-                                        <div>
-                                          <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">GSM Decision</label>
-                                          <select
-                                            value={gwGsmDecision}
-                                            disabled={isSimulating}
-                                            onChange={e => setGwGsmDecision(gw, e.target.value as 'retry' | 'do_default')}
-                                            className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
-                                          >
-                                            <option value="retry">Retry</option>
-                                            <option value="do_default">Do Default</option>
-                                          </select>
-                                        </div>
+                                      <div className={`grid gap-2 ${FEATURE_FLAGS.GSM_RETRY_IN_SIMULATION ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                                        {FEATURE_FLAGS.GSM_RETRY_IN_SIMULATION && (
+                                          <div>
+                                            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">GSM Decision</label>
+                                            <select
+                                              value={gwGsmDecision}
+                                              disabled={isSimulating}
+                                              onChange={e => setGwGsmDecision(gw, e.target.value as 'retry' | 'do_default')}
+                                              className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
+                                            >
+                                              <option value="retry">Retry</option>
+                                              <option value="do_default">Do Default</option>
+                                            </select>
+                                          </div>
+                                        )}
                                         <div>
                                           <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">Score Impact</label>
                                           <select
                                             value={gwPenalized ? 'penalized' : 'skipped'}
-                                            disabled={isSimulating}
                                             onChange={e => setGwPenalized(gw, e.target.value === 'penalized')}
-                                            className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
+                                            className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500"
                                           >
                                             <option value="penalized">Penalized</option>
                                             <option value="skipped">Penalty skipped</option>
@@ -2696,7 +2710,6 @@ export function DecisionExplorerPage() {
                                         connector={gw}
                                         showClassification={false}
                                       />
-                                      </>)}
                                     </div>
                                   )}
                                 </div>
@@ -2769,33 +2782,23 @@ export function DecisionExplorerPage() {
               >
                 {loading ? <><Spinner size={14} /> Running Debit Routing…</> : <><Network size={14} /> Run Debit Routing</>}
               </Button>
-            ) : activeTab === 'volume' ? (
-              <Button
-                onClick={runVolumeSplit}
-                disabled={loading || !effectiveMerchantId}
-                className="w-full justify-center dark:bg-sky-500 dark:text-white dark:hover:bg-sky-400"
-              >
-                {loading ? (
-                  <><Spinner size={14} /> Running {volumeProgress}/{volumePayments || 0} decisions…</>
-                ) : (
-                  <><PieChartIcon size={14} /> Run Volume Evaluation</>
-                )}
-              </Button>
-            ) : activeTab === 'batch' ? (
+            ) : activeTab === 'volume' ? null : activeTab === 'batch' ? (
               <>
-                {/* <label className={`flex items-center gap-2 select-none ${gsmScoringFilterEnabled ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
-                  <input
-                    type="checkbox"
-                    checked={smartRetryEnabled}
-                    onChange={e => setSmartRetryEnabled(e.target.checked)}
-                    disabled={!gsmScoringFilterEnabled}
-                    className="rounded border-slate-300 dark:border-slate-600 disabled:cursor-not-allowed"
-                  />
-                  <span className="text-xs text-slate-600 dark:text-slate-400">
-                    Smart retry — on GSM <code className="text-[11px]">retry</code> decision, attempt next fallback gateway
-                    {!gsmScoringFilterEnabled && <span className="ml-1 text-amber-500">(enable GSM scoring filter first)</span>}
-                  </span>
-                </label> */}
+                {FEATURE_FLAGS.SMART_RETRY_IN_SIMULATION && (
+                  <label className={`flex items-center gap-2 select-none ${gsmScoringFilterEnabled ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
+                    <input
+                      type="checkbox"
+                      checked={smartRetryEnabled}
+                      onChange={e => setSmartRetryEnabled(e.target.checked)}
+                      disabled={!gsmScoringFilterEnabled}
+                      className="rounded border-slate-300 dark:border-slate-600 disabled:cursor-not-allowed"
+                    />
+                    <span className="text-xs text-slate-600 dark:text-slate-400">
+                      Smart retry — on GSM <code className="text-[11px]">retry</code> decision, attempt next fallback gateway
+                      {!gsmScoringFilterEnabled && <span className="ml-1 text-amber-500">(enable GSM scoring filter first)</span>}
+                    </span>
+                  </label>
+                )}
                 <Button
                   onClick={isSimulating ? () => { simulationAbortRef.current = true } : runSimulation}
                   disabled={!effectiveMerchantId || routingConfigUnavailable}
@@ -2816,19 +2819,21 @@ export function DecisionExplorerPage() {
               </>
             ) : (
               <>
-                {/* <label className={`flex items-center gap-2 select-none ${gsmScoringFilterEnabled ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
-                  <input
-                    type="checkbox"
-                    checked={smartRetryEnabled}
-                    onChange={e => setSmartRetryEnabled(e.target.checked)}
-                    disabled={!gsmScoringFilterEnabled}
-                    className="rounded border-slate-300 dark:border-slate-600 disabled:cursor-not-allowed"
-                  />
-                  <span className="text-xs text-slate-600 dark:text-slate-400">
-                    Smart retry — on GSM <code className="text-[11px]">retry</code> decision, attempt next fallback gateway
-                    {!gsmScoringFilterEnabled && <span className="ml-1 text-amber-500">(enable GSM scoring filter first)</span>}
-                  </span>
-                </label> */}
+                {FEATURE_FLAGS.SMART_RETRY_IN_SIMULATION && (
+                  <label className={`flex items-center gap-2 select-none ${gsmScoringFilterEnabled ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
+                    <input
+                      type="checkbox"
+                      checked={smartRetryEnabled}
+                      onChange={e => setSmartRetryEnabled(e.target.checked)}
+                      disabled={!gsmScoringFilterEnabled}
+                      className="rounded border-slate-300 dark:border-slate-600 disabled:cursor-not-allowed"
+                    />
+                    <span className="text-xs text-slate-600 dark:text-slate-400">
+                      Smart retry — on GSM <code className="text-[11px]">retry</code> decision, attempt next fallback gateway
+                      {!gsmScoringFilterEnabled && <span className="ml-1 text-amber-500">(enable GSM scoring filter first)</span>}
+                    </span>
+                  </label>
+                )}
                 <Button onClick={run} disabled={loading || !effectiveMerchantId || routingConfigUnavailable} className="w-full justify-center">
                   {loading ? <><Spinner size={14} /> Running…</> : <><Play size={14} /> Run Single Transaction</>}
                 </Button>
@@ -2946,13 +2951,23 @@ export function DecisionExplorerPage() {
             volumeDistribution.length > 0 ? (
               <div className="space-y-5">
                 <section className="rounded-2xl border border-slate-200 bg-white shadow-[0_18px_60px_-46px_rgba(15,23,42,0.2)] dark:border-[#283241] dark:bg-[#101722]">
-                  <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 dark:border-[#263141]">
-                    <div>
-                      <SurfaceLabel>Volume result</SurfaceLabel>
-                      <h3 className="mt-2 text-lg font-semibold text-slate-950 dark:text-white">Distribution analysis</h3>
-                      <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#8f9bb0]">
-                        {volumeEvaluationCount} evaluations from <code>/routing/evaluate</code> using the active volume split rule.
-                      </p>
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4 dark:border-[#263141]">
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Distribution analysis</h3>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <span className="text-xs text-slate-500 dark:text-[#8f9bb0]">
+                          <span className="font-semibold text-slate-700 dark:text-[#c5d0e0]">{volumeEvaluationCount}</span> evaluations
+                        </span>
+                        {volumeLeader && (
+                          <>
+                            <span className="text-slate-300 dark:text-[#3a4455]">·</span>
+                            <span className="text-xs text-slate-500 dark:text-[#8f9bb0]">
+                              leader <span className="font-semibold text-slate-700 dark:text-[#c5d0e0]">{volumeLeader.name}</span> at{' '}
+                              <span className="font-semibold text-slate-700 dark:text-[#c5d0e0]">{volumeLeader.percentage}%</span>
+                            </span>
+                          </>
+                        )}
+                      </div>
                     </div>
                     {ruleResult?.payment_id ? (
                       <Button
@@ -2965,119 +2980,51 @@ export function DecisionExplorerPage() {
                     ) : null}
                   </div>
 
-                  <div className="grid gap-5 px-5 py-5 2xl:grid-cols-[minmax(0,1fr)_300px]">
-                    <div className="min-w-0 space-y-5">
-                      <div className="grid gap-3 sm:grid-cols-3">
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-[#293546] dark:bg-[#0b111a]">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-[#77849a]">Runs</p>
-                          <p className="mt-2 text-2xl font-semibold text-slate-950 dark:text-white">{volumeEvaluationCount}</p>
-                        </div>
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-[#293546] dark:bg-[#0b111a]">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-[#77849a]">Leader</p>
-                          <p className="mt-2 truncate text-2xl font-semibold text-slate-950 dark:text-white">{volumeLeader?.name || '--'}</p>
-                        </div>
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-[#293546] dark:bg-[#0b111a]">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-[#77849a]">Share</p>
-                          <p className="mt-2 text-2xl font-semibold text-slate-950 dark:text-white">{volumeLeader?.percentage ?? 0}%</p>
-                        </div>
+                  <div className="space-y-4 px-5 py-4">
+                    <div>
+                      <div className="flex items-center justify-between text-xs text-slate-500 dark:text-[#8f9bb0]">
+                        <span>Observed percentage split</span>
+                        <span>{sortedVolumeDistribution.length} gateways</span>
                       </div>
-
-                      <div>
-                        <div className="flex items-center justify-between text-xs text-slate-500 dark:text-[#8f9bb0]">
-                          <span>Observed percentage split</span>
-                          <span>{sortedVolumeDistribution.length} gateways</span>
-                        </div>
-                        <div className="mt-2 flex h-3 overflow-hidden rounded-full bg-slate-100 dark:bg-[#1d2633]">
-                          {sortedVolumeDistribution.map((item) => (
-                            <div
-                              key={item.name}
-                              className="h-full transition-all duration-300"
-                              style={{
-                                width: `${item.percentage}%`,
-                                backgroundColor: COLORS[(volumeColorIndex.get(item.name) ?? 0) % COLORS.length],
-                              }}
-                              title={`${item.name}: ${item.percentage}%`}
-                            />
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="space-y-3">
-                        {sortedVolumeDistribution.map((item) => {
-                          const color = COLORS[(volumeColorIndex.get(item.name) ?? 0) % COLORS.length]
-                          return (
-                            <div key={item.name} className="rounded-xl border border-slate-200 bg-white px-4 py-3 dark:border-[#263141] dark:bg-[#0c121c]">
-                              <div className="flex items-center justify-between gap-4">
-                                <div className="flex min-w-0 items-center gap-3">
-                                  <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: color }} />
-                                  <div className="min-w-0">
-                                    <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{item.name}</p>
-                                    <p className="text-xs text-slate-500 dark:text-[#8290a5]">{item.count} payments</p>
-                                  </div>
-                                </div>
-                                <p className="text-sm font-semibold text-slate-900 dark:text-white">{item.percentage}%</p>
-                              </div>
-                              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-[#1d2633]">
-                                <div className="h-full rounded-full" style={{ width: `${item.percentage}%`, backgroundColor: color }} />
-                              </div>
-                            </div>
-                          )
-                        })}
+                      <div className="mt-2 flex h-2.5 overflow-hidden rounded-full bg-slate-100 dark:bg-[#1d2633]">
+                        {sortedVolumeDistribution.map((item) => (
+                          <div
+                            key={item.name}
+                            className="h-full transition-all duration-300"
+                            style={{
+                              width: `${item.percentage}%`,
+                              backgroundColor: COLORS[(volumeColorIndex.get(item.name) ?? 0) % COLORS.length],
+                            }}
+                            title={`${item.name}: ${item.percentage}%`}
+                          />
+                        ))}
                       </div>
                     </div>
 
-                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 dark:border-[#293546] dark:bg-[#0b111a]">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-semibold text-slate-900 dark:text-white">Connector share</p>
-                        <Badge variant="gray">Current run</Badge>
-                      </div>
-                      <div className="mt-4 h-[260px]">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <PieChart>
-                            <Pie
-                              data={pieData}
-                              cx="50%"
-                              cy="50%"
-                              innerRadius={72}
-                              outerRadius={104}
-                              paddingAngle={2}
-                              dataKey="value"
-                              label={false}
-                              labelLine={false}
-                            >
-                              {pieData.map((_, index) => (
-                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                              ))}
-                            </Pie>
-                            <Tooltip
-                              formatter={(value: number) => [`${value} payments`, 'Count']}
-                              contentStyle={CHART_TOOLTIP_STYLE}
-                              labelStyle={CHART_TOOLTIP_LABEL_STYLE}
-                              itemStyle={CHART_TOOLTIP_ITEM_STYLE}
-                            />
-                          </PieChart>
-                        </ResponsiveContainer>
-                      </div>
-                      <div className="mt-4 space-y-2">
-                        {sortedVolumeDistribution.map((item) => (
-                          <div key={item.name} className="flex items-center justify-between gap-3 text-xs">
-                            <span className="flex min-w-0 items-center gap-2 text-slate-500 dark:text-[#9aa6bb]">
-                              <span
-                                className="h-2.5 w-2.5 rounded-full"
-                                style={{ backgroundColor: COLORS[(volumeColorIndex.get(item.name) ?? 0) % COLORS.length] }}
-                              />
-                              <span className="truncate">{item.name}</span>
-                            </span>
-                            <span className="font-semibold text-slate-900 dark:text-white">{item.percentage}%</span>
+                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                      {sortedVolumeDistribution.map((item) => {
+                        const color = COLORS[(volumeColorIndex.get(item.name) ?? 0) % COLORS.length]
+                        return (
+                          <div key={item.name} className="rounded-xl border border-slate-200 bg-slate-50/60 px-4 py-3 dark:border-[#263141] dark:bg-[#0c121c]">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex min-w-0 items-center gap-2">
+                                <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+                                <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{item.name}</p>
+                              </div>
+                              <p className="shrink-0 text-sm font-semibold text-slate-900 dark:text-white">{item.percentage}%</p>
+                            </div>
+                            <p className="mt-0.5 pl-[18px] text-xs text-slate-500 dark:text-[#8290a5]">{item.count} payments</p>
+                            <div className="mt-2.5 h-1 overflow-hidden rounded-full bg-slate-200 dark:bg-[#1d2633]">
+                              <div className="h-full rounded-full" style={{ width: `${item.percentage}%`, backgroundColor: color }} />
+                            </div>
                           </div>
-                        ))}
-                      </div>
+                        )
+                      })}
                     </div>
                   </div>
                 </section>
 
-                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.8fr)]">
-                  <section className="rounded-2xl border border-slate-200 bg-white dark:border-[#283241] dark:bg-[#101722]">
+                <section className="rounded-2xl border border-slate-200 bg-white dark:border-[#283241] dark:bg-[#101722]">
                     <div className="border-b border-slate-200 px-5 py-4 dark:border-[#263141]">
                       <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Evaluation sequence</h3>
                       <p className="mt-1 text-xs text-slate-500 dark:text-[#8f9bb0]">Click any row to inspect the captured decision trace.</p>
@@ -3130,39 +3077,6 @@ export function DecisionExplorerPage() {
                       </table>
                     </div>
                   </section>
-
-                  <section className="rounded-2xl border border-slate-200 bg-white dark:border-[#283241] dark:bg-[#101722]">
-                    <div className="border-b border-slate-200 px-5 py-4 dark:border-[#263141]">
-                      <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Gateway totals</h3>
-                    </div>
-                    <div className="p-5">
-                      <table className="w-full text-sm">
-                        <tbody className="divide-y divide-slate-100 dark:divide-[#263141]">
-                          {sortedVolumeDistribution.map((item) => (
-                            <tr key={item.name}>
-                              <td className="py-3">
-                                <div className="flex items-center gap-2">
-                                  <span
-                                    className="h-2.5 w-2.5 rounded-full"
-                                    style={{ backgroundColor: COLORS[(volumeColorIndex.get(item.name) ?? 0) % COLORS.length] }}
-                                  />
-                                  <span className="font-medium text-slate-900 dark:text-white">{item.name}</span>
-                                </div>
-                              </td>
-                              <td className="py-3 text-right text-slate-500 dark:text-[#9aa6bb]">{item.count}</td>
-                              <td className="py-3 text-right font-semibold text-slate-900 dark:text-white">{item.percentage}%</td>
-                            </tr>
-                          ))}
-                          <tr>
-                            <td className="py-3 font-semibold text-slate-900 dark:text-white">Total</td>
-                            <td className="py-3 text-right font-semibold text-slate-900 dark:text-white">{volumeEvaluationCount}</td>
-                            <td className="py-3 text-right font-semibold text-slate-900 dark:text-white">100%</td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-                  </section>
-                </div>
 
                 <section className="rounded-2xl border border-slate-200 bg-white dark:border-[#283241] dark:bg-[#101722]">
                   <button
@@ -3336,22 +3250,22 @@ export function DecisionExplorerPage() {
                     {sortedGatewayStats.length > 0 && (() => {
                       const totalRouted = totalRoutedPayments
                       const sortedGateways = sortedGatewayStats
-                      const GW_COLORS = ['#3b82f6', '#8b5cf6', '#f97316', '#ec4899', '#14b8a6']
                       const hasAnySpark = sortedGateways.some(([gw]) => (gatewaySparklines.series[gw]?.length ?? 0) >= 2)
                       return (
-                        <div className="flex gap-4">
+                        <div className="flex flex-wrap gap-3 items-start">
                           {/* per-gateway stat rows */}
-                          <div className="flex-1 space-y-2 min-w-0">
-                            {sortedGateways.map(([gateway, stats], idx) => {
+                          <div className="flex-1 space-y-2 min-w-[320px]">
+                            {sortedGateways.map(([gateway, stats]) => {
                               const share = totalRouted > 0 ? Math.round((stats.total / totalRouted) * 100) : 0
                               const srPct = stats.total > 0 ? Math.round((stats.success / stats.total) * 100) : 0
+                              const gwColor = gatewayColorMap[gateway] ?? GW_PALETTE[0]
                               return (
                                 <div key={gateway} className="space-y-1">
                                   <div className="flex items-center gap-2">
-                                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: GW_COLORS[idx % GW_COLORS.length] }} />
+                                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: gwColor }} />
                                     <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 w-20 truncate shrink-0">{gateway}</span>
-                                    <div className="flex-1 h-1.5 rounded-full bg-slate-100 dark:bg-[#1c1c24] overflow-hidden">
-                                      <div className="h-full rounded-full transition-[width] duration-300" style={{ width: `${share}%`, backgroundColor: GW_COLORS[idx % GW_COLORS.length] }} />
+                                    <div className="flex-1 h-1.5 rounded-full bg-slate-100 dark:bg-[#1c1c24] overflow-hidden min-w-0">
+                                      <div className="h-full rounded-full transition-[width] duration-300" style={{ width: `${share}%`, backgroundColor: gwColor }} />
                                     </div>
                                     <div className="flex items-center gap-2.5 text-[11px] shrink-0">
                                       <span className={`font-bold tabular-nums ${srPct >= 80 ? 'text-emerald-600 dark:text-emerald-400' : srPct >= 50 ? 'text-amber-500' : 'text-red-500'}`}>{srPct}% SR</span>
@@ -3405,15 +3319,22 @@ export function DecisionExplorerPage() {
                             }
                             // Show ~6 evenly-spaced x labels
                             const xLabelStep = Math.max(1, Math.floor(numPts / 6))
-                            const xLabels = paymentNums
+                            const allXLabels = paymentNums
                               .map((n, i) => ({ n, i }))
                               .filter(({ i }) => i % xLabelStep === 0 || i === numPts - 1)
+                            // Drop second-to-last label if it collides with the final one
+                            const xLabels = allXLabels.filter((_, j) => {
+                              if (j === allXLabels.length - 2) {
+                                return allXLabels[allXLabels.length - 1].i - allXLabels[j].i >= Math.ceil(xLabelStep * 0.5)
+                              }
+                              return true
+                            })
                             return (
-                              <div className="relative shrink-0" style={{ width: 200 + AXIS_W }}>
+                              <div className="relative self-start flex-1" style={{ minWidth: 200 + AXIS_W }}>
                                 {/* scrollable chart area */}
                                 <div
                                   className="overflow-x-auto"
-                                  style={{ width: 200, scrollbarWidth: 'none' }}
+                                  style={{ width: `calc(100% - ${AXIS_W}px)`, scrollbarWidth: 'none' }}
                                   ref={el => { if (el) el.scrollLeft = el.scrollWidth }}
                                 >
                                   <svg width={CW} height={H} viewBox={`0 0 ${CW} ${H}`} style={{ display: 'block' }}>
@@ -3423,10 +3344,10 @@ export function DecisionExplorerPage() {
                                         stroke="#e2e8f0" strokeWidth="0.5" strokeDasharray="2,2" />
                                     ))}
                                     {/* gateway lines */}
-                                    {sortedGateways.map(([gw], idx) => {
+                                    {sortedGateways.map(([gw]) => {
                                       const pts = series[gw]
                                       if (!pts || pts.length < 2) return null
-                                      const color = GW_COLORS[idx % GW_COLORS.length]
+                                      const color = gatewayColorMap[gw] ?? GW_PALETTE[0]
                                       const line = makeLine(pts)
                                       const area = `${line} L ${xPos(pts.length - 1)},${CHART_H} L 0,${CHART_H} Z`
                                       return (

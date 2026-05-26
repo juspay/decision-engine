@@ -20,6 +20,7 @@ export interface ConditionRow {
   lhs: string
   operator: string
   value: string | string[]
+  metadataKey?: string
 }
 
 export interface StatementGroup {
@@ -93,7 +94,8 @@ const DSL_SYM_TO_OP: Record<string, string> = {
 
 function condToDSL(c: ConditionRow): string {
   if (Array.isArray(c.value)) return `${c.lhs} in [${c.value.join(', ')}]`
-  return `${c.lhs} ${DSL_OP_TO_SYM[c.operator] ?? c.operator} ${c.value}`
+  const lhsPart = c.metadataKey ? `${c.lhs}.${c.metadataKey}` : c.lhs
+  return `${lhsPart} ${DSL_OP_TO_SYM[c.operator] ?? c.operator} ${c.value}`
 }
 
 function stmtToDSLLines(stmt: StatementGroup): string[] {
@@ -158,11 +160,15 @@ function parseCondDSL(text: string): ConditionRow | null {
     if (values.length === 0) throw new InvalidConditionError(`Empty value list in condition: "${text}"`)
     return { id: crypto.randomUUID(), lhs: notInM[1], operator: 'not_in', value: values }
   }
-  const opM = /^(\w+)\s*(>=|<=|!=|>|<|=)\s*(.+)$/.exec(text)
+  const opM = /^([\w.]+)\s*(>=|<=|!=|>|<|=)\s*(.+)$/.exec(text)
   if (opM) {
     const value = opM[3].trim()
     if (!value) throw new InvalidConditionError(`Empty value in condition: "${text}"`)
-    return { id: crypto.randomUUID(), lhs: opM[1], operator: DSL_SYM_TO_OP[opM[2]] ?? opM[2], value }
+    const lhsFull = opM[1]
+    const dotIdx = lhsFull.indexOf('.')
+    const lhs = dotIdx >= 0 ? lhsFull.slice(0, dotIdx) : lhsFull
+    const metadataKey = dotIdx >= 0 ? lhsFull.slice(dotIdx + 1) : undefined
+    return { id: crypto.randomUUID(), lhs, operator: DSL_SYM_TO_OP[opM[2]] ?? opM[2], value, metadataKey }
   }
   throw new InvalidConditionError(`Invalid condition syntax: "${text}"`)
 }

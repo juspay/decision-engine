@@ -1,0 +1,5 @@
+export const FEATURE_FLAGS = {
+  GSM_RETRY_IN_SIMULATION: false,
+  SMART_RETRY_IN_ANALYTICS: false,
+  SMART_RETRY_IN_SIMULATION: false,
+}

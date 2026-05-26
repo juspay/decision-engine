@@ -14,6 +14,7 @@ import {
   YAxis,
 } from 'recharts'
 import { fetcher } from '../../lib/api'
+import { FEATURE_FLAGS } from '../../lib/featureFlags'
 import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
 import {
   AnalyticsOverviewResponse,
@@ -1806,7 +1807,7 @@ export function AnalyticsPage() {
             onToggle={() => setRoutingAlignmentOpen((value) => !value)}
           />
 
-          <SmartRetrySection stats={overview.data?.smart_retry_stats ?? null} />
+          {FEATURE_FLAGS.SMART_RETRY_IN_ANALYTICS && <SmartRetrySection stats={overview.data?.smart_retry_stats ?? null} />}
 
           <Card className="overflow-visible">
         <CardHeader>
