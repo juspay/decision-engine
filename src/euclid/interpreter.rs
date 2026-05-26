@@ -1,4 +1,4 @@
-use crate::euclid::ast::{Output, ValueType, VolumeSplit};
+use crate::euclid::ast::{Output, VolumeSplit};
 use crate::euclid::{ast, types};
 use rand::distributions::WeightedIndex;
 use rand::prelude::*;
@@ -41,10 +41,7 @@ impl InterpreterBackend {
     ) -> Result<bool, types::InterpreterError> {
         use ast::{ComparisonType::*, ValueType::*};
 
-        let ctx_value = match &comparison.value {
-            ValueType::MetadataVariant(m) => ctx.get(&m.key),
-            _ => ctx.get(&comparison.lhs),
-        };
+        let ctx_value = ctx.get(&comparison.lhs);
         if ctx_value.is_none() {
             crate::logger::debug!(
                 missing_context_key = %comparison.lhs,

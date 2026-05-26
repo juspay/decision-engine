@@ -75,6 +75,7 @@ function createCondition(routingKeys: Record<string, RoutingKeyConfig>): Conditi
     lhs: firstKey,
     operator: '==',
     value: firstKeyValues[0] || '',
+    metadataKey: '',
   }
 }
 
@@ -180,7 +181,11 @@ function RuleBreakdown({ algo }: { algo: RoutingAlgorithm }) {
                         <span className="rounded-md bg-slate-100 dark:bg-[#1a1f2a] px-2 py-1 text-slate-700 dark:text-[#c8d0de]">
                           {toLabel(String(cond.lhs ?? ''))}{' '}
                           <span className="font-mono text-slate-400 dark:text-[#5d6880]">{formatOp(String(cond.comparison ?? ''))}</span>{' '}
-                          <span className="font-medium">{toLabel(String(cond.value?.value ?? ''))}</span>
+                          <span className="font-medium">
+                            {cond.value?.type === 'metadata_variant' && cond.value.value && typeof cond.value.value === 'object'
+                              ? `{ "${(cond.value.value as { key?: string }).key ?? ''}" : "${(cond.value.value as { value?: string }).value ?? ''}" }`
+                              : toLabel(String(cond.value?.value ?? ''))}
+                          </span>
                         </span>
                       </div>
                     ))}
@@ -531,7 +536,8 @@ function ConditionRowEditor({
   const keyInfo = routingKeys[row.lhs]
   const isEnum = keyInfo?.type === 'enum'
   const isInt = keyInfo?.type === 'integer'
-  const isStr = keyInfo?.type === 'str_value' || keyInfo?.type === 'udf'
+  const isStr = keyInfo?.type === 'str_value'
+  const isMetadata = keyInfo?.type === 'udf' || keyInfo?.type === 'global_ref'
   const isMulti = row.operator === 'in' || row.operator === 'not_in'
 
   const operators = isInt
@@ -600,6 +606,24 @@ function ConditionRowEditor({
           placeholder="value"
           className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-xs w-24 focus:outline-none"
         />
+      ) : isMetadata ? (
+        <>
+          <input
+            type="text"
+            value={row.metadataKey || ''}
+            onChange={(e) => onChange({ ...row, metadataKey: e.target.value })}
+            placeholder="key"
+            className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-xs w-24 focus:outline-none"
+          />
+          <span className="text-xs text-slate-400 dark:text-slate-500 select-none">=</span>
+          <input
+            type="text"
+            value={row.value as string}
+            onChange={(e) => onChange({ ...row, value: e.target.value })}
+            placeholder="value"
+            className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-xs w-32 focus:outline-none"
+          />
+        </>
       ) : isStr ? (
         <input
           type="text"
@@ -913,9 +937,21 @@ function buildAlgorithmData(rules: RuleBlock[], defaultOutput: DefaultOutput, ro
       }
     }
 
+    if (keyType === 'udf' || keyType === 'global_ref') {
+      return {
+        lhs: c.lhs,
+        comparison: OPERATOR_TO_API[c.operator] || c.operator,
+        value: {
+          type: 'metadata_variant',
+          value: { key: c.metadataKey || c.lhs, value: c.value },
+        },
+        metadata: {},
+      }
+    }
+
     const apiValueType =
       keyType === 'integer' ? 'number' :
-      keyType === 'str_value' || keyType === 'udf' ? 'str_value' :
+      keyType === 'str_value' ? 'str_value' :
       'enum_variant'
     return {
       lhs: c.lhs,
@@ -966,13 +1002,26 @@ function parseAlgorithmToRuleBlocks(algo: RoutingAlgorithm): { ruleBlocks: RuleB
 
   function parseCondition(cond: { lhs: string; comparison: string; value: { type: string; value: unknown } }): ConditionRow {
     const isArray = cond.value?.type === 'enum_variant_array'
+    const isMetadataVariant = cond.value?.type === 'metadata_variant'
     let operator = API_OPERATOR_TO_UI[cond.comparison] ?? cond.comparison
     if (isArray && cond.comparison === 'equal') operator = 'in'
     if (isArray && cond.comparison === 'not_equal') operator = 'not_in'
+
+    if (isMetadataVariant) {
+      const metaVal = cond.value?.value as { key?: string; value?: unknown } | undefined
+      return {
+        id: crypto.randomUUID(),
+        lhs: String(cond.lhs),
+        operator,
+        value: String(metaVal?.value ?? ''),
+        metadataKey: String(metaVal?.key ?? cond.lhs),
+      }
+    }
+
     const value = isArray
       ? (Array.isArray(cond.value?.value) ? (cond.value.value as string[]) : [String(cond.value?.value)])
       : String(cond.value?.value ?? '')
-    return { id: crypto.randomUUID(), lhs: String(cond.lhs), operator, value }
+    return { id: crypto.randomUUID(), lhs: String(cond.lhs), operator, value, metadataKey: '' }
   }
 
   function parseStatement(stmt: { condition: Parameters<typeof parseCondition>[0][]; nested?: typeof stmt[] }): StatementGroup {
