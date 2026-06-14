@@ -5,7 +5,8 @@ use crate::analytics::models::{
     AnalyticsDecisionResponse, AnalyticsGatewayScoresResponse, AnalyticsLogSummariesResponse,
     AnalyticsOverviewResponse, AnalyticsQuery, AnalyticsRoutingStatsResponse,
     ExperimentResultsQuery, ExperimentResultsResponse, ExperimentTransactionsQuery,
-    ExperimentTransactionsResponse, PaymentAuditQuery, PaymentAuditResponse,
+    ExperimentTransactionsResponse, PaymentAuditQuery, PaymentAuditResponse, RoutingEventsQuery,
+    RoutingEventsResponse,
 };
 use crate::error::ApiError;
 
@@ -61,6 +62,11 @@ pub trait AnalyticsReadStore: Send + Sync {
         &self,
         query: &ExperimentTransactionsQuery,
     ) -> Result<ExperimentTransactionsResponse, ApiError>;
+
+    async fn routing_events(
+        &self,
+        query: &RoutingEventsQuery,
+    ) -> Result<RoutingEventsResponse, ApiError>;
 }
 
 #[derive(Clone)]
@@ -149,6 +155,13 @@ impl AnalyticsReadStore for UnavailableAnalyticsReadStore {
         &self,
         _query: &ExperimentTransactionsQuery,
     ) -> Result<ExperimentTransactionsResponse, ApiError> {
+        Err(ApiError::DatabaseError)
+    }
+
+    async fn routing_events(
+        &self,
+        _query: &RoutingEventsQuery,
+    ) -> Result<RoutingEventsResponse, ApiError> {
         Err(ApiError::DatabaseError)
     }
 }

@@ -529,6 +529,135 @@ pub struct ExperimentTransactionsQuery {
     pub page_size: u64,
 }
 
+pub const ROUTING_EVENTS_BUCKET_MS: i64 = 5 * 60 * 1000;
+pub const ROUTING_EVENTS_FAST_BUCKET_MS: i64 = 60 * 1000;
+pub const ROUTING_EVENTS_SECOND_BUCKET_MS: i64 = 1000;
+pub const ROUTING_EVENTS_STALENESS_BUCKETS: i64 = 12;
+// Floor so tiny buckets don't age gateways out within seconds of quiet.
+pub const ROUTING_EVENTS_STALENESS_FLOOR_MS: i64 = 10 * 60 * 1000;
+// Second-granularity scans are row-heavy; cap the window in that mode.
+pub const ROUTING_EVENTS_SECOND_BUCKET_MAX_WINDOW_MS: i64 = 60 * 60 * 1000;
+pub const DEFAULT_ROUTING_EVENTS_MIN_TXN_COUNT: i64 = 10;
+// SR scores are on a 0..1 scale (see gateway_scoring_service success_rate).
+pub const DEFAULT_ROUTING_EVENTS_MIN_SCORE_DELTA: f64 = 0.01;
+pub const DEFAULT_ROUTING_EVENTS_SWING_THRESHOLD: f64 = 0.1;
+pub const DEFAULT_ROUTING_EVENTS_LIMIT: usize = 50;
+pub const MAX_ROUTING_EVENTS_LIMIT: usize = 200;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RoutingEventType {
+    /// The top-scored gateway for a dimension changed.
+    LeaderChanged,
+    /// A gateway newly appeared in the score map for a dimension.
+    GatewayEntered,
+    /// A gateway's score moved by more than the swing threshold between snapshots.
+    ScoreSwing,
+}
+
+impl RoutingEventType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::LeaderChanged => "leader_changed",
+            Self::GatewayEntered => "gateway_entered",
+            Self::ScoreSwing => "score_swing",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoutingEvent {
+    /// Deterministic composite ID, stable across polls; clients dedupe on it.
+    pub id: String,
+    pub event_type: RoutingEventType,
+    pub merchant_id: String,
+    pub payment_method_type: Option<String>,
+    pub payment_method: Option<String>,
+    pub bucket_ms: i64,
+    pub gateway: String,
+    pub previous_gateway: Option<String>,
+    pub score: Option<f64>,
+    pub previous_score: Option<f64>,
+    pub transaction_count: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoutingEventsResponse {
+    pub merchant_id: String,
+    pub range: String,
+    pub events: Vec<RoutingEvent>,
+    pub generated_at_ms: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct RoutingEventsQuery {
+    pub merchant_id: String,
+    pub range: AnalyticsRange,
+    pub start_ms: Option<i64>,
+    pub end_ms: Option<i64>,
+    pub payment_method_type: Option<String>,
+    pub payment_method: Option<String>,
+    pub min_transaction_count: i64,
+    pub min_score_delta: f64,
+    pub swing_threshold: f64,
+    pub limit: usize,
+    /// Bucket granularity: 5-min default, 1-min opt-in ("bucket=1m").
+    /// Event IDs embed bucket_ms, so each granularity has its own stable ID space.
+    pub bucket_ms: i64,
+}
+
+impl RoutingEventsQuery {
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_request(
+        merchant_id: String,
+        range: Option<String>,
+        start_ms: Option<i64>,
+        end_ms: Option<i64>,
+        payment_method_type: Option<String>,
+        payment_method: Option<String>,
+        min_transaction_count: Option<i64>,
+        min_score_delta: Option<f64>,
+        swing_threshold: Option<f64>,
+        limit: Option<u32>,
+        bucket: Option<String>,
+    ) -> Self {
+        let range = AnalyticsRange::from_query(range.as_deref());
+        let (start_ms, end_ms) = match (start_ms, end_ms) {
+            (Some(start_ms), Some(end_ms)) if start_ms >= 0 && end_ms > start_ms => {
+                (Some(start_ms), Some(end_ms))
+            }
+            _ => (None, None),
+        };
+
+        Self {
+            merchant_id,
+            range,
+            start_ms,
+            end_ms,
+            payment_method_type: payment_method_type.filter(|value| !value.is_empty()),
+            payment_method: payment_method.filter(|value| !value.is_empty()),
+            min_transaction_count: min_transaction_count
+                .unwrap_or(DEFAULT_ROUTING_EVENTS_MIN_TXN_COUNT)
+                .max(0),
+            min_score_delta: min_score_delta
+                .unwrap_or(DEFAULT_ROUTING_EVENTS_MIN_SCORE_DELTA)
+                .max(0.0),
+            swing_threshold: swing_threshold
+                .unwrap_or(DEFAULT_ROUTING_EVENTS_SWING_THRESHOLD)
+                .max(0.0),
+            limit: limit
+                .map(|limit| limit as usize)
+                .unwrap_or(DEFAULT_ROUTING_EVENTS_LIMIT)
+                .clamp(1, MAX_ROUTING_EVENTS_LIMIT),
+            bucket_ms: match bucket.as_deref() {
+                Some("1s") => ROUTING_EVENTS_SECOND_BUCKET_MS,
+                Some("1m") => ROUTING_EVENTS_FAST_BUCKET_MS,
+                _ => ROUTING_EVENTS_BUCKET_MS,
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

@@ -130,4 +130,11 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
     ) -> Result<ExperimentTransactionsResponse, ApiError> {
         endpoints::experiment_transactions::load(&self.client, query).await
     }
+
+    async fn routing_events(
+        &self,
+        query: &RoutingEventsQuery,
+    ) -> Result<RoutingEventsResponse, ApiError> {
+        endpoints::routing_events::load(&self.client, query).await
+    }
 }

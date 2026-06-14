@@ -3,8 +3,9 @@ use crate::analytics::{
     experiment_transactions as fetch_experiment_transactions,
     gateway_scores as fetch_gateway_scores, log_summaries as fetch_log_summaries,
     overview as fetch_overview, payment_audit as fetch_payment_audit,
-    preview_trace as fetch_preview_trace, routing_stats as fetch_routing_stats, AnalyticsQuery,
-    ExperimentResultsQuery, ExperimentTransactionsQuery, PaymentAuditQuery,
+    preview_trace as fetch_preview_trace, routing_events as fetch_routing_events,
+    routing_stats as fetch_routing_stats, AnalyticsQuery, ExperimentResultsQuery,
+    ExperimentTransactionsQuery, PaymentAuditQuery, RoutingEventsQuery,
 };
 use crate::custom_extractors::{AuthenticatedAnalyticsContext, TenantStateResolver};
 use crate::error;
@@ -90,6 +91,7 @@ pub fn serve() -> axum::Router<Arc<crate::tenant::GlobalAppState>> {
         .route("/gateway-scores", axum::routing::get(gateway_scores))
         .route("/decisions", axum::routing::get(decisions))
         .route("/routing-stats", axum::routing::get(routing_stats))
+        .route("/routing-events", axum::routing::get(routing_events))
         .route("/log-summaries", axum::routing::get(log_summaries))
         .route("/payment-audit", axum::routing::get(payment_audit))
         .route("/preview-trace", axum::routing::get(preview_trace))
@@ -176,6 +178,41 @@ pub async fn preview_trace(
 ) -> Result<Json<crate::analytics::PaymentAuditResponse>, error::ContainerError<error::ApiError>> {
     let query = payment_audit_query_from_params(auth_context.merchant_id.clone(), &params);
     Ok(Json(fetch_preview_trace(&state, &query).await?))
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RoutingEventsParams {
+    pub range: Option<String>,
+    pub start_ms: Option<i64>,
+    pub end_ms: Option<i64>,
+    pub payment_method_type: Option<String>,
+    pub payment_method: Option<String>,
+    pub min_transaction_count: Option<i64>,
+    pub min_score_delta: Option<f64>,
+    pub swing_threshold: Option<f64>,
+    pub limit: Option<u32>,
+    pub bucket: Option<String>,
+}
+
+pub async fn routing_events(
+    TenantStateResolver(state): TenantStateResolver,
+    AuthenticatedAnalyticsContext(auth_context): AuthenticatedAnalyticsContext,
+    Query(params): Query<RoutingEventsParams>,
+) -> Result<Json<crate::analytics::RoutingEventsResponse>, error::ContainerError<error::ApiError>> {
+    let query = RoutingEventsQuery::from_request(
+        auth_context.merchant_id.clone(),
+        params.range,
+        params.start_ms,
+        params.end_ms,
+        params.payment_method_type,
+        params.payment_method,
+        params.min_transaction_count,
+        params.min_score_delta,
+        params.swing_threshold,
+        params.limit,
+        params.bucket,
+    );
+    Ok(Json(fetch_routing_events(&state, &query).await?))
 }
 
 #[derive(Debug, Clone, Deserialize)]

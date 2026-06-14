@@ -10,6 +10,7 @@ pub mod log_samples;
 pub mod overview_counts;
 pub mod route_hits;
 pub mod rule_hits;
+pub mod score_bucket_series;
 pub mod score_series;
 pub mod score_snapshots;
 pub mod smart_retry_stats;

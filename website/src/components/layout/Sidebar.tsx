@@ -10,6 +10,7 @@ import {
   Network,
   BarChart3,
   Activity,
+  BellRing,
   Moon,
   Sun,
   Users,
@@ -132,6 +133,7 @@ export function Sidebar() {
         <SideLink to="/" icon={LayoutDashboard} end selectedPath={selectedPath} onNavigate={setPendingPath}>Overview</SideLink>
         <SideLink to="/analytics" icon={BarChart3} selectedPath={selectedPath} onNavigate={setPendingPath}>Analytics</SideLink>
         <SideLink to="/audit" icon={Activity} selectedPath={selectedPath} onNavigate={setPendingPath}>Decision Audit</SideLink>
+        <SideLink to="/events" icon={BellRing} selectedPath={selectedPath} onNavigate={setPendingPath}>Routing Events</SideLink>
 
         <div className="flex items-center gap-2 px-3 pb-2 pt-5">
           <span className="text-[12px] font-bold uppercase tracking-widest text-slate-400 dark:text-[#6d768a]">

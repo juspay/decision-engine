@@ -5,6 +5,7 @@ import { DebitRoutingPage } from './components/pages/DebitRoutingPage'
 import { EuclidRulesPage } from './components/pages/EuclidRulesPage'
 import { OverviewPage } from './components/pages/OverviewPage'
 import { PaymentAuditPage } from './components/pages/PaymentAuditPage'
+import { RoutingEventsPage } from './components/pages/RoutingEventsPage'
 import { RoutingHubPage } from './components/pages/RoutingHubPage'
 import { SRRoutingPage } from './components/pages/SRRoutingPage'
 import { VolumeSplitPage } from './components/pages/VolumeSplitPage'
@@ -37,6 +38,7 @@ export default function App() {
           <Route path="decisions" element={<DecisionExplorerPage />} />
           <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="audit" element={<PaymentAuditPage />} />
+          <Route path="events" element={<RoutingEventsPage />} />
           <Route path="members" element={<MembersPage />} />
           <Route path="api-keys" element={<ApiKeysPage />} />
           <Route path="account" element={<AccountPage />} />
