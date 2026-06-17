@@ -403,6 +403,7 @@ pub async fn run_decider_flow(
                     debit_routing_output: None,
                     is_rust_based_decider: deciderParams.dpShouldConsumeResult.unwrap_or(false),
                     latency: None,
+                    multi_objective_info: None,
                 })
             } else {
                 decider_flow
@@ -732,6 +733,7 @@ pub async fn run_decider_flow(
                                     .dpShouldConsumeResult
                                     .unwrap_or(false),
                                 latency: None,
+                                multi_objective_info: None,
                             })
                         }
                         None => Err((

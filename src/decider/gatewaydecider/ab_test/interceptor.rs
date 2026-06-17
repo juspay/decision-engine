@@ -149,6 +149,7 @@ pub async fn intercept(dreq: &DomainDeciderRequestForApiCallV2) -> AbTestInterce
                     gateway_mga_id_map: None,
                     is_rust_based_decider: true,
                     latency: None,
+                    multi_objective_info: None,
                 }),
                 experiment_id,
                 variant_arm: arm.to_string(),

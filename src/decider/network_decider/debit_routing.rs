@@ -50,6 +50,7 @@ pub async fn perform_debit_routing(
                         gateway_mga_id_map: None,
                         is_rust_based_decider: true,
                         latency: None,
+                        multi_objective_info: None,
                     });
                 }
             }
