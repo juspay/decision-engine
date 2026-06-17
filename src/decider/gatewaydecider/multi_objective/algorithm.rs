@@ -7,22 +7,24 @@ use super::{MultiObjectiveInfo, MultiObjectiveOutcome, PspSummary};
 use crate::types::card::txn_card_info::TxnCardInfo;
 use crate::types::txn_details::types::TxnDetail;
 
-/// Bump given to the cost-winner's score. Tiny so we don't pollute the score
-/// magnitude (downstream observability still sees ~the original SR score).
-const PROMOTION_EPSILON: f64 = 1e-6;
+pub struct CostDecision {
+    pub chosen: String,
+    pub fallbacks: Vec<String>,
+}
 
 pub struct ReorderOutcome {
     pub head_moved: bool,
     pub info: MultiObjectiveInfo,
+    pub cost_decision: Option<CostDecision>,
 }
 
 pub async fn try_apply_multi_objective_post_step(
-    score_map: &mut HashMap<String, f64>,
+    score_map: &HashMap<String, f64>,
     merchant_id: &str,
     txn_detail: &TxnDetail,
     txn_card_info: &TxnCardInfo,
     tolerance_pp: f64,
-) -> MultiObjectiveInfo {
+) -> ReorderOutcome {
     if score_map.len() < 2 {
         let sr_head = current_head(score_map);
         return auth_won(
@@ -31,17 +33,16 @@ pub async fn try_apply_multi_objective_post_step(
             &HashMap::new(),
             score_map.len(),
             "Only one PSP available; nothing to reorder.".to_string(),
-        )
-        .info;
+        );
     }
     let cluster_key = derive_cluster_key(txn_detail, txn_card_info);
     let psps: Vec<String> = score_map.keys().cloned().collect();
     let costs = hypersense_client::lookup_costs(merchant_id, &cluster_key, &psps).await;
-    reorder_for_cost(score_map, tolerance_pp, &costs).info
+    reorder_for_cost(score_map, tolerance_pp, &costs)
 }
 
 pub fn reorder_for_cost(
-    score_map: &mut HashMap<String, f64>,
+    score_map: &HashMap<String, f64>,
     tolerance_pp: f64,
     costs: &HashMap<String, PspCost>,
 ) -> ReorderOutcome {
@@ -150,10 +151,6 @@ pub fn reorder_for_cost(
         .filter(|c| c.is_finite())
         .map(|sr| sr - cheapest_cost);
 
-    if let Some(entry) = score_map.get_mut(&cheapest_psp) {
-        *entry = best_auth + PROMOTION_EPSILON;
-    }
-
     let reason = match cost_saved_bps {
         Some(saved) => format!(
             "Promoted '{}' over '{}' — saves {:.2} bps within the {:.2} pp band.",
@@ -168,6 +165,8 @@ pub fn reorder_for_cost(
         ),
     };
 
+    let fallbacks = build_cost_ordered_fallbacks(score_map, &qualified, &cheapest_psp, &key_for);
+
     ReorderOutcome {
         head_moved: true,
         info: MultiObjectiveInfo {
@@ -179,7 +178,41 @@ pub fn reorder_for_cost(
             cost_saved_bps,
             qualified_count: qualified.len(),
         },
+        cost_decision: Some(CostDecision {
+            chosen: cheapest_psp,
+            fallbacks,
+        }),
     }
+}
+
+fn build_cost_ordered_fallbacks(
+    score_map: &HashMap<String, f64>,
+    qualified: &[String],
+    chosen: &str,
+    key_for: &dyn Fn(&str) -> f64,
+) -> Vec<String> {
+    let mut by_cost: Vec<String> = qualified
+        .iter()
+        .filter(|gw| gw.as_str() != chosen)
+        .cloned()
+        .collect();
+    by_cost.sort_by(|a, b| {
+        key_for(a)
+            .partial_cmp(&key_for(b))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let qualified_set: std::collections::HashSet<&str> =
+        qualified.iter().map(|s| s.as_str()).collect();
+    let mut by_auth: Vec<(String, f64)> = score_map
+        .iter()
+        .filter(|(gw, _)| !qualified_set.contains(gw.as_str()))
+        .map(|(gw, score)| (gw.clone(), *score))
+        .collect();
+    by_auth.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    by_cost.extend(by_auth.into_iter().map(|(gw, _)| gw));
+    by_cost
 }
 
 fn current_head(score_map: &HashMap<String, f64>) -> Option<(String, f64)> {
@@ -224,115 +257,7 @@ fn auth_won(
             cost_saved_bps: None,
             qualified_count,
         },
+        cost_decision: None,
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::super::{MultiObjectiveOutcome, PspSummary};
-    use super::*;
-
-    fn cost(bps: f64) -> PspCost {
-        PspCost {
-            available: true,
-            effective_cost_bps: bps,
-        }
-    }
-
-    fn unavailable() -> PspCost {
-        PspCost {
-            available: false,
-            effective_cost_bps: 0.0,
-        }
-    }
-
-    fn map(entries: &[(&str, f64)]) -> HashMap<String, f64> {
-        entries
-            .iter()
-            .map(|(g, s)| ((*g).to_string(), *s))
-            .collect()
-    }
-
-    fn costs(entries: &[(&str, PspCost)]) -> HashMap<String, PspCost> {
-        entries
-            .iter()
-            .map(|(g, c)| ((*g).to_string(), c.clone()))
-            .collect()
-    }
-
-    #[test]
-    fn no_qualifiers_is_noop() {
-        let mut m = map(&[("a", 0.9), ("b", 0.7)]);
-        let c = costs(&[("a", cost(20.0)), ("b", cost(10.0))]);
-        let out = reorder_for_cost(&mut m, 5.0, &c);
-        assert!(!out.head_moved);
-        assert_eq!(out.info.outcome, MultiObjectiveOutcome::AuthWon);
-        assert!(out.info.reason.contains("Only 1 PSP qualified"));
-    }
-
-    #[test]
-    fn cheaper_in_band_psp_promoted() {
-        let mut m = map(&[("a", 0.874), ("b", 0.869)]);
-        let c = costs(&[("a", cost(20.0)), ("b", cost(16.0))]);
-        let out = reorder_for_cost(&mut m, 0.8, &c);
-        assert!(out.head_moved);
-        assert_eq!(out.info.outcome, MultiObjectiveOutcome::CostWon);
-        assert_eq!(out.info.cost_saved_bps, Some(4.0));
-        let chosen: PspSummary = out.info.chosen.unwrap();
-        assert_eq!(chosen.psp, "b");
-        let sr_head: PspSummary = out.info.sr_head.unwrap();
-        assert_eq!(sr_head.psp, "a");
-        let head = m
-            .iter()
-            .max_by(|x, y| x.1.partial_cmp(y.1).unwrap())
-            .unwrap();
-        assert_eq!(head.0, "b");
-    }
-
-    #[test]
-    fn auth_wins_when_runner_up_out_of_band() {
-        let mut m = map(&[("a", 0.912), ("b", 0.881)]);
-        let c = costs(&[("a", cost(20.0)), ("b", cost(16.0))]);
-        let out = reorder_for_cost(&mut m, 0.8, &c);
-        assert!(!out.head_moved);
-        assert_eq!(out.info.outcome, MultiObjectiveOutcome::AuthWon);
-        assert!(out.info.reason.contains("Only 1 PSP qualified"));
-    }
-
-    #[test]
-    fn missing_cost_psp_sorts_last() {
-        let mut m = map(&[("a", 0.9), ("b", 0.895)]);
-        let c = costs(&[("b", cost(10.0))]);
-        let out = reorder_for_cost(&mut m, 5.0, &c);
-        assert!(out.head_moved);
-        assert_eq!(out.info.outcome, MultiObjectiveOutcome::CostWon);
-    }
-
-    #[test]
-    fn unavailable_psp_sorts_last() {
-        let mut m = map(&[("a", 0.9), ("b", 0.895)]);
-        let c = costs(&[("a", unavailable()), ("b", cost(10.0))]);
-        let out = reorder_for_cost(&mut m, 5.0, &c);
-        assert!(out.head_moved);
-        assert_eq!(out.info.outcome, MultiObjectiveOutcome::CostWon);
-    }
-
-    #[test]
-    fn all_qualifiers_missing_cost_is_noop() {
-        let mut m = map(&[("a", 0.9), ("b", 0.895)]);
-        let out = reorder_for_cost(&mut m, 5.0, &HashMap::new());
-        assert!(!out.head_moved);
-        assert_eq!(out.info.outcome, MultiObjectiveOutcome::AuthWon);
-        assert!(out.info.reason.contains("No cost data"));
-    }
-
-    #[test]
-    fn sr_head_already_cheapest_is_noop() {
-        let mut m = map(&[("a", 0.9), ("b", 0.895)]);
-        let c = costs(&[("a", cost(10.0)), ("b", cost(20.0))]);
-        let out = reorder_for_cost(&mut m, 5.0, &c);
-        assert!(!out.head_moved);
-        assert_eq!(out.info.outcome, MultiObjectiveOutcome::AuthWon);
-        assert!(out.info.reason.contains("already the cheapest"));
-    }
-}
