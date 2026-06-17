@@ -45,6 +45,7 @@ pub enum KnownFeature {
     GsmScoringFilter,
     ExploreExploitSrv3,
     AbTestRealPayments,
+    MultiObjectiveRouting,
 }
 
 impl KnownFeature {
@@ -53,6 +54,7 @@ impl KnownFeature {
             Self::GsmScoringFilter,
             Self::ExploreExploitSrv3,
             Self::AbTestRealPayments,
+            Self::MultiObjectiveRouting,
         ]
     }
 
@@ -61,6 +63,7 @@ impl KnownFeature {
             "gsm-scoring-filter" => Some(Self::GsmScoringFilter),
             "explore-exploit-srv3" => Some(Self::ExploreExploitSrv3),
             "ab-test-real-payments" => Some(Self::AbTestRealPayments),
+            "multi-objective-routing" => Some(Self::MultiObjectiveRouting),
             _ => None,
         }
     }
@@ -72,6 +75,7 @@ impl KnownFeature {
             Self::GsmScoringFilter => "gsm_based_scoring_filter_enabled_merchant",
             Self::ExploreExploitSrv3 => "ENABLE_EXPLORE_AND_EXPLOIT_ON_SRV3_CARD",
             Self::AbTestRealPayments => "ab_test_real_payments_enabled",
+            Self::MultiObjectiveRouting => "multi_objective_routing_enabled",
         }
     }
 
