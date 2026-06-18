@@ -260,4 +260,3 @@ fn auth_won(
         cost_decision: None,
     }
 }
-
