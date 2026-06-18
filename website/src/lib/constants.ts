@@ -59,6 +59,7 @@ export type RoutingKey = keyof typeof STATIC_ROUTING_KEYS
 
 export const ROUTING_APPROACH_COLORS: Record<string, string> = {
   SR_SELECTION_V3_ROUTING: 'bg-blue-100 text-blue-800',
+  SR_SELECTION_MULTI_OBJECTIVE: 'bg-cyan-100 text-cyan-800',
   PRIORITY_LOGIC: 'bg-purple-100 text-purple-800',
   NTW_BASED_ROUTING: 'bg-green-100 text-green-800',
   SR_SELECTION_V3_ROUTING_WITH_HEDGING: 'bg-orange-100 text-orange-800',
