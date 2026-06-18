@@ -1,5 +1,6 @@
 use crate::analytics::{
-    decisions as fetch_decisions, experiment_results as fetch_experiment_results,
+    cost_savings as fetch_cost_savings, decisions as fetch_decisions,
+    experiment_results as fetch_experiment_results,
     experiment_transactions as fetch_experiment_transactions,
     gateway_scores as fetch_gateway_scores, log_summaries as fetch_log_summaries,
     overview as fetch_overview, payment_audit as fetch_payment_audit,
@@ -90,6 +91,7 @@ pub fn serve() -> axum::Router<Arc<crate::tenant::GlobalAppState>> {
         .route("/gateway-scores", axum::routing::get(gateway_scores))
         .route("/decisions", axum::routing::get(decisions))
         .route("/routing-stats", axum::routing::get(routing_stats))
+        .route("/cost-savings", axum::routing::get(cost_savings))
         .route("/log-summaries", axum::routing::get(log_summaries))
         .route("/payment-audit", axum::routing::get(payment_audit))
         .route("/preview-trace", axum::routing::get(preview_trace))
@@ -146,6 +148,18 @@ pub async fn routing_stats(
 > {
     let query = analytics_query_from_params(auth_context.merchant_id.clone(), &params);
     Ok(Json(fetch_routing_stats(&state, &query).await?))
+}
+
+pub async fn cost_savings(
+    TenantStateResolver(state): TenantStateResolver,
+    AuthenticatedAnalyticsContext(auth_context): AuthenticatedAnalyticsContext,
+    Query(params): Query<AnalyticsQueryParams>,
+) -> Result<
+    Json<crate::analytics::AnalyticsCostSavingsResponse>,
+    error::ContainerError<error::ApiError>,
+> {
+    let query = analytics_query_from_params(auth_context.merchant_id.clone(), &params);
+    Ok(Json(fetch_cost_savings(&state, &query).await?))
 }
 
 pub async fn log_summaries(
