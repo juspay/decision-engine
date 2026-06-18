@@ -141,6 +141,8 @@ pub struct TxnCardInfo {
     pub cardSwitchProvider: Option<Secret<String>>,
     #[serde(rename = "cardType")]
     pub card_type: Option<CardType>,
+    #[serde(rename = "cardProgram", default)]
+    pub card_program: Option<String>,
     #[serde(rename = "nameOnCard")]
     pub nameOnCard: Option<Secret<String>>,
     // #[serde(rename = "txnDetailId")]
@@ -188,6 +190,8 @@ pub struct SafeTxnCardInfo {
     pub cardSwitchProvider: Option<Secret<String>>,
     #[serde(rename = "cardType")]
     pub card_type: Option<CardType>,
+    #[serde(rename = "cardProgram", default)]
+    pub card_program: Option<String>,
     #[serde(rename = "nameOnCard")]
     pub nameOnCard: Option<Secret<String>>,
     #[serde(with = "time::serde::iso8601")]
@@ -221,6 +225,7 @@ pub fn convert_safe_to_txn_card_info(
         cardIssuerBankName: safe_info.cardIssuerBankName,
         cardSwitchProvider: safe_info.cardSwitchProvider,
         card_type: safe_info.card_type,
+        card_program: safe_info.card_program,
         nameOnCard: safe_info.nameOnCard,
         dateCreated: safe_info.dateCreated,
         paymentMethodType: safe_info.paymentMethodType,
