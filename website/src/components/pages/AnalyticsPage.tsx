@@ -17,6 +17,7 @@ import { fetcher } from '../../lib/api'
 import { FEATURE_FLAGS } from '../../lib/featureFlags'
 import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
 import {
+  AnalyticsCostSavingsResponse,
   AnalyticsOverviewResponse,
   AnalyticsRange,
   AnalyticsRangeValue,
@@ -25,6 +26,31 @@ import {
   RoutingFilterOptions,
   SmartRetryStats,
 } from '../../types/api'
+
+function formatCurrencyValue(value: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency,
+      maximumFractionDigits: 2,
+    }).format(value)
+  } catch {
+    return `${value.toFixed(2)} ${currency}`
+  }
+}
+
+function formatCurrencyCompact(value: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency,
+      notation: 'compact',
+      maximumFractionDigits: 2,
+    }).format(value)
+  } catch {
+    return `${value.toFixed(0)} ${currency}`
+  }
+}
 import { Button } from '../ui/Button'
 import { Card, CardBody, CardHeader } from '../ui/Card'
 import { Badge } from '../ui/Badge'
@@ -873,6 +899,8 @@ export function AnalyticsPage() {
   }, [customEnd, customStart, range])
   const activeQueryWindow = range === 'custom' ? customWindow : presetWindowBounds
 
+  const [costCurrency, setCostCurrency] = useState<string | null>(null)
+
   const overviewUrl =
     activeQueryWindow
       ? buildAnalyticsUrl('/analytics/overview', range, activeQueryWindow)
@@ -881,6 +909,13 @@ export function AnalyticsPage() {
     activeQueryWindow
       ? buildAnalyticsUrl('/analytics/routing-stats', range, activeQueryWindow)
       : null
+  const costSavingsUrl = (() => {
+    if (!activeQueryWindow) return null
+    const base = buildAnalyticsUrl('/analytics/cost-savings', range, activeQueryWindow)
+    if (!costCurrency) return base
+    const sep = base.includes('?') ? '&' : '?'
+    return `${base}${sep}currency=${encodeURIComponent(costCurrency)}`
+  })()
   const filteredRoutingUrl =
     activeQueryWindow
       ? buildAnalyticsUrl('/analytics/routing-stats', range, activeQueryWindow, routingFilters)
@@ -927,6 +962,13 @@ export function AnalyticsPage() {
 
   const overview = useSWR<AnalyticsOverviewResponse>(overviewUrl, fetcher, overviewSwrOptions)
   const routing = useSWR<AnalyticsRoutingStatsResponse>(routingUrl, fetcher, routingSwrOptions)
+  const costSavings = useSWR<AnalyticsCostSavingsResponse>(costSavingsUrl, fetcher, routingSwrOptions)
+  useEffect(() => {
+    const serverCurrency = costSavings.data?.currency
+    if (serverCurrency && costCurrency === null) {
+      setCostCurrency(serverCurrency)
+    }
+  }, [costSavings.data?.currency, costCurrency])
   const filteredRouting = useSWR<AnalyticsRoutingStatsResponse>(
     filteredRoutingUrl,
     fetcher,
@@ -1762,7 +1804,7 @@ export function AnalyticsPage() {
         <div className="space-y-6">
           <Card>
             <CardBody>
-              <div className="grid gap-6 sm:grid-cols-3">
+              <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
                     Overall auth rate
@@ -1796,6 +1838,28 @@ export function AnalyticsPage() {
                     </p>
                   </div>
                 ))}
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                    Total cost saved
+                  </p>
+                  {costSavings.data && costSavings.data.currency && costSavings.data.totals.saved_value > 0 ? (
+                    <>
+                      <p className="mt-2 text-2xl font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
+                        {formatCurrencyValue(costSavings.data.totals.saved_value, costSavings.data.currency)}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                        {formatNumber(costSavings.data.totals.cost_won_count, 0)} of {formatNumber(costSavings.data.totals.total_decisions, 0)} decisions
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="mt-2 text-2xl font-semibold text-slate-300 dark:text-slate-700">—</p>
+                      <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                        {costSavings.data ? 'No multi-objective wins yet' : 'Loading…'}
+                      </p>
+                    </>
+                  )}
+                </div>
               </div>
             </CardBody>
           </Card>
@@ -1857,6 +1921,62 @@ export function AnalyticsPage() {
           )}
         </CardBody>
       </Card>
+
+          <Card className="overflow-visible">
+            <CardHeader>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Cost saved over time</h2>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                    Savings from multi-objective routing promoting the cheaper PSP within the SR tolerance band.
+                  </p>
+                </div>
+                {(costSavings.data?.available_currencies?.length ?? 0) > 1 && (
+                  <select
+                    className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:border-[#2a2a35] dark:bg-[#0d0d14] dark:text-slate-200"
+                    value={costSavings.data?.currency ?? ''}
+                    onChange={(e) => setCostCurrency(e.target.value)}
+                  >
+                    {costSavings.data?.available_currencies.map((c) => (
+                      <option key={c.currency} value={c.currency}>
+                        {c.currency} ({formatNumber(c.decision_count, 0)})
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            </CardHeader>
+            <CardBody>
+              {costSavings.data && costSavings.data.currency && costSavings.data.trend.length > 0 ? (
+                <div className="h-72">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={costSavings.data.trend} barCategoryGap="35%">
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                      <XAxis dataKey="bucket_ms" tickFormatter={bucketTickFormatter} tick={{ fontSize: 11 }} />
+                      <YAxis
+                        tick={{ fontSize: 11 }}
+                        tickFormatter={(value: number) => formatCurrencyCompact(value, costSavings.data!.currency!)}
+                        width={70}
+                      />
+                      <Tooltip
+                        labelFormatter={(label) => formatDateTime(Number(label))}
+                        formatter={(value: number) => [formatCurrencyValue(value, costSavings.data!.currency!), 'Saved']}
+                        contentStyle={CHART_TOOLTIP_STYLE}
+                        labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                        itemStyle={CHART_TOOLTIP_ITEM_STYLE}
+                      />
+                      <Bar dataKey="saved_value" fill="#10b981" name="Saved" radius={[3, 3, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <EmptyState
+                  title="No cost savings yet"
+                  body="Cost savings appear once multi-objective routing promotes a cheaper PSP within the SR tolerance band."
+                />
+              )}
+            </CardBody>
+          </Card>
 
           <Card className="overflow-visible">
         <CardHeader>
