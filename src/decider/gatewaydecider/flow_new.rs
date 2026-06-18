@@ -15,17 +15,22 @@ use std::vec::Vec;
 // use eulerhs::framework as Framework;
 // use gatewaydecider::flow::*;
 use super::gw_scoring as GS;
+use super::multi_objective;
 use super::runner::handle_fallback_logic;
 use super::types as T;
 use super::types::PriorityLogicFailure;
 use super::utils as Utils;
 // use optics_core::{preview, review};
 use crate::decider::gatewaydecider::constants as C;
+use crate::feedback::constants::kvRedis;
 use crate::logger;
+use crate::redis::feature::is_feature_enabled;
 use crate::redis::feature::RedisDataStruct;
 use crate::types::card::txn_card_info::TxnCardInfo;
 use crate::types::merchant as ETM;
+use crate::types::merchant::id::merchant_id_to_text;
 use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
+use crate::types::routing_configuration::SuccessRateData;
 use crate::types::service_configuration;
 
 pub async fn decider_full_payload_hs_function(
@@ -187,6 +192,7 @@ pub async fn decider_full_payload_hs_function(
             false,
             cpu_start,
             ab_test_sr_override,
+            dreq_.enable_multi_objective,
         )
         .await
     }
@@ -205,6 +211,7 @@ async fn perform_hybrid_routing(
         false,
         cpu_start,
         None,
+        dreq_.enable_multi_objective,
     )
     .await;
 
@@ -236,6 +243,16 @@ fn handle_enforced_gateway(gateway_list: Option<Vec<String>>) -> Option<Vec<Stri
     }
 }
 
+async fn load_default_tolerance_pp(merchant_id: &str) -> Option<f64> {
+    let key = format!("SR_V3_INPUT_CONFIG_{}", merchant_id);
+    let row = service_configuration::find_config_by_name(key)
+        .await
+        .ok()??;
+    let value = row.value?;
+    let cfg: SuccessRateData = serde_json::from_str(&value).ok()?;
+    cfg.default_tolerance_pp
+}
+
 pub async fn run_decider_flow(
     deciderParams: T::DeciderParams,
     rankingAlgorithm: Option<RankingAlgorithm>,
@@ -243,6 +260,7 @@ pub async fn run_decider_flow(
     is_legacy_decider_flow: bool,
     cpu_start: Instant,
     ab_test_sr_override: Option<crate::euclid::types::SrConfigOverride>,
+    enable_multi_objective_override: Option<bool>,
 ) -> Result<T::DecidedGateway, T::ErrorResponse> {
     let txnCreationTime = deciderParams
         .dpTxnDetail
@@ -323,6 +341,7 @@ pub async fn run_decider_flow(
                     debit_routing_output: None,
                     is_rust_based_decider: true,
                     latency: Some(cpu_time),
+                    multi_objective_info: None,
                 })
             } else {
                 decider_flow
@@ -484,6 +503,21 @@ pub async fn run_decider_flow(
                     .collect::<HashMap<_, _>>()
             );
 
+            let merchant_id_text =
+                merchant_id_to_text(deciderParams.dpMerchantAccount.merchantId.clone());
+            let multi_obj_on = match enable_multi_objective_override {
+                Some(b) => b,
+                None => {
+                    is_feature_enabled(
+                        "multi_objective_routing_enabled".to_string(),
+                        merchant_id_text.clone(),
+                        kvRedis(),
+                    )
+                    .await
+                }
+            };
+            let hedging_on = decider_flow.writer.gwDeciderApproach.is_hedging();
+
             let scoreList = currentGatewayScoreMap.iter().collect::<Vec<_>>();
             logger::debug!(action = "scoreList", tag = "scoreList", "{:?}", scoreList);
 
@@ -504,7 +538,7 @@ pub async fn run_decider_flow(
                 _gs => {
                     let maxScore = Utils::get_max_score_gateway(&currentGatewayScoreMap)
                         .map(|(_gw, score)| score);
-                    let decidedGateway = Utils::random_gateway_selection_for_same_score(
+                    let mut decidedGateway = Utils::random_gateway_selection_for_same_score(
                         &currentGatewayScoreMap,
                         maxScore,
                     );
@@ -514,6 +548,31 @@ pub async fn run_decider_flow(
                         "{:?}",
                         decidedGateway
                     );
+
+                    let mut cost_fallbacks_override: Option<Vec<String>> = None;
+                    if multi_obj_on && !hedging_on {
+                        let tolerance_pp = load_default_tolerance_pp(&merchant_id_text)
+                            .await
+                            .unwrap_or(multi_objective::DEFAULT_TOLERANCE_BAND_PP);
+                        let outcome =
+                            multi_objective::algorithm::try_apply_multi_objective_post_step(
+                                &currentGatewayScoreMap,
+                                &merchant_id_text,
+                                &deciderParams.dpTxnDetail,
+                                &deciderParams.dpTxnCardInfo,
+                                tolerance_pp,
+                            )
+                            .await;
+                        if outcome.info.outcome == multi_objective::MultiObjectiveOutcome::CostWon {
+                            decider_flow.writer.gwDeciderApproach =
+                                T::GatewayDeciderApproach::SrSelectionMultiObjective;
+                            if let Some(decision) = outcome.cost_decision {
+                                decidedGateway = Some(decision.chosen);
+                                cost_fallbacks_override = Some(decision.fallbacks);
+                            }
+                        }
+                        decider_flow.writer.multi_objective_info = Some(outcome.info);
+                    }
 
                     let stateBindings = (
                         decider_flow.writer.srElminiationApproachInfo.clone(),
@@ -626,10 +685,12 @@ pub async fn run_decider_flow(
                     match decidedGateway {
                         Some(decideGatewayOutput) => {
                             let cpu_time = cpu_start.elapsed().as_millis() as u64;
-                            let fallbacks = fallback_gateways_from_score_map(
-                                &currentGatewayScoreMap,
-                                &decideGatewayOutput,
-                            );
+                            let fallbacks = cost_fallbacks_override.unwrap_or_else(|| {
+                                fallback_gateways_from_score_map(
+                                    &currentGatewayScoreMap,
+                                    &decideGatewayOutput,
+                                )
+                            });
                             Ok(T::DecidedGateway {
                                 decided_gateway: decideGatewayOutput,
                                 fallback_gateways: fallbacks,
@@ -654,6 +715,10 @@ pub async fn run_decider_flow(
                                 debit_routing_output: None,
                                 is_rust_based_decider: true,
                                 latency: Some(cpu_time),
+                                multi_objective_info: decider_flow
+                                    .writer
+                                    .multi_objective_info
+                                    .clone(),
                             })
                         }
                         None => Err((
@@ -669,6 +734,8 @@ pub async fn run_decider_flow(
             }
         }
     };
+
+    //apply try_apply_multi_objective_post_step
     let key = [
         C::GATEWAY_SCORING_DATA,
         &deciderParams.dpTxnDetail.txnUuid.clone(),

@@ -1,5 +1,6 @@
 pub mod audit_summaries;
 pub mod audit_timeline;
+pub mod cost_savings;
 pub mod decision_approaches;
 pub mod decision_series;
 pub mod decision_tiles;

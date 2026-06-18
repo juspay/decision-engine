@@ -236,6 +236,35 @@ pub struct AnalyticsRoutingStatsResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalyticsAvailableCurrency {
+    pub currency: String,
+    pub decision_count: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalyticsCostSavingsTrendPoint {
+    pub bucket_ms: i64,
+    pub saved_value: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalyticsCostSavingsTotals {
+    pub saved_value: f64,
+    pub cost_won_count: u64,
+    pub total_decisions: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalyticsCostSavingsResponse {
+    pub merchant_id: String,
+    pub range: String,
+    pub currency: Option<String>,
+    pub available_currencies: Vec<AnalyticsAvailableCurrency>,
+    pub trend: Vec<AnalyticsCostSavingsTrendPoint>,
+    pub totals: AnalyticsCostSavingsTotals,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoutingFilterOptions {
     pub dimensions: Vec<RoutingFilterDimension>,
     pub missing_dimensions: Vec<RoutingFilterDimensionHint>,

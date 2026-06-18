@@ -476,6 +476,7 @@ pub struct DeciderState {
     /// Applied at routing time: hedging_percent overrides explore-exploit, elimination_threshold
     /// overrides the merchant's elimination rule. Absent for control arm and non-tuning experiments.
     pub ab_test_sr_override: Option<crate::euclid::types::SrConfigOverride>,
+    pub multi_objective_info: Option<super::multi_objective::MultiObjectiveInfo>,
 }
 
 pub fn initial_decider_state(date_created: String) -> DeciderState {
@@ -520,6 +521,7 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
         srv3_bucket_size: None,
         sr_v3_hedging_percent: None,
         gateway_reference_id: None,
+        multi_objective_info: None,
         gateway_scoring_data: GatewayScoringData {
             merchantId: String::new(),
             paymentMethodType: String::new(),
@@ -652,6 +654,7 @@ pub enum GatewayDeciderApproach {
     SrV3GlobalDowntimeHedging,
     NtwBasedRouting,
     AbTestStaticAlgorithm,
+    SrSelectionMultiObjective,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -691,6 +694,22 @@ impl fmt::Display for RankingAlgorithm {
             Self::NtwBasedRouting => write!(f, "NTW_BASED_ROUTING"),
             Self::NtwSrHybridRouting => write!(f, "NTW_SR_HYBRID_ROUTING"),
         }
+    }
+}
+
+impl GatewayDeciderApproach {
+    pub fn is_hedging(&self) -> bool {
+        matches!(
+            self,
+            Self::SrV2Hedging
+                | Self::SrV2AllDowntimeHedging
+                | Self::SrV2DowntimeHedging
+                | Self::SrV2GlobalDowntimeHedging
+                | Self::SrV3Hedging
+                | Self::SrV3AllDowntimeHedging
+                | Self::SrV3DowntimeHedging
+                | Self::SrV3GlobalDowntimeHedging
+        )
     }
 }
 
@@ -953,6 +972,8 @@ pub struct DomainDeciderRequestForApiCallV2 {
     pub eligible_gateway_list: Option<Vec<String>>,
     pub ranking_algorithm: Option<RankingAlgorithm>,
     pub elimination_enabled: Option<bool>,
+    #[serde(default)]
+    pub enable_multi_objective: Option<bool>,
 }
 
 pub fn deserialize_optional_udfs_to_hashmap<'de, D>(
@@ -1004,6 +1025,8 @@ pub struct PaymentInfo {
     pub card_isin: Option<String>,
     card_type: Option<ETCa::card_type::CardType>,
     card_switch_provider: Option<Secret<String>>,
+    #[serde(default)]
+    card_program: Option<String>,
 }
 
 // write a function to transfer DomainDeciderRequestForApiCallV2 to DomainDeciderRequest
@@ -1102,6 +1125,7 @@ impl DomainDeciderRequestForApiCallV2 {
                 cardIssuerBankName: self.payment_info.card_issuer_bank_name.clone(),
                 cardSwitchProvider: self.payment_info.card_switch_provider.clone(),
                 card_type: self.payment_info.card_type.clone(),
+                card_program: self.payment_info.card_program.clone(),
                 nameOnCard: None,
                 dateCreated: OffsetDateTime::now_utc(),
                 paymentMethodType: self.payment_info.payment_method_type.to_string(),
@@ -1313,6 +1337,7 @@ pub struct DecidedGateway {
     pub gateway_mga_id_map: Option<AValue>,
     pub is_rust_based_decider: bool,
     pub latency: Option<u64>,
+    pub multi_objective_info: Option<super::multi_objective::MultiObjectiveInfo>,
 }
 
 #[derive(Debug, Serialize, Clone, Deserialize)]
@@ -1525,6 +1550,9 @@ impl fmt::Display for GatewayDeciderApproach {
                 write!(f, "NTW_BASED_ROUTING")
             }
             Self::AbTestStaticAlgorithm => write!(f, "AB_TEST_STATIC_ALGORITHM"),
+            Self::SrSelectionMultiObjective => {
+                write!(f, "SR_SELECTION_MULTI_OBJECTIVE")
+            }
         }
     }
 }

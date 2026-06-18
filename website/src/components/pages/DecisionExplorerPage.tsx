@@ -16,25 +16,27 @@ import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
 import { useAuthStore } from '../../store/authStore'
 import { apiPost, fetcher } from '../../lib/api'
 import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
-import { DecideGatewayResponse, GatewayConnector, PaymentAuditEvent, PaymentAuditResponse, RoutingAlgorithmName, UpdateScoreResponse } from '../../types/api'
+import { DecideGatewayResponse, GatewayConnector, MultiObjectiveInfo, PaymentAuditEvent, PaymentAuditResponse, UpdateScoreResponse } from '../../types/api'
 import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
 import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
 import { FEATURE_FLAGS } from '../../lib/featureFlags'
 import { Play, RefreshCw, ChevronDown, ChevronUp, Activity, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings } from 'lucide-react'
 
-const ALGORITHMS: RoutingAlgorithmName[] = [
+// UI-local algorithm tokens for the simulation dropdown. Maps to the backend
+// /decide-gateway request as follows:
+//   'SR_BASED_ROUTING'   → { rankingAlgorithm: 'SR_BASED_ROUTING' }
+//   'SR_MULTI_OBJECTIVE' → { rankingAlgorithm: 'SR_BASED_ROUTING', enableMultiObjective: true }
+type SimulationAlgorithm = 'SR_BASED_ROUTING' | 'SR_MULTI_OBJECTIVE'
+
+const ALGORITHMS: SimulationAlgorithm[] = [
   'SR_BASED_ROUTING',
-  'PL_BASED_ROUTING',
-  'NTW_BASED_ROUTING',
-  'NTW_SR_HYBRID_ROUTING',
+  'SR_MULTI_OBJECTIVE',
 ]
 
-const ALGORITHM_LABELS: Record<RoutingAlgorithmName, string> = {
+const ALGORITHM_LABELS: Record<SimulationAlgorithm, string> = {
   SR_BASED_ROUTING: 'Success Rate Based',
-  PL_BASED_ROUTING: 'Priority List Based',
-  NTW_BASED_ROUTING: 'Network Based',
-  NTW_SR_HYBRID_ROUTING: 'Network + SR Hybrid',
+  SR_MULTI_OBJECTIVE: 'Success Rate Based + Multi-Objective',
 }
 
 type TabType = 'single' | 'batch' | 'rule' | 'volume' | 'debit'
@@ -45,10 +47,27 @@ interface FormState {
   payment_method_type: string
   payment_method: string
   card_brand: string
+  card_program: string
   auth_type: string
   eligible_gateways: string
-  ranking_algorithm: RoutingAlgorithmName
+  ranking_algorithm: SimulationAlgorithm
 }
+
+const MULTI_OBJECTIVE_CURRENCY = 'USD'
+const MULTI_OBJECTIVE_PAYMENT_METHODS = ['CREDIT'] as const
+const CARD_PROGRAM_OPTIONS = ['STANDARD', 'PREMIUM'] as const
+const MULTI_OBJECTIVE_CARD_BRANDS = ['VISA', 'MASTERCARD'] as const
+
+const MULTI_OBJECTIVE_CLUSTER_VARIANTS: Array<{
+  paymentMethod: 'CREDIT'
+  cardSwitchProvider: 'VISA' | 'MASTERCARD'
+  cardProgram: 'STANDARD' | 'PREMIUM'
+}> = [
+  { paymentMethod: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD' },
+  { paymentMethod: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'PREMIUM'  },
+  { paymentMethod: 'CREDIT', cardSwitchProvider: 'MASTERCARD', cardProgram: 'STANDARD' },
+  { paymentMethod: 'CREDIT', cardSwitchProvider: 'MASTERCARD', cardProgram: 'PREMIUM'  },
+]
 
 interface DebitRoutingFormState {
   amount: string
@@ -93,6 +112,26 @@ interface SimulationResult {
   gatewayPriorityMap: Record<string, number> | null
   retryGateway?: string
   retryStatus?: 'CHARGED' | 'FAILURE' | 'PENDING_VBV'
+  costSavedBps?: number | null
+  costWon?: boolean
+  amount: number
+  currency: string
+}
+
+function formatCurrencyValue(value: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency,
+      maximumFractionDigits: 2,
+    }).format(value)
+  } catch {
+    return `${value.toFixed(2)} ${currency}`
+  }
+}
+
+function formatSavingsCurrency(bps: number, amount: number, currency: string): string {
+  return formatCurrencyValue((bps / 10000) * amount, currency)
 }
 
 type TransactionOutcome = 'CHARGED' | 'FAILURE' | 'PENDING_VBV'
@@ -150,6 +189,7 @@ const DEFAULT_FORM: FormState = {
   payment_method_type: '',
   payment_method: '',
   card_brand: '',
+  card_program: 'STANDARD',
   auth_type: '',
   eligible_gateways: 'stripe, adyen',
   ranking_algorithm: 'SR_BASED_ROUTING',
@@ -220,13 +260,9 @@ function cloneConnectors(connectors: GatewayConnector[]) {
   return connectors.map((connector) => ({ ...connector }))
 }
 
-function normalizeRankingAlgorithm(value: unknown): RoutingAlgorithmName {
-  if (value === 'SrBasedRouting') return 'SR_BASED_ROUTING'
-  if (value === 'PlBasedRouting') return 'PL_BASED_ROUTING'
-  if (value === 'NtwBasedRouting') return 'NTW_BASED_ROUTING'
-  if (value === 'NtwSrHybridRouting') return 'NTW_SR_HYBRID_ROUTING'
-  return ALGORITHMS.includes(value as RoutingAlgorithmName)
-    ? value as RoutingAlgorithmName
+function normalizeRankingAlgorithm(value: unknown): SimulationAlgorithm {
+  return ALGORITHMS.includes(value as SimulationAlgorithm)
+    ? (value as SimulationAlgorithm)
     : DEFAULT_FORM.ranking_algorithm
 }
 
@@ -957,6 +993,35 @@ export function DecisionExplorerPage() {
     cardBrandOptions,
   ])
 
+  // SR_MULTI_OBJECTIVE constrains the form to a card-only cluster shape:
+  // Currency = USD, Method Type = CARD, Payment Method = CREDIT, and Card Brand
+  // defaults to Visa/Mastercard when the prior selection isn't one of them.
+  useEffect(() => {
+    if (form.ranking_algorithm !== 'SR_MULTI_OBJECTIVE') return
+    setForm(prev => {
+      if (prev.ranking_algorithm !== 'SR_MULTI_OBJECTIVE') return prev
+      const next = { ...prev }
+      let changed = false
+      if (next.currency !== MULTI_OBJECTIVE_CURRENCY) { next.currency = MULTI_OBJECTIVE_CURRENCY; changed = true }
+      const cardType = paymentMethodTypeOptions.find(p => p === 'CARD') || 'CARD'
+      if (next.payment_method_type !== cardType) { next.payment_method_type = cardType; changed = true }
+      if (!MULTI_OBJECTIVE_PAYMENT_METHODS.includes(next.payment_method as 'CREDIT')) {
+        next.payment_method = 'CREDIT'
+        changed = true
+      }
+      if (!MULTI_OBJECTIVE_CARD_BRANDS.includes(next.card_brand as 'VISA' | 'MASTERCARD')) {
+        const fallback = cardBrandOptions.find(b => b === 'VISA') || cardBrandOptions.find(b => b === 'MASTERCARD') || cardBrandOptions[0] || 'VISA'
+        next.card_brand = fallback
+        changed = true
+      }
+      if (!CARD_PROGRAM_OPTIONS.includes(next.card_program as 'STANDARD' | 'PREMIUM')) {
+        next.card_program = 'STANDARD'
+        changed = true
+      }
+      return changed ? next : prev
+    })
+  }, [form.ranking_algorithm, paymentMethodTypeOptions, cardBrandOptions])
+
   useEffect(() => {
     if (!selectedAuditPaymentId && !selectedPreviewPaymentId && !setupPrompt) return
 
@@ -1373,9 +1438,13 @@ export function DecisionExplorerPage() {
           paymentMethod: form.payment_method,
           authType: form.auth_type,
           cardBrand: form.card_brand,
+          cardSwitchProvider: form.card_brand,
+          cardType: form.payment_method,
+          ...(form.ranking_algorithm === 'SR_MULTI_OBJECTIVE' && { cardProgram: form.card_program }),
         },
         eligibleGatewayList: gateways,
-        rankingAlgorithm: form.ranking_algorithm,
+        rankingAlgorithm: 'SR_BASED_ROUTING',
+        enableMultiObjective: form.ranking_algorithm === 'SR_MULTI_OBJECTIVE',
         eliminationEnabled: eliminationEnabled,
       })
       const scoreRes = await apiPost<UpdateScoreResponse>('/update-gateway-score', {
@@ -1497,26 +1566,45 @@ export function DecisionExplorerPage() {
     let consecutiveErrors = 0
     let lastUIUpdate = 0
 
+    const isMultiObjective = form.ranking_algorithm === 'SR_MULTI_OBJECTIVE'
+
     try {
       for (let i = 0; i < total; i++) {
         if (simulationAbortRef.current) break
         const paymentId = `sim_${Date.now()}_${i}`
+
+        // Under SR_MULTI_OBJECTIVE, vary the cluster and amount per payment so
+        // the (mock) Hypersense cost lookup returns distinct costs and the
+        // multi-objective leg has meaningful choices to make. Form values still
+        // seed everything else (currency, eligible_gateways, etc).
+        const variant = isMultiObjective ? MULTI_OBJECTIVE_CLUSTER_VARIANTS[i % MULTI_OBJECTIVE_CLUSTER_VARIANTS.length] : null
+        const paymentMethodType = isMultiObjective ? 'CARD' : form.payment_method_type
+        const paymentMethod = variant ? variant.paymentMethod : form.payment_method
+        const cardBrand = variant ? variant.cardSwitchProvider : form.card_brand
+        const cardProgram = variant ? variant.cardProgram : form.card_program
+        const amount = isMultiObjective
+          ? Math.floor(10 + Math.random() * 991)
+          : (parseFloat(form.amount) || 1000)
 
         try {
           const decideRes = await apiPost<DecideGatewayResponse>('/decide-gateway', {
             merchantId: effectiveMerchantId,
             paymentInfo: {
               paymentId: paymentId,
-              amount: parseFloat(form.amount) || 1000,
+              amount,
               currency: form.currency,
               paymentType: 'ORDER_PAYMENT',
-              paymentMethodType: form.payment_method_type,
-              paymentMethod: form.payment_method,
+              paymentMethodType,
+              paymentMethod,
               authType: form.auth_type,
-              cardBrand: form.card_brand,
+              cardBrand,
+              cardSwitchProvider: cardBrand,
+              cardType: paymentMethod,
+              cardProgram,
             },
             eligibleGatewayList: gateways,
-            rankingAlgorithm: form.ranking_algorithm,
+            rankingAlgorithm: 'SR_BASED_ROUTING',
+            enableMultiObjective: isMultiObjective,
             eliminationEnabled: eliminationEnabled,
           })
 
@@ -1563,6 +1651,7 @@ export function DecisionExplorerPage() {
             })
           }
 
+          const mo = decideRes.multi_objective_info ?? null
           results.push({
             paymentId,
             decidedGateway,
@@ -1572,6 +1661,10 @@ export function DecisionExplorerPage() {
             gatewayPriorityMap: decideRes.gateway_priority_map ?? null,
             retryGateway,
             retryStatus,
+            costSavedBps: mo?.costSavedBps ?? null,
+            costWon: mo?.outcome === 'COST_WON',
+            amount,
+            currency: form.currency,
           })
 
           consecutiveErrors = 0
@@ -1837,6 +1930,18 @@ export function DecisionExplorerPage() {
     const triggered = deferredSimulationResults.filter(r => r.retryGateway !== undefined).length
     const recovered = deferredSimulationResults.filter(r => r.retryStatus === 'CHARGED').length
     return { triggered, recovered }
+  }, [deferredSimulationResults])
+
+  const totalCostSaved = useMemo(() => {
+    let value = 0
+    let currency = ''
+    for (const r of deferredSimulationResults) {
+      if (r.costWon && r.costSavedBps != null && r.costSavedBps > 0 && r.status === 'CHARGED') {
+        value += (r.costSavedBps / 10000) * r.amount
+        currency = r.currency
+      }
+    }
+    return { value, currency }
   }, [deferredSimulationResults])
 
   const debitNetworkRows = debitResult?.debit_routing_output?.co_badged_card_networks_info || []
@@ -2488,26 +2593,47 @@ export function DecisionExplorerPage() {
             ) : (
               <>
                 <div className="space-y-2">
-                  <div className="grid grid-cols-3 gap-x-3 gap-y-2.5">
-                    {([
+                  {(() => {
+                    const isMultiObjective = form.ranking_algorithm === 'SR_MULTI_OBJECTIVE'
+                    const methodTypeOptionsForRender = isMultiObjective
+                      ? (paymentMethodTypeOptions.includes('CARD') ? ['CARD'] : ['CARD', ...paymentMethodTypeOptions])
+                      : paymentMethodTypeOptions
+                    const paymentMethodOptionsForRender = isMultiObjective
+                      ? [...MULTI_OBJECTIVE_PAYMENT_METHODS]
+                      : paymentMethodOptions
+                    const currencyOptionsForRender = isMultiObjective
+                      ? [MULTI_OBJECTIVE_CURRENCY]
+                      : currencyOptions
+                    const cardBrandOptionsForRender = isMultiObjective
+                      ? [...MULTI_OBJECTIVE_CARD_BRANDS]
+                      : cardBrandOptions
+                    const fields: { label: string; content: React.ReactNode }[] = [
                       { label: 'Amount', content: <input value={form.amount} onChange={e => set('amount', e.target.value)} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500" /> },
-                      { label: 'Currency', content: <select value={form.currency} onChange={e => set('currency', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{currencyOptions.map(c => <option key={c} value={c}>{c}</option>)}</select> },
-                      { label: 'Method Type', content: <select value={form.payment_method_type} onChange={e => set('payment_method_type', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{paymentMethodTypeOptions.map(p => <option key={p} value={p}>{formatOptionLabel(p)}</option>)}</select> },
-                      { label: 'Payment Method', content: <select value={form.payment_method} onChange={e => set('payment_method', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{paymentMethodOptions.map(p => <option key={p} value={p}>{formatOptionLabel(p)}</option>)}</select> },
-                      { label: 'Card Brand', content: <select value={form.card_brand} onChange={e => set('card_brand', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{cardBrandOptions.map(b => <option key={b} value={b}>{formatOptionLabel(b)}</option>)}</select> },
+                      { label: 'Currency', content: <select value={form.currency} onChange={e => set('currency', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading || isMultiObjective} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{currencyOptionsForRender.map(c => <option key={c} value={c}>{c}</option>)}</select> },
+                      { label: 'Method Type', content: <select value={form.payment_method_type} onChange={e => set('payment_method_type', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading || isMultiObjective} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{methodTypeOptionsForRender.map(p => <option key={p} value={p}>{formatOptionLabel(p)}</option>)}</select> },
+                      { label: 'Payment Method', content: <select value={form.payment_method} onChange={e => set('payment_method', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{paymentMethodOptionsForRender.map(p => <option key={p} value={p}>{formatOptionLabel(p)}</option>)}</select> },
+                      { label: 'Card Brand', content: <select value={form.card_brand} onChange={e => set('card_brand', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{cardBrandOptionsForRender.map(b => <option key={b} value={b}>{formatOptionLabel(b)}</option>)}</select> },
                       { label: 'Auth Type', content: <select value={form.auth_type} onChange={e => set('auth_type', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{authTypeOptions.map(a => <option key={a} value={a}>{formatOptionLabel(a)}</option>)}</select> },
-                    ] as { label: string; content: React.ReactNode }[]).map(({ label, content }) => (
-                      <div key={label}>
-                        <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">{label}</label>
-                        {content}
+                    ]
+                    if (isMultiObjective) {
+                      fields.push({ label: 'Card Type', content: <select value={form.card_program} onChange={e => set('card_program', e.target.value)} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500">{CARD_PROGRAM_OPTIONS.map(c => <option key={c} value={c}>{formatOptionLabel(c)}</option>)}</select> })
+                    }
+                    return (
+                      <div className="grid grid-cols-3 gap-x-3 gap-y-2.5">
+                        {fields.map(({ label, content }) => (
+                          <div key={label}>
+                            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">{label}</label>
+                            {content}
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
+                    )
+                  })()}
                   <div>
                     <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">Algorithm</label>
                     <select
                       value={form.ranking_algorithm}
-                      onChange={e => set('ranking_algorithm', e.target.value as RoutingAlgorithmName)}
+                      onChange={e => set('ranking_algorithm', e.target.value as SimulationAlgorithm)}
                       className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm font-medium text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 cursor-pointer"
                     >
                       {ALGORITHMS.map(a => <option key={a} value={a}>{ALGORITHM_LABELS[a]}</option>)}
@@ -3241,6 +3367,14 @@ export function DecisionExplorerPage() {
                                 </UiTooltip>
                               </>
                             )}
+                            {totalCostSaved.value > 0 && totalCostSaved.currency && (
+                              <>
+                                <span className="text-slate-300 dark:text-slate-600">·</span>
+                                <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+                                  saved {formatCurrencyValue(totalCostSaved.value, totalCostSaved.currency)}
+                                </span>
+                              </>
+                            )}
                           </>
                         )}
                       </div>
@@ -3415,6 +3549,7 @@ export function DecisionExplorerPage() {
                               <th className="text-left px-3 py-2 whitespace-nowrap">Gateway</th>
                               <th className="text-left px-3 py-2">Routing</th>
                               <th className="text-left px-3 py-2">Outcome</th>
+                              <th className="text-right px-3 py-2 whitespace-nowrap">Cost Savings</th>
                               {smartRetryEnabled && <th className="text-left px-3 py-2 whitespace-nowrap">Retry Gateway</th>}
                               {smartRetryEnabled && <th className="text-left px-3 py-2">Retry Outcome</th>}
                               <th className="w-8" />
@@ -3443,7 +3578,11 @@ export function DecisionExplorerPage() {
                                     </span>
                                   ) : (
                                     <span className="text-[11px] text-slate-400">
-                                      {res.routingApproach === 'SR_SELECTION_V3_ROUTING' ? 'SR V3' : (res.routingApproach ?? '—')}
+                                      {res.routingApproach === 'SR_SELECTION_V3_ROUTING'
+                                        ? 'SR V3'
+                                        : res.routingApproach === 'SR_SELECTION_MULTI_OBJECTIVE'
+                                        ? 'Multi-Obj'
+                                        : (res.routingApproach ?? '—')}
                                     </span>
                                   )}
                                 </td>
@@ -3451,6 +3590,13 @@ export function DecisionExplorerPage() {
                                   <Badge variant={res.status === 'CHARGED' ? 'green' : res.status === 'PENDING_VBV' ? 'orange' : 'red'}>
                                     {res.status}
                                   </Badge>
+                                </td>
+                                <td className="px-3 py-2 text-right whitespace-nowrap">
+                                  {res.costWon && res.costSavedBps != null && res.costSavedBps > 0 && res.status === 'CHARGED' ? (
+                                    <span className="font-mono text-xs text-emerald-700 dark:text-emerald-400 tabular-nums">
+                                      {formatSavingsCurrency(res.costSavedBps, res.amount, res.currency)}
+                                    </span>
+                                  ) : null}
                                 </td>
                                 {smartRetryEnabled && (
                                   <td className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
@@ -3508,7 +3654,7 @@ export function DecisionExplorerPage() {
                       paymentMethod: form.payment_method,
                       authType: form.auth_type,
                       cardBrand: form.card_brand,
-                      rankingAlgorithm: form.ranking_algorithm,
+                      rankingAlgorithm: 'SR_BASED_ROUTING',
                       eligibleGateways: form.eligible_gateways,
                     }}
                   />
@@ -3582,6 +3728,10 @@ export function DecisionExplorerPage() {
                     )}
                   </CardBody>
                 </Card>
+
+                {result.multi_objective_info && (
+                  <MultiObjectiveDecisionPanel info={result.multi_objective_info} />
+                )}
 
                 {scoreData.length > 0 && (
                   <Card>
@@ -4220,6 +4370,111 @@ export function DecisionExplorerPage() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function MultiObjectiveDecisionPanel({ info }: { info: MultiObjectiveInfo }) {
+  const isCostWin = info.outcome === 'COST_WON'
+  const tone = isCostWin
+    ? 'border-cyan-200 bg-cyan-50/60 dark:border-cyan-900 dark:bg-cyan-950/30'
+    : 'border-slate-200 bg-slate-50/60 dark:border-[#1c1c24] dark:bg-[#0b0b10]'
+  const pillTone = isCostWin
+    ? 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-200'
+    : 'bg-slate-200 text-slate-700 dark:bg-[#1f1f29] dark:text-slate-200'
+  return (
+    <Card>
+      <CardBody>
+        <div className={`rounded-2xl border px-4 py-3 ${tone}`}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+                Multi-Objective Decision
+              </span>
+              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${pillTone}`}>
+                {isCostWin ? 'Cost won' : 'Auth won'}
+              </span>
+            </div>
+            <div className="text-right">
+              <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+                Tolerance band
+              </span>
+              <p className="font-mono text-sm font-semibold text-slate-800 dark:text-slate-100">
+                {info.tolerancePp.toFixed(2)} pp
+              </p>
+            </div>
+          </div>
+
+          <p className="mt-3 text-sm text-slate-700 dark:text-slate-200 leading-relaxed">
+            {info.reason}
+          </p>
+
+          {isCostWin && info.costSavedBps != null && (
+            <div className="mt-3 inline-flex items-center gap-2 rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200">
+              <span>Cost saved</span>
+              <span className="font-mono">{info.costSavedBps.toFixed(2)} bps</span>
+            </div>
+          )}
+
+          {(info.srHead || info.chosen) && (
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              {info.srHead && (
+                <MultiObjectivePspCard
+                  label={isCostWin ? 'SR head (would have picked)' : 'SR head (kept)'}
+                  summary={info.srHead}
+                />
+              )}
+              {info.chosen && (
+                <MultiObjectivePspCard
+                  label={isCostWin ? 'Chosen by cost' : 'Final pick'}
+                  summary={info.chosen}
+                  emphasis={isCostWin}
+                />
+              )}
+            </div>
+          )}
+
+          <p className="mt-3 text-[11px] text-slate-500 dark:text-slate-400">
+            {info.qualifiedCount} PSP{info.qualifiedCount === 1 ? '' : 's'} qualified under the band.
+          </p>
+        </div>
+      </CardBody>
+    </Card>
+  )
+}
+
+function MultiObjectivePspCard({
+  label,
+  summary,
+  emphasis = false,
+}: {
+  label: string
+  summary: { psp: string; authRate: number; costBps: number | null }
+  emphasis?: boolean
+}) {
+  const borderTone = emphasis
+    ? 'border-cyan-300 bg-white dark:border-cyan-700 dark:bg-[#0d141a]'
+    : 'border-slate-200 bg-white dark:border-[#1c1c24] dark:bg-[#0d0d13]'
+  return (
+    <div className={`rounded-xl border px-3 py-2 ${borderTone}`}>
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+        {label}
+      </p>
+      <p className="mt-1 font-mono text-sm font-semibold text-slate-900 dark:text-white">
+        {summary.psp}
+      </p>
+      <div className="mt-1.5 flex gap-3 text-xs text-slate-600 dark:text-slate-300">
+        <span>
+          <span className="text-slate-400">auth</span>{' '}
+          <span className="font-mono">{(summary.authRate * 100).toFixed(2)}%</span>
+        </span>
+        <span>
+          <span className="text-slate-400">cost</span>{' '}
+          <span className="font-mono">
+            {summary.costBps != null ? `${summary.costBps.toFixed(2)} bps` : '—'}
+          </span>
+        </span>
+      </div>
     </div>
   )
 }

@@ -96,6 +96,13 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
         endpoints::routing_stats::load(&self.client, query).await
     }
 
+    async fn cost_savings(
+        &self,
+        query: &AnalyticsQuery,
+    ) -> Result<AnalyticsCostSavingsResponse, ApiError> {
+        endpoints::cost_savings::load(&self.client, query).await
+    }
+
     async fn log_summaries(
         &self,
         query: &AnalyticsQuery,
