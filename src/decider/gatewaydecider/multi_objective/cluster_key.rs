@@ -15,7 +15,7 @@ pub struct ClusterKey {
     pub transaction_currency: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payment_method_type: Option<String>,
-    /// Card tier (e.g. "standard"); not currently derivable from txn data.
+    /// Card tier (e.g. "standard"); derived from the card program.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub card_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -39,7 +39,11 @@ pub fn derive_cluster_key(txn_detail: &TxnDetail, txn_card_info: &TxnCardInfo) -
             .card_type
             .as_ref()
             .map(|ct| format!("{:?}", ct).to_lowercase()),
-        card_type: None,
+        card_type: txn_card_info
+            .card_program
+            .as_ref()
+            .and_then(|s| non_empty(s))
+            .map(|s| s.to_lowercase()),
         card_network: txn_card_info
             .cardSwitchProvider
             .as_ref()
