@@ -2,14 +2,7 @@ pub mod algorithm;
 pub mod cluster_key;
 pub mod hypersense_client;
 
-use std::collections::HashMap;
-
 use serde::{Deserialize, Serialize};
-
-use crate::types::card::txn_card_info::TxnCardInfo;
-use crate::types::txn_details::types::TxnDetail;
-
-use cluster_key::derive_cluster_key;
 
 pub const DEFAULT_TOLERANCE_BAND_PP: f64 = 0.5;
 

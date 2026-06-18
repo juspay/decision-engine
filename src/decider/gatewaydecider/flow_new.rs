@@ -563,9 +563,7 @@ pub async fn run_decider_flow(
                                 tolerance_pp,
                             )
                             .await;
-                        if outcome.info.outcome
-                            == multi_objective::MultiObjectiveOutcome::CostWon
-                        {
+                        if outcome.info.outcome == multi_objective::MultiObjectiveOutcome::CostWon {
                             decider_flow.writer.gwDeciderApproach =
                                 T::GatewayDeciderApproach::SrSelectionMultiObjective;
                             if let Some(decision) = outcome.cost_decision {
