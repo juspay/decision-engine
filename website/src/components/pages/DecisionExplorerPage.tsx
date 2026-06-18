@@ -53,12 +53,13 @@ interface FormState {
   ranking_algorithm: SimulationAlgorithm
 }
 
-const MULTI_OBJECTIVE_PAYMENT_METHODS = ['CREDIT', 'DEBIT'] as const
+const MULTI_OBJECTIVE_CURRENCY = 'USD'
+const MULTI_OBJECTIVE_PAYMENT_METHODS = ['CREDIT'] as const
 const CARD_PROGRAM_OPTIONS = ['STANDARD', 'PREMIUM'] as const
 const MULTI_OBJECTIVE_CARD_BRANDS = ['VISA', 'MASTERCARD'] as const
 
 const MULTI_OBJECTIVE_CLUSTER_VARIANTS: Array<{
-  paymentMethod: 'CREDIT' | 'DEBIT'
+  paymentMethod: 'CREDIT'
   cardSwitchProvider: 'VISA' | 'MASTERCARD'
   cardProgram: 'STANDARD' | 'PREMIUM'
 }> = [
@@ -66,10 +67,6 @@ const MULTI_OBJECTIVE_CLUSTER_VARIANTS: Array<{
   { paymentMethod: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'PREMIUM'  },
   { paymentMethod: 'CREDIT', cardSwitchProvider: 'MASTERCARD', cardProgram: 'STANDARD' },
   { paymentMethod: 'CREDIT', cardSwitchProvider: 'MASTERCARD', cardProgram: 'PREMIUM'  },
-  { paymentMethod: 'DEBIT',  cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD' },
-  { paymentMethod: 'DEBIT',  cardSwitchProvider: 'VISA',       cardProgram: 'PREMIUM'  },
-  { paymentMethod: 'DEBIT',  cardSwitchProvider: 'MASTERCARD', cardProgram: 'STANDARD' },
-  { paymentMethod: 'DEBIT',  cardSwitchProvider: 'MASTERCARD', cardProgram: 'PREMIUM'  },
 ]
 
 interface DebitRoutingFormState {
@@ -997,7 +994,7 @@ export function DecisionExplorerPage() {
   ])
 
   // SR_MULTI_OBJECTIVE constrains the form to a card-only cluster shape:
-  // Method Type = CARD, Payment Method ∈ {CREDIT, DEBIT}, and Card Brand
+  // Currency = USD, Method Type = CARD, Payment Method = CREDIT, and Card Brand
   // defaults to Visa/Mastercard when the prior selection isn't one of them.
   useEffect(() => {
     if (form.ranking_algorithm !== 'SR_MULTI_OBJECTIVE') return
@@ -1005,9 +1002,10 @@ export function DecisionExplorerPage() {
       if (prev.ranking_algorithm !== 'SR_MULTI_OBJECTIVE') return prev
       const next = { ...prev }
       let changed = false
+      if (next.currency !== MULTI_OBJECTIVE_CURRENCY) { next.currency = MULTI_OBJECTIVE_CURRENCY; changed = true }
       const cardType = paymentMethodTypeOptions.find(p => p === 'CARD') || 'CARD'
       if (next.payment_method_type !== cardType) { next.payment_method_type = cardType; changed = true }
-      if (!MULTI_OBJECTIVE_PAYMENT_METHODS.includes(next.payment_method as 'CREDIT' | 'DEBIT')) {
+      if (!MULTI_OBJECTIVE_PAYMENT_METHODS.includes(next.payment_method as 'CREDIT')) {
         next.payment_method = 'CREDIT'
         changed = true
       }
@@ -2603,12 +2601,18 @@ export function DecisionExplorerPage() {
                     const paymentMethodOptionsForRender = isMultiObjective
                       ? [...MULTI_OBJECTIVE_PAYMENT_METHODS]
                       : paymentMethodOptions
+                    const currencyOptionsForRender = isMultiObjective
+                      ? [MULTI_OBJECTIVE_CURRENCY]
+                      : currencyOptions
+                    const cardBrandOptionsForRender = isMultiObjective
+                      ? [...MULTI_OBJECTIVE_CARD_BRANDS]
+                      : cardBrandOptions
                     const fields: { label: string; content: React.ReactNode }[] = [
                       { label: 'Amount', content: <input value={form.amount} onChange={e => set('amount', e.target.value)} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500" /> },
-                      { label: 'Currency', content: <select value={form.currency} onChange={e => set('currency', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{currencyOptions.map(c => <option key={c} value={c}>{c}</option>)}</select> },
+                      { label: 'Currency', content: <select value={form.currency} onChange={e => set('currency', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading || isMultiObjective} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{currencyOptionsForRender.map(c => <option key={c} value={c}>{c}</option>)}</select> },
                       { label: 'Method Type', content: <select value={form.payment_method_type} onChange={e => set('payment_method_type', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading || isMultiObjective} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{methodTypeOptionsForRender.map(p => <option key={p} value={p}>{formatOptionLabel(p)}</option>)}</select> },
                       { label: 'Payment Method', content: <select value={form.payment_method} onChange={e => set('payment_method', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{paymentMethodOptionsForRender.map(p => <option key={p} value={p}>{formatOptionLabel(p)}</option>)}</select> },
-                      { label: 'Card Brand', content: <select value={form.card_brand} onChange={e => set('card_brand', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{cardBrandOptions.map(b => <option key={b} value={b}>{formatOptionLabel(b)}</option>)}</select> },
+                      { label: 'Card Brand', content: <select value={form.card_brand} onChange={e => set('card_brand', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{cardBrandOptionsForRender.map(b => <option key={b} value={b}>{formatOptionLabel(b)}</option>)}</select> },
                       { label: 'Auth Type', content: <select value={form.auth_type} onChange={e => set('auth_type', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{authTypeOptions.map(a => <option key={a} value={a}>{formatOptionLabel(a)}</option>)}</select> },
                     ]
                     if (isMultiObjective) {
