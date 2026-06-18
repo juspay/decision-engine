@@ -1025,6 +1025,8 @@ pub struct PaymentInfo {
     pub card_isin: Option<String>,
     card_type: Option<ETCa::card_type::CardType>,
     card_switch_provider: Option<Secret<String>>,
+    #[serde(default)]
+    card_program: Option<String>,
 }
 
 // write a function to transfer DomainDeciderRequestForApiCallV2 to DomainDeciderRequest
@@ -1123,6 +1125,7 @@ impl DomainDeciderRequestForApiCallV2 {
                 cardIssuerBankName: self.payment_info.card_issuer_bank_name.clone(),
                 cardSwitchProvider: self.payment_info.card_switch_provider.clone(),
                 card_type: self.payment_info.card_type.clone(),
+                card_program: self.payment_info.card_program.clone(),
                 nameOnCard: None,
                 dateCreated: OffsetDateTime::now_utc(),
                 paymentMethodType: self.payment_info.payment_method_type.to_string(),
