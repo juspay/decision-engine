@@ -105,6 +105,7 @@ interface SimulationResult {
   retryStatus?: 'CHARGED' | 'FAILURE' | 'PENDING_VBV'
   costSavedBps?: number | null
   costWon?: boolean
+  authWon?: boolean
   tolerancePp?: number | null
   amount: number
   currency: string
@@ -221,9 +222,6 @@ const DEFAULT_DEBIT_FORM: DebitRoutingFormState = {
 // Auth-rate simulation runs a fixed batch — no user input; it starts on Run
 // and stops at this many transactions.
 const SIMULATION_TOTAL_PAYMENTS = '5000'
-
-// Static annotation shown beside the simulation controls (read-only note).
-const EXPERIMENT_NOTE = 'Stripe degraded · Testing cost-based fallback to Adyen'
 
 // Default auth-rate tolerance band below the best gateway's SR within which gateways are
 // SR-equivalent and become eligible for cost-based routing. Stored as a fraction
@@ -1615,6 +1613,7 @@ export function DecisionSimulatorPage() {
             retryStatus,
             costSavedBps: mo?.costSavedBps ?? null,
             costWon: mo?.outcome === 'COST_WON',
+            authWon: mo?.outcome === 'AUTH_WON',
             tolerancePp: mo?.tolerancePp ?? null,
             amount,
             currency: form.currency,
@@ -1920,6 +1919,18 @@ export function DecisionSimulatorPage() {
     return { value, currency }
   }, [deferredSimulationResults])
 
+  // Multi-objective outcome counts: how often the auth objective vs the cost
+  // objective won the routing decision across the run.
+  const multiObjectiveStats = useMemo(() => {
+    let authWon = 0
+    let costWon = 0
+    for (const r of deferredSimulationResults) {
+      if (r.authWon) authWon++
+      if (r.costWon) costWon++
+    }
+    return { authWon, costWon }
+  }, [deferredSimulationResults])
+
   const debitNetworkRows = debitResult?.debit_routing_output?.co_badged_card_networks_info || []
   const volumeColorIndex = useMemo(
     () => new Map(volumeDistribution.map((item, index) => [item.name, index] as const)),
@@ -2159,53 +2170,69 @@ export function DecisionSimulatorPage() {
       )}
 
       {activeTab === 'batch' && (
-        <div className="flex flex-wrap items-end gap-6 rounded-2xl border border-slate-200 bg-white px-5 py-4 dark:border-[#222226] dark:bg-[#0b0b10]">
-          {[
-            { key: 'stripe', label: 'Stripe success rate' },
-            { key: 'adyen', label: 'Adyen success rate' },
-          ].map(({ key, label }) => {
-            const color = gatewayColorMap[key] ?? GW_PALETTE[0]
-            const rate = getGwSuccessRate(key)
-            return (
-              <div key={key} className="flex w-[190px] flex-col gap-1.5">
-                <div className="flex items-center gap-1.5">
-                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} />
-                  <SurfaceLabel>{label}</SurfaceLabel>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-stretch">
+          <div className="flex flex-wrap items-end gap-6 rounded-2xl border border-slate-200 bg-white px-5 py-4 dark:border-[#222226] dark:bg-[#0b0b10]">
+            {[
+              { key: 'stripe', label: 'Stripe success rate' },
+              { key: 'adyen', label: 'Adyen success rate' },
+            ].map(({ key, label }) => {
+              const color = gatewayColorMap[key] ?? GW_PALETTE[0]
+              const rate = getGwSuccessRate(key)
+              return (
+                <div key={key} className="flex w-[190px] flex-col gap-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} />
+                    <SurfaceLabel>{label}</SurfaceLabel>
+                  </div>
+                  <input
+                    type="text"
+                    value={`${rate}%`}
+                    onChange={e => setGwSuccessRate(key, Math.max(0, Math.min(100, parseInt(e.target.value.replace(/\D/g, ''), 10) || 0)))}
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100"
+                  />
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={rate}
+                    onChange={e => setGwSuccessRate(key, Number(e.target.value))}
+                    className="h-1 w-full cursor-pointer"
+                    style={{ accentColor: color }}
+                  />
                 </div>
-                <input
-                  type="text"
-                  value={`${rate}%`}
-                  onChange={e => setGwSuccessRate(key, Math.max(0, Math.min(100, parseInt(e.target.value.replace(/\D/g, ''), 10) || 0)))}
-                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100"
-                />
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  value={rate}
-                  onChange={e => setGwSuccessRate(key, Number(e.target.value))}
-                  className="h-1 w-full cursor-pointer"
-                  style={{ accentColor: color }}
-                />
-              </div>
-            )
-          })}
+              )
+            })}
 
-          <div className="flex min-w-[240px] flex-1 flex-col gap-1.5">
-            <SurfaceLabel>Experiment variables</SurfaceLabel>
-            <p className="py-1.5 text-sm leading-snug text-slate-700 dark:text-slate-200">
-              {EXPERIMENT_NOTE}
-            </p>
+            <Button
+              onClick={isSimulating ? () => { simulationAbortRef.current = true } : runSimulation}
+              disabled={!effectiveMerchantId || routingConfigUnavailable}
+              variant={isSimulating ? 'secondary' : 'primary'}
+              className="self-end"
+            >
+              {isSimulating ? <><X size={14} /> Stop</> : <><Play size={14} className="fill-current" /> Run simulation</>}
+            </Button>
           </div>
 
-          <Button
-            onClick={isSimulating ? () => { simulationAbortRef.current = true } : runSimulation}
-            disabled={!effectiveMerchantId || routingConfigUnavailable}
-            variant={isSimulating ? 'secondary' : 'primary'}
-            className="ml-auto self-end"
-          >
-            {isSimulating ? <><X size={14} /> Stop</> : <><Play size={14} className="fill-current" /> Run simulation</>}
-          </Button>
+          <div className="flex flex-1 flex-wrap items-end justify-around gap-6 rounded-2xl border border-slate-200 bg-white px-5 py-4 dark:border-[#222226] dark:bg-[#0b0b10]">
+            <div className="flex flex-col gap-1.5">
+              <SurfaceLabel>Total auth won</SurfaceLabel>
+              <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-sky-600 dark:text-sky-400">
+                {multiObjectiveStats.authWon.toLocaleString()}
+              </p>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <SurfaceLabel>Total cost won</SurfaceLabel>
+              <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-violet-600 dark:text-violet-400">
+                {multiObjectiveStats.costWon.toLocaleString()}
+              </p>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <SurfaceLabel>Total cost saved</SurfaceLabel>
+              <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-emerald-600 dark:text-emerald-400">
+                {formatCurrencyValue(totalCostSaved.value, totalCostSaved.currency || form.currency || 'USD')}
+              </p>
+            </div>
+          </div>
         </div>
       )}
 
