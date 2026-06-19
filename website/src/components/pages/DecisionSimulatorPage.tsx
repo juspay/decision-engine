@@ -4,7 +4,7 @@ import { ErrorInfoFields, ErrorInfoState, GsmOptionRow, DEFAULT_ERROR_INFO } fro
 import { PenaltyClassificationGuide } from './PenaltyClassificationGuide'
 import { useNavigate } from 'react-router-dom'
 import useSWR from 'swr'
-import { BarChart, Bar, LineChart, Line, ComposedChart, Area, CartesianGrid, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, Cell, ReferenceLine, ReferenceArea } from 'recharts'
+import { BarChart, Bar, LineChart, Line, ComposedChart, Area, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, ReferenceLine, ReferenceArea } from 'recharts'
 import { Tooltip as UiTooltip } from '../ui/Tooltip'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
@@ -2341,12 +2341,13 @@ export function DecisionSimulatorPage() {
                             })
                             const bandLabel = `Dynamic Threshold (Top PSP − ${bandPp.toFixed(bandPp % 1 ? 1 : 0)}pp)`
                             return (
-                              <div className="w-full flex-1 min-h-[300px]">
+                              <div className="w-full flex-1 min-h-[320px] flex flex-col">
+                                <div className="min-h-0 flex-1">
                                 <ResponsiveContainer width="100%" height="100%">
-                                  <ComposedChart data={chartData} margin={{ top: 16, right: 8, bottom: 24, left: 0 }}>
+                                  <ComposedChart data={chartData} margin={{ top: 16, right: 8, bottom: 28, left: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" className="dark:opacity-20" vertical={false} />
-                                    <Area dataKey="threshold" stackId="elig" stroke="none" fill="transparent" isAnimationActive={false} legendType="none" connectNulls />
-                                    <Area dataKey="eligibleSpan" stackId="elig" stroke="none" fill="#10b981" fillOpacity={0.08} isAnimationActive={false} legendType="none" connectNulls />
+                                    <Area dataKey="threshold" stackId="elig" stroke="none" fill="transparent" isAnimationActive={false} legendType="none" activeDot={false} connectNulls />
+                                    <Area dataKey="eligibleSpan" stackId="elig" stroke="none" fill="#10b981" fillOpacity={0.08} isAnimationActive={false} legendType="none" activeDot={false} connectNulls />
                                     <XAxis
                                       dataKey="step"
                                       tick={{ fontSize: 11, fill: '#94a3b8' }}
@@ -2370,28 +2371,27 @@ export function DecisionSimulatorPage() {
                                         const row = payload[0].payload
                                         if (!row) return null
                                         return (
-                                          <div style={CHART_TOOLTIP_STYLE}>
-                                            <p style={CHART_TOOLTIP_LABEL_STYLE}>Payment {row.step}</p>
+                                          <div style={{ ...CHART_TOOLTIP_STYLE, padding: '10px 12px', fontSize: 12, lineHeight: 1.5 }}>
+                                            <p style={{ ...CHART_TOOLTIP_LABEL_STYLE, margin: '0 0 6px' }}>Payment {row.step}</p>
                                             {sortedGateways.map(([gw]) => (
                                               row[gw] == null ? null : (
-                                                <p key={gw} style={{ ...CHART_TOOLTIP_ITEM_STYLE, color: gatewayColorMap[gw] ?? GW_PALETTE[0] }}>
+                                                <p key={gw} style={{ ...CHART_TOOLTIP_ITEM_STYLE, margin: '2px 0', color: gatewayColorMap[gw] ?? GW_PALETTE[0] }}>
                                                   {gw}: {row[gw].toFixed(1)}%
                                                 </p>
                                               )
                                             ))}
                                             {row.threshold != null && (
-                                              <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid rgba(148,163,184,0.25)' }}>
-                                                <p style={CHART_TOOLTIP_ITEM_STYLE}><strong>Top PSP SR:</strong> {row.topPspSr?.toFixed(1)}%</p>
-                                                <p style={CHART_TOOLTIP_ITEM_STYLE}><strong>Configured Band:</strong> −{bandPp.toFixed(bandPp % 1 ? 1 : 0)}pp</p>
-                                                <p style={CHART_TOOLTIP_ITEM_STYLE}><strong>Cost-Eligible Threshold:</strong> {row.threshold.toFixed(1)}%</p>
-                                                <p style={{ ...CHART_TOOLTIP_ITEM_STYLE, opacity: 0.7, fontSize: 10 }}>This threshold changes at every x-axis point.</p>
+                                              <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(148,163,184,0.25)' }}>
+                                                <p style={{ ...CHART_TOOLTIP_ITEM_STYLE, margin: '3px 0' }}><strong>Top PSP SR:</strong> {row.topPspSr?.toFixed(1)}%</p>
+                                                <p style={{ ...CHART_TOOLTIP_ITEM_STYLE, margin: '3px 0' }}><strong>Configured Band:</strong> −{bandPp.toFixed(bandPp % 1 ? 1 : 0)}pp</p>
+                                                <p style={{ ...CHART_TOOLTIP_ITEM_STYLE, margin: '3px 0' }}><strong>Cost-Eligible Threshold:</strong> {row.threshold.toFixed(1)}%</p>
+                                                <p style={{ ...CHART_TOOLTIP_ITEM_STYLE, margin: '6px 0 0', opacity: 0.7, fontSize: 10 }}>This threshold changes at every x-axis point.</p>
                                               </div>
                                             )}
                                           </div>
                                         )
                                       }}
                                     />
-                                    <Legend wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
                                     {sortedGateways.map(([gw]) => (
                                       <Line
                                         key={gw}
@@ -2401,6 +2401,7 @@ export function DecisionSimulatorPage() {
                                         stroke={gatewayColorMap[gw] ?? GW_PALETTE[0]}
                                         strokeWidth={2.5}
                                         dot={false}
+                                        activeDot={false}
                                         isAnimationActive={false}
                                         connectNulls
                                       />
@@ -2413,11 +2414,25 @@ export function DecisionSimulatorPage() {
                                       strokeDasharray="5 4"
                                       strokeWidth={1.75}
                                       dot={false}
+                                      activeDot={false}
                                       isAnimationActive={false}
                                       connectNulls
                                     />
                                   </ComposedChart>
                                 </ResponsiveContainer>
+                                </div>
+                                <div className="mt-3 flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+                                  {sortedGateways.map(([gw]) => (
+                                    <span key={gw} className="inline-flex items-center gap-1.5">
+                                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: gatewayColorMap[gw] ?? GW_PALETTE[0] }} />
+                                      {gw}
+                                    </span>
+                                  ))}
+                                  <span className="inline-flex items-center gap-1.5">
+                                    <span className="inline-block w-4 border-t-2 border-dashed" style={{ borderColor: '#10b981' }} />
+                                    {bandLabel}
+                                  </span>
+                                </div>
                               </div>
                             )
                           })()}

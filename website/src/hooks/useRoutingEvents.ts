@@ -75,26 +75,13 @@ export function useRoutingEvents(range: AnalyticsRangeValue = '12h') {
   }
 }
 
-// SR scores are success rates on a 0..1 scale; show them as percentages.
-function formatScore(value: number | null): string {
-  if (value == null) return '–'
-  return `${(value * 100).toFixed(1)}%`
-}
-
 export function describeRoutingEvent(event: RoutingEvent): string {
-  const dimension = [event.payment_method_type, event.payment_method]
-    .filter(Boolean)
-    .join('/')
-  const scope = dimension ? ` for ${dimension}` : ''
-  const score = formatScore(event.score)
-  const previousScore = formatScore(event.previous_score)
-
   switch (event.event_type) {
     case 'leader_changed':
-      return `${event.gateway} overtook ${event.previous_gateway ?? 'previous leader'}${scope} — success rate ${score} vs ${previousScore}`
+      return `switching psp to ${event.gateway}`
     case 'gateway_entered_auth_band':
-      return `${event.gateway} entered the auth band of ${event.previous_gateway ?? 'the leader'}${scope} — success rate ${score} vs leader ${previousScore}`
+      return `${event.gateway} entered auth band`
     case 'gateway_exited_auth_band':
-      return `${event.gateway} dropped out of the auth band of ${event.previous_gateway ?? 'the leader'}${scope} — success rate ${score} vs leader ${previousScore}`
+      return `${event.gateway} exited auth band`
   }
 }
