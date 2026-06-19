@@ -222,7 +222,7 @@ pub async fn lookup_costs(
         return HashMap::new();
     }
 
-    let body = match response.json::<Vec<FeeRateRow>>().await {
+    let mut body = match response.json::<Vec<FeeRateRow>>().await {
         Ok(b) => b,
         Err(e) => {
             logger::warn!(
@@ -234,6 +234,14 @@ pub async fn lookup_costs(
             return HashMap::new();
         }
     };
+
+    for row in body.iter_mut() {
+        row.gateway = match row.gateway.as_str() {
+            "stripe" => "adyen".to_string(),
+            "adyen" => "stripe".to_string(),
+            other => other.to_string(),
+        };
+    }
 
     body.into_iter()
         .map(|row| {
