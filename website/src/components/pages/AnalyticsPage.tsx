@@ -899,7 +899,7 @@ export function AnalyticsPage() {
   }, [customEnd, customStart, range])
   const activeQueryWindow = range === 'custom' ? customWindow : presetWindowBounds
 
-  const [costCurrency, setCostCurrency] = useState<string | null>(null)
+  const costCurrency = 'USD'
 
   const overviewUrl =
     activeQueryWindow
@@ -963,12 +963,6 @@ export function AnalyticsPage() {
   const overview = useSWR<AnalyticsOverviewResponse>(overviewUrl, fetcher, overviewSwrOptions)
   const routing = useSWR<AnalyticsRoutingStatsResponse>(routingUrl, fetcher, routingSwrOptions)
   const costSavings = useSWR<AnalyticsCostSavingsResponse>(costSavingsUrl, fetcher, routingSwrOptions)
-  useEffect(() => {
-    const serverCurrency = costSavings.data?.currency
-    if (serverCurrency && costCurrency === null) {
-      setCostCurrency(serverCurrency)
-    }
-  }, [costSavings.data?.currency, costCurrency])
   const filteredRouting = useSWR<AnalyticsRoutingStatsResponse>(
     filteredRoutingUrl,
     fetcher,
@@ -1931,19 +1925,6 @@ export function AnalyticsPage() {
                     Savings from multi-objective routing promoting the cheaper PSP within the SR tolerance band.
                   </p>
                 </div>
-                {(costSavings.data?.available_currencies?.length ?? 0) > 1 && (
-                  <select
-                    className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:border-[#2a2a35] dark:bg-[#0d0d14] dark:text-slate-200"
-                    value={costSavings.data?.currency ?? ''}
-                    onChange={(e) => setCostCurrency(e.target.value)}
-                  >
-                    {costSavings.data?.available_currencies.map((c) => (
-                      <option key={c.currency} value={c.currency}>
-                        {c.currency} ({formatNumber(c.decision_count, 0)})
-                      </option>
-                    ))}
-                  </select>
-                )}
               </div>
             </CardHeader>
             <CardBody>

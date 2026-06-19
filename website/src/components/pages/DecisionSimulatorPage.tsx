@@ -2136,7 +2136,7 @@ export function DecisionSimulatorPage() {
         <div>
           <SurfaceLabel>Simulation console</SurfaceLabel>
           <div className="mt-2 flex flex-wrap items-center gap-3">
-            <h1 className="text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">Decision Explorer</h1>
+            <h1 className="text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">Decision Simulator</h1>
             <Badge variant="blue">{effectiveMerchantId || 'No merchant'}</Badge>
           </div>
         </div>
@@ -2370,22 +2370,34 @@ export function DecisionSimulatorPage() {
                                         if (!active || !payload || !payload.length) return null
                                         const row = payload[0].payload
                                         if (!row) return null
+                                        const hasBand = row.threshold != null
                                         return (
-                                          <div style={{ ...CHART_TOOLTIP_STYLE, padding: '10px 12px', fontSize: 12, lineHeight: 1.5 }}>
+                                          <div style={{ ...CHART_TOOLTIP_STYLE, padding: '10px 12px', fontSize: 12, lineHeight: 1.5, minWidth: 190 }}>
                                             <p style={{ ...CHART_TOOLTIP_LABEL_STYLE, margin: '0 0 6px' }}>Payment {row.step}</p>
-                                            {sortedGateways.map(([gw]) => (
-                                              row[gw] == null ? null : (
-                                                <p key={gw} style={{ ...CHART_TOOLTIP_ITEM_STYLE, margin: '2px 0', color: gatewayColorMap[gw] ?? GW_PALETTE[0] }}>
-                                                  {gw}: {row[gw].toFixed(1)}%
-                                                </p>
-                                              )
-                                            ))}
-                                            {row.threshold != null && (
-                                              <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(148,163,184,0.25)' }}>
-                                                <p style={{ ...CHART_TOOLTIP_ITEM_STYLE, margin: '3px 0' }}><strong>Top PSP SR:</strong> {row.topPspSr?.toFixed(1)}%</p>
-                                                <p style={{ ...CHART_TOOLTIP_ITEM_STYLE, margin: '3px 0' }}><strong>Configured Band:</strong> −{bandPp.toFixed(bandPp % 1 ? 1 : 0)}pp</p>
-                                                <p style={{ ...CHART_TOOLTIP_ITEM_STYLE, margin: '3px 0' }}><strong>Cost-Eligible Threshold:</strong> {row.threshold.toFixed(1)}%</p>
-                                                <p style={{ ...CHART_TOOLTIP_ITEM_STYLE, margin: '6px 0 0', opacity: 0.7, fontSize: 10 }}>This threshold changes at every x-axis point.</p>
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                              {sortedGateways.map(([gw]) => {
+                                                if (row[gw] == null) return null
+                                                const gwColor = gatewayColorMap[gw] ?? GW_PALETTE[0]
+                                                const isTop = hasBand && row.topPspSr != null && row[gw] === row.topPspSr
+                                                return (
+                                                  <div key={gw} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                    <span style={{ width: 8, height: 8, borderRadius: 999, backgroundColor: gwColor, flexShrink: 0 }} />
+                                                    <span style={{ color: gwColor, fontWeight: 600 }}>{gw}</span>
+                                                    <span style={{ marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>{row[gw].toFixed(1)}%</span>
+                                                    {hasBand && (
+                                                      <span style={{ fontSize: 10, fontWeight: 600, width: 34, textAlign: 'right', color: '#10b981' }}>
+                                                        {isTop ? '★ Top' : ''}
+                                                      </span>
+                                                    )}
+                                                  </div>
+                                                )
+                                              })}
+                                            </div>
+                                            {hasBand && (
+                                              <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(148,163,184,0.25)', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                                                <p style={{ ...CHART_TOOLTIP_ITEM_STYLE, margin: 0, display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Top PSP SR</span><strong>{row.topPspSr?.toFixed(1)}%</strong></p>
+                                                <p style={{ ...CHART_TOOLTIP_ITEM_STYLE, margin: 0, display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Configured Band</span><strong>{bandPp.toFixed(bandPp % 1 ? 1 : 0)}pp</strong></p>
+                                                <p style={{ ...CHART_TOOLTIP_ITEM_STYLE, margin: 0, display: 'flex', justifyContent: 'space-between', gap: 12, color: '#10b981' }}><span>Cost-Eligible ≥</span><strong>{row.threshold.toFixed(1)}%</strong></p>
                                               </div>
                                             )}
                                           </div>
@@ -2445,15 +2457,10 @@ export function DecisionSimulatorPage() {
                       const previewGateways = eligibleGatewaysParsed
                       if (previewGateways.length === 0) return null
                       const previewScores = previewGateways.map(gw => ({ gw, sr: getGwSuccessRate(gw) }))
-                      const bestSr = previewScores.reduce((m, g) => Math.max(m, g.sr), 0)
-                      const bandPp = DEFAULT_COST_ROUTING_TOLERANCE * 100
-                      const costBandThreshold = Math.max(0, bestSr - bandPp)
                       const target = totalSimulationPayments || Number(SIMULATION_TOTAL_PAYMENTS)
-                      const chartData = [1, target].map(step => {
-                        const row: Record<string, number> = { step }
-                        previewScores.forEach(({ gw, sr }) => { row[gw] = sr })
-                        return row
-                      })
+                      // Empty plot area until a simulation runs — only the axis range
+                      // is seeded so the chart frame renders without any band or lines.
+                      const chartData = [{ step: 1 }, { step: target }]
                       return (
                         <div className="flex flex-1 flex-col gap-4">
                           <div className="space-y-2">
@@ -2476,14 +2483,6 @@ export function DecisionSimulatorPage() {
                             <ResponsiveContainer width="100%" height="100%">
                               <LineChart data={chartData} margin={{ top: 16, right: 8, bottom: 20, left: 0 }}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" className="dark:opacity-20" vertical={false} />
-                                <ReferenceArea y1={costBandThreshold} y2={100} fill="#10b981" fillOpacity={0.08} ifOverflow="extendDomain" />
-                                <ReferenceLine
-                                  y={costBandThreshold}
-                                  stroke="#10b981"
-                                  strokeDasharray="4 4"
-                                  strokeWidth={1.5}
-                                  label={{ value: `Cost-based eligible ≥ ${costBandThreshold.toFixed(costBandThreshold % 1 ? 1 : 0)}% (${bandPp.toFixed(bandPp % 1 ? 1 : 0)}pp band)`, position: 'insideTopLeft', fontSize: 10, fill: '#059669' }}
-                                />
                                 <XAxis
                                   dataKey="step"
                                   tick={{ fontSize: 11, fill: '#94a3b8' }}
@@ -2500,20 +2499,6 @@ export function DecisionSimulatorPage() {
                                   width={44}
                                   tickFormatter={(v: number) => `${v}%`}
                                 />
-                                {previewScores.map(({ gw }) => (
-                                  <Line
-                                    key={gw}
-                                    type="monotone"
-                                    dataKey={gw}
-                                    name={gw}
-                                    stroke={gatewayColorMap[gw] ?? GW_PALETTE[0]}
-                                    strokeWidth={2.5}
-                                    strokeDasharray="5 4"
-                                    dot={false}
-                                    isAnimationActive={false}
-                                    connectNulls
-                                  />
-                                ))}
                               </LineChart>
                             </ResponsiveContainer>
                           </div>
@@ -3324,10 +3309,10 @@ export function DecisionSimulatorPage() {
                 <CardHeader className="flex flex-row items-center justify-between gap-3">
                   <span className="flex items-center gap-2.5">
                     <span className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.18)]" />
-                    <h3 className="text-sm font-medium text-slate-800 dark:text-white">Events</h3>
+                    <h3 className="text-sm font-medium text-slate-800 dark:text-white">Autopilot Actions</h3>
                   </span>
                   {sessionRoutingEvents.length > 0 && (
-                    <span className="text-xs text-slate-400 tabular-nums">{sessionRoutingEvents.length} events</span>
+                    <span className="text-xs text-slate-400 tabular-nums">{sessionRoutingEvents.length} actions</span>
                   )}
                 </CardHeader>
                 <CardBody className="p-0">

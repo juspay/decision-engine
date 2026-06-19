@@ -349,7 +349,7 @@ export function SRRoutingPage() {
         <nav className="-mb-px flex gap-1">
           <button type="button" className={tabClass('scoring')} onClick={() => setActiveTab('scoring')}>Scoring</button>
           <button type="button" className={tabClass('elimination')} onClick={() => setActiveTab('elimination')}>Elimination</button>
-          <button type="button" className={tabClass('cost')} onClick={() => setActiveTab('cost')}>Cost Based Routing</button>
+          <button type="button" className={tabClass('cost')} onClick={() => setActiveTab('cost')}>Cost Based</button>
           <button type="button" className={tabClass('flags')} onClick={() => setActiveTab('flags')}>Feature Flags</button>
         </nav>
       </div>
@@ -484,12 +484,12 @@ export function SRRoutingPage() {
             <form onSubmit={handleSubmit(onSave)} className="space-y-6">
               <Card>
                 <CardHeader>
-                  <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Cost Based Routing</h2>
+                  <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Cost Based Config</h2>
                   <p className="text-xs text-slate-500 mt-0.5">Tunes how aggressively the router prefers the cheaper PSP within the auth-rate tolerance band.</p>
                 </CardHeader>
                 <CardBody className="grid gap-6 md:grid-cols-3">
                   <label className="space-y-1.5">
-                    <span className="text-xs font-medium text-slate-600 dark:text-slate-300">Cost Optimisation Override Configuration (pp)</span>
+                    <span className="text-xs font-medium text-slate-600 dark:text-slate-300">Cost Optimisation Override Configuration</span>
                     <input
                       type="number" step="0.01"
                       {...register('defaultTolerancePp')}
@@ -498,7 +498,7 @@ export function SRRoutingPage() {
                     />
                     {errors.defaultTolerancePp && <p className="text-xs text-red-500">{errors.defaultTolerancePp.message}</p>}
                     <p className="text-[11px] text-slate-400 leading-relaxed">
-                      Auth-rate band in percentage points used by multi-objective routing. Within this window, the cheaper PSP wins. Leave blank for the default (0.5 pp).
+                      Auth-rate band used by multi-objective routing. Within this window, the cheaper PSP wins. Leave blank for the default (0.5).
                     </p>
                   </label>
                 </CardBody>
@@ -747,7 +747,7 @@ function EliminationConfig({ merchantId }: { merchantId: string | null }) {
 
       <Card>
         <CardHeader>
-          <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Elimination Config</h2>
+          <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Elimination Configs</h2>
           <p className="text-xs text-slate-500 mt-0.5">
             Gateways whose SR score drops below the threshold are removed from routing entirely.
           </p>

@@ -6,6 +6,7 @@ export const CHART_TOOLTIP_STYLE: CSSProperties = {
   borderRadius: '14px',
   color: 'var(--chart-tooltip-text)',
   boxShadow: 'var(--chart-tooltip-shadow)',
+  padding: '10px 12px',
 }
 
 export const CHART_TOOLTIP_LABEL_STYLE: CSSProperties = {
