@@ -243,7 +243,10 @@ fn handle_enforced_gateway(gateway_list: Option<Vec<String>>) -> Option<Vec<Stri
     }
 }
 
-async fn load_default_tolerance_pp(merchant_id: &str) -> Option<f64> {
+/// The merchant's configured multi-objective auth-band tolerance (`default_tolerance_pp`
+/// from `SR_V3_INPUT_CONFIG_<merchant_id>`). Shared with the routing-events analytics so
+/// the visualized band matches the band the live decider actually applied.
+pub async fn load_default_tolerance_pp(merchant_id: &str) -> Option<f64> {
     let key = format!("SR_V3_INPUT_CONFIG_{}", merchant_id);
     let row = service_configuration::find_config_by_name(key)
         .await

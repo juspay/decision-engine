@@ -532,6 +532,32 @@ export interface UpdateScoreResponse {
   gsm_info: GsmInfo | null
 }
 
+export type RoutingEventType =
+  | 'leader_changed'
+  | 'gateway_entered_auth_band'
+  | 'gateway_exited_auth_band'
+
+export interface RoutingEvent {
+  id: string
+  event_type: RoutingEventType
+  merchant_id: string
+  payment_method_type: string | null
+  payment_method: string | null
+  bucket_ms: number
+  gateway: string
+  previous_gateway: string | null
+  score: number | null
+  previous_score: number | null
+  transaction_count: number | null
+}
+
+export interface RoutingEventsResponse {
+  merchant_id: string
+  range: AnalyticsRangeValue
+  events: RoutingEvent[]
+  generated_at_ms: number
+}
+
 export interface PaymentAuditResponse {
   merchant_id: string
   range: AnalyticsRangeValue
