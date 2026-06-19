@@ -32,6 +32,7 @@ function formatCurrencyValue(value: number, currency: string): string {
     return new Intl.NumberFormat(undefined, {
       style: 'currency',
       currency,
+      currencyDisplay: 'narrowSymbol',
       maximumFractionDigits: 2,
     }).format(value)
   } catch {

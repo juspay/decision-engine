@@ -140,6 +140,9 @@ fn detect_routing_events(
         // edge-triggered so an entry event fires only on a fresh crossing.
         let mut in_auth_band: HashSet<String> = HashSet::new();
         let mut previous_leader: Option<String> = None;
+        // The raw best gateway of the immediately preceding bucket, used to seed a
+        // demoted leader into the band silently when it stays within tolerance.
+        let mut prior_bucket_leader: Option<String> = None;
         let mut is_first_bucket = true;
 
         for (&bucket_ms, rows) in buckets {
@@ -174,6 +177,11 @@ fn detect_routing_events(
                 .map(|(name, gateway_state)| (name.clone(), gateway_state.score));
 
             if let Some((leader_name, leader_score)) = leader {
+                // Snapshot the prior bucket's leader before advancing it; the band
+                // detector uses it to recognise a leader that just got overtaken.
+                let former_leader = prior_bucket_leader.clone();
+                prior_bucket_leader = Some(leader_name.clone());
+
                 // Auth-band detection runs only when multi-objective routing is on
                 // (tolerance set); otherwise the band is meaningless and we emit
                 // leader changes alone.
@@ -190,6 +198,7 @@ fn detect_routing_events(
                         query,
                         staleness_ms,
                         is_first_bucket,
+                        former_leader.as_deref(),
                     );
                 }
 
@@ -258,8 +267,10 @@ fn detect_routing_events(
 /// `tolerance_pp` of the leader's; `GatewayExitedAuthBand` fires when it later
 /// drops below that floor or ages out. Membership is edge-triggered via
 /// `in_auth_band`, so each crossing fires exactly once. The leader is the band
-/// reference and never a member — a member promoted to leader exits silently,
-/// and a former leader that stays within tolerance fires a fresh entry.
+/// reference and never a member — a member promoted to leader exits silently.
+/// A leader that gets overtaken but stays within tolerance never actually left
+/// the band (only the reference moved), so it is re-seeded as a member silently
+/// via `former_leader` and does not fire a spurious entry.
 #[allow(clippy::too_many_arguments)]
 fn emit_auth_band_events(
     events: &mut Vec<RoutingEvent>,
@@ -273,11 +284,28 @@ fn emit_auth_band_events(
     query: &RoutingEventsQuery,
     staleness_ms: i64,
     is_first_bucket: bool,
+    former_leader: Option<&str>,
 ) {
     let band_floor = leader_score - tolerance_pp;
-    // The leader is the reference, never a member; clearing it silently (no exit
-    // event) means a re-entry after losing the lead counts as a fresh crossing.
+    // The leader is the reference, never a member.
     in_auth_band.remove(leader_name);
+
+    // When leadership just changed, the outgoing leader moves from "the reference"
+    // to an ordinary candidate. If it is still eligible and within tolerance of the
+    // new leader it was inside the band all along — the reference simply moved — so
+    // seed it as a member silently. Without this, the next bucket would report it as
+    // freshly entering a band it never left (e.g. two PSPs trading the lead while
+    // both stay within tolerance would each re-fire an entry on every flip-back).
+    if let Some(former) = former_leader.filter(|former| *former != leader_name) {
+        if let Some(former_state) = state.get(former) {
+            let eligible = former_state.transaction_count.unwrap_or(0)
+                >= query.min_transaction_count
+                && bucket_ms - former_state.last_seen_bucket_ms <= staleness_ms;
+            if eligible && former_state.score >= band_floor {
+                in_auth_band.insert(former.to_string());
+            }
+        }
+    }
 
     for (gateway, gateway_state) in state {
         if gateway == leader_name {
@@ -584,23 +612,57 @@ mod tests {
     }
 
     #[test]
-    fn former_leader_still_within_tolerance_enters_band_on_flip() {
+    fn former_leader_within_tolerance_does_not_re_enter_band_on_flip() {
         // adyen leads at 95 (band floor 90), stripe is out at 80. stripe then
-        // overtakes at 99 (floor 94); adyen's carried 95 lands in the new band.
+        // overtakes at 99 (floor 94); adyen's carried 95 still lands inside the new
+        // band. adyen was the reference the prior bucket and never dropped below
+        // tolerance, so the band's reference simply moved with the flip: it must not
+        // report a fresh entry, and it was never a member so it does not exit.
         let points = vec![
             point(0, "adyen", 95.0, 100),
             point(0, "stripe", 80.0, 100),
             point(BUCKET, "stripe", 99.0, 100),
         ];
         let events = detect_routing_events(&points, &query(), 0);
-        let band = entered_band_events(&events);
-        assert_eq!(band.len(), 1);
-        assert_eq!(band[0].gateway, "adyen");
-        assert_eq!(band[0].previous_gateway.as_deref(), Some("stripe"));
-        assert_eq!(band[0].score, Some(95.0));
-        assert_eq!(band[0].previous_score, Some(99.0));
-        // adyen was the leader, not a band member, so losing the lead is not an exit.
+        assert!(entered_band_events(&events).is_empty());
         assert!(exited_band_events(&events).is_empty());
+        // The leadership flip itself still surfaces.
+        assert!(events.iter().any(|event| {
+            event.event_type == RoutingEventType::LeaderChanged
+                && event.gateway == "stripe"
+                && event.previous_gateway.as_deref() == Some("adyen")
+        }));
+    }
+
+    #[test]
+    fn leaders_trading_within_tolerance_do_not_re_enter_band() {
+        // The reported bug: two PSPs swap the lead while both stay within tolerance.
+        // Each flip-back used to re-fire an entry for the gateway dropping to #2,
+        // even though it never left the band. stripe enters once on the way in; the
+        // subsequent lead swaps emit leader changes only, no further band entries.
+        let points = vec![
+            point(0, "adyen", 90.0, 100),
+            point(0, "stripe", 80.0, 100), // out of band (floor 85): seeded
+            point(BUCKET, "adyen", 90.0, 100),
+            point(BUCKET, "stripe", 88.0, 100), // crosses in → one entered
+            point(2 * BUCKET, "stripe", 91.0, 100), // stripe takes the lead
+            point(2 * BUCKET, "adyen", 90.0, 100), // adyen drops to #2, still in band
+            point(3 * BUCKET, "adyen", 92.0, 100), // adyen retakes the lead
+            point(3 * BUCKET, "stripe", 91.0, 100), // stripe drops to #2, still in band
+        ];
+        let events = detect_routing_events(&points, &query(), 0);
+
+        let entered = entered_band_events(&events);
+        assert_eq!(entered.len(), 1, "only stripe's initial crossing enters");
+        assert_eq!(entered[0].gateway, "stripe");
+        assert_eq!(entered[0].bucket_ms, BUCKET);
+        assert!(exited_band_events(&events).is_empty());
+
+        let flips = events
+            .iter()
+            .filter(|event| event.event_type == RoutingEventType::LeaderChanged)
+            .count();
+        assert_eq!(flips, 2, "both lead swaps still surface as leader changes");
     }
 
     #[test]

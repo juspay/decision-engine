@@ -4,7 +4,7 @@ import { fetcher } from '../lib/api'
 import { useAuthStore } from '../store/authStore'
 import { AnalyticsRangeValue, RoutingEvent, RoutingEventsResponse } from '../types/api'
 
-const POLL_INTERVAL_MS = 30_000
+const POLL_INTERVAL_MS = 15_000
 const SEEN_STORAGE_PREFIX = 'routing_events_seen'
 const MAX_SEEN_IDS = 500
 
