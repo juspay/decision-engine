@@ -94,9 +94,7 @@ pub async fn load_cost_savings_trend(
     let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
     builder.extend_selects([
         query_bucket_select_expr(query, start_ms, end_ms),
-        format!(
-            "sum(({COST_SAVED_BPS_EXPR} / 10000.0) * {PAYMENT_AMOUNT_EXPR}) AS saved_value"
-        ),
+        format!("sum(({COST_SAVED_BPS_EXPR} / 10000.0) * {PAYMENT_AMOUNT_EXPR}) AS saved_value"),
     ]);
     builder.extend_filters(base_window_filters(start_ms, end_ms));
     builder.extend_filters(merchant_filter(&query.merchant_id));

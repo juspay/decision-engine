@@ -1,4 +1,6 @@
-use crate::analytics::models::{AnalyticsCostSavingsResponse, AnalyticsCostSavingsTotals, AnalyticsQuery};
+use crate::analytics::models::{
+    AnalyticsCostSavingsResponse, AnalyticsCostSavingsTotals, AnalyticsQuery,
+};
 use crate::analytics::service::format_range;
 use crate::error::ApiError;
 
@@ -8,7 +10,8 @@ pub async fn load(
     client: &clickhouse::Client,
     query: &AnalyticsQuery,
 ) -> Result<AnalyticsCostSavingsResponse, ApiError> {
-    let available_currencies = metrics::cost_savings::load_available_currencies(client, query).await?;
+    let available_currencies =
+        metrics::cost_savings::load_available_currencies(client, query).await?;
 
     // Active currency: caller-provided wins; otherwise pick the one with the most decisions.
     let active_currency = query
