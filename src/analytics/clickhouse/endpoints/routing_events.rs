@@ -667,6 +667,37 @@ mod tests {
     }
 
     #[test]
+    fn psp_enters_once_holds_silently_then_exits_once() {
+        // The full contract: a PSP that enters the band fires one entered event,
+        // stays silent for every bucket it remains in the band, then fires exactly
+        // one exited event when it drops below the floor. adyen leads at 89 so the
+        // band floor is 84 throughout.
+        let points = vec![
+            point(0, "adyen", 89.0, 100),
+            point(0, "stripe", 80.0, 100), // below floor: out of band (seeded)
+            point(BUCKET, "adyen", 89.0, 100),
+            point(BUCKET, "stripe", 86.0, 100), // crosses in → one entered
+            point(2 * BUCKET, "adyen", 89.0, 100),
+            point(2 * BUCKET, "stripe", 87.0, 100), // still in band → silent
+            point(3 * BUCKET, "adyen", 89.0, 100),
+            point(3 * BUCKET, "stripe", 88.0, 100), // still in band → silent
+            point(4 * BUCKET, "adyen", 89.0, 100),
+            point(4 * BUCKET, "stripe", 70.0, 100), // drops out → one exited
+        ];
+        let events = detect_routing_events(&points, &query(), 0);
+
+        let entered = entered_band_events(&events);
+        assert_eq!(entered.len(), 1, "exactly one entered event for the stint");
+        assert_eq!(entered[0].gateway, "stripe");
+        assert_eq!(entered[0].bucket_ms, BUCKET);
+
+        let exited = exited_band_events(&events);
+        assert_eq!(exited.len(), 1, "exactly one exited event for the stint");
+        assert_eq!(exited[0].gateway, "stripe");
+        assert_eq!(exited[0].bucket_ms, 4 * BUCKET);
+    }
+
+    #[test]
     fn multi_objective_off_suppresses_band_events_but_keeps_leader_changes() {
         // tolerance_pp = None models a merchant with multi-objective routing off:
         // the band is meaningless, so only the leader flip surfaces.

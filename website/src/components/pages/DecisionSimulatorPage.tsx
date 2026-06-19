@@ -4,7 +4,7 @@ import { ErrorInfoFields, ErrorInfoState, GsmOptionRow, DEFAULT_ERROR_INFO } fro
 import { PenaltyClassificationGuide } from './PenaltyClassificationGuide'
 import { useNavigate } from 'react-router-dom'
 import useSWR from 'swr'
-import { BarChart, Bar, LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, ReferenceLine, ReferenceArea } from 'recharts'
+import { BarChart, Bar, LineChart, Line, ComposedChart, Area, CartesianGrid, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, Cell, ReferenceLine, ReferenceArea } from 'recharts'
 import { Tooltip as UiTooltip } from '../ui/Tooltip'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
@@ -16,12 +16,13 @@ import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
 import { useAuthStore } from '../../store/authStore'
 import { apiPost, fetcher } from '../../lib/api'
 import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
-import { DecideGatewayResponse, GatewayConnector, MultiObjectiveInfo, PaymentAuditEvent, PaymentAuditResponse, UpdateScoreResponse } from '../../types/api'
+import { DecideGatewayResponse, GatewayConnector, MultiObjectiveInfo, PaymentAuditEvent, PaymentAuditResponse, RoutingEventType, UpdateScoreResponse } from '../../types/api'
 import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
 import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
+import { describeRoutingEvent, useRoutingEvents } from '../../hooks/useRoutingEvents'
 import { FEATURE_FLAGS } from '../../lib/featureFlags'
-import { Play, RefreshCw, ChevronDown, ChevronUp, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings } from 'lucide-react'
+import { Play, RefreshCw, ChevronDown, ChevronUp, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings, ArrowRightLeft, Target, TrendingDown } from 'lucide-react'
 
 // UI-local algorithm tokens for the simulation dropdown. Maps to the backend
 // /decide-gateway request as follows:
@@ -165,6 +166,23 @@ function approachColor(approach: string): string {
 
 const COLORS = ['#0069ED', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16']
 const GW_PALETTE = ['#3b82f6', '#8b5cf6', '#f97316', '#ec4899', '#14b8a6']
+
+// Routing events bucket at second granularity and the analytics pipeline lags a
+// little, so allow a small margin before the run-start when scoping events to a run.
+const EVENTS_RUN_START_MARGIN_MS = 3000
+
+// Icon/colour per routing-event type for the simulator's Events panel. Events come
+// from the /analytics/routing-events feed: leader flips and auth-band entries/exits
+// as gateway success-rate scores shift during a run.
+const SIM_EVENT_META: Record<RoutingEventType, { icon: React.ElementType; iconClass: string }> = {
+  leader_changed: { icon: ArrowRightLeft, iconClass: 'text-sky-500' },
+  gateway_entered_auth_band: { icon: Target, iconClass: 'text-emerald-500' },
+  gateway_exited_auth_band: { icon: TrendingDown, iconClass: 'text-amber-500' },
+}
+
+function formatSimEventTime(ms: number) {
+  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
 
 type VolumePaymentEntry = {
   paymentId: string
@@ -847,6 +865,16 @@ export function DecisionSimulatorPage() {
   const [previewInspectorTab, setPreviewInspectorTab] = useState<AuditInspectorTab>('summary')
   const [previewTraceLabel, setPreviewTraceLabel] = useState('Rule Evaluation Decision')
   const deferredSimulationResults = useDeferredValue(simulationResults)
+  // Timestamp (ms) the active batch run started; null until the user runs one. Scopes
+  // the Events panel to the current run instead of the merchant's whole last hour.
+  const [simulationStartedAtMs, setSimulationStartedAtMs] = useState<number | null>(null)
+  // Live routing-event stream (leader flips, auth-band crossings), filtered to the run.
+  const routingEvents = useRoutingEvents('1h')
+  const sessionRoutingEvents = useMemo(() => {
+    if (simulationStartedAtMs == null) return []
+    const sinceMs = simulationStartedAtMs - EVENTS_RUN_START_MARGIN_MS
+    return routingEvents.events.filter((event) => event.bucket_ms >= sinceMs)
+  }, [routingEvents.events, simulationStartedAtMs])
   const [showPenaltyGuide, setShowPenaltyGuide] = useState(false)
 
   const routingKeyNames = useMemo(
@@ -1029,6 +1057,7 @@ export function DecisionSimulatorPage() {
     setVolumeEvaluationLog(defaults.volumeEvaluationLog)
     setVolumeProgress(defaults.volumeProgress)
     setSimulationResults(defaults.simulationResults)
+    setSimulationStartedAtMs(null)
     setResponseOpen(defaults.responseOpen)
     setDebitResponseOpen(defaults.debitResponseOpen)
     setVolumeResponseOpen(defaults.volumeResponseOpen)
@@ -1073,6 +1102,7 @@ export function DecisionSimulatorPage() {
     setVolumeEvaluationLog(nextState.volumeEvaluationLog)
     setVolumeProgress(nextState.volumeProgress)
     setSimulationResults(nextState.simulationResults)
+    setSimulationStartedAtMs(null)
     setResponseOpen(nextState.responseOpen)
     setDebitResponseOpen(nextState.debitResponseOpen)
     setVolumeResponseOpen(nextState.volumeResponseOpen)
@@ -1476,6 +1506,7 @@ export function DecisionSimulatorPage() {
     if (total <= 0) return setError('Total Payments must be greater than 0')
 
     setIsSimulating(true)
+    setSimulationStartedAtMs(Date.now())
     setError(null)
     setSetupPrompt(null)
     setSimulationResults([])
@@ -2282,48 +2313,40 @@ export function DecisionSimulatorPage() {
                           {/* combined multi-line SR trend chart */}
                           {hasAnySpark && (() => {
                             const { series, paymentNums } = gatewaySparklines
+                            // Cost-based routing is eligible for any PSP whose SR sits within the
+                            // auth-rate tolerance band of the *leading* PSP's SR. The leader moves
+                            // every transaction, so the threshold is computed per point as
+                            // topPspSr − band and drawn as a dynamic dashed line: wherever a PSP's
+                            // line crosses it you can see exactly when it entered or exited the band.
+                            const bandPp = costRoutingTolerancePp * 100
                             const chartData = paymentNums.map((n, i) => {
                               const row: Record<string, number> = { step: n }
+                              let topAtPoint: number | null = null
                               sortedGateways.forEach(([gw]) => {
                                 const v = series[gw]?.[i]
-                                if (v != null) row[gw] = v
+                                if (v != null) {
+                                  row[gw] = v
+                                  if (topAtPoint == null || v > topAtPoint) topAtPoint = v
+                                }
                               })
+                              if (topAtPoint != null) {
+                                const threshold = Math.max(0, topAtPoint - bandPp)
+                                row.topPspSr = topAtPoint
+                                row.threshold = threshold
+                                // Span from the threshold up to 100%, stacked over a transparent base,
+                                // so the shaded eligible area rises and falls with the band.
+                                row.eligibleSpan = Math.max(0, 100 - threshold)
+                              }
                               return row
                             })
-                            // Cost-based routing is eligible for gateways whose SR sits within the
-                            // auth-rate tolerance band of the best gateway's SR — shade that band as
-                            // the eligible area, with a dotted line at its lower threshold. The band
-                            // width comes from the live cost-optimisation tolerance, stored as a
-                            // fraction (e.g. 0.2 = 20 percentage points) so scale it to the 0–100 SR axis.
-                            const srScores = sortedGateways
-                              .map(([gw]) => gatewaySrScores[gw])
-                              .filter((v): v is number => v != null)
-                            const bestSr = srScores.length ? Math.max(...srScores) : null
-                            const bandPp = costRoutingTolerancePp * 100
-                            const costBandThreshold = bestSr != null ? Math.max(0, bestSr - bandPp) : null
+                            const bandLabel = `Dynamic Threshold (Top PSP − ${bandPp.toFixed(bandPp % 1 ? 1 : 0)}pp)`
                             return (
                               <div className="w-full flex-1 min-h-[300px]">
                                 <ResponsiveContainer width="100%" height="100%">
-                                  <LineChart data={chartData} margin={{ top: 16, right: 8, bottom: 20, left: 0 }}>
+                                  <ComposedChart data={chartData} margin={{ top: 16, right: 8, bottom: 24, left: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" className="dark:opacity-20" vertical={false} />
-                                    {costBandThreshold != null && (
-                                      <ReferenceArea
-                                        y1={costBandThreshold}
-                                        y2={100}
-                                        fill="#10b981"
-                                        fillOpacity={0.08}
-                                        ifOverflow="extendDomain"
-                                      />
-                                    )}
-                                    {costBandThreshold != null && (
-                                      <ReferenceLine
-                                        y={costBandThreshold}
-                                        stroke="#10b981"
-                                        strokeDasharray="4 4"
-                                        strokeWidth={1.5}
-                                        label={{ value: `Cost-based eligible ≥ ${costBandThreshold.toFixed(costBandThreshold % 1 ? 1 : 0)}% (${bandPp.toFixed(bandPp % 1 ? 1 : 0)}pp band)`, position: 'insideTopLeft', fontSize: 10, fill: '#059669' }}
-                                      />
-                                    )}
+                                    <Area dataKey="threshold" stackId="elig" stroke="none" fill="transparent" isAnimationActive={false} legendType="none" connectNulls />
+                                    <Area dataKey="eligibleSpan" stackId="elig" stroke="none" fill="#10b981" fillOpacity={0.08} isAnimationActive={false} legendType="none" connectNulls />
                                     <XAxis
                                       dataKey="step"
                                       tick={{ fontSize: 11, fill: '#94a3b8' }}
@@ -2341,12 +2364,34 @@ export function DecisionSimulatorPage() {
                                       tickFormatter={(v: number) => `${v}%`}
                                     />
                                     <Tooltip
-                                      contentStyle={CHART_TOOLTIP_STYLE}
-                                      labelStyle={CHART_TOOLTIP_LABEL_STYLE}
-                                      itemStyle={CHART_TOOLTIP_ITEM_STYLE}
-                                      formatter={(value: number, name: string) => [`${value}%`, name]}
-                                      labelFormatter={(l) => `Payment ${l}`}
+                                      content={(props) => {
+                                        const { active, payload } = props as unknown as { active?: boolean; payload?: Array<{ payload?: Record<string, number> }> }
+                                        if (!active || !payload || !payload.length) return null
+                                        const row = payload[0].payload
+                                        if (!row) return null
+                                        return (
+                                          <div style={CHART_TOOLTIP_STYLE}>
+                                            <p style={CHART_TOOLTIP_LABEL_STYLE}>Payment {row.step}</p>
+                                            {sortedGateways.map(([gw]) => (
+                                              row[gw] == null ? null : (
+                                                <p key={gw} style={{ ...CHART_TOOLTIP_ITEM_STYLE, color: gatewayColorMap[gw] ?? GW_PALETTE[0] }}>
+                                                  {gw}: {row[gw].toFixed(1)}%
+                                                </p>
+                                              )
+                                            ))}
+                                            {row.threshold != null && (
+                                              <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid rgba(148,163,184,0.25)' }}>
+                                                <p style={CHART_TOOLTIP_ITEM_STYLE}><strong>Top PSP SR:</strong> {row.topPspSr?.toFixed(1)}%</p>
+                                                <p style={CHART_TOOLTIP_ITEM_STYLE}><strong>Configured Band:</strong> −{bandPp.toFixed(bandPp % 1 ? 1 : 0)}pp</p>
+                                                <p style={CHART_TOOLTIP_ITEM_STYLE}><strong>Cost-Eligible Threshold:</strong> {row.threshold.toFixed(1)}%</p>
+                                                <p style={{ ...CHART_TOOLTIP_ITEM_STYLE, opacity: 0.7, fontSize: 10 }}>This threshold changes at every x-axis point.</p>
+                                              </div>
+                                            )}
+                                          </div>
+                                        )
+                                      }}
                                     />
+                                    <Legend wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
                                     {sortedGateways.map(([gw]) => (
                                       <Line
                                         key={gw}
@@ -2360,7 +2405,18 @@ export function DecisionSimulatorPage() {
                                         connectNulls
                                       />
                                     ))}
-                                  </LineChart>
+                                    <Line
+                                      type="natural"
+                                      dataKey="threshold"
+                                      name={bandLabel}
+                                      stroke="#10b981"
+                                      strokeDasharray="5 4"
+                                      strokeWidth={1.75}
+                                      dot={false}
+                                      isAnimationActive={false}
+                                      connectNulls
+                                    />
+                                  </ComposedChart>
                                 </ResponsiveContainer>
                               </div>
                             )
@@ -3248,17 +3304,58 @@ export function DecisionSimulatorPage() {
             )
           ) : activeTab === 'batch' ? (
             <>
-              {/* Events — backend stream not wired yet, shows empty state */}
+              {/* Events — routing events from the active simulation run only. */}
               <Card>
-                <CardHeader className="flex flex-row items-center gap-2.5">
-                  <span className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.18)]" />
-                  <h3 className="text-sm font-medium text-slate-800 dark:text-white">Events</h3>
+                <CardHeader className="flex flex-row items-center justify-between gap-3">
+                  <span className="flex items-center gap-2.5">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.18)]" />
+                    <h3 className="text-sm font-medium text-slate-800 dark:text-white">Events</h3>
+                  </span>
+                  {sessionRoutingEvents.length > 0 && (
+                    <span className="text-xs text-slate-400 tabular-nums">{sessionRoutingEvents.length} events</span>
+                  )}
                 </CardHeader>
-                <CardBody className="py-12 text-center">
-                  <p className="text-sm text-slate-500 dark:text-slate-400">No events yet</p>
-                  <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
-                    Event stream will appear here once the backend is available.
-                  </p>
+                <CardBody className="p-0">
+                  {simulationStartedAtMs == null ? (
+                    <div className="py-12 text-center">
+                      <p className="text-sm text-slate-500 dark:text-slate-400">No events yet</p>
+                      <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
+                        Start a simulation — leader changes and auth-band crossings appear here as gateway scores shift.
+                      </p>
+                    </div>
+                  ) : routingEvents.isUnavailable ? (
+                    <div className="py-12 text-center">
+                      <p className="text-sm text-slate-500 dark:text-slate-400">Events unavailable</p>
+                      <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
+                        The analytics pipeline (Kafka → ClickHouse) is offline for this environment.
+                      </p>
+                    </div>
+                  ) : sessionRoutingEvents.length === 0 ? (
+                    <div className="py-12 text-center">
+                      <p className="text-sm text-slate-500 dark:text-slate-400">Waiting for events…</p>
+                      <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
+                        No leader changes or auth-band crossings for this run yet.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="max-h-[360px] overflow-y-auto divide-y divide-slate-100 dark:divide-[#1a1a22]">
+                      {sessionRoutingEvents.slice(0, 50).map((event) => {
+                        const meta = SIM_EVENT_META[event.event_type]
+                        const Icon = meta?.icon ?? ArrowRightLeft
+                        return (
+                          <div key={event.id} className="flex items-start gap-2.5 px-4 py-2.5">
+                            <div className="mt-0.5 shrink-0">
+                              <Icon size={14} className={meta?.iconClass ?? 'text-slate-400'} />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-[13px] text-slate-700 dark:text-slate-200">{describeRoutingEvent(event)}</p>
+                              <p className="mt-0.5 text-[11px] text-slate-400">{formatSimEventTime(event.bucket_ms)}</p>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
                 </CardBody>
               </Card>
               {hasSimulationActivity ? (
