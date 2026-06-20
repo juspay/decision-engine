@@ -1126,17 +1126,30 @@ pub fn isRoutingApproachInSRV2(maybe_text: Option<String>) -> bool {
 }
 
 // Original Haskell function: isRoutingApproachInSRV3
+//
+// Multi-objective (cost) routing is layered *on top of* SRv3: it only re-picks
+// among PSPs the SRv3 scorer already deemed SR-equivalent, so a cost-won decision
+// is still an SRv3 decision and must feed the SRv3 producer. Its approach string
+// (`SR_SELECTION_MULTI_OBJECTIVE`) carries no "V3" token, so match it explicitly —
+// otherwise producer isolation silently drops every cost-routed outcome and the
+// chosen gateway's score never moves on success or failure.
 pub fn is_routing_approach_in_srv3(maybe_text: Option<String>) -> bool {
     match maybe_text {
-        Some(text) => text.contains("V3"),
+        Some(text) => text.contains("V3") || text.contains("MULTI_OBJECTIVE"),
         None => false,
     }
 }
 
 // Original Haskell function: isRoutingApproachInExplore
+//
+// Under explore/exploit, only off-policy ("explore") samples update SRv3 scores so
+// the estimates stay unbiased. Hedging is the usual explore path, but multi-objective
+// (cost) routing is also off-policy: it deliberately picks a *non-top*, SR-equivalent
+// (cheaper) PSP, which is exploration of that PSP. Treat it as explore too, otherwise
+// cost-routed outcomes are excluded from scoring whenever explore/exploit is enabled.
 pub fn is_routing_approach_in_explore(maybe_text: Option<String>) -> bool {
     match maybe_text {
-        Some(text) => text.contains("HEDGING"),
+        Some(text) => text.contains("HEDGING") || text.contains("MULTI_OBJECTIVE"),
         None => false,
     }
 }
@@ -1449,6 +1462,39 @@ mod tests {
             Some("some_future_message"),
             false
         )));
+    }
+
+    // ── Routing-approach producer/explore gates ─────────────────────────────
+    use super::{is_routing_approach_in_explore, is_routing_approach_in_srv3};
+
+    #[test]
+    fn srv3_gate_admits_v3_and_multi_objective() {
+        // Plain SRv3 and its hedging/downtime variants.
+        assert!(is_routing_approach_in_srv3(Some("SR_SELECTION_V3_ROUTING".into())));
+        assert!(is_routing_approach_in_srv3(Some("SR_V3_HEDGING".into())));
+        // Cost-routed decisions are SRv3-layered and must reach the SRv3 producer.
+        assert!(is_routing_approach_in_srv3(Some("SR_SELECTION_MULTI_OBJECTIVE".into())));
+    }
+
+    #[test]
+    fn srv3_gate_rejects_non_srv3() {
+        assert!(!is_routing_approach_in_srv3(Some("SR_SELECTION_V2_ROUTING".into())));
+        assert!(!is_routing_approach_in_srv3(Some("MERCHANT_PREFERENCE".into())));
+        assert!(!is_routing_approach_in_srv3(None));
+    }
+
+    #[test]
+    fn explore_gate_admits_hedging_and_multi_objective() {
+        assert!(is_routing_approach_in_explore(Some("SR_V3_HEDGING".into())));
+        // Cost routing picks a non-top, SR-equivalent PSP — off-policy exploration.
+        assert!(is_routing_approach_in_explore(Some("SR_SELECTION_MULTI_OBJECTIVE".into())));
+    }
+
+    #[test]
+    fn explore_gate_rejects_plain_exploit() {
+        // Pure exploit V3 routing is still excluded under explore/exploit gating.
+        assert!(!is_routing_approach_in_explore(Some("SR_SELECTION_V3_ROUTING".into())));
+        assert!(!is_routing_approach_in_explore(None));
     }
 }
 

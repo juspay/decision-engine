@@ -457,6 +457,12 @@ pub struct HypersenseConfig {
     /// TTL (seconds) for the cached access token. Must stay below the token's own
     /// lifetime (the sign-in API issues 86400s tokens); defaults to 23h.
     pub token_ttl_secs: i64,
+    /// TTL (seconds) for the in-process fee-rate-estimate cache that fronts the
+    /// cost-observability endpoint. Identical lookup scenarios within this window
+    /// are served from memory instead of re-hitting the API. `0` disables the
+    /// cache. Defaults to 300s (5 min) — short, since this is a temporary cache
+    /// and cost data should not go stale for long.
+    pub cost_cache_ttl_secs: u64,
 }
 
 impl Default for HypersenseConfig {
@@ -466,6 +472,7 @@ impl Default for HypersenseConfig {
             username: String::new(),
             password: masking::Secret::new(String::new()),
             token_ttl_secs: 82_800,
+            cost_cache_ttl_secs: 300,
         }
     }
 }

@@ -35,15 +35,21 @@ function persistSeenIds(merchantId: string, ids: Set<string>) {
   }
 }
 
-export function useRoutingEvents(range: AnalyticsRangeValue = '12h') {
+export function useRoutingEvents(
+  range: AnalyticsRangeValue = '12h',
+  // Override the poll cadence — e.g. tighten it while a simulation is actively
+  // producing events so the Autopilot feed keeps up instead of lagging by a
+  // full poll interval. Falls back to the idle default.
+  refreshInterval: number = POLL_INTERVAL_MS,
+) {
   const merchantId = useAuthStore((state) => state.user?.merchantId) ?? ''
   // Short windows get second-granularity detection (catches crossings inside a
   // burst); longer windows use minute buckets to keep the scan bounded.
   const bucket = range === '15m' || range === '1h' ? '1s' : '1m'
-  const { data, error, isLoading } = useSWR<RoutingEventsResponse>(
+  const { data, error, isLoading, mutate } = useSWR<RoutingEventsResponse>(
     merchantId ? `/analytics/routing-events?range=${range}&bucket=${bucket}` : null,
     fetcher,
-    { refreshInterval: POLL_INTERVAL_MS, revalidateOnFocus: false },
+    { refreshInterval, revalidateOnFocus: false },
   )
 
   const [seenIds, setSeenIds] = useState<Set<string>>(() => loadSeenIds(merchantId))
@@ -65,11 +71,18 @@ export function useRoutingEvents(range: AnalyticsRangeValue = '12h') {
     })
   }, [events, merchantId])
 
+  // Force an immediate re-fetch (bypassing the poll timer) — used to pull fresh
+  // events the moment a simulation batch lands.
+  const refresh = useCallback(() => {
+    void mutate()
+  }, [mutate])
+
   return {
     events,
     unseenEvents,
     unseenCount: unseenEvents.length,
     markAllSeen,
+    refresh,
     isLoading,
     isUnavailable: Boolean(error),
   }
@@ -80,8 +93,10 @@ export function describeRoutingEvent(event: RoutingEvent): string {
     case 'leader_changed':
       return `switching psp to ${event.gateway}`
     case 'gateway_entered_auth_band':
-      return `${event.gateway} entered auth band`
+      // Score is now within tolerance of the top PSP, so the engine can route to
+      // it for cost savings despite a slightly lower success rate.
+      return `${event.gateway} now good enough on success — routing it to save cost`
     case 'gateway_exited_auth_band':
-      return `${event.gateway} exited auth band`
+      return `${event.gateway} slipped on success — not eligible for cost override anymore`
   }
 }

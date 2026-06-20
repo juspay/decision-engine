@@ -569,6 +569,21 @@ pub const ROUTING_EVENTS_SECOND_BUCKET_MAX_WINDOW_MS: i64 = 60 * 60 * 1000;
 pub const DEFAULT_ROUTING_EVENTS_MIN_TXN_COUNT: i64 = 10;
 // SR scores are on a 0..1 scale (see gateway_scoring_service success_rate).
 pub const DEFAULT_ROUTING_EVENTS_MIN_SCORE_DELTA: f64 = 0.01;
+// Effective number of samples behind each SR score — the moving window the score
+// is averaged over (mirrors DEFAULT_SR_V3_BASED_BUCKET_SIZE). Used as `n` in the
+// binomial standard error sqrt(p(1-p)/n) that sizes the auth-band hysteresis.
+pub const ROUTING_EVENTS_SCORE_SAMPLE_SIZE: f64 = 125.0;
+// Hysteresis (deadband) for auth-band membership, sized to the *noise* of the
+// score gap rather than the band width: half-width = z * SE(gap), the same
+// binomial standard error used for leader changes. A gateway must clear
+// `band_floor + h` to be reported entering and fall below `band_floor - h` to
+// be reported exiting, so a score sitting on the edge stops re-crossing on every
+// sub-pp wobble (band "flapping"). z is smaller than the leader-change z because
+// this only suppresses chatter, it is not a confidence claim.
+pub const ROUTING_EVENTS_AUTH_BAND_Z: f64 = 1.0;
+// Hard minimum band-hysteresis half-width, so an extreme (near 0/1) score whose
+// variance collapses to ~0 still keeps a small deadband.
+pub const ROUTING_EVENTS_AUTH_BAND_HYSTERESIS_FLOOR: f64 = 0.002;
 pub const DEFAULT_ROUTING_EVENTS_LIMIT: usize = 50;
 pub const MAX_ROUTING_EVENTS_LIMIT: usize = 200;
 

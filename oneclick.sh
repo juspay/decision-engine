@@ -222,7 +222,6 @@ INSERT INTO service_configuration (name, value)
 SELECT v.name, v.value
 FROM (VALUES
     ('ENABLE_MERCHANT_ON_VOLUME_DISTRIBUTION_FEATURE_SR_V3', '{"enableAll":true,"enableAllRollout":100}'),
-    ('ENABLE_RESET_ON_SR_V3',                                '{"enableAll":true,"enableAllRollout":100}'),
     ('merchants_enabled_for_score_keys_unification',         '{"enableAll":true,"enableAllRollout":100}'),
     ('SR_V3_INPUT_CONFIG_DEFAULT',                           '{"defaultLatencyThreshold":90,"defaultBucketSize":125,"defaultHedgingPercent":5}')
 ) AS v(name, value)

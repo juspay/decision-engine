@@ -108,7 +108,7 @@ export async function apiFetch<T>(
   const body = options?.body ? JSON.parse(options.body as string) : undefined
   const requestPath = resolveApiPath(path)
 
-  logRequest(method, requestPath, body)
+  // logRequest(method, requestPath, body)
 
   try {
     const token = tokenRef.get()
@@ -135,7 +135,7 @@ export async function apiFetch<T>(
       responseBody = responseText
     }
 
-    logResponse(requestPath, res.status, res.statusText, responseBody)
+    // logResponse(requestPath, res.status, res.statusText, responseBody)
 
     // Only clear session when the JWT itself is confirmed invalid/expired.
     // A generic 401 (e.g. missing API key on a protected route) must NOT wipe the session.

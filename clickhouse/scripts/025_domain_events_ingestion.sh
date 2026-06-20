@@ -17,7 +17,7 @@ if [ -n "${CLICKHOUSE_PASSWORD}" ]; then
 fi
 
 clickhouse-client ${auth_args} --multiquery <<SQL
-CREATE TABLE analytics_domain_events (
+CREATE TABLE IF NOT EXISTS analytics_domain_events (
     event_id String,
     api_flow LowCardinality(String),
     flow_type LowCardinality(String),
@@ -74,7 +74,7 @@ DROP TABLE IF EXISTS analytics_payment_audit_summary_buckets_queue;
 DROP TABLE IF EXISTS analytics_payment_audit_lookup_summaries_queue;
 DROP TABLE IF EXISTS analytics_domain_events_queue;
 
-CREATE TABLE analytics_payment_audit_summary_buckets (
+CREATE TABLE IF NOT EXISTS analytics_payment_audit_summary_buckets (
     merchant_id String,
     lookup_key String,
     summary_kind LowCardinality(String),
@@ -103,7 +103,7 @@ ORDER BY (
 )
 TTL bucket_start + INTERVAL 18 MONTH;
 
-CREATE TABLE analytics_payment_audit_lookup_summaries (
+CREATE TABLE IF NOT EXISTS analytics_payment_audit_lookup_summaries (
     merchant_id String,
     lookup_key String,
     summary_kind LowCardinality(String),
@@ -169,6 +169,9 @@ SETTINGS
     kafka_topic_list = '${ANALYTICS_KAFKA_DOMAIN_TOPIC}',
     kafka_group_name = '${DOMAIN_GROUP_NAME}',
     kafka_format = 'JSONEachRow',
+    -- Drain the topic ~2x/sec instead of the 7.5s default so score snapshots
+    -- (and the routing events derived from them) surface near real-time.
+    kafka_flush_interval_ms = 500,
     kafka_handle_error_mode = 'stream';
 
 CREATE TABLE analytics_payment_audit_summary_buckets_queue AS analytics_domain_events_queue
