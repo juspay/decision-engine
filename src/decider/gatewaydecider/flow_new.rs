@@ -738,7 +738,6 @@ pub async fn run_decider_flow(
         }
     };
 
-    //apply try_apply_multi_objective_post_step
     let key = [
         C::GATEWAY_SCORING_DATA,
         &deciderParams.dpTxnDetail.txnUuid.clone(),
