@@ -2,10 +2,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::analytics::models::{
     AnalyticsRange, RoutingEvent, RoutingEventType, RoutingEventsQuery, RoutingEventsResponse,
-    ROUTING_EVENTS_AUTH_BAND_HYSTERESIS_FLOOR, ROUTING_EVENTS_AUTH_BAND_Z,
-    ROUTING_EVENTS_SCORE_SAMPLE_SIZE, ROUTING_EVENTS_SECOND_BUCKET_MAX_WINDOW_MS,
-    ROUTING_EVENTS_SECOND_BUCKET_MS, ROUTING_EVENTS_STALENESS_BUCKETS,
-    ROUTING_EVENTS_STALENESS_FLOOR_MS,
+    ROUTING_EVENTS_SECOND_BUCKET_MAX_WINDOW_MS, ROUTING_EVENTS_SECOND_BUCKET_MS,
+    ROUTING_EVENTS_STALENESS_BUCKETS, ROUTING_EVENTS_STALENESS_FLOOR_MS,
 };
 use crate::analytics::service::now_ms;
 use crate::error::ApiError;
@@ -106,33 +104,6 @@ fn event_id(
     )
 }
 
-/// Standard error of the gap between two SR scores. Each score is a binomial
-/// proportion `p` measured over a moving window of `ROUTING_EVENTS_SCORE_SAMPLE_SIZE`
-/// transactions, so its sampling noise is `sqrt(p(1-p)/n)`; the gap between two
-/// such (independent) proportions has standard error
-/// `sqrt(p_a(1-p_a)/n + p_b(1-p_b)/n)`. The auth-band hysteresis is expressed as
-/// a multiple (`z`) of it rather than a hand-picked constant.
-fn score_gap_standard_error(score_a: f64, score_b: f64) -> f64 {
-    let variance = |p: f64| {
-        // The proportion variance is only defined on [0, 1]; clamp so an
-        // out-of-range value (e.g. test fixtures on a 0..100 scale) contributes
-        // zero noise instead of a negative that would poison the sqrt — the
-        // configured floor then takes over.
-        let p = p.clamp(0.0, 1.0);
-        p * (1.0 - p) / ROUTING_EVENTS_SCORE_SAMPLE_SIZE
-    };
-    (variance(score_a) + variance(score_b)).sqrt()
-}
-
-/// Auth-band hysteresis half-width for a gateway measured against the leader,
-/// sized to the noise of their score gap (`z * SE`). The deadband between
-/// `band_floor + h` (entry) and `band_floor - h` (exit) absorbs sub-noise wobble
-/// so a score parked on the band edge stops flapping. Like the leader margin it
-/// self-tunes to the scores' variance instead of the (policy-set) band width.
-fn auth_band_hysteresis(leader_score: f64, gateway_score: f64) -> f64 {
-    let se_gap = score_gap_standard_error(leader_score, gateway_score);
-    (ROUTING_EVENTS_AUTH_BAND_Z * se_gap).max(ROUTING_EVENTS_AUTH_BAND_HYSTERESIS_FLOOR)
-}
 
 /// Walk bucketed score points per dimension, carrying the last known score per
 /// gateway forward across sparse buckets, and emit routing events. Pure and
@@ -334,9 +305,9 @@ fn emit_auth_band_events(
                 >= query.min_transaction_count
                 && bucket_ms - former_state.last_seen_bucket_ms <= staleness_ms;
             // A demoted leader was already inside the band, so seed it as a member
-            // if it merely holds above the lenient exit floor.
-            let exit_floor = band_floor - auth_band_hysteresis(leader_score, former_state.score);
-            if eligible && former_state.score >= exit_floor {
+            // if it still holds at/above the band floor (same threshold a member is
+            // held to before exiting).
+            if eligible && former_state.score >= band_floor {
                 in_auth_band.insert(former.to_string());
             }
         }
@@ -349,15 +320,13 @@ fn emit_auth_band_events(
         let eligible = gateway_state.transaction_count.unwrap_or(0) >= query.min_transaction_count
             && bucket_ms - gateway_state.last_seen_bucket_ms <= staleness_ms;
         let was_in_band = in_auth_band.contains(gateway);
-        // Apply the strict entry threshold (band_floor + h) for a fresh crossing,
-        // the lenient exit threshold (band_floor - h) once already a member.
-        let hysteresis = auth_band_hysteresis(leader_score, gateway_state.score);
-        let threshold = if was_in_band {
-            band_floor - hysteresis
-        } else {
-            band_floor + hysteresis
-        };
-        let in_band_now = eligible && gateway_state.score >= threshold;
+        // Instantaneous, single-threshold membership: a gateway is in the cost band
+        // exactly when its score is within tolerance of the leader (>= band_floor),
+        // so both "entered" and "exited" fire the instant the score crosses the edge
+        // — no hysteresis/deadband. Flap protection instead lives downstream (the UI
+        // collapses any rapid re-crossings into one "contesting ×N" row), and the
+        // deterministic outcome scheduler keeps scores from jittering at the edge.
+        let in_band_now = eligible && gateway_state.score >= band_floor;
 
         if in_band_now && !was_in_band {
             in_auth_band.insert(gateway.clone());
@@ -783,31 +752,29 @@ mod tests {
     }
 
     #[test]
-    fn score_wobbling_on_band_edge_does_not_flap() {
-        // adyen leads at 0.95, so the raw band floor (tolerance 0.05) is 0.90. The
-        // noise-based hysteresis is z*SE ≈ 0.03 (n=125), making the band sticky
-        // roughly between 0.86 and 0.93. stripe enters once, then wobbles across the
-        // raw 0.90 floor by less than the deadband each bucket — the old single
-        // threshold fired an exit/enter on every crossing; now those wobbles stay
-        // inside the deadband and emit nothing until stripe genuinely drops out.
+    fn member_holding_in_band_does_not_re_fire() {
+        // Single instantaneous threshold at the band floor (no hysteresis). adyen
+        // leads 0.95, so floor (tolerance 0.05) is 0.90. stripe crosses in once, then
+        // wobbles while staying above the floor — membership is edge-triggered, so it
+        // emits nothing until it genuinely drops below the floor, where it exits once.
         let points = vec![
             point(0, "adyen", 0.95, 100),
-            point(0, "stripe", 0.90, 100), // below enter floor (~0.93): out of band
+            point(0, "stripe", 0.88, 100), // below floor: out of band
             point(BUCKET, "adyen", 0.95, 100),
-            point(BUCKET, "stripe", 0.94, 100), // clears enter floor: single entry
+            point(BUCKET, "stripe", 0.94, 100), // crosses floor: single entry
             point(2 * BUCKET, "adyen", 0.95, 100),
-            point(2 * BUCKET, "stripe", 0.89, 100), // under raw floor but within deadband: hold
+            point(2 * BUCKET, "stripe", 0.92, 100), // stays above floor: hold
             point(3 * BUCKET, "adyen", 0.95, 100),
-            point(3 * BUCKET, "stripe", 0.91, 100), // back above floor: hold
+            point(3 * BUCKET, "stripe", 0.91, 100), // stays above floor: hold
             point(4 * BUCKET, "adyen", 0.95, 100),
-            point(4 * BUCKET, "stripe", 0.88, 100), // still within deadband: hold
+            point(4 * BUCKET, "stripe", 0.93, 100), // stays above floor: hold
             point(5 * BUCKET, "adyen", 0.95, 100),
-            point(5 * BUCKET, "stripe", 0.85, 100), // clears exit floor (~0.863): single exit
+            point(5 * BUCKET, "stripe", 0.85, 100), // drops below floor 0.90: prompt exit
         ];
         let events = detect_routing_events(&points, &unit_scale_band_query(), 0);
 
         // Exactly one entry (the genuine crossing in) and one exit (the genuine drop
-        // out) — none of the mid-band wobble produces events.
+        // below the floor) — the in-band wobble produces nothing.
         let entered = entered_band_events(&events);
         assert_eq!(entered.len(), 1, "wobble must not re-fire entries");
         assert_eq!(entered[0].bucket_ms, BUCKET);
@@ -815,6 +782,23 @@ mod tests {
         let exited = exited_band_events(&events);
         assert_eq!(exited.len(), 1, "wobble must not re-fire exits");
         assert_eq!(exited[0].bucket_ms, 5 * BUCKET);
+    }
+
+    #[test]
+    fn exit_fires_promptly_at_the_band_floor() {
+        // Asymmetric hysteresis: a member that slips just below the floor exits on
+        // that bucket, without waiting for an extra deadband-sized drop. adyen leads
+        // 0.95 (floor 0.90); stripe is seeded in-band then dips to 0.895.
+        let points = vec![
+            point(0, "adyen", 0.95, 100),
+            point(0, "stripe", 0.94, 100), // seeded in band (clears enter floor ~0.93)
+            point(BUCKET, "adyen", 0.95, 100),
+            point(BUCKET, "stripe", 0.895, 100), // just below floor → exits now
+        ];
+        let events = detect_routing_events(&points, &unit_scale_band_query(), 0);
+        let exited = exited_band_events(&events);
+        assert_eq!(exited.len(), 1);
+        assert_eq!(exited[0].bucket_ms, BUCKET);
     }
 
     #[test]

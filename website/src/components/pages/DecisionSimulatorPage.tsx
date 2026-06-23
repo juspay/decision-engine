@@ -4,7 +4,7 @@ import { ErrorInfoFields, ErrorInfoState, GsmOptionRow, DEFAULT_ERROR_INFO } fro
 import { PenaltyClassificationGuide } from './PenaltyClassificationGuide'
 import { useNavigate } from 'react-router-dom'
 import useSWR from 'swr'
-import { BarChart, Bar, LineChart, Line, ComposedChart, Area, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, ReferenceLine, ReferenceArea } from 'recharts'
+import { BarChart, Bar, LineChart, Line, ComposedChart, Area, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
 import { Card, CardBody, CardHeader, SurfaceLabel } from '../ui/Card'
@@ -21,7 +21,7 @@ import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
 import { describeRoutingEvent, useRoutingEvents } from '../../hooks/useRoutingEvents'
 import { FEATURE_FLAGS } from '../../lib/featureFlags'
-import { Play, RefreshCw, ChevronDown, ChevronUp, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings, ArrowRightLeft, Target, TrendingDown, Flag } from 'lucide-react'
+import { Play, Pause, RefreshCw, ChevronDown, ChevronUp, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings, ArrowRightLeft, Target, TrendingDown, Flag } from 'lucide-react'
 
 // UI-local algorithm tokens for the simulation dropdown. Maps to the backend
 // /decide-gateway request as follows:
@@ -845,6 +845,13 @@ export function DecisionSimulatorPage() {
   const [volumeProgress, setVolumeProgress] = useState(initialState.volumeProgress)
   const [simulationResults, setSimulationResults] = useState<SimulationResult[]>(initialState.simulationResults)
   const [isSimulating, setIsSimulating] = useState(false)
+  // Pause/resume: the run loop stays alive and idles on this ref instead of being
+  // aborted, so position, outcome accumulators, the feed, and backend scores are
+  // all preserved across a pause.
+  const [isPaused, setIsPaused] = useState(false)
+  const simulationPausedRef = useRef(false)
+  // Per-column filters for the Transaction Log table.
+  const [txFilters, setTxFilters] = useState<Record<string, string>>({})
   const [smartRetryEnabled, setSmartRetryEnabled] = useState(initialState.smartRetryEnabled)
   const [error, setError] = useState<string | null>(null)
   const txLogRef = useRef<HTMLDivElement>(null)
@@ -869,7 +876,7 @@ export function DecisionSimulatorPage() {
   // Live routing-event stream (leader flips, auth-band crossings), filtered to the run.
   // Poll tightly while a run is producing events so the Autopilot feed keeps up;
   // relax back to the idle cadence once it finishes.
-  const routingEvents = useRoutingEvents('1h', isSimulating ? 1_000 : 15_000)
+  const routingEvents = useRoutingEvents('1h', isSimulating && !isPaused ? 500 : 15_000)
   const sessionRoutingEvents = useMemo(() => {
     if (simulationStartedAtMs == null) return []
     const sinceMs = simulationStartedAtMs - EVENTS_RUN_START_MARGIN_MS
@@ -1620,6 +1627,8 @@ export function DecisionSimulatorPage() {
     if (total <= 0) return setError('Total Payments must be greater than 0')
 
     setIsSimulating(true)
+    setIsPaused(false)
+    simulationPausedRef.current = false
     setSimulationStartedAtMs(Date.now())
     setError(null)
     setSetupPrompt(null)
@@ -1636,15 +1645,40 @@ export function DecisionSimulatorPage() {
     // the storm (the SWR poll runs at 1s too).
     let lastEventsRefresh = 0
 
+    // Deterministic outcome scheduler (error diffusion). i.i.d. coin flips
+    // (Math.random() < rate) have ~±5pp swing over the backend's 125-txn window,
+    // which can briefly push a laggard's score above the leader and steal traffic.
+    // Error diffusion instead spaces successes/failures evenly so the *realized*
+    // rate tracks the slider within ~1/window (≈ ±1pp) — so adyen@90 stays ~90 and
+    // never overtakes stripe@96 — without touching backend scoring. Random initial
+    // phase per gateway so failures aren't visibly periodic.
+    const outcomeAccumulator: Record<string, number> = {}
+    const drawSuccess = (gw: string): boolean => {
+      const p = Math.max(0, Math.min(1, getGwSuccessRate(gw) / 100))
+      if (outcomeAccumulator[gw] === undefined) outcomeAccumulator[gw] = Math.random()
+      outcomeAccumulator[gw] += p
+      if (outcomeAccumulator[gw] >= 1) {
+        outcomeAccumulator[gw] -= 1
+        return true
+      }
+      return false
+    }
+
     const isMultiObjective = form.ranking_algorithm === 'SR_MULTI_OBJECTIVE'
 
     try {
       for (let i = 0; i < total; i++) {
         if (simulationAbortRef.current) break
+        // Idle here while paused (loop stays alive, state preserved); a Stop still
+        // breaks out. The in-flight transaction always completes before we pause.
+        while (simulationPausedRef.current && !simulationAbortRef.current) {
+          await new Promise(resolve => setTimeout(resolve, 120))
+        }
+        if (simulationAbortRef.current) break
         const paymentId = `sim_${Date.now()}_${i}`
 
         // Under SR_MULTI_OBJECTIVE, vary the cluster and amount per payment so
-        // the (mock) Hypersense cost lookup returns distinct costs and the
+        // the (mock) cost lookup returns distinct costs and the
         // multi-objective leg has meaningful choices to make. Form values still
         // seed everything else (currency, eligible_gateways, etc).
         const variant = isMultiObjective ? MULTI_OBJECTIVE_CLUSTER_VARIANTS[i % MULTI_OBJECTIVE_CLUSTER_VARIANTS.length] : null
@@ -1679,8 +1713,7 @@ export function DecisionSimulatorPage() {
           })
 
           const decidedGateway = decideRes.decided_gateway
-          const gwRate = getGwSuccessRate(decidedGateway)
-          const isSuccess = Math.random() * 100 < gwRate
+          const isSuccess = drawSuccess(decidedGateway)
           const failureMode = getGwFailureMode(decidedGateway)
           const outcome: TransactionOutcome = isSuccess ? 'CHARGED' : (failureMode === 'timeout' ? 'PENDING_VBV' : 'FAILURE')
 
@@ -1705,8 +1738,7 @@ export function DecisionSimulatorPage() {
             decideRes.fallback_gateways.length > 0
           ) {
             retryGateway = decideRes.fallback_gateways[0]
-            const retryGwRate = getGwSuccessRate(retryGateway)
-            const retrySuccess = Math.random() * 100 < retryGwRate
+            const retrySuccess = drawSuccess(retryGateway)
             const retryFailureMode = getGwFailureMode(retryGateway)
             retryStatus = retrySuccess ? 'CHARGED' : (retryFailureMode === 'timeout' ? 'PENDING_VBV' : 'FAILURE')
             await apiPost('/update-gateway-score', {
@@ -1747,9 +1779,11 @@ export function DecisionSimulatorPage() {
             markExplorerRunDataUpdated()
             lastUIUpdate = now
           }
-          // Pull fresh Autopilot events at most ~once/sec (throttled apart from the
-          // UI tick) so the feed stays current without a fetch storm.
-          if (now - lastEventsRefresh > 1000 || i === total - 1) {
+          // Pull fresh Autopilot events ~4x/sec so new actions surface promptly and
+          // in small batches (one big once-a-second flush buried the highlight on a
+          // fast loop). The append-only accumulator makes frequent refreshes safe;
+          // they're naturally floored by the Kafka→ClickHouse flush cadence.
+          if (now - lastEventsRefresh > 250 || i === total - 1) {
             routingEvents.refresh()
             lastEventsRefresh = now
           }
@@ -1766,9 +1800,21 @@ export function DecisionSimulatorPage() {
     } finally {
       setSimulationResults([...results])
       setIsSimulating(false)
+      setIsPaused(false)
+      simulationPausedRef.current = false
       // Final flush: events from the last txns can land just after the loop ends.
       routingEvents.refresh()
     }
+  }
+
+  function pauseSimulation() {
+    simulationPausedRef.current = true
+    setIsPaused(true)
+  }
+
+  function resumeSimulation() {
+    simulationPausedRef.current = false
+    setIsPaused(false)
   }
 
   async function runRuleEvaluation() {
@@ -2067,6 +2113,70 @@ export function DecisionSimulatorPage() {
     }
     return { data, gateways, windowSize: ROLLING_WINDOW }
   }, [deferredSimulationResults, gatewayStats, chartWindow])
+
+  // Human-readable routing label, shared by the Transaction Log cell and its filter.
+  const routingApproachLabel = (approach?: string | null): string =>
+    approach?.includes('HEDGING')
+      ? 'Hedging'
+      : approach === 'SR_SELECTION_MULTI_OBJECTIVE'
+        ? 'Cost Based'
+        : approach === 'SR_SELECTION_V3_ROUTING'
+          ? 'Auth Based'
+          : approach ?? '—'
+
+  // Distinct values that populate the categorical Transaction Log column filters.
+  const txFilterOptions = useMemo(() => {
+    const gateways = new Set<string>()
+    const routings = new Set<string>()
+    const outcomes = new Set<string>()
+    const retryGateways = new Set<string>()
+    const retryOutcomes = new Set<string>()
+    for (const res of deferredSimulationResults) {
+      gateways.add(res.decidedGateway)
+      routings.add(routingApproachLabel(res.routingApproach))
+      if (res.status) outcomes.add(res.status)
+      if (res.retryGateway) retryGateways.add(res.retryGateway)
+      if (res.retryStatus) retryOutcomes.add(res.retryStatus)
+    }
+    const sorted = (s: Set<string>) => Array.from(s).sort()
+    return {
+      gateways: sorted(gateways),
+      routings: sorted(routings),
+      outcomes: sorted(outcomes),
+      retryGateways: sorted(retryGateways),
+      retryOutcomes: sorted(retryOutcomes),
+    }
+  }, [deferredSimulationResults])
+
+  // Transaction Log rows after applying the column filters, keeping each row's
+  // original index so the "#" column stays stable regardless of filtering.
+  const txFilteredRows = useMemo(() => {
+    const f = txFilters
+    const active = Object.values(f).some(Boolean)
+    const rows = deferredSimulationResults.map((res, idx) => ({ res, idx }))
+    if (!active) return rows
+    const srText = (res: SimulationResult) => {
+      const s = res.gatewayPriorityMap?.[res.decidedGateway]
+      return typeof s === 'number' ? (s * 100).toFixed(1) : ''
+    }
+    return rows.filter(({ res }) => {
+      if (f.gateway && res.decidedGateway !== f.gateway) return false
+      if (f.routing && routingApproachLabel(res.routingApproach) !== f.routing) return false
+      if (f.outcome && res.status !== f.outcome) return false
+      if (f.retryGateway && (res.retryGateway ?? '') !== f.retryGateway) return false
+      if (f.retryOutcome && (res.retryStatus ?? '') !== f.retryOutcome) return false
+      if (f.amount && !formatCurrencyValue(res.amount, res.currency).toLowerCase().includes(f.amount.toLowerCase())) return false
+      if (f.sr && !srText(res).includes(f.sr)) return false
+      if (f.cost) {
+        const hasSavings = !!res.costWon && res.costSavedBps != null && res.costSavedBps > 0 && res.status === 'CHARGED'
+        if (f.cost === 'yes' && !hasSavings) return false
+        if (f.cost === 'no' && hasSavings) return false
+      }
+      return true
+    })
+  }, [deferredSimulationResults, txFilters])
+
+  const txFiltersActive = Object.values(txFilters).some(Boolean)
 
   const hedgingHits = useMemo(
     () => deferredSimulationResults.filter(r => r.routingApproach?.includes('HEDGING')).length,
@@ -2380,14 +2490,31 @@ export function DecisionSimulatorPage() {
               )
             })}
 
-            <Button
-              onClick={isSimulating ? () => { simulationAbortRef.current = true } : runSimulation}
-              disabled={!effectiveMerchantId || routingConfigUnavailable}
-              variant={isSimulating ? 'secondary' : 'primary'}
-              className="self-end lg:ml-auto"
-            >
-              {isSimulating ? <><X size={14} /> Stop</> : <><Play size={14} className="fill-current" /> Run simulation</>}
-            </Button>
+            {!isSimulating ? (
+              <Button
+                onClick={runSimulation}
+                disabled={!effectiveMerchantId || routingConfigUnavailable}
+                variant="primary"
+                className="self-end lg:ml-auto"
+              >
+                <Play size={14} className="fill-current" /> Run simulation
+              </Button>
+            ) : (
+              <div className="flex items-center gap-2 self-end lg:ml-auto">
+                {isPaused ? (
+                  <Button onClick={resumeSimulation} variant="primary">
+                    <Play size={14} className="fill-current" /> Resume
+                  </Button>
+                ) : (
+                  <Button onClick={pauseSimulation} variant="secondary">
+                    <Pause size={14} /> Pause
+                  </Button>
+                )}
+                <Button onClick={() => { simulationAbortRef.current = true }} variant="secondary">
+                  <X size={14} /> Stop
+                </Button>
+              </div>
+            )}
           </div>
 
           <div className="flex flex-1 flex-wrap items-end justify-around gap-6 rounded-2xl border border-slate-200 bg-white px-5 py-4 dark:border-[#222226] dark:bg-[#0b0b10]">
@@ -2472,6 +2599,12 @@ export function DecisionSimulatorPage() {
                             })
                             const dataMin = yValues.length ? Math.min(...yValues) : 0
                             const yMin = Math.max(0, Math.floor((dataMin - 5) / 5) * 5)
+                            // Plot a little above 100 so a line sitting at 100% isn't
+                            // clipped flat against the top edge; keep ticks capped at 100.
+                            const yMax = 103
+                            const yStep = 100 - yMin > 40 ? 10 : 5
+                            const yTicks: number[] = []
+                            for (let t = yMin; t <= 100; t += yStep) yTicks.push(t)
                             const bandLabel = `SR threshold for cost override`
                             return (
                               <div className="w-full flex-1 min-h-[320px] flex flex-col">
@@ -2517,7 +2650,8 @@ export function DecisionSimulatorPage() {
                                       minTickGap={28}
                                     />
                                     <YAxis
-                                      domain={[yMin, 100]}
+                                      domain={[yMin, yMax]}
+                                      ticks={yTicks}
                                       allowDataOverflow
                                       tick={{ fontSize: 11, fill: '#94a3b8' }}
                                       tickLine={false}
@@ -3944,7 +4078,26 @@ export function DecisionSimulatorPage() {
           <CardHeader className="flex flex-row items-center justify-between gap-3">
             <h3 className="text-sm font-medium text-slate-800 dark:text-white">Transaction Log</h3>
             {deferredSimulationResults.length > 0 && (
-              <span className="text-xs text-slate-400 tabular-nums">{deferredSimulationResults.length} transactions</span>
+              <span className="flex items-center gap-2 text-xs text-slate-400 tabular-nums">
+                {txFiltersActive && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setTxFilters({})}
+                      className="rounded px-1.5 py-0.5 text-[11px] font-medium text-brand-600 hover:bg-brand-50 dark:text-brand-400 dark:hover:bg-brand-900/20"
+                    >
+                      Clear filters
+                    </button>
+                    <span className="text-slate-300 dark:text-slate-600">·</span>
+                  </>
+                )}
+                <span>
+                  {txFiltersActive
+                    ? `${txFilteredRows.length} / ${deferredSimulationResults.length}`
+                    : deferredSimulationResults.length}{' '}
+                  transactions
+                </span>
+              </span>
             )}
           </CardHeader>
           <CardBody className="p-0">
@@ -3963,9 +4116,42 @@ export function DecisionSimulatorPage() {
                       {smartRetryEnabled && <th className="text-left px-3 py-2 whitespace-nowrap">Retry Gateway</th>}
                       {smartRetryEnabled && <th className="text-left px-3 py-2">Retry Outcome</th>}
                     </tr>
+                    {(() => {
+                      const inputCls = 'w-full rounded border border-slate-200 bg-white px-1.5 py-1 text-[11px] font-normal text-slate-700 placeholder:text-slate-300 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-200 dark:placeholder:text-slate-600'
+                      const setF = (key: string, value: string) => setTxFilters(prev => ({ ...prev, [key]: value }))
+                      const sel = (key: string, opts: string[], placeholder: string) => (
+                        <select value={txFilters[key] ?? ''} onChange={e => setF(key, e.target.value)} className={inputCls}>
+                          <option value="">{placeholder}</option>
+                          {opts.map(o => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                      )
+                      return (
+                        <tr className="bg-white dark:bg-[#0a0a0f] border-b border-slate-100 dark:border-[#1c1c24]">
+                          <th className="px-2 py-1.5" />
+                          <th className="px-2 py-1.5">
+                            <input value={txFilters.amount ?? ''} onChange={e => setF('amount', e.target.value)} placeholder="search" className={inputCls} />
+                          </th>
+                          <th className="px-2 py-1.5">{sel('gateway', txFilterOptions.gateways, 'All')}</th>
+                          <th className="px-2 py-1.5">
+                            <input value={txFilters.sr ?? ''} onChange={e => setF('sr', e.target.value)} placeholder="e.g. 90" className={inputCls} />
+                          </th>
+                          <th className="px-2 py-1.5">{sel('routing', txFilterOptions.routings, 'All')}</th>
+                          <th className="px-2 py-1.5">{sel('outcome', txFilterOptions.outcomes, 'All')}</th>
+                          <th className="px-2 py-1.5">
+                            <select value={txFilters.cost ?? ''} onChange={e => setF('cost', e.target.value)} className={inputCls}>
+                              <option value="">All</option>
+                              <option value="yes">Has savings</option>
+                              <option value="no">None</option>
+                            </select>
+                          </th>
+                          {smartRetryEnabled && <th className="px-2 py-1.5">{sel('retryGateway', txFilterOptions.retryGateways, 'All')}</th>}
+                          {smartRetryEnabled && <th className="px-2 py-1.5">{sel('retryOutcome', txFilterOptions.retryOutcomes, 'All')}</th>}
+                        </tr>
+                      )
+                    })()}
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-[#1a1a22]">
-                    {deferredSimulationResults.map((res, idx) => (
+                    {txFilteredRows.map(({ res, idx }) => (
                       <tr
                         key={res.paymentId}
                         className="group cursor-pointer hover:bg-slate-50 dark:hover:bg-[#0d0d14] transition-colors"
@@ -4027,6 +4213,13 @@ export function DecisionSimulatorPage() {
                         )}
                       </tr>
                     ))}
+                    {txFilteredRows.length === 0 && (
+                      <tr>
+                        <td colSpan={smartRetryEnabled ? 9 : 7} className="px-3 py-8 text-center text-sm text-slate-400 dark:text-slate-500">
+                          No transactions match the current filters.
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>

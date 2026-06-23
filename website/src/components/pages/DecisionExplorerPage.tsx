@@ -1575,7 +1575,7 @@ export function DecisionExplorerPage() {
         const paymentId = `sim_${Date.now()}_${i}`
 
         // Under SR_MULTI_OBJECTIVE, vary the cluster and amount per payment so
-        // the (mock) Hypersense cost lookup returns distinct costs and the
+        // the (mock) cost lookup returns distinct costs and the
         // multi-objective leg has meaningful choices to make. Form values still
         // seed everything else (currency, eligible_gateways, etc).
         const variant = isMultiObjective ? MULTI_OBJECTIVE_CLUSTER_VARIANTS[i % MULTI_OBJECTIVE_CLUSTER_VARIANTS.length] : null

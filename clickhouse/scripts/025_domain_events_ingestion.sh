@@ -169,9 +169,10 @@ SETTINGS
     kafka_topic_list = '${ANALYTICS_KAFKA_DOMAIN_TOPIC}',
     kafka_group_name = '${DOMAIN_GROUP_NAME}',
     kafka_format = 'JSONEachRow',
-    -- Drain the topic ~2x/sec instead of the 7.5s default so score snapshots
-    -- (and the routing events derived from them) surface near real-time.
-    kafka_flush_interval_ms = 500,
+    -- Drain the topic ~4x/sec instead of the 7.5s default so score snapshots
+    -- (and the routing events derived from them) surface near real-time and in
+    -- small batches rather than one big chunk.
+    kafka_flush_interval_ms = 250,
     kafka_handle_error_mode = 'stream';
 
 CREATE TABLE analytics_payment_audit_summary_buckets_queue AS analytics_domain_events_queue

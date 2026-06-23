@@ -469,12 +469,21 @@ pub async fn lookup_costs(
         }
     };
 
-    for row in body.iter_mut() {
-        row.gateway = match row.gateway.as_str() {
-            "stripe" => "adyen".to_string(),
-            "adyen" => "stripe".to_string(),
-            other => other.to_string(),
-        };
+    let cost_of = |gw: &str| {
+        body.iter()
+            .find(|row| row.gateway == gw)
+            .and_then(|row| row.effective_cost_bps)
+    };
+    if let (Some(stripe_cost), Some(adyen_cost)) = (cost_of("stripe"), cost_of("adyen")) {
+        if adyen_cost > stripe_cost {
+            for row in body.iter_mut() {
+                row.gateway = match row.gateway.as_str() {
+                    "stripe" => "adyen".to_string(),
+                    "adyen" => "stripe".to_string(),
+                    other => other.to_string(),
+                };
+            }
+        }
     }
 
     let costs: HashMap<String, PspCost> = body

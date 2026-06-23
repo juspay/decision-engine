@@ -109,8 +109,8 @@ function CurrentConfigDetails({ config }: { config: SRConfigResponse['config'] }
             <p className="font-medium">{config.data.defaultLatencyThreshold ?? 'Not set'} s</p>
           </div>
           <div>
-            <span className="text-slate-500">Tolerance band (pp):</span>
-            <p className="font-medium">{config.data.defaultTolerancePp ?? 'Not set (0.5)'}</p>
+            <span className="text-slate-500">Tolerance band:</span>
+            <p className="font-medium">{config.data.defaultTolerancePp != null ? `${config.data.defaultTolerancePp * 100}%` : 'Not set (50%)'}</p>
           </div>
         </div>
       </div>
@@ -208,7 +208,8 @@ export function SRRoutingPage() {
         defaultSuccessRate: d.defaultSuccessRate ?? 0.5,
         defaultLatencyThreshold: d.defaultLatencyThreshold ?? null,
         defaultHedgingPercent: d.defaultHedgingPercent ?? null,
-        defaultTolerancePp: d.defaultTolerancePp ?? null,
+        // Stored as a fraction in the backend (e.g. 0.1) but shown as a percentage in the UI (10).
+        defaultTolerancePp: d.defaultTolerancePp != null ? d.defaultTolerancePp * 100 : null,
         subLevelInputConfig: subLevelRows,
       })
       setShowSubLevelOverrides(subLevelRows.length > 0)
@@ -255,7 +256,8 @@ export function SRRoutingPage() {
             defaultSuccessRate: data.defaultSuccessRate,
             defaultLatencyThreshold: data.defaultLatencyThreshold,
             defaultHedgingPercent: data.defaultHedgingPercent,
-            defaultTolerancePp: data.defaultTolerancePp,
+            // UI holds a percentage (e.g. 10); persist back as a fraction (0.1).
+            defaultTolerancePp: data.defaultTolerancePp != null ? data.defaultTolerancePp / 100 : null,
             subLevelInputConfig: data.subLevelInputConfig.length > 0
               ? data.subLevelInputConfig
               : null,
@@ -484,21 +486,23 @@ export function SRRoutingPage() {
             <form onSubmit={handleSubmit(onSave)} className="space-y-6">
               <Card>
                 <CardHeader>
-                  <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Cost Based Config</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">Tunes how aggressively the router prefers the cheaper PSP within the auth-rate tolerance band.</p>
+                  <h2 className="text-base font-semibold text-slate-800 dark:text-white">Cost Based Config</h2>
                 </CardHeader>
-                <CardBody className="grid gap-6 md:grid-cols-3">
-                  <label className="space-y-1.5">
-                    <span className="text-xs font-medium text-slate-600 dark:text-slate-300">Cost Optimisation Override Configuration</span>
-                    <input
-                      type="number" step="0.01"
-                      {...register('defaultTolerancePp')}
-                      placeholder="0.5"
-                      className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 w-full focus:outline-none focus:ring-1 focus:ring-brand-500"
-                    />
-                    {errors.defaultTolerancePp && <p className="text-xs text-red-500">{errors.defaultTolerancePp.message}</p>}
-                    <p className="text-[11px] text-slate-400 leading-relaxed">
-                      Auth-rate band used by multi-objective routing. Within this window, the cheaper PSP wins. Leave blank for the default (0.5).
+                <CardBody>
+                  <label className="space-y-1.5 block">
+                    <span className="block text-sm font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap">Auth Tolerance Band for Cost Optimisation</span>
+                    <div className="relative max-w-xs">
+                      <input
+                        type="number" step="1"
+                        {...register('defaultTolerancePp')}
+                        placeholder="50"
+                        className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 pr-8 w-full text-base focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      />
+                      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-base text-slate-400">%</span>
+                    </div>
+                    {errors.defaultTolerancePp && <p className="text-sm text-red-500">{errors.defaultTolerancePp.message}</p>}
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      Auth-tolerance band window within which the cheaper PSP wins
                     </p>
                   </label>
                 </CardBody>
@@ -547,7 +551,7 @@ const SR_FEATURES: { feature: KnownFeature; title: string; description: string }
     feature: 'multi-objective-routing',
     title: 'Multi-objective routing',
     description:
-      'Within the auth-tolerance band, picks the cheaper PSP using cost data from Hypersense. Active only when Explore-exploit on SRv3 is disabled — when both are on, hedging wins to keep the bandit\'s exploration signal clean. routing_approach shows SR_SELECTION_MULTI_OBJECTIVE when this path is taken.',
+      'Within the auth-tolerance band, picks the cheaper PSP using cost data from PSP. Active only when Explore-exploit on SRv3 is disabled — when both are on, hedging wins to keep the bandit\'s exploration signal clean. routing_approach shows SR_SELECTION_MULTI_OBJECTIVE when this path is taken.',
   },
 ]
 

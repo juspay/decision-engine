@@ -73,6 +73,7 @@ base_url = "https://eu.hyperswitch.io/cost-observability/router"
 username = "hypersense_user"
 password = "hypersense_pass"
 token_ttl_secs = 82800
+cost_cache_ttl_secs = 300    # in-process fee-rate cache; 0 disables, default 5 min
 
 [tenant_secrets]
 public = { schema = "public" }
