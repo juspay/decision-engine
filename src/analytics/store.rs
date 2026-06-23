@@ -6,8 +6,7 @@ use crate::analytics::models::{
     AnalyticsLogSummariesResponse, AnalyticsOverviewResponse, AnalyticsQuery,
     AnalyticsRoutingStatsResponse, ExperimentResultsQuery, ExperimentResultsResponse,
     ExperimentTransactionsQuery, ExperimentTransactionsResponse, PaymentAuditQuery,
-    PaymentAuditResponse, RoutingEventsQuery,
-    RoutingEventsResponse,
+    PaymentAuditResponse, RoutingEventsQuery, RoutingEventsResponse,
 };
 use crate::error::ApiError;
 

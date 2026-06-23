@@ -125,7 +125,12 @@ enum ScenarioCost {
 /// distinct amounts. Returns `None` (keep probing live) unless *every* gateway is
 /// available in both samples and yields a plausible, non-negative fit — we never
 /// want to pin a half-trusted or implausible model into the cache.
-fn solve_fee_models(a1: f64, obs1: &Observation, a2: f64, obs2: &Observation) -> Option<HashMap<String, FeeModel>> {
+fn solve_fee_models(
+    a1: f64,
+    obs1: &Observation,
+    a2: f64,
+    obs2: &Observation,
+) -> Option<HashMap<String, FeeModel>> {
     if a1 <= 0.0 || a2 <= 0.0 {
         return None;
     }
@@ -150,12 +155,27 @@ fn solve_fee_models(a1: f64, obs1: &Observation, a2: f64, obs2: &Observation) ->
         let pct_bps = c1 - fixed_scaled / a1;
         // Tiny negative values are float noise around an exactly-zero component;
         // clamp those, but reject anything clearly outside a sane fee shape.
-        let fixed = if (-1e-6..0.0).contains(&fixed) { 0.0 } else { fixed };
-        let pct_bps = if (-1e-6..0.0).contains(&pct_bps) { 0.0 } else { pct_bps };
+        let fixed = if (-1e-6..0.0).contains(&fixed) {
+            0.0
+        } else {
+            fixed
+        };
+        let pct_bps = if (-1e-6..0.0).contains(&pct_bps) {
+            0.0
+        } else {
+            pct_bps
+        };
         if fixed < 0.0 || pct_bps < 0.0 || pct_bps > MAX_PLAUSIBLE_PCT_BPS {
             return None;
         }
-        models.insert(gw.clone(), FeeModel { available: true, pct_bps, fixed });
+        models.insert(
+            gw.clone(),
+            FeeModel {
+                available: true,
+                pct_bps,
+                fixed,
+            },
+        );
     }
     Some(models)
 }
@@ -223,8 +243,13 @@ impl CostCache {
                 match state {
                     // Already solved — leave it; it serves all amounts.
                     ScenarioCost::Solved(_) => return,
-                    ScenarioCost::Probing { amount: prior_amount, rows: prior_rows } => {
-                        if let Some(models) = solve_fee_models(*prior_amount, prior_rows, amount, &rows) {
+                    ScenarioCost::Probing {
+                        amount: prior_amount,
+                        rows: prior_rows,
+                    } => {
+                        if let Some(models) =
+                            solve_fee_models(*prior_amount, prior_rows, amount, &rows)
+                        {
                             data.insert(key.to_string(), (ScenarioCost::Solved(models), now));
                             return;
                         }
@@ -235,10 +260,17 @@ impl CostCache {
 
         // No usable prior probe yet — store this observation as the pending probe.
         self.evict_if_full(&mut data, key);
-        data.insert(key.to_string(), (ScenarioCost::Probing { amount, rows }, now));
+        data.insert(
+            key.to_string(),
+            (ScenarioCost::Probing { amount, rows }, now),
+        );
     }
 
-    fn evict_if_full(&self, data: &mut HashMap<String, (ScenarioCost, Instant)>, incoming_key: &str) {
+    fn evict_if_full(
+        &self,
+        data: &mut HashMap<String, (ScenarioCost, Instant)>,
+        incoming_key: &str,
+    ) {
         if data.len() < self.max_size || data.contains_key(incoming_key) {
             return;
         }

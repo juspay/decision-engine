@@ -1470,16 +1470,24 @@ mod tests {
     #[test]
     fn srv3_gate_admits_v3_and_multi_objective() {
         // Plain SRv3 and its hedging/downtime variants.
-        assert!(is_routing_approach_in_srv3(Some("SR_SELECTION_V3_ROUTING".into())));
+        assert!(is_routing_approach_in_srv3(Some(
+            "SR_SELECTION_V3_ROUTING".into()
+        )));
         assert!(is_routing_approach_in_srv3(Some("SR_V3_HEDGING".into())));
         // Cost-routed decisions are SRv3-layered and must reach the SRv3 producer.
-        assert!(is_routing_approach_in_srv3(Some("SR_SELECTION_MULTI_OBJECTIVE".into())));
+        assert!(is_routing_approach_in_srv3(Some(
+            "SR_SELECTION_MULTI_OBJECTIVE".into()
+        )));
     }
 
     #[test]
     fn srv3_gate_rejects_non_srv3() {
-        assert!(!is_routing_approach_in_srv3(Some("SR_SELECTION_V2_ROUTING".into())));
-        assert!(!is_routing_approach_in_srv3(Some("MERCHANT_PREFERENCE".into())));
+        assert!(!is_routing_approach_in_srv3(Some(
+            "SR_SELECTION_V2_ROUTING".into()
+        )));
+        assert!(!is_routing_approach_in_srv3(Some(
+            "MERCHANT_PREFERENCE".into()
+        )));
         assert!(!is_routing_approach_in_srv3(None));
     }
 
@@ -1487,13 +1495,17 @@ mod tests {
     fn explore_gate_admits_hedging_and_multi_objective() {
         assert!(is_routing_approach_in_explore(Some("SR_V3_HEDGING".into())));
         // Cost routing picks a non-top, SR-equivalent PSP — off-policy exploration.
-        assert!(is_routing_approach_in_explore(Some("SR_SELECTION_MULTI_OBJECTIVE".into())));
+        assert!(is_routing_approach_in_explore(Some(
+            "SR_SELECTION_MULTI_OBJECTIVE".into()
+        )));
     }
 
     #[test]
     fn explore_gate_rejects_plain_exploit() {
         // Pure exploit V3 routing is still excluded under explore/exploit gating.
-        assert!(!is_routing_approach_in_explore(Some("SR_SELECTION_V3_ROUTING".into())));
+        assert!(!is_routing_approach_in_explore(Some(
+            "SR_SELECTION_V3_ROUTING".into()
+        )));
         assert!(!is_routing_approach_in_explore(None));
     }
 }

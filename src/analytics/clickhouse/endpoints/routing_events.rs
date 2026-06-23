@@ -104,7 +104,6 @@ fn event_id(
     )
 }
 
-
 /// Walk bucketed score points per dimension, carrying the last known score per
 /// gateway forward across sparse buckets, and emit routing events. Pure and
 /// deterministic so event IDs are stable across polls.
