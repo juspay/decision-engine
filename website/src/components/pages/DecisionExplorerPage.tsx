@@ -267,7 +267,7 @@ function normalizeRankingAlgorithm(value: unknown): SimulationAlgorithm {
     : DEFAULT_FORM.ranking_algorithm
 }
 
-function normalizeDebitCardType(value: unknown): DebitRoutingFormState['card_type'] {
+function normalizeDebitCardCategory(value: unknown): DebitRoutingFormState['card_type'] {
   return `${value || ''}`.toLowerCase() === 'credit' ? 'credit' : 'debit'
 }
 
@@ -360,7 +360,7 @@ function loadExplorerState(scopeKey: string): ExplorerPersistedState {
       debitForm: {
         ...defaults.debitForm,
         ...(parsed.debitForm || {}),
-        card_type: normalizeDebitCardType(parsed.debitForm?.card_type),
+        card_type: normalizeDebitCardCategory(parsed.debitForm?.card_type),
       },
       ruleParams: parsed.ruleParams?.length ? cloneRuleParams(parsed.ruleParams) : defaults.ruleParams,
       fallbackConnectors: parsed.fallbackConnectors?.length ? cloneConnectors(parsed.fallbackConnectors) : defaults.fallbackConnectors,
@@ -1373,7 +1373,7 @@ export function DecisionExplorerPage() {
         regulated_name: debitForm.is_regulated && debitForm.regulated_name.trim()
           ? debitForm.regulated_name.trim()
           : null,
-        card_type: normalizeDebitCardType(debitForm.card_type),
+        card_type: normalizeDebitCardCategory(debitForm.card_type),
       },
     })
   }
