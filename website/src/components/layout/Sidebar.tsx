@@ -10,6 +10,7 @@ import {
   Network,
   BarChart3,
   Activity,
+  BellRing,
   Moon,
   Sun,
   Users,
@@ -132,6 +133,7 @@ export function Sidebar() {
         <SideLink to="/" icon={LayoutDashboard} end selectedPath={selectedPath} onNavigate={setPendingPath}>Overview</SideLink>
         <SideLink to="/analytics" icon={BarChart3} selectedPath={selectedPath} onNavigate={setPendingPath}>Analytics</SideLink>
         <SideLink to="/audit" icon={Activity} selectedPath={selectedPath} onNavigate={setPendingPath}>Decision Audit</SideLink>
+        <SideLink to="/events" icon={BellRing} selectedPath={selectedPath} onNavigate={setPendingPath}>Routing Events</SideLink>
 
         <div className="flex items-center gap-2 px-3 pb-2 pt-5">
           <span className="text-[12px] font-bold uppercase tracking-widest text-slate-400 dark:text-[#6d768a]">
@@ -140,7 +142,7 @@ export function Sidebar() {
         </div>
 
         <SideLink to="/routing" icon={GitBranch} end selectedPath={selectedPath} onNavigate={setPendingPath}>Routing Hub</SideLink>
-        <SideLink to="/routing/sr" icon={TrendingUp} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Auth-Rate Based</SideLink>
+        <SideLink to="/routing/sr" icon={TrendingUp} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Multi Objective</SideLink>
         <SideLink to="/routing/rules" icon={BookOpen} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Rule-Based</SideLink>
         <SideLink to="/routing/volume" icon={PieChart} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Volume Split</SideLink>
         <SideLink to="/routing/debit" icon={Network} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Debit Routing</SideLink>
@@ -153,6 +155,7 @@ export function Sidebar() {
         </div>
 
         <SideLink to="/decisions" icon={Search} selectedPath={selectedPath} onNavigate={setPendingPath}>Decision Explorer</SideLink>
+        <SideLink to="/decisions/simulator" icon={FlaskConical} selectedPath={selectedPath} onNavigate={setPendingPath}>Decision Simulator</SideLink>
 
         <div className="flex items-center gap-2 px-3 pb-2 pt-5">
           <span className="text-[12px] font-bold uppercase tracking-widest text-slate-400 dark:text-[#6d768a]">

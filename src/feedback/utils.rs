@@ -221,6 +221,7 @@ pub fn get_txn_card_info_from_api_payload(
         cardIssuerBankName: None,
         cardSwitchProvider: None,
         card_type: None,
+        card_program: None,
         nameOnCard: None,
         dateCreated: gateway_scoring_data.dateCreated,
         paymentMethodType: gateway_scoring_data.paymentMethodType.clone(),

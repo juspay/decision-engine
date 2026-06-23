@@ -377,6 +377,9 @@ export function RoutingHubPage() {
                   {srData.defaultHedgingPercent != null && (
                     <SRRow label="Hedging" value={`${srData.defaultHedgingPercent}%`} />
                   )}
+                  {srData.defaultTolerancePp != null && (
+                    <SRRow label="Tolerance band" value={`${srData.defaultTolerancePp} pp`} />
+                  )}
                   {srData.defaultLatencyThreshold != null && (
                     <SRRow label="Latency threshold" value={`${srData.defaultLatencyThreshold} ms`} />
                   )}

@@ -17,6 +17,7 @@ ONECLICK_AUTO_CONFIRM="${ONECLICK_AUTO_CONFIRM:-0}"
 POSTGRES_HOST="${POSTGRES_HOST:-localhost}"
 POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 POSTGRES_USER="${POSTGRES_USER:-db_user}"
+POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-db_pass}"
 POSTGRES_DB="${POSTGRES_DB:-decision_engine_db}"
 REDIS_HOST="${REDIS_HOST:-localhost}"
 REDIS_PORT="${REDIS_PORT:-6379}"
@@ -205,6 +206,53 @@ check_clickhouse_schema() {
     done
 
     return "$missing"
+}
+
+# Seed the global SR V3 service configs the decider relies on. These were
+# previously created only by routing-config/setup.py (which targets MySQL); the
+# Postgres bring-up creates an empty service_configuration table, so without this
+# the decider can't hedge (e.g. ENABLE_MERCHANT_ON_VOLUME_DISTRIBUTION_FEATURE_SR_V3
+# is absent and route_random_traffic never runs). Idempotent via WHERE NOT EXISTS
+# since service_configuration.name has no unique constraint.
+seed_global_configs() {
+    echo "Seeding global SR V3 service configs..."
+    local sql
+    sql=$(cat <<'SQL'
+INSERT INTO service_configuration (name, value)
+SELECT v.name, v.value
+FROM (VALUES
+    ('ENABLE_MERCHANT_ON_VOLUME_DISTRIBUTION_FEATURE_SR_V3', '{"enableAll":true,"enableAllRollout":100}'),
+    ('merchants_enabled_for_score_keys_unification',         '{"enableAll":true,"enableAllRollout":100}'),
+    ('SR_V3_INPUT_CONFIG_DEFAULT',                           '{"defaultLatencyThreshold":90,"defaultBucketSize":125,"defaultHedgingPercent":5}')
+) AS v(name, value)
+WHERE NOT EXISTS (
+    SELECT 1 FROM service_configuration sc WHERE sc.name = v.name
+);
+SQL
+)
+
+    if command_exists psql; then
+        if PGPASSWORD="$POSTGRES_PASSWORD" psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" \
+            -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c "$sql" >/dev/null 2>&1; then
+            echo "Global SR V3 configs seeded."
+            echo ""
+            return 0
+        fi
+    fi
+
+    if docker compose ps -q postgresql >/dev/null 2>&1; then
+        if echo "$sql" | docker compose exec -T postgresql \
+            psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 >/dev/null 2>&1; then
+            echo "Global SR V3 configs seeded."
+            echo ""
+            return 0
+        fi
+    fi
+
+    echo "  [warn] Could not seed global SR V3 configs (no psql and postgresql container unreachable)."
+    echo "         Hedging will not work until these service_configuration rows exist."
+    echo ""
+    return 1
 }
 
 print_service_status() {
@@ -472,6 +520,8 @@ fi
 
 echo "Running Postgres migrations..."
 just migrate-pg
+
+seed_global_configs
 
 # Start backend, npm install, and docs in parallel — none of them depend on each other.
 echo "Starting Decision Engine server, installing dashboard dependencies, and starting docs preview..."

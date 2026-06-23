@@ -1,5 +1,6 @@
 pub mod audit_summaries;
 pub mod audit_timeline;
+pub mod cost_savings;
 pub mod decision_approaches;
 pub mod decision_series;
 pub mod decision_tiles;
@@ -10,6 +11,7 @@ pub mod log_samples;
 pub mod overview_counts;
 pub mod route_hits;
 pub mod rule_hits;
+pub mod score_bucket_series;
 pub mod score_series;
 pub mod score_snapshots;
 pub mod smart_retry_stats;

@@ -39,6 +39,7 @@ pub struct SuccessRateData {
     pub default_upper_reset_factor: Option<f64>,
     pub default_gateway_extra_score: Option<Vec<GatewayWiseExtraScore>>,
     pub sub_level_input_config: Option<Vec<SRSubLevelInputConfig>>,
+    pub default_tolerance_pp: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

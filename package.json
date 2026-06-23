@@ -16,10 +16,11 @@
     "test": "npm run test:all"
   },
   "devDependencies": {
-    "cypress": "^13.6.0",
-    "@cypress/grep": "^4.0.1"
+    "@cypress/grep": "^4.0.1",
+    "cypress": "^13.6.0"
   },
   "dependencies": {
+    "typescript": "^6.0.3",
     "uuid": "^9.0.1"
   }
 }

@@ -43,6 +43,10 @@ const srFormSchema = z.object({
     (v) => (v === '' || v === null ? null : Number(v)),
     z.number().nullable()
   ),
+  defaultTolerancePp: z.preprocess(
+    (v) => (v === '' || v === null ? null : Number(v)),
+    z.number().min(0).max(100).nullable()
+  ),
   subLevelInputConfig: z.array(subLevelSchema),
 })
 
@@ -58,6 +62,7 @@ interface SRConfigResponse {
       defaultSuccessRate: number | null
       defaultLatencyThreshold: number | null
       defaultHedgingPercent: number | null
+      defaultTolerancePp: number | null
       subLevelInputConfig: {
         paymentMethodType: string
         paymentMethod: string
@@ -102,6 +107,10 @@ function CurrentConfigDetails({ config }: { config: SRConfigResponse['config'] }
           <div>
             <span className="text-slate-500">Feedback Latency Window:</span>
             <p className="font-medium">{config.data.defaultLatencyThreshold ?? 'Not set'} s</p>
+          </div>
+          <div>
+            <span className="text-slate-500">Tolerance band:</span>
+            <p className="font-medium">{config.data.defaultTolerancePp != null ? `${config.data.defaultTolerancePp * 100}%` : 'Not set (50%)'}</p>
           </div>
         </div>
       </div>
@@ -150,7 +159,7 @@ function CurrentConfigDetails({ config }: { config: SRConfigResponse['config'] }
   )
 }
 
-type SRTab = 'scoring' | 'elimination' | 'flags'
+type SRTab = 'scoring' | 'elimination' | 'cost' | 'flags'
 
 export function SRRoutingPage() {
   const { merchantId } = useMerchantStore()
@@ -184,6 +193,7 @@ export function SRRoutingPage() {
       defaultSuccessRate: 0.5,
       defaultLatencyThreshold: null,
       defaultHedgingPercent: null,
+      defaultTolerancePp: null,
       subLevelInputConfig: [],
     },
   })
@@ -198,6 +208,8 @@ export function SRRoutingPage() {
         defaultSuccessRate: d.defaultSuccessRate ?? 0.5,
         defaultLatencyThreshold: d.defaultLatencyThreshold ?? null,
         defaultHedgingPercent: d.defaultHedgingPercent ?? null,
+        // Stored as a fraction in the backend (e.g. 0.1) but shown as a percentage in the UI (10).
+        defaultTolerancePp: d.defaultTolerancePp != null ? d.defaultTolerancePp * 100 : null,
         subLevelInputConfig: subLevelRows,
       })
       setShowSubLevelOverrides(subLevelRows.length > 0)
@@ -244,6 +256,8 @@ export function SRRoutingPage() {
             defaultSuccessRate: data.defaultSuccessRate,
             defaultLatencyThreshold: data.defaultLatencyThreshold,
             defaultHedgingPercent: data.defaultHedgingPercent,
+            // UI holds a percentage (e.g. 10); persist back as a fraction (0.1).
+            defaultTolerancePp: data.defaultTolerancePp != null ? data.defaultTolerancePp / 100 : null,
             subLevelInputConfig: data.subLevelInputConfig.length > 0
               ? data.subLevelInputConfig
               : null,
@@ -290,7 +304,7 @@ export function SRRoutingPage() {
       {/* Page header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Auth-Rate Based Routing</h1>
+          <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Multi Objective Routing</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
             Dynamic gateway scoring based on real-time success rates.
           </p>
@@ -337,6 +351,7 @@ export function SRRoutingPage() {
         <nav className="-mb-px flex gap-1">
           <button type="button" className={tabClass('scoring')} onClick={() => setActiveTab('scoring')}>Scoring</button>
           <button type="button" className={tabClass('elimination')} onClick={() => setActiveTab('elimination')}>Elimination</button>
+          <button type="button" className={tabClass('cost')} onClick={() => setActiveTab('cost')}>Cost Based</button>
           <button type="button" className={tabClass('flags')} onClick={() => setActiveTab('flags')}>Feature Flags</button>
         </nav>
       </div>
@@ -466,6 +481,45 @@ export function SRRoutingPage() {
           {/* ── Elimination tab ── */}
           {activeTab === 'elimination' && <EliminationConfig merchantId={merchantId} />}
 
+          {/* ── Cost Based Routing tab ── */}
+          {activeTab === 'cost' && (
+            <form onSubmit={handleSubmit(onSave)} className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <h2 className="text-base font-semibold text-slate-800 dark:text-white">Cost Based Config</h2>
+                </CardHeader>
+                <CardBody>
+                  <label className="space-y-1.5 block">
+                    <span className="block text-sm font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap">Auth Tolerance Band for Cost Optimisation</span>
+                    <div className="relative max-w-xs">
+                      <input
+                        type="number" step="1"
+                        {...register('defaultTolerancePp')}
+                        placeholder="50"
+                        className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 pr-8 w-full text-base focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      />
+                      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-base text-slate-400">%</span>
+                    </div>
+                    {errors.defaultTolerancePp && <p className="text-sm text-red-500">{errors.defaultTolerancePp.message}</p>}
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      Auth-tolerance band window within which the cheaper PSP wins
+                    </p>
+                  </label>
+                </CardBody>
+              </Card>
+
+              <ErrorMessage error={saveError} />
+              {saveSuccess && (
+                <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-4 py-3 text-sm text-emerald-400">
+                  Configuration saved.
+                </div>
+              )}
+              <Button type="submit" disabled={saving || !merchantId}>
+                {saving ? <><Spinner size={14} /> Saving…</> : 'Save Cost Config'}
+              </Button>
+            </form>
+          )}
+
           {/* ── Feature Flags tab ── */}
           {activeTab === 'flags' && <SRFeatureFlags merchantId={merchantId} />}
         </>
@@ -492,6 +546,12 @@ const SR_FEATURES: { feature: KnownFeature; title: string; description: string }
     title: 'A/B test on real payments',
     description:
       'Routes live production traffic through the active A/B test algorithm. When enabled, each payment is deterministically assigned to a control or variant arm based on its payment ID. Disable at any time to fall back to standard SR routing with no impact on in-flight payments.',
+  },
+  {
+    feature: 'multi-objective-routing',
+    title: 'Multi-objective routing',
+    description:
+      'Within the auth-tolerance band, picks the cheaper PSP using cost data from PSP. Active only when Explore-exploit on SRv3 is disabled — when both are on, hedging wins to keep the bandit\'s exploration signal clean. routing_approach shows SR_SELECTION_MULTI_OBJECTIVE when this path is taken.',
   },
 ]
 
@@ -691,7 +751,7 @@ function EliminationConfig({ merchantId }: { merchantId: string | null }) {
 
       <Card>
         <CardHeader>
-          <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Elimination Config</h2>
+          <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Elimination Configs</h2>
           <p className="text-xs text-slate-500 mt-0.5">
             Gateways whose SR score drops below the threshold are removed from routing entirely.
           </p>

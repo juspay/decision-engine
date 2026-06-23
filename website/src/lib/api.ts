@@ -16,27 +16,27 @@ function resolveApiPath(path: string) {
   return `${API_BASE_PATH}${normalizedPath}`
 }
 
-function logRequest(method: string, path: string, body?: unknown) {
-  if (!DEBUG_API) return
-  console.log('\n' + '='.repeat(80))
-  console.log(`[API REQUEST] ${new Date().toISOString()}`)
-  console.log(`Method: ${method}`)
-  console.log(`Path: ${path}`)
-  if (body !== undefined) {
-    console.log('Body:', JSON.stringify(body, null, 2))
-  }
-  console.log('='.repeat(80))
-}
+// function logRequest(method: string, path: string, body?: unknown) {
+//   if (!DEBUG_API) return
+//   console.log('\n' + '='.repeat(80))
+//   console.log(`[API REQUEST] ${new Date().toISOString()}`)
+//   console.log(`Method: ${method}`)
+//   console.log(`Path: ${path}`)
+//   if (body !== undefined) {
+//     console.log('Body:', JSON.stringify(body, null, 2))
+//   }
+//   console.log('='.repeat(80))
+// }
 
-function logResponse(path: string, status: number, statusText: string, body: string) {
-  if (!DEBUG_API) return
-  console.log('\n' + '-'.repeat(80))
-  console.log(`[API RESPONSE] ${new Date().toISOString()}`)
-  console.log(`Path: ${path}`)
-  console.log(`Status: ${status} ${statusText}`)
-  console.log('Response Body:', body)
-  console.log('-'.repeat(80) + '\n')
-}
+// function logResponse(path: string, status: number, statusText: string, body: string) {
+//   if (!DEBUG_API) return
+//   console.log('\n' + '-'.repeat(80))
+//   console.log(`[API RESPONSE] ${new Date().toISOString()}`)
+//   console.log(`Path: ${path}`)
+//   console.log(`Status: ${status} ${statusText}`)
+//   console.log('Response Body:', body)
+//   console.log('-'.repeat(80) + '\n')
+// }
 
 function logError(path: string, error: unknown) {
   if (!DEBUG_API) return
@@ -104,11 +104,9 @@ export async function apiFetch<T>(
   path: string,
   options?: RequestInit
 ): Promise<T> {
-  const method = options?.method || 'GET'
-  const body = options?.body ? JSON.parse(options.body as string) : undefined
   const requestPath = resolveApiPath(path)
 
-  logRequest(method, requestPath, body)
+  // logRequest(method, requestPath, body)
 
   try {
     const token = tokenRef.get()
@@ -126,16 +124,16 @@ export async function apiFetch<T>(
     })
 
     const responseText = await res.text()
-    let responseBody: string
+    // let responseBody: string
 
-    try {
-      const json = JSON.parse(responseText)
-      responseBody = JSON.stringify(json, null, 2)
-    } catch {
-      responseBody = responseText
-    }
+    // try {
+    //   const json = JSON.parse(responseText)
+    //   responseBody = JSON.stringify(json, null, 2)
+    // } catch {
+    //   responseBody = responseText
+    // }
 
-    logResponse(requestPath, res.status, res.statusText, responseBody)
+    // logResponse(requestPath, res.status, res.statusText, responseBody)
 
     // Only clear session when the JWT itself is confirmed invalid/expired.
     // A generic 401 (e.g. missing API key on a protected route) must NOT wipe the session.

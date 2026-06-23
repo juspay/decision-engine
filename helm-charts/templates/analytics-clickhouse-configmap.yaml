@@ -223,6 +223,9 @@ data:
         kafka_group_name = '{{ .Values.analytics.clickhouse.domainConsumerGroup }}',
         kafka_format = 'JSONEachRow',
         kafka_num_consumers = 1,
+        -- Drain the topic ~2x/sec instead of the 7.5s default so score snapshots
+        -- (and the routing events derived from them) surface near real-time.
+        kafka_flush_interval_ms = 250,
         kafka_handle_error_mode = 'stream';
 
     CREATE MATERIALIZED VIEW IF NOT EXISTS {{ .Values.analytics.clickhouse.database }}.analytics_domain_events_parse_errors_mv

@@ -4,6 +4,7 @@ pub mod flow_new;
 pub mod flows;
 pub mod gw_filter;
 pub mod gw_scoring;
+pub mod multi_objective;
 pub mod runner;
 // pub mod gw_filter_new;
 // pub mod gw_scoring;

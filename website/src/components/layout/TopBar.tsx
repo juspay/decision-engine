@@ -4,6 +4,7 @@ import { useAuthStore } from '../../store/authStore'
 import { useMerchantStore } from '../../store/merchantStore'
 import { apiFetch } from '../../lib/api'
 import { ChevronDown, Building2, Check, Plus } from 'lucide-react'
+import { NotificationBell } from './NotificationBell'
 
 interface SwitchMerchantResponse {
   token: string
@@ -56,6 +57,8 @@ export function TopBar() {
       <div />
 
       <div className="flex items-center gap-2">
+        <NotificationBell />
+
         {/* Merchant switcher */}
         {merchants.length > 0 && (
           <div className="relative" ref={dropdownRef}>

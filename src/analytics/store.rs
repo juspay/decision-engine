@@ -2,10 +2,11 @@ use async_trait::async_trait;
 
 use crate::analytics::events::{ApiEvent, DomainAnalyticsEvent};
 use crate::analytics::models::{
-    AnalyticsDecisionResponse, AnalyticsGatewayScoresResponse, AnalyticsLogSummariesResponse,
-    AnalyticsOverviewResponse, AnalyticsQuery, AnalyticsRoutingStatsResponse,
-    ExperimentResultsQuery, ExperimentResultsResponse, ExperimentTransactionsQuery,
-    ExperimentTransactionsResponse, PaymentAuditQuery, PaymentAuditResponse,
+    AnalyticsCostSavingsResponse, AnalyticsDecisionResponse, AnalyticsGatewayScoresResponse,
+    AnalyticsLogSummariesResponse, AnalyticsOverviewResponse, AnalyticsQuery,
+    AnalyticsRoutingStatsResponse, ExperimentResultsQuery, ExperimentResultsResponse,
+    ExperimentTransactionsQuery, ExperimentTransactionsResponse, PaymentAuditQuery,
+    PaymentAuditResponse, RoutingEventsQuery, RoutingEventsResponse,
 };
 use crate::error::ApiError;
 
@@ -37,6 +38,11 @@ pub trait AnalyticsReadStore: Send + Sync {
         query: &AnalyticsQuery,
     ) -> Result<AnalyticsRoutingStatsResponse, ApiError>;
 
+    async fn cost_savings(
+        &self,
+        query: &AnalyticsQuery,
+    ) -> Result<AnalyticsCostSavingsResponse, ApiError>;
+
     async fn log_summaries(
         &self,
         query: &AnalyticsQuery,
@@ -61,6 +67,11 @@ pub trait AnalyticsReadStore: Send + Sync {
         &self,
         query: &ExperimentTransactionsQuery,
     ) -> Result<ExperimentTransactionsResponse, ApiError>;
+
+    async fn routing_events(
+        &self,
+        query: &RoutingEventsQuery,
+    ) -> Result<RoutingEventsResponse, ApiError>;
 }
 
 #[derive(Clone)]
@@ -117,6 +128,13 @@ impl AnalyticsReadStore for UnavailableAnalyticsReadStore {
         Err(ApiError::DatabaseError)
     }
 
+    async fn cost_savings(
+        &self,
+        _query: &AnalyticsQuery,
+    ) -> Result<AnalyticsCostSavingsResponse, ApiError> {
+        Err(ApiError::DatabaseError)
+    }
+
     async fn log_summaries(
         &self,
         _query: &AnalyticsQuery,
@@ -149,6 +167,13 @@ impl AnalyticsReadStore for UnavailableAnalyticsReadStore {
         &self,
         _query: &ExperimentTransactionsQuery,
     ) -> Result<ExperimentTransactionsResponse, ApiError> {
+        Err(ApiError::DatabaseError)
+    }
+
+    async fn routing_events(
+        &self,
+        _query: &RoutingEventsQuery,
+    ) -> Result<RoutingEventsResponse, ApiError> {
         Err(ApiError::DatabaseError)
     }
 }

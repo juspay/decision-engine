@@ -11,7 +11,26 @@ export interface DecideGatewayResponse {
   reset_approach: string
   is_scheduled_outage: boolean
   debit_routing_output?: DebitRoutingOutput | null
+  multi_objective_info?: MultiObjectiveInfo | null
   latency: number | null
+}
+
+export type MultiObjectiveOutcome = 'COST_WON' | 'AUTH_WON'
+
+export interface PspSummary {
+  psp: string
+  authRate: number
+  costBps: number | null
+}
+
+export interface MultiObjectiveInfo {
+  outcome: MultiObjectiveOutcome
+  reason: string
+  tolerancePp: number
+  srHead: PspSummary | null
+  chosen: PspSummary | null
+  costSavedBps: number | null
+  qualifiedCount: number
 }
 
 export type RoutingAlgorithmName =
@@ -186,6 +205,7 @@ export interface SRConfigData {
   defaultLowerResetFactor: number | null
   defaultUpperResetFactor: number | null
   defaultGatewayExtraScore: number | null
+  defaultTolerancePp: number | null
   subLevelInputConfig: SubLevelConfig[] | null
 }
 
@@ -367,6 +387,31 @@ export interface AnalyticsRoutingStatsResponse {
   available_filters: RoutingFilterOptions
 }
 
+export interface AnalyticsAvailableCurrency {
+  currency: string
+  decision_count: number
+}
+
+export interface AnalyticsCostSavingsTrendPoint {
+  bucket_ms: number
+  saved_value: number
+}
+
+export interface AnalyticsCostSavingsTotals {
+  saved_value: number
+  cost_won_count: number
+  total_decisions: number
+}
+
+export interface AnalyticsCostSavingsResponse {
+  merchant_id: string
+  range: AnalyticsRangeValue
+  currency: string | null
+  available_currencies: AnalyticsAvailableCurrency[]
+  trend: AnalyticsCostSavingsTrendPoint[]
+  totals: AnalyticsCostSavingsTotals
+}
+
 export interface RoutingFilterOptions {
   dimensions: RoutingFilterDimension[]
   missing_dimensions: RoutingFilterDimensionHint[]
@@ -485,6 +530,32 @@ export interface UpdateScoreResponse {
   gateway: string
   payment_id: string
   gsm_info: GsmInfo | null
+}
+
+export type RoutingEventType =
+  | 'leader_changed'
+  | 'gateway_entered_auth_band'
+  | 'gateway_exited_auth_band'
+
+export interface RoutingEvent {
+  id: string
+  event_type: RoutingEventType
+  merchant_id: string
+  payment_method_type: string | null
+  payment_method: string | null
+  bucket_ms: number
+  gateway: string
+  previous_gateway: string | null
+  score: number | null
+  previous_score: number | null
+  transaction_count: number | null
+}
+
+export interface RoutingEventsResponse {
+  merchant_id: string
+  range: AnalyticsRangeValue
+  events: RoutingEvent[]
+  generated_at_ms: number
 }
 
 export interface PaymentAuditResponse {

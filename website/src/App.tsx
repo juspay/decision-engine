@@ -1,10 +1,12 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { AnalyticsPage } from './components/pages/AnalyticsPage'
 import { DecisionExplorerPage } from './components/pages/DecisionExplorerPage'
+import { DecisionSimulatorPage } from './components/pages/DecisionSimulatorPage'
 import { DebitRoutingPage } from './components/pages/DebitRoutingPage'
 import { EuclidRulesPage } from './components/pages/EuclidRulesPage'
 import { OverviewPage } from './components/pages/OverviewPage'
 import { PaymentAuditPage } from './components/pages/PaymentAuditPage'
+import { RoutingEventsPage } from './components/pages/RoutingEventsPage'
 import { RoutingHubPage } from './components/pages/RoutingHubPage'
 import { SRRoutingPage } from './components/pages/SRRoutingPage'
 import { VolumeSplitPage } from './components/pages/VolumeSplitPage'
@@ -35,8 +37,10 @@ export default function App() {
           <Route path="routing/debit" element={<DebitRoutingPage />} />
           <Route path="routing/ab-testing" element={<ABTestingPage />} />
           <Route path="decisions" element={<DecisionExplorerPage />} />
+          <Route path="decisions/simulator" element={<DecisionSimulatorPage />} />
           <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="audit" element={<PaymentAuditPage />} />
+          <Route path="events" element={<RoutingEventsPage />} />
           <Route path="members" element={<MembersPage />} />
           <Route path="api-keys" element={<ApiKeysPage />} />
           <Route path="account" element={<AccountPage />} />

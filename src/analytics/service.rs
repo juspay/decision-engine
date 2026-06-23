@@ -436,6 +436,20 @@ pub async fn routing_stats(
         .await
 }
 
+pub async fn cost_savings(
+    _state: &crate::app::TenantAppState,
+    query: &AnalyticsQuery,
+) -> Result<AnalyticsCostSavingsResponse, error::ApiError> {
+    let global_state = crate::app::APP_STATE
+        .get()
+        .ok_or(error::ApiError::DatabaseError)?;
+    global_state
+        .analytics_runtime
+        .read_store()
+        .cost_savings(query)
+        .await
+}
+
 pub async fn log_summaries(
     _state: &crate::app::TenantAppState,
     query: &AnalyticsQuery,
@@ -503,6 +517,20 @@ pub async fn experiment_transactions(
         .analytics_runtime
         .read_store()
         .experiment_transactions(query)
+        .await
+}
+
+pub async fn routing_events(
+    _state: &crate::app::TenantAppState,
+    query: &RoutingEventsQuery,
+) -> Result<RoutingEventsResponse, error::ApiError> {
+    let global_state = crate::app::APP_STATE
+        .get()
+        .ok_or(error::ApiError::DatabaseError)?;
+    global_state
+        .analytics_runtime
+        .read_store()
+        .routing_events(query)
         .await
 }
 

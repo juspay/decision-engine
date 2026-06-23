@@ -96,6 +96,13 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
         endpoints::routing_stats::load(&self.client, query).await
     }
 
+    async fn cost_savings(
+        &self,
+        query: &AnalyticsQuery,
+    ) -> Result<AnalyticsCostSavingsResponse, ApiError> {
+        endpoints::cost_savings::load(&self.client, query).await
+    }
+
     async fn log_summaries(
         &self,
         query: &AnalyticsQuery,
@@ -129,5 +136,12 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
         query: &ExperimentTransactionsQuery,
     ) -> Result<ExperimentTransactionsResponse, ApiError> {
         endpoints::experiment_transactions::load(&self.client, query).await
+    }
+
+    async fn routing_events(
+        &self,
+        query: &RoutingEventsQuery,
+    ) -> Result<RoutingEventsResponse, ApiError> {
+        endpoints::routing_events::load(&self.client, query).await
     }
 }

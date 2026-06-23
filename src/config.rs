@@ -61,6 +61,8 @@ pub struct GlobalConfig {
     pub gsm: GsmConfig,
     #[serde(default)]
     pub mem_cache: MemCacheConfig,
+    #[serde(default)]
+    pub hypersense: HypersenseConfig,
 }
 
 #[derive(Clone, serde::Deserialize, Debug)]
@@ -251,6 +253,7 @@ pub struct TenantConfig {
     pub pm_filters: ConnectorFilters,
     pub debit_routing_config: network_decider::types::DebitRoutingConfig,
     pub cache_config: CacheConfig,
+    pub hypersense: HypersenseConfig,
 }
 
 #[derive(Clone, Debug, Default, serde::Deserialize)]
@@ -354,6 +357,7 @@ impl TenantConfig {
                 .unwrap(),
             debit_routing_config: global_config.debit_routing_config.clone(),
             cache_config: global_config.cache_config.clone(),
+            hypersense: global_config.hypersense.clone(),
         }
     }
 }
@@ -441,6 +445,35 @@ pub struct CacheConfig {
 impl CacheConfig {
     pub fn add_prefix(&self, key: &str) -> String {
         format!("{}{}", self.service_config_redis_prefix, key)
+    }
+}
+
+#[derive(Clone, serde::Deserialize, Debug)]
+#[serde(default)]
+pub struct HypersenseConfig {
+    pub base_url: String,
+    pub username: String,
+    pub password: masking::Secret<String>,
+    /// TTL (seconds) for the cached access token. Must stay below the token's own
+    /// lifetime (the sign-in API issues 86400s tokens); defaults to 23h.
+    pub token_ttl_secs: i64,
+    /// TTL (seconds) for the in-process fee-rate-estimate cache that fronts the
+    /// cost-observability endpoint. Identical lookup scenarios within this window
+    /// are served from memory instead of re-hitting the API. `0` disables the
+    /// cache. Defaults to 300s (5 min) — short, since this is a temporary cache
+    /// and cost data should not go stale for long.
+    pub cost_cache_ttl_secs: u64,
+}
+
+impl Default for HypersenseConfig {
+    fn default() -> Self {
+        Self {
+            base_url: "https://eu.hyperswitch.io/cost-observability/router".to_string(),
+            username: String::new(),
+            password: masking::Secret::new(String::new()),
+            token_ttl_secs: 82_800,
+            cost_cache_ttl_secs: 300,
+        }
     }
 }
 

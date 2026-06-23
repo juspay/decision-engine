@@ -1,11 +1,10 @@
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { RuleEvaluationPanel } from './RuleEvaluationPanel'
-import { ErrorInfoFields, ErrorInfoState, GsmOptionRow, DEFAULT_ERROR_INFO, penalizedByUnifiedMessage } from './ErrorInfoFields'
+import { ErrorInfoFields, ErrorInfoState, GsmOptionRow, DEFAULT_ERROR_INFO } from './ErrorInfoFields'
 import { PenaltyClassificationGuide } from './PenaltyClassificationGuide'
 import { useNavigate } from 'react-router-dom'
 import useSWR from 'swr'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
-import { Tooltip as UiTooltip } from '../ui/Tooltip'
+import { BarChart, Bar, LineChart, Line, ComposedChart, Area, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
 import { Card, CardBody, CardHeader, SurfaceLabel } from '../ui/Card'
@@ -16,28 +15,19 @@ import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
 import { useAuthStore } from '../../store/authStore'
 import { apiPost, fetcher } from '../../lib/api'
 import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
-import { DecideGatewayResponse, GatewayConnector, MultiObjectiveInfo, PaymentAuditEvent, PaymentAuditResponse, UpdateScoreResponse } from '../../types/api'
+import { DecideGatewayResponse, GatewayConnector, MultiObjectiveInfo, PaymentAuditEvent, PaymentAuditResponse, RoutingEvent, RoutingEventType, UpdateScoreResponse } from '../../types/api'
 import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
 import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
+import { describeRoutingEvent, useRoutingEvents } from '../../hooks/useRoutingEvents'
 import { FEATURE_FLAGS } from '../../lib/featureFlags'
-import { Play, RefreshCw, ChevronDown, ChevronUp, Activity, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings } from 'lucide-react'
+import { Play, Pause, RefreshCw, ChevronDown, ChevronUp, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings, ArrowRightLeft, Target, TrendingDown, Flag } from 'lucide-react'
 
 // UI-local algorithm tokens for the simulation dropdown. Maps to the backend
 // /decide-gateway request as follows:
 //   'SR_BASED_ROUTING'   → { rankingAlgorithm: 'SR_BASED_ROUTING' }
 //   'SR_MULTI_OBJECTIVE' → { rankingAlgorithm: 'SR_BASED_ROUTING', enableMultiObjective: true }
 type SimulationAlgorithm = 'SR_BASED_ROUTING' | 'SR_MULTI_OBJECTIVE'
-
-const ALGORITHMS: SimulationAlgorithm[] = [
-  'SR_BASED_ROUTING',
-  'SR_MULTI_OBJECTIVE',
-]
-
-const ALGORITHM_LABELS: Record<SimulationAlgorithm, string> = {
-  SR_BASED_ROUTING: 'Success Rate Based',
-  SR_MULTI_OBJECTIVE: 'Success Rate Based + Multi-Objective',
-}
 
 type TabType = 'single' | 'batch' | 'rule' | 'volume' | 'debit'
 
@@ -114,6 +104,8 @@ interface SimulationResult {
   retryStatus?: 'CHARGED' | 'FAILURE' | 'PENDING_VBV'
   costSavedBps?: number | null
   costWon?: boolean
+  authWon?: boolean
+  tolerancePp?: number | null
   amount: number
   currency: string
 }
@@ -176,6 +168,23 @@ function approachColor(approach: string): string {
 const COLORS = ['#0069ED', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16']
 const GW_PALETTE = ['#3b82f6', '#8b5cf6', '#f97316', '#ec4899', '#14b8a6']
 
+// Routing events bucket at second granularity and the analytics pipeline lags a
+// little, so allow a small margin before the run-start when scoping events to a run.
+const EVENTS_RUN_START_MARGIN_MS = 3000
+
+// Icon/colour per routing-event type for the simulator's Events panel. Events come
+// from the /analytics/routing-events feed: leader flips and auth-band entries/exits
+// as gateway success-rate scores shift during a run.
+const SIM_EVENT_META: Record<RoutingEventType, { icon: React.ElementType; iconClass: string }> = {
+  leader_changed: { icon: ArrowRightLeft, iconClass: 'text-sky-500' },
+  gateway_entered_auth_band: { icon: Target, iconClass: 'text-emerald-500' },
+  gateway_exited_auth_band: { icon: TrendingDown, iconClass: 'text-amber-500' },
+}
+
+function formatSimEventTime(ms: number) {
+  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
 type VolumePaymentEntry = {
   paymentId: string
   connector: string
@@ -191,9 +200,9 @@ const DEFAULT_FORM: FormState = {
   payment_method: '',
   card_brand: '',
   card_program: 'STANDARD',
-  auth_type: '',
+  auth_type: 'THREE_DS',
   eligible_gateways: 'stripe, adyen',
-  ranking_algorithm: 'SR_BASED_ROUTING',
+  ranking_algorithm: 'SR_MULTI_OBJECTIVE',
 }
 
 const DEFAULT_DEBIT_FORM: DebitRoutingFormState = {
@@ -210,8 +219,19 @@ const DEFAULT_DEBIT_FORM: DebitRoutingFormState = {
   card_type: 'debit',
 }
 
+// Auth-rate simulation runs a fixed batch — no user input; it starts on Run
+// and stops at this many transactions.
+const SIMULATION_TOTAL_PAYMENTS = '5000'
+
+// Default auth-rate tolerance band below the best gateway's SR within which gateways are
+// SR-equivalent and become eligible for cost-based routing. Stored as a fraction
+// (0.2 = 20 percentage points), matching the "Cost Optimisation Override Configuration"
+// default of 0.5 pp on the SR Routing page. The live per-decision value
+// (multi_objective_info.tolerancePp) overrides this when present.
+const DEFAULT_COST_ROUTING_TOLERANCE = 0.005
+
 const DEFAULT_SIMULATION_CONFIG: SimulationConfig = {
-  totalPayments: '10',
+  totalPayments: SIMULATION_TOTAL_PAYMENTS,
 }
 
 
@@ -259,12 +279,6 @@ function cloneRuleParams(params: RuleEvaluateParams[]) {
 
 function cloneConnectors(connectors: GatewayConnector[]) {
   return connectors.map((connector) => ({ ...connector }))
-}
-
-function normalizeRankingAlgorithm(value: unknown): SimulationAlgorithm {
-  return ALGORITHMS.includes(value as SimulationAlgorithm)
-    ? (value as SimulationAlgorithm)
-    : DEFAULT_FORM.ranking_algorithm
 }
 
 function normalizeDebitCardCategory(value: unknown): DebitRoutingFormState['card_type'] {
@@ -345,16 +359,15 @@ function loadExplorerState(scopeKey: string): ExplorerPersistedState {
       ...parsed,
       scopeKey,
       resultDataUpdatedAtMs: parsed.resultDataUpdatedAtMs || null,
-      activeTab:
-        parsed.activeTab && parsed.activeTab !== 'single'
-          ? parsed.activeTab
-          : defaults.activeTab,
+      activeTab: defaults.activeTab,
       form: {
         ...defaults.form,
         ...(parsed.form || {}),
-        ranking_algorithm: normalizeRankingAlgorithm(parsed.form?.ranking_algorithm),
+        // Only Success Rate Based + Multi-Objective is supported now; the
+        // dynamic simulator drives the transaction variant, not the form.
+        ranking_algorithm: 'SR_MULTI_OBJECTIVE',
       },
-      simulationConfig: { ...defaults.simulationConfig, ...(parsed.simulationConfig || {}) },
+      simulationConfig: { ...defaults.simulationConfig, ...(parsed.simulationConfig || {}), totalPayments: SIMULATION_TOTAL_PAYMENTS },
       gatewaySimConfigs: parsed.gatewaySimConfigs || defaults.gatewaySimConfigs,
       errorInfo: { ...defaults.errorInfo, ...(parsed.errorInfo || {}) },
       debitForm: {
@@ -379,10 +392,6 @@ function toUpperOptions(values: string[] = []): string[] {
 
 function uniqueUpperOptions(values: string[] = []): string[] {
   return Array.from(new Set(toUpperOptions(values)))
-}
-
-function formatOptionLabel(value: string): string {
-  return value.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase())
 }
 
 function extractVolumeConnector(response: RuleEvaluateResponse) {
@@ -657,12 +666,6 @@ function sectionButtonClass(active: boolean) {
     : '!border-transparent !bg-slate-100 !text-slate-600 hover:!bg-slate-200 hover:!text-slate-900 dark:!bg-[#161b24] dark:!text-[#a7b2c6] dark:hover:!bg-[#1c2330] dark:hover:!text-white'
 }
 
-function explorerModeButtonClass(active: boolean) {
-  return active
-    ? 'border-slate-300 bg-white text-slate-950 shadow-sm dark:border-[#3b82f6]/45 dark:bg-[#182131] dark:text-white'
-    : 'border-transparent text-slate-500 hover:border-slate-200 hover:bg-white/70 hover:text-slate-900 dark:text-[#8d9ab2] dark:hover:border-[#2a303a] dark:hover:bg-[#151b24] dark:hover:text-white'
-}
-
 function isMissingRoutingSetupError(message: string) {
   const normalized = message.toLowerCase()
   return normalized.includes('no active routing algorithm')
@@ -786,7 +789,7 @@ function InspectorJsonPanel({
 // concrete value. Non-Advanced algorithms (Priority/Single) have no conditions
 // so return an empty array.
 // ---------------------------------------------------------------------------
-export function DecisionExplorerPage() {
+export function DecisionSimulatorPage() {
   const navigate = useNavigate()
   const { merchantId } = useMerchantStore()
   const authUser = useAuthStore((state) => state.user)
@@ -842,13 +845,15 @@ export function DecisionExplorerPage() {
   const [volumeProgress, setVolumeProgress] = useState(initialState.volumeProgress)
   const [simulationResults, setSimulationResults] = useState<SimulationResult[]>(initialState.simulationResults)
   const [isSimulating, setIsSimulating] = useState(false)
+  // Pause/resume: the run loop stays alive and idles on this ref instead of being
+  // aborted, so position, outcome accumulators, the feed, and backend scores are
+  // all preserved across a pause.
+  const [isPaused, setIsPaused] = useState(false)
+  const simulationPausedRef = useRef(false)
+  // Per-column filters for the Transaction Log table.
+  const [txFilters, setTxFilters] = useState<Record<string, string>>({})
   const [smartRetryEnabled, setSmartRetryEnabled] = useState(initialState.smartRetryEnabled)
   const [error, setError] = useState<string | null>(null)
-  const [addGwDraft, setAddGwDraft] = useState('')
-  const [addGwOpen, setAddGwOpen] = useState(false)
-  const [expandedGateways, setExpandedGateways] = useState<Set<string>>(new Set())
-  const toggleGateway = (gw: string) => setExpandedGateways(prev => { const next = new Set(prev); next.has(gw) ? next.delete(gw) : next.add(gw); return next })
-  const addGwInputRef = useRef<HTMLInputElement>(null)
   const txLogRef = useRef<HTMLDivElement>(null)
 
   const [setupPrompt, setSetupPrompt] = useState<SetupPromptState | null>(null)
@@ -865,7 +870,133 @@ export function DecisionExplorerPage() {
   const [previewInspectorTab, setPreviewInspectorTab] = useState<AuditInspectorTab>('summary')
   const [previewTraceLabel, setPreviewTraceLabel] = useState('Rule Evaluation Decision')
   const deferredSimulationResults = useDeferredValue(simulationResults)
+  // Timestamp (ms) the active batch run started; null until the user runs one. Scopes
+  // the Events panel to the current run instead of the merchant's whole last hour.
+  const [simulationStartedAtMs, setSimulationStartedAtMs] = useState<number | null>(null)
+  // Live routing-event stream (leader flips, auth-band crossings), filtered to the run.
+  // Poll tightly while a run is producing events so the Autopilot feed keeps up;
+  // relax back to the idle cadence once it finishes.
+  const routingEvents = useRoutingEvents('1h', isSimulating && !isPaused ? 500 : 15_000)
+  const sessionRoutingEvents = useMemo(() => {
+    if (simulationStartedAtMs == null) return []
+    const sinceMs = simulationStartedAtMs - EVENTS_RUN_START_MARGIN_MS
+    return routingEvents.events.filter((event) => event.bucket_ms >= sinceMs)
+  }, [routingEvents.events, simulationStartedAtMs])
+  // Keep the run's feed append-only. The backend re-detects every event from
+  // ClickHouse on each poll, and the trailing (still-filling) 1s bucket can make a
+  // just-emitted event flicker out on the next scan — so replacing the list each
+  // poll makes recent rows visibly vanish. Instead we merge each snapshot into a
+  // stable, ID-keyed accumulator (event IDs are deterministic), so once a row
+  // appears it stays for the run. Reset whenever a new run starts/clears.
+  const [accumulatedEvents, setAccumulatedEvents] = useState<RoutingEvent[]>([])
+  const accumulatedEventIdsRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    accumulatedEventIdsRef.current = new Set()
+    setAccumulatedEvents([])
+  }, [simulationStartedAtMs])
+  useEffect(() => {
+    const unseen = sessionRoutingEvents.filter((e) => !accumulatedEventIdsRef.current.has(e.id))
+    if (unseen.length === 0) return
+    unseen.forEach((e) => accumulatedEventIdsRef.current.add(e.id))
+    setAccumulatedEvents((prev) =>
+      prev
+        .concat(unseen)
+        .sort((a, b) => b.bucket_ms - a.bucket_ms || b.id.localeCompare(a.id))
+        .slice(0, 200),
+    )
+  }, [sessionRoutingEvents])
+  // Briefly highlight freshly-arrived Autopilot actions so a new leader change /
+  // band crossing catches the eye, then fades back. We diff incoming event IDs
+  // against the ones already seen; the very first batch is baselined silently so
+  // an existing backlog doesn't all flash at once on mount.
+  const [highlightedEventIds, setHighlightedEventIds] = useState<Set<string>>(new Set())
+  const seenEventIdsRef = useRef<Set<string>>(new Set())
+  const baselinedEventsRef = useRef(false)
+  const highlightTimersRef = useRef<number[]>([])
+  useEffect(() => {
+    const ids = accumulatedEvents.map((e) => e.id)
+    if (!baselinedEventsRef.current) {
+      ids.forEach((id) => seenEventIdsRef.current.add(id))
+      baselinedEventsRef.current = true
+      return
+    }
+    const fresh = ids.filter((id) => !seenEventIdsRef.current.has(id))
+    if (fresh.length === 0) return
+    fresh.forEach((id) => seenEventIdsRef.current.add(id))
+    setHighlightedEventIds((prev) => {
+      const next = new Set(prev)
+      fresh.forEach((id) => next.add(id))
+      return next
+    })
+    const timer = window.setTimeout(() => {
+      setHighlightedEventIds((prev) => {
+        const next = new Set(prev)
+        fresh.forEach((id) => next.delete(id))
+        return next
+      })
+    }, 12000)
+    highlightTimersRef.current.push(timer)
+  }, [accumulatedEvents])
+  useEffect(() => () => { highlightTimersRef.current.forEach((t) => window.clearTimeout(t)) }, [])
+  // Near-tied gateways produce storms of two kinds: a score parked on the auth-band
+  // edge re-crosses it on every wobble (enter/exit), and two leaders trading the #1
+  // spot fire a leader_changed on every swap. Collapse each consecutive run into a
+  // single "contesting" row that reports the net current state + how many times it
+  // flipped, so the feed stays readable instead of scrolling identical lines.
+  type FeedItem =
+    | { kind: 'single'; event: RoutingEvent }
+    | { kind: 'flap'; gateway: string; crossings: number; latest: RoutingEvent; inBand: boolean }
+    | { kind: 'leaderFlap'; gateways: string[]; crossings: number; latest: RoutingEvent }
+  const collapsedRoutingEvents = useMemo<FeedItem[]>(() => {
+    const isBand = (t: RoutingEventType) =>
+      t === 'gateway_entered_auth_band' || t === 'gateway_exited_auth_band'
+    const list = accumulatedEvents.slice(0, 50)
+    const items: FeedItem[] = []
+    let i = 0
+    while (i < list.length) {
+      const ev = list[i]
+      if (isBand(ev.event_type)) {
+        // list is newest-first; gather the adjacent run for this gateway.
+        let j = i
+        while (j < list.length && isBand(list[j].event_type) && list[j].gateway === ev.gateway) j++
+        const crossings = j - i
+        if (crossings > 1) {
+          items.push({
+            kind: 'flap',
+            gateway: ev.gateway,
+            crossings,
+            latest: ev,
+            inBand: ev.event_type === 'gateway_entered_auth_band',
+          })
+        } else {
+          items.push({ kind: 'single', event: ev })
+        }
+        i = j
+      } else if (ev.event_type === 'leader_changed') {
+        // Gather the adjacent run of lead swaps (any direction).
+        let j = i
+        while (j < list.length && list[j].event_type === 'leader_changed') j++
+        const crossings = j - i
+        if (crossings > 1) {
+          const gateways = Array.from(new Set(list.slice(i, j).map((e) => e.gateway))).sort()
+          items.push({ kind: 'leaderFlap', gateways, crossings, latest: ev })
+        } else {
+          items.push({ kind: 'single', event: ev })
+        }
+        i = j
+      } else {
+        items.push({ kind: 'single', event: ev })
+        i++
+      }
+    }
+    return items
+  }, [accumulatedEvents])
   const [showPenaltyGuide, setShowPenaltyGuide] = useState(false)
+  // SR / volume chart window: focus on the most recent N transactions (auto-follows
+  // the live stream) or 'all' for the full-session view. Both charts share this so
+  // their x-axes stay aligned.
+  const [chartWindow, setChartWindow] = useState<number | 'all'>(100)
+  const CHART_WINDOW_OPTIONS: (number | 'all')[] = [100, 500, 'all']
 
   const routingKeyNames = useMemo(
     () => Object.keys(routingKeysConfig).sort(),
@@ -876,11 +1007,6 @@ export function DecisionExplorerPage() {
     () => toUpperOptions(routingKeysConfig.payment_method?.values || []),
     [routingKeysConfig]
   )
-
-  const paymentMethodOptions = useMemo(() => {
-    const methodTypeKey = form.payment_method_type.toLowerCase()
-    return toUpperOptions(routingKeysConfig[methodTypeKey]?.values || [])
-  }, [form.payment_method_type, routingKeysConfig])
 
   const currencyOptions = useMemo(
     () => uniqueUpperOptions(routingKeysConfig.currency?.values || []),
@@ -919,14 +1045,6 @@ export function DecisionExplorerPage() {
     { revalidateOnFocus: false, dedupingInterval: 300_000 },
   )
   const gsmRules = gsmOptionsData?.rules ?? []
-
-  const { data: eliminationConfig } = useSWR<{ config: { data: { threshold: number } } } | null>(
-    effectiveMerchantId ? ['rule-elimination', effectiveMerchantId] : null,
-    () => apiPost<{ config: { data: { threshold: number } } }>('/rule/get', { merchant_id: effectiveMerchantId, algorithm: 'elimination' }).catch(() => null),
-    { revalidateOnFocus: false, dedupingInterval: 60_000 },
-  )
-  const eliminationConfigured = eliminationConfig?.config?.data?.threshold != null
-
 
   useEffect(() => {
     if (routingConfigUnavailable || routingKeysLoading) return
@@ -1060,6 +1178,7 @@ export function DecisionExplorerPage() {
     setVolumeEvaluationLog(defaults.volumeEvaluationLog)
     setVolumeProgress(defaults.volumeProgress)
     setSimulationResults(defaults.simulationResults)
+    setSimulationStartedAtMs(null)
     setResponseOpen(defaults.responseOpen)
     setDebitResponseOpen(defaults.debitResponseOpen)
     setVolumeResponseOpen(defaults.volumeResponseOpen)
@@ -1104,6 +1223,7 @@ export function DecisionExplorerPage() {
     setVolumeEvaluationLog(nextState.volumeEvaluationLog)
     setVolumeProgress(nextState.volumeProgress)
     setSimulationResults(nextState.simulationResults)
+    setSimulationStartedAtMs(null)
     setResponseOpen(nextState.responseOpen)
     setDebitResponseOpen(nextState.debitResponseOpen)
     setVolumeResponseOpen(nextState.volumeResponseOpen)
@@ -1211,10 +1331,6 @@ export function DecisionExplorerPage() {
     smartRetryEnabled,
   ])
 
-  function set<K extends keyof FormState>(field: K, value: FormState[K]) {
-    setForm(f => ({ ...f, [field]: value }))
-  }
-
   function setDebitField<K extends keyof DebitRoutingFormState>(field: K, value: DebitRoutingFormState[K]) {
     setDebitForm(f => ({ ...f, [field]: value }))
   }
@@ -1239,10 +1355,6 @@ export function DecisionExplorerPage() {
     setGatewaySimConfigs(c => ({ ...c, [gw]: { ...getGwSimConfig(gw), ...c[gw], successRate: rate } }))
   }
 
-  function setGwFailureMode(gw: string, mode: 'decline' | 'timeout') {
-    setGatewaySimConfigs(c => ({ ...c, [gw]: { ...getGwSimConfig(gw), ...c[gw], failureMode: mode } }))
-  }
-
   // Finds a real error code for `connector` that produces the desired GSM decision + penalty.
   function resolveSimErrorInfo(connector: string, gsmDecision: 'retry' | 'do_default', penalized: boolean) {
     const penalizedMessages = new Set(['Issue with Integration', 'Issue with Configurations', 'Technical issue with PSP', 'Something went wrong'])
@@ -1256,47 +1368,6 @@ export function DecisionExplorerPage() {
       targetMessages.has(r.unifiedMessage) &&
       !!r.errorCode && r.errorCode.toLowerCase() !== 'no error code'
     )
-  }
-
-  function resolvedErrorInfo(connector: string, gsmDecision: 'retry' | 'do_default', penalized: boolean): ErrorInfoState {
-    const rule = resolveSimErrorInfo(connector, gsmDecision, penalized)
-    return rule
-      ? { error_code: rule.errorCode, error_message: rule.errorMessage, issuer_error_code: '', card_network: '' }
-      : { ...DEFAULT_ERROR_INFO }
-  }
-
-  function setGwGsmDecision(gw: string, decision: 'retry' | 'do_default') {
-    setGatewaySimConfigs(c => {
-      const prev = getGwSimConfig(gw)
-      return { ...c, [gw]: { ...prev, ...c[gw], gsmDecision: decision, errorInfo: resolvedErrorInfo(gw, decision, (c[gw] ?? prev).penalized) } }
-    })
-  }
-
-  function setGwPenalized(gw: string, penalized: boolean) {
-    setGatewaySimConfigs(c => {
-      const prev = getGwSimConfig(gw)
-      return { ...c, [gw]: { ...prev, ...c[gw], penalized, errorInfo: resolvedErrorInfo(gw, (c[gw] ?? prev).gsmDecision, penalized) } }
-    })
-  }
-
-  function setGwErrorInfoField(gw: string, updates: Partial<ErrorInfoState>) {
-    setGatewaySimConfigs(c => {
-      const prev = getGwSimConfig(gw)
-      const existing = c[gw] ?? prev
-      const newErrorInfo = { ...existing.errorInfo, ...updates }
-      let newGsmDecision = existing.gsmDecision
-      let newPenalized = existing.penalized
-      // Sync selects when the error code changes
-      if (updates.error_code) {
-        const rule =
-          gsmRules.find(r => r.connector === gw && r.errorCode === updates.error_code && (r.subFlow === 'Authorize' || r.flow === 'Authorize')) ??
-          gsmRules.find(r => r.connector === gw && r.errorCode === updates.error_code)
-        if (rule?.decision === 'retry' || rule?.decision === 'do_default') newGsmDecision = rule.decision
-        const p = penalizedByUnifiedMessage(rule?.unifiedMessage)
-        if (p !== null) newPenalized = p
-      }
-      return { ...c, [gw]: { ...prev, ...existing, errorInfo: newErrorInfo, gsmDecision: newGsmDecision, penalized: newPenalized } }
-    })
   }
 
   // Resolves the best-matching GSM rule for a connector+errorCode pair.
@@ -1556,6 +1627,9 @@ export function DecisionExplorerPage() {
     if (total <= 0) return setError('Total Payments must be greater than 0')
 
     setIsSimulating(true)
+    setIsPaused(false)
+    simulationPausedRef.current = false
+    setSimulationStartedAtMs(Date.now())
     setError(null)
     setSetupPrompt(null)
     setSimulationResults([])
@@ -1566,11 +1640,40 @@ export function DecisionExplorerPage() {
     const MAX_CONSECUTIVE_ERRORS = 3
     let consecutiveErrors = 0
     let lastUIUpdate = 0
+    // Refreshing the events feed on every 150ms UI tick fires overlapping fetches
+    // whose out-of-order responses make rows flicker; ~1s keeps it fresh without
+    // the storm (the SWR poll runs at 1s too).
+    let lastEventsRefresh = 0
+
+    // Deterministic outcome scheduler (error diffusion). i.i.d. coin flips
+    // (Math.random() < rate) have ~±5pp swing over the backend's 125-txn window,
+    // which can briefly push a laggard's score above the leader and steal traffic.
+    // Error diffusion instead spaces successes/failures evenly so the *realized*
+    // rate tracks the slider within ~1/window (≈ ±1pp) — so adyen@90 stays ~90 and
+    // never overtakes stripe@96 — without touching backend scoring. Random initial
+    // phase per gateway so failures aren't visibly periodic.
+    const outcomeAccumulator: Record<string, number> = {}
+    const drawSuccess = (gw: string): boolean => {
+      const p = Math.max(0, Math.min(1, getGwSuccessRate(gw) / 100))
+      if (outcomeAccumulator[gw] === undefined) outcomeAccumulator[gw] = Math.random()
+      outcomeAccumulator[gw] += p
+      if (outcomeAccumulator[gw] >= 1) {
+        outcomeAccumulator[gw] -= 1
+        return true
+      }
+      return false
+    }
 
     const isMultiObjective = form.ranking_algorithm === 'SR_MULTI_OBJECTIVE'
 
     try {
       for (let i = 0; i < total; i++) {
+        if (simulationAbortRef.current) break
+        // Idle here while paused (loop stays alive, state preserved); a Stop still
+        // breaks out. The in-flight transaction always completes before we pause.
+        while (simulationPausedRef.current && !simulationAbortRef.current) {
+          await new Promise(resolve => setTimeout(resolve, 120))
+        }
         if (simulationAbortRef.current) break
         const paymentId = `sim_${Date.now()}_${i}`
 
@@ -1610,8 +1713,7 @@ export function DecisionExplorerPage() {
           })
 
           const decidedGateway = decideRes.decided_gateway
-          const gwRate = getGwSuccessRate(decidedGateway)
-          const isSuccess = Math.random() * 100 < gwRate
+          const isSuccess = drawSuccess(decidedGateway)
           const failureMode = getGwFailureMode(decidedGateway)
           const outcome: TransactionOutcome = isSuccess ? 'CHARGED' : (failureMode === 'timeout' ? 'PENDING_VBV' : 'FAILURE')
 
@@ -1636,8 +1738,7 @@ export function DecisionExplorerPage() {
             decideRes.fallback_gateways.length > 0
           ) {
             retryGateway = decideRes.fallback_gateways[0]
-            const retryGwRate = getGwSuccessRate(retryGateway)
-            const retrySuccess = Math.random() * 100 < retryGwRate
+            const retrySuccess = drawSuccess(retryGateway)
             const retryFailureMode = getGwFailureMode(retryGateway)
             retryStatus = retrySuccess ? 'CHARGED' : (retryFailureMode === 'timeout' ? 'PENDING_VBV' : 'FAILURE')
             await apiPost('/update-gateway-score', {
@@ -1664,6 +1765,8 @@ export function DecisionExplorerPage() {
             retryStatus,
             costSavedBps: mo?.costSavedBps ?? null,
             costWon: mo?.outcome === 'COST_WON',
+            authWon: mo?.outcome === 'AUTH_WON',
+            tolerancePp: mo?.tolerancePp ?? null,
             amount,
             currency: form.currency,
           })
@@ -1675,6 +1778,14 @@ export function DecisionExplorerPage() {
             setSimulationResults([...results])
             markExplorerRunDataUpdated()
             lastUIUpdate = now
+          }
+          // Pull fresh Autopilot events ~4x/sec so new actions surface promptly and
+          // in small batches (one big once-a-second flush buried the highlight on a
+          // fast loop). The append-only accumulator makes frequent refreshes safe;
+          // they're naturally floored by the Kafka→ClickHouse flush cadence.
+          if (now - lastEventsRefresh > 250 || i === total - 1) {
+            routingEvents.refresh()
+            lastEventsRefresh = now
           }
         } catch (e: unknown) {
           consecutiveErrors++
@@ -1689,7 +1800,21 @@ export function DecisionExplorerPage() {
     } finally {
       setSimulationResults([...results])
       setIsSimulating(false)
+      setIsPaused(false)
+      simulationPausedRef.current = false
+      // Final flush: events from the last txns can land just after the loop ends.
+      routingEvents.refresh()
     }
+  }
+
+  function pauseSimulation() {
+    simulationPausedRef.current = true
+    setIsPaused(true)
+  }
+
+  function resumeSimulation() {
+    simulationPausedRef.current = false
+    setIsPaused(false)
   }
 
   async function runRuleEvaluation() {
@@ -1833,10 +1958,6 @@ export function DecisionExplorerPage() {
 
   const totalSimulationPayments = parseInt(simulationConfig.totalPayments) || 0
   const completedSimulationCount = simulationResults.length
-  const simulationProgressPercentage =
-    totalSimulationPayments > 0
-      ? Math.round((completedSimulationCount / totalSimulationPayments) * 100)
-      : 0
   const hasSimulationActivity = isSimulating || completedSimulationCount > 0
 
   const eligibleGatewaysParsed = useMemo(
@@ -1879,32 +2000,63 @@ export function DecisionExplorerPage() {
     return acc
   }, {} as Record<string, { total: number; success: number; failure: number }>), [deferredSimulationResults])
 
-  // Single forward pass: carry the last seen non-hedging score for each gateway forward,
-  // sampling every `step` results. O(n) vs the previous O(n × MAX_PTS) backward search.
+  // Live cost-optimisation tolerance band (pp) — the most recent value the router reported
+  // for this run, falling back to the configured default when no decision carried one.
+  const costRoutingTolerancePp = useMemo(() => {
+    for (let i = deferredSimulationResults.length - 1; i >= 0; i--) {
+      const t = deferredSimulationResults[i].tolerancePp
+      if (t != null) return t
+    }
+    return DEFAULT_COST_ROUTING_TOLERANCE
+  }, [deferredSimulationResults])
+
+  // Per-gateway engine SR-score trend. Each line plots the routing engine's
+  // priority score for that gateway (gateway_priority_map), i.e. the same value
+  // shown in the Transaction Log "SR Score" column — not the realized outcome
+  // rate. This is the score the engine actually routes on, so the Top-PSP line
+  // and the cost-eligible band below reflect the real Auth-vs-Cost decisions.
+  // A normal SR decision emits a full map of every eligible gateway's score;
+  // hedging decisions emit only an exploratory {decidedGateway: 1.0} entry, so
+  // we skip those to avoid 100% spikes and carry forward each gateway's last
+  // real score instead.
   const gatewaySparklines = useMemo(() => {
     const results = deferredSimulationResults
-    const empty = { series: {} as Record<string, number[]>, paymentNums: [] as number[], yMin: 0, yMax: 100 }
+    const empty = { series: {} as Record<string, (number | null)[]>, paymentNums: [] as number[], yMin: 0, yMax: 100 }
     if (results.length < 2) return empty
 
-    const MAX_PTS = 200
-    const step = Math.max(1, Math.floor(results.length / MAX_PTS))
+    const TARGET_POINTS = 80
+    // Focus on the last `chartWindow` transactions (or the whole run). Bucketing
+    // across just the window — not the full session — gives recent events more
+    // resolution rather than cropping a coarse 80-point view of everything.
+    const windowStart = chartWindow === 'all' ? 0 : Math.max(0, results.length - chartWindow)
+    const windowLen = results.length - windowStart
+    const bucketSize = Math.max(1, Math.ceil(windowLen / TARGET_POINTS))
     const gateways = Object.keys(gatewayStats)
-    const lastScore: Record<string, number> = {}
-    const series: Record<string, number[]> = {}
+    const lastScore: Record<string, number> = {}  // engine score (0–100), carried forward
+    const series: Record<string, (number | null)[]> = {}
     gateways.forEach(gw => { series[gw] = [] })
     const paymentNums: number[] = []
 
     for (let i = 0; i < results.length; i++) {
       const r = results[i]
-      if (!r.routingApproach?.includes('HEDGING') && r.gatewayPriorityMap) {
+      const pm = r.gatewayPriorityMap
+      // Refresh every gateway's score from the decision's priority map, skipping
+      // hedging (single-entry exploratory map at 1.0) so the band stays meaningful.
+      if (pm && !r.routingApproach?.includes('HEDGING')) {
         for (const gw of gateways) {
-          const score = r.gatewayPriorityMap[gw]
-          if (score !== undefined && score !== null) lastScore[gw] = Math.round(score * 100)
+          const s = pm[gw]
+          if (typeof s === 'number') lastScore[gw] = Math.round(s * 100)
         }
       }
-      if (i % step === 0 || i === results.length - 1) {
+      // Transactions before the window only seed the carried-forward score so the
+      // left edge opens at the correct value; they aren't plotted.
+      if (i < windowStart) continue
+      const posInWindow = i - windowStart
+      // Sample every gateway's current engine score at the bucket boundary. A gateway
+      // with no score yet records null (skipped by the chart) rather than a 0 dip.
+      if ((posInWindow + 1) % bucketSize === 0 || i === results.length - 1) {
         paymentNums.push(i + 1)
-        for (const gw of gateways) series[gw].push(lastScore[gw] ?? 0)
+        for (const gw of gateways) series[gw].push(lastScore[gw] ?? null)
       }
     }
 
@@ -1912,26 +2064,125 @@ export function DecisionExplorerPage() {
     let obsMin = 100, obsMax = 0
     for (const gw of gateways) {
       for (const v of series[gw]) {
-        if (v > 0) { if (v < obsMin) obsMin = v; if (v > obsMax) obsMax = v }
+        if (v != null && v > 0) { if (v < obsMin) obsMin = v; if (v > obsMax) obsMax = v }
       }
     }
     if (obsMin > obsMax) { obsMin = 0; obsMax = 100 }
-    const yMin = Math.max(0, obsMin - 5)
-    const yMax = Math.min(100, obsMax + 5)
+    const yMin = Math.max(0, obsMin - 2)
+    const yMax = Math.min(100, obsMax + 2)
 
     return { series, paymentNums, yMin, yMax }
-  }, [deferredSimulationResults, gatewayStats])
+  }, [deferredSimulationResults, gatewayStats, chartWindow])
+
+  // Rolling routing-share trend, paired with the SR chart on the same x-axis.
+  // For each bucket it reports the share of the last ≤WINDOW transactions that
+  // went to each gateway, normalized to sum to 100% per point. Drawn as a 100%
+  // stacked area so the split is always full height — you read the live traffic
+  // mix directly and watch a connector's band grow or shrink as routing shifts.
+  const gatewayVolumeTrend = useMemo(() => {
+    const results = deferredSimulationResults
+    const gateways = Object.keys(gatewayStats)
+    const empty = { data: [] as Record<string, number>[], gateways, windowSize: 1 }
+    if (results.length < 2) return empty
+
+    const ROLLING_WINDOW = 50
+    const TARGET_POINTS = 80
+    // Match the SR chart's window so both x-axes stay aligned.
+    const windowStart = chartWindow === 'all' ? 0 : Math.max(0, results.length - chartWindow)
+    const windowLen = results.length - windowStart
+    const bucketSize = Math.max(1, Math.ceil(windowLen / TARGET_POINTS))
+    const recent: string[] = []  // decided gateway of the last ≤WINDOW transactions
+    const data: Record<string, number>[] = []
+
+    for (let i = 0; i < results.length; i++) {
+      // Keep rolling the share window across all history so the left edge of the
+      // visible window still has full ≤ROLLING_WINDOW lookback, but only emit
+      // points inside the window.
+      recent.push(results[i].decidedGateway)
+      if (recent.length > ROLLING_WINDOW) recent.shift()
+      if (i < windowStart) continue
+      const posInWindow = i - windowStart
+      if ((posInWindow + 1) % bucketSize === 0 || i === results.length - 1) {
+        const counts: Record<string, number> = {}
+        for (const gw of recent) counts[gw] = (counts[gw] ?? 0) + 1
+        const total = recent.length || 1
+        const row: Record<string, number> = { step: i + 1 }
+        for (const gw of gateways) row[gw] = Math.round(((counts[gw] ?? 0) / total) * 1000) / 10
+        data.push(row)
+      }
+    }
+    return { data, gateways, windowSize: ROLLING_WINDOW }
+  }, [deferredSimulationResults, gatewayStats, chartWindow])
+
+  // Human-readable routing label, shared by the Transaction Log cell and its filter.
+  const routingApproachLabel = (approach?: string | null): string =>
+    approach?.includes('HEDGING')
+      ? 'Hedging'
+      : approach === 'SR_SELECTION_MULTI_OBJECTIVE'
+        ? 'Cost Based'
+        : approach === 'SR_SELECTION_V3_ROUTING'
+          ? 'Auth Based'
+          : approach ?? '—'
+
+  // Distinct values that populate the categorical Transaction Log column filters.
+  const txFilterOptions = useMemo(() => {
+    const gateways = new Set<string>()
+    const routings = new Set<string>()
+    const outcomes = new Set<string>()
+    const retryGateways = new Set<string>()
+    const retryOutcomes = new Set<string>()
+    for (const res of deferredSimulationResults) {
+      gateways.add(res.decidedGateway)
+      routings.add(routingApproachLabel(res.routingApproach))
+      if (res.status) outcomes.add(res.status)
+      if (res.retryGateway) retryGateways.add(res.retryGateway)
+      if (res.retryStatus) retryOutcomes.add(res.retryStatus)
+    }
+    const sorted = (s: Set<string>) => Array.from(s).sort()
+    return {
+      gateways: sorted(gateways),
+      routings: sorted(routings),
+      outcomes: sorted(outcomes),
+      retryGateways: sorted(retryGateways),
+      retryOutcomes: sorted(retryOutcomes),
+    }
+  }, [deferredSimulationResults])
+
+  // Transaction Log rows after applying the column filters, keeping each row's
+  // original index so the "#" column stays stable regardless of filtering.
+  const txFilteredRows = useMemo(() => {
+    const f = txFilters
+    const active = Object.values(f).some(Boolean)
+    const rows = deferredSimulationResults.map((res, idx) => ({ res, idx }))
+    if (!active) return rows
+    const srText = (res: SimulationResult) => {
+      const s = res.gatewayPriorityMap?.[res.decidedGateway]
+      return typeof s === 'number' ? (s * 100).toFixed(1) : ''
+    }
+    return rows.filter(({ res }) => {
+      if (f.gateway && res.decidedGateway !== f.gateway) return false
+      if (f.routing && routingApproachLabel(res.routingApproach) !== f.routing) return false
+      if (f.outcome && res.status !== f.outcome) return false
+      if (f.retryGateway && (res.retryGateway ?? '') !== f.retryGateway) return false
+      if (f.retryOutcome && (res.retryStatus ?? '') !== f.retryOutcome) return false
+      if (f.amount && !formatCurrencyValue(res.amount, res.currency).toLowerCase().includes(f.amount.toLowerCase())) return false
+      if (f.sr && !srText(res).includes(f.sr)) return false
+      if (f.cost) {
+        const hasSavings = !!res.costWon && res.costSavedBps != null && res.costSavedBps > 0 && res.status === 'CHARGED'
+        if (f.cost === 'yes' && !hasSavings) return false
+        if (f.cost === 'no' && hasSavings) return false
+      }
+      return true
+    })
+  }, [deferredSimulationResults, txFilters])
+
+  const txFiltersActive = Object.values(txFilters).some(Boolean)
 
   const hedgingHits = useMemo(
     () => deferredSimulationResults.filter(r => r.routingApproach?.includes('HEDGING')).length,
     [deferredSimulationResults],
   )
 
-  const smartRetryStats = useMemo(() => {
-    const triggered = deferredSimulationResults.filter(r => r.retryGateway !== undefined).length
-    const recovered = deferredSimulationResults.filter(r => r.retryStatus === 'CHARGED').length
-    return { triggered, recovered }
-  }, [deferredSimulationResults])
 
   const totalCostSaved = useMemo(() => {
     let value = 0
@@ -1943,6 +2194,18 @@ export function DecisionExplorerPage() {
       }
     }
     return { value, currency }
+  }, [deferredSimulationResults])
+
+  // Multi-objective outcome counts: how often the auth objective vs the cost
+  // objective won the routing decision across the run.
+  const multiObjectiveStats = useMemo(() => {
+    let authWon = 0
+    let costWon = 0
+    for (const r of deferredSimulationResults) {
+      if (r.authWon) authWon++
+      if (r.costWon) costWon++
+    }
+    return { authWon, costWon }
   }, [deferredSimulationResults])
 
   const debitNetworkRows = debitResult?.debit_routing_output?.co_badged_card_networks_info || []
@@ -2109,10 +2372,15 @@ export function DecisionExplorerPage() {
       setSingleRunOutcome(defaults.singleRunOutcome)
       setResponseOpen(defaults.responseOpen)
     } else if (activeTab === 'batch') {
-      setForm(populatedForm(defaults.form))
+      setForm({ ...populatedForm(defaults.form), currency: MULTI_OBJECTIVE_CURRENCY })
       setSimulationConfig(defaults.simulationConfig)
       setGatewaySimConfigs({})
       setSimulationResults(defaults.simulationResults)
+      // Abort any in-flight run and drop the run-start timestamp so the
+      // Autopilot Actions feed (scoped to simulationStartedAtMs) clears back
+      // to its empty state instead of replaying the previous run's events.
+      simulationAbortRef.current = true
+      setSimulationStartedAtMs(null)
       setIsSimulating(false)
     } else if (activeTab === 'rule') {
       setRuleResetSignal(n => n + 1)
@@ -2148,7 +2416,7 @@ export function DecisionExplorerPage() {
 
   const resetButtonLabel =
     activeTab === 'batch'
-      ? 'Reset Auth-Rate Based Routing'
+      ? 'Reset Multi Objective Routing'
       : activeTab === 'rule'
         ? 'Reset Rule Based Routing'
         : activeTab === 'volume'
@@ -2161,7 +2429,7 @@ export function DecisionExplorerPage() {
         <div>
           <SurfaceLabel>Simulation console</SurfaceLabel>
           <div className="mt-2 flex flex-wrap items-center gap-3">
-            <h1 className="text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">Decision Explorer</h1>
+            <h1 className="text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">Decision Simulator</h1>
             <Badge variant="blue">{effectiveMerchantId || 'No merchant'}</Badge>
           </div>
         </div>
@@ -2169,39 +2437,6 @@ export function DecisionExplorerPage() {
           <RefreshCw size={14} />
           {resetButtonLabel}
         </Button>
-      </div>
-
-      <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-1 dark:border-[#242b36] dark:bg-[#0c1118]">
-        <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-4">
-          <button
-            onClick={() => { simulationAbortRef.current = true; setActiveTab('batch') }}
-            className={`rounded-xl border px-4 py-3 text-left text-sm font-semibold transition ${explorerModeButtonClass(activeTab === 'batch')}`}
-          >
-            <span className="block">Auth-rate</span>
-            <span className="mt-1 block text-[11px] font-medium text-slate-400 dark:text-[#738097]">Score simulation</span>
-          </button>
-          <button
-            onClick={() => { simulationAbortRef.current = true; setActiveTab('rule') }}
-            className={`rounded-xl border px-4 py-3 text-left text-sm font-semibold transition ${explorerModeButtonClass(activeTab === 'rule')}`}
-          >
-            <span className="block">Rule based</span>
-            <span className="mt-1 block text-[11px] font-medium text-slate-400 dark:text-[#738097]">Policy evaluator</span>
-          </button>
-          <button
-            onClick={() => { simulationAbortRef.current = true; setActiveTab('volume') }}
-            className={`rounded-xl border px-4 py-3 text-left text-sm font-semibold transition ${explorerModeButtonClass(activeTab === 'volume')}`}
-          >
-            <span className="block">Volume split</span>
-            <span className="mt-1 block text-[11px] font-medium text-slate-400 dark:text-[#738097]">Distribution run</span>
-          </button>
-          <button
-            onClick={() => { simulationAbortRef.current = true; setActiveTab('debit') }}
-            className={`rounded-xl border px-4 py-3 text-left text-sm font-semibold transition ${explorerModeButtonClass(activeTab === 'debit')}`}
-          >
-            <span className="block">Debit routing</span>
-            <span className="mt-1 block text-[11px] font-medium text-slate-400 dark:text-[#738097]">Network decision</span>
-          </button>
-        </div>
       </div>
 
       {activeTab === 'rule' && (
@@ -2216,13 +2451,468 @@ export function DecisionExplorerPage() {
         />
       )}
 
+      {activeTab === 'batch' && (
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] lg:items-stretch">
+          <div className="flex flex-wrap items-end gap-6 rounded-2xl border border-slate-200 bg-white px-5 py-4 dark:border-[#222226] dark:bg-[#0b0b10]">
+            {[
+              { key: 'stripe', label: 'Stripe success rate' },
+              { key: 'adyen', label: 'Adyen success rate' },
+            ].map(({ key, label }) => {
+              const color = gatewayColorMap[key] ?? GW_PALETTE[0]
+              const rate = getGwSuccessRate(key)
+              return (
+                <div key={key} className="flex w-[190px] flex-col gap-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} />
+                    <SurfaceLabel>{label}</SurfaceLabel>
+                  </div>
+                  <input
+                    type="text"
+                    value={`${rate}%`}
+                    onChange={e => setGwSuccessRate(key, Math.max(0, Math.min(100, parseInt(e.target.value.replace(/\D/g, ''), 10) || 0)))}
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100"
+                  />
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={rate}
+                    onChange={e => setGwSuccessRate(key, Number(e.target.value))}
+                    className="mt-1 h-1.5 w-full cursor-pointer appearance-none rounded-full outline-none
+                      [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:bg-[color:var(--thumb)] [&::-webkit-slider-thumb]:shadow [&::-webkit-slider-thumb]:transition-transform [&::-webkit-slider-thumb]:hover:scale-110 [&::-webkit-slider-thumb]:active:scale-95
+                      [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-white [&::-moz-range-thumb]:border-solid [&::-moz-range-thumb]:bg-[color:var(--thumb)] [&::-moz-range-thumb]:shadow"
+                    style={{
+                      '--thumb': color,
+                      background: `linear-gradient(to right, ${color} ${rate}%, rgba(148,163,184,0.45) ${rate}%)`,
+                    } as CSSProperties}
+                  />
+                </div>
+              )
+            })}
+
+            {!isSimulating ? (
+              <Button
+                onClick={runSimulation}
+                disabled={!effectiveMerchantId || routingConfigUnavailable}
+                variant="primary"
+                className="self-end lg:ml-auto"
+              >
+                <Play size={14} className="fill-current" /> Run simulation
+              </Button>
+            ) : (
+              <div className="flex items-center gap-2 self-end lg:ml-auto">
+                {isPaused ? (
+                  <Button onClick={resumeSimulation} variant="primary">
+                    <Play size={14} className="fill-current" /> Resume
+                  </Button>
+                ) : (
+                  <Button onClick={pauseSimulation} variant="secondary">
+                    <Pause size={14} /> Pause
+                  </Button>
+                )}
+                <Button onClick={() => { simulationAbortRef.current = true }} variant="secondary">
+                  <X size={14} /> Stop
+                </Button>
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-1 flex-wrap items-end justify-around gap-6 rounded-2xl border border-slate-200 bg-white px-5 py-4 dark:border-[#222226] dark:bg-[#0b0b10]">
+            <div className="flex flex-col gap-1.5">
+              <SurfaceLabel>Total SR decisions</SurfaceLabel>
+              <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-sky-600 dark:text-sky-400">
+                {multiObjectiveStats.authWon.toLocaleString()}
+              </p>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <SurfaceLabel>Total Cost overrides</SurfaceLabel>
+              <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-violet-600 dark:text-violet-400">
+                {multiObjectiveStats.costWon.toLocaleString()}
+              </p>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <SurfaceLabel>Total cost saved</SurfaceLabel>
+              <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-emerald-600 dark:text-emerald-400">
+                {formatCurrencyValue(totalCostSaved.value, totalCostSaved.currency || form.currency || 'USD')}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className={activeTab === 'volume'
         ? 'grid grid-cols-1 gap-5 xl:grid-cols-[minmax(340px,420px)_minmax(0,1fr)]'
-        : 'grid grid-cols-1 gap-6 lg:grid-cols-2'
+        : activeTab === 'batch'
+          ? 'grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] lg:items-stretch lg:h-[calc(100vh-220px)] lg:min-h-[560px] lg:max-h-[760px]'
+          : 'grid grid-cols-1 gap-6 lg:grid-cols-2'
       }
         style={activeTab === 'rule' ? { display: 'none' } : undefined}
       >
-        <Card className="!rounded-2xl self-start">
+        <div className={`flex flex-col gap-6 min-w-0 ${activeTab === 'batch' ? 'lg:min-h-0' : 'self-start'}`}>
+        {activeTab === 'batch' && (
+                <Card className="flex-1">
+                  <CardBody className="!pt-4 flex flex-1 flex-col">
+                    {sortedGatewayStats.length > 0 ? (() => {
+                      const sortedGateways = sortedGatewayStats
+                      const hasAnySpark = sortedGateways.some(([gw]) => (gatewaySparklines.series[gw]?.length ?? 0) >= 2)
+                      return (
+                        <div className="flex flex-1 flex-col gap-4">
+                          {/* per-gateway stat rows moved to the Gateway Selection Summary
+                              card in the right column (enlarged, above Autopilot Actions). */}
+                          {/* combined multi-line SR trend chart */}
+                          {hasAnySpark && (() => {
+                            const { series, paymentNums } = gatewaySparklines
+                            // Cost-based routing is eligible for any PSP whose SR sits within the
+                            // auth-rate tolerance band of the *leading* PSP's SR. The leader moves
+                            // every transaction, so the threshold is computed per point as
+                            // topPspSr − band and drawn as a dynamic dashed line: wherever a PSP's
+                            // line crosses it you can see exactly when it entered or exited the band.
+                            const bandPp = costRoutingTolerancePp * 100
+                            const chartData = paymentNums.map((n, i) => {
+                              const row: Record<string, number> = { step: n }
+                              let topAtPoint: number | null = null
+                              sortedGateways.forEach(([gw]) => {
+                                const v = series[gw]?.[i]
+                                if (v != null) {
+                                  row[gw] = v
+                                  if (topAtPoint == null || v > topAtPoint) topAtPoint = v
+                                }
+                              })
+                              if (topAtPoint != null) {
+                                const threshold = Math.max(0, topAtPoint - bandPp)
+                                row.topPspSr = topAtPoint
+                                row.threshold = threshold
+                                // Span from the threshold up to 100%, stacked over a transparent base,
+                                // so the shaded eligible area rises and falls with the band.
+                                row.eligibleSpan = Math.max(0, 100 - threshold)
+                              }
+                              return row
+                            })
+                            // Zoom the Y-axis to the data band instead of a fixed 0–100%.
+                            // SR lines and the threshold typically sit in the upper range, so
+                            // anchoring the floor just below the lowest plotted value removes the
+                            // dead space under ~75% and makes the contended region legible.
+                            const yValues: number[] = []
+                            chartData.forEach((row) => {
+                              sortedGateways.forEach(([gw]) => { if (row[gw] != null) yValues.push(row[gw]) })
+                              if (row.threshold != null) yValues.push(row.threshold)
+                            })
+                            const dataMin = yValues.length ? Math.min(...yValues) : 0
+                            const yMin = Math.max(0, Math.floor((dataMin - 5) / 5) * 5)
+                            // Plot a little above 100 so a line sitting at 100% isn't
+                            // clipped flat against the top edge; keep ticks capped at 100.
+                            const yMax = 103
+                            const yStep = 100 - yMin > 40 ? 10 : 5
+                            const yTicks: number[] = []
+                            for (let t = yMin; t <= 100; t += yStep) yTicks.push(t)
+                            const bandLabel = `SR threshold for cost override`
+                            return (
+                              <div className="w-full flex-1 min-h-[320px] flex flex-col">
+                                <div className="mb-2 flex items-start justify-between gap-3">
+                                  <div>
+                                    <h4 className="text-sm font-medium text-slate-800 dark:text-white">Success Rate Trend</h4>
+                                    <p className="text-[13px] text-slate-400 dark:text-slate-500">Engine routing score per connector, with the cost-eligible band below the leader</p>
+                                  </div>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <span className="text-[11px] text-slate-400 dark:text-slate-500">Window</span>
+                                    <div className="inline-flex rounded-md border border-slate-200 dark:border-[#1f1f29] p-0.5">
+                                      {CHART_WINDOW_OPTIONS.map((opt) => {
+                                        const active = chartWindow === opt
+                                        return (
+                                          <button
+                                            key={String(opt)}
+                                            type="button"
+                                            onClick={() => setChartWindow(opt)}
+                                            className={`px-2.5 py-1 text-[11px] font-medium rounded transition-colors ${
+                                              active
+                                                ? 'bg-brand-500 text-white'
+                                                : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+                                            }`}
+                                          >
+                                            {opt === 'all' ? 'All' : `Last ${opt}`}
+                                          </button>
+                                        )
+                                      })}
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="min-h-0 flex-1">
+                                <ResponsiveContainer width="100%" height="100%">
+                                  <ComposedChart data={chartData} margin={{ top: 16, right: 8, bottom: 8, left: 0 }}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" className="dark:opacity-20" vertical={false} />
+                                    <Area dataKey="threshold" stackId="elig" stroke="none" fill="transparent" isAnimationActive={false} legendType="none" activeDot={false} connectNulls />
+                                    <Area dataKey="eligibleSpan" stackId="elig" stroke="none" fill="#10b981" fillOpacity={0.08} isAnimationActive={false} legendType="none" activeDot={false} connectNulls />
+                                    <XAxis
+                                      dataKey="step"
+                                      tick={{ fontSize: 11, fill: '#94a3b8' }}
+                                      tickLine={false}
+                                      axisLine={{ stroke: '#e2e8f0' }}
+                                      minTickGap={28}
+                                    />
+                                    <YAxis
+                                      domain={[yMin, yMax]}
+                                      ticks={yTicks}
+                                      allowDataOverflow
+                                      tick={{ fontSize: 11, fill: '#94a3b8' }}
+                                      tickLine={false}
+                                      axisLine={{ stroke: '#e2e8f0' }}
+                                      width={44}
+                                      tickFormatter={(v: number) => `${v}%`}
+                                    />
+                                    <Tooltip
+                                      content={(props) => {
+                                        const { active, payload } = props as unknown as { active?: boolean; payload?: Array<{ payload?: Record<string, number> }> }
+                                        if (!active || !payload || !payload.length) return null
+                                        const row = payload[0].payload
+                                        if (!row) return null
+                                        const hasBand = row.threshold != null
+                                        return (
+                                          <div style={{ ...CHART_TOOLTIP_STYLE, padding: '10px 12px', fontSize: 12, lineHeight: 1.5, minWidth: 190 }}>
+                                            <p style={{ ...CHART_TOOLTIP_LABEL_STYLE, margin: '0 0 6px' }}>Payment {row.step}</p>
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                              {sortedGateways.map(([gw]) => {
+                                                if (row[gw] == null) return null
+                                                const gwColor = gatewayColorMap[gw] ?? GW_PALETTE[0]
+                                                const isTop = hasBand && row.topPspSr != null && row[gw] === row.topPspSr
+                                                return (
+                                                  <div key={gw} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                    <span style={{ width: 8, height: 8, borderRadius: 999, backgroundColor: gwColor, flexShrink: 0 }} />
+                                                    <span style={{ color: gwColor, fontWeight: 600 }}>{gw}</span>
+                                                    <span style={{ marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>{row[gw].toFixed(1)}%</span>
+                                                    {hasBand && (
+                                                      <span style={{ fontSize: 10, fontWeight: 600, width: 34, textAlign: 'right', color: '#10b981' }}>
+                                                        {isTop ? '★ Top' : ''}
+                                                      </span>
+                                                    )}
+                                                  </div>
+                                                )
+                                              })}
+                                            </div>
+                                            {hasBand && (
+                                              <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(148,163,184,0.25)', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                                                <p style={{ ...CHART_TOOLTIP_ITEM_STYLE, margin: 0, display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Top PSP SR</span><strong>{row.topPspSr?.toFixed(1)}%</strong></p>
+                                                <p style={{ ...CHART_TOOLTIP_ITEM_STYLE, margin: 0, display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Configured Band</span><strong>{bandPp.toFixed(bandPp % 1 ? 1 : 0)}pp</strong></p>
+                                                <p style={{ ...CHART_TOOLTIP_ITEM_STYLE, margin: 0, display: 'flex', justifyContent: 'space-between', gap: 12, color: '#10b981' }}><span>Cost-Eligible ≥</span><strong>{row.threshold.toFixed(1)}%</strong></p>
+                                              </div>
+                                            )}
+                                          </div>
+                                        )
+                                      }}
+                                    />
+                                    {sortedGateways.map(([gw]) => (
+                                      <Line
+                                        key={gw}
+                                        type="natural"
+                                        dataKey={gw}
+                                        name={gw}
+                                        stroke={gatewayColorMap[gw] ?? GW_PALETTE[0]}
+                                        strokeWidth={2.5}
+                                        dot={false}
+                                        activeDot={false}
+                                        isAnimationActive={false}
+                                        connectNulls
+                                      />
+                                    ))}
+                                    <Line
+                                      type="natural"
+                                      dataKey="threshold"
+                                      name={bandLabel}
+                                      stroke="#10b981"
+                                      strokeDasharray="5 4"
+                                      strokeWidth={1.75}
+                                      dot={false}
+                                      activeDot={false}
+                                      isAnimationActive={false}
+                                      connectNulls
+                                    />
+                                  </ComposedChart>
+                                </ResponsiveContainer>
+                                </div>
+                                <div className="mt-3 flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+                                  {sortedGateways.map(([gw]) => (
+                                    <span key={gw} className="inline-flex items-center gap-1.5">
+                                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: gatewayColorMap[gw] ?? GW_PALETTE[0] }} />
+                                      {gw}
+                                    </span>
+                                  ))}
+                                  <span className="inline-flex items-center gap-1.5">
+                                    <span className="inline-block w-4 border-t-2 border-dashed" style={{ borderColor: '#10b981' }} />
+                                    {bandLabel}
+                                  </span>
+                                </div>
+                              </div>
+                            )
+                          })()}
+                          {/* routing-share trend — traffic split across connectors */}
+                          {gatewayVolumeTrend.data.length >= 2 && (() => {
+                            const { data, gateways } = gatewayVolumeTrend
+                            const latest = data[data.length - 1] ?? {}
+                            const colorFor = (gw: string, idx: number) => gatewayColorMap[gw] ?? GW_PALETTE[idx % GW_PALETTE.length]
+                            const latestSplit = gateways
+                              .map((gw, idx) => ({ gw, share: latest[gw] ?? 0, color: colorFor(gw, idx) }))
+                              .sort((a, b) => b.share - a.share)
+                            // Each connector is its own line at its real share (they sum to
+                            // 100%, but are not stacked) so a hand-off shows as the two lines
+                            // crossing. Paint the taller area first so the smaller one's line
+                            // stays visible on top.
+                            const drawOrder = gateways
+                              .map((gw, idx) => ({ gw, idx, share: latest[gw] ?? 0 }))
+                              .sort((a, b) => b.share - a.share)
+                            return (
+                              <div className="w-full border-t border-slate-100 pt-4 dark:border-[#1a1a22]">
+                                <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+                                  <div>
+                                    <h4 className="text-sm font-medium text-slate-800 dark:text-white">Routing Distribution</h4>
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    {latestSplit.map(({ gw, share, color }) => (
+                                      <span
+                                        key={gw}
+                                        className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600 ring-1 ring-inset ring-slate-200/70 dark:bg-[#12121a] dark:text-slate-300 dark:ring-[#22222c]"
+                                      >
+                                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
+                                        {gw}
+                                        <span className="tabular-nums font-semibold text-slate-900 dark:text-white">{Math.round(share)}%</span>
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                                <div className="h-[200px] w-full">
+                                  <ResponsiveContainer width="100%" height="100%">
+                                    <ComposedChart data={data} margin={{ top: 8, right: 8, bottom: 8, left: 0 }}>
+                                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" className="dark:opacity-20" vertical={false} />
+                                      <XAxis
+                                        dataKey="step"
+                                        tick={{ fontSize: 11, fill: '#94a3b8' }}
+                                        tickLine={false}
+                                        axisLine={{ stroke: '#e2e8f0' }}
+                                        minTickGap={28}
+                                      />
+                                      <YAxis
+                                        domain={[0, 100]}
+                                        ticks={[0, 25, 50, 75, 100]}
+                                        tick={{ fontSize: 11, fill: '#94a3b8' }}
+                                        tickLine={false}
+                                        axisLine={{ stroke: '#e2e8f0' }}
+                                        width={44}
+                                        tickFormatter={(v: number) => `${v}%`}
+                                      />
+                                      <Tooltip
+                                        cursor={{ stroke: '#cbd5e1', strokeWidth: 1 }}
+                                        content={(props) => {
+                                          const { active, payload } = props as unknown as { active?: boolean; payload?: Array<{ payload?: Record<string, number> }> }
+                                          if (!active || !payload || !payload.length) return null
+                                          const row = payload[0].payload
+                                          if (!row) return null
+                                          const rows = gateways
+                                            .map((gw, idx) => ({ gw, share: row[gw] ?? 0, color: colorFor(gw, idx) }))
+                                            .sort((a, b) => b.share - a.share)
+                                          return (
+                                            <div style={{ ...CHART_TOOLTIP_STYLE, padding: '10px 12px', fontSize: 12, lineHeight: 1.5, minWidth: 170 }}>
+                                              <p style={{ ...CHART_TOOLTIP_LABEL_STYLE, margin: '0 0 6px' }}>Payment {row.step}</p>
+                                              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                                {rows.map(({ gw, share, color }) => (
+                                                  <div key={gw} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                    <span style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: color, flexShrink: 0 }} />
+                                                    <span style={{ color, fontWeight: 600 }}>{gw}</span>
+                                                    <span style={{ marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>{share.toFixed(1)}%</span>
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            </div>
+                                          )
+                                        }}
+                                      />
+                                      {drawOrder.map(({ gw, idx }) => (
+                                        <Area
+                                          key={gw}
+                                          type="monotone"
+                                          dataKey={gw}
+                                          name={gw}
+                                          stroke={colorFor(gw, idx)}
+                                          fill={colorFor(gw, idx)}
+                                          fillOpacity={0.18}
+                                          strokeWidth={2.5}
+                                          isAnimationActive={false}
+                                          legendType="none"
+                                          activeDot={{ r: 3.5, strokeWidth: 0 }}
+                                        />
+                                      ))}
+                                    </ComposedChart>
+                                  </ResponsiveContainer>
+                                </div>
+                              </div>
+                            )
+                          })()}
+                        </div>
+                      )
+                    })() : (() => {
+                      // Pre-run preview: project flat SR lines from the configured
+                      // gateway success rates so the chart is visible on landing,
+                      // before any simulated payment has been routed.
+                      const previewGateways = eligibleGatewaysParsed
+                      if (previewGateways.length === 0) return null
+                      const previewScores = previewGateways.map(gw => ({ gw, sr: getGwSuccessRate(gw) }))
+                      const target = totalSimulationPayments || Number(SIMULATION_TOTAL_PAYMENTS)
+                      // Empty plot area until a simulation runs — only the axis range
+                      // is seeded so the chart frame renders without any band or lines.
+                      const chartData = [{ step: 1 }, { step: target }]
+                      return (
+                        <div className="flex flex-1 flex-col gap-4">
+                          <div className="space-y-2">
+                            {previewScores.map(({ gw, sr }) => {
+                              const gwColor = gatewayColorMap[gw] ?? GW_PALETTE[0]
+                              return (
+                                <div key={gw} className="space-y-1">
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: gwColor }} />
+                                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate shrink-0 w-14 text-left">{gw}</span>
+                                    <span className={`font-bold tabular-nums text-[11px] w-14 text-right ${sr >= 80 ? 'text-emerald-600 dark:text-emerald-400' : sr >= 50 ? 'text-amber-500' : 'text-red-500'}`}>{sr}% SR</span>
+                                    <span className="text-slate-300 dark:text-slate-600 text-[11px]">·</span>
+                                    <span className="text-slate-400 dark:text-slate-500 tabular-nums text-[11px] w-16 text-right">0% routed</span>
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                          <div className="w-full flex-1 min-h-[300px]">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <LineChart data={chartData} margin={{ top: 16, right: 8, bottom: 8, left: 0 }}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" className="dark:opacity-20" vertical={false} />
+                                <XAxis
+                                  dataKey="step"
+                                  tick={{ fontSize: 11, fill: '#94a3b8' }}
+                                  tickLine={false}
+                                  axisLine={{ stroke: '#e2e8f0' }}
+                                  minTickGap={28}
+                                />
+                                <YAxis
+                                  domain={[0, 100]}
+                                  tick={{ fontSize: 11, fill: '#94a3b8' }}
+                                  tickLine={false}
+                                  axisLine={{ stroke: '#e2e8f0' }}
+                                  width={44}
+                                  tickFormatter={(v: number) => `${v}%`}
+                                />
+                              </LineChart>
+                            </ResponsiveContainer>
+                          </div>
+                          <p className="pt-1 text-center text-[11px] text-slate-400">
+                            Projected from configured success rates · run a simulation to see live routing.
+                          </p>
+                        </div>
+                      )
+                    })()}
+                    {Object.keys(gatewayStats).length === 1 && eligibleGatewaysParsed.length > 1 && (
+                      <p className="text-[11px] text-slate-400 pt-1">
+                        SR routing concentrates traffic on the highest-scoring gateway. Run with a "Gateway Down" scenario to see score drop and traffic shift to the next gateway.
+                      </p>
+                    )}
+                  </CardBody>
+                </Card>
+        )}
+        {activeTab !== 'batch' && (
+        <Card className="!rounded-2xl">
           <CardHeader className="!px-5 !py-4">
             <div>
               <SurfaceLabel>
@@ -2593,55 +3283,6 @@ export function DecisionExplorerPage() {
               </div>
             ) : (
               <>
-                <div className="space-y-2">
-                  {(() => {
-                    const isMultiObjective = form.ranking_algorithm === 'SR_MULTI_OBJECTIVE'
-                    const methodTypeOptionsForRender = isMultiObjective
-                      ? (paymentMethodTypeOptions.includes('CARD') ? ['CARD'] : ['CARD', ...paymentMethodTypeOptions])
-                      : paymentMethodTypeOptions
-                    const paymentMethodOptionsForRender = isMultiObjective
-                      ? [...MULTI_OBJECTIVE_PAYMENT_METHODS]
-                      : paymentMethodOptions
-                    const currencyOptionsForRender = isMultiObjective
-                      ? [MULTI_OBJECTIVE_CURRENCY]
-                      : currencyOptions
-                    const cardBrandOptionsForRender = isMultiObjective
-                      ? [...MULTI_OBJECTIVE_CARD_BRANDS]
-                      : cardBrandOptions
-                    const fields: { label: string; content: React.ReactNode }[] = [
-                      { label: 'Amount', content: <input value={form.amount} onChange={e => set('amount', e.target.value)} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500" /> },
-                      { label: 'Currency', content: <select value={form.currency} onChange={e => set('currency', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading || isMultiObjective} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{currencyOptionsForRender.map(c => <option key={c} value={c}>{c}</option>)}</select> },
-                      { label: 'Method Type', content: <select value={form.payment_method_type} onChange={e => set('payment_method_type', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading || isMultiObjective} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{methodTypeOptionsForRender.map(p => <option key={p} value={p}>{formatOptionLabel(p)}</option>)}</select> },
-                      { label: 'Payment Method', content: <select value={form.payment_method} onChange={e => set('payment_method', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{paymentMethodOptionsForRender.map(p => <option key={p} value={p}>{formatOptionLabel(p)}</option>)}</select> },
-                      { label: 'Card Brand', content: <select value={form.card_brand} onChange={e => set('card_brand', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{cardBrandOptionsForRender.map(b => <option key={b} value={b}>{formatOptionLabel(b)}</option>)}</select> },
-                      { label: 'Auth Type', content: <select value={form.auth_type} onChange={e => set('auth_type', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{authTypeOptions.map(a => <option key={a} value={a}>{formatOptionLabel(a)}</option>)}</select> },
-                    ]
-                    if (isMultiObjective) {
-                      fields.push({ label: 'Card Type', content: <select value={form.card_program} onChange={e => set('card_program', e.target.value)} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500">{CARD_PROGRAM_OPTIONS.map(c => <option key={c} value={c}>{formatOptionLabel(c)}</option>)}</select> })
-                    }
-                    return (
-                      <div className="grid grid-cols-3 gap-x-3 gap-y-2.5">
-                        {fields.map(({ label, content }) => (
-                          <div key={label}>
-                            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">{label}</label>
-                            {content}
-                          </div>
-                        ))}
-                      </div>
-                    )
-                  })()}
-                  <div>
-                    <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">Algorithm</label>
-                    <select
-                      value={form.ranking_algorithm}
-                      onChange={e => set('ranking_algorithm', e.target.value as SimulationAlgorithm)}
-                      className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm font-medium text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 cursor-pointer"
-                    >
-                      {ALGORITHMS.map(a => <option key={a} value={a}>{ALGORITHM_LABELS[a]}</option>)}
-                    </select>
-                  </div>
-                </div>
-
                 {activeTab === 'single' && (
                   <>
                     <div>
@@ -2661,237 +3302,6 @@ export function DecisionExplorerPage() {
                     {singleRunOutcome === 'FAILURE' && <ErrorInfoFields info={errorInfo} onChange={setErrorField} rules={gsmRules} />}
                   </>
                 )}
-
-                {activeTab === 'batch' && (
-                  <div className="border-t border-slate-100 dark:border-[#1c1c24] pt-4 space-y-4">
-                    {/* Simulation header */}
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Activity size={13} className="text-slate-400 dark:text-slate-500" />
-                        <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Simulation</span>
-                      </div>
-                      <div className="flex items-center gap-2.5">
-                        <label className="text-xs font-medium text-slate-500 dark:text-slate-400">Payments</label>
-                        <input
-                          type="number"
-                          min={1}
-                          max={5000}
-                          value={simulationConfig.totalPayments}
-                          onChange={e => setSimulationConfig({ totalPayments: e.target.value })}
-                          onBlur={e => {
-                            const total = Math.max(1, Math.min(5000, parseInt(e.target.value) || 1))
-                            setSimulationConfig({ totalPayments: String(total) })
-                          }}
-                          className="w-24 bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-2 text-sm font-semibold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Gateway accordion rows */}
-                    <div className="space-y-2">
-                      {eligibleGatewaysParsed.map(gw => {
-                        const gwRate = gatewaySimConfigs[gw]?.successRate ?? 70
-                        const gwFailureMode = gatewaySimConfigs[gw]?.failureMode ?? 'decline'
-                        const gwGsmDecision = gatewaySimConfigs[gw]?.gsmDecision ?? 'retry'
-                        const gwPenalized = gatewaySimConfigs[gw]?.penalized ?? true
-
-                        const isOpen = expandedGateways.has(gw)
-                        const ratePillClass = gwRate >= 80
-                          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
-                          : gwRate >= 50
-                            ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
-                            : 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300'
-                        const trackColor = gwRate >= 80 ? '#10b981' : gwRate >= 50 ? '#f59e0b' : '#ef4444'
-
-                        return (
-                          <div key={gw} className="rounded-xl border border-slate-200 dark:border-[#222226] bg-white dark:bg-[#0a0a10] overflow-hidden">
-                            {/* Header row — avatar · name · slider · rate · × · chevron */}
-                            <div
-                              role="button"
-                              tabIndex={0}
-                              onClick={() => toggleGateway(gw)}
-                              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleGateway(gw) } }}
-                              className="flex items-center gap-2.5 px-3 pt-3 pb-5 cursor-pointer hover:bg-slate-50 dark:hover:bg-[#0f0f18] transition-colors select-none"
-                            >
-                              <div
-                                className="flex h-7 w-7 items-center justify-center rounded-lg text-xs font-bold uppercase shrink-0"
-                                style={{ backgroundColor: `${gatewayColorMap[gw] ?? GW_PALETTE[0]}22`, color: gatewayColorMap[gw] ?? GW_PALETTE[0] }}
-                              >
-                                {gw.charAt(0)}
-                              </div>
-                              <span className="text-sm font-semibold text-slate-800 dark:text-slate-100 capitalize shrink-0 w-16 truncate">{gw}</span>
-                              {/* Inline slider — labels are absolute so wrapper height = track height only, keeping items-center aligned */}
-                              <div className="relative flex-1 min-w-0 mr-2">
-                                <input
-                                  type="range"
-                                  min={0}
-                                  max={100}
-                                  value={gwRate}
-                                  onChange={e => setGwSuccessRate(gw, parseInt(e.target.value))}
-                                  onClick={e => e.stopPropagation()}
-                                  onMouseDown={e => e.stopPropagation()}
-                                  style={{ accentColor: trackColor }}
-                                  className="w-full h-2 cursor-pointer"
-                                />
-                                <div className="absolute top-full left-0 right-2 flex justify-between pointer-events-none">
-                                  <span className="text-[9px] text-slate-400 dark:text-slate-500 tabular-nums">0</span>
-                                  <span className="text-[9px] text-slate-400 dark:text-slate-500 tabular-nums">100%</span>
-                                </div>
-                              </div>
-                              <UiTooltip text="Simulated success rate for this gateway">
-                                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-bold tabular-nums shrink-0 ${ratePillClass}`}>
-                                  {gwRate}%
-                                </span>
-                              </UiTooltip>
-                              {FEATURE_FLAGS.GSM_RETRY_IN_SIMULATION && gwFailureMode === 'decline' && gsmScoringFilterEnabled && !!gatewaySimConfigs[gw]?.errorInfo?.error_code && (
-                                <span className="inline-flex items-center gap-1 text-[10px] text-slate-400 dark:text-slate-500 shrink-0">
-                                  <span className={`font-medium ${gwGsmDecision === 'retry' ? 'text-amber-500 dark:text-amber-400' : 'text-slate-500 dark:text-slate-400'}`}>{gwGsmDecision === 'retry' ? 'retry' : 'no retry'}</span>
-                                  <span>·</span>
-                                  <span className={gwPenalized ? 'text-red-500 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}>{gwPenalized ? 'penalized' : 'no penalty'}</span>
-                                </span>
-                              )}
-                              <button
-                                type="button"
-                                disabled={isSimulating}
-                                onClick={e => {
-                                  e.stopPropagation()
-                                  const remaining = eligibleGatewaysParsed.filter(g => g !== gw)
-                                  set('eligible_gateways', remaining.join(', '))
-                                  setExpandedGateways(prev => { const next = new Set(prev); next.delete(gw); return next })
-                                }}
-                                className="text-slate-300 hover:text-red-400 dark:text-slate-600 dark:hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors shrink-0"
-                              >
-                                <X size={13} />
-                              </button>
-                              <ChevronDown
-                                size={13}
-                                className={`text-slate-400 dark:text-slate-500 transition-transform duration-200 shrink-0 ${isOpen ? 'rotate-180' : ''}`}
-                              />
-                            </div>
-
-                            {/* Expandable body — failure mode + error scenarios only */}
-                            <div className={`grid transition-all duration-200 ease-in-out ${isOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
-                              <div className="overflow-hidden min-h-0">
-                                <div className="px-4 pb-4 pt-3 space-y-3 border-t border-slate-100 dark:border-[#1c1c24]">
-                                  {/* Failure mode toggle */}
-                                  <div className={`grid grid-cols-2 rounded-lg overflow-hidden border text-xs font-semibold ${isSimulating ? 'opacity-50 pointer-events-none border-slate-100 dark:border-[#1c1c24]' : 'border-slate-200 dark:border-[#222226]'}`}>
-                                    <button
-                                      type="button"
-                                      disabled={isSimulating}
-                                      onClick={() => setGwFailureMode(gw, 'decline')}
-                                      className={`py-2 transition-colors ${gwFailureMode === 'decline' ? 'bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
-                                    >
-                                      Decline
-                                    </button>
-                                    <button
-                                      type="button"
-                                      disabled={isSimulating}
-                                      onClick={() => setGwFailureMode(gw, 'timeout')}
-                                      className={`py-2 border-l border-slate-200 dark:border-[#222226] transition-colors ${gwFailureMode === 'timeout' ? 'bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
-                                    >
-                                      Timeout
-                                    </button>
-                                  </div>
-
-                                  {gwFailureMode === 'timeout' && (
-                                    <p className={`text-xs px-3 py-2 rounded-lg ${eliminationConfigured ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400' : 'bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400'}`}>
-                                      {eliminationConfigured
-                                        ? `Removed from routing below ${eliminationConfig!.config.data.threshold} threshold.`
-                                        : 'Elimination not configured. Set it up in SR Routing settings.'}
-                                    </p>
-                                  )}
-
-                                  {gwFailureMode === 'decline' && (
-                                    <div className="space-y-2">
-                                      <div className={`grid gap-2 ${FEATURE_FLAGS.GSM_RETRY_IN_SIMULATION ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                                        {FEATURE_FLAGS.GSM_RETRY_IN_SIMULATION && (
-                                          <div>
-                                            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">GSM Decision</label>
-                                            <select
-                                              value={gwGsmDecision}
-                                              disabled={isSimulating}
-                                              onChange={e => setGwGsmDecision(gw, e.target.value as 'retry' | 'do_default')}
-                                              className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
-                                            >
-                                              <option value="retry">Retry</option>
-                                              <option value="do_default">Do Default</option>
-                                            </select>
-                                          </div>
-                                        )}
-                                        <div>
-                                          <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">Score Impact</label>
-                                          <select
-                                            value={gwPenalized ? 'penalized' : 'skipped'}
-                                            onChange={e => setGwPenalized(gw, e.target.value === 'penalized')}
-                                            className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                                          >
-                                            <option value="penalized">Penalized</option>
-                                            <option value="skipped">Penalty skipped</option>
-                                          </select>
-                                        </div>
-                                      </div>
-                                      <ErrorInfoFields
-                                        info={gatewaySimConfigs[gw]?.errorInfo ?? DEFAULT_ERROR_INFO}
-                                        onChange={updates => setGwErrorInfoField(gw, updates)}
-                                        rules={gsmRules}
-                                        connector={gw}
-                                        showClassification={false}
-                                      />
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        )
-                      })}
-
-                      {/* Add connector */}
-                      {addGwOpen ? (
-                        <div className="space-y-1.5">
-                          <div className="relative">
-                            <input
-                              ref={addGwInputRef}
-                              type="text"
-                              value={addGwDraft}
-                              onChange={e => setAddGwDraft(e.target.value)}
-                              onKeyDown={e => {
-                                if (e.key === 'Enter') {
-                                  const gw = addGwDraft.trim().toLowerCase()
-                                  if (gw && !eligibleGatewaysParsed.includes(gw)) {
-                                    set('eligible_gateways', [...eligibleGatewaysParsed, gw].join(', '))
-                                    setExpandedGateways(prev => new Set(prev).add(gw))
-                                  }
-                                  setAddGwDraft('')
-                                  setAddGwOpen(false)
-                                }
-                                if (e.key === 'Escape') { setAddGwDraft(''); setAddGwOpen(false) }
-                              }}
-                              onBlur={() => { setAddGwDraft(''); setAddGwOpen(false) }}
-                              placeholder="e.g. stripe"
-                              autoFocus
-                              className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-brand-300 dark:border-brand-700 rounded-lg px-3 py-2 pr-16 text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                            />
-                            <kbd className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-[#1c1c24] border border-slate-200 dark:border-[#2a2a35] px-1.5 py-0.5 rounded font-mono">
-                              Enter ↵
-                            </kbd>
-                          </div>
-                          <p className="text-xs text-slate-400 dark:text-slate-500">Press Enter to add · Esc to cancel</p>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled={isSimulating}
-                          onClick={() => { setAddGwOpen(true); setTimeout(() => addGwInputRef.current?.focus(), 0) }}
-                          className="w-full rounded-xl border border-dashed border-slate-200 dark:border-[#2a2a3a] flex items-center justify-center gap-2 h-11 text-slate-400 hover:text-brand-600 hover:border-brand-400 dark:hover:text-brand-400 dark:hover:border-brand-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                        >
-                          <Plus size={14} />
-                          <span className="text-xs font-semibold uppercase tracking-wider">Add connector</span>
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
               </>
             )}
           </CardBody>
@@ -2909,42 +3319,7 @@ export function DecisionExplorerPage() {
               >
                 {loading ? <><Spinner size={14} /> Running Debit Routing…</> : <><Network size={14} /> Run Debit Routing</>}
               </Button>
-            ) : activeTab === 'volume' ? null : activeTab === 'batch' ? (
-              <>
-                {FEATURE_FLAGS.SMART_RETRY_IN_SIMULATION && (
-                  <label className={`flex items-center gap-2 select-none ${gsmScoringFilterEnabled ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
-                    <input
-                      type="checkbox"
-                      checked={smartRetryEnabled}
-                      onChange={e => setSmartRetryEnabled(e.target.checked)}
-                      disabled={!gsmScoringFilterEnabled}
-                      className="rounded border-slate-300 dark:border-slate-600 disabled:cursor-not-allowed"
-                    />
-                    <span className="text-xs text-slate-600 dark:text-slate-400">
-                      Smart retry — on GSM <code className="text-[11px]">retry</code> decision, attempt next fallback gateway
-                      {!gsmScoringFilterEnabled && <span className="ml-1 text-amber-500">(enable GSM scoring filter first)</span>}
-                    </span>
-                  </label>
-                )}
-                <Button
-                  onClick={isSimulating ? () => { simulationAbortRef.current = true } : runSimulation}
-                  disabled={!effectiveMerchantId || routingConfigUnavailable}
-                  variant={isSimulating ? 'secondary' : 'primary'}
-                  className="w-full justify-center"
-                >
-                  {isSimulating ? (
-                    <>
-                      <X size={14} />
-                      Stop ({simulationResults.length}/{simulationConfig.totalPayments || 0})
-                    </>
-                  ) : (
-                    <>
-                      <Activity size={14} /> Run Auth-Rate Simulation
-                    </>
-                  )}
-                </Button>
-              </>
-            ) : (
+            ) : activeTab === 'volume' ? null : (
               <>
                 {FEATURE_FLAGS.SMART_RETRY_IN_SIMULATION && (
                   <label className={`flex items-center gap-2 select-none ${gsmScoringFilterEnabled ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
@@ -2968,8 +3343,10 @@ export function DecisionExplorerPage() {
             )}
           </div>
         </Card>
+        )}
+        </div>
 
-        <div className="min-w-0 flex flex-col gap-4">
+        <div className={`min-w-0 flex flex-col gap-4 ${activeTab === 'batch' ? 'lg:min-h-0' : ''}`}>
           {activeTab === 'debit' ? (
             debitResult ? (
               <>
@@ -3321,320 +3698,174 @@ export function DecisionExplorerPage() {
               </Card>
             )
           ) : activeTab === 'batch' ? (
-            hasSimulationActivity ? (
-              <>
-                <Card className="shrink-0">
-                  <CardHeader className="!py-3">
-                    <div className="flex items-center justify-between gap-3">
+            <>
+              {/* Run summary — per-gateway stats lifted above the feed and enlarged.
+                  The run progress / hedged / saved line stays on the chart card to
+                  avoid duplicating it here. */}
+              {hasSimulationActivity && (
+                <Card className="lg:shrink-0">
+                  <CardHeader className="flex flex-row items-start justify-between gap-3">
+                    <div>
                       <h3 className="text-sm font-medium text-slate-800 dark:text-white">Gateway Selection Summary</h3>
-                      <div className="flex items-center gap-1.5">
-                        {totalSimulationPayments > 0 && (() => {
-                          const r = 6
-                          const circ = 2 * Math.PI * r
-                          const offset = circ * (1 - simulationProgressPercentage / 100)
-                          return (
-                            <svg width="16" height="16" viewBox="0 0 16 16" className="-rotate-90">
-                              <circle cx="8" cy="8" r={r} fill="none" strokeWidth="2" className="stroke-slate-200 dark:stroke-slate-700" />
-                              <circle
-                                cx="8" cy="8" r={r} fill="none" strokeWidth="2" strokeLinecap="round"
-                                strokeDasharray={circ} strokeDashoffset={offset}
-                                className="stroke-brand-500 transition-[stroke-dashoffset] duration-300"
-                              />
-                            </svg>
-                          )
-                        })()}
-                        <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                          {completedSimulationCount} / {totalSimulationPayments || 0}
-                        </span>
-                        {completedSimulationCount > 0 && (
-                          <>
-                            <span className="text-slate-300 dark:text-slate-600">·</span>
-                            {hedgingHits > 0 ? (
-                              <span className="text-[11px] font-medium text-brand-600 dark:text-sky-400">
-                                {Math.round((hedgingHits / completedSimulationCount) * 100)}% hedged
-                              </span>
-                            ) : (
-                              <UiTooltip text="Enable ENABLE_EXPLORE_AND_EXPLOIT_ON_SRV3_{PMT} or ENABLE_MERCHANT_ON_VOLUME_DISTRIBUTION_FEATURE_SR_V3 in Redis">
-                                <span className="text-[11px] text-amber-500 dark:text-amber-400 cursor-help">0 hedged</span>
-                              </UiTooltip>
-                            )}
-                            {smartRetryEnabled && smartRetryStats.triggered > 0 && (
-                              <>
-                                <span className="text-slate-300 dark:text-slate-600">·</span>
-                                <UiTooltip text={`${smartRetryStats.triggered} retries triggered · ${smartRetryStats.recovered} recovered`}>
-                                  <span className="text-[11px] font-medium text-orange-500 dark:text-orange-400 cursor-help">
-                                    {smartRetryStats.triggered} retried · {smartRetryStats.recovered} recovered
-                                  </span>
-                                </UiTooltip>
-                              </>
-                            )}
-                            {totalCostSaved.value > 0 && totalCostSaved.currency && (
-                              <>
-                                <span className="text-slate-300 dark:text-slate-600">·</span>
-                                <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
-                                  saved {formatCurrencyValue(totalCostSaved.value, totalCostSaved.currency)}
-                                </span>
-                              </>
-                            )}
-                          </>
-                        )}
-                      </div>
+                      <p className="text-[13px] text-slate-400 dark:text-slate-500 mt-0.5">Overall success rate &amp; routed share across the run</p>
                     </div>
+                    <span className="text-[13px] tabular-nums flex items-center gap-1.5 shrink-0">
+                      <span className="text-slate-400">{completedSimulationCount} / {totalSimulationPayments || 0}</span>
+                      {completedSimulationCount > 0 && hedgingHits > 0 && (
+                        <>
+                          <span className="text-slate-300 dark:text-slate-600">·</span>
+                          <span className="font-medium text-brand-600 dark:text-sky-400">
+                            {Math.round((hedgingHits / completedSimulationCount) * 100)}% hedged
+                          </span>
+                        </>
+                      )}
+                    </span>
                   </CardHeader>
-                  <CardBody className="!pt-3">
-                    {sortedGatewayStats.length > 0 && (() => {
-                      const totalRouted = totalRoutedPayments
-                      const sortedGateways = sortedGatewayStats
-                      const hasAnySpark = sortedGateways.some(([gw]) => (gatewaySparklines.series[gw]?.length ?? 0) >= 2)
+                  <CardBody className="space-y-3">
+                    {sortedGatewayStats.map(([gateway, stats]) => {
+                      const share = totalRoutedPayments > 0 ? Math.round((stats.total / totalRoutedPayments) * 100) : 0
+                      const srPct = stats.total > 0 ? Math.round((stats.success / stats.total) * 100) : 0
+                      const gwColor = gatewayColorMap[gateway] ?? GW_PALETTE[0]
                       return (
-                        <div className="flex flex-wrap gap-3 items-start">
-                          {/* per-gateway stat rows */}
-                          <div className="flex-1 space-y-2 min-w-[320px]">
-                            {sortedGateways.map(([gateway, stats]) => {
-                              const share = totalRouted > 0 ? Math.round((stats.total / totalRouted) * 100) : 0
-                              const srPct = stats.total > 0 ? Math.round((stats.success / stats.total) * 100) : 0
-                              const gwColor = gatewayColorMap[gateway] ?? GW_PALETTE[0]
-                              return (
-                                <div key={gateway} className="space-y-1">
-                                  <div className="flex items-center gap-2">
-                                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: gwColor }} />
-                                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 w-20 truncate shrink-0">{gateway}</span>
-                                    <div className="flex-1 h-1.5 rounded-full bg-slate-100 dark:bg-[#1c1c24] overflow-hidden min-w-0">
-                                      <div className="h-full rounded-full transition-[width] duration-300" style={{ width: `${share}%`, backgroundColor: gwColor }} />
-                                    </div>
-                                    <div className="flex items-center gap-2.5 text-[11px] shrink-0">
-                                      <span className={`font-bold tabular-nums ${srPct >= 80 ? 'text-emerald-600 dark:text-emerald-400' : srPct >= 50 ? 'text-amber-500' : 'text-red-500'}`}>{srPct}% SR</span>
-                                      <span className="text-slate-300 dark:text-slate-600">·</span>
-                                      <span className="text-slate-400 dark:text-slate-500 tabular-nums">{share}% routed</span>
-                                      <span className="text-slate-300 dark:text-slate-600">·</span>
-                                      <span className="tabular-nums text-slate-500 dark:text-slate-400">
-                                        <span className="text-emerald-600 dark:text-emerald-400">{stats.success}</span>
-                                        <span className="text-slate-300 dark:text-slate-600 mx-0.5">/</span>
-                                        <span className="text-red-400">{stats.failure}</span>
-                                      </span>
-                                    </div>
-                                  </div>
-                                </div>
-                              )
-                            })}
-                          </div>
-                          {/* combined multi-line SR chart — scrollable, fixed y-axis */}
-                          {hasAnySpark && (() => {
-                            const { series, paymentNums } = gatewaySparklines
-                            const numPts = paymentNums.length
-                            const PT_W = 7        // px per data point
-                            const CHART_H = Math.max(64, sortedGateways.length * 28)
-                            const XAXIS_H = 14    // room for x-axis labels
-                            const AXIS_W = 28     // fixed y-axis width
-                            const CW = Math.max(200, numPts * PT_W)
-                            const H = CHART_H + XAXIS_H
-                            const pad = 6
-                            const xPos = (i: number) => (i / Math.max(numPts - 1, 1)) * CW
-
-                            const { yMin, yMax } = gatewaySparklines
-                            const yRange = yMax - yMin || 1
-
-                            const yPos = (v: number) => pad + ((yMax - v) / yRange) * (CHART_H - pad * 2)
-
-                            // Pick ~4 round tick values within [yMin, yMax]
-                            const tickStep = yRange <= 10 ? 2 : yRange <= 30 ? 5 : 10
-                            const tickStart = Math.ceil(yMin / tickStep) * tickStep
-                            const ticks: number[] = []
-                            for (let t = tickStart; t <= yMax; t += tickStep) ticks.push(t)
-
-                            const makeLine = (pts: number[]) => {
-                              if (pts.length < 2) return ''
-                              const coords = pts.map((v, i) => [xPos(i), yPos(v)])
-                              let d = `M ${coords[0][0]},${coords[0][1]}`
-                              for (let i = 1; i < coords.length; i++) {
-                                const cpx = (coords[i][0] - coords[i - 1][0]) * 0.4
-                                d += ` C ${coords[i-1][0]+cpx},${coords[i-1][1]} ${coords[i][0]-cpx},${coords[i][1]} ${coords[i][0]},${coords[i][1]}`
-                              }
-                              return d
-                            }
-                            // Show ~6 evenly-spaced x labels
-                            const xLabelStep = Math.max(1, Math.floor(numPts / 6))
-                            const allXLabels = paymentNums
-                              .map((n, i) => ({ n, i }))
-                              .filter(({ i }) => i % xLabelStep === 0 || i === numPts - 1)
-                            // Drop second-to-last label if it collides with the final one
-                            const xLabels = allXLabels.filter((_, j) => {
-                              if (j === allXLabels.length - 2) {
-                                return allXLabels[allXLabels.length - 1].i - allXLabels[j].i >= Math.ceil(xLabelStep * 0.5)
-                              }
-                              return true
-                            })
-                            return (
-                              <div className="relative self-start flex-1" style={{ minWidth: 200 + AXIS_W }}>
-                                {/* scrollable chart area */}
-                                <div
-                                  className="overflow-x-auto"
-                                  style={{ width: `calc(100% - ${AXIS_W}px)`, scrollbarWidth: 'none' }}
-                                  ref={el => { if (el) el.scrollLeft = el.scrollWidth }}
-                                >
-                                  <svg width={CW} height={H} viewBox={`0 0 ${CW} ${H}`} style={{ display: 'block' }}>
-                                    {/* horizontal grid lines */}
-                                    {ticks.map(t => (
-                                      <line key={t} x1={0} y1={yPos(t)} x2={CW} y2={yPos(t)}
-                                        stroke="#e2e8f0" strokeWidth="0.5" strokeDasharray="2,2" />
-                                    ))}
-                                    {/* gateway lines */}
-                                    {sortedGateways.map(([gw]) => {
-                                      const pts = series[gw]
-                                      if (!pts || pts.length < 2) return null
-                                      const color = gatewayColorMap[gw] ?? GW_PALETTE[0]
-                                      const line = makeLine(pts)
-                                      const area = `${line} L ${xPos(pts.length - 1)},${CHART_H} L 0,${CHART_H} Z`
-                                      return (
-                                        <g key={gw}>
-                                          <path d={area} fill={color} fillOpacity={0.07} />
-                                          <path d={line} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                                        </g>
-                                      )
-                                    })}
-                                    {/* x-axis baseline */}
-                                    <line x1={0} y1={CHART_H} x2={CW} y2={CHART_H} stroke="#e2e8f0" strokeWidth="0.5" />
-                                    {/* x-axis labels */}
-                                    {xLabels.map(({ n, i }, labelIdx) => (
-                                      <text key={i} x={xPos(i)} y={CHART_H + 10} fontSize="7"
-                                        fill="#94a3b8" fontFamily="monospace"
-                                        textAnchor={labelIdx === 0 ? 'start' : labelIdx === xLabels.length - 1 ? 'end' : 'middle'}>
-                                        {n}
-                                      </text>
-                                    ))}
-                                  </svg>
-                                </div>
-                                {/* fixed y-axis */}
-                                <div className="absolute top-0 right-0" style={{ width: AXIS_W }}>
-                                  <svg width={AXIS_W} height={CHART_H} viewBox={`0 0 ${AXIS_W} ${CHART_H}`} style={{ display: 'block' }}>
-                                    <line x1={2} y1={pad} x2={2} y2={CHART_H - pad} stroke="#cbd5e1" strokeWidth="0.5" />
-                                    {ticks.map(t => (
-                                      <g key={t}>
-                                        <line x1={0} y1={yPos(t)} x2={4} y2={yPos(t)} stroke="#cbd5e1" strokeWidth="0.5" />
-                                        <text x={6} y={yPos(t) + 3} fontSize="7" fill="#94a3b8" fontFamily="monospace">{t}%</text>
-                                      </g>
-                                    ))}
-                                  </svg>
-                                </div>
-                              </div>
-                            )
-                          })()}
-                          {!hasAnySpark && null}
+                        <div key={gateway} className="flex items-center gap-2.5">
+                          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: gwColor }} />
+                          <span className="text-sm font-semibold text-slate-800 dark:text-slate-100 w-20 truncate">{gateway}</span>
+                          <span className={`text-lg font-bold tabular-nums leading-none ${srPct >= 80 ? 'text-emerald-600 dark:text-emerald-400' : srPct >= 50 ? 'text-amber-500' : 'text-red-500'}`}>{srPct}%</span>
+                          <span className="text-[11px] text-slate-400 dark:text-slate-500">overall SR</span>
+                          <span className="ml-auto flex items-center gap-2 text-xs tabular-nums text-slate-500 dark:text-slate-400">
+                            <span>{share}% of traffic</span>
+                            <span className="text-slate-300 dark:text-slate-600">·</span>
+                            <span>
+                              <span className="text-emerald-600 dark:text-emerald-400">{stats.success}</span>
+                              <span className="text-slate-300 dark:text-slate-600 mx-0.5">/</span>
+                              <span className="text-red-400">{stats.failure}</span>
+                            </span>
+                          </span>
                         </div>
                       )
-                    })()}
-                    {Object.keys(gatewayStats).length === 1 && eligibleGatewaysParsed.length > 1 && (
-                      <p className="text-[11px] text-slate-400 pt-1">
-                        SR routing concentrates traffic on the highest-scoring gateway. Run with a "Gateway Down" scenario to see score drop and traffic shift to the next gateway.
+                    })}
+                  </CardBody>
+                </Card>
+              )}
+              {/* Autopilot Actions — fills the column now the transaction log moved full-width below. */}
+              <Card className="lg:flex-1 lg:min-h-0 lg:flex lg:flex-col">
+                <CardHeader className="flex flex-row items-center justify-between gap-3 lg:shrink-0">
+                  <span className="flex items-center gap-2.5">
+                    <h3 className="text-sm font-medium text-slate-800 dark:text-white">Autopilot Actions</h3>
+                  </span>
+                  {accumulatedEvents.length > 0 && (
+                    <span className="text-xs text-slate-400 tabular-nums">{accumulatedEvents.length} actions</span>
+                  )}
+                </CardHeader>
+                <CardBody className="p-0 lg:flex-1 lg:min-h-0 lg:flex lg:flex-col">
+                  {simulationStartedAtMs == null ? (
+                    <div className="py-12 text-center">
+                      <p className="text-sm text-slate-500 dark:text-slate-400">No events yet</p>
+                      <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
+                        Start a simulation — leader changes and auth-band crossings appear here as gateway scores shift.
                       </p>
-                    )}
-                  </CardBody>
-                </Card>
-
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between gap-3">
-                    <h3 className="text-sm font-medium text-slate-800 dark:text-white">Transaction Log</h3>
-                    {deferredSimulationResults.length > 0 && (
-                      <span className="text-xs text-slate-400 tabular-nums">{deferredSimulationResults.length} transactions</span>
-                    )}
-                  </CardHeader>
-                  <CardBody className="p-0">
-
-                    {deferredSimulationResults.length > 0 ? (
-                      <div ref={txLogRef} className="max-h-[480px] overflow-auto">
-                        <table className="w-full text-sm">
-                          <thead className="bg-slate-50 dark:bg-[#0a0a0f] text-[11px] text-slate-400 dark:text-slate-500 sticky top-0 border-b border-slate-100 dark:border-[#1c1c24]">
-                            <tr>
-                              <th className="text-left px-3 py-2 w-10">#</th>
-                              <th className="text-left px-3 py-2">Payment ID</th>
-                              <th className="text-left px-3 py-2 whitespace-nowrap">Gateway</th>
-                              <th className="text-left px-3 py-2">Routing</th>
-                              <th className="text-left px-3 py-2">Outcome</th>
-                              <th className="text-right px-3 py-2 whitespace-nowrap">Cost Savings</th>
-                              {smartRetryEnabled && <th className="text-left px-3 py-2 whitespace-nowrap">Retry Gateway</th>}
-                              {smartRetryEnabled && <th className="text-left px-3 py-2">Retry Outcome</th>}
-                              <th className="w-8" />
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100 dark:divide-[#1a1a22]">
-                            {deferredSimulationResults.map((res, idx) => {
-                              const absIdx = idx
-                              return (
-                              <tr
-                                key={res.paymentId}
-                                className="group cursor-pointer hover:bg-slate-50 dark:hover:bg-[#0d0d14] transition-colors"
-                                onClick={() => openAuditModal(res.paymentId)}
-                              >
-                                <td className="px-3 py-2 text-[11px] text-slate-400 tabular-nums">{absIdx + 1}</td>
-                                <td className="px-3 py-2 max-w-[180px]">
-                                  <span className="block truncate font-mono text-xs text-slate-700 dark:text-slate-300 group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">
-                                    {res.paymentId}
-                                  </span>
-                                </td>
-                                <td className="px-3 py-2 text-xs font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap">{res.decidedGateway}</td>
-                                <td className="px-3 py-2">
-                                  {res.routingApproach?.includes('HEDGING') ? (
-                                    <span className="inline-flex items-center rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700 ring-1 ring-inset ring-brand-200 dark:bg-brand-900/20 dark:text-brand-300 dark:ring-brand-800">
-                                      Hedging
-                                    </span>
-                                  ) : (
-                                    <span className="text-[11px] text-slate-400">
-                                      {res.routingApproach === 'SR_SELECTION_V3_ROUTING'
-                                        ? 'SR V3'
-                                        : res.routingApproach === 'SR_SELECTION_MULTI_OBJECTIVE'
-                                        ? 'Multi-Obj'
-                                        : (res.routingApproach ?? '—')}
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="px-3 py-2">
-                                  <Badge variant={res.status === 'CHARGED' ? 'green' : res.status === 'PENDING_VBV' ? 'orange' : 'red'}>
-                                    {res.status}
-                                  </Badge>
-                                </td>
-                                <td className="px-3 py-2 text-right whitespace-nowrap">
-                                  {res.costWon && res.costSavedBps != null && res.costSavedBps > 0 && res.status === 'CHARGED' ? (
-                                    <span className="font-mono text-xs text-emerald-700 dark:text-emerald-400 tabular-nums">
-                                      {formatSavingsCurrency(res.costSavedBps, res.amount, res.currency)}
-                                    </span>
-                                  ) : null}
-                                </td>
-                                {smartRetryEnabled && (
-                                  <td className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                                    {res.retryGateway ?? '—'}
-                                  </td>
-                                )}
-                                {smartRetryEnabled && (
-                                  <td className="px-3 py-2">
-                                    {res.retryStatus ? (
-                                      <Badge variant={res.retryStatus === 'CHARGED' ? 'green' : res.retryStatus === 'PENDING_VBV' ? 'orange' : 'red'}>
-                                        {res.retryStatus}
-                                      </Badge>
-                                    ) : <span className="text-xs text-slate-400">—</span>}
-                                  </td>
-                                )}
-                                <td className="pr-3 py-2">
-                                  <span className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 dark:text-slate-500">
-                                    <svg viewBox="0 0 16 16" fill="none" className="w-3.5 h-3.5" stroke="currentColor" strokeWidth="1.5">
-                                      <path d="M3 8h10M9 4l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
-                                    </svg>
-                                  </span>
-                                </td>
-                              </tr>
-                            )})}
-                          </tbody>
-                        </table>
+                    </div>
+                  ) : routingEvents.isUnavailable ? (
+                    <div className="py-12 text-center">
+                      <p className="text-sm text-slate-500 dark:text-slate-400">Events unavailable</p>
+                      <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
+                        The analytics pipeline (Kafka → ClickHouse) is offline for this environment.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="max-h-[240px] overflow-y-auto lg:max-h-none lg:flex-1 lg:min-h-0 divide-y divide-slate-100 dark:divide-[#1a1a22]">
+                      {collapsedRoutingEvents.map((item) => {
+                        if (item.kind === 'leaderFlap') {
+                          const isFresh = highlightedEventIds.has(item.latest.id)
+                          return (
+                            <div
+                              key={item.latest.id}
+                              className={`flex items-start gap-2.5 px-4 py-2.5 transition-colors duration-1000 ${isFresh ? 'bg-emerald-200 dark:bg-emerald-500/25' : 'bg-transparent'}`}
+                            >
+                              <div className="mt-0.5 shrink-0">
+                                <ArrowRightLeft size={16} className="text-sky-500" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-[15px] text-slate-700 dark:text-slate-200">
+                                  {item.gateways.join(' & ')} competing closely on success
+                                  <span className="ml-1.5 rounded-full bg-sky-100 px-1.5 py-0.5 text-[11px] font-medium text-sky-700 dark:bg-sky-900/30 dark:text-sky-300">×{item.crossings}</span>
+                                </p>
+                                <p className="mt-0.5 text-[13px] text-slate-600 dark:text-slate-400">
+                                  now routing to {item.latest.gateway} · {formatSimEventTime(item.latest.bucket_ms)}
+                                </p>
+                              </div>
+                            </div>
+                          )
+                        }
+                        if (item.kind === 'flap') {
+                          const isFresh = highlightedEventIds.has(item.latest.id)
+                          return (
+                            <div
+                              key={item.latest.id}
+                              className={`flex items-start gap-2.5 px-4 py-2.5 transition-colors duration-1000 ${isFresh ? 'bg-emerald-200 dark:bg-emerald-500/25' : 'bg-transparent'}`}
+                            >
+                              <div className="mt-0.5 shrink-0">
+                                <RefreshCw size={16} className="text-amber-500" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-[15px] text-slate-700 dark:text-slate-200">
+                                  {item.gateway} fluctuating at the cost-savings cutoff
+                                  <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">×{item.crossings}</span>
+                                </p>
+                                <p className="mt-0.5 text-[13px] text-slate-600 dark:text-slate-400">
+                                  now {item.inBand ? 'routed to save cost' : 'using top performer only'} · {formatSimEventTime(item.latest.bucket_ms)}
+                                </p>
+                              </div>
+                            </div>
+                          )
+                        }
+                        const event = item.event
+                        const meta = SIM_EVENT_META[event.event_type]
+                        const Icon = meta?.icon ?? ArrowRightLeft
+                        const isFresh = highlightedEventIds.has(event.id)
+                        return (
+                          <div
+                            key={event.id}
+                            className={`flex items-start gap-2.5 px-4 py-2.5 transition-colors duration-1000 ${isFresh ? 'bg-emerald-200 dark:bg-emerald-500/25' : 'bg-transparent'}`}
+                          >
+                            <div className="mt-0.5 shrink-0">
+                              <Icon size={16} className={meta?.iconClass ?? 'text-slate-400'} />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-[15px] text-slate-700 dark:text-slate-200">{describeRoutingEvent(event)}</p>
+                              <p className="mt-0.5 text-[13px] text-slate-600 dark:text-slate-400">{formatSimEventTime(event.bucket_ms)}</p>
+                            </div>
+                          </div>
+                        )
+                      })}
+                      {/* Default first event — the start of tracking. It's the oldest
+                          entry, so it sits at the bottom of the newest-first feed. */}
+                      <div className="flex items-start gap-2.5 px-4 py-2.5 bg-gradient-to-r from-sky-50 via-transparent to-violet-50 dark:from-sky-500/10 dark:to-violet-500/10">
+                        <div className="mt-0.5 shrink-0">
+                          <Flag size={16} className="text-violet-500" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[15px] text-slate-700 dark:text-slate-200">
+                            Started tracking{' '}
+                            <span className="font-semibold text-emerald-600 dark:text-emerald-400">SR</span>{' '}and{' '}
+                            <span className="font-semibold text-violet-600 dark:text-violet-400">Cost</span>{' '}for{' '}
+                            {eligibleGatewaysParsed.map((gw, i) => (
+                              <span key={gw}>
+                                <span className="font-semibold capitalize" style={{ color: gatewayColorMap[gw] ?? GW_PALETTE[0] }}>{gw}</span>
+                                {i < eligibleGatewaysParsed.length - 1 ? ', ' : ''}
+                              </span>
+                            ))}{' '}at CARD, CARD SCHEME, CARD_TYPE, CARD_PROGRAM, AMOUNT combinations
+                          </p>
+                          {simulationStartedAtMs != null && (
+                            <p className="mt-0.5 text-[13px] text-slate-600 dark:text-slate-400">{formatSimEventTime(simulationStartedAtMs)}</p>
+                          )}
+                        </div>
                       </div>
-                    ) : (
-                      <div className="flex items-center gap-3 px-4 py-6 text-sm text-slate-500">
-                        <Spinner size={16} />
-                        Waiting for the first simulated payment result…
-                      </div>
-                    )}
-                  </CardBody>
-                </Card>
-              </>
-            ) : (
+                    </div>
+                  )}
+                </CardBody>
+              </Card>
+              {!hasSimulationActivity && (
               <div className="space-y-3">
                 <button
                   type="button"
@@ -3661,7 +3892,8 @@ export function DecisionExplorerPage() {
                   />
                 )}
               </div>
-            )
+            )}
+            </>
           ) : (
             result ? (
               <>
@@ -3839,6 +4071,167 @@ export function DecisionExplorerPage() {
           )}
         </div>
       </div>
+
+      {/* Transaction Log — full-width table at the page bottom. */}
+      {activeTab === 'batch' && hasSimulationActivity && (
+        <Card className="mt-6">
+          <CardHeader className="flex flex-row items-center justify-between gap-3">
+            <h3 className="text-sm font-medium text-slate-800 dark:text-white">Transaction Log</h3>
+            {deferredSimulationResults.length > 0 && (
+              <span className="flex items-center gap-2 text-xs text-slate-400 tabular-nums">
+                {txFiltersActive && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setTxFilters({})}
+                      className="rounded px-1.5 py-0.5 text-[11px] font-medium text-brand-600 hover:bg-brand-50 dark:text-brand-400 dark:hover:bg-brand-900/20"
+                    >
+                      Clear filters
+                    </button>
+                    <span className="text-slate-300 dark:text-slate-600">·</span>
+                  </>
+                )}
+                <span>
+                  {txFiltersActive
+                    ? `${txFilteredRows.length} / ${deferredSimulationResults.length}`
+                    : deferredSimulationResults.length}{' '}
+                  transactions
+                </span>
+              </span>
+            )}
+          </CardHeader>
+          <CardBody className="p-0">
+            {deferredSimulationResults.length > 0 ? (
+              <div ref={txLogRef} className="max-h-[560px] overflow-y-auto overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 dark:bg-[#0a0a0f] text-[11px] text-slate-400 dark:text-slate-500 sticky top-0 border-b border-slate-100 dark:border-[#1c1c24]">
+                    <tr>
+                      <th className="text-left px-3 py-2 w-8">#</th>
+                      <th className="text-left px-3 py-2">Amount</th>
+                      <th className="text-left px-3 py-2 whitespace-nowrap">Gateway</th>
+                      <th className="text-right px-3 py-2 whitespace-nowrap">SR Score</th>
+                      <th className="text-left px-3 py-2">Routing</th>
+                      <th className="text-left px-3 py-2">Outcome</th>
+                      <th className="text-right px-3 py-2 whitespace-nowrap">Cost Savings</th>
+                      {smartRetryEnabled && <th className="text-left px-3 py-2 whitespace-nowrap">Retry Gateway</th>}
+                      {smartRetryEnabled && <th className="text-left px-3 py-2">Retry Outcome</th>}
+                    </tr>
+                    {(() => {
+                      const inputCls = 'w-full rounded border border-slate-200 bg-white px-1.5 py-1 text-[11px] font-normal text-slate-700 placeholder:text-slate-300 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-200 dark:placeholder:text-slate-600'
+                      const setF = (key: string, value: string) => setTxFilters(prev => ({ ...prev, [key]: value }))
+                      const sel = (key: string, opts: string[], placeholder: string) => (
+                        <select value={txFilters[key] ?? ''} onChange={e => setF(key, e.target.value)} className={inputCls}>
+                          <option value="">{placeholder}</option>
+                          {opts.map(o => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                      )
+                      return (
+                        <tr className="bg-white dark:bg-[#0a0a0f] border-b border-slate-100 dark:border-[#1c1c24]">
+                          <th className="px-2 py-1.5" />
+                          <th className="px-2 py-1.5">
+                            <input value={txFilters.amount ?? ''} onChange={e => setF('amount', e.target.value)} placeholder="search" className={inputCls} />
+                          </th>
+                          <th className="px-2 py-1.5">{sel('gateway', txFilterOptions.gateways, 'All')}</th>
+                          <th className="px-2 py-1.5">
+                            <input value={txFilters.sr ?? ''} onChange={e => setF('sr', e.target.value)} placeholder="e.g. 90" className={inputCls} />
+                          </th>
+                          <th className="px-2 py-1.5">{sel('routing', txFilterOptions.routings, 'All')}</th>
+                          <th className="px-2 py-1.5">{sel('outcome', txFilterOptions.outcomes, 'All')}</th>
+                          <th className="px-2 py-1.5">
+                            <select value={txFilters.cost ?? ''} onChange={e => setF('cost', e.target.value)} className={inputCls}>
+                              <option value="">All</option>
+                              <option value="yes">Has savings</option>
+                              <option value="no">None</option>
+                            </select>
+                          </th>
+                          {smartRetryEnabled && <th className="px-2 py-1.5">{sel('retryGateway', txFilterOptions.retryGateways, 'All')}</th>}
+                          {smartRetryEnabled && <th className="px-2 py-1.5">{sel('retryOutcome', txFilterOptions.retryOutcomes, 'All')}</th>}
+                        </tr>
+                      )
+                    })()}
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-[#1a1a22]">
+                    {txFilteredRows.map(({ res, idx }) => (
+                      <tr
+                        key={res.paymentId}
+                        className="group cursor-pointer hover:bg-slate-50 dark:hover:bg-[#0d0d14] transition-colors"
+                        onClick={() => openAuditModal(res.paymentId)}
+                      >
+                        <td className="px-3 py-2 text-[11px] text-slate-400 tabular-nums">{idx + 1}</td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          <span className="block font-mono text-xs text-slate-700 dark:text-slate-300 tabular-nums group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">
+                            {formatCurrencyValue(res.amount, res.currency)}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-xs font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap">{res.decidedGateway}</td>
+                        <td className="px-3 py-2 text-right whitespace-nowrap">
+                          {(() => {
+                            const srScore = res.gatewayPriorityMap?.[res.decidedGateway]
+                            return typeof srScore === 'number' ? (
+                              <span className="font-mono text-xs text-slate-600 dark:text-slate-300 tabular-nums">
+                                {(srScore * 100).toFixed(1)}%
+                              </span>
+                            ) : (
+                              <span className="text-[11px] text-slate-400">—</span>
+                            )
+                          })()}
+                        </td>
+                        <td className="px-3 py-2">
+                          {res.routingApproach?.includes('HEDGING') ? (
+                            <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-inset ring-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:ring-amber-800">Hedging</span>
+                          ) : res.routingApproach === 'SR_SELECTION_MULTI_OBJECTIVE' ? (
+                            <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-300 dark:ring-emerald-800">Cost Based</span>
+                          ) : res.routingApproach === 'SR_SELECTION_V3_ROUTING' ? (
+                            <span className="inline-flex items-center rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700 ring-1 ring-inset ring-brand-200 dark:bg-brand-900/20 dark:text-brand-300 dark:ring-brand-800">Auth Based</span>
+                          ) : (
+                            <span className="text-[11px] text-slate-400">{res.routingApproach ?? '—'}</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          <span className={`text-xs font-semibold ${res.status === 'CHARGED' ? 'text-emerald-600 dark:text-emerald-400' : res.status === 'PENDING_VBV' ? 'text-amber-600 dark:text-amber-400' : 'text-red-500 dark:text-red-400'}`}>{res.status}</span>
+                        </td>
+                        <td className="px-3 py-2 text-right whitespace-nowrap">
+                          {res.costWon && res.costSavedBps != null && res.costSavedBps > 0 && res.status === 'CHARGED' ? (
+                            <span className="font-mono text-xs text-emerald-700 dark:text-emerald-400 tabular-nums">
+                              {formatSavingsCurrency(res.costSavedBps, res.amount, res.currency)}
+                            </span>
+                          ) : null}
+                        </td>
+                        {smartRetryEnabled && (
+                          <td className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                            {res.retryGateway ?? '—'}
+                          </td>
+                        )}
+                        {smartRetryEnabled && (
+                          <td className="px-3 py-2">
+                            {res.retryStatus ? (
+                              <Badge variant={res.retryStatus === 'CHARGED' ? 'green' : res.retryStatus === 'PENDING_VBV' ? 'orange' : 'red'}>
+                                {res.retryStatus}
+                              </Badge>
+                            ) : <span className="text-xs text-slate-400">—</span>}
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                    {txFilteredRows.length === 0 && (
+                      <tr>
+                        <td colSpan={smartRetryEnabled ? 9 : 7} className="px-3 py-8 text-center text-sm text-slate-400 dark:text-slate-500">
+                          No transactions match the current filters.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 px-4 py-6 text-sm text-slate-500">
+                <Spinner size={16} />
+                Waiting for the first simulated payment result…
+              </div>
+            )}
+          </CardBody>
+        </Card>
+      )}
 
       {setupPrompt && (
         <div className="fixed bottom-0 left-0 right-0 top-[76px] z-[140] flex items-center justify-center p-4">
