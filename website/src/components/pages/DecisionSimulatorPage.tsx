@@ -106,6 +106,11 @@ interface SimulationResult {
   costWon?: boolean
   authWon?: boolean
   tolerancePp?: number | null
+  // Captured on cost-override decisions so the run can value the auth-rate the
+  // override risked: (headAuthRate − chosenAuthRate) × amount × margin.
+  headAuthRate?: number | null
+  chosenAuthRate?: number | null
+  margin?: number | null
   amount: number
   currency: string
 }
@@ -223,12 +228,13 @@ const DEFAULT_DEBIT_FORM: DebitRoutingFormState = {
 // and stops at this many transactions.
 const SIMULATION_TOTAL_PAYMENTS = '5000'
 
-// Default auth-rate tolerance band below the best gateway's SR within which gateways are
-// SR-equivalent and become eligible for cost-based routing. Stored as a fraction
-// (0.2 = 20 percentage points), matching the "Cost Optimisation Override Configuration"
-// default of 0.5 pp on the SR Routing page. The live per-decision value
-// (multi_objective_info.tolerancePp) overrides this when present.
-const DEFAULT_COST_ROUTING_TOLERANCE = 0.005
+// Fallback auth band (in percentage points) below the leader's SR within which gateways
+// are SR-equivalent and become eligible for cost-based routing. The live decider no longer
+// reads a static tolerance — it derives the band per-txn as
+// max(noise_floor, λ·Δcost/(100·margin)) and reports it (already in pp) as
+// multi_objective_info.tolerancePp. This constant is only the visual fallback for the band
+// line before any decision has reported a derived value.
+const DEFAULT_COST_ROUTING_TOLERANCE_PP = 0.5
 
 const DEFAULT_SIMULATION_CONFIG: SimulationConfig = {
   totalPayments: SIMULATION_TOTAL_PAYMENTS,
@@ -853,6 +859,10 @@ export function DecisionSimulatorPage() {
   // Per-column filters for the Transaction Log table.
   const [txFilters, setTxFilters] = useState<Record<string, string>>({})
   const [smartRetryEnabled, setSmartRetryEnabled] = useState(initialState.smartRetryEnabled)
+  // Comparison lever: when on, the multi-objective post-step picks the cheapest PSP in the
+  // auth band instead of the highest-EV one. Lets the run show how "band alone" (cheapest)
+  // trades more cost saved for more auth value risked vs the default EV pick.
+  const [costPickCheapest, setCostPickCheapest] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const txLogRef = useRef<HTMLDivElement>(null)
 
@@ -1517,6 +1527,7 @@ export function DecisionSimulatorPage() {
         eligibleGatewayList: gateways,
         rankingAlgorithm: 'SR_BASED_ROUTING',
         enableMultiObjective: form.ranking_algorithm === 'SR_MULTI_OBJECTIVE',
+        ...(form.ranking_algorithm === 'SR_MULTI_OBJECTIVE' && { costPickCheapest }),
         eliminationEnabled: eliminationEnabled,
       })
       const scoreRes = await apiPost<UpdateScoreResponse>('/update-gateway-score', {
@@ -1709,6 +1720,7 @@ export function DecisionSimulatorPage() {
             eligibleGatewayList: gateways,
             rankingAlgorithm: 'SR_BASED_ROUTING',
             enableMultiObjective: isMultiObjective,
+            ...(isMultiObjective && { costPickCheapest }),
             eliminationEnabled: eliminationEnabled,
           })
 
@@ -1767,6 +1779,9 @@ export function DecisionSimulatorPage() {
             costWon: mo?.outcome === 'COST_WON',
             authWon: mo?.outcome === 'AUTH_WON',
             tolerancePp: mo?.tolerancePp ?? null,
+            headAuthRate: mo?.srHead?.authRate ?? null,
+            chosenAuthRate: mo?.chosen?.authRate ?? null,
+            margin: mo?.margin ?? null,
             amount,
             currency: form.currency,
           })
@@ -2000,14 +2015,15 @@ export function DecisionSimulatorPage() {
     return acc
   }, {} as Record<string, { total: number; success: number; failure: number }>), [deferredSimulationResults])
 
-  // Live cost-optimisation tolerance band (pp) — the most recent value the router reported
-  // for this run, falling back to the configured default when no decision carried one.
+  // Live derived auth band (in percentage points) — the most recent value the router
+  // derived and reported for this run, falling back to the visual default when no decision
+  // carried one. The backend already reports this in pp, so it is used as-is (no scaling).
   const costRoutingTolerancePp = useMemo(() => {
     for (let i = deferredSimulationResults.length - 1; i >= 0; i--) {
       const t = deferredSimulationResults[i].tolerancePp
       if (t != null) return t
     }
-    return DEFAULT_COST_ROUTING_TOLERANCE
+    return DEFAULT_COST_ROUTING_TOLERANCE_PP
   }, [deferredSimulationResults])
 
   // Per-gateway engine SR-score trend. Each line plots the routing engine's
@@ -2194,6 +2210,57 @@ export function DecisionSimulatorPage() {
       }
     }
     return { value, currency }
+  }, [deferredSimulationResults])
+
+  // Honest economics of cost routing. The gross fee saved (totalCostSaved) is only the
+  // upside; an override also accepts a small auth-rate risk. We value that risk the way
+  // the band does — the *expected* sale value given up, (headAuthRate − chosenAuthRate)
+  // × amount × margin — and net it. This is counterfactual-free: it never books a single
+  // failed override as a full lost sale (the SR head would have failed a share of those
+  // too), it books only the auth-rate delta the override knowingly traded. The realized
+  // line is a separate, observed sanity check: did overridden txns actually charge at a
+  // similar rate to auth-kept txns?
+  const costEconomics = useMemo(() => {
+    let feeSaved = 0
+    let authValueRisked = 0
+    let overrideCharged = 0
+    let overrideTotal = 0
+    let authKeptCharged = 0
+    let authKeptTotal = 0
+    let currency = ''
+    for (const r of deferredSimulationResults) {
+      if (r.currency) currency = r.currency
+      if (r.costWon) {
+        overrideTotal++
+        if (r.status === 'CHARGED') {
+          overrideCharged++
+          if (r.costSavedBps != null && r.costSavedBps > 0) {
+            feeSaved += (r.costSavedBps / 10000) * r.amount
+          }
+        }
+        // Expected auth value the override traded away (head vs chosen auth gap),
+        // valued at the merchant's margin. Only meaningful when we captured both.
+        if (r.headAuthRate != null && r.chosenAuthRate != null && r.margin != null) {
+          const authGap = Math.max(0, r.headAuthRate - r.chosenAuthRate)
+          authValueRisked += authGap * r.amount * r.margin
+        }
+      } else if (r.authWon) {
+        authKeptTotal++
+        if (r.status === 'CHARGED') authKeptCharged++
+      }
+    }
+    const overrideSr = overrideTotal > 0 ? overrideCharged / overrideTotal : null
+    const authKeptSr = authKeptTotal > 0 ? authKeptCharged / authKeptTotal : null
+    return {
+      currency,
+      feeSaved,
+      authValueRisked,
+      netProfit: feeSaved - authValueRisked,
+      overrideSr,
+      authKeptSr,
+      overrideTotal,
+      authKeptTotal,
+    }
   }, [deferredSimulationResults])
 
   // Multi-objective outcome counts: how often the auth objective vs the cost
@@ -2490,6 +2557,35 @@ export function DecisionSimulatorPage() {
               )
             })}
 
+            {form.ranking_algorithm === 'SR_MULTI_OBJECTIVE' && (
+              <div className="flex flex-col gap-1.5">
+                <SurfaceLabel>Cost pick</SurfaceLabel>
+                <div className="inline-flex rounded-lg border border-slate-200 p-0.5 dark:border-[#1f1f29]" title="Among PSPs the auth band admits: EV-max routes to the highest expected-value PSP (default, safe); Cheapest-in-band routes to the lowest-cost PSP regardless of the auth it risks. Start a fresh run after switching to compare cleanly.">
+                  {([
+                    { val: false, label: 'EV-max' },
+                    { val: true, label: 'Cheapest' },
+                  ] as const).map(({ val, label }) => {
+                    const active = costPickCheapest === val
+                    return (
+                      <button
+                        key={label}
+                        type="button"
+                        disabled={isSimulating}
+                        onClick={() => setCostPickCheapest(val)}
+                        className={`px-2.5 py-1 text-[12px] font-medium rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                          active
+                            ? 'bg-brand-500 text-white'
+                            : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
             {!isSimulating ? (
               <Button
                 onClick={runSimulation}
@@ -2518,24 +2614,53 @@ export function DecisionSimulatorPage() {
           </div>
 
           <div className="flex flex-1 flex-wrap items-end justify-around gap-6 rounded-2xl border border-slate-200 bg-white px-5 py-4 dark:border-[#222226] dark:bg-[#0b0b10]">
-            <div className="flex flex-col gap-1.5">
-              <SurfaceLabel>Total SR decisions</SurfaceLabel>
-              <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-sky-600 dark:text-sky-400">
-                {multiObjectiveStats.authWon.toLocaleString()}
-              </p>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <SurfaceLabel>Total Cost overrides</SurfaceLabel>
-              <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-violet-600 dark:text-violet-400">
-                {multiObjectiveStats.costWon.toLocaleString()}
-              </p>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <SurfaceLabel>Total cost saved</SurfaceLabel>
-              <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-emerald-600 dark:text-emerald-400">
-                {formatCurrencyValue(totalCostSaved.value, totalCostSaved.currency || form.currency || 'USD')}
-              </p>
-            </div>
+            {(() => {
+              const ccy = costEconomics.currency || form.currency || 'USD'
+              const netPositive = costEconomics.netProfit >= 0
+              const overridePct = costEconomics.overrideSr != null ? `${(costEconomics.overrideSr * 100).toFixed(1)}%` : '—'
+              const keptPct = costEconomics.authKeptSr != null ? `${(costEconomics.authKeptSr * 100).toFixed(1)}%` : '—'
+              return (
+                <>
+                  <div className="flex flex-col gap-1.5">
+                    <SurfaceLabel>Total SR decisions</SurfaceLabel>
+                    <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-sky-600 dark:text-sky-400">
+                      {multiObjectiveStats.authWon.toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <SurfaceLabel>Total Cost overrides</SurfaceLabel>
+                    <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-violet-600 dark:text-violet-400">
+                      {multiObjectiveStats.costWon.toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <SurfaceLabel>Cost saved (gross)</SurfaceLabel>
+                    <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-emerald-600 dark:text-emerald-400">
+                      {formatCurrencyValue(totalCostSaved.value, totalCostSaved.currency || ccy)}
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-1.5" title="Expected sale value the overrides traded for cost: (head auth − chosen auth) × amount × margin. Not a count of failed txns.">
+                    <SurfaceLabel>Auth value risked</SurfaceLabel>
+                    <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-amber-600 dark:text-amber-400">
+                      {costEconomics.authValueRisked > 0 ? '−' : ''}{formatCurrencyValue(costEconomics.authValueRisked, ccy)}
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-1.5" title="Cost saved (gross) − Auth value risked. Stays positive while the band+EV gate is working; goes negative only if the cost feed is wrong.">
+                    <SurfaceLabel>Net profit</SurfaceLabel>
+                    <p className={`py-1.5 text-lg font-semibold leading-snug tabular-nums ${netPositive ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                      {!netPositive ? '−' : ''}{formatCurrencyValue(Math.abs(costEconomics.netProfit), ccy)}
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-1.5" title="Realized: share of overridden txns that charged, vs the share of auth-kept (SR-head) txns that charged. A large persistent gap below the kept rate is the calibration signal to tighten cost aggressiveness.">
+                    <SurfaceLabel>Override SR (realized)</SurfaceLabel>
+                    <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-slate-700 dark:text-slate-200">
+                      {overridePct}
+                      <span className="ml-1.5 text-xs font-normal text-slate-400">vs {keptPct} kept</span>
+                    </p>
+                  </div>
+                </>
+              )
+            })()}
           </div>
         </div>
       )}
@@ -2563,11 +2688,13 @@ export function DecisionSimulatorPage() {
                           {hasAnySpark && (() => {
                             const { series, paymentNums } = gatewaySparklines
                             // Cost-based routing is eligible for any PSP whose SR sits within the
-                            // auth-rate tolerance band of the *leading* PSP's SR. The leader moves
-                            // every transaction, so the threshold is computed per point as
-                            // topPspSr − band and drawn as a dynamic dashed line: wherever a PSP's
-                            // line crosses it you can see exactly when it entered or exited the band.
-                            const bandPp = costRoutingTolerancePp * 100
+                            // derived auth band of the *leading* PSP's SR — the band the decider
+                            // computes per-txn from SR noise + cost saving, not a static config.
+                            // The leader moves every transaction, so the threshold is computed per
+                            // point as topPspSr − band and drawn as a dynamic dashed line: wherever
+                            // a PSP's line crosses it you can see when it entered or exited the band.
+                            // Already in percentage points (the decider reports pp directly).
+                            const bandPp = costRoutingTolerancePp
                             const chartData = paymentNums.map((n, i) => {
                               const row: Record<string, number> = { step: n }
                               let topAtPoint: number | null = null
@@ -2691,7 +2818,7 @@ export function DecisionSimulatorPage() {
                                             {hasBand && (
                                               <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(148,163,184,0.25)', display: 'flex', flexDirection: 'column', gap: 3 }}>
                                                 <p style={{ ...CHART_TOOLTIP_ITEM_STYLE, margin: 0, display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Top PSP SR</span><strong>{row.topPspSr?.toFixed(1)}%</strong></p>
-                                                <p style={{ ...CHART_TOOLTIP_ITEM_STYLE, margin: 0, display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Configured Band</span><strong>{bandPp.toFixed(bandPp % 1 ? 1 : 0)}pp</strong></p>
+                                                <p style={{ ...CHART_TOOLTIP_ITEM_STYLE, margin: 0, display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Derived Band</span><strong>{bandPp.toFixed(bandPp % 1 ? 1 : 0)}pp</strong></p>
                                                 <p style={{ ...CHART_TOOLTIP_ITEM_STYLE, margin: 0, display: 'flex', justifyContent: 'space-between', gap: 12, color: '#10b981' }}><span>Cost-Eligible ≥</span><strong>{row.threshold.toFixed(1)}%</strong></p>
                                               </div>
                                             )}
@@ -4791,7 +4918,7 @@ function MultiObjectiveDecisionPanel({ info }: { info: MultiObjectiveInfo }) {
             </div>
             <div className="text-right">
               <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
-                Tolerance band
+                Auth band (derived)
               </span>
               <p className="font-mono text-sm font-semibold text-slate-800 dark:text-slate-100">
                 {info.tolerancePp.toFixed(2)} pp
@@ -4820,7 +4947,7 @@ function MultiObjectiveDecisionPanel({ info }: { info: MultiObjectiveInfo }) {
               )}
               {info.chosen && (
                 <MultiObjectivePspCard
-                  label={isCostWin ? 'Chosen by cost' : 'Final pick'}
+                  label={isCostWin ? 'Chosen by EV' : 'Final pick'}
                   summary={info.chosen}
                   emphasis={isCostWin}
                 />

@@ -193,6 +193,7 @@ pub async fn decider_full_payload_hs_function(
             cpu_start,
             ab_test_sr_override,
             dreq_.enable_multi_objective,
+            dreq_.cost_pick_cheapest,
         )
         .await
     }
@@ -212,6 +213,7 @@ async fn perform_hybrid_routing(
         cpu_start,
         None,
         dreq_.enable_multi_objective,
+        dreq_.cost_pick_cheapest,
     )
     .await;
 
@@ -243,17 +245,43 @@ fn handle_enforced_gateway(gateway_list: Option<Vec<String>>) -> Option<Vec<Stri
     }
 }
 
-/// The merchant's configured multi-objective auth-band tolerance (`default_tolerance_pp`
-/// from `SR_V3_INPUT_CONFIG_<merchant_id>`). Shared with the routing-events analytics so
-/// the visualized band matches the band the live decider actually applied.
-pub async fn load_default_tolerance_pp(merchant_id: &str) -> Option<f64> {
-    let key = format!("SR_V3_INPUT_CONFIG_{}", merchant_id);
-    let row = service_configuration::find_config_by_name(key)
+/// The merchant's configured margin (fraction of ticket) from
+/// `SR_V3_INPUT_CONFIG_<merchant_id>`. Drives the multi-objective economic band
+/// `Δcost/(100·margin)`. Falls back to [`multi_objective::DEFAULT_MARGIN`] when unset.
+pub async fn load_margin(merchant_id: &str) -> f64 {
+    let read = || async {
+        let key = format!("SR_V3_INPUT_CONFIG_{}", merchant_id);
+        let row = service_configuration::find_config_by_name(key)
+            .await
+            .ok()??;
+        let value = row.value?;
+        let cfg: SuccessRateData = serde_json::from_str(&value).ok()?;
+        cfg.margin
+    };
+    read()
         .await
-        .ok()??;
-    let value = row.value?;
-    let cfg: SuccessRateData = serde_json::from_str(&value).ok()?;
-    cfg.default_tolerance_pp
+        .filter(|m| *m > 0.0)
+        .unwrap_or(multi_objective::DEFAULT_MARGIN)
+}
+
+/// The merchant's configured default SRV3 bucket size (`defaultBucketSize` from
+/// `SR_V3_INPUT_CONFIG_<merchant_id>`). Shared with the routing-events analytics so the
+/// historically-detected auth band uses the same `B` the live decider does when sizing
+/// its noise floor. Falls back to [`C::DEFAULT_SR_V3_BASED_BUCKET_SIZE`] when unset.
+pub async fn load_srv3_default_bucket_size(merchant_id: &str) -> i32 {
+    let read = || async {
+        let key = format!("SR_V3_INPUT_CONFIG_{}", merchant_id);
+        let row = service_configuration::find_config_by_name(key)
+            .await
+            .ok()??;
+        let value = row.value?;
+        let cfg: SuccessRateData = serde_json::from_str(&value).ok()?;
+        cfg.default_bucket_size
+    };
+    read()
+        .await
+        .filter(|b| *b > 0)
+        .unwrap_or(C::DEFAULT_SR_V3_BASED_BUCKET_SIZE)
 }
 
 pub async fn run_decider_flow(
@@ -264,6 +292,7 @@ pub async fn run_decider_flow(
     cpu_start: Instant,
     ab_test_sr_override: Option<crate::euclid::types::SrConfigOverride>,
     enable_multi_objective_override: Option<bool>,
+    cost_pick_cheapest: Option<bool>,
 ) -> Result<T::DecidedGateway, T::ErrorResponse> {
     let txnCreationTime = deciderParams
         .dpTxnDetail
@@ -554,16 +583,25 @@ pub async fn run_decider_flow(
 
                     let mut cost_fallbacks_override: Option<Vec<String>> = None;
                     if multi_obj_on && !hedging_on {
-                        let tolerance_pp = load_default_tolerance_pp(&merchant_id_text)
-                            .await
-                            .unwrap_or(multi_objective::DEFAULT_TOLERANCE_BAND_PP);
+                        let margin = load_margin(&merchant_id_text).await;
+                        let bucket_size = decider_flow
+                            .writer
+                            .srv3_bucket_size
+                            .unwrap_or(C::DEFAULT_SR_V3_BASED_BUCKET_SIZE);
+                        let strategy = if cost_pick_cheapest.unwrap_or(false) {
+                            multi_objective::CostPickStrategy::CheapestInBand
+                        } else {
+                            multi_objective::CostPickStrategy::MaxEv
+                        };
                         let outcome =
                             multi_objective::algorithm::try_apply_multi_objective_post_step(
                                 &currentGatewayScoreMap,
                                 &merchant_id_text,
                                 &deciderParams.dpTxnDetail,
                                 &deciderParams.dpTxnCardInfo,
-                                tolerance_pp,
+                                bucket_size,
+                                margin,
+                                strategy,
                             )
                             .await;
                         if outcome.info.outcome == multi_objective::MultiObjectiveOutcome::CostWon {

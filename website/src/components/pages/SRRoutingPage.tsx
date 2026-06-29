@@ -43,7 +43,7 @@ const srFormSchema = z.object({
     (v) => (v === '' || v === null ? null : Number(v)),
     z.number().nullable()
   ),
-  defaultTolerancePp: z.preprocess(
+  margin: z.preprocess(
     (v) => (v === '' || v === null ? null : Number(v)),
     z.number().min(0).max(100).nullable()
   ),
@@ -62,7 +62,7 @@ interface SRConfigResponse {
       defaultSuccessRate: number | null
       defaultLatencyThreshold: number | null
       defaultHedgingPercent: number | null
-      defaultTolerancePp: number | null
+      margin: number | null
       subLevelInputConfig: {
         paymentMethodType: string
         paymentMethod: string
@@ -109,8 +109,8 @@ function CurrentConfigDetails({ config }: { config: SRConfigResponse['config'] }
             <p className="font-medium">{config.data.defaultLatencyThreshold ?? 'Not set'} s</p>
           </div>
           <div>
-            <span className="text-slate-500">Tolerance band:</span>
-            <p className="font-medium">{config.data.defaultTolerancePp != null ? `${config.data.defaultTolerancePp * 100}%` : 'Not set (50%)'}</p>
+            <span className="text-slate-500">Margin:</span>
+            <p className="font-medium">{config.data.margin != null ? `${config.data.margin * 100}%` : 'Not set (20%)'}</p>
           </div>
         </div>
       </div>
@@ -193,7 +193,7 @@ export function SRRoutingPage() {
       defaultSuccessRate: 0.5,
       defaultLatencyThreshold: null,
       defaultHedgingPercent: null,
-      defaultTolerancePp: null,
+      margin: null,
       subLevelInputConfig: [],
     },
   })
@@ -208,8 +208,8 @@ export function SRRoutingPage() {
         defaultSuccessRate: d.defaultSuccessRate ?? 0.5,
         defaultLatencyThreshold: d.defaultLatencyThreshold ?? null,
         defaultHedgingPercent: d.defaultHedgingPercent ?? null,
-        // Stored as a fraction in the backend (e.g. 0.1) but shown as a percentage in the UI (10).
-        defaultTolerancePp: d.defaultTolerancePp != null ? d.defaultTolerancePp * 100 : null,
+        // Stored as a fraction in the backend (e.g. 0.2) but shown as a percentage in the UI (20).
+        margin: d.margin != null ? d.margin * 100 : null,
         subLevelInputConfig: subLevelRows,
       })
       setShowSubLevelOverrides(subLevelRows.length > 0)
@@ -256,8 +256,8 @@ export function SRRoutingPage() {
             defaultSuccessRate: data.defaultSuccessRate,
             defaultLatencyThreshold: data.defaultLatencyThreshold,
             defaultHedgingPercent: data.defaultHedgingPercent,
-            // UI holds a percentage (e.g. 10); persist back as a fraction (0.1).
-            defaultTolerancePp: data.defaultTolerancePp != null ? data.defaultTolerancePp / 100 : null,
+            // UI holds a percentage (e.g. 20); persist back as a fraction (0.2).
+            margin: data.margin != null ? data.margin / 100 : null,
             subLevelInputConfig: data.subLevelInputConfig.length > 0
               ? data.subLevelInputConfig
               : null,
@@ -490,19 +490,19 @@ export function SRRoutingPage() {
                 </CardHeader>
                 <CardBody>
                   <label className="space-y-1.5 block">
-                    <span className="block text-sm font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap">Auth Tolerance Band for Cost Optimisation</span>
+                    <span className="block text-sm font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap">Merchant Margin</span>
                     <div className="relative max-w-xs">
                       <input
                         type="number" step="1"
-                        {...register('defaultTolerancePp')}
-                        placeholder="50"
+                        {...register('margin')}
+                        placeholder="20"
                         className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 pr-8 w-full text-base focus:outline-none focus:ring-1 focus:ring-brand-500"
                       />
                       <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-base text-slate-400">%</span>
                     </div>
-                    {errors.defaultTolerancePp && <p className="text-sm text-red-500">{errors.defaultTolerancePp.message}</p>}
+                    {errors.margin && <p className="text-sm text-red-500">{errors.margin.message}</p>}
                     <p className="text-xs text-slate-400 leading-relaxed">
-                      Auth-tolerance band window within which the cheaper PSP wins
+                      Your gross margin. The cost-vs-auth band is derived automatically from this — a cheaper PSP only wins when the saving outweighs the auth it risks. Defaults to 20%.
                     </p>
                   </label>
                 </CardBody>
@@ -551,7 +551,7 @@ const SR_FEATURES: { feature: KnownFeature; title: string; description: string }
     feature: 'multi-objective-routing',
     title: 'Multi-objective routing',
     description:
-      'Within the auth-tolerance band, picks the cheaper PSP using cost data from PSP. Active only when Explore-exploit on SRv3 is disabled — when both are on, hedging wins to keep the bandit\'s exploration signal clean. routing_approach shows SR_SELECTION_MULTI_OBJECTIVE when this path is taken.',
+      'Derives an auth band per transaction from SR noise and the cost saving (scaled by merchant margin), then picks the highest expected-value PSP inside it using cost data from PSP. Active only when Explore-exploit on SRv3 is disabled — when both are on, hedging wins to keep the bandit\'s exploration signal clean. routing_approach shows SR_SELECTION_MULTI_OBJECTIVE when this path is taken.',
   },
 ]
 

@@ -182,17 +182,15 @@ fn detect_routing_events(
                 let former_leader = prior_bucket_leader.clone();
                 prior_bucket_leader = Some(leader_name.clone());
 
-                // Auth-band detection runs only when multi-objective routing is on
-                // (tolerance set); otherwise the band is meaningless and we emit
-                // leader changes alone.
-                if let Some(tolerance_pp) = query.tolerance_pp {
+                // Auth-band detection runs only when multi-objective routing is on;
+                // otherwise the band is meaningless and we emit leader changes alone.
+                if query.auth_band.is_on() {
                     emit_auth_band_events(
                         &mut events,
                         &mut in_auth_band,
                         &state,
                         &leader_name,
                         leader_score,
-                        tolerance_pp,
                         bucket_ms,
                         dimension,
                         query,
@@ -263,14 +261,16 @@ fn detect_routing_events(
 }
 
 /// Emit auth-band crossing events for every eligible non-leader gateway.
-/// `GatewayEnteredAuthBand` fires when a gateway's score first rises to within
-/// `tolerance_pp` of the leader's; `GatewayExitedAuthBand` fires when it later
-/// drops below that floor or ages out. Membership is edge-triggered via
+/// `GatewayEnteredAuthBand` fires when a gateway's score first rises into the
+/// leader's band (`>= query.auth_band.band_floor(leader, candidate)`);
+/// `GatewayExitedAuthBand` fires when it later drops below that floor or ages out.
+/// The floor is **per candidate** — under `NoiseFloor` it widens with each gateway's
+/// own SR variance, matching the live decider's gate. Membership is edge-triggered via
 /// `in_auth_band`, so each crossing fires exactly once. The leader is the band
 /// reference and never a member — a member promoted to leader exits silently.
-/// A leader that gets overtaken but stays within tolerance never actually left
-/// the band (only the reference moved), so it is re-seeded as a member silently
-/// via `former_leader` and does not fire a spurious entry.
+/// A leader that gets overtaken but stays within its band never actually left it
+/// (only the reference moved), so it is re-seeded as a member silently via
+/// `former_leader` and does not fire a spurious entry.
 #[allow(clippy::too_many_arguments)]
 fn emit_auth_band_events(
     events: &mut Vec<RoutingEvent>,
@@ -278,7 +278,6 @@ fn emit_auth_band_events(
     state: &HashMap<String, GatewayState>,
     leader_name: &str,
     leader_score: f64,
-    tolerance_pp: f64,
     bucket_ms: i64,
     dimension: &DimensionKey,
     query: &RoutingEventsQuery,
@@ -286,7 +285,6 @@ fn emit_auth_band_events(
     is_first_bucket: bool,
     former_leader: Option<&str>,
 ) {
-    let band_floor = leader_score - tolerance_pp;
     // The leader is the reference, never a member.
     in_auth_band.remove(leader_name);
 
@@ -304,9 +302,11 @@ fn emit_auth_band_events(
                 >= query.min_transaction_count
                 && bucket_ms - former_state.last_seen_bucket_ms <= staleness_ms;
             // A demoted leader was already inside the band, so seed it as a member
-            // if it still holds at/above the band floor (same threshold a member is
-            // held to before exiting).
-            if eligible && former_state.score >= band_floor {
+            // if it still holds at/above its own band floor (same threshold a member
+            // is held to before exiting).
+            if eligible
+                && former_state.score >= query.auth_band.band_floor(leader_score, former_state.score)
+            {
                 in_auth_band.insert(former.to_string());
             }
         }
@@ -325,6 +325,7 @@ fn emit_auth_band_events(
         // — no hysteresis/deadband. Flap protection instead lives downstream (the UI
         // collapses any rapid re-crossings into one "contesting ×N" row), and the
         // deterministic outcome scheduler keeps scores from jittering at the edge.
+        let band_floor = query.auth_band.band_floor(leader_score, gateway_state.score);
         let in_band_now = eligible && gateway_state.score >= band_floor;
 
         if in_band_now && !was_in_band {
@@ -398,7 +399,7 @@ fn auth_band_event(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analytics::models::{RoutingEventsQuery, ROUTING_EVENTS_BUCKET_MS};
+    use crate::analytics::models::{AuthBandSpec, RoutingEventsQuery, ROUTING_EVENTS_BUCKET_MS};
 
     const BUCKET: i64 = ROUTING_EVENTS_BUCKET_MS;
 
@@ -412,9 +413,9 @@ mod tests {
             payment_method: None,
             min_transaction_count: 10,
             min_score_delta: 0.5,
-            // Test scores are on a 0..100 scale, so a 5-point band is workable.
-            // Some(..) = multi-objective on; None disables auth-band detection.
-            tolerance_pp: Some(5.0),
+            // Test scores are on a 0..100 scale, so a fixed 5-point band is workable.
+            // Fixed(..) = multi-objective on; Off disables auth-band detection.
+            auth_band: AuthBandSpec::Fixed(5.0),
             limit: 50,
             bucket_ms: ROUTING_EVENTS_BUCKET_MS,
         }
@@ -487,13 +488,22 @@ mod tests {
             .all(|event| event.event_type != RoutingEventType::LeaderChanged));
     }
 
-    // 0..1 scores with the auth band on (5pp tolerance), so the noise-based band
-    // hysteresis (z * SE) produces a real deadband rather than collapsing to the
-    // floor as it does for the 0..100 fixtures.
+    // 0..1 scores with a fixed 5pp auth band, used by the band-floor edge tests.
     fn unit_scale_band_query() -> RoutingEventsQuery {
         RoutingEventsQuery {
             min_score_delta: 0.001,
-            tolerance_pp: Some(0.05),
+            auth_band: AuthBandSpec::Fixed(0.05),
+            ..query()
+        }
+    }
+
+    // 0..1 scores with the derived per-candidate noise-floor band (z = 1), the live
+    // decider's cost-independent gate. The band width follows each candidate's SR
+    // variance and the SRV3 bucket size.
+    fn noise_floor_query(bucket_size: i32) -> RoutingEventsQuery {
+        RoutingEventsQuery {
+            min_score_delta: 0.001,
+            auth_band: AuthBandSpec::NoiseFloor { bucket_size, z: 1.0 },
             ..query()
         }
     }
@@ -833,10 +843,10 @@ mod tests {
 
     #[test]
     fn multi_objective_off_suppresses_band_events_but_keeps_leader_changes() {
-        // tolerance_pp = None models a merchant with multi-objective routing off:
+        // AuthBandSpec::Off models a merchant with multi-objective routing off:
         // the band is meaningless, so only the leader flip surfaces.
         let mut mo_off = query();
-        mo_off.tolerance_pp = None;
+        mo_off.auth_band = AuthBandSpec::Off;
         let points = vec![
             point(0, "adyen", 89.0, 100),
             point(0, "stripe", 80.0, 100),
@@ -852,6 +862,47 @@ mod tests {
         assert!(events
             .iter()
             .any(|event| event.event_type == RoutingEventType::LeaderChanged));
+    }
+
+    #[test]
+    fn noise_floor_band_rejects_gateway_beyond_its_derived_floor() {
+        // Leader 0.90, B=125 → stripe's per-candidate floor ≈ 4.17pp. stripe only
+        // climbs to 0.85 (5pp back), so it never enters the band.
+        let points = vec![
+            point(0, "adyen", 0.90, 100),
+            point(0, "stripe", 0.80, 100),
+            point(BUCKET, "adyen", 0.90, 100),
+            point(BUCKET, "stripe", 0.85, 100),
+        ];
+        let events = detect_routing_events(&points, &noise_floor_query(125), 0);
+        assert!(
+            entered_band_events(&events).is_empty(),
+            "5pp gap exceeds the ~4.2pp noise floor at B=125; stripe stays out"
+        );
+    }
+
+    #[test]
+    fn larger_bucket_tightens_noise_floor_band() {
+        // A 0.88 candidate 2pp behind a 0.90 leader is inside the band at B=125
+        // (floor ≈ 3.96pp) but outside it at B=2000 (floor ≈ 1.0pp): the noise floor
+        // scales as 1/√B, exactly like the live decider. This is the lever that
+        // actually tightens the band — not margin (see scratch/deriving-routing-config).
+        let points = vec![
+            point(0, "adyen", 0.90, 100),
+            point(0, "stripe", 0.80, 100),
+            point(BUCKET, "adyen", 0.90, 100),
+            point(BUCKET, "stripe", 0.88, 100),
+        ];
+        let small_bucket = detect_routing_events(&points, &noise_floor_query(125), 0);
+        let entered = entered_band_events(&small_bucket);
+        assert_eq!(entered.len(), 1, "enters the band at B=125");
+        assert_eq!(entered[0].gateway, "stripe");
+
+        let large_bucket = detect_routing_events(&points, &noise_floor_query(2000), 0);
+        assert!(
+            entered_band_events(&large_bucket).is_empty(),
+            "the same 2pp gap is outside the tighter B=2000 floor"
+        );
     }
 
     #[test]

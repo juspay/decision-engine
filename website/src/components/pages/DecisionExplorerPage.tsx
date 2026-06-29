@@ -4398,7 +4398,7 @@ function MultiObjectiveDecisionPanel({ info }: { info: MultiObjectiveInfo }) {
             </div>
             <div className="text-right">
               <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
-                Tolerance band
+                Auth band (derived)
               </span>
               <p className="font-mono text-sm font-semibold text-slate-800 dark:text-slate-100">
                 {info.tolerancePp.toFixed(2)} pp
@@ -4427,7 +4427,7 @@ function MultiObjectiveDecisionPanel({ info }: { info: MultiObjectiveInfo }) {
               )}
               {info.chosen && (
                 <MultiObjectivePspCard
-                  label={isCostWin ? 'Chosen by cost' : 'Final pick'}
+                  label={isCostWin ? 'Chosen by EV' : 'Final pick'}
                   summary={info.chosen}
                   emphasis={isCostWin}
                 />

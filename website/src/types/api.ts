@@ -31,6 +31,9 @@ export interface MultiObjectiveInfo {
   chosen: PspSummary | null
   costSavedBps: number | null
   qualifiedCount: number
+  /// Merchant margin (fraction of ticket) the decider applied. Used to value the
+  /// auth-rate a cost override risked and net it against the fee saved.
+  margin: number
 }
 
 export type RoutingAlgorithmName =
@@ -205,7 +208,7 @@ export interface SRConfigData {
   defaultLowerResetFactor: number | null
   defaultUpperResetFactor: number | null
   defaultGatewayExtraScore: number | null
-  defaultTolerancePp: number | null
+  margin: number | null
   subLevelInputConfig: SubLevelConfig[] | null
 }
 

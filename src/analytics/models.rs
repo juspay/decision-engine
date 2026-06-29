@@ -614,6 +614,54 @@ pub struct RoutingEventsResponse {
     pub generated_at_ms: i64,
 }
 
+/// How the historical routing-events detector computes the auth band a non-leader
+/// must sit within to count as cost-eligible. Mirrors the live decider's band so the
+/// visualized crossings line up with what the decider actually applied.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AuthBandSpec {
+    /// Multi-objective routing is off for the merchant — the band is meaningless, so
+    /// only `LeaderChanged` events fire.
+    Off,
+    /// Per-candidate noise floor derived from the SRV3 bucket size, matching the live
+    /// decider's cost-independent gate floor `z·√(σ_leader² + σ_cand²)` with
+    /// `σ = √(p̂(1−p̂)/B)` (scores are the SR estimates p̂ on the 0..1 scale). This is
+    /// the dominant, always-on component of the live band; the economic (cost-driven)
+    /// widening can't be reconstructed from the historical score series, so it is
+    /// omitted here — making this a conservative (never wider than live) band.
+    NoiseFloor { bucket_size: i32, z: f64 },
+    /// Fixed half-width on the 0..1 SR scale — an explicit caller override (and the
+    /// shape the unit tests pin behavior against).
+    Fixed(f64),
+}
+
+impl AuthBandSpec {
+    /// Whether auth-band detection runs at all (multi-objective on).
+    pub fn is_on(&self) -> bool {
+        !matches!(self, AuthBandSpec::Off)
+    }
+
+    /// Minimum score (0..1) a candidate must hold to be inside the leader's auth band.
+    /// `NoiseFloor` widens the band per candidate with that candidate's own SR
+    /// variance, so a noisier (lower-SR) gateway gets a slightly wider band — exactly
+    /// like the live decider's `gate_for`. Not meaningful for `Off` (callers gate on
+    /// [`AuthBandSpec::is_on`] first).
+    pub fn band_floor(&self, leader_score: f64, candidate_score: f64) -> f64 {
+        match self {
+            AuthBandSpec::Off => f64::NEG_INFINITY,
+            AuthBandSpec::Fixed(half_width) => leader_score - half_width,
+            AuthBandSpec::NoiseFloor { bucket_size, z } => {
+                let std_err = |p: f64| {
+                    let b = (*bucket_size).max(1) as f64;
+                    (p * (1.0 - p) / b).max(0.0).sqrt()
+                };
+                let floor =
+                    z * (std_err(leader_score).powi(2) + std_err(candidate_score).powi(2)).sqrt();
+                leader_score - floor
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RoutingEventsQuery {
     pub merchant_id: String,
@@ -624,12 +672,9 @@ pub struct RoutingEventsQuery {
     pub payment_method: Option<String>,
     pub min_transaction_count: i64,
     pub min_score_delta: f64,
-    /// Auth-band half-width below the leader's score; non-leaders at or above
-    /// `leader_score - tolerance_pp` are in the band, on the same 0..1 SR scale.
-    /// `None` means multi-objective routing is off for the merchant, so no auth-band
-    /// events are emitted (only `LeaderChanged`). When `Some`, it mirrors the live
-    /// decider's band — the merchant's configured `default_tolerance_pp`.
-    pub tolerance_pp: Option<f64>,
+    /// How the auth band is computed for this scan (off / per-candidate noise floor /
+    /// fixed override). Resolved by the handler — see `analytics::resolve_auth_band`.
+    pub auth_band: AuthBandSpec,
     pub limit: usize,
     /// Bucket granularity: 5-min default, 1-min opt-in ("bucket=1m").
     /// Event IDs embed bucket_ms, so each granularity has its own stable ID space.
@@ -647,7 +692,7 @@ impl RoutingEventsQuery {
         payment_method: Option<String>,
         min_transaction_count: Option<i64>,
         min_score_delta: Option<f64>,
-        tolerance_pp: Option<f64>,
+        auth_band: AuthBandSpec,
         limit: Option<u32>,
         bucket: Option<String>,
     ) -> Self {
@@ -672,10 +717,9 @@ impl RoutingEventsQuery {
             min_score_delta: min_score_delta
                 .unwrap_or(DEFAULT_ROUTING_EVENTS_MIN_SCORE_DELTA)
                 .max(0.0),
-            // Already resolved by the handler: `Some` when multi-objective is on
-            // (explicit override or the merchant's configured tolerance), `None`
-            // when it is off. Clamp the band width but keep the on/off distinction.
-            tolerance_pp: tolerance_pp.map(|value| value.max(0.0)),
+            // Already resolved by the handler: `Off` when multi-objective is off,
+            // else a per-candidate noise floor (default) or an explicit fixed band.
+            auth_band,
             limit: limit
                 .map(|limit| limit as usize)
                 .unwrap_or(DEFAULT_ROUTING_EVENTS_LIMIT)
