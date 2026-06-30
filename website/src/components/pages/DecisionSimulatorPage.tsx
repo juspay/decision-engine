@@ -48,15 +48,26 @@ const MULTI_OBJECTIVE_PAYMENT_METHODS = ['CREDIT'] as const
 const CARD_PROGRAM_OPTIONS = ['STANDARD', 'PREMIUM'] as const
 const MULTI_OBJECTIVE_CARD_BRANDS = ['VISA', 'MASTERCARD'] as const
 
+// Each variant is one card scenario the seed-cost table prices distinctly. Cost is keyed by
+// issuer region (cardIssuerCountry → us/eu/intl), funding (CREDIT/DEBIT), network, and program
+// — so these span the full Stripe-vs-Adyen spread: Adyen wins big on regulated US debit / EU
+// consumer / international, wins modestly on US standard credit, and loses to Stripe's blended
+// rate on premium-rewards / corporate / amex.
 const MULTI_OBJECTIVE_CLUSTER_VARIANTS: Array<{
-  paymentMethod: 'CREDIT'
-  cardSwitchProvider: 'VISA' | 'MASTERCARD'
-  cardProgram: 'STANDARD' | 'PREMIUM'
+  label: string
+  paymentMethod: 'CREDIT' | 'DEBIT'
+  cardSwitchProvider: 'VISA' | 'MASTERCARD' | 'AMEX'
+  cardProgram: 'STANDARD' | 'PREMIUM' | 'COMMERCIAL'
+  cardIssuerCountry: 'US' | 'EU' | 'INTL'
 }> = [
-  { paymentMethod: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD' },
-  { paymentMethod: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'PREMIUM'  },
-  { paymentMethod: 'CREDIT', cardSwitchProvider: 'MASTERCARD', cardProgram: 'STANDARD' },
-  { paymentMethod: 'CREDIT', cardSwitchProvider: 'MASTERCARD', cardProgram: 'PREMIUM'  },
+  { label: 'US regulated debit', paymentMethod: 'DEBIT',  cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD',   cardIssuerCountry: 'US'   },
+  { label: 'US standard credit', paymentMethod: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD',   cardIssuerCountry: 'US'   },
+  { label: 'US premium rewards', paymentMethod: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'PREMIUM',    cardIssuerCountry: 'US'   },
+  { label: 'US corporate',       paymentMethod: 'CREDIT', cardSwitchProvider: 'MASTERCARD', cardProgram: 'COMMERCIAL', cardIssuerCountry: 'US'   },
+  { label: 'EU consumer debit',  paymentMethod: 'DEBIT',  cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD',   cardIssuerCountry: 'EU'   },
+  { label: 'EU consumer credit', paymentMethod: 'CREDIT', cardSwitchProvider: 'MASTERCARD', cardProgram: 'STANDARD',   cardIssuerCountry: 'EU'   },
+  { label: 'Amex US consumer',   paymentMethod: 'CREDIT', cardSwitchProvider: 'AMEX',       cardProgram: 'PREMIUM',    cardIssuerCountry: 'US'   },
+  { label: 'International card',  paymentMethod: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD',   cardIssuerCountry: 'INTL' },
 ]
 
 interface DebitRoutingFormState {
@@ -124,6 +135,8 @@ interface SimulationResult {
   // Card attributes that seeded the cost lookup (the cluster the decision priced).
   cardNetwork?: string
   cardProgram?: string
+  cardIssuerRegion?: string
+  cardScenario?: string
 }
 
 function formatCurrencyValue(value: number, currency: string): string {
@@ -897,6 +910,14 @@ export function DecisionSimulatorPage() {
   // Cost-pick strategy is fixed to EV-max (the toggle UI is commented out); keep the
   // value so the decide payload still sends it explicitly.
   const [costPickCheapest] = useState(false)
+  // Multi-objective card scenario: 'ALL' rotates the 8 variants round-robin (mixes dimensions
+  // on one chart); a numeric index pins every txn to a single scenario so the SR Trend shows
+  // one clean per-segment bucket instead of an interleaved sawtooth. The run loop reads the
+  // ref (not the captured value) so the scenario can be switched while paused and the rest of
+  // the run continues in the new segment — the dropdown is locked only while actively running.
+  const [multiObjScenario, setMultiObjScenario] = useState<number | 'ALL'>('ALL')
+  const multiObjScenarioRef = useRef<number | 'ALL'>(multiObjScenario)
+  useEffect(() => { multiObjScenarioRef.current = multiObjScenario }, [multiObjScenario])
   const [error, setError] = useState<string | null>(null)
   const txLogRef = useRef<HTMLDivElement>(null)
 
@@ -1727,11 +1748,18 @@ export function DecisionSimulatorPage() {
       // the (mock) cost lookup returns distinct costs and the
       // multi-objective leg has meaningful choices to make. Form values still
       // seed everything else (currency, eligible_gateways, etc).
-      const variant = isMultiObjective ? MULTI_OBJECTIVE_CLUSTER_VARIANTS[i % MULTI_OBJECTIVE_CLUSTER_VARIANTS.length] : null
+      // Read live so a scenario switch made while paused takes effect on resume.
+      const scenarioSel = multiObjScenarioRef.current
+      const variant = isMultiObjective
+        ? (scenarioSel === 'ALL'
+            ? MULTI_OBJECTIVE_CLUSTER_VARIANTS[i % MULTI_OBJECTIVE_CLUSTER_VARIANTS.length]
+            : MULTI_OBJECTIVE_CLUSTER_VARIANTS[scenarioSel])
+        : null
       const paymentMethodType = isMultiObjective ? 'CARD' : form.payment_method_type
       const paymentMethod = variant ? variant.paymentMethod : form.payment_method
       const cardBrand = variant ? variant.cardSwitchProvider : form.card_brand
       const cardProgram = variant ? variant.cardProgram : form.card_program
+      const cardIssuerCountry = variant ? variant.cardIssuerCountry : undefined
       const amtLo = Math.min(amountRangeRef.current.min, amountRangeRef.current.max)
       const amtHi = Math.max(amountRangeRef.current.min, amountRangeRef.current.max)
       const amount = isMultiObjective
@@ -1752,6 +1780,7 @@ export function DecisionSimulatorPage() {
           cardSwitchProvider: cardBrand,
           cardType: paymentMethod,
           cardProgram,
+          ...(cardIssuerCountry && { cardIssuerCountry }),
         },
         eligibleGatewayList: gateways,
         rankingAlgorithm: 'SR_BASED_ROUTING',
@@ -1822,6 +1851,8 @@ export function DecisionSimulatorPage() {
         currency: form.currency,
         cardNetwork: cardBrand,
         cardProgram,
+        cardIssuerRegion: cardIssuerCountry,
+        cardScenario: variant?.label,
       }
     }
 
@@ -2667,6 +2698,25 @@ export function DecisionSimulatorPage() {
                 </div>
               )
             })}
+
+            {form.ranking_algorithm === 'SR_MULTI_OBJECTIVE' && (
+              <div className="flex w-[220px] flex-col gap-1.5">
+                <SurfaceLabel>
+                  <span title="Pin every multi-objective transaction to one card scenario so the SR Trend shows a single clean per-segment bucket. 'All scenarios' rotates through the 8 card types (interleaves dimensions on one chart). Editable while paused — the rest of the run continues in the new segment on resume.">Card scenario</span>
+                </SurfaceLabel>
+                <select
+                  value={String(multiObjScenario)}
+                  disabled={isSimulating && !isPaused}
+                  onChange={e => setMultiObjScenario(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value))}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50 disabled:cursor-not-allowed dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100"
+                >
+                  <option value="ALL">All scenarios (rotate)</option>
+                  {MULTI_OBJECTIVE_CLUSTER_VARIANTS.map((v, idx) => (
+                    <option key={v.label} value={idx}>{v.label}</option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {/* {form.ranking_algorithm === 'SR_MULTI_OBJECTIVE' && (
               <div className="flex flex-col gap-1.5">

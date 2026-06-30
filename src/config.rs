@@ -519,6 +519,14 @@ pub struct SeedCostTier {
     /// Matches `ClusterKey::transaction_currency`. `None` matches any.
     #[serde(default)]
     pub transaction_currency: Option<String>,
+    /// Issuer region bucket — "us", "eu", or "intl" (case-insensitive equality).
+    /// Matches `ClusterKey::card_issuing_country` (which `derive_cluster_key` normalizes
+    /// from the card's issuer country). This is the dimension that separates the otherwise
+    /// indistinguishable USD scenarios at a US merchant — regulated US debit vs EU consumer
+    /// vs international — since they share a currency but differ by who issued the card.
+    /// `None` matches any.
+    #[serde(default)]
+    pub card_issuing_country: Option<String>,
     pub pct_bps: f64,
     pub fixed: f64,
 }

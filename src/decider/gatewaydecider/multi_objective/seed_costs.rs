@@ -57,14 +57,21 @@ fn field(value: &Option<String>) -> &str {
 /// Match specificity of a tier against a cluster, or `None` if it doesn't apply.
 ///
 /// Each field the tier specifies must match the same-named cluster field by case-insensitive
-/// equality. The returned score is `matched_field_count·16 + tiebreak`, so a tier matching
+/// equality. The returned score is `matched_field_count·32 + tiebreak`, so a tier matching
 /// more fields always outranks one matching fewer, and same-count ties resolve by the more
-/// discriminating dimension (currency > network > funding > program). A wildcard (`None`)
-/// field adds nothing.
+/// discriminating dimension (issuer_region > currency > network > funding > program). A
+/// wildcard (`None`) field adds nothing.
 fn tier_score(tier: &SeedCostTier, cluster: &ClusterKey) -> Option<u32> {
     let mut count = 0u32;
     let mut tiebreak = 0u32;
 
+    if let Some(v) = &tier.card_issuing_country {
+        if !v.eq_ignore_ascii_case(field(&cluster.card_issuing_country)) {
+            return None;
+        }
+        count += 1;
+        tiebreak += 16;
+    }
     if let Some(v) = &tier.transaction_currency {
         if !v.eq_ignore_ascii_case(field(&cluster.transaction_currency)) {
             return None;
@@ -94,7 +101,7 @@ fn tier_score(tier: &SeedCostTier, cluster: &ClusterKey) -> Option<u32> {
         tiebreak += 1;
     }
 
-    Some(count * 16 + tiebreak)
+    Some(count * 32 + tiebreak)
 }
 
 /// Resolve the `{pct_bps, fixed}` for a PSP entry against a cluster: the most specific
@@ -176,8 +183,38 @@ mod tests {
             payment_method_type: funding.map(String::from),
             card_type: program.map(String::from),
             transaction_currency: currency.map(String::from),
+            card_issuing_country: None,
             pct_bps,
             fixed,
+        }
+    }
+
+    /// Tier scoped to an issuer region ("us" | "eu" | "intl"), plus optional network/funding.
+    fn region_tier(
+        region: &str,
+        network: Option<&str>,
+        funding: Option<&str>,
+        program: Option<&str>,
+        pct_bps: f64,
+        fixed: f64,
+    ) -> SeedCostTier {
+        SeedCostTier {
+            card_issuing_country: Some(region.to_string()),
+            ..t(network, funding, program, None, pct_bps, fixed)
+        }
+    }
+
+    /// Cluster builder including issuer region.
+    fn cluster_region(
+        region: &str,
+        network: &str,
+        funding: &str,
+        program: &str,
+        amount: f64,
+    ) -> ClusterKey {
+        ClusterKey {
+            card_issuing_country: Some(region.to_string()),
+            ..cluster(network, funding, program, "USD", amount)
         }
     }
 
@@ -320,6 +357,46 @@ mod tests {
         let costs = lookup_seed_costs(&e, &usd_credit("visa", "standard", 44.0), &psps);
         // On a $44 standard card: Adyen ~248 bps vs Stripe ~358 bps blended.
         assert!(costs["adyen"].effective_cost_bps < costs["stripe"].effective_cost_bps);
+    }
+
+    // Issuer region separates same-currency (USD) scenarios at a US merchant: a US-issued
+    // debit (Durbin) prices differently from an EU-issued consumer debit even though both
+    // are USD card-present-style txns. Region is the most discriminating dimension.
+    #[test]
+    fn issuer_region_separates_same_currency_debit() {
+        let adyen = SeedCostEntry {
+            psp: "adyen".to_string(),
+            default: SeedFeeModel { pct_bps: 194.0, fixed: 0.24 },
+            tiers: vec![
+                region_tier("us", Some("visa"), Some("debit"), None, 78.0, 0.30), // ~108bps @ $100
+                region_tier("eu", Some("visa"), Some("debit"), None, 68.0, 0.30), // ~98bps  @ $100
+            ],
+        };
+        let e = vec![adyen];
+        let psps = vec!["adyen".to_string()];
+        let us = lookup_seed_costs(&e, &cluster_region("us", "visa", "debit", "standard", 100.0), &psps);
+        let eu = lookup_seed_costs(&e, &cluster_region("eu", "visa", "debit", "standard", 100.0), &psps);
+        assert!((us["adyen"].effective_cost_bps - 108.0).abs() < 1e-6);
+        assert!((eu["adyen"].effective_cost_bps - 98.0).abs() < 1e-6);
+    }
+
+    // A region-scoped tier (more fields matched) outranks a region-agnostic one of the same
+    // shape, and an `intl` card that matches no US/EU tier falls to the intl tier.
+    #[test]
+    fn intl_card_takes_the_intl_tier() {
+        let adyen = SeedCostEntry {
+            psp: "adyen".to_string(),
+            default: SeedFeeModel { pct_bps: 194.0, fixed: 0.24 },
+            tiers: vec![
+                region_tier("us", Some("visa"), Some("credit"), Some("standard"), 222.0, 0.24),
+                region_tier("intl", None, None, None, 239.0, 0.24), // ~263bps @ $100
+            ],
+        };
+        let e = vec![adyen];
+        let psps = vec!["adyen".to_string()];
+        let intl = lookup_seed_costs(&e, &cluster_region("intl", "visa", "credit", "standard", 100.0), &psps);
+        // US tier requires issuer=us; intl card can't match it, so it lands on the intl tier.
+        assert!((intl["adyen"].effective_cost_bps - 263.0).abs() < 1e-6);
     }
 
     #[test]

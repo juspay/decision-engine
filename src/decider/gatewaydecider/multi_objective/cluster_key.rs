@@ -48,7 +48,6 @@ pub fn derive_cluster_key(txn_detail: &TxnDetail, txn_card_info: &TxnCardInfo) -
             .as_ref()
             .map(|s| s.peek().to_lowercase()),
         mcc: DEFAULT_MCC.to_string(),
-        cross_border_flag: false,
         card_bin: txn_card_info
             .card_isin
             .as_ref()
@@ -59,9 +58,42 @@ pub fn derive_cluster_key(txn_detail: &TxnDetail, txn_card_info: &TxnCardInfo) -
             .as_ref()
             .and_then(|s| non_empty(s))
             .map(|s| s.to_lowercase()),
-        // Issuer country isn't available from txn data yet.
-        card_issuing_country: None,
+        // Normalize the card's issuer country into a pricing region bucket. This is what
+        // separates the same-currency (USD) cost scenarios at a US merchant — regulated US
+        // debit vs EU consumer vs international — that transaction_currency alone cannot.
+        card_issuing_country: txn_card_info
+            .card_issuer_country
+            .as_ref()
+            .and_then(|s| non_empty(s))
+            .map(|s| issuer_region(&s)),
+        // Cross-border = card issued outside the merchant's home region (here: anything that
+        // normalizes to "intl"). Derived for completeness; pricing matches on the region.
+        cross_border_flag: txn_card_info
+            .card_issuer_country
+            .as_ref()
+            .and_then(|s| non_empty(s))
+            .map(|s| issuer_region(&s) == "intl")
+            .unwrap_or(false),
         psp_array: Vec::new(),
+    }
+}
+
+/// Map an issuer country (ISO-3166 alpha-2, or a region bucket already) to the pricing
+/// region the seed-cost tiers key on: "us", "eu", or "intl". Case-insensitive. EU/UK
+/// consumer interchange is capped, so those issuers share the cheap "eu" bucket; the US
+/// merchant's own region is "us"; everything else is cross-border "intl".
+fn issuer_region(raw: &str) -> String {
+    const EU: &[&str] = &[
+        "eu", "gb", "uk", "ie", "de", "fr", "es", "it", "nl", "be", "pt", "at", "fi", "se",
+        "dk", "pl", "cz", "gr", "hu", "ro", "sk", "bg", "hr", "si", "ee", "lv", "lt", "lu",
+        "mt", "cy",
+    ];
+    let v = raw.trim().to_lowercase();
+    match v.as_str() {
+        "us" | "usa" => "us".to_string(),
+        "intl" => "intl".to_string(),
+        s if EU.contains(&s) => "eu".to_string(),
+        _ => "intl".to_string(),
     }
 }
 
