@@ -1,6 +1,7 @@
 pub mod algorithm;
 pub mod cluster_key;
 pub mod hypersense_client;
+pub mod seed_costs;
 
 use serde::{Deserialize, Serialize};
 

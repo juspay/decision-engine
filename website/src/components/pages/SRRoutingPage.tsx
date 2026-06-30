@@ -13,6 +13,7 @@ import { apiPost } from '../../lib/api'
 import { PAYMENT_METHOD_TYPES, PAYMENT_METHODS } from '../../lib/constants'
 import { Plus, Trash2, Eye, PowerOff } from 'lucide-react'
 import { useMerchantFeatures, type KnownFeature } from '../../hooks/useMerchantFeatures'
+import { BucketHedgingTuner } from './BucketHedgingTuner'
 
 // ---- Schema ----
 const subLevelSchema = z.object({
@@ -159,7 +160,7 @@ function CurrentConfigDetails({ config }: { config: SRConfigResponse['config'] }
   )
 }
 
-type SRTab = 'scoring' | 'elimination' | 'cost' | 'flags'
+type SRTab = 'scoring' | 'elimination' | 'cost' | 'tuning' | 'flags'
 
 export function SRRoutingPage() {
   const { merchantId } = useMerchantStore()
@@ -351,7 +352,8 @@ export function SRRoutingPage() {
         <nav className="-mb-px flex gap-1">
           <button type="button" className={tabClass('scoring')} onClick={() => setActiveTab('scoring')}>Scoring</button>
           <button type="button" className={tabClass('elimination')} onClick={() => setActiveTab('elimination')}>Elimination</button>
-          <button type="button" className={tabClass('cost')} onClick={() => setActiveTab('cost')}>Cost Based</button>
+          {/* <button type="button" className={tabClass('cost')} onClick={() => setActiveTab('cost')}>Cost Based</button> */}
+          <button type="button" className={tabClass('tuning')} onClick={() => setActiveTab('tuning')}>Auto-Tuning</button>
           <button type="button" className={tabClass('flags')} onClick={() => setActiveTab('flags')}>Feature Flags</button>
         </nav>
       </div>
@@ -519,6 +521,9 @@ export function SRRoutingPage() {
               </Button>
             </form>
           )}
+
+          {/* ── Auto-Tuning tab ── */}
+          {activeTab === 'tuning' && <BucketHedgingTuner />}
 
           {/* ── Feature Flags tab ── */}
           {activeTab === 'flags' && <SRFeatureFlags merchantId={merchantId} />}

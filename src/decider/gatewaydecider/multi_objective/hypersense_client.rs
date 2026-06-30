@@ -80,6 +80,28 @@ const MIN_PROBE_AMOUNT_REL_GAP: f64 = 0.01;
 /// fit broke (e.g. a non-linear/capped fee), so we discard it and re-probe live.
 const MAX_PLAUSIBLE_PCT_BPS: f64 = 6_500.0;
 
+/// Upper sanity bound (cluster major-currency units) on a solved flat per-transaction
+/// fee. Real fixed fees are cents-scale; a larger value means the solver collapsed a
+/// non-linear/tiered curve (e.g. small-ticket interchange) into a bogus flat fee, which
+/// then explodes at small amounts. Reject and re-probe live instead of caching it.
+const MAX_PLAUSIBLE_FIXED: f64 = 2.0;
+
+/// Max residual (basis points) allowed between a solved model's prediction and an
+/// actual observation before we declare the linear fee model a bad fit. The upstream
+/// fee calc is deterministic, so a truly linear PSP fits to well under 1 bp; anything
+/// larger means the curve isn't `pct + fixed/amount` and must not be cached.
+const FIT_TOLERANCE_BPS: f64 = 1.0;
+
+/// Minimum number of distinct-amount observations required before a fit is trusted.
+/// Two points solve the line but fit themselves exactly; a third is the held-out point
+/// that actually reveals non-linearity (tiered/small-ticket curves), so we never
+/// promote a scenario to `Solved` on two probes alone.
+const MIN_OBSERVATIONS_TO_SOLVE: usize = 3;
+
+/// Cap on pending probe observations retained per scenario while still solving. Bounds
+/// memory if a scenario keeps mis-fitting (never solves); we keep the most recent few.
+const MAX_PENDING_OBSERVATIONS: usize = 6;
+
 /// Amount-independent fee model for one gateway in one scenario. The upstream
 /// `effective_cost_bps` is a blend of a percentage markup and a flat per-txn fee:
 ///
@@ -114,17 +136,19 @@ type Observation = HashMap<String, (bool, f64)>;
 /// Per-scenario cache state.
 #[derive(Clone)]
 enum ScenarioCost {
-    /// One observation so far — we still need a second at a sufficiently different
-    /// amount to separate the percentage and fixed components.
-    Probing { amount: f64, rows: Observation },
+    /// Live observations gathered so far (distinct amounts), not yet a trusted fit. We
+    /// keep accumulating until at least `MIN_OBSERVATIONS_TO_SOLVE` distinct amounts
+    /// agree on one linear model — two to solve it, a third to confirm it.
+    Probing { obs: Vec<(f64, Observation)> },
     /// Solved amount-independent model per gateway; serves all amounts locally.
     Solved(HashMap<String, FeeModel>),
 }
 
 /// Solves the `{pct_bps, fixed}` split for every gateway from two observations at
 /// distinct amounts. Returns `None` (keep probing live) unless *every* gateway is
-/// available in both samples and yields a plausible, non-negative fit — we never
-/// want to pin a half-trusted or implausible model into the cache.
+/// available in both samples and yields a plausible, non-negative fit (within both the
+/// `pct_bps` and `fixed` sanity bounds) — we never want to pin a half-trusted or
+/// implausible model into the cache.
 fn solve_fee_models(
     a1: f64,
     obs1: &Observation,
@@ -165,7 +189,11 @@ fn solve_fee_models(
         } else {
             pct_bps
         };
-        if fixed < 0.0 || pct_bps < 0.0 || pct_bps > MAX_PLAUSIBLE_PCT_BPS {
+        if fixed < 0.0
+            || fixed > MAX_PLAUSIBLE_FIXED
+            || pct_bps < 0.0
+            || pct_bps > MAX_PLAUSIBLE_PCT_BPS
+        {
             return None;
         }
         models.insert(
@@ -180,12 +208,68 @@ fn solve_fee_models(
     Some(models)
 }
 
+/// Fits a per-gateway fee model from accumulated live observations *and validates it*.
+///
+/// A two-point solve fits its own two points exactly, so it can never reveal that the
+/// real cost curve is non-linear (tiered/small-ticket interchange) — it just collapses
+/// the curvature into a bogus flat fee that explodes at small amounts. To catch that we
+/// require a held-out third point: solve the line from the two most-separated amounts
+/// (largest `inv_delta`, least noise amplification), then require *every* observation —
+/// including the ones not used to solve — to fall within `FIT_TOLERANCE_BPS` of the
+/// model. Returns `None` (keep probing live) until at least `MIN_OBSERVATIONS_TO_SOLVE`
+/// distinct amounts agree on a single linear model.
+fn fit_from_observations(obs: &[(f64, Observation)]) -> Option<HashMap<String, FeeModel>> {
+    if obs.len() < MIN_OBSERVATIONS_TO_SOLVE {
+        return None;
+    }
+
+    // Solve from the two most-separated amounts; the rest are the validation set.
+    let lo = obs
+        .iter()
+        .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))?;
+    let hi = obs
+        .iter()
+        .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))?;
+    let models = solve_fee_models(lo.0, &lo.1, hi.0, &hi.1)?;
+
+    // Reject unless the solved model reproduces every observation (the held-out points
+    // are the real test) for every gateway, within tolerance and still available.
+    for (amount, rows) in obs {
+        for (gw, model) in &models {
+            let &(avail, actual) = rows.get(gw)?;
+            if !avail || (model.effective_cost_bps(*amount) - actual).abs() > FIT_TOLERANCE_BPS {
+                return None;
+            }
+        }
+    }
+    Some(models)
+}
+
+/// Adds a fresh observation to a scenario's pending probe set. A sample at a near-equal
+/// amount (within `MIN_PROBE_AMOUNT_REL_GAP`) *replaces* the existing one — repeated
+/// amounts refresh rather than crowd out the distinct probes a fit needs — and the
+/// buffer is capped at the most recent `MAX_PENDING_OBSERVATIONS` distinct amounts.
+fn upsert_observation(obs: &mut Vec<(f64, Observation)>, amount: f64, rows: Observation) {
+    if let Some(slot) = obs
+        .iter_mut()
+        .find(|(a, _)| (*a - amount).abs() / a.max(amount).max(1.0) < MIN_PROBE_AMOUNT_REL_GAP)
+    {
+        slot.1 = rows;
+        return;
+    }
+    obs.push((amount, rows));
+    if obs.len() > MAX_PENDING_OBSERVATIONS {
+        obs.remove(0);
+    }
+}
+
 /// Temporary, best-effort in-process cache that fronts the fee-rate endpoint by
 /// caching the *fee model* (percentage + fixed split), not the per-amount response.
 ///
-/// Conservative by construction: a scenario is only served from cache once its
-/// split has been solved from two consistent live observations; transient failures
-/// and partial/unavailable scenarios are never cached, and entries expire past TTL.
+/// Conservative by construction: a scenario is only served from cache once its split
+/// has been solved *and validated* against a held-out observation (≥3 consistent live
+/// samples; see `fit_from_observations`); transient failures and partial/unavailable
+/// scenarios are never cached, and entries expire past TTL.
 struct CostCache {
     data: Mutex<HashMap<String, (ScenarioCost, Instant)>>,
     max_size: usize,
@@ -227,42 +311,44 @@ impl CostCache {
         }
     }
 
-    /// Folds a fresh live observation into the cache: solves and stores the model if
-    /// a usable prior probe (distinct amount, same scenario) exists, otherwise keeps
-    /// this observation as the pending probe. Skips silently on lock contention and
-    /// never downgrades an already-solved entry.
+    /// Folds a fresh live observation into the cache: appends it to the scenario's
+    /// pending probes and promotes to a solved model only once a validated fit emerges
+    /// (see `fit_from_observations`). Skips silently on lock contention and never
+    /// downgrades an already-solved entry.
     fn record(&self, key: &str, amount: f64, rows: Observation, ttl: Duration) {
         let Ok(mut data) = self.data.try_lock() else {
             return;
         };
         let now = Instant::now();
 
-        // Try to solve against an existing, unexpired probe for this scenario.
-        if let Some((state, stored_at)) = data.get(key) {
+        // Fold into an existing, unexpired probe set for this scenario.
+        if let Some((state, stored_at)) = data.get_mut(key) {
             if stored_at.elapsed() < ttl {
                 match state {
                     // Already solved — leave it; it serves all amounts.
                     ScenarioCost::Solved(_) => return,
-                    ScenarioCost::Probing {
-                        amount: prior_amount,
-                        rows: prior_rows,
-                    } => {
-                        if let Some(models) =
-                            solve_fee_models(*prior_amount, prior_rows, amount, &rows)
-                        {
-                            data.insert(key.to_string(), (ScenarioCost::Solved(models), now));
-                            return;
+                    ScenarioCost::Probing { obs } => {
+                        upsert_observation(obs, amount, rows);
+                        if let Some(models) = fit_from_observations(obs) {
+                            *state = ScenarioCost::Solved(models);
+                            *stored_at = now;
                         }
+                        return;
                     }
                 }
             }
         }
 
-        // No usable prior probe yet — store this observation as the pending probe.
+        // Fresh scenario (or the prior one expired) — start a new probe set.
         self.evict_if_full(&mut data, key);
         data.insert(
             key.to_string(),
-            (ScenarioCost::Probing { amount, rows }, now),
+            (
+                ScenarioCost::Probing {
+                    obs: vec![(amount, rows)],
+                },
+                now,
+            ),
         );
     }
 
@@ -407,6 +493,12 @@ pub async fn lookup_costs(
 
     let app_state = get_tenant_app_state().await;
     let cfg = &app_state.config.hypersense;
+
+    // Simulator / offline mode: serve realistic IC++-vs-blended costs from the config seed
+    // table, skipping the token fetch, network round-trip, and the live model cache.
+    if cfg.use_seed_costs {
+        return super::seed_costs::lookup_seed_costs(&cfg.seed_costs, cluster, psps);
+    }
 
     // The request we'd send doubles as the (amount-independent) cache key, so build
     // it up front. `amount` is read separately — it parameterises the cached fee
@@ -588,5 +680,74 @@ mod tests {
         ]);
         let o2 = HashMap::from([("stripe".to_string(), (true, c2))]);
         assert!(solve_fee_models(a1, &o1, a2, &o2).is_none());
+    }
+
+    // A solved `fixed` past the sanity cap is rejected. This is the exact failure that
+    // mis-priced stripe: a non-linear curve collapsed into a multi-dollar flat fee that
+    // exploded at small amounts. Two clean points implying fixed = $3.30 must not solve.
+    #[test]
+    fn rejects_implausibly_large_fixed_fee() {
+        let (a1, c1) = obs(768.0, 275.0, 3.30);
+        let (a2, c2) = obs(374.0, 275.0, 3.30);
+        let o1 = HashMap::from([("stripe".to_string(), (true, c1))]);
+        let o2 = HashMap::from([("stripe".to_string(), (true, c2))]);
+        assert!(
+            solve_fee_models(a1, &o1, a2, &o2).is_none(),
+            "fixed = $3.30 exceeds MAX_PLAUSIBLE_FIXED and must be rejected"
+        );
+    }
+
+    // One live observation at one amount: a single point can't separate pct from fixed,
+    // so the fit must keep probing.
+    fn pt(amount: f64, pct: f64, fixed: f64) -> (f64, Observation) {
+        (
+            amount,
+            HashMap::from([("stripe".to_string(), (true, pct + (fixed / amount) * 10_000.0))]),
+        )
+    }
+
+    // Three consistent linear samples confirm a single model, which then reproduces the
+    // cost at the small amount (44) that the old two-point cache got catastrophically
+    // wrong (1025 bps vs the true 321 bps).
+    #[test]
+    fn fit_accepts_three_consistent_linear_points() {
+        let obs = vec![pt(768.0, 287.0, 0.15), pt(374.0, 287.0, 0.15), pt(120.0, 287.0, 0.15)];
+        let models = fit_from_observations(&obs).expect("consistent linear samples should solve");
+        let m = models.get("stripe").unwrap();
+        let expected = 287.0 + (0.15 / 44.0) * 10_000.0; // ≈ 321.09
+        assert!(
+            (m.effective_cost_bps(44.0) - expected).abs() < 1e-6,
+            "got {} expected {}",
+            m.effective_cost_bps(44.0),
+            expected
+        );
+    }
+
+    // The core fix: a held-out third point reveals non-linearity that a two-point solve
+    // cannot. Extremes (120, 768) solve a clean line; the middle sample is bumped off it
+    // (small-ticket-style curvature), so the fit is rejected and we fall back to live.
+    #[test]
+    fn fit_rejects_nonlinear_held_out_point() {
+        let mut middle = pt(374.0, 287.0, 0.15);
+        // Bump the middle observation 5 bps off the line through the two extremes.
+        middle
+            .1
+            .insert("stripe".to_string(), (true, 287.0 + (0.15 / 374.0) * 10_000.0 + 5.0));
+        let obs = vec![pt(768.0, 287.0, 0.15), middle, pt(120.0, 287.0, 0.15)];
+        assert!(
+            fit_from_observations(&obs).is_none(),
+            "5 bps non-linearity at the held-out point must reject the fit"
+        );
+    }
+
+    // Two points alone are never enough now — a third confirming sample is required so a
+    // line (which fits its own two points exactly) can't be trusted on its own.
+    #[test]
+    fn fit_requires_a_confirming_third_point() {
+        let obs = vec![pt(768.0, 287.0, 0.15), pt(374.0, 287.0, 0.15)];
+        assert!(
+            fit_from_observations(&obs).is_none(),
+            "two points must keep probing until a third confirms the model"
+        );
     }
 }

@@ -74,6 +74,54 @@ username = "hypersense_user"
 password = "hypersense_pass"
 token_ttl_secs = 82800
 cost_cache_ttl_secs = 300    # in-process fee-rate cache; 0 disables, default 5 min
+use_seed_costs = true        # simulator: serve local IC++ (Adyen) vs blended (Stripe) costs instead of the live API
+
+# Simulator seed cost models (used only when use_seed_costs = true). Each PSP has a
+# `default` fee and optional `tiers` overriding it by card scenario. A tier may scope on any
+# of these (each matches the same-named cluster field by case-insensitive equality; omit =
+# wildcard):
+#   card_network         e.g. "visa", "mastercard", "discover", "amex", "jcb"
+#   payment_method_type  "credit" | "debit"
+#   card_type            e.g. "standard", "premium", "ultra_premium", "commercial"
+#   transaction_currency e.g. "USD", "EUR"   (also our stand-in for region: USD=US, EUR=EEA)
+# The tier matching the MOST fields wins; ties break by currency > network > funding >
+# program. pct_bps is the percentage fee in basis points; fixed is the flat per-txn fee in
+# the major currency unit. The Adyen figures are all-in IC++ (interchange + scheme + markup).
+#
+# Not modelled yet (need issuer-country / BIN enrichment in derive_cluster_key, which today
+# leaves card_issuing_country = None and cross_border_flag = false): a true region dimension,
+# cross-border surcharges, and US regulated-vs-unregulated debit — so US debit below is a
+# single blended estimate. Add a PSP with another [[hypersense.seed_costs]] block.
+[[hypersense.seed_costs]]
+psp = "stripe"                                 # blended: one flat rate for every card
+default = { pct_bps = 290.0, fixed = 0.30 }    # 2.9% + $0.30
+
+[[hypersense.seed_costs]]
+psp = "adyen"                                  # Interchange++: varies by card scenario
+default = { pct_bps = 194.0, fixed = 0.24 }    # global fallback = US visa credit standard (1.94% + $0.24)
+tiers = [
+  # --- United States (USD) -------------------------------------------------------------
+  # Visa
+  { card_network = "visa", transaction_currency = "USD", card_type = "standard",      pct_bps = 194.0, fixed = 0.24 },  # 1.94%
+  { card_network = "visa", transaction_currency = "USD", card_type = "premium",       pct_bps = 254.0, fixed = 0.24 },  # 2.54% (Signature)
+  # Mastercard
+  { card_network = "mastercard", transaction_currency = "USD", card_type = "standard",      pct_bps = 190.0, fixed = 0.24 },  # 1.90% (Core)
+  { card_network = "mastercard", transaction_currency = "USD", card_type = "premium",       pct_bps = 250.0, fixed = 0.24 },  # 2.50% (World)
+
+
+  # --- EEA (EUR) — consumer interchange-capped; commercial exempt ----------------------
+  # Visa
+  { card_network = "visa", transaction_currency = "EUR", payment_method_type = "debit",  pct_bps = 80.0, fixed = 0.11 },  # 0.80%
+  { card_network = "visa", transaction_currency = "EUR", payment_method_type = "credit", pct_bps = 90.0, fixed = 0.11 },  # 0.90% (consumer cap)
+  { card_network = "visa", transaction_currency = "EUR", payment_method_type = "credit", card_type = "commercial", pct_bps = 235.0, fixed = 0.11 },  # 2.35% (exempt)
+  # Mastercard
+  { card_network = "mastercard", transaction_currency = "EUR", payment_method_type = "debit",  pct_bps = 80.0, fixed = 0.11 },  # 0.80%
+  { card_network = "mastercard", transaction_currency = "EUR", payment_method_type = "credit", pct_bps = 90.0, fixed = 0.11 },  # 0.90% (consumer cap)
+  { card_network = "mastercard", transaction_currency = "EUR", payment_method_type = "credit", card_type = "commercial", pct_bps = 240.0, fixed = 0.11 },  # 2.40% (exempt)
+
+  # --- Global (network-only fallbacks; currency-agnostic) ------------------------------
+  { card_network = "jcb", pct_bps = 275.0, fixed = 0.13 },  # 2.75% blended (cross-border-ish)
+]
 
 [tenant_secrets]
 public = { schema = "public" }

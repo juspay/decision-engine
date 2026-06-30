@@ -75,6 +75,14 @@ interface DebitRoutingFormState {
 
 interface SimulationConfig {
   totalPayments: string
+  // Number of transactions fired concurrently per batch. 1 = the original strictly
+  // sequential loop; higher values send more feedback per unit time so gateway scores
+  // move faster. Read once at run start (see `runSimulation`).
+  tps: number
+  // Inclusive amount range each multi-objective transaction's amount is drawn from
+  // (uniform). Drives how much the fixed-fee term shows up in cost.
+  minAmount: number
+  maxAmount: number
 }
 
 interface GatewaySimConfig {
@@ -113,6 +121,9 @@ interface SimulationResult {
   margin?: number | null
   amount: number
   currency: string
+  // Card attributes that seeded the cost lookup (the cluster the decision priced).
+  cardNetwork?: string
+  cardProgram?: string
 }
 
 function formatCurrencyValue(value: number, currency: string): string {
@@ -228,6 +239,18 @@ const DEFAULT_DEBIT_FORM: DebitRoutingFormState = {
 // and stops at this many transactions.
 const SIMULATION_TOTAL_PAYMENTS = '5000'
 
+// Default / ceiling for the parallel-requests (TPS) lever. 1 preserves the original
+// sequential cadence; the ceiling caps how many decide+feedback round-trips we fan out
+// at once so a slider drag can't flood the backend.
+const DEFAULT_SIMULATION_TPS = 1
+const MAX_SIMULATION_TPS = 50
+
+// Bounds + defaults for the per-transaction amount range slider (multi-objective sim).
+const SIMULATION_AMOUNT_BOUND_MIN = 1
+const SIMULATION_AMOUNT_BOUND_MAX = 1000
+const DEFAULT_SIMULATION_MIN_AMOUNT = 10
+const DEFAULT_SIMULATION_MAX_AMOUNT = 200
+
 // Fallback auth band (in percentage points) below the leader's SR within which gateways
 // are SR-equivalent and become eligible for cost-based routing. The live decider no longer
 // reads a static tolerance — it derives the band per-txn as
@@ -238,6 +261,9 @@ const DEFAULT_COST_ROUTING_TOLERANCE_PP = 0.5
 
 const DEFAULT_SIMULATION_CONFIG: SimulationConfig = {
   totalPayments: SIMULATION_TOTAL_PAYMENTS,
+  tps: DEFAULT_SIMULATION_TPS,
+  minAmount: DEFAULT_SIMULATION_MIN_AMOUNT,
+  maxAmount: DEFAULT_SIMULATION_MAX_AMOUNT,
 }
 
 
@@ -822,6 +848,12 @@ export function DecisionSimulatorPage() {
   const [form, setForm] = useState<FormState>(initialState.form)
 
   const [simulationConfig, setSimulationConfig] = useState<SimulationConfig>(initialState.simulationConfig)
+  // Live amount range: the run loop reads this ref (not the captured config) so dragging
+  // the Amount-range slider mid-run takes effect on the next transaction.
+  const amountRangeRef = useRef({ min: simulationConfig.minAmount, max: simulationConfig.maxAmount })
+  useEffect(() => {
+    amountRangeRef.current = { min: simulationConfig.minAmount, max: simulationConfig.maxAmount }
+  }, [simulationConfig.minAmount, simulationConfig.maxAmount])
   const [errorInfo, setErrorInfo] = useState<ErrorInfoState>(initialState.errorInfo)
   const [gatewaySimConfigs, setGatewaySimConfigs] = useState<Record<string, GatewaySimConfig>>(initialState.gatewaySimConfigs)
   const gatewaySimConfigsRef = useRef(gatewaySimConfigs)
@@ -862,7 +894,9 @@ export function DecisionSimulatorPage() {
   // Comparison lever: when on, the multi-objective post-step picks the cheapest PSP in the
   // auth band instead of the highest-EV one. Lets the run show how "band alone" (cheapest)
   // trades more cost saved for more auth value risked vs the default EV pick.
-  const [costPickCheapest, setCostPickCheapest] = useState(false)
+  // Cost-pick strategy is fixed to EV-max (the toggle UI is commented out); keep the
+  // value so the decide payload still sends it explicitly.
+  const [costPickCheapest] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const txLogRef = useRef<HTMLDivElement>(null)
 
@@ -1677,139 +1711,178 @@ export function DecisionSimulatorPage() {
 
     const isMultiObjective = form.ranking_algorithm === 'SR_MULTI_OBJECTIVE'
 
+    // Parallel-requests (TPS) lever: how many transactions we fan out per batch. Read
+    // once here so a mid-run slider change can't reshape an in-flight run. 1 reproduces
+    // the original strictly-sequential loop.
+    const concurrency = Math.max(1, Math.min(MAX_SIMULATION_TPS, Math.round(simulationConfig.tps) || 1))
+
+    // One full transaction (decide → score → optional smart retry). Returns the row to
+    // append; throws on a backend error so the batch can tally it. `drawSuccess` mutates
+    // a shared accumulator, but each call is synchronous (no await inside), so concurrent
+    // tasks still update it atomically — error diffusion stays intact.
+    const runTxn = async (i: number): Promise<SimulationResult> => {
+      const paymentId = `sim_${Date.now()}_${i}`
+
+      // Under SR_MULTI_OBJECTIVE, vary the cluster and amount per payment so
+      // the (mock) cost lookup returns distinct costs and the
+      // multi-objective leg has meaningful choices to make. Form values still
+      // seed everything else (currency, eligible_gateways, etc).
+      const variant = isMultiObjective ? MULTI_OBJECTIVE_CLUSTER_VARIANTS[i % MULTI_OBJECTIVE_CLUSTER_VARIANTS.length] : null
+      const paymentMethodType = isMultiObjective ? 'CARD' : form.payment_method_type
+      const paymentMethod = variant ? variant.paymentMethod : form.payment_method
+      const cardBrand = variant ? variant.cardSwitchProvider : form.card_brand
+      const cardProgram = variant ? variant.cardProgram : form.card_program
+      const amtLo = Math.min(amountRangeRef.current.min, amountRangeRef.current.max)
+      const amtHi = Math.max(amountRangeRef.current.min, amountRangeRef.current.max)
+      const amount = isMultiObjective
+        ? Math.floor(amtLo + Math.random() * (amtHi - amtLo + 1)) // configurable amount range
+        : (parseFloat(form.amount) || 1000)
+
+      const decideRes = await apiPost<DecideGatewayResponse>('/decide-gateway', {
+        merchantId: effectiveMerchantId,
+        paymentInfo: {
+          paymentId: paymentId,
+          amount,
+          currency: form.currency,
+          paymentType: 'ORDER_PAYMENT',
+          paymentMethodType,
+          paymentMethod,
+          authType: form.auth_type,
+          cardBrand,
+          cardSwitchProvider: cardBrand,
+          cardType: paymentMethod,
+          cardProgram,
+        },
+        eligibleGatewayList: gateways,
+        rankingAlgorithm: 'SR_BASED_ROUTING',
+        enableMultiObjective: isMultiObjective,
+        ...(isMultiObjective && { costPickCheapest }),
+        eliminationEnabled: eliminationEnabled,
+      })
+
+      const decidedGateway = decideRes.decided_gateway
+      const isSuccess = drawSuccess(decidedGateway)
+      const failureMode = getGwFailureMode(decidedGateway)
+      const outcome: TransactionOutcome = isSuccess ? 'CHARGED' : (failureMode === 'timeout' ? 'PENDING_VBV' : 'FAILURE')
+
+      const scoreRes = await apiPost<UpdateScoreResponse>('/update-gateway-score', {
+        merchantId: effectiveMerchantId,
+        gateway: decidedGateway,
+        gatewayReferenceId: null,
+        status: outcome,
+        paymentId: paymentId,
+        enforceDynamicRoutingFailure: null,
+        ...(outcome === 'FAILURE' && { errorInfo: buildSimErrorInfo(decidedGateway) }),
+      })
+
+      let retryGateway: string | undefined
+      let retryStatus: TransactionOutcome | undefined
+
+      if (
+        smartRetryEnabled &&
+        gsmScoringFilterEnabled &&
+        outcome === 'FAILURE' &&
+        scoreRes.gsm_info?.decision === 'retry' &&
+        decideRes.fallback_gateways.length > 0
+      ) {
+        retryGateway = decideRes.fallback_gateways[0]
+        const retrySuccess = drawSuccess(retryGateway)
+        const retryFailureMode = getGwFailureMode(retryGateway)
+        retryStatus = retrySuccess ? 'CHARGED' : (retryFailureMode === 'timeout' ? 'PENDING_VBV' : 'FAILURE')
+        await apiPost('/update-gateway-score', {
+          merchantId: effectiveMerchantId,
+          gateway: retryGateway,
+          gatewayReferenceId: null,
+          status: retryStatus,
+          paymentId: paymentId,
+          enforceDynamicRoutingFailure: null,
+          isSmartRetry: true,
+          ...(retryStatus === 'FAILURE' && { errorInfo: buildSimErrorInfo(retryGateway) }),
+        })
+      }
+
+      const mo = decideRes.multi_objective_info ?? null
+      return {
+        paymentId,
+        decidedGateway,
+        status: outcome,
+        timestamp: new Date().toISOString(),
+        routingApproach: decideRes.routing_approach ?? null,
+        gatewayPriorityMap: decideRes.gateway_priority_map ?? null,
+        retryGateway,
+        retryStatus,
+        costSavedBps: mo?.costSavedBps ?? null,
+        costWon: mo?.outcome === 'COST_WON',
+        authWon: mo?.outcome === 'AUTH_WON',
+        tolerancePp: mo?.tolerancePp ?? null,
+        headAuthRate: mo?.srHead?.authRate ?? null,
+        chosenAuthRate: mo?.chosen?.authRate ?? null,
+        margin: mo?.margin ?? null,
+        amount,
+        currency: form.currency,
+        cardNetwork: cardBrand,
+        cardProgram,
+      }
+    }
+
     try {
-      for (let i = 0; i < total; i++) {
+      for (let start = 0; start < total; start += concurrency) {
         if (simulationAbortRef.current) break
         // Idle here while paused (loop stays alive, state preserved); a Stop still
-        // breaks out. The in-flight transaction always completes before we pause.
+        // breaks out. The in-flight batch always completes before we pause.
         while (simulationPausedRef.current && !simulationAbortRef.current) {
           await new Promise(resolve => setTimeout(resolve, 120))
         }
         if (simulationAbortRef.current) break
-        const paymentId = `sim_${Date.now()}_${i}`
 
-        // Under SR_MULTI_OBJECTIVE, vary the cluster and amount per payment so
-        // the (mock) cost lookup returns distinct costs and the
-        // multi-objective leg has meaningful choices to make. Form values still
-        // seed everything else (currency, eligible_gateways, etc).
-        const variant = isMultiObjective ? MULTI_OBJECTIVE_CLUSTER_VARIANTS[i % MULTI_OBJECTIVE_CLUSTER_VARIANTS.length] : null
-        const paymentMethodType = isMultiObjective ? 'CARD' : form.payment_method_type
-        const paymentMethod = variant ? variant.paymentMethod : form.payment_method
-        const cardBrand = variant ? variant.cardSwitchProvider : form.card_brand
-        const cardProgram = variant ? variant.cardProgram : form.card_program
-        const amount = isMultiObjective
-          ? Math.floor(10 + Math.random() * 991)
-          : (parseFloat(form.amount) || 1000)
+        const chunk = Math.min(concurrency, total - start)
+        const isLastChunk = start + chunk >= total
+        // Fire the batch concurrently; settle each task so one bad txn can't sink the
+        // rest, then append rows in index order so the result stream stays sequential.
+        const settled = await Promise.all(
+          Array.from({ length: chunk }, (_, k) =>
+            runTxn(start + k).then(
+              (r): { ok: true; row: SimulationResult } => ({ ok: true, row: r }),
+              (e: unknown): { ok: false; error: unknown } => ({ ok: false, error: e }),
+            ),
+          ),
+        )
 
-        try {
-          const decideRes = await apiPost<DecideGatewayResponse>('/decide-gateway', {
-            merchantId: effectiveMerchantId,
-            paymentInfo: {
-              paymentId: paymentId,
-              amount,
-              currency: form.currency,
-              paymentType: 'ORDER_PAYMENT',
-              paymentMethodType,
-              paymentMethod,
-              authType: form.auth_type,
-              cardBrand,
-              cardSwitchProvider: cardBrand,
-              cardType: paymentMethod,
-              cardProgram,
-            },
-            eligibleGatewayList: gateways,
-            rankingAlgorithm: 'SR_BASED_ROUTING',
-            enableMultiObjective: isMultiObjective,
-            ...(isMultiObjective && { costPickCheapest }),
-            eliminationEnabled: eliminationEnabled,
-          })
-
-          const decidedGateway = decideRes.decided_gateway
-          const isSuccess = drawSuccess(decidedGateway)
-          const failureMode = getGwFailureMode(decidedGateway)
-          const outcome: TransactionOutcome = isSuccess ? 'CHARGED' : (failureMode === 'timeout' ? 'PENDING_VBV' : 'FAILURE')
-
-          const scoreRes = await apiPost<UpdateScoreResponse>('/update-gateway-score', {
-            merchantId: effectiveMerchantId,
-            gateway: decidedGateway,
-            gatewayReferenceId: null,
-            status: outcome,
-            paymentId: paymentId,
-            enforceDynamicRoutingFailure: null,
-            ...(outcome === 'FAILURE' && { errorInfo: buildSimErrorInfo(decidedGateway) }),
-          })
-
-          let retryGateway: string | undefined
-          let retryStatus: TransactionOutcome | undefined
-
-          if (
-            smartRetryEnabled &&
-            gsmScoringFilterEnabled &&
-            outcome === 'FAILURE' &&
-            scoreRes.gsm_info?.decision === 'retry' &&
-            decideRes.fallback_gateways.length > 0
-          ) {
-            retryGateway = decideRes.fallback_gateways[0]
-            const retrySuccess = drawSuccess(retryGateway)
-            const retryFailureMode = getGwFailureMode(retryGateway)
-            retryStatus = retrySuccess ? 'CHARGED' : (retryFailureMode === 'timeout' ? 'PENDING_VBV' : 'FAILURE')
-            await apiPost('/update-gateway-score', {
-              merchantId: effectiveMerchantId,
-              gateway: retryGateway,
-              gatewayReferenceId: null,
-              status: retryStatus,
-              paymentId: paymentId,
-              enforceDynamicRoutingFailure: null,
-              isSmartRetry: true,
-              ...(retryStatus === 'FAILURE' && { errorInfo: buildSimErrorInfo(retryGateway) }),
-            })
+        let chunkSucceeded = 0
+        for (const s of settled) {
+          if (s.ok) {
+            results.push(s.row)
+            chunkSucceeded++
           }
+        }
 
-          const mo = decideRes.multi_objective_info ?? null
-          results.push({
-            paymentId,
-            decidedGateway,
-            status: outcome,
-            timestamp: new Date().toISOString(),
-            routingApproach: decideRes.routing_approach ?? null,
-            gatewayPriorityMap: decideRes.gateway_priority_map ?? null,
-            retryGateway,
-            retryStatus,
-            costSavedBps: mo?.costSavedBps ?? null,
-            costWon: mo?.outcome === 'COST_WON',
-            authWon: mo?.outcome === 'AUTH_WON',
-            tolerancePp: mo?.tolerancePp ?? null,
-            headAuthRate: mo?.srHead?.authRate ?? null,
-            chosenAuthRate: mo?.chosen?.authRate ?? null,
-            margin: mo?.margin ?? null,
-            amount,
-            currency: form.currency,
-          })
-
-          consecutiveErrors = 0
-
-          const now = Date.now()
-          if (now - lastUIUpdate > 150 || i === total - 1) {
-            setSimulationResults([...results])
-            markExplorerRunDataUpdated()
-            lastUIUpdate = now
-          }
-          // Pull fresh Autopilot events ~4x/sec so new actions surface promptly and
-          // in small batches (one big once-a-second flush buried the highlight on a
-          // fast loop). The append-only accumulator makes frequent refreshes safe;
-          // they're naturally floored by the Kafka→ClickHouse flush cadence.
-          if (now - lastEventsRefresh > 250 || i === total - 1) {
-            routingEvents.refresh()
-            lastEventsRefresh = now
-          }
-        } catch (e: unknown) {
+        if (chunkSucceeded === 0) {
+          // A wholly-failed batch counts as one consecutive failure; bail if the backend
+          // looks down, otherwise back off and retry the next batch.
           consecutiveErrors++
           if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-            handleRunError(e, 'batch', `Simulation stopped after ${MAX_CONSECUTIVE_ERRORS} consecutive backend errors. Check that the server is running.`)
+            const firstError = settled.find((s): s is { ok: false; error: unknown } => !s.ok)
+            handleRunError(firstError?.error, 'batch', `Simulation stopped after ${MAX_CONSECUTIVE_ERRORS} consecutive failed batches. Check that the server is running.`)
             return
           }
           await new Promise(resolve => setTimeout(resolve, 1000))
           continue
+        }
+        consecutiveErrors = 0
+
+        const now = Date.now()
+        if (now - lastUIUpdate > 150 || isLastChunk) {
+          setSimulationResults([...results])
+          markExplorerRunDataUpdated()
+          lastUIUpdate = now
+        }
+        // Pull fresh Autopilot events ~4x/sec so new actions surface promptly and
+        // in small batches (one big once-a-second flush buried the highlight on a
+        // fast loop). The append-only accumulator makes frequent refreshes safe;
+        // they're naturally floored by the Kafka→ClickHouse flush cadence.
+        if (now - lastEventsRefresh > 250 || isLastChunk) {
+          routingEvents.refresh()
+          lastEventsRefresh = now
         }
       }
     } finally {
@@ -2143,12 +2216,16 @@ export function DecisionSimulatorPage() {
   // Distinct values that populate the categorical Transaction Log column filters.
   const txFilterOptions = useMemo(() => {
     const gateways = new Set<string>()
+    const networks = new Set<string>()
+    const programs = new Set<string>()
     const routings = new Set<string>()
     const outcomes = new Set<string>()
     const retryGateways = new Set<string>()
     const retryOutcomes = new Set<string>()
     for (const res of deferredSimulationResults) {
       gateways.add(res.decidedGateway)
+      if (res.cardNetwork) networks.add(res.cardNetwork)
+      if (res.cardProgram) programs.add(res.cardProgram)
       routings.add(routingApproachLabel(res.routingApproach))
       if (res.status) outcomes.add(res.status)
       if (res.retryGateway) retryGateways.add(res.retryGateway)
@@ -2157,6 +2234,8 @@ export function DecisionSimulatorPage() {
     const sorted = (s: Set<string>) => Array.from(s).sort()
     return {
       gateways: sorted(gateways),
+      networks: sorted(networks),
+      programs: sorted(programs),
       routings: sorted(routings),
       outcomes: sorted(outcomes),
       retryGateways: sorted(retryGateways),
@@ -2177,6 +2256,8 @@ export function DecisionSimulatorPage() {
     }
     return rows.filter(({ res }) => {
       if (f.gateway && res.decidedGateway !== f.gateway) return false
+      if (f.network && (res.cardNetwork ?? '') !== f.network) return false
+      if (f.program && (res.cardProgram ?? '') !== f.program) return false
       if (f.routing && routingApproachLabel(res.routingApproach) !== f.routing) return false
       if (f.outcome && res.status !== f.outcome) return false
       if (f.retryGateway && (res.retryGateway ?? '') !== f.retryGateway) return false
@@ -2191,6 +2272,22 @@ export function DecisionSimulatorPage() {
       return true
     })
   }, [deferredSimulationResults, txFilters])
+
+  // Column totals over the currently filtered rows, for the Transaction Log footer.
+  // Only the numeric columns are summable: Amount (all rows) and Cost Savings (realized —
+  // same condition as the per-row cell: a charged cost-override with positive savings).
+  const txColumnTotals = useMemo(() => {
+    let amount = 0
+    let savings = 0
+    for (const { res } of txFilteredRows) {
+      amount += res.amount
+      if (res.costWon && res.costSavedBps != null && res.costSavedBps > 0 && res.status === 'CHARGED') {
+        savings += (res.costSavedBps / 10000) * res.amount
+      }
+    }
+    const currency = txFilteredRows[0]?.res.currency || form.currency || 'USD'
+    return { amount, savings, currency, count: txFilteredRows.length }
+  }, [txFilteredRows, form.currency])
 
   const txFiltersActive = Object.values(txFilters).some(Boolean)
 
@@ -2266,13 +2363,28 @@ export function DecisionSimulatorPage() {
   // Multi-objective outcome counts: how often the auth objective vs the cost
   // objective won the routing decision across the run.
   const multiObjectiveStats = useMemo(() => {
-    let authWon = 0
     let costWon = 0
+    let costSuccess = 0
+    let costFailure = 0
+    let srSuccess = 0
+    let srFailure = 0
+    let total = 0
     for (const r of deferredSimulationResults) {
-      if (r.authWon) authWon++
-      if (r.costWon) costWon++
+      total++
+      if (r.costWon) {
+        // Cost override (cost beat the SR head).
+        costWon++
+        if (r.status === 'CHARGED') costSuccess++
+        else costFailure++
+      } else {
+        // Everything else is SR-based — auth-won AND hedged decisions.
+        if (r.status === 'CHARGED') srSuccess++
+        else srFailure++
+      }
     }
-    return { authWon, costWon }
+    // Total = SR-based + cost-based by construction, and matches the Gateway Summary total.
+    const srBased = total - costWon
+    return { srBased, srSuccess, srFailure, costWon, costSuccess, costFailure, total }
   }, [deferredSimulationResults])
 
   const debitNetworkRows = debitResult?.debit_routing_output?.co_badged_card_networks_info || []
@@ -2519,8 +2631,7 @@ export function DecisionSimulatorPage() {
       )}
 
       {activeTab === 'batch' && (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] lg:items-stretch">
-          <div className="flex flex-wrap items-end gap-6 rounded-2xl border border-slate-200 bg-white px-5 py-4 dark:border-[#222226] dark:bg-[#0b0b10]">
+        <div className="flex flex-wrap items-end gap-6 rounded-2xl border border-slate-200 bg-white px-5 py-3 dark:border-[#222226] dark:bg-[#0b0b10]">
             {[
               { key: 'stripe', label: 'Stripe success rate' },
               { key: 'adyen', label: 'Adyen success rate' },
@@ -2557,7 +2668,7 @@ export function DecisionSimulatorPage() {
               )
             })}
 
-            {form.ranking_algorithm === 'SR_MULTI_OBJECTIVE' && (
+            {/* {form.ranking_algorithm === 'SR_MULTI_OBJECTIVE' && (
               <div className="flex flex-col gap-1.5">
                 <SurfaceLabel>Cost pick</SurfaceLabel>
                 <div className="inline-flex rounded-lg border border-slate-200 p-0.5 dark:border-[#1f1f29]" title="Among PSPs the auth band admits: EV-max routes to the highest expected-value PSP (default, safe); Cheapest-in-band routes to the lowest-cost PSP regardless of the auth it risks. Start a fresh run after switching to compare cleanly.">
@@ -2584,7 +2695,80 @@ export function DecisionSimulatorPage() {
                   })}
                 </div>
               </div>
-            )}
+            )} */}
+
+            {/* {(() => {
+              const tps = Math.max(1, Math.min(MAX_SIMULATION_TPS, simulationConfig.tps || 1))
+              const fillPct = ((tps - 1) / (MAX_SIMULATION_TPS - 1)) * 100
+              const tpsColor = '#6366f1'
+              return (
+                <div className="flex w-[190px] flex-col gap-1.5">
+                  <div className="flex items-center justify-between gap-1.5">
+                    <SurfaceLabel>
+                      <span title="Transactions fired concurrently per batch. Higher = more decide+feedback round-trips per second, so gateway scores move faster. Applies on the next run.">Parallel requests</span>
+                    </SurfaceLabel>
+                    <span className="text-xs font-semibold tabular-nums text-slate-600 dark:text-slate-300">{tps}×</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={1}
+                    max={MAX_SIMULATION_TPS}
+                    value={tps}
+                    disabled={isSimulating}
+                    onChange={e => setSimulationConfig(c => ({ ...c, tps: Number(e.target.value) }))}
+                    className="mt-1 h-1.5 w-full cursor-pointer appearance-none rounded-full outline-none disabled:cursor-not-allowed disabled:opacity-50
+                      [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:bg-[color:var(--thumb)] [&::-webkit-slider-thumb]:shadow [&::-webkit-slider-thumb]:transition-transform [&::-webkit-slider-thumb]:hover:scale-110 [&::-webkit-slider-thumb]:active:scale-95
+                      [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-white [&::-moz-range-thumb]:border-solid [&::-moz-range-thumb]:bg-[color:var(--thumb)] [&::-moz-range-thumb]:shadow"
+                    style={{
+                      '--thumb': tpsColor,
+                      background: `linear-gradient(to right, ${tpsColor} ${fillPct}%, rgba(148,163,184,0.45) ${fillPct}%)`,
+                    } as CSSProperties}
+                  />
+                </div>
+              )
+            })()} */}
+
+            {/* {(() => {
+              const BMIN = SIMULATION_AMOUNT_BOUND_MIN
+              const BMAX = SIMULATION_AMOUNT_BOUND_MAX
+              const lo = Math.max(BMIN, Math.min(simulationConfig.minAmount, simulationConfig.maxAmount))
+              const hi = Math.min(BMAX, Math.max(simulationConfig.minAmount, simulationConfig.maxAmount))
+              const pct = (v: number) => ((v - BMIN) / (BMAX - BMIN)) * 100
+              const amtColor = '#10b981'
+              // Two overlapped range inputs: track is transparent (the divs below draw it),
+              // and only the thumbs receive pointer events so both handles stay draggable.
+              const rangeCls = `pointer-events-none absolute inset-0 h-4 w-full appearance-none bg-transparent outline-none disabled:cursor-not-allowed
+                [&::-webkit-slider-runnable-track]:h-4 [&::-webkit-slider-runnable-track]:bg-transparent [&::-moz-range-track]:h-4 [&::-moz-range-track]:bg-transparent
+                [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:bg-[color:var(--thumb)] [&::-webkit-slider-thumb]:shadow [&::-webkit-slider-thumb]:cursor-pointer
+                [&::-moz-range-thumb]:pointer-events-auto [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-white [&::-moz-range-thumb]:border-solid [&::-moz-range-thumb]:bg-[color:var(--thumb)] [&::-moz-range-thumb]:shadow [&::-moz-range-thumb]:cursor-pointer`
+              return (
+                <div className="flex w-[220px] flex-col gap-1.5">
+                  <div className="flex items-center justify-between gap-1.5">
+                    <SurfaceLabel>
+                      <span title="Per-transaction amount range (multi-objective sim). Each payment's amount is drawn uniformly from this range. Smaller amounts make the flat per-txn fee a bigger share of cost. Applies on the next run.">Amount range</span>
+                    </SurfaceLabel>
+                    <span className="text-xs font-semibold tabular-nums text-slate-600 dark:text-slate-300">${lo}–${hi}</span>
+                  </div>
+                  <div className="relative mt-2 h-4 w-full">
+                    <div className="absolute top-1/2 h-1.5 w-full -translate-y-1/2 rounded-full bg-slate-200 dark:bg-[#23232b]" />
+                    <div
+                      className="absolute top-1/2 h-1.5 -translate-y-1/2 rounded-full"
+                      style={{ left: `${pct(lo)}%`, right: `${100 - pct(hi)}%`, background: amtColor }}
+                    />
+                    <input
+                      type="range" min={BMIN} max={BMAX} step={5} value={lo}
+                      onChange={e => { const v = Math.min(Number(e.target.value), hi); setSimulationConfig(c => ({ ...c, minAmount: v })) }}
+                      className={rangeCls} style={{ '--thumb': amtColor } as CSSProperties}
+                    />
+                    <input
+                      type="range" min={BMIN} max={BMAX} step={5} value={hi}
+                      onChange={e => { const v = Math.max(Number(e.target.value), lo); setSimulationConfig(c => ({ ...c, maxAmount: v })) }}
+                      className={rangeCls} style={{ '--thumb': amtColor } as CSSProperties}
+                    />
+                  </div>
+                </div>
+              )
+            })()} */}
 
             {!isSimulating ? (
               <Button
@@ -2612,63 +2796,12 @@ export function DecisionSimulatorPage() {
               </div>
             )}
           </div>
-
-          <div className="flex flex-1 flex-wrap items-end justify-around gap-6 rounded-2xl border border-slate-200 bg-white px-5 py-4 dark:border-[#222226] dark:bg-[#0b0b10]">
-            {(() => {
-              const ccy = costEconomics.currency || form.currency || 'USD'
-              const netPositive = costEconomics.netProfit >= 0
-              const overridePct = costEconomics.overrideSr != null ? `${(costEconomics.overrideSr * 100).toFixed(1)}%` : '—'
-              const keptPct = costEconomics.authKeptSr != null ? `${(costEconomics.authKeptSr * 100).toFixed(1)}%` : '—'
-              return (
-                <>
-                  <div className="flex flex-col gap-1.5">
-                    <SurfaceLabel>Total SR decisions</SurfaceLabel>
-                    <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-sky-600 dark:text-sky-400">
-                      {multiObjectiveStats.authWon.toLocaleString()}
-                    </p>
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    <SurfaceLabel>Total Cost overrides</SurfaceLabel>
-                    <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-violet-600 dark:text-violet-400">
-                      {multiObjectiveStats.costWon.toLocaleString()}
-                    </p>
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    <SurfaceLabel>Cost saved (gross)</SurfaceLabel>
-                    <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-emerald-600 dark:text-emerald-400">
-                      {formatCurrencyValue(totalCostSaved.value, totalCostSaved.currency || ccy)}
-                    </p>
-                  </div>
-                  <div className="flex flex-col gap-1.5" title="Expected sale value the overrides traded for cost: (head auth − chosen auth) × amount × margin. Not a count of failed txns.">
-                    <SurfaceLabel>Auth value risked</SurfaceLabel>
-                    <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-amber-600 dark:text-amber-400">
-                      {costEconomics.authValueRisked > 0 ? '−' : ''}{formatCurrencyValue(costEconomics.authValueRisked, ccy)}
-                    </p>
-                  </div>
-                  <div className="flex flex-col gap-1.5" title="Cost saved (gross) − Auth value risked. Stays positive while the band+EV gate is working; goes negative only if the cost feed is wrong.">
-                    <SurfaceLabel>Net profit</SurfaceLabel>
-                    <p className={`py-1.5 text-lg font-semibold leading-snug tabular-nums ${netPositive ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-                      {!netPositive ? '−' : ''}{formatCurrencyValue(Math.abs(costEconomics.netProfit), ccy)}
-                    </p>
-                  </div>
-                  <div className="flex flex-col gap-1.5" title="Realized: share of overridden txns that charged, vs the share of auth-kept (SR-head) txns that charged. A large persistent gap below the kept rate is the calibration signal to tighten cost aggressiveness.">
-                    <SurfaceLabel>Override SR (realized)</SurfaceLabel>
-                    <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-slate-700 dark:text-slate-200">
-                      {overridePct}
-                      <span className="ml-1.5 text-xs font-normal text-slate-400">vs {keptPct} kept</span>
-                    </p>
-                  </div>
-                </>
-              )
-            })()}
-          </div>
-        </div>
       )}
 
       <div className={activeTab === 'volume'
         ? 'grid grid-cols-1 gap-5 xl:grid-cols-[minmax(340px,420px)_minmax(0,1fr)]'
         : activeTab === 'batch'
-          ? 'grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] lg:items-stretch lg:h-[calc(100vh-220px)] lg:min-h-[560px] lg:max-h-[760px]'
+          ? 'grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] lg:items-stretch'
           : 'grid grid-cols-1 gap-6 lg:grid-cols-2'
       }
         style={activeTab === 'rule' ? { display: 'none' } : undefined}
@@ -2734,7 +2867,7 @@ export function DecisionSimulatorPage() {
                             for (let t = yMin; t <= 100; t += yStep) yTicks.push(t)
                             const bandLabel = `SR threshold for cost override`
                             return (
-                              <div className="w-full flex-1 min-h-[320px] flex flex-col">
+                              <div className="w-full flex-1 min-h-[380px] flex flex-col">
                                 <div className="mb-2 flex items-start justify-between gap-3">
                                   <div>
                                     <h4 className="text-sm font-medium text-slate-800 dark:text-white">Success Rate Trend</h4>
@@ -3474,6 +3607,74 @@ export function DecisionSimulatorPage() {
         </div>
 
         <div className={`min-w-0 flex flex-col gap-4 ${activeTab === 'batch' ? 'lg:min-h-0' : ''}`}>
+          {activeTab === 'batch' && (
+            <div className="flex flex-col justify-center gap-5 rounded-2xl border border-slate-200 bg-white px-5 py-4 dark:border-[#222226] dark:bg-[#0b0b10]">
+              {(() => {
+                const ccy = costEconomics.currency || form.currency || 'USD'
+                const netPositive = costEconomics.netProfit >= 0
+                return (
+                  <>
+                    {/* Row 1 — decision counts */}
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="flex min-w-0 flex-col gap-1.5">
+                        <SurfaceLabel className="!overflow-visible !whitespace-normal">Total decisions</SurfaceLabel>
+                        <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-sky-600 dark:text-sky-400">
+                          {multiObjectiveStats.total.toLocaleString()}
+                        </p>
+                      </div>
+                      <div className="flex min-w-0 flex-col gap-1.5">
+                        <SurfaceLabel className="!overflow-visible !whitespace-normal">Total SR-based decisions</SurfaceLabel>
+                        <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-sky-600 dark:text-sky-400">
+                          {multiObjectiveStats.srBased.toLocaleString()}
+                          <span className="ml-1.5 text-xs font-medium tabular-nums" title="Charged / Failed">
+                            <span className="text-slate-400">(</span>
+                            <span className="text-emerald-600 dark:text-emerald-400">{multiObjectiveStats.srSuccess.toLocaleString()}</span>
+                            <span className="text-slate-400"> / </span>
+                            <span className="text-red-500 dark:text-red-400">{multiObjectiveStats.srFailure.toLocaleString()}</span>
+                            <span className="text-slate-400">)</span>
+                          </span>
+                        </p>
+                      </div>
+                      <div className="flex min-w-0 flex-col gap-1.5">
+                        <SurfaceLabel className="!overflow-visible !whitespace-normal">Total cost-based decisions</SurfaceLabel>
+                        <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-violet-600 dark:text-violet-400">
+                          {multiObjectiveStats.costWon.toLocaleString()}
+                          <span className="ml-1.5 text-xs font-medium tabular-nums" title="Charged / Failed">
+                            <span className="text-slate-400">(</span>
+                            <span className="text-emerald-600 dark:text-emerald-400">{multiObjectiveStats.costSuccess.toLocaleString()}</span>
+                            <span className="text-slate-400"> / </span>
+                            <span className="text-red-500 dark:text-red-400">{multiObjectiveStats.costFailure.toLocaleString()}</span>
+                            <span className="text-slate-400">)</span>
+                          </span>
+                        </p>
+                      </div>
+                    </div>
+                    {/* Row 2 — cost economics */}
+                    <div className="grid grid-cols-3 gap-4 border-t border-slate-100 pt-4 dark:border-[#1c1c24]">
+                      <div className="flex flex-col gap-1.5" title="Expected sale value the overrides traded for cost: (head auth − chosen auth) × amount × margin. Not a count of failed txns.">
+                        <SurfaceLabel className="!overflow-visible !whitespace-normal">Expected Revenue Impact</SurfaceLabel>
+                        <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-amber-600 dark:text-amber-400">
+                          {costEconomics.authValueRisked > 0 ? '−' : ''}{formatCurrencyValue(costEconomics.authValueRisked, ccy)}
+                        </p>
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <SurfaceLabel className="!overflow-visible !whitespace-normal">Realised Cost savings</SurfaceLabel>
+                        <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-emerald-600 dark:text-emerald-400">
+                          {formatCurrencyValue(totalCostSaved.value, totalCostSaved.currency || ccy)}
+                        </p>
+                      </div>
+                      <div className="flex flex-col gap-1.5" title="Cost saved (gross) − Auth value risked. Stays positive while the band+EV gate is working; goes negative only if the cost feed is wrong.">
+                        <SurfaceLabel className="!overflow-visible !whitespace-normal">Effective Cost Benefits</SurfaceLabel>
+                        <p className={`py-1.5 text-lg font-semibold leading-snug tabular-nums ${netPositive ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                          {!netPositive ? '−' : ''}{formatCurrencyValue(Math.abs(costEconomics.netProfit), ccy)}
+                        </p>
+                      </div>
+                    </div>
+                  </>
+                )
+              })()}
+            </div>
+          )}
           {activeTab === 'debit' ? (
             debitResult ? (
               <>
@@ -3834,7 +4035,7 @@ export function DecisionSimulatorPage() {
                   <CardHeader className="flex flex-row items-start justify-between gap-3">
                     <div>
                       <h3 className="text-sm font-medium text-slate-800 dark:text-white">Gateway Selection Summary</h3>
-                      <p className="text-[13px] text-slate-400 dark:text-slate-500 mt-0.5">Overall success rate &amp; routed share across the run</p>
+                      {/* <p className="text-[13px] text-slate-400 dark:text-slate-500 mt-0.5">Overall success rate &amp; routed share across the run</p> */}
                     </div>
                     <span className="text-[13px] tabular-nums flex items-center gap-1.5 shrink-0">
                       <span className="text-slate-400">{completedSimulationCount} / {totalSimulationPayments || 0}</span>
@@ -4235,6 +4436,8 @@ export function DecisionSimulatorPage() {
                     <tr>
                       <th className="text-left px-3 py-2 w-8">#</th>
                       <th className="text-left px-3 py-2">Amount</th>
+                      <th className="text-left px-3 py-2 whitespace-nowrap">Network</th>
+                      <th className="text-left px-3 py-2 whitespace-nowrap">Program</th>
                       <th className="text-left px-3 py-2 whitespace-nowrap">Gateway</th>
                       <th className="text-right px-3 py-2 whitespace-nowrap">SR Score</th>
                       <th className="text-left px-3 py-2">Routing</th>
@@ -4258,6 +4461,8 @@ export function DecisionSimulatorPage() {
                           <th className="px-2 py-1.5">
                             <input value={txFilters.amount ?? ''} onChange={e => setF('amount', e.target.value)} placeholder="search" className={inputCls} />
                           </th>
+                          <th className="px-2 py-1.5">{sel('network', txFilterOptions.networks, 'All')}</th>
+                          <th className="px-2 py-1.5">{sel('program', txFilterOptions.programs, 'All')}</th>
                           <th className="px-2 py-1.5">{sel('gateway', txFilterOptions.gateways, 'All')}</th>
                           <th className="px-2 py-1.5">
                             <input value={txFilters.sr ?? ''} onChange={e => setF('sr', e.target.value)} placeholder="e.g. 90" className={inputCls} />
@@ -4290,6 +4495,8 @@ export function DecisionSimulatorPage() {
                             {formatCurrencyValue(res.amount, res.currency)}
                           </span>
                         </td>
+                        <td className="px-3 py-2 text-xs text-slate-600 dark:text-slate-300 whitespace-nowrap">{res.cardNetwork ?? '—'}</td>
+                        <td className="px-3 py-2 text-xs text-slate-600 dark:text-slate-300 whitespace-nowrap">{res.cardProgram ?? '—'}</td>
                         <td className="px-3 py-2 text-xs font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap">{res.decidedGateway}</td>
                         <td className="px-3 py-2 text-right whitespace-nowrap">
                           {(() => {
@@ -4342,12 +4549,29 @@ export function DecisionSimulatorPage() {
                     ))}
                     {txFilteredRows.length === 0 && (
                       <tr>
-                        <td colSpan={smartRetryEnabled ? 9 : 7} className="px-3 py-8 text-center text-sm text-slate-400 dark:text-slate-500">
+                        <td colSpan={smartRetryEnabled ? 11 : 9} className="px-3 py-8 text-center text-sm text-slate-400 dark:text-slate-500">
                           No transactions match the current filters.
                         </td>
                       </tr>
                     )}
                   </tbody>
+                  {txFilteredRows.length > 0 && (
+                    <tfoot className="sticky bottom-0 z-10 bg-slate-50 dark:bg-[#0a0a0f] border-t border-slate-200 dark:border-[#1c1c24]">
+                      <tr className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                        <td className="px-3 py-2 text-slate-400">Σ</td>
+                        <td className="px-3 py-2 whitespace-nowrap tabular-nums">{formatCurrencyValue(txColumnTotals.amount, txColumnTotals.currency)}</td>
+                        <td className="px-3 py-2" />
+                        <td className="px-3 py-2" />
+                        <td className="px-3 py-2 whitespace-nowrap font-normal text-slate-400">{txColumnTotals.count.toLocaleString()} rows</td>
+                        <td className="px-3 py-2" />
+                        <td className="px-3 py-2" />
+                        <td className="px-3 py-2" />
+                        <td className="px-3 py-2 text-right whitespace-nowrap tabular-nums text-emerald-700 dark:text-emerald-400">{formatCurrencyValue(txColumnTotals.savings, txColumnTotals.currency)}</td>
+                        {smartRetryEnabled && <td className="px-3 py-2" />}
+                        {smartRetryEnabled && <td className="px-3 py-2" />}
+                      </tr>
+                    </tfoot>
+                  )}
                 </table>
               </div>
             ) : (
