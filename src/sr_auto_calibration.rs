@@ -198,7 +198,10 @@ async fn run_once(runtime: &AnalyticsRuntime, params: CalibrationParams, interva
         // the same SR_V3_INPUT_CONFIG_* and duplicate `calibration_applied` events. The lock is
         // best-effort (advisory): we let it expire rather than release it, and we fail *open* on
         // a Redis error so a single replica keeps calibrating even if Redis is unavailable.
-        let lock_key = format!("sr_auto_calibration_lock_{}_{}", merchant_id, interval_bucket);
+        let lock_key = format!(
+            "sr_auto_calibration_lock_{}_{}",
+            merchant_id, interval_bucket
+        );
         let app_state = get_tenant_app_state().await;
         match app_state
             .redis_conn
