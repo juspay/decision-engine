@@ -535,22 +535,23 @@ pub async fn run_decider_flow(
 
             let merchant_id_text =
                 merchant_id_to_text(deciderParams.dpMerchantAccount.merchantId.clone());
-            // Cost-savings (multi-objective economic reorder) runs only when BOTH are true:
-            //   1. the request explicitly opts in (`enableMultiObjective: true`), and
-            //   2. the merchant has the "Optimize for economic value" feature enabled
-            //      (`multi_objective_routing_enabled`).
-            // `&&` short-circuits so the feature-flag lookup is skipped when the request didn't
-            // opt in. `enableMultiObjective` is a new request field that defaults to `None`
-            // (⇒ off), so this double-gate introduces no regression: there is no pre-existing
-            // caller whose behavior changes — multi-objective routing is opt-in from day one,
-            // and the merchant flag is a second, per-merchant kill switch on top of it.
-            let multi_obj_on = enable_multi_objective_override.unwrap_or(false)
-                && is_feature_enabled(
-                    "multi_objective_routing_enabled".to_string(),
-                    merchant_id_text.clone(),
-                    kvRedis(),
-                )
-                .await;
+            // Cost-savings (multi-objective economic reorder) enablement:
+            //   - if the request explicitly sets `enableMultiObjective`, honor it (per-request
+            //     override, letting a caller force it on or off), otherwise
+            //   - fall back to the merchant's `multi_objective_routing_enabled` feature flag.
+            // The feature flag is the primary rollout switch, so a caller that omits the field
+            // must not silently lose multi-objective routing.
+            let multi_obj_on = match enable_multi_objective_override {
+                Some(b) => b,
+                None => {
+                    is_feature_enabled(
+                        "multi_objective_routing_enabled".to_string(),
+                        merchant_id_text.clone(),
+                        kvRedis(),
+                    )
+                    .await
+                }
+            };
             let hedging_on = decider_flow.writer.gwDeciderApproach.is_hedging();
 
             let scoreList = currentGatewayScoreMap.iter().collect::<Vec<_>>();
