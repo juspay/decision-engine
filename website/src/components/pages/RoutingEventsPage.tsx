@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ArrowRightLeft, BellRing, Target, TrendingDown } from 'lucide-react'
+import { ArrowRightLeft, BellRing, Target, TrendingDown, SlidersHorizontal } from 'lucide-react'
 import { describeRoutingEvent, useRoutingEvents } from '../../hooks/useRoutingEvents'
 import { AnalyticsRangeValue, RoutingEvent, RoutingEventType } from '../../types/api'
 import { Badge } from '../ui/Badge'
@@ -15,11 +15,12 @@ const PRESET_OPTIONS: { value: AnalyticsRangeValue; label: string }[] = [
 
 const EVENT_TYPE_META: Record<
   RoutingEventType,
-  { label: string; badge: 'blue' | 'green' | 'orange'; icon: React.ElementType }
+  { label: string; badge: 'blue' | 'green' | 'orange' | 'purple'; icon: React.ElementType }
 > = {
   leader_changed: { label: 'Leader change', badge: 'blue', icon: ArrowRightLeft },
   gateway_entered_auth_band: { label: 'Entered auth band', badge: 'green', icon: Target },
   gateway_exited_auth_band: { label: 'Exited auth band', badge: 'orange', icon: TrendingDown },
+  calibration_applied: { label: 'Autopilot tuning', badge: 'purple', icon: SlidersHorizontal },
 }
 
 const ALL_EVENT_TYPES = Object.keys(EVENT_TYPE_META) as RoutingEventType[]

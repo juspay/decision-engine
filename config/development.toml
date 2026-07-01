@@ -41,6 +41,28 @@ url = "http://localhost:8123"
 user = "decision_engine"
 password = "decision_engine"
 
+[sr_auto_calibration]
+# Runtime auto-calibration of SRv3 bucket size + hedging %.
+# Values below are tuned for a fast DEMO. The PRODUCTION default for each knob is noted on its
+# line — to run production-like, delete the line (default applies) or set the noted value.
+#
+# Recalc cadence (seconds).                                   prod default: 900 (15 min)
+interval_secs = 60
+min_bucket_size = 100 # prod default: 100
+# Bucket cap — smaller window flips scores after fewer outcomes.  prod default: 2000
+max_bucket_size = 300
+# Hedging refresh horizon — short ⇒ high hedging ⇒ fast           prod default: 3600 (= lookback)
+# laggard recovery.
+reaction_horizon_secs = 30
+# Total hedging cap (%).                                          prod default: 30
+max_hedging_percent = 20
+# Lookback window (seconds) for counting volume/dimensions.       prod default: 3600 (1 h)
+# Keep it >> interval_secs so windows overlap and smooth.
+lookback_secs = 300
+# Min per-cluster volume before a cluster is calibrated.          prod default: 100
+# Lower for demos, especially when splitting by dimension.
+min_volume = 20
+
 
 [redis]
 host = "127.0.0.1"
@@ -74,6 +96,63 @@ username = "hypersense_user"
 password = "hypersense_pass"
 token_ttl_secs = 82800
 cost_cache_ttl_secs = 300    # in-process fee-rate cache; 0 disables, default 5 min
+use_seed_costs = true        # simulator: serve local IC++ (Adyen) vs blended (Stripe) costs instead of the live API
+
+# Simulator seed cost models (used only when use_seed_costs = true). Each PSP has a
+# `default` fee and optional `tiers` overriding it by card scenario. A tier may scope on any
+# of these (each matches the same-named cluster field by case-insensitive equality; omit =
+# wildcard):
+#   card_network         e.g. "visa", "mastercard", "discover", "amex", "jcb"
+#   payment_method_type  "credit" | "debit"
+#   card_type            e.g. "standard", "premium", "ultra_premium", "commercial"
+#   transaction_currency e.g. "USD", "EUR"   (also our stand-in for region: USD=US, EUR=EEA)
+# The tier matching the MOST fields wins; ties break by currency > network > funding >
+# program. pct_bps is the percentage fee in basis points; fixed is the flat per-txn fee in
+# the major currency unit. The Adyen figures are all-in IC++ (interchange + scheme + markup).
+#
+# Not modelled yet (need issuer-country / BIN enrichment in derive_cluster_key, which today
+# leaves card_issuing_country = None and cross_border_flag = false): a true region dimension,
+# cross-border surcharges, and US regulated-vs-unregulated debit — so US debit below is a
+# single blended estimate. Add a PSP with another [[hypersense.seed_costs]] block.
+# Region is keyed by the card's ISSUER (card_issuing_country, normalized to us/eu/intl by
+# derive_cluster_key), NOT the transaction currency. At a US merchant every txn is USD, so
+# issuer region is the only thing that separates regulated US debit, EU consumer cards, and
+# international cards — which is exactly where the big cost gaps live. Fees below are modeled
+# on a $100 ticket (effective_cost_bps = pct_bps + fixed/amount·10_000).
+[[hypersense.seed_costs]]
+psp = "stripe"                                 # blended: one flat rate for every card
+default = { pct_bps = 290.0, fixed = 0.30 }    # 2.9% + $0.30 → $3.20 @ $100
+tiers = [
+  # International card at a US merchant: Stripe adds a 1.5% cross-border surcharge.
+  { card_issuing_country = "intl", pct_bps = 440.0, fixed = 0.30 },  # 4.4% + $0.30 → $4.70 @ $100
+]
+
+[[hypersense.seed_costs]]
+psp = "adyen"                                  # Interchange++: varies by issuer region + card scenario
+default = { pct_bps = 194.0, fixed = 0.24 }    # fallback = US visa credit standard (1.94% + $0.24)
+tiers = [
+  # --- US issuer: regulated (Durbin) debit; IC++ credit by program --------------------
+  { card_issuing_country = "us", card_network = "visa",       payment_method_type = "debit",  pct_bps = 78.0,  fixed = 0.30 },  # ~$1.08 regulated debit
+  { card_issuing_country = "us", card_network = "mastercard", payment_method_type = "debit",  pct_bps = 78.0,  fixed = 0.30 },
+  { card_issuing_country = "us", card_network = "visa",       payment_method_type = "credit", card_type = "standard",   pct_bps = 222.0, fixed = 0.24 },  # ~$2.46 standard
+  { card_issuing_country = "us", card_network = "mastercard", payment_method_type = "credit", card_type = "standard",   pct_bps = 222.0, fixed = 0.24 },
+  { card_issuing_country = "us", card_network = "visa",       payment_method_type = "credit", card_type = "premium",    pct_bps = 317.0, fixed = 0.24 },  # ~$3.41 rewards (e.g. Sapphire)
+  { card_issuing_country = "us", card_network = "mastercard", payment_method_type = "credit", card_type = "premium",    pct_bps = 317.0, fixed = 0.24 },
+  { card_issuing_country = "us", card_network = "visa",       payment_method_type = "credit", card_type = "commercial", pct_bps = 334.0, fixed = 0.24 },  # ~$3.58 corporate/business
+  { card_issuing_country = "us", card_network = "mastercard", payment_method_type = "credit", card_type = "commercial", pct_bps = 334.0, fixed = 0.24 },
+
+  # --- EU/UK issuer: consumer interchange capped (cheap) ------------------------------
+  { card_issuing_country = "eu", card_network = "visa",       payment_method_type = "debit",  pct_bps = 68.0, fixed = 0.30 },  # ~$0.98
+  { card_issuing_country = "eu", card_network = "mastercard", payment_method_type = "debit",  pct_bps = 68.0, fixed = 0.30 },
+  { card_issuing_country = "eu", card_network = "visa",       payment_method_type = "credit", pct_bps = 79.0, fixed = 0.30 },  # ~$1.09
+  { card_issuing_country = "eu", card_network = "mastercard", payment_method_type = "credit", pct_bps = 79.0, fixed = 0.30 },
+
+  # --- Amex (OptBlue flat model, region-agnostic) ------------------------------------
+  { card_network = "amex", pct_bps = 330.0, fixed = 0.23 },  # 3.3% + $0.23 → $3.53
+
+  # --- International issuer: cross-border IC++ ----------------------------------------
+  { card_issuing_country = "intl", pct_bps = 239.0, fixed = 0.24 },  # ~$2.63
+]
 
 [tenant_secrets]
 public = { schema = "public" }

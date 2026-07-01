@@ -219,6 +219,9 @@ pub async fn decide_gateway(
                         Some(payload.payment_method_type().to_string()),
                         Some(payload.payment_method().to_string()),
                         auth_type.clone(),
+                        payload.card_network(),
+                        Some(payload.currency()),
+                        payload.country(),
                     );
                     metrics::API_REQUEST_COUNTER
                         .with_label_values(&["decide_gateway", "success"])

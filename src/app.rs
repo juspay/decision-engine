@@ -318,6 +318,14 @@ where
         panic!("Failed to set global app state");
     }
 
+    // Background job: periodically auto-calibrate SRv3 bucket size + hedging from observed
+    // traffic for merchants enrolled via the `sr_auto_calibration_enabled` flag. Spawned after
+    // APP_STATE is set so config reads/writes resolve the tenant app state.
+    crate::sr_auto_calibration::spawn(
+        global_app_state.analytics_runtime.clone(),
+        global_app_state.global_config.sr_auto_calibration.clone(),
+    );
+
     // Create a signal stream for SIGTERM
     let mut sigterm = signal(SignalKind::terminate()).expect("Failed to create SIGTERM handler");
 
@@ -413,6 +421,10 @@ where
             axum::routing::post(crate::euclid::handlers::routing_rules::config_sr_dimensions),
         )
         .route(
+            "/config-sr-dimension/:merchant_id",
+            axum::routing::get(crate::euclid::handlers::routing_rules::get_sr_dimensions),
+        )
+        .route(
             "/config/routing-keys",
             axum::routing::get(crate::euclid::handlers::routing_rules::get_routing_config),
         )
@@ -429,6 +441,10 @@ where
         .route(
             "/update-gateway-score",
             post(routes::update_gateway_score::update_gateway_score),
+        )
+        .route(
+            "/gateway-score/reset",
+            post(routes::gateway_score::reset_gateway_scores),
         )
         .route("/api-key/create", post(routes::api_key::create_api_key))
         .route(

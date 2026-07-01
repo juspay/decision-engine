@@ -102,6 +102,10 @@ pub async fn emit_if_in_flight(payment_id: &str, merchant_id: &str, is_success: 
         None,
         None,
         None,
+        // card_network, currency, country — not available on the A/B outcome path.
+        None,
+        None,
+        None,
     );
 
     logger::debug!(

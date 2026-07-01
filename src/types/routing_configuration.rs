@@ -39,7 +39,11 @@ pub struct SuccessRateData {
     pub default_upper_reset_factor: Option<f64>,
     pub default_gateway_extra_score: Option<Vec<GatewayWiseExtraScore>>,
     pub sub_level_input_config: Option<Vec<SRSubLevelInputConfig>>,
-    pub default_tolerance_pp: Option<f64>,
+    /// Merchant margin (fraction of ticket, e.g. 0.20). Used in the multi-objective
+    /// expected-value ranking `EV = auth·(margin − cost/10_000)`; there is no auth
+    /// band or admission gate. Defaults to [`crate::decider::gatewaydecider::
+    /// multi_objective::DEFAULT_MARGIN`] when unset.
+    pub margin: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -47,6 +51,24 @@ pub struct SuccessRateData {
 pub struct SRSubLevelInputConfig {
     pub payment_method_type: Option<String>,
     pub payment_method: Option<String>,
+    // Optional cluster dimensions (serialize as cardNetwork/cardIsIn/currency/country/authType).
+    // Required here so dimension-scoped sub-level overrides round-trip through /rule/get and
+    // /rule/update instead of being silently dropped by serde.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub card_network: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub card_is_in: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub currency: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub country: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_type: Option<String>,
+    /// Provenance: "autopilot" for entries the auto-calibrator created/manages, absent for
+    /// human-authored ones. Lets Hard refresh wipe only auto entries and lets the job avoid
+    /// overwriting manual overrides.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
     pub latency_threshold: Option<f64>,
     pub bucket_size: Option<i32>,
     pub hedging_percent: Option<f64>,

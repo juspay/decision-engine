@@ -1027,6 +1027,8 @@ pub struct PaymentInfo {
     card_switch_provider: Option<Secret<String>>,
     #[serde(default)]
     card_program: Option<String>,
+    #[serde(default)]
+    card_issuer_country: Option<String>,
 }
 
 // write a function to transfer DomainDeciderRequestForApiCallV2 to DomainDeciderRequest
@@ -1049,6 +1051,23 @@ impl DomainDeciderRequestForApiCallV2 {
             .auth_type
             .as_ref()
             .map(ToString::to_string)
+    }
+
+    /// Card scheme (card_network SR dimension) — the card switch provider, matching how the
+    /// decider keys SR clusters.
+    pub fn card_network(&self) -> Option<String> {
+        self.payment_info
+            .card_switch_provider
+            .as_ref()
+            .map(|s| s.peek().to_string())
+    }
+
+    pub fn currency(&self) -> String {
+        self.payment_info.currency.to_string()
+    }
+
+    pub fn country(&self) -> Option<String> {
+        self.payment_info.country.as_ref().map(ToString::to_string)
     }
 
     pub async fn to_domain_decider_request(&self) -> DomainDeciderRequest {
@@ -1126,6 +1145,7 @@ impl DomainDeciderRequestForApiCallV2 {
                 cardSwitchProvider: self.payment_info.card_switch_provider.clone(),
                 card_type: self.payment_info.card_type.clone(),
                 card_program: self.payment_info.card_program.clone(),
+                card_issuer_country: self.payment_info.card_issuer_country.clone(),
                 nameOnCard: None,
                 dateCreated: OffsetDateTime::now_utc(),
                 paymentMethodType: self.payment_info.payment_method_type.to_string(),

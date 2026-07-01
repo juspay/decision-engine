@@ -18,10 +18,38 @@ pub trait AnalyticsWriteStore: Send + Sync {
     fn sink_name(&self) -> &'static str;
 }
 
+/// Runtime calibration inputs for one cluster, derived from analytics. The cluster is keyed by
+/// (payment_method_type, payment_method) plus whatever low-cardinality dimensions the merchant
+/// has active (card scheme / currency / country / auth type — `None` when inactive). `volume` is
+/// the decision count over the lookback window and `gateway_count` the distinct PSPs that saw it.
+#[derive(Debug, Clone)]
+pub struct SegmentTraffic {
+    pub payment_method_type: String,
+    pub payment_method: String,
+    pub card_network: Option<String>,
+    pub currency: Option<String>,
+    pub country: Option<String>,
+    pub auth_type: Option<String>,
+    pub volume: i64,
+    pub gateway_count: i64,
+}
+
 #[async_trait]
 pub trait AnalyticsReadStore: Send + Sync {
     async fn overview(&self, query: &AnalyticsQuery)
         -> Result<AnalyticsOverviewResponse, ApiError>;
+
+    /// Per-cluster decision volume + PSP count for the auto-calibrator, grouped by
+    /// (pmt, pm) plus `active_dims` (a subset of card_network/currency/country/auth_type).
+    /// Defaults to empty so stores without analytics simply contribute no inputs.
+    async fn merchant_segment_traffic(
+        &self,
+        _merchant_id: &str,
+        _since_ms: i64,
+        _active_dims: &[&str],
+    ) -> Result<Vec<SegmentTraffic>, ApiError> {
+        Ok(Vec::new())
+    }
 
     async fn gateway_scores(
         &self,

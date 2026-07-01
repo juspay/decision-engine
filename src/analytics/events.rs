@@ -96,6 +96,9 @@ impl DomainAnalyticsEvent {
         payment_method_type: Option<String>,
         payment_method: Option<String>,
         auth_type: Option<String>,
+        card_network: Option<String>,
+        currency: Option<String>,
+        country: Option<String>,
         created_at_ms: i64,
     ) -> Self {
         let lookup_key = derive_lookup_key(payment_id.as_deref(), request_id.as_deref());
@@ -109,6 +112,9 @@ impl DomainAnalyticsEvent {
             payment_method_type,
             payment_method,
             auth_type,
+            card_network,
+            currency,
+            country,
             gateway,
             event_stage,
             routing_approach,
@@ -328,6 +334,45 @@ impl DomainAnalyticsEvent {
             auth_type,
             event_stage: Some("request_received".to_string()),
             status: Some("received".to_string()),
+            ..Self::base(flow, route, created_at_ms)
+        }
+    }
+
+    /// A calibration retune emitted by the SR auto-calibrator. Numeric knobs ride typed
+    /// columns (`score_value`/`sigma_factor` = new/prev hedging %, `transaction_count` =
+    /// new bucket, `average_latency` = prev bucket) so the routing-events detector can read
+    /// them back without JSON parsing. `event_stage` tags the row for that query.
+    #[allow(clippy::too_many_arguments)]
+    pub fn autopilot_calibration(
+        flow: AnalyticsFlowContext,
+        route: AnalyticsRoute,
+        merchant_id: Option<String>,
+        payment_method_type: Option<String>,
+        payment_method: Option<String>,
+        card_network: Option<String>,
+        currency: Option<String>,
+        country: Option<String>,
+        auth_type: Option<String>,
+        new_bucket: i32,
+        previous_bucket: Option<i32>,
+        new_hedge: f64,
+        previous_hedge: Option<f64>,
+        created_at_ms: i64,
+    ) -> Self {
+        Self {
+            merchant_id,
+            payment_method_type,
+            payment_method,
+            card_network,
+            currency,
+            country,
+            auth_type,
+            event_stage: Some(crate::analytics::models::AUTOPILOT_CALIBRATION_STAGE.to_string()),
+            status: Some("applied".to_string()),
+            score_value: Some(new_hedge),
+            sigma_factor: previous_hedge,
+            transaction_count: Some(new_bucket as i64),
+            average_latency: previous_bucket.map(|b| b as f64),
             ..Self::base(flow, route, created_at_ms)
         }
     }
