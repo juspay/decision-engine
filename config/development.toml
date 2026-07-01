@@ -41,6 +41,28 @@ url = "http://localhost:8123"
 user = "decision_engine"
 password = "decision_engine"
 
+[sr_auto_calibration]
+# Runtime auto-calibration of SRv3 bucket size + hedging %.
+# Values below are tuned for a fast DEMO. The PRODUCTION default for each knob is noted on its
+# line — to run production-like, delete the line (default applies) or set the noted value.
+#
+# Recalc cadence (seconds).                                   prod default: 900 (15 min)
+interval_secs = 60
+min_bucket_size = 25 # prod default: 100
+# Bucket cap — smaller window flips scores after fewer outcomes.  prod default: 2000
+max_bucket_size = 100
+# Hedging refresh horizon — short ⇒ high hedging ⇒ fast           prod default: 3600 (= lookback)
+# laggard recovery.
+reaction_horizon_secs = 30
+# Total hedging cap (%).                                          prod default: 30
+max_hedging_percent = 20
+# Lookback window (seconds) for counting volume/dimensions.       prod default: 3600 (1 h)
+# Keep it >> interval_secs so windows overlap and smooth.
+lookback_secs = 300
+# Min per-cluster volume before a cluster is calibrated.          prod default: 100
+# Lower for demos, especially when splitting by dimension.
+min_volume = 20
+
 
 [redis]
 host = "127.0.0.1"

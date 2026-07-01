@@ -234,36 +234,36 @@ pub async fn routing_events(
     Ok(Json(fetch_routing_events(&state, &query).await?))
 }
 
-/// Resolve how the routing-events historical detector should compute the auth band,
-/// matching the live decider. `Off` when multi-objective routing is off for the
-/// merchant (no entered/exited events fire). Otherwise an explicit caller override
-/// wins as a fixed band; absent that, a per-candidate **noise floor** derived from the
-/// merchant's SRV3 bucket size — the same cost-independent gate floor the live decider
-/// applies (`z·√(σ_leader² + σ_cand²)`). The economic (cost-driven) widening can't be
-/// reconstructed from the historical score series, so it is omitted; the noise floor is
-/// its dominant, always-on component, so this stays conservative (never wider than live).
-async fn resolve_auth_band(merchant_id: &str, explicit: Option<f64>) -> AuthBandSpec {
-    let multi_objective_on = crate::redis::feature::is_feature_enabled(
-        "multi_objective_routing_enabled".to_string(),
-        merchant_id.to_string(),
-        crate::feedback::constants::kvRedis(),
-    )
-    .await;
-    if !multi_objective_on {
-        return AuthBandSpec::Off;
-    }
-    match explicit {
-        Some(half_width) => AuthBandSpec::Fixed(half_width.max(0.0)),
-        None => {
-            let bucket_size =
-                crate::decider::gatewaydecider::flow_new::load_srv3_default_bucket_size(merchant_id)
-                    .await;
-            AuthBandSpec::NoiseFloor {
-                bucket_size,
-                z: crate::decider::gatewaydecider::multi_objective::Z_NOISE,
-            }
-        }
-    }
+/// Resolve how the routing-events historical detector should compute the auth band.
+///
+/// Auth-band crossing events (`gateway_entered_auth_band` / `gateway_exited_auth_band`,
+/// surfaced in the UI as "{gateway} fluctuating at the cost-savings cutoff") are turned
+/// OFF: this always returns `AuthBandSpec::Off`, so `emit_auth_band_events` never runs and
+/// only `leader_changed` events are emitted.
+///
+/// To re-enable, restore the derivation below (kept for reference): mirror the live decider —
+/// `Off` when multi-objective routing is off for the merchant; otherwise an explicit caller
+/// override wins as a fixed band, and absent that a per-candidate **noise floor** derived from
+/// the merchant's SRV3 bucket size (`z·√(σ_leader² + σ_cand²)`):
+///
+/// ```ignore
+/// let multi_objective_on = crate::redis::feature::is_feature_enabled(
+///     "multi_objective_routing_enabled".to_string(),
+///     merchant_id.to_string(),
+///     crate::feedback::constants::kvRedis(),
+/// ).await;
+/// if !multi_objective_on { return AuthBandSpec::Off; }
+/// match explicit {
+///     Some(half_width) => AuthBandSpec::Fixed(half_width.max(0.0)),
+///     None => {
+///         let bucket_size =
+///             crate::decider::gatewaydecider::flow_new::load_srv3_default_bucket_size(merchant_id).await;
+///         AuthBandSpec::NoiseFloor { bucket_size, z: crate::decider::gatewaydecider::multi_objective::Z_NOISE }
+///     }
+/// }
+/// ```
+async fn resolve_auth_band(_merchant_id: &str, _explicit: Option<f64>) -> AuthBandSpec {
+    AuthBandSpec::Off
 }
 
 #[derive(Debug, Clone, Deserialize)]

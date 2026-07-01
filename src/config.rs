@@ -63,6 +63,39 @@ pub struct GlobalConfig {
     pub mem_cache: MemCacheConfig,
     #[serde(default)]
     pub hypersense: HypersenseConfig,
+    #[serde(default)]
+    pub sr_auto_calibration: SrAutoCalibrationConfig,
+}
+
+/// Runtime auto-calibration of the SRv3 bucket size + hedging %.
+#[derive(Clone, serde::Deserialize, Debug, Default)]
+pub struct SrAutoCalibrationConfig {
+    /// Recalc cadence in seconds. When unset (or 0), the job uses a built-in default (900s).
+    #[serde(default)]
+    pub interval_secs: Option<u64>,
+    /// Smallest bucket size the calibrator will write. Default 100.
+    #[serde(default)]
+    pub min_bucket_size: Option<i32>,
+    /// Largest bucket size the calibrator will write. Lower it (e.g. 25) for snappy demos —
+    /// a smaller window flips scores faster. Default 2000.
+    #[serde(default)]
+    pub max_bucket_size: Option<i32>,
+    /// Total hedging cap (%). Default 30.
+    #[serde(default)]
+    pub max_hedging_percent: Option<f64>,
+    /// Horizon (seconds) hedging sizes window-refresh against. Default 3600 (production). Set it
+    /// short (e.g. 60) for demos so laggards get enough exploration traffic to recover quickly.
+    #[serde(default)]
+    pub reaction_horizon_secs: Option<u64>,
+    /// Trailing window (seconds) over which volume/dimensions are counted in ClickHouse. Default
+    /// 3600. Keep it well above `interval_secs` so windows overlap and smooth; shorten (e.g. 300)
+    /// for demos to react faster and shed stale events.
+    #[serde(default)]
+    pub lookback_secs: Option<u64>,
+    /// Minimum per-cluster volume in the lookback window before a cluster is calibrated. Default
+    /// 100. Lower it (e.g. 20) for demos, especially when splitting by dimension.
+    #[serde(default)]
+    pub min_volume: Option<i64>,
 }
 
 #[derive(Clone, serde::Deserialize, Debug)]

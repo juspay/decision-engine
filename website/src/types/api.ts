@@ -26,14 +26,18 @@ export interface PspSummary {
 export interface MultiObjectiveInfo {
   outcome: MultiObjectiveOutcome
   reason: string
-  tolerancePp: number
   srHead: PspSummary | null
   chosen: PspSummary | null
   costSavedBps: number | null
+  /// Number of PSPs ranked on expected value (i.e. those that had cost data).
   qualifiedCount: number
   /// Merchant margin (fraction of ticket) the decider applied. Used to value the
   /// auth-rate a cost override risked and net it against the fee saved.
   margin: number
+  /// EV gap between the top-two EV-ranked PSPs (`EV(#1) − EV(#2)`, a fraction of
+  /// ticket) — the margin of victory of the winning pick. Null when fewer than two
+  /// PSPs had the cost data needed to rank on EV.
+  evGapTop2?: number | null
 }
 
 export type RoutingAlgorithmName =
@@ -539,6 +543,7 @@ export type RoutingEventType =
   | 'leader_changed'
   | 'gateway_entered_auth_band'
   | 'gateway_exited_auth_band'
+  | 'calibration_applied'
 
 export interface RoutingEvent {
   id: string
@@ -552,6 +557,16 @@ export interface RoutingEvent {
   score: number | null
   previous_score: number | null
   transaction_count: number | null
+  // Present only on `calibration_applied` events: the autopilot's new/previous knobs
+  // and the full cluster grain the retune applied to.
+  bucket_size?: number | null
+  previous_bucket_size?: number | null
+  hedging_percent?: number | null
+  previous_hedging_percent?: number | null
+  card_network?: string | null
+  currency?: string | null
+  country?: string | null
+  auth_type?: string | null
 }
 
 export interface RoutingEventsResponse {

@@ -537,17 +537,19 @@ pub async fn run_decider_flow(
 
             let merchant_id_text =
                 merchant_id_to_text(deciderParams.dpMerchantAccount.merchantId.clone());
-            let multi_obj_on = match enable_multi_objective_override {
-                Some(b) => b,
-                None => {
-                    is_feature_enabled(
-                        "multi_objective_routing_enabled".to_string(),
-                        merchant_id_text.clone(),
-                        kvRedis(),
-                    )
-                    .await
-                }
-            };
+            // Cost-savings (multi-objective economic reorder) runs only when BOTH are true:
+            //   1. the request explicitly opts in (`enableMultiObjective: true`), and
+            //   2. the merchant has the "Optimize for economic value" feature enabled
+            //      (`multi_objective_routing_enabled`).
+            // `&&` short-circuits so the feature-flag lookup is skipped when the request didn't
+            // opt in.
+            let multi_obj_on = enable_multi_objective_override.unwrap_or(false)
+                && is_feature_enabled(
+                    "multi_objective_routing_enabled".to_string(),
+                    merchant_id_text.clone(),
+                    kvRedis(),
+                )
+                .await;
             let hedging_on = decider_flow.writer.gwDeciderApproach.is_hedging();
 
             let scoreList = currentGatewayScoreMap.iter().collect::<Vec<_>>();
@@ -584,10 +586,6 @@ pub async fn run_decider_flow(
                     let mut cost_fallbacks_override: Option<Vec<String>> = None;
                     if multi_obj_on && !hedging_on {
                         let margin = load_margin(&merchant_id_text).await;
-                        let bucket_size = decider_flow
-                            .writer
-                            .srv3_bucket_size
-                            .unwrap_or(C::DEFAULT_SR_V3_BASED_BUCKET_SIZE);
                         let strategy = if cost_pick_cheapest.unwrap_or(false) {
                             multi_objective::CostPickStrategy::CheapestInBand
                         } else {
@@ -599,7 +597,6 @@ pub async fn run_decider_flow(
                                 &merchant_id_text,
                                 &deciderParams.dpTxnDetail,
                                 &deciderParams.dpTxnCardInfo,
-                                bucket_size,
                                 margin,
                                 strategy,
                             )

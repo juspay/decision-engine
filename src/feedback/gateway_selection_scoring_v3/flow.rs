@@ -41,10 +41,9 @@ use crate::{
     },
     feedback::{
         constants as C,
-        types::SrV3DebugBlock,
         utils::{
             dateInIST, getCurrentIstDateWithFormat, getProducerKey, isKeyExistsRedis,
-            log_gateway_score_type, updateMovingWindow, updateScore, GatewayScoringType,
+            log_gateway_score_type, updateMovingWindow, GatewayScoringType,
         },
     },
     redis::types::ServiceConfigKey,
@@ -54,7 +53,6 @@ use crate::{
     },
 };
 use masking::PeekInterface;
-use serde_json;
 
 // Converted functions
 // Original Haskell function: updateSrV3Score
@@ -132,8 +130,7 @@ pub async fn update_sr_v3_score(
 pub async fn createKeysIfNotExist(
     key_for_gateway_selection_queue: String,
     key_for_gateway_selection_score: String,
-    txn_detail: TxnDetail,
-    txn_card_info: TxnCardInfo,
+    bucket_size: i32,
 ) {
     let is_queue_key_exists = isKeyExistsRedis(key_for_gateway_selection_queue.clone()).await;
     let is_score_key_exists = isKeyExistsRedis(key_for_gateway_selection_score.clone()).await;
@@ -146,14 +143,14 @@ pub async fn createKeysIfNotExist(
     );
     if is_queue_key_exists && is_score_key_exists {
     } else {
-        let merchant_bucket_size = getSrV3MerchantBucketSize(txn_detail, txn_card_info).await;
+        let merchant_bucket_size = bucket_size.max(1);
         logger::debug!(
             tag = "createKeysIfNotExist",
             action = "createKeysIfNotExist",
             "Creating keys with bucket size as {}",
             merchant_bucket_size
         );
-        let score_list = vec!["1".to_string(); merchant_bucket_size.try_into().unwrap()];
+        let score_list = vec!["1".to_string(); merchant_bucket_size as usize];
         let redis = C::kvRedis();
         GU::create_moving_window_and_score(
             redis,
@@ -179,14 +176,18 @@ pub async fn updateScoreAndQueue(
         tag = "updateScoreAndQueue",
         "Updating sr v3 score and queue"
     );
+    // Resolve the bucket size once and thread it through both key creation and the moving-window
+    // update, so the queue is trimmed to the *current* configured size on every feedback. This is
+    // what makes an auto-calibrated bucket-size change take effect (resize-in-place) without a
+    // destructive wipe.
+    let bucket_size = getSrV3MerchantBucketSize(txn_detail.clone(), txn_card_info.clone()).await;
     createKeysIfNotExist(
         key_for_gateway_selection_queue.clone(),
         key_for_gateway_selection_score.clone(),
-        txn_detail.clone(),
-        txn_card_info,
+        bucket_size,
     )
     .await;
-    let (value, should_score_increase): (String, bool) = match gateway_scoring_type {
+    let (value, _should_score_increase): (String, bool) = match gateway_scoring_type {
         GatewayScoringType::PenaliseSrv3 => ("0".into(), false),
         GatewayScoringType::Reward => ("1".into(), true),
         _ => ("0".into(), false),
@@ -247,39 +248,17 @@ pub async fn updateScoreAndQueue(
     // } else {
     //     value.clone()
     // };
-    let popped_status = updateMovingWindow(
+    // Push the outcome and trim to the current bucket size. The SR score is derived directly
+    // from the queue (`get_score_from_redis` = sum/len), so the cached `}score` key is only a
+    // cold-start fallback and no longer needs incremental maintenance here.
+    updateMovingWindow(
         C::kvRedis(),
         key_for_gateway_selection_queue.clone(),
         key_for_gateway_selection_score.clone(),
         value.clone(),
+        bucket_size,
     )
     .await;
-    logger::debug!(
-        action = "updateScoreAndQueue",
-        tag = "updateScoreAndQueue",
-        "Popped Redis Value {}",
-        popped_status
-    );
-    let returned_value =
-        match serde_json::from_slice::<Option<SrV3DebugBlock>>(popped_status.as_bytes()) {
-            Ok(maybe_popped_status_block) => get_status(maybe_popped_status_block, popped_status),
-            Err(_) => popped_status,
-        };
-    logger::debug!(
-        action = "updateScoreAndQueue",
-        tag = "updateScoreAndQueue",
-        "Popped Returned Value {}",
-        returned_value
-    );
-    if returned_value == value {
-    } else {
-        updateScore(
-            C::kvRedis(),
-            key_for_gateway_selection_score.clone(),
-            should_score_increase,
-        )
-        .await;
-    }
 }
 
 //Original Haskell function: getSrV3MerchantBucketSize
@@ -336,8 +315,3 @@ pub async fn getSrV3MerchantBucketSize(txn_detail: TxnDetail, txn_card_info: Txn
     merchant_bucket_size
 }
 
-fn get_status(maybe_popped_status_block: Option<SrV3DebugBlock>, default_status: String) -> String {
-    maybe_popped_status_block
-        .map(|block| block.txn_status)
-        .unwrap_or(default_status)
-}

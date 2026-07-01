@@ -1058,6 +1058,23 @@ impl DomainDeciderRequestForApiCallV2 {
             .map(ToString::to_string)
     }
 
+    /// Card scheme (card_network SR dimension) — the card switch provider, matching how the
+    /// decider keys SR clusters.
+    pub fn card_network(&self) -> Option<String> {
+        self.payment_info
+            .card_switch_provider
+            .as_ref()
+            .map(|s| s.peek().to_string())
+    }
+
+    pub fn currency(&self) -> String {
+        self.payment_info.currency.to_string()
+    }
+
+    pub fn country(&self) -> Option<String> {
+        self.payment_info.country.as_ref().map(ToString::to_string)
+    }
+
     pub async fn to_domain_decider_request(&self) -> DomainDeciderRequest {
         DomainDeciderRequest {
             orderReference: ETO::Order {

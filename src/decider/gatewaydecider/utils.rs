@@ -1728,31 +1728,46 @@ fn get_sr_v3_sub_level_input_config(
     sr_routing_dimensions: &SrRoutingDimensions,
     is_input_non_null: impl Fn(&SrV3SubLevelInputConfig) -> bool,
 ) -> Option<SrV3SubLevelInputConfig> {
-    sub_level_input_config
-        .as_ref()
-        .and_then(|configs| {
-            configs
-                .iter()
-                .find(|config| {
-                    is_sr_v3_config_match(
-                        config,
-                        Some(pmt.to_string()),
-                        Some(pm.to_string()),
-                        sr_routing_dimensions,
-                    ) && is_input_non_null(config)
-                })
-                .or_else(|| {
-                    configs.iter().find(|config| {
-                        is_sr_v3_config_match(
-                            config,
-                            Some(pmt.to_string()),
-                            None,
-                            sr_routing_dimensions,
-                        ) && is_input_non_null(config)
-                    })
-                })
-        })
-        .cloned()
+    sub_level_input_config.as_ref().and_then(|configs| {
+        configs
+            .iter()
+            .filter(|config| {
+                is_sr_v3_config_match(
+                    config,
+                    Some(pmt.to_string()),
+                    Some(pm.to_string()),
+                    sr_routing_dimensions,
+                ) && is_input_non_null(config)
+            })
+            // Most-specific match wins: rank matching rows by the number of constrained
+            // (non-`None`) dimensions so a fully-qualified row (e.g. VISA/USD/THREE_DS) is
+            // preferred over a broad all-`Any` row that also matches. This also subsumes the
+            // old pmt-only fallback — a row that constrains `paymentMethod` outranks one that
+            // leaves it `Any`. Fold with a strict `>` (via `>=` keeping the incumbent) so the
+            // earliest config wins on equal specificity, preserving deterministic config order.
+            .fold(None::<&SrV3SubLevelInputConfig>, |best, config| match best {
+                Some(b) if config_specificity(b) >= config_specificity(config) => Some(b),
+                _ => Some(config),
+            })
+            .cloned()
+    })
+}
+
+/// Number of dimensions a sub-level config constrains (non-`None`). Higher = more specific.
+/// `paymentMethodType` is excluded because every candidate has already matched on it, so it
+/// does not discriminate between rows.
+fn config_specificity(config: &SrV3SubLevelInputConfig) -> usize {
+    [
+        config.paymentMethod.is_some(),
+        config.cardNetwork.is_some(),
+        config.cardIsIn.is_some(),
+        config.currency.is_some(),
+        config.country.is_some(),
+        config.authType.is_some(),
+    ]
+    .into_iter()
+    .filter(|&present| present)
+    .count()
 }
 
 fn is_sr_v3_config_match(
@@ -3136,3 +3151,92 @@ pub async fn get_penality_factor_(
 //     Ok(None)
 //     }
 // }
+
+#[cfg(test)]
+mod sr_v3_sub_level_match_tests {
+    use super::*;
+    use crate::decider::gatewaydecider::types::{SrRoutingDimensions, SrV3SubLevelInputConfig};
+
+    fn sub_config(
+        pm: Option<&str>,
+        network: Option<&str>,
+        currency: Option<&str>,
+        auth: Option<&str>,
+        hedging: f64,
+    ) -> SrV3SubLevelInputConfig {
+        SrV3SubLevelInputConfig {
+            paymentMethodType: Some("CARD".to_string()),
+            paymentMethod: pm.map(String::from),
+            cardNetwork: network.map(String::from),
+            cardIsIn: None,
+            currency: currency.map(String::from),
+            country: None,
+            authType: auth.map(String::from),
+            latencyThreshold: None,
+            bucketSize: None,
+            hedgingPercent: Some(hedging),
+            lowerResetFactor: None,
+            upperResetFactor: None,
+            gatewayExtraScore: None,
+        }
+    }
+
+    fn visa_usd_3ds_debit() -> SrRoutingDimensions {
+        SrRoutingDimensions {
+            card_network: Some("VISA".to_string()),
+            card_isin: None,
+            currency: Some("USD".to_string()),
+            country: Some("US".to_string()),
+            auth_type: Some("THREE_DS".to_string()),
+        }
+    }
+
+    // The broad `CARD/DEBIT` all-`Any` row is listed BEFORE the fully-qualified autopilot row,
+    // yet the specific row must win — regression guard for the first-match shadowing bug.
+    #[test]
+    fn specific_row_wins_over_broad_row_listed_first() {
+        let configs = Some(vec![
+            sub_config(Some("DEBIT"), None, None, None, 8.81),
+            sub_config(Some("DEBIT"), Some("VISA"), Some("USD"), Some("THREE_DS"), 20.0),
+        ]);
+        let picked = get_sr_v3_sub_level_input_config(
+            &configs,
+            "CARD",
+            "DEBIT",
+            &visa_usd_3ds_debit(),
+            |x| x.hedgingPercent.is_some(),
+        );
+        assert_eq!(picked.and_then(|c| c.hedgingPercent), Some(20.0));
+    }
+
+    // With no fully-qualified row, the broad row still matches.
+    #[test]
+    fn broad_row_used_when_no_specific_row() {
+        let configs = Some(vec![sub_config(Some("DEBIT"), None, None, None, 8.81)]);
+        let picked = get_sr_v3_sub_level_input_config(
+            &configs,
+            "CARD",
+            "DEBIT",
+            &visa_usd_3ds_debit(),
+            |x| x.hedgingPercent.is_some(),
+        );
+        assert_eq!(picked.and_then(|c| c.hedgingPercent), Some(8.81));
+    }
+
+    // Equal specificity ⇒ earliest config wins (deterministic config order preserved).
+    #[test]
+    fn ties_keep_earliest_config() {
+        let configs = Some(vec![
+            sub_config(Some("DEBIT"), Some("VISA"), None, None, 11.0),
+            sub_config(Some("DEBIT"), Some("VISA"), None, None, 22.0),
+        ]);
+        let picked = get_sr_v3_sub_level_input_config(
+            &configs,
+            "CARD",
+            "DEBIT",
+            &visa_usd_3ds_debit(),
+            |x| x.hedgingPercent.is_some(),
+        );
+        assert_eq!(picked.and_then(|c| c.hedgingPercent), Some(11.0));
+    }
+}

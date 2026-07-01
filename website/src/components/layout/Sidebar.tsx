@@ -154,7 +154,7 @@ export function Sidebar() {
           </span>
         </div>
 
-        <SideLink to="/decisions" icon={Search} selectedPath={selectedPath} onNavigate={setPendingPath}>Decision Explorer</SideLink>
+        {/* <SideLink to="/decisions" icon={Search} selectedPath={selectedPath} onNavigate={setPendingPath}>Decision Explorer</SideLink> */}
         <SideLink to="/decisions/simulator" icon={FlaskConical} selectedPath={selectedPath} onNavigate={setPendingPath}>Decision Simulator</SideLink>
 
         <div className="flex items-center gap-2 px-3 pb-2 pt-5">

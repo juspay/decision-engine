@@ -9,6 +9,7 @@ use crate::analytics::service::now_ms;
 use crate::error::ApiError;
 
 use super::super::metrics;
+use super::super::metrics::calibration_events::CalibrationEventRow;
 use super::super::metrics::score_bucket_series::ScoreBucketPoint;
 
 pub async fn load(
@@ -21,7 +22,21 @@ pub async fn load(
     let lookback_start_ms = start_ms.saturating_sub(staleness_horizon_ms(query.bucket_ms));
     let points =
         metrics::score_bucket_series::load(client, query, lookback_start_ms, end_ms).await?;
-    let events = detect_routing_events(&points, query, start_ms);
+    let mut events = detect_routing_events(&points, query, start_ms);
+
+    // Autopilot calibration retunes are real emitted domain events (not derivable from the
+    // score series), so replay them from their own store and merge into the same feed.
+    let calibration_rows =
+        metrics::calibration_events::load(client, query, start_ms, end_ms).await?;
+    events.extend(calibration_events_to_routing_events(
+        &query.merchant_id,
+        calibration_rows,
+    ));
+    // Re-establish the newest-first, deterministic order across both sources and re-cap:
+    // `detect_routing_events` already sorted/truncated its own output, so the calibration
+    // rows we appended need folding back in.
+    events.sort_by(|a, b| b.bucket_ms.cmp(&a.bucket_ms).then_with(|| a.id.cmp(&b.id)));
+    events.truncate(query.limit);
 
     Ok(RoutingEventsResponse {
         merchant_id: query.merchant_id.clone(),
@@ -102,6 +117,57 @@ fn event_id(
         bucket_ms,
         transition
     )
+}
+
+/// Deterministic ID for a calibration event, stable across polls so the client dedupes on
+/// it. Keyed on the full cluster grain (finer than the pmt/pm the derived events use) plus
+/// the emit timestamp, so every distinct retune surfaces exactly once.
+fn calibration_event_id(merchant_id: &str, row: &CalibrationEventRow) -> String {
+    format!(
+        "{}:{}:{}:{}:{}:{}:{}:{}:{}",
+        RoutingEventType::CalibrationApplied.as_str(),
+        merchant_id,
+        row.payment_method_type.as_deref().unwrap_or("-"),
+        row.payment_method.as_deref().unwrap_or("-"),
+        row.card_network.as_deref().unwrap_or("-"),
+        row.currency.as_deref().unwrap_or("-"),
+        row.country.as_deref().unwrap_or("-"),
+        row.auth_type.as_deref().unwrap_or("-"),
+        row.created_at_ms,
+    )
+}
+
+/// Map raw calibration domain-event rows into `calibration_applied` routing events. The
+/// score/leader fields are unused for this type; the retune knobs ride the dedicated
+/// `bucket_size`/`hedging_percent` fields, and `bucket_ms` carries the emit time so the
+/// event slots into the shared newest-first timeline.
+fn calibration_events_to_routing_events(
+    merchant_id: &str,
+    rows: Vec<CalibrationEventRow>,
+) -> Vec<RoutingEvent> {
+    rows.into_iter()
+        .map(|row| RoutingEvent {
+            id: calibration_event_id(merchant_id, &row),
+            event_type: RoutingEventType::CalibrationApplied,
+            merchant_id: merchant_id.to_string(),
+            payment_method_type: row.payment_method_type.clone(),
+            payment_method: row.payment_method.clone(),
+            bucket_ms: row.created_at_ms,
+            gateway: String::new(),
+            previous_gateway: None,
+            score: None,
+            previous_score: None,
+            transaction_count: None,
+            bucket_size: row.new_bucket.map(|b| b as i32),
+            previous_bucket_size: row.previous_bucket.map(|b| b.round() as i32),
+            hedging_percent: row.new_hedge,
+            previous_hedging_percent: row.previous_hedge,
+            card_network: row.card_network,
+            currency: row.currency,
+            country: row.country,
+            auth_type: row.auth_type,
+        })
+        .collect()
 }
 
 /// Walk bucketed score points per dimension, carrying the last known score per
@@ -238,6 +304,14 @@ fn detect_routing_events(
                                 transaction_count: state
                                     .get(&leader_name)
                                     .and_then(|gateway_state| gateway_state.transaction_count),
+                                bucket_size: None,
+                                previous_bucket_size: None,
+                                hedging_percent: None,
+                                previous_hedging_percent: None,
+                                card_network: None,
+                                currency: None,
+                                country: None,
+                                auth_type: None,
                             });
                             previous_leader = Some(leader_name);
                         }
@@ -393,6 +467,14 @@ fn auth_band_event(
         score: Some(gateway_state.score),
         previous_score: Some(leader_score),
         transaction_count: gateway_state.transaction_count,
+        bucket_size: None,
+        previous_bucket_size: None,
+        hedging_percent: None,
+        previous_hedging_percent: None,
+        card_network: None,
+        currency: None,
+        country: None,
+        auth_type: None,
     }
 }
 
@@ -402,6 +484,48 @@ mod tests {
     use crate::analytics::models::{AuthBandSpec, RoutingEventsQuery, ROUTING_EVENTS_BUCKET_MS};
 
     const BUCKET: i64 = ROUTING_EVENTS_BUCKET_MS;
+
+    fn calibration_row(created_at_ms: i64) -> CalibrationEventRow {
+        CalibrationEventRow {
+            created_at_ms,
+            payment_method_type: Some("card".to_string()),
+            payment_method: Some("credit".to_string()),
+            card_network: Some("VISA".to_string()),
+            currency: None,
+            country: None,
+            auth_type: None,
+            new_hedge: Some(8.5),
+            previous_hedge: Some(5.0),
+            new_bucket: Some(250),
+            previous_bucket: Some(100.0),
+        }
+    }
+
+    #[test]
+    fn calibration_rows_map_to_calibration_events_with_stable_ids() {
+        let rows = vec![calibration_row(1_700_000_000_000)];
+        let events = calibration_events_to_routing_events("m_123", rows);
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+        assert_eq!(event.event_type, RoutingEventType::CalibrationApplied);
+        assert_eq!(event.bucket_ms, 1_700_000_000_000);
+        assert_eq!(event.bucket_size, Some(250));
+        assert_eq!(event.previous_bucket_size, Some(100));
+        assert_eq!(event.hedging_percent, Some(8.5));
+        assert_eq!(event.previous_hedging_percent, Some(5.0));
+        assert_eq!(event.card_network.as_deref(), Some("VISA"));
+        // The score/leader fields are unused for calibration events.
+        assert_eq!(event.gateway, "");
+        assert!(event.score.is_none());
+        // ID embeds the full cluster grain + emit time; "-" fills unset dims.
+        assert_eq!(
+            event.id,
+            "calibration_applied:m_123:card:credit:VISA:-:-:-:1700000000000"
+        );
+        // Deterministic across polls.
+        let rerun = calibration_events_to_routing_events("m_123", vec![calibration_row(1_700_000_000_000)]);
+        assert_eq!(rerun[0].id, event.id);
+    }
 
     fn query() -> RoutingEventsQuery {
         RoutingEventsQuery {

@@ -572,12 +572,21 @@ pub const DEFAULT_ROUTING_EVENTS_MIN_SCORE_DELTA: f64 = 0.01;
 pub const DEFAULT_ROUTING_EVENTS_LIMIT: usize = 50;
 pub const MAX_ROUTING_EVENTS_LIMIT: usize = 200;
 
+/// `event_stage` marker written on the domain-event rows the SR auto-calibrator emits,
+/// and the filter the routing-events detector reads them back by. Single source of truth
+/// shared by the emit path (`record_autopilot_calibration`) and the query path.
+pub const AUTOPILOT_CALIBRATION_STAGE: &str = "autopilot_calibration";
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RoutingEventType {
     LeaderChanged,
     GatewayEnteredAuthBand,
     GatewayExitedAuthBand,
+    /// The autopilot re-tuned a cluster's SRV3 bucket size / hedging %. Unlike the other
+    /// variants (derived from the score series), this is a real emitted event replayed
+    /// from the domain-event stream.
+    CalibrationApplied,
 }
 
 impl RoutingEventType {
@@ -586,6 +595,7 @@ impl RoutingEventType {
             Self::LeaderChanged => "leader_changed",
             Self::GatewayEnteredAuthBand => "gateway_entered_auth_band",
             Self::GatewayExitedAuthBand => "gateway_exited_auth_band",
+            Self::CalibrationApplied => "calibration_applied",
         }
     }
 }
@@ -604,6 +614,25 @@ pub struct RoutingEvent {
     pub score: Option<f64>,
     pub previous_score: Option<f64>,
     pub transaction_count: Option<i64>,
+    // Calibration-only fields (all `None` for the score-derived event types). They carry
+    // the autopilot's new/previous knobs and the full cluster grain (which is finer than
+    // the pmt/pm the derived events track), so the UI can label and describe the retune.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bucket_size: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_bucket_size: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hedging_percent: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_hedging_percent: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub card_network: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub currency: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub country: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

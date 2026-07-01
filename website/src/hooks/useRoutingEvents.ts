@@ -226,5 +226,42 @@ export function describeRoutingEvent(event: RoutingEvent): string {
       return `${event.gateway} now good enough on success — routing it to save cost`
     case 'gateway_exited_auth_band':
       return `${event.gateway} slipped on success — not eligible for cost override anymore`
+    case 'calibration_applied':
+      return describeCalibration(event)
   }
+}
+
+// Human-readable summary of an autopilot calibration retune: which cluster, and how the
+// bucket size / hedging % moved. Shows "→" deltas when a previous value is known (an update)
+// and a plain "set" when the autopilot first created the cluster's override.
+function describeCalibration(event: RoutingEvent): string {
+  const dims = [
+    event.payment_method_type,
+    event.payment_method,
+    event.card_network,
+    event.currency,
+    event.country,
+    event.auth_type,
+  ].filter((d): d is string => Boolean(d))
+  const cluster = dims.length ? dims.join(' · ') : 'default'
+
+  const parts: string[] = []
+  if (event.bucket_size != null) {
+    parts.push(
+      event.previous_bucket_size != null && event.previous_bucket_size !== event.bucket_size
+        ? `bucket ${event.previous_bucket_size} → ${event.bucket_size}`
+        : `bucket ${event.bucket_size}`,
+    )
+  }
+  if (event.hedging_percent != null) {
+    const hedge = `${event.hedging_percent.toFixed(1)}%`
+    parts.push(
+      event.previous_hedging_percent != null &&
+        event.previous_hedging_percent !== event.hedging_percent
+        ? `hedging ${event.previous_hedging_percent.toFixed(1)}% → ${hedge}`
+        : `hedging ${hedge}`,
+    )
+  }
+  const change = parts.length ? parts.join(', ') : 'settings'
+  return `autopilot tuned ${cluster} — ${change}`
 }
