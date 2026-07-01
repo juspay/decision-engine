@@ -16,6 +16,7 @@ use crate::analytics::events::DomainAnalyticsEvent;
 use crate::analytics::flow::{AnalyticsFlowContext, AnalyticsRoute, ApiFlow, FlowType};
 use crate::analytics::runtime::AnalyticsRuntime;
 use crate::analytics::store::{AnalyticsReadStore, SegmentTraffic};
+use crate::app::get_tenant_app_state;
 use crate::config::SrAutoCalibrationConfig;
 use crate::euclid::types::SrDimensionConfig;
 use crate::logger;
@@ -160,7 +161,7 @@ pub fn spawn(runtime: Arc<AnalyticsRuntime>, config: SrAutoCalibrationConfig) {
             // Isolate each cycle: a panic inside `run_once` is caught here so the supervisor
             // loop keeps ticking instead of the whole job dying. Per-merchant errors are already
             // handled inside `run_once` (logged, loop continues).
-            let outcome = std::panic::AssertUnwindSafe(run_once(&runtime, params))
+            let outcome = std::panic::AssertUnwindSafe(run_once(&runtime, params, interval_secs))
                 .catch_unwind()
                 .await;
             if let Err(panic) = outcome {
@@ -180,16 +181,50 @@ pub fn spawn(runtime: Arc<AnalyticsRuntime>, config: SrAutoCalibrationConfig) {
     });
 }
 
-async fn run_once(runtime: &AnalyticsRuntime, params: CalibrationParams) {
+async fn run_once(runtime: &AnalyticsRuntime, params: CalibrationParams, interval_secs: u64) {
     let merchants = enrolled_merchants().await;
     if merchants.is_empty() {
         return;
     }
     let store = runtime.read_store();
     let since_ms = crate::analytics::now_ms() - (params.lookback_secs as i64) * 1000;
+    // Interval bucket for the per-merchant lock key. Keying by bucket (rather than relying on
+    // TTL expiry timing) means each new interval always gets a fresh key, so the lock dedupes
+    // concurrent replicas *within* an interval without ever throttling the per-cycle cadence.
+    let interval_bucket = crate::analytics::now_ms() / 1000 / (interval_secs.max(1) as i64);
     for merchant_id in merchants {
-        // NOTE: single-replica assumption for now — a Redis SET NX lock per merchant should be
-        // added before running multiple replicas, to avoid concurrent writes of the same config.
+        // Multi-replica safety: acquire a per-merchant, per-interval Redis SET-NX lock so only
+        // one replica calibrates a given merchant per interval — avoids concurrent rewrites of
+        // the same SR_V3_INPUT_CONFIG_* and duplicate `calibration_applied` events. The lock is
+        // best-effort (advisory): we let it expire rather than release it, and we fail *open* on
+        // a Redis error so a single replica keeps calibrating even if Redis is unavailable.
+        let lock_key = format!("sr_auto_calibration_lock_{}_{}", merchant_id, interval_bucket);
+        let app_state = get_tenant_app_state().await;
+        match app_state
+            .redis_conn
+            .set_key_if_not_exists(&lock_key, "1", interval_secs.saturating_mul(2) as i64)
+            .await
+        {
+            Ok(true) => {} // acquired — this replica owns the merchant this interval.
+            Ok(false) => {
+                logger::debug!(
+                    tag = "sr_auto_calibration",
+                    action = "skip_locked",
+                    "another replica is calibrating {} this interval; skipping",
+                    merchant_id
+                );
+                continue;
+            }
+            Err(err) => {
+                logger::warn!(
+                    tag = "sr_auto_calibration",
+                    action = "lock_error",
+                    "lock acquisition for {} failed ({:?}); proceeding without lock",
+                    merchant_id,
+                    err
+                );
+            }
+        }
         if let Err(reason) =
             calibrate_merchant(store.as_ref(), &merchant_id, since_ms, params).await
         {

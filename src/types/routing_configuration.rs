@@ -39,9 +39,10 @@ pub struct SuccessRateData {
     pub default_upper_reset_factor: Option<f64>,
     pub default_gateway_extra_score: Option<Vec<GatewayWiseExtraScore>>,
     pub sub_level_input_config: Option<Vec<SRSubLevelInputConfig>>,
-    /// Merchant margin (fraction of ticket, e.g. 0.20). Drives the multi-objective
-    /// economic auth band `Δcost/(100·margin)`. Defaults to [`crate::decider::
-    /// gatewaydecider::multi_objective::DEFAULT_MARGIN`] when unset.
+    /// Merchant margin (fraction of ticket, e.g. 0.20). Used in the multi-objective
+    /// expected-value ranking `EV = auth·(margin − cost/10_000)`; there is no auth
+    /// band or admission gate. Defaults to [`crate::decider::gatewaydecider::
+    /// multi_objective::DEFAULT_MARGIN`] when unset.
     pub margin: Option<f64>,
 }
 

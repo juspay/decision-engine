@@ -244,8 +244,9 @@ fn handle_enforced_gateway(gateway_list: Option<Vec<String>>) -> Option<Vec<Stri
 }
 
 /// The merchant's configured margin (fraction of ticket) from
-/// `SR_V3_INPUT_CONFIG_<merchant_id>`. Drives the multi-objective economic band
-/// `Δcost/(100·margin)`. Falls back to [`multi_objective::DEFAULT_MARGIN`] when unset.
+/// `SR_V3_INPUT_CONFIG_<merchant_id>`. Used in the multi-objective expected-value
+/// ranking `EV = auth·(margin − cost/10_000)` — there is no auth band or admission
+/// gate. Falls back to [`multi_objective::DEFAULT_MARGIN`] when unset.
 pub async fn load_margin(merchant_id: &str) -> f64 {
     let read = || async {
         let key = format!("SR_V3_INPUT_CONFIG_{}", merchant_id);
@@ -539,7 +540,10 @@ pub async fn run_decider_flow(
             //   2. the merchant has the "Optimize for economic value" feature enabled
             //      (`multi_objective_routing_enabled`).
             // `&&` short-circuits so the feature-flag lookup is skipped when the request didn't
-            // opt in.
+            // opt in. `enableMultiObjective` is a new request field that defaults to `None`
+            // (⇒ off), so this double-gate introduces no regression: there is no pre-existing
+            // caller whose behavior changes — multi-objective routing is opt-in from day one,
+            // and the merchant flag is a second, per-merchant kill switch on top of it.
             let multi_obj_on = enable_multi_objective_override.unwrap_or(false)
                 && is_feature_enabled(
                     "multi_objective_routing_enabled".to_string(),

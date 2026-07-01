@@ -6,8 +6,9 @@ pub mod seed_costs;
 use serde::{Deserialize, Serialize};
 
 /// Default merchant margin (fraction of ticket) when none is configured. Drives the
-/// expected-value calculation `EV = auth·(margin − cost)`.
-pub const DEFAULT_MARGIN: f64 = 0.20;
+/// expected-value calculation `EV = auth·(margin − cost)`. Margin is not currently a
+/// user-facing knob, so this 1.0 (100%) default is the value applied in practice.
+pub const DEFAULT_MARGIN: f64 = 1.0;
 
 /// Surfaced on the `/decide-gateway` response when the multi-objective post-step
 /// actually ran. Lets callers see why the gateway was picked (auth still won, or

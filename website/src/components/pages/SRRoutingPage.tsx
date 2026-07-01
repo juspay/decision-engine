@@ -170,7 +170,7 @@ function CurrentConfigDetails({ config }: { config: SRConfigResponse['config'] }
           </div>
           <div>
             <span className="text-slate-500">Margin:</span>
-            <p className="font-medium">{config.data.margin != null ? `${config.data.margin * 100}%` : 'Not set (20%)'}</p>
+            <p className="font-medium">{config.data.margin != null ? `${config.data.margin * 100}%` : 'Not set (100%)'}</p>
           </div>
         </div>
       </div>
@@ -329,9 +329,10 @@ export function SRRoutingPage() {
             defaultSuccessRate: data.defaultSuccessRate,
             defaultLatencyThreshold: data.defaultLatencyThreshold,
             defaultHedgingPercent: data.defaultHedgingPercent,
-            // Margin is no longer user-configurable — always treat it as 100% (fraction 1.0)
-            // for now. (Removed the Cost based config card; revisit if margin becomes a knob.)
-            margin: 1.0,
+            // Margin is not a user-facing knob right now, so we omit it and let the
+            // backend default (multi_objective::DEFAULT_MARGIN = 1.0 / 100%) apply.
+            // This avoids clobbering any stored value and keeps a single source of
+            // truth on the backend. Revisit if margin becomes configurable again.
             subLevelInputConfig: data.subLevelInputConfig.length > 0
               ? data.subLevelInputConfig
               : null,

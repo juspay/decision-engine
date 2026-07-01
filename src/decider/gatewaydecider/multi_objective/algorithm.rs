@@ -42,9 +42,9 @@ pub async fn try_apply_multi_objective_post_step(
 }
 
 /// Pure expected-value pick: rank every PSP that has cost data by
-/// `EV = auth·(margin − cost/10_000)` and promote the highest. There is **no auth band**
-/// and no admission gate — a PSP wins purely on expected value, regardless of how far its
-/// auth rate sits from the SR head's.
+/// `EV = auth·(margin − cost/10_000)` and promote the highest. There is **no explicit
+/// auth band** and no admission gate — a PSP wins purely on expected value.
+///
 pub fn reorder_for_cost(
     score_map: &HashMap<String, f64>,
     margin: f64,
