@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use super::cluster_key::derive_cluster_key;
 use super::hypersense_client;
 use super::hypersense_client::PspCost;
-use super::{CostPickStrategy, MultiObjectiveInfo, MultiObjectiveOutcome, PspSummary};
+use super::{MultiObjectiveInfo, MultiObjectiveOutcome, PspSummary};
 use crate::types::card::txn_card_info::TxnCardInfo;
 use crate::types::txn_details::types::TxnDetail;
 
@@ -24,7 +24,6 @@ pub async fn try_apply_multi_objective_post_step(
     txn_detail: &TxnDetail,
     txn_card_info: &TxnCardInfo,
     margin: f64,
-    strategy: CostPickStrategy,
 ) -> ReorderOutcome {
     if score_map.len() < 2 {
         let sr_head = current_head(score_map);
@@ -39,7 +38,7 @@ pub async fn try_apply_multi_objective_post_step(
     let cluster_key = derive_cluster_key(txn_detail, txn_card_info);
     let psps: Vec<String> = score_map.keys().cloned().collect();
     let costs = hypersense_client::lookup_costs(merchant_id, &cluster_key, &psps).await;
-    reorder_for_cost(score_map, margin, &costs, strategy)
+    reorder_for_cost(score_map, margin, &costs)
 }
 
 /// Pure expected-value pick: rank every PSP that has cost data by
@@ -50,7 +49,6 @@ pub fn reorder_for_cost(
     score_map: &HashMap<String, f64>,
     margin: f64,
     costs: &HashMap<String, PspCost>,
-    strategy: CostPickStrategy,
 ) -> ReorderOutcome {
     let sr_head = current_head(score_map);
 
@@ -119,13 +117,8 @@ pub fn reorder_for_cost(
         ranked_count += 1;
         let cand_ev = ev(score, c);
         ranked_evs.push(cand_ev);
-        // MaxEv promotes on a strict expected-value gain; CheapestInBand promotes purely on
-        // a strictly lower cost, ignoring the auth tradeoff (kept for side-by-side comparison).
-        let improves = match strategy {
-            CostPickStrategy::MaxEv => cand_ev > chosen_ev + f64::EPSILON,
-            CostPickStrategy::CheapestInBand => c < chosen_cost - f64::EPSILON,
-        };
-        if improves {
+        // Promote on a strict expected-value gain (no churn on ties).
+        if cand_ev > chosen_ev + f64::EPSILON {
             chosen_ev = cand_ev;
             chosen_psp = Some(gw.clone());
             chosen_score = score;
@@ -164,15 +157,10 @@ pub fn reorder_for_cost(
 
     let chosen_name = chosen_psp.clone().unwrap_or_default();
     let cost_saved_bps = head_cost - chosen_cost;
-    let basis = match strategy {
-        CostPickStrategy::MaxEv => "expected value",
-        CostPickStrategy::CheapestInBand => "lowest cost",
-    };
     let reason = format!(
-        "Promoted '{}' over '{}' on {} — saves {:.2} bps for {:.2}pp auth.",
+        "Promoted '{}' over '{}' on expected value — saves {:.2} bps for {:.2}pp auth.",
         chosen_name,
         head_psp.clone().unwrap_or_default(),
-        basis,
         cost_saved_bps,
         (best_auth - chosen_score) * 100.0,
     );
@@ -320,7 +308,7 @@ mod tests {
     fn ev_picks_highest_ev_over_head_and_cheaper_psps() {
         let s = scores(&[("A", 0.910), ("B", 0.902), ("C", 0.885), ("D", 0.850)]);
         let c = costs(&[("A", 200.0), ("B", 150.0), ("C", 120.0), ("D", 110.0)]);
-        let out = reorder_for_cost(&s, 0.20, &c, CostPickStrategy::MaxEv);
+        let out = reorder_for_cost(&s, 0.20, &c);
         assert_eq!(out.info.outcome, MultiObjectiveOutcome::CostWon);
         // No gate: every PSP with cost data is ranked, including D.
         assert_eq!(out.info.qualified_count, 4, "all four PSPs ranked on EV");
@@ -328,35 +316,20 @@ mod tests {
         assert_eq!(chosen, "B", "EV should pick B, not the cheaper C or D");
     }
 
-    // Same field, but CheapestInBand picks the lowest-cost PSP overall — now D (110bps),
-    // since there is no band to exclude it. Only the pick differs from MaxEv.
-    #[test]
-    fn cheapest_picks_lowest_cost_overall() {
-        let s = scores(&[("A", 0.910), ("B", 0.902), ("C", 0.885), ("D", 0.850)]);
-        let c = costs(&[("A", 200.0), ("B", 150.0), ("C", 120.0), ("D", 110.0)]);
-        let out = reorder_for_cost(&s, 0.20, &c, CostPickStrategy::CheapestInBand);
-        assert_eq!(out.info.outcome, MultiObjectiveOutcome::CostWon);
-        assert_eq!(out.info.qualified_count, 4, "all four PSPs ranked");
-        let chosen = out.cost_decision.expect("cost decision").chosen;
-        assert_eq!(chosen, "D", "cheapest should pick D (110bps), the lowest cost overall");
-    }
-
     // The old noise-floor circuit breaker is gone: pure EV promotes a much-worse-auth PSP
     // whenever its cost makes its EV higher. B is 5pp below A on auth but far cheaper —
-    // EV_A .16744 < EV_B .16965 → B wins under both strategies.
+    // EV_A .16744 < EV_B .16965 → B wins.
     #[test]
     fn pure_ev_promotes_far_worse_auth_when_ev_wins() {
         let s = scores(&[("A", 0.92), ("B", 0.87)]);
         let c = costs(&[("A", 180.0), ("B", 50.0)]);
-        for strategy in [CostPickStrategy::MaxEv, CostPickStrategy::CheapestInBand] {
-            let out = reorder_for_cost(&s, 0.20, &c, strategy);
-            assert_eq!(
-                out.info.outcome,
-                MultiObjectiveOutcome::CostWon,
-                "no band gate now — B's higher EV / lower cost wins"
-            );
-            assert_eq!(out.cost_decision.expect("cost decision").chosen, "B");
-        }
+        let out = reorder_for_cost(&s, 0.20, &c);
+        assert_eq!(
+            out.info.outcome,
+            MultiObjectiveOutcome::CostWon,
+            "no band gate now — B's higher EV wins"
+        );
+        assert_eq!(out.cost_decision.expect("cost decision").chosen, "B");
     }
 
     // Head already highest on EV → AuthWon, no churn.
@@ -364,7 +337,7 @@ mod tests {
     fn head_wins_when_it_is_highest_ev() {
         let s = scores(&[("A", 0.91), ("B", 0.905)]);
         let c = costs(&[("A", 100.0), ("B", 130.0)]); // B pricier -> EV lower
-        let out = reorder_for_cost(&s, 0.20, &c, CostPickStrategy::MaxEv);
+        let out = reorder_for_cost(&s, 0.20, &c);
         assert_eq!(out.info.outcome, MultiObjectiveOutcome::AuthWon);
     }
 
@@ -375,23 +348,32 @@ mod tests {
         // All four ranked; EVs B .16687 > C .16638 > A .1638 > D .16065. Top-two gap = B − C.
         let s = scores(&[("A", 0.910), ("B", 0.902), ("C", 0.885), ("D", 0.850)]);
         let c = costs(&[("A", 200.0), ("B", 150.0), ("C", 120.0), ("D", 110.0)]);
-        let out = reorder_for_cost(&s, 0.20, &c, CostPickStrategy::MaxEv);
+        let out = reorder_for_cost(&s, 0.20, &c);
         assert_eq!(out.info.outcome, MultiObjectiveOutcome::CostWon);
         let gap = out.info.ev_gap_top2.expect("PSPs ranked on EV");
-        assert!((gap - 0.00049).abs() < 1e-6, "top-two gap should be B−C; got {gap}");
+        assert!(
+            (gap - 0.00049).abs() < 1e-6,
+            "top-two gap should be B−C; got {gap}"
+        );
 
         // AuthWon still reports the head's EV lead over the runner-up (A − B).
         let s2 = scores(&[("A", 0.91), ("B", 0.905)]);
         let c2 = costs(&[("A", 100.0), ("B", 130.0)]);
-        let out2 = reorder_for_cost(&s2, 0.20, &c2, CostPickStrategy::MaxEv);
+        let out2 = reorder_for_cost(&s2, 0.20, &c2);
         assert_eq!(out2.info.outcome, MultiObjectiveOutcome::AuthWon);
         let gap2 = out2.info.ev_gap_top2.expect("A, B ranked on EV");
-        assert!((gap2 - 0.003665).abs() < 1e-6, "AuthWon gap should be A−B; got {gap2}");
+        assert!(
+            (gap2 - 0.003665).abs() < 1e-6,
+            "AuthWon gap should be A−B; got {gap2}"
+        );
 
         // Only one PSP has cost data → nothing to rank a second place against → None.
         let s3 = scores(&[("A", 0.90)]);
         let c3 = costs(&[("A", 100.0)]);
-        let out3 = reorder_for_cost(&s3, 0.20, &c3, CostPickStrategy::MaxEv);
-        assert_eq!(out3.info.ev_gap_top2, None, "single eligible PSP has no top-two gap");
+        let out3 = reorder_for_cost(&s3, 0.20, &c3);
+        assert_eq!(
+            out3.info.ev_gap_top2, None,
+            "single eligible PSP has no top-two gap"
+        );
     }
 }

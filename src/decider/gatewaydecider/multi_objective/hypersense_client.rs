@@ -702,7 +702,10 @@ mod tests {
     fn pt(amount: f64, pct: f64, fixed: f64) -> (f64, Observation) {
         (
             amount,
-            HashMap::from([("stripe".to_string(), (true, pct + (fixed / amount) * 10_000.0))]),
+            HashMap::from([(
+                "stripe".to_string(),
+                (true, pct + (fixed / amount) * 10_000.0),
+            )]),
         )
     }
 
@@ -711,7 +714,11 @@ mod tests {
     // wrong (1025 bps vs the true 321 bps).
     #[test]
     fn fit_accepts_three_consistent_linear_points() {
-        let obs = vec![pt(768.0, 287.0, 0.15), pt(374.0, 287.0, 0.15), pt(120.0, 287.0, 0.15)];
+        let obs = vec![
+            pt(768.0, 287.0, 0.15),
+            pt(374.0, 287.0, 0.15),
+            pt(120.0, 287.0, 0.15),
+        ];
         let models = fit_from_observations(&obs).expect("consistent linear samples should solve");
         let m = models.get("stripe").unwrap();
         let expected = 287.0 + (0.15 / 44.0) * 10_000.0; // ≈ 321.09
@@ -730,9 +737,10 @@ mod tests {
     fn fit_rejects_nonlinear_held_out_point() {
         let mut middle = pt(374.0, 287.0, 0.15);
         // Bump the middle observation 5 bps off the line through the two extremes.
-        middle
-            .1
-            .insert("stripe".to_string(), (true, 287.0 + (0.15 / 374.0) * 10_000.0 + 5.0));
+        middle.1.insert(
+            "stripe".to_string(),
+            (true, 287.0 + (0.15 / 374.0) * 10_000.0 + 5.0),
+        );
         let obs = vec![pt(768.0, 287.0, 0.15), middle, pt(120.0, 287.0, 0.15)];
         assert!(
             fit_from_observations(&obs).is_none(),

@@ -974,11 +974,6 @@ pub struct DomainDeciderRequestForApiCallV2 {
     pub elimination_enabled: Option<bool>,
     #[serde(default)]
     pub enable_multi_objective: Option<bool>,
-    /// When `Some(true)`, the multi-objective post-step picks the **cheapest** PSP in the
-    /// auth band instead of the highest expected-value one. Comparison/demo lever only —
-    /// surfaces larger cost savings at the cost of more auth risked. Defaults to EV pick.
-    #[serde(default)]
-    pub cost_pick_cheapest: Option<bool>,
 }
 
 pub fn deserialize_optional_udfs_to_hashmap<'de, D>(

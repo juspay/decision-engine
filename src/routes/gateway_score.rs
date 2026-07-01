@@ -107,7 +107,8 @@ async fn clear_autopilot_sublevel_overrides(merchant_id: &str) -> usize {
     let kept: Vec<serde_json::Value> = arr
         .into_iter()
         .filter(|e| {
-            e.get("source").and_then(|v| v.as_str()) != Some(crate::sr_auto_calibration::AUTOPILOT_SOURCE)
+            e.get("source").and_then(|v| v.as_str())
+                != Some(crate::sr_auto_calibration::AUTOPILOT_SOURCE)
         })
         .collect();
     let removed = before - kept.len();

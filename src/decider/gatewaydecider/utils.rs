@@ -1745,10 +1745,13 @@ fn get_sr_v3_sub_level_input_config(
             // old pmt-only fallback — a row that constrains `paymentMethod` outranks one that
             // leaves it `Any`. Fold with a strict `>` (via `>=` keeping the incumbent) so the
             // earliest config wins on equal specificity, preserving deterministic config order.
-            .fold(None::<&SrV3SubLevelInputConfig>, |best, config| match best {
-                Some(b) if config_specificity(b) >= config_specificity(config) => Some(b),
-                _ => Some(config),
-            })
+            .fold(
+                None::<&SrV3SubLevelInputConfig>,
+                |best, config| match best {
+                    Some(b) if config_specificity(b) >= config_specificity(config) => Some(b),
+                    _ => Some(config),
+                },
+            )
             .cloned()
     })
 }
@@ -3197,7 +3200,13 @@ mod sr_v3_sub_level_match_tests {
     fn specific_row_wins_over_broad_row_listed_first() {
         let configs = Some(vec![
             sub_config(Some("DEBIT"), None, None, None, 8.81),
-            sub_config(Some("DEBIT"), Some("VISA"), Some("USD"), Some("THREE_DS"), 20.0),
+            sub_config(
+                Some("DEBIT"),
+                Some("VISA"),
+                Some("USD"),
+                Some("THREE_DS"),
+                20.0,
+            ),
         ]);
         let picked = get_sr_v3_sub_level_input_config(
             &configs,

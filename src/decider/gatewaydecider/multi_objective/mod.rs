@@ -9,20 +9,6 @@ use serde::{Deserialize, Serialize};
 /// expected-value calculation `EV = auth·(margin − cost)`.
 pub const DEFAULT_MARGIN: f64 = 0.20;
 
-/// How the post-step picks among all PSPs with cost data. Ranking is pure — there is no
-/// auth band or admission gate; only the final pick differs between strategies.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum CostPickStrategy {
-    /// Production default: route to the highest expected-value PSP, where
-    /// `EV = auth·(margin − cost)`. Balances auth and cost in a single number.
-    #[default]
-    MaxEv,
-    /// Comparison-only: route to the **cheapest** PSP regardless of EV, ignoring the auth
-    /// tradeoff entirely. Surfaces more/larger cost savings but risks more auth value.
-    /// Wired to the simulator's toggle so the two strategies can be compared side by side.
-    CheapestInBand,
-}
-
 /// Surfaced on the `/decide-gateway` response when the multi-objective post-step
 /// actually ran. Lets callers see why the gateway was picked (auth still won, or
 /// cost won and saved N bps) without having to reconstruct the logic.

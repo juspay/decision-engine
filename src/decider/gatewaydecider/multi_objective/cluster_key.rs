@@ -84,9 +84,8 @@ pub fn derive_cluster_key(txn_detail: &TxnDetail, txn_card_info: &TxnCardInfo) -
 /// merchant's own region is "us"; everything else is cross-border "intl".
 fn issuer_region(raw: &str) -> String {
     const EU: &[&str] = &[
-        "eu", "gb", "uk", "ie", "de", "fr", "es", "it", "nl", "be", "pt", "at", "fi", "se",
-        "dk", "pl", "cz", "gr", "hu", "ro", "sk", "bg", "hr", "si", "ee", "lv", "lt", "lu",
-        "mt", "cy",
+        "eu", "gb", "uk", "ie", "de", "fr", "es", "it", "nl", "be", "pt", "at", "fi", "se", "dk",
+        "pl", "cz", "gr", "hu", "ro", "sk", "bg", "hr", "si", "ee", "lv", "lt", "lu", "mt", "cy",
     ];
     let v = raw.trim().to_lowercase();
     match v.as_str() {

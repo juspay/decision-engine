@@ -237,17 +237,59 @@ mod tests {
                 }, // global fallback = US visa credit standard
                 tiers: vec![
                     // US (USD)
-                    t(Some("visa"), None, Some("standard"), Some("USD"), 194.0, 0.24),
-                    t(Some("visa"), None, Some("premium"), Some("USD"), 254.0, 0.24),
-                    t(Some("visa"), None, Some("ultra_premium"), Some("USD"), 310.0, 0.24),
+                    t(
+                        Some("visa"),
+                        None,
+                        Some("standard"),
+                        Some("USD"),
+                        194.0,
+                        0.24,
+                    ),
+                    t(
+                        Some("visa"),
+                        None,
+                        Some("premium"),
+                        Some("USD"),
+                        254.0,
+                        0.24,
+                    ),
+                    t(
+                        Some("visa"),
+                        None,
+                        Some("ultra_premium"),
+                        Some("USD"),
+                        310.0,
+                        0.24,
+                    ),
                     t(Some("visa"), Some("debit"), None, Some("USD"), 95.0, 0.30),
-                    t(Some("mastercard"), None, Some("standard"), Some("USD"), 190.0, 0.24),
-                    t(Some("mastercard"), None, Some("premium"), Some("USD"), 250.0, 0.24),
+                    t(
+                        Some("mastercard"),
+                        None,
+                        Some("standard"),
+                        Some("USD"),
+                        190.0,
+                        0.24,
+                    ),
+                    t(
+                        Some("mastercard"),
+                        None,
+                        Some("premium"),
+                        Some("USD"),
+                        250.0,
+                        0.24,
+                    ),
                     t(Some("amex"), None, None, Some("USD"), 343.0, 0.10),
                     // EEA (EUR) — consumer capped, commercial exempt.
                     t(Some("visa"), Some("debit"), None, Some("EUR"), 80.0, 0.11),
                     t(Some("visa"), Some("credit"), None, Some("EUR"), 90.0, 0.11),
-                    t(Some("visa"), Some("credit"), Some("commercial"), Some("EUR"), 235.0, 0.11),
+                    t(
+                        Some("visa"),
+                        Some("credit"),
+                        Some("commercial"),
+                        Some("EUR"),
+                        235.0,
+                        0.11,
+                    ),
                 ],
             },
         ]
@@ -310,7 +352,11 @@ mod tests {
     fn debit_is_cheaper_than_credit() {
         let e = entries();
         let psps = vec!["adyen".to_string()];
-        let debit = lookup_seed_costs(&e, &cluster("visa", "debit", "standard", "USD", 100.0), &psps);
+        let debit = lookup_seed_costs(
+            &e,
+            &cluster("visa", "debit", "standard", "USD", 100.0),
+            &psps,
+        );
         let credit = lookup_seed_costs(&e, &usd_credit("visa", "standard", 100.0), &psps);
         // Debit hits the funding tier (0.95% + $0.30 = 95 + 30 = 125 bps @ $100).
         assert!((debit["adyen"].effective_cost_bps - 125.0).abs() < 1e-6);
@@ -323,7 +369,11 @@ mod tests {
         // tier (both 3 fields); funding is the more discriminating dimension, so debit wins.
         let e = entries();
         let psps = vec!["adyen".to_string()];
-        let costs = lookup_seed_costs(&e, &cluster("visa", "debit", "premium", "USD", 100.0), &psps);
+        let costs = lookup_seed_costs(
+            &e,
+            &cluster("visa", "debit", "premium", "USD", 100.0),
+            &psps,
+        );
         assert!((costs["adyen"].effective_cost_bps - 125.0).abs() < 1e-6);
     }
 
@@ -333,7 +383,11 @@ mod tests {
         // USD-scoped and can't match), so it prices at the capped EEA rate, not US premium.
         let e = entries();
         let psps = vec!["adyen".to_string()];
-        let costs = lookup_seed_costs(&e, &cluster("visa", "credit", "premium", "EUR", 100.0), &psps);
+        let costs = lookup_seed_costs(
+            &e,
+            &cluster("visa", "credit", "premium", "EUR", 100.0),
+            &psps,
+        );
         // 0.90% + €0.11 on €100 = 90 + 11 = 101 bps.
         assert!((costs["adyen"].effective_cost_bps - 101.0).abs() < 1e-6);
     }
@@ -344,8 +398,11 @@ mod tests {
         // commercial tier outranks the 3-field consumer-credit tier by field count.
         let e = entries();
         let psps = vec!["adyen".to_string()];
-        let costs =
-            lookup_seed_costs(&e, &cluster("visa", "credit", "commercial", "EUR", 100.0), &psps);
+        let costs = lookup_seed_costs(
+            &e,
+            &cluster("visa", "credit", "commercial", "EUR", 100.0),
+            &psps,
+        );
         // 2.35% + €0.11 on €100 = 235 + 11 = 246 bps.
         assert!((costs["adyen"].effective_cost_bps - 246.0).abs() < 1e-6);
     }
@@ -366,7 +423,10 @@ mod tests {
     fn issuer_region_separates_same_currency_debit() {
         let adyen = SeedCostEntry {
             psp: "adyen".to_string(),
-            default: SeedFeeModel { pct_bps: 194.0, fixed: 0.24 },
+            default: SeedFeeModel {
+                pct_bps: 194.0,
+                fixed: 0.24,
+            },
             tiers: vec![
                 region_tier("us", Some("visa"), Some("debit"), None, 78.0, 0.30), // ~108bps @ $100
                 region_tier("eu", Some("visa"), Some("debit"), None, 68.0, 0.30), // ~98bps  @ $100
@@ -374,8 +434,16 @@ mod tests {
         };
         let e = vec![adyen];
         let psps = vec!["adyen".to_string()];
-        let us = lookup_seed_costs(&e, &cluster_region("us", "visa", "debit", "standard", 100.0), &psps);
-        let eu = lookup_seed_costs(&e, &cluster_region("eu", "visa", "debit", "standard", 100.0), &psps);
+        let us = lookup_seed_costs(
+            &e,
+            &cluster_region("us", "visa", "debit", "standard", 100.0),
+            &psps,
+        );
+        let eu = lookup_seed_costs(
+            &e,
+            &cluster_region("eu", "visa", "debit", "standard", 100.0),
+            &psps,
+        );
         assert!((us["adyen"].effective_cost_bps - 108.0).abs() < 1e-6);
         assert!((eu["adyen"].effective_cost_bps - 98.0).abs() < 1e-6);
     }
@@ -386,15 +454,29 @@ mod tests {
     fn intl_card_takes_the_intl_tier() {
         let adyen = SeedCostEntry {
             psp: "adyen".to_string(),
-            default: SeedFeeModel { pct_bps: 194.0, fixed: 0.24 },
+            default: SeedFeeModel {
+                pct_bps: 194.0,
+                fixed: 0.24,
+            },
             tiers: vec![
-                region_tier("us", Some("visa"), Some("credit"), Some("standard"), 222.0, 0.24),
+                region_tier(
+                    "us",
+                    Some("visa"),
+                    Some("credit"),
+                    Some("standard"),
+                    222.0,
+                    0.24,
+                ),
                 region_tier("intl", None, None, None, 239.0, 0.24), // ~263bps @ $100
             ],
         };
         let e = vec![adyen];
         let psps = vec!["adyen".to_string()];
-        let intl = lookup_seed_costs(&e, &cluster_region("intl", "visa", "credit", "standard", 100.0), &psps);
+        let intl = lookup_seed_costs(
+            &e,
+            &cluster_region("intl", "visa", "credit", "standard", 100.0),
+            &psps,
+        );
         // US tier requires issuer=us; intl card can't match it, so it lands on the intl tier.
         assert!((intl["adyen"].effective_cost_bps - 263.0).abs() < 1e-6);
     }

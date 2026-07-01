@@ -314,4 +314,3 @@ pub async fn getSrV3MerchantBucketSize(txn_detail: TxnDetail, txn_card_info: Txn
     );
     merchant_bucket_size
 }
-

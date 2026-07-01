@@ -71,8 +71,14 @@ impl CalibrationParams {
             .filter(|&v| v > 0)
             .unwrap_or(DEFAULT_LOOKBACK_SECS) as f64;
         Self {
-            min_bucket: cfg.min_bucket_size.filter(|&v| v > 0).unwrap_or(DEFAULT_MIN_BUCKET),
-            max_bucket: cfg.max_bucket_size.filter(|&v| v > 0).unwrap_or(DEFAULT_MAX_BUCKET),
+            min_bucket: cfg
+                .min_bucket_size
+                .filter(|&v| v > 0)
+                .unwrap_or(DEFAULT_MIN_BUCKET),
+            max_bucket: cfg
+                .max_bucket_size
+                .filter(|&v| v > 0)
+                .unwrap_or(DEFAULT_MAX_BUCKET),
             max_hedging_pct: cfg
                 .max_hedging_percent
                 .filter(|&v| v > 0.0)
@@ -83,7 +89,10 @@ impl CalibrationParams {
                 .map(|v| v as f64)
                 .unwrap_or(lookback_secs),
             lookback_secs,
-            min_volume: cfg.min_volume.filter(|&v| v > 0).unwrap_or(DEFAULT_MIN_VOLUME),
+            min_volume: cfg
+                .min_volume
+                .filter(|&v| v > 0)
+                .unwrap_or(DEFAULT_MIN_VOLUME),
         }
     }
 }
@@ -181,7 +190,9 @@ async fn run_once(runtime: &AnalyticsRuntime, params: CalibrationParams) {
     for merchant_id in merchants {
         // NOTE: single-replica assumption for now — a Redis SET NX lock per merchant should be
         // added before running multiple replicas, to avoid concurrent writes of the same config.
-        if let Err(reason) = calibrate_merchant(store.as_ref(), &merchant_id, since_ms, params).await {
+        if let Err(reason) =
+            calibrate_merchant(store.as_ref(), &merchant_id, since_ms, params).await
+        {
             logger::warn!(
                 tag = "sr_auto_calibration",
                 action = "skip",
@@ -294,8 +305,22 @@ async fn calibrate_merchant(
                 entries[i]["source"] = serde_json::json!(AUTOPILOT_SOURCE);
                 changed += 1;
                 let prev_bucket = cur_bucket.map(|c| c as i32);
-                log_segment(merchant_id, seg, prev_bucket, new_bucket, cur_hedge, new_hedge);
-                emit_calibration_event(merchant_id, seg, prev_bucket, new_bucket, cur_hedge, new_hedge);
+                log_segment(
+                    merchant_id,
+                    seg,
+                    prev_bucket,
+                    new_bucket,
+                    cur_hedge,
+                    new_hedge,
+                );
+                emit_calibration_event(
+                    merchant_id,
+                    seg,
+                    prev_bucket,
+                    new_bucket,
+                    cur_hedge,
+                    new_hedge,
+                );
             }
         } else {
             entries.push(new_segment_entry(seg, new_bucket, new_hedge));

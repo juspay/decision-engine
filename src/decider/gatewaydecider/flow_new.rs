@@ -193,7 +193,6 @@ pub async fn decider_full_payload_hs_function(
             cpu_start,
             ab_test_sr_override,
             dreq_.enable_multi_objective,
-            dreq_.cost_pick_cheapest,
         )
         .await
     }
@@ -213,7 +212,6 @@ async fn perform_hybrid_routing(
         cpu_start,
         None,
         dreq_.enable_multi_objective,
-        dreq_.cost_pick_cheapest,
     )
     .await;
 
@@ -292,7 +290,6 @@ pub async fn run_decider_flow(
     cpu_start: Instant,
     ab_test_sr_override: Option<crate::euclid::types::SrConfigOverride>,
     enable_multi_objective_override: Option<bool>,
-    cost_pick_cheapest: Option<bool>,
 ) -> Result<T::DecidedGateway, T::ErrorResponse> {
     let txnCreationTime = deciderParams
         .dpTxnDetail
@@ -586,11 +583,6 @@ pub async fn run_decider_flow(
                     let mut cost_fallbacks_override: Option<Vec<String>> = None;
                     if multi_obj_on && !hedging_on {
                         let margin = load_margin(&merchant_id_text).await;
-                        let strategy = if cost_pick_cheapest.unwrap_or(false) {
-                            multi_objective::CostPickStrategy::CheapestInBand
-                        } else {
-                            multi_objective::CostPickStrategy::MaxEv
-                        };
                         let outcome =
                             multi_objective::algorithm::try_apply_multi_objective_post_step(
                                 &currentGatewayScoreMap,
@@ -598,7 +590,6 @@ pub async fn run_decider_flow(
                                 &deciderParams.dpTxnDetail,
                                 &deciderParams.dpTxnCardInfo,
                                 margin,
-                                strategy,
                             )
                             .await;
                         if outcome.info.outcome == multi_objective::MultiObjectiveOutcome::CostWon {

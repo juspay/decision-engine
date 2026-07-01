@@ -945,12 +945,6 @@ export function DecisionSimulatorPage() {
   const [isHardRefreshing, setIsHardRefreshing] = useState(false)
   // Confirmation popup guard for the destructive hard refresh.
   const [hardRefreshConfirmOpen, setHardRefreshConfirmOpen] = useState(false)
-  // Comparison lever: when on, the multi-objective post-step picks the cheapest PSP in the
-  // auth band instead of the highest-EV one. Lets the run show how "band alone" (cheapest)
-  // trades more cost saved for more auth value risked vs the default EV pick.
-  // Cost-pick strategy is fixed to EV-max (the toggle UI is commented out); keep the
-  // value so the decide payload still sends it explicitly.
-  const [costPickCheapest] = useState(false)
   // Multi-objective card scenario: 'ALL' rotates the 8 variants round-robin (mixes dimensions
   // on one chart); a numeric index pins every txn to a single scenario so the SR Trend shows
   // one clean per-segment bucket instead of an interleaved sawtooth. The run loop reads the
@@ -1681,7 +1675,6 @@ export function DecisionSimulatorPage() {
         eligibleGatewayList: gateways,
         rankingAlgorithm: 'SR_BASED_ROUTING',
         enableMultiObjective: form.ranking_algorithm === 'SR_MULTI_OBJECTIVE',
-        ...(form.ranking_algorithm === 'SR_MULTI_OBJECTIVE' && { costPickCheapest }),
         eliminationEnabled: eliminationEnabled,
       })
       const scoreRes = await apiPost<UpdateScoreResponse>('/update-gateway-score', {
@@ -1918,7 +1911,6 @@ export function DecisionSimulatorPage() {
         eligibleGatewayList: gateways,
         rankingAlgorithm: 'SR_BASED_ROUTING',
         enableMultiObjective: isMultiObjective,
-        ...(isMultiObjective && { costPickCheapest }),
         eliminationEnabled: eliminationEnabled,
       })
 
@@ -2642,10 +2634,6 @@ export function DecisionSimulatorPage() {
     () => Object.entries(gatewayStats).sort((a, b) => b[1].total - a[1].total),
     [gatewayStats],
   )
-  const totalRoutedPayments = useMemo(
-    () => Object.values(gatewayStats).reduce((s, g) => s + g.total, 0),
-    [gatewayStats],
-  )
   const sortedVolumeDistribution = useMemo(
     () => [...volumeDistribution].sort((a, b) => b.count - a.count),
     [volumeDistribution],
@@ -2972,35 +2960,6 @@ export function DecisionSimulatorPage() {
                 </select>
               </div>
             )}
-
-            {/* {form.ranking_algorithm === 'SR_MULTI_OBJECTIVE' && (
-              <div className="flex flex-col gap-1.5">
-                <SurfaceLabel>Cost pick</SurfaceLabel>
-                <div className="inline-flex rounded-lg border border-slate-200 p-0.5 dark:border-[#1f1f29]" title="Across all PSPs with cost data: EV-max routes to the highest expected-value PSP (default, safe); Cheapest routes to the lowest-cost PSP regardless of the auth it risks. Start a fresh run after switching to compare cleanly.">
-                  {([
-                    { val: false, label: 'EV-max' },
-                    { val: true, label: 'Cheapest' },
-                  ] as const).map(({ val, label }) => {
-                    const active = costPickCheapest === val
-                    return (
-                      <button
-                        key={label}
-                        type="button"
-                        disabled={isSimulating}
-                        onClick={() => setCostPickCheapest(val)}
-                        className={`px-2.5 py-1 text-[12px] font-medium rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                          active
-                            ? 'bg-brand-500 text-white'
-                            : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-            )} */}
 
             {/* {(() => {
               const tps = Math.max(1, Math.min(MAX_SIMULATION_TPS, simulationConfig.tps || 1))

@@ -3,7 +3,6 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard,
   GitBranch,
-  Search,
   TrendingUp,
   BookOpen,
   PieChart,

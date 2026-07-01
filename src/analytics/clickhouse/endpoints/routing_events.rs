@@ -379,7 +379,8 @@ fn emit_auth_band_events(
             // if it still holds at/above its own band floor (same threshold a member
             // is held to before exiting).
             if eligible
-                && former_state.score >= query.auth_band.band_floor(leader_score, former_state.score)
+                && former_state.score
+                    >= query.auth_band.band_floor(leader_score, former_state.score)
             {
                 in_auth_band.insert(former.to_string());
             }
@@ -399,7 +400,9 @@ fn emit_auth_band_events(
         // — no hysteresis/deadband. Flap protection instead lives downstream (the UI
         // collapses any rapid re-crossings into one "contesting ×N" row), and the
         // deterministic outcome scheduler keeps scores from jittering at the edge.
-        let band_floor = query.auth_band.band_floor(leader_score, gateway_state.score);
+        let band_floor = query
+            .auth_band
+            .band_floor(leader_score, gateway_state.score);
         let in_band_now = eligible && gateway_state.score >= band_floor;
 
         if in_band_now && !was_in_band {
@@ -523,7 +526,8 @@ mod tests {
             "calibration_applied:m_123:card:credit:VISA:-:-:-:1700000000000"
         );
         // Deterministic across polls.
-        let rerun = calibration_events_to_routing_events("m_123", vec![calibration_row(1_700_000_000_000)]);
+        let rerun =
+            calibration_events_to_routing_events("m_123", vec![calibration_row(1_700_000_000_000)]);
         assert_eq!(rerun[0].id, event.id);
     }
 
@@ -627,7 +631,10 @@ mod tests {
     fn noise_floor_query(bucket_size: i32) -> RoutingEventsQuery {
         RoutingEventsQuery {
             min_score_delta: 0.001,
-            auth_band: AuthBandSpec::NoiseFloor { bucket_size, z: 1.0 },
+            auth_band: AuthBandSpec::NoiseFloor {
+                bucket_size,
+                z: 1.0,
+            },
             ..query()
         }
     }
