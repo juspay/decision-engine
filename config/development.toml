@@ -48,9 +48,9 @@ password = "decision_engine"
 #
 # Recalc cadence (seconds).                                   prod default: 900 (15 min)
 interval_secs = 60
-min_bucket_size = 25 # prod default: 100
+min_bucket_size = 100 # prod default: 100
 # Bucket cap — smaller window flips scores after fewer outcomes.  prod default: 2000
-max_bucket_size = 100
+max_bucket_size = 300
 # Hedging refresh horizon — short ⇒ high hedging ⇒ fast           prod default: 3600 (= lookback)
 # laggard recovery.
 reaction_horizon_secs = 30

@@ -10,6 +10,7 @@ import { Badge } from '../ui/Badge'
 import { Card, CardBody, CardHeader, SurfaceLabel } from '../ui/Card'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { Spinner } from '../ui/Spinner'
+import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
 import { useAuthStore } from '../../store/authStore'
@@ -66,6 +67,11 @@ const MULTI_OBJECTIVE_CLUSTER_VARIANTS: Array<{
   { label: 'US corporate',       paymentMethod: 'CREDIT', cardSwitchProvider: 'MASTERCARD', cardProgram: 'COMMERCIAL', cardIssuerCountry: 'US'   },
   { label: 'Amex US consumer',   paymentMethod: 'CREDIT', cardSwitchProvider: 'AMEX',       cardProgram: 'PREMIUM',    cardIssuerCountry: 'US'   },
 ]
+
+// Scenario the simulator opens on. 'US debit' is the headline Adyen-wins-on-cost case, so it's the
+// default (falls back to the first variant if the label is ever renamed).
+const DEFAULT_MULTI_OBJ_SCENARIO: number | 'ALL' =
+  Math.max(0, MULTI_OBJECTIVE_CLUSTER_VARIANTS.findIndex(v => v.label === 'US debit'))
 
 interface DebitRoutingFormState {
   amount: string
@@ -376,7 +382,7 @@ function getDefaultExplorerState(): ExplorerPersistedState {
     debitResponseOpen: false,
     volumeResponseOpen: false,
     smartRetryEnabled: false,
-    multiObjScenario: 'ALL',
+    multiObjScenario: DEFAULT_MULTI_OBJ_SCENARIO,
     resumableRun: null,
   }
 }
@@ -937,6 +943,8 @@ export function DecisionSimulatorPage() {
   const [txFilters, setTxFilters] = useState<Record<string, string>>({})
   const [smartRetryEnabled, setSmartRetryEnabled] = useState(initialState.smartRetryEnabled)
   const [isHardRefreshing, setIsHardRefreshing] = useState(false)
+  // Confirmation popup guard for the destructive hard refresh.
+  const [hardRefreshConfirmOpen, setHardRefreshConfirmOpen] = useState(false)
   // Comparison lever: when on, the multi-objective post-step picks the cheapest PSP in the
   // auth band instead of the highest-EV one. Lets the run show how "band alone" (cheapest)
   // trades more cost saved for more auth value risked vs the default EV pick.
@@ -1777,7 +1785,8 @@ export function DecisionSimulatorPage() {
 
   // Hard refresh: flush this merchant's SR scores in Redis so the next run starts from
   // fresh scores, then clear the local results/feed so the charts reset too. Scoped to the
-  // current merchant only — other merchants' scores are untouched.
+  // current merchant only — other merchants' scores are untouched. Intentionally a small,
+  // low-profile icon (see below) since it's a destructive escape hatch, not an everyday action.
   async function hardRefreshScores() {
     if (!effectiveMerchantId) return setError('Sign in with a merchant-linked account to continue')
     if (isSimulating) return
@@ -1914,6 +1923,7 @@ export function DecisionSimulatorPage() {
       })
 
       const decidedGateway = decideRes.decided_gateway
+
       const isSuccess = drawSuccess(decidedGateway)
       const failureMode = getGwFailureMode(decidedGateway)
       const outcome: TransactionOutcome = isSuccess ? 'CHARGED' : (failureMode === 'timeout' ? 'PENDING_VBV' : 'FAILURE')
@@ -2842,7 +2852,7 @@ export function DecisionSimulatorPage() {
 
   const resetButtonLabel =
     activeTab === 'batch'
-      ? 'Reset Multi Objective Routing'
+      ? 'Reset'
       : activeTab === 'rule'
         ? 'Reset Rule Based Routing'
         : activeTab === 'volume'
@@ -2857,15 +2867,31 @@ export function DecisionSimulatorPage() {
             <h1 className="text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">Decision Simulator</h1>
           </div>
         </div>
-        <Button
-                  onClick={hardRefreshScores}
-                  disabled={isSimulating || !effectiveMerchantId || isHardRefreshing}
-                  variant="secondary"
-                  title="Flush this merchant's SR scores from Redis so the next run starts from fresh scores."
-                >
-                  <RefreshCw size={14} className={isHardRefreshing ? 'animate-spin' : ''} /> {isHardRefreshing ? 'Refreshing…' : 'Hard refresh'}
-                </Button>
+        {/* Deliberately a small, muted icon (not a full button) — hard refresh flushes this
+            merchant's SR scores and is a rare escape hatch, so it's kept low-profile. Clicking
+            opens a confirmation popup before anything is flushed. */}
+        <button
+          type="button"
+          onClick={() => setHardRefreshConfirmOpen(true)}
+          disabled={isSimulating || !effectiveMerchantId || isHardRefreshing}
+          title="Hard refresh — flush this merchant's SR scores from Redis so the next run starts fresh. Use sparingly."
+          aria-label="Hard refresh gateway scores"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 disabled:pointer-events-none disabled:opacity-40 dark:text-slate-500 dark:hover:bg-white/5 dark:hover:text-slate-300"
+        >
+          <RefreshCw size={14} className={isHardRefreshing ? 'animate-spin' : ''} />
+        </button>
       </div>
+
+      <ConfirmDialog
+        open={hardRefreshConfirmOpen}
+        variant="danger"
+        title="Hard refresh SR scores?"
+        description="This flushes all of this merchant's accumulated SR scores from Redis. The next run starts from fresh scores — there's no undo."
+        confirmLabel="Flush scores"
+        cancelLabel="Cancel"
+        onConfirm={() => { setHardRefreshConfirmOpen(false); void hardRefreshScores() }}
+        onCancel={() => setHardRefreshConfirmOpen(false)}
+      />
 
       {activeTab === 'rule' && (
         <RuleEvaluationPanel
@@ -3172,14 +3198,20 @@ export function DecisionSimulatorPage() {
                             const dataMin = yValues.length ? Math.min(...yValues) : 0
                             const dataMax = yValues.length ? Math.max(...yValues) : 100
                             const spread = Math.max(dataMax - dataMin, 0)
-                            // Discrete zoom bands keyed off the SR spread. The panel never grows
-                            // taller; instead the grid steps out a level so the gridline count
-                            // stays roughly constant: tight 1pp grid when the connectors sit close,
-                            // widening to 5pp (then 10pp) as the gap grows.
-                            const yStep = spread <= 4 ? 1 : spread <= 24 ? 5 : 10
-                            // One tick of breathing room each side so lines aren't glued to the edges.
-                            const yMin = Math.max(0, Math.floor((dataMin - yStep) / yStep) * yStep)
-                            const yMaxTick = Math.min(100, Math.ceil((dataMax + yStep) / yStep) * yStep)
+                            // Never zoom tighter than this (pp). Early in a run only a few noisy
+                            // points exist; without a floor the domain snaps to their ~0.3pp jitter
+                            // and a tiny wiggle fills the whole chart. Holding a minimum window keeps
+                            // sub-pp jitter small on-screen while the connector gap stays legible.
+                            const MIN_SPAN = 6
+                            const effectiveSpread = Math.max(spread, MIN_SPAN)
+                            // Discrete zoom bands keyed off the *effective* spread so the gridline
+                            // count stays roughly constant as the real gap grows.
+                            const yStep = effectiveSpread <= 10 ? 2 : effectiveSpread <= 30 ? 5 : 10
+                            // Center the (>= MIN_SPAN) window on the data, then snap out to whole ticks.
+                            const center = (dataMin + dataMax) / 2
+                            const half = Math.max(spread / 2, MIN_SPAN / 2)
+                            const yMin = Math.max(0, Math.floor((center - half) / yStep) * yStep)
+                            const yMaxTick = Math.min(100, Math.ceil((center + half) / yStep) * yStep)
                             // Domain reaches a hair past the top tick so a line at the max isn't
                             // clipped flat against the edge; ticks themselves stay capped at 100.
                             const yMax = yMaxTick + Math.min(yStep, 2)
