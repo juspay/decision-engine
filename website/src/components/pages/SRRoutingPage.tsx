@@ -9,15 +9,70 @@ import { Button } from '../ui/Button'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { Spinner } from '../ui/Spinner'
 import { useMerchantStore } from '../../store/merchantStore'
-import { apiPost } from '../../lib/api'
+import { apiPost, fetcher } from '../../lib/api'
 import { PAYMENT_METHOD_TYPES, PAYMENT_METHODS } from '../../lib/constants'
-import { Plus, Trash2, Eye, PowerOff } from 'lucide-react'
+import { Plus, Trash2, Eye, PowerOff, Info } from 'lucide-react'
 import { useMerchantFeatures, type KnownFeature } from '../../hooks/useMerchantFeatures'
+import { BucketHedgingTuner } from './BucketHedgingTuner'
+
+// Ensures a stored value is always selectable in a dropdown, even when it isn't in the known
+// option list (e.g. auto-calibration writes the casing live txns use, "CARD"/"CREDIT", while the
+// option lists are lowercase). Prepends the value so the <select> renders it instead of going blank.
+function optionsWithValue(options: readonly string[], value: string): string[] {
+  return value && !options.includes(value) ? [value, ...options] : [...options]
+}
+
+// Dimensions a merchant can split SR scoring clusters on (must match backend ELIGIBLE_DIMENSIONS).
+const ELIGIBLE_SR_DIMENSIONS: { key: string; label: string; note?: string }[] = [
+  { key: 'card_network', label: 'Card Network' },
+  { key: 'currency', label: 'Currency' },
+  { key: 'country', label: 'Country' },
+  { key: 'auth_type', label: 'Auth Type' },
+  { key: 'card_is_in', label: 'Card BIN', note: 'High cardinality — not auto-calibrated' },
+]
+// Low-cardinality dims Autopilot auto-selects when enabled (BIN excluded to avoid a score-key explosion).
+const AUTOPILOT_SR_DIMENSIONS = ['card_network', 'currency', 'country', 'auth_type']
+
+interface SrDimensionResponse {
+  paymentInfo?: { fields?: string[] | null; udfs?: number[] | null }
+}
+
+// Enable all low-cardinality SR dimensions for a merchant (union with whatever is already set;
+// preserves udfs). Used when Autopilot is turned on.
+async function enableAutopilotSrDimensions(merchantId: string): Promise<void> {
+  let fields: string[] = []
+  let udfs: number[] = []
+  try {
+    const cur = await fetcher<SrDimensionResponse>(`/config-sr-dimension/${merchantId}`)
+    fields = cur?.paymentInfo?.fields ?? []
+    udfs = cur?.paymentInfo?.udfs ?? []
+  } catch {
+    // No config yet — start fresh.
+  }
+  const merged = Array.from(new Set([...fields, ...AUTOPILOT_SR_DIMENSIONS]))
+  await apiPost('/config-sr-dimension', {
+    merchant_id: merchantId,
+    paymentInfo: { udfs, fields: merged },
+  })
+}
 
 // ---- Schema ----
+// Optional cluster dimensions — empty string normalizes to null so the decider treats them as
+// "any" (a stored "" would never match a real value).
+const optionalDim = z.preprocess(
+  (v) => (v === '' || v === null || v === undefined ? null : v),
+  z.string().nullable()
+)
+
 const subLevelSchema = z.object({
   paymentMethodType: z.string().min(1),
   paymentMethod: z.string().min(1),
+  cardNetwork: optionalDim,
+  currency: optionalDim,
+  country: optionalDim,
+  authType: optionalDim,
+  // Provenance passthrough: "autopilot" for auto-calibrated rows, null for human-authored.
+  source: optionalDim,
   bucketSize: z.coerce.number().int().positive(),
   hedgingPercent: z.preprocess(
     (v) => (v === '' || v === null ? null : Number(v)),
@@ -43,7 +98,7 @@ const srFormSchema = z.object({
     (v) => (v === '' || v === null ? null : Number(v)),
     z.number().nullable()
   ),
-  defaultTolerancePp: z.preprocess(
+  margin: z.preprocess(
     (v) => (v === '' || v === null ? null : Number(v)),
     z.number().min(0).max(100).nullable()
   ),
@@ -62,10 +117,15 @@ interface SRConfigResponse {
       defaultSuccessRate: number | null
       defaultLatencyThreshold: number | null
       defaultHedgingPercent: number | null
-      defaultTolerancePp: number | null
+      margin: number | null
       subLevelInputConfig: {
         paymentMethodType: string
         paymentMethod: string
+        cardNetwork?: string | null
+        currency?: string | null
+        country?: string | null
+        authType?: string | null
+        source?: string | null
         bucketSize: number
         hedgingPercent: number | null
         latencyThreshold: number | null
@@ -109,8 +169,8 @@ function CurrentConfigDetails({ config }: { config: SRConfigResponse['config'] }
             <p className="font-medium">{config.data.defaultLatencyThreshold ?? 'Not set'} s</p>
           </div>
           <div>
-            <span className="text-slate-500">Tolerance band:</span>
-            <p className="font-medium">{config.data.defaultTolerancePp != null ? `${config.data.defaultTolerancePp * 100}%` : 'Not set (50%)'}</p>
+            <span className="text-slate-500">Margin:</span>
+            <p className="font-medium">{config.data.margin != null ? `${config.data.margin * 100}%` : 'Not set (100%)'}</p>
           </div>
         </div>
       </div>
@@ -159,11 +219,12 @@ function CurrentConfigDetails({ config }: { config: SRConfigResponse['config'] }
   )
 }
 
-type SRTab = 'scoring' | 'elimination' | 'cost' | 'flags'
+type SRTab = 'autopilot' | 'manual' | 'flags'
 
 export function SRRoutingPage() {
   const { merchantId } = useMerchantStore()
-  const [activeTab, setActiveTab] = useState<SRTab>('scoring')
+  const [activeTab, setActiveTab] = useState<SRTab>('autopilot')
+  const [manualTab, setManualTab] = useState<'scoring' | 'elimination' | 'dimensions'>('scoring')
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState(false)
@@ -193,7 +254,7 @@ export function SRRoutingPage() {
       defaultSuccessRate: 0.5,
       defaultLatencyThreshold: null,
       defaultHedgingPercent: null,
-      defaultTolerancePp: null,
+      margin: null,
       subLevelInputConfig: [],
     },
   })
@@ -202,14 +263,26 @@ export function SRRoutingPage() {
   useEffect(() => {
     if (existing?.config?.data) {
       const d = existing.config.data
-      const subLevelRows = d.subLevelInputConfig ?? []
+      // Normalize so the optional dimension fields are always present (controlled inputs).
+      const subLevelRows = (d.subLevelInputConfig ?? []).map((r) => ({
+        paymentMethodType: r.paymentMethodType,
+        paymentMethod: r.paymentMethod,
+        cardNetwork: r.cardNetwork ?? null,
+        currency: r.currency ?? null,
+        country: r.country ?? null,
+        authType: r.authType ?? null,
+        source: r.source ?? null,
+        bucketSize: r.bucketSize,
+        hedgingPercent: r.hedgingPercent ?? null,
+        latencyThreshold: r.latencyThreshold ?? null,
+      }))
       reset({
         defaultBucketSize: d.defaultBucketSize ?? 200,
         defaultSuccessRate: d.defaultSuccessRate ?? 0.5,
         defaultLatencyThreshold: d.defaultLatencyThreshold ?? null,
         defaultHedgingPercent: d.defaultHedgingPercent ?? null,
-        // Stored as a fraction in the backend (e.g. 0.1) but shown as a percentage in the UI (10).
-        defaultTolerancePp: d.defaultTolerancePp != null ? d.defaultTolerancePp * 100 : null,
+        // Stored as a fraction in the backend (e.g. 0.2) but shown as a percentage in the UI (20).
+        margin: d.margin != null ? d.margin * 100 : null,
         subLevelInputConfig: subLevelRows,
       })
       setShowSubLevelOverrides(subLevelRows.length > 0)
@@ -222,7 +295,7 @@ export function SRRoutingPage() {
 
   function addSubLevelOverride() {
     setShowSubLevelOverrides(true)
-    append({ paymentMethodType: 'card', paymentMethod: 'credit', bucketSize: 20, hedgingPercent: null, latencyThreshold: null })
+    append({ paymentMethodType: 'card', paymentMethod: 'credit', cardNetwork: null, currency: null, country: null, authType: null, source: null, bucketSize: 20, hedgingPercent: null, latencyThreshold: null })
   }
 
   function removeSubLevelOverride(index: number) {
@@ -256,8 +329,10 @@ export function SRRoutingPage() {
             defaultSuccessRate: data.defaultSuccessRate,
             defaultLatencyThreshold: data.defaultLatencyThreshold,
             defaultHedgingPercent: data.defaultHedgingPercent,
-            // UI holds a percentage (e.g. 10); persist back as a fraction (0.1).
-            defaultTolerancePp: data.defaultTolerancePp != null ? data.defaultTolerancePp / 100 : null,
+            // Margin is not a user-facing knob right now, so we omit it and let the
+            // backend default (multi_objective::DEFAULT_MARGIN = 1.0 / 100%) apply.
+            // This avoids clobbering any stored value and keeps a single source of
+            // truth on the backend. Revisit if margin becomes configurable again.
             subLevelInputConfig: data.subLevelInputConfig.length > 0
               ? data.subLevelInputConfig
               : null,
@@ -349,9 +424,8 @@ export function SRRoutingPage() {
       {/* Tab navigation */}
       <div className="border-b border-slate-200 dark:border-[#1c1c23]">
         <nav className="-mb-px flex gap-1">
-          <button type="button" className={tabClass('scoring')} onClick={() => setActiveTab('scoring')}>Scoring</button>
-          <button type="button" className={tabClass('elimination')} onClick={() => setActiveTab('elimination')}>Elimination</button>
-          <button type="button" className={tabClass('cost')} onClick={() => setActiveTab('cost')}>Cost Based</button>
+          <button type="button" className={tabClass('autopilot')} onClick={() => setActiveTab('autopilot')}>Autopilot</button>
+          <button type="button" className={tabClass('manual')} onClick={() => setActiveTab('manual')}>Manual</button>
           <button type="button" className={tabClass('flags')} onClick={() => setActiveTab('flags')}>Feature Flags</button>
         </nav>
       </div>
@@ -360,9 +434,32 @@ export function SRRoutingPage() {
         <div className="flex justify-center py-12"><Spinner /></div>
       ) : (
         <>
-          {/* ── Scoring tab ── */}
-          {activeTab === 'scoring' && (
-            <form onSubmit={handleSubmit(onSave)} className="space-y-6">
+          {/* ── Autopilot tab ── */}
+          {activeTab === 'autopilot' && <AutopilotConfig merchantId={merchantId} />}
+
+          {/* ── Manual tab ── */}
+          {activeTab === 'manual' && (
+            <div className="space-y-6">
+              {/* Manual sub-tabs */}
+              <div className="inline-flex rounded-lg border border-slate-200 p-0.5 dark:border-[#222226]">
+                {([['scoring', 'Scoring defaults'], ['elimination', 'Elimination'], ['dimensions', 'SR Dimensions']] as const).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setManualTab(id)}
+                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                      manualTab === id
+                        ? 'bg-brand-500 text-white'
+                        : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {manualTab === 'scoring' && (
+              <form onSubmit={handleSubmit(onSave)} className="space-y-6">
               <Card>
                 <CardHeader>
                   <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Scoring defaults</h2>
@@ -426,8 +523,13 @@ export function SRRoutingPage() {
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="text-left text-xs text-slate-500 border-b border-slate-200 dark:border-[#1c1c24] bg-slate-50 dark:bg-[#0a0a0f]">
+                            <th className="px-4 py-2">Source</th>
                             <th className="px-4 py-2">Method Type</th>
                             <th className="px-4 py-2">Method</th>
+                            <th className="px-4 py-2">Card Network</th>
+                            <th className="px-4 py-2">Currency</th>
+                            <th className="px-4 py-2">Country</th>
+                            <th className="px-4 py-2">Auth Type</th>
                             <th className="px-4 py-2">Memory Size</th>
                             <th className="px-4 py-2">Hedging %</th>
                             <th className="px-4 py-2">Timeout Grace (s)</th>
@@ -437,19 +539,36 @@ export function SRRoutingPage() {
                         <tbody>
                           {fields.map((field, idx) => {
                             const methodType = watchedRows?.[idx]?.paymentMethodType || ''
-                            const methodOptions = PAYMENT_METHODS[methodType] || []
+                            const method = watchedRows?.[idx]?.paymentMethod || ''
+                            // PAYMENT_METHODS is keyed lowercase; match case-insensitively. Always
+                            // include the stored value as an option so auto-calibrated rows (which
+                            // use the casing live txns send, e.g. "CARD"/"CREDIT") still display.
+                            const baseMethodOptions = PAYMENT_METHODS[methodType.toLowerCase()] || ['credit', 'debit']
+                            const typeOptions = optionsWithValue(PAYMENT_METHOD_TYPES, methodType)
+                            const methodOptions = optionsWithValue(baseMethodOptions, method)
                             return (
                               <tr key={field.id} className="border-b border-slate-200 dark:border-[#1c1c24] hover:bg-slate-50 dark:bg-[#0f0f16] transition-colors">
                                 <td className="px-4 py-2">
-                                  <select {...register(`subLevelInputConfig.${idx}.paymentMethodType`)} className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
-                                    {PAYMENT_METHOD_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                                  {/* Hidden so RHF reliably round-trips provenance on save. */}
+                                  <input type="hidden" {...register(`subLevelInputConfig.${idx}.source`)} />
+                                  {watchedRows?.[idx]?.source === 'autopilot'
+                                    ? <Badge variant="green">Auto</Badge>
+                                    : <Badge variant="gray">Manual</Badge>}
+                                </td>
+                                <td className="px-4 py-2">
+                                  <select {...register(`subLevelInputConfig.${idx}.paymentMethodType`)} className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg pl-2 pr-7 py-1 text-sm min-w-[6rem] focus:outline-none focus:ring-1 focus:ring-brand-500">
+                                    {typeOptions.map((t) => <option key={t} value={t}>{t}</option>)}
                                   </select>
                                 </td>
                                 <td className="px-4 py-2">
-                                  <select {...register(`subLevelInputConfig.${idx}.paymentMethod`)} className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500">
-                                    {(methodOptions.length ? methodOptions : ['credit', 'debit']).map((m) => <option key={m} value={m}>{m}</option>)}
+                                  <select {...register(`subLevelInputConfig.${idx}.paymentMethod`)} className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg pl-2 pr-7 py-1 text-sm min-w-[6rem] focus:outline-none focus:ring-1 focus:ring-brand-500">
+                                    {methodOptions.map((m) => <option key={m} value={m}>{m}</option>)}
                                   </select>
                                 </td>
+                                <td className="px-4 py-2"><input type="text" {...register(`subLevelInputConfig.${idx}.cardNetwork`)} placeholder="Any" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-24 focus:outline-none focus:ring-1 focus:ring-brand-500" /></td>
+                                <td className="px-4 py-2"><input type="text" {...register(`subLevelInputConfig.${idx}.currency`)} placeholder="Any" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500" /></td>
+                                <td className="px-4 py-2"><input type="text" {...register(`subLevelInputConfig.${idx}.country`)} placeholder="Any" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500" /></td>
+                                <td className="px-4 py-2"><input type="text" {...register(`subLevelInputConfig.${idx}.authType`)} placeholder="Any" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-24 focus:outline-none focus:ring-1 focus:ring-brand-500" /></td>
                                 <td className="px-4 py-2"><input type="number" {...register(`subLevelInputConfig.${idx}.bucketSize`)} className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500" /></td>
                                 <td className="px-4 py-2"><input type="number" step="0.1" {...register(`subLevelInputConfig.${idx}.hedgingPercent`)} placeholder="—" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500" /></td>
                                 <td className="px-4 py-2"><input type="number" {...register(`subLevelInputConfig.${idx}.latencyThreshold`)} placeholder="—" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-24 focus:outline-none focus:ring-1 focus:ring-brand-500" /></td>
@@ -473,57 +592,210 @@ export function SRRoutingPage() {
                 </div>
               )}
               <Button type="submit" disabled={saving || !merchantId}>
-                {saving ? <><Spinner size={14} /> Saving…</> : 'Save Scoring Config'}
+                {saving ? <><Spinner size={14} /> Saving…</> : 'Save Manual Config'}
               </Button>
-            </form>
-          )}
-
-          {/* ── Elimination tab ── */}
-          {activeTab === 'elimination' && <EliminationConfig merchantId={merchantId} />}
-
-          {/* ── Cost Based Routing tab ── */}
-          {activeTab === 'cost' && (
-            <form onSubmit={handleSubmit(onSave)} className="space-y-6">
-              <Card>
-                <CardHeader>
-                  <h2 className="text-base font-semibold text-slate-800 dark:text-white">Cost Based Config</h2>
-                </CardHeader>
-                <CardBody>
-                  <label className="space-y-1.5 block">
-                    <span className="block text-sm font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap">Auth Tolerance Band for Cost Optimisation</span>
-                    <div className="relative max-w-xs">
-                      <input
-                        type="number" step="1"
-                        {...register('defaultTolerancePp')}
-                        placeholder="50"
-                        className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 pr-8 w-full text-base focus:outline-none focus:ring-1 focus:ring-brand-500"
-                      />
-                      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-base text-slate-400">%</span>
-                    </div>
-                    {errors.defaultTolerancePp && <p className="text-sm text-red-500">{errors.defaultTolerancePp.message}</p>}
-                    <p className="text-xs text-slate-400 leading-relaxed">
-                      Auth-tolerance band window within which the cheaper PSP wins
-                    </p>
-                  </label>
-                </CardBody>
-              </Card>
-
-              <ErrorMessage error={saveError} />
-              {saveSuccess && (
-                <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-4 py-3 text-sm text-emerald-400">
-                  Configuration saved.
-                </div>
+              </form>
               )}
-              <Button type="submit" disabled={saving || !merchantId}>
-                {saving ? <><Spinner size={14} /> Saving…</> : 'Save Cost Config'}
-              </Button>
-            </form>
+
+              {manualTab === 'elimination' && <EliminationConfig merchantId={merchantId} />}
+
+              {manualTab === 'dimensions' && <SrDimensionsConfig merchantId={merchantId} />}
+            </div>
           )}
 
           {/* ── Feature Flags tab ── */}
           {activeTab === 'flags' && <SRFeatureFlags merchantId={merchantId} />}
         </>
       )}
+    </div>
+  )
+}
+
+// Small on/off switch used by the Autopilot decision rows.
+function Switch({ on, onClick, disabled }: { on: boolean; onClick: () => void; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      disabled={disabled}
+      onClick={onClick}
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+        on ? 'bg-brand-500' : 'bg-slate-300 dark:bg-slate-600'
+      }`}
+    >
+      <span
+        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+          on ? 'translate-x-6' : 'translate-x-1'
+        }`}
+      />
+    </button>
+  )
+}
+
+// Autopilot reframes routing as a set of outcomes rather than raw flags. The master
+// toggle is the real switch: turning it OFF hard-disables every autopilot decision (their
+// backend flags are set off) so the engine falls back to the Manual configuration. SR base
+// routing ("switch PSP on low auth") is always on and shown as a status pill.
+function AutopilotConfig({ merchantId }: { merchantId: string | null }) {
+  const features = useMerchantFeatures(merchantId ?? undefined)
+  const [toggling, setToggling] = useState<KnownFeature | 'master' | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  // The Static-vs-Automatic tuning illustrator is an explainer, hidden until the user
+  // clicks the info icon next to the Self-tuning badge.
+  const [showTuner, setShowTuner] = useState(false)
+
+  const costOn = features.isEnabled('multi-objective-routing')
+  const autoCalibrationOn = features.isEnabled('auto-calibration')
+  // Master is its own persisted backend flag (`autopilot`) so the toggle survives reloads.
+  const autopilotOn = features.isEnabled('autopilot')
+
+  async function toggleFeature(feature: KnownFeature, enabled: boolean) {
+    setToggling(feature); setError(null); setMessage(null)
+    try {
+      await features.setFeatureEnabled(feature, enabled)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setToggling(null)
+    }
+  }
+
+  async function toggleMaster(next: boolean) {
+    setToggling('master'); setError(null); setMessage(null)
+    try {
+      await features.setFeatureEnabled('autopilot', next)
+      if (next) {
+        // Turning Autopilot on enables its decisions by default — cost savings (multi-objective
+        // economic routing) and auto-calibration — and activates all low-cardinality SR
+        // dimensions so scoring clusters split on them (card scheme / currency / country /
+        // auth type) and the calibrator can tune each cluster.
+        // Enable unconditionally: the toggle is idempotent, and the captured `costOn` /
+        // `autoCalibrationOn` booleans can be stale (the features list is SWR-cached for 5 min),
+        // so guarding on them would silently skip the POST and leave the decision off.
+        await features.setFeatureEnabled('multi-objective-routing', true)
+        await features.setFeatureEnabled('auto-calibration', true)
+        if (merchantId) await enableAutopilotSrDimensions(merchantId)
+      } else {
+        // Hard-disable: turn every autopilot decision off so routing uses manual config.
+        // Unconditional for the same reason as the enable path — stale cached booleans must not
+        // gate the POST, or a flag that is actually on server-side would be left enabled.
+        await features.setFeatureEnabled('elimination', false)
+        await features.setFeatureEnabled('multi-objective-routing', false)
+        await features.setFeatureEnabled('auto-calibration', false)
+      }
+      setMessage(next
+        ? 'Autopilot on — cost savings and auto-calibration enabled; fine-tune the decisions below.'
+        : 'Autopilot off — routing uses your Manual configuration.')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setToggling(null)
+    }
+  }
+
+  const busy = !merchantId || features.isLoading
+  const rowDisabled = busy || !autopilotOn || toggling !== null
+
+  return (
+    <div className="space-y-4">
+      {error && (
+        <p className="rounded-lg border border-red-500/20 bg-red-500/8 px-3 py-2 text-xs text-red-500">{error}</p>
+      )}
+      {message && (
+        <p className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-3 py-2 text-xs text-emerald-500">{message}</p>
+      )}
+
+      {/* Master toggle */}
+      <Card>
+        <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-4">
+          <div className="max-w-2xl">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-slate-800 dark:text-white">Autopilot mode</span>
+              {autopilotOn ? <Badge variant="green">On</Badge> : <Badge variant="gray">Off</Badge>}
+            </div>
+            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#9aa6bb]">
+              Let the engine adapt routing automatically. Turn off to route purely by your Manual configuration.
+            </p>
+          </div>
+          <Switch on={autopilotOn} disabled={busy || toggling !== null} onClick={() => toggleMaster(!autopilotOn)} />
+        </div>
+      </Card>
+
+      {/* Autopilot decisions */}
+      <Card className={autopilotOn ? '' : 'opacity-60'}>
+        {/* (i) SRv3 — always on, shown as status */}
+        <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-4">
+          <div className="max-w-2xl">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-medium text-slate-800 dark:text-white">Always route to the best-performing PSP</span>
+              <Badge variant="gray">SRv3</Badge>
+              <Badge variant="green">Active</Badge>
+            </div>
+            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#9aa6bb]">
+              Real-time success-rate routing. Always on — it is the base routing path.
+            </p>
+          </div>
+        </div>
+
+        {/* (ii) Elimination — hidden for now. Re-enable this row to expose the toggle;
+            the underlying `elimination` flag wiring (seeding + master-off) stays in place.
+        <div className="flex flex-wrap items-center justify-between gap-4 border-t border-slate-100 px-5 py-4 dark:border-[#222226]">
+          <div className="max-w-2xl">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-medium text-slate-800 dark:text-white">Disable PSP in case of sub-threshold auth rates</span>
+              <Badge variant="gray">Elimination</Badge>
+            </div>
+            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#9aa6bb]">
+              Temporarily removes a PSP whose auth rate drops below the elimination threshold.
+            </p>
+          </div>
+          <Switch on={eliminationOn} disabled={rowDisabled} onClick={() => toggleFeature('elimination', !eliminationOn)} />
+        </div>
+        */}
+
+        {/* (iii) Cost savings */}
+        <div className="flex flex-wrap items-center justify-between gap-4 border-t border-slate-100 px-5 py-4 dark:border-[#222226]">
+          <div className="max-w-2xl">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-medium text-slate-800 dark:text-white">Optimize for economic value (cost awareness), not just approval rate</span>
+              <Badge variant="gray">Cost savings</Badge>
+            </div>
+            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#9aa6bb]">
+              Multi-objective routing: picks the highest expected-value PSP inside it.
+            </p>
+          </div>
+          <Switch on={costOn} disabled={rowDisabled} onClick={() => toggleFeature('multi-objective-routing', !costOn)} />
+        </div>
+
+        {/* (iv) Auto-calibration */}
+        <div className="flex flex-wrap items-center justify-between gap-4 border-t border-slate-100 px-5 py-4 dark:border-[#222226]">
+          <div className="max-w-2xl">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-medium text-slate-800 dark:text-white">Self-tune routing settings to match your traffic patterns</span>
+              <Badge variant="gray">Self-tuning</Badge>
+              {autopilotOn && autoCalibrationOn && (
+                <button
+                  type="button"
+                  onClick={() => setShowTuner((s) => !s)}
+                  aria-expanded={showTuner}
+                  aria-label="Show static vs automatic tuning illustration"
+                  className={`inline-flex items-center rounded-full p-0.5 transition-colors ${showTuner ? 'text-brand-600 dark:text-brand-400' : 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300'}`}
+                >
+                  <Info className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#9aa6bb]">
+              Auto configures the Learning window and Discovery share based on your traffic volume.
+            </p>
+          </div>
+          <Switch on={autoCalibrationOn} disabled={rowDisabled} onClick={() => toggleFeature('auto-calibration', !autoCalibrationOn)} />
+        </div>
+      </Card>
+
+      {autopilotOn && autoCalibrationOn && showTuner && <BucketHedgingTuner />}
     </div>
   )
 }
@@ -547,13 +819,93 @@ const SR_FEATURES: { feature: KnownFeature; title: string; description: string }
     description:
       'Routes live production traffic through the active A/B test algorithm. When enabled, each payment is deterministically assigned to a control or variant arm based on its payment ID. Disable at any time to fall back to standard SR routing with no impact on in-flight payments.',
   },
-  {
-    feature: 'multi-objective-routing',
-    title: 'Multi-objective routing',
-    description:
-      'Within the auth-tolerance band, picks the cheaper PSP using cost data from PSP. Active only when Explore-exploit on SRv3 is disabled — when both are on, hedging wins to keep the bandit\'s exploration signal clean. routing_approach shows SR_SELECTION_MULTI_OBJECTIVE when this path is taken.',
-  },
+  // 'multi-objective-routing' is intentionally not listed here — it is owned by the
+  // Autopilot "Maximize economic value" decision (see AutopilotConfig).
 ]
+
+function SrDimensionsConfig({ merchantId }: { merchantId: string | null }) {
+  const { data, mutate } = useSWR<SrDimensionResponse>(
+    merchantId ? `/config-sr-dimension/${merchantId}` : null,
+    fetcher,
+    { revalidateOnFocus: false, shouldRetryOnError: false }
+  )
+  const [selected, setSelected] = useState<string[] | null>(null)
+  const [udfs, setUdfs] = useState<number[]>([])
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [saveSuccess, setSaveSuccess] = useState(false)
+
+  useEffect(() => {
+    if (!data) return
+    setSelected(data.paymentInfo?.fields ?? [])
+    setUdfs(data.paymentInfo?.udfs ?? [])
+  }, [data])
+
+  const current = selected ?? []
+
+  function toggle(key: string) {
+    setSaveSuccess(false)
+    setSelected((prev) => {
+      const cur = prev ?? []
+      return cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]
+    })
+  }
+
+  async function onSave() {
+    if (!merchantId || selected == null) return
+    setSaving(true); setSaveError(null); setSaveSuccess(false)
+    try {
+      await apiPost('/config-sr-dimension', {
+        merchant_id: merchantId,
+        paymentInfo: { udfs, fields: selected },
+      })
+      setSaveSuccess(true)
+      mutate()
+    } catch (err: unknown) {
+      setSaveError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <h2 className="text-sm font-semibold text-slate-800 dark:text-white">SR scoring dimensions</h2>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Attributes SR scoring splits clusters on. More dimensions = finer, more responsive scores, but more clusters (each needs its own volume to score well). Changing this re-buckets scores. Autopilot enables the low-cardinality dimensions automatically.
+          </p>
+        </CardHeader>
+        <CardBody className="space-y-1">
+          {ELIGIBLE_SR_DIMENSIONS.map(({ key, label, note }) => (
+            <label key={key} className="flex items-center gap-3 cursor-pointer select-none py-1.5">
+              <input
+                type="checkbox"
+                checked={current.includes(key)}
+                onChange={() => toggle(key)}
+                disabled={!merchantId || selected == null}
+                className="rounded border-slate-300 dark:border-slate-600 disabled:cursor-not-allowed"
+              />
+              <span className="text-sm text-slate-700 dark:text-slate-200">{label}</span>
+              {note && <span className="text-[11px] text-amber-500">{note}</span>}
+            </label>
+          ))}
+        </CardBody>
+      </Card>
+
+      <ErrorMessage error={saveError} />
+      {saveSuccess && (
+        <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-4 py-3 text-sm text-emerald-400">
+          SR dimensions saved.
+        </div>
+      )}
+      <Button onClick={onSave} disabled={saving || !merchantId || selected == null}>
+        {saving ? <><Spinner size={14} /> Saving…</> : 'Save SR Dimensions'}
+      </Button>
+    </div>
+  )
+}
 
 function SRFeatureFlags({ merchantId }: { merchantId: string | null }) {
   const features = useMerchantFeatures(merchantId ?? undefined)
@@ -753,7 +1105,7 @@ function EliminationConfig({ merchantId }: { merchantId: string | null }) {
         <CardHeader>
           <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Elimination Configs</h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Gateways whose SR score drops below the threshold are removed from routing entirely.
+            Each gateway carries a health score that decays on consecutive failures and recovers on successes. When it falls below the threshold, the gateway is removed from routing until it recovers. This is not the raw success rate.
           </p>
         </CardHeader>
         <CardBody className="grid gap-4 md:grid-cols-2">
@@ -763,11 +1115,11 @@ function EliminationConfig({ merchantId }: { merchantId: string | null }) {
               type="number" step="0.01" min="0" max="1"
               value={threshold}
               onChange={e => setThreshold(e.target.value)}
-              placeholder="e.g. 0.35"
+              placeholder="e.g. 0.05"
               className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 w-full focus:outline-none focus:ring-1 focus:ring-brand-500"
             />
             <p className="text-[11px] text-slate-400 dark:text-slate-500">
-              Score (0–1) below which a gateway is eliminated. System default is 0.05.
+              Health score (0–1) below which a gateway is eliminated — the score decays on consecutive failures and recovers on successes, so a lower value tolerates more failures before dropping a gateway. Not the success rate.
             </p>
           </label>
           <label className="space-y-1">

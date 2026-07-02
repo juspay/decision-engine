@@ -143,6 +143,12 @@ pub struct TxnCardInfo {
     pub card_type: Option<CardType>,
     #[serde(rename = "cardProgram", default)]
     pub card_program: Option<String>,
+    /// Issuer country of the card (ISO code or region bucket). Used by the multi-objective
+    /// cost cluster key to separate same-currency scenarios (US debit vs EU consumer vs
+    /// international) at a single merchant. Optional; absent when issuer enrichment is
+    /// unavailable.
+    #[serde(rename = "cardIssuerCountry", default)]
+    pub card_issuer_country: Option<String>,
     #[serde(rename = "nameOnCard")]
     pub nameOnCard: Option<Secret<String>>,
     // #[serde(rename = "txnDetailId")]
@@ -192,6 +198,8 @@ pub struct SafeTxnCardInfo {
     pub card_type: Option<CardType>,
     #[serde(rename = "cardProgram", default)]
     pub card_program: Option<String>,
+    #[serde(rename = "cardIssuerCountry", default)]
+    pub card_issuer_country: Option<String>,
     #[serde(rename = "nameOnCard")]
     pub nameOnCard: Option<Secret<String>>,
     #[serde(with = "time::serde::iso8601")]
@@ -226,6 +234,7 @@ pub fn convert_safe_to_txn_card_info(
         cardSwitchProvider: safe_info.cardSwitchProvider,
         card_type: safe_info.card_type,
         card_program: safe_info.card_program,
+        card_issuer_country: safe_info.card_issuer_country,
         nameOnCard: safe_info.nameOnCard,
         dateCreated: safe_info.dateCreated,
         paymentMethodType: safe_info.paymentMethodType,

@@ -63,6 +63,39 @@ pub struct GlobalConfig {
     pub mem_cache: MemCacheConfig,
     #[serde(default)]
     pub hypersense: HypersenseConfig,
+    #[serde(default)]
+    pub sr_auto_calibration: SrAutoCalibrationConfig,
+}
+
+/// Runtime auto-calibration of the SRv3 bucket size + hedging %.
+#[derive(Clone, serde::Deserialize, Debug, Default)]
+pub struct SrAutoCalibrationConfig {
+    /// Recalc cadence in seconds. When unset (or 0), the job uses a built-in default (900s).
+    #[serde(default)]
+    pub interval_secs: Option<u64>,
+    /// Smallest bucket size the calibrator will write. Default 100.
+    #[serde(default)]
+    pub min_bucket_size: Option<i32>,
+    /// Largest bucket size the calibrator will write. Lower it (e.g. 25) for snappy demos —
+    /// a smaller window flips scores faster. Default 2000.
+    #[serde(default)]
+    pub max_bucket_size: Option<i32>,
+    /// Total hedging cap (%). Default 30.
+    #[serde(default)]
+    pub max_hedging_percent: Option<f64>,
+    /// Horizon (seconds) hedging sizes window-refresh against. Default 3600 (production). Set it
+    /// short (e.g. 60) for demos so laggards get enough exploration traffic to recover quickly.
+    #[serde(default)]
+    pub reaction_horizon_secs: Option<u64>,
+    /// Trailing window (seconds) over which volume/dimensions are counted in ClickHouse. Default
+    /// 3600. Keep it well above `interval_secs` so windows overlap and smooth; shorten (e.g. 300)
+    /// for demos to react faster and shed stale events.
+    #[serde(default)]
+    pub lookback_secs: Option<u64>,
+    /// Minimum per-cluster volume in the lookback window before a cluster is calibrated. Default
+    /// 100. Lower it (e.g. 20) for demos, especially when splitting by dimension.
+    #[serde(default)]
+    pub min_volume: Option<i64>,
 }
 
 #[derive(Clone, serde::Deserialize, Debug)]
@@ -463,6 +496,15 @@ pub struct HypersenseConfig {
     /// cache. Defaults to 300s (5 min) — short, since this is a temporary cache
     /// and cost data should not go stale for long.
     pub cost_cache_ttl_secs: u64,
+    /// When true, candidate PSP costs are served from the local, deterministic
+    /// `seed_costs` table (realistic US IC++ for Adyen vs blended for Stripe) instead
+    /// of the live Hypersense API. Intended for the Decision Simulator so the auth-vs-cost
+    /// tradeoff is offline and repeatable. Defaults to `false` (production uses the API).
+    pub use_seed_costs: bool,
+    /// Per-PSP seed cost models consulted when `use_seed_costs` is true. Each entry has a
+    /// `default` fee plus optional `tiers` overriding it by card network/program. Empty by
+    /// default; populate it (see `config/development.toml`) to drive the simulator.
+    pub seed_costs: Vec<SeedCostEntry>,
 }
 
 impl Default for HypersenseConfig {
@@ -473,8 +515,65 @@ impl Default for HypersenseConfig {
             password: masking::Secret::new(String::new()),
             token_ttl_secs: 82_800,
             cost_cache_ttl_secs: 300,
+            use_seed_costs: false,
+            seed_costs: Vec::new(),
         }
     }
+}
+
+/// An amount-independent fee split — `effective_cost_bps = pct_bps + fixed/amount·10_000`.
+/// `fixed` is in the cluster's major currency unit (e.g. dollars).
+#[derive(Clone, Debug, serde::Deserialize)]
+pub struct SeedFeeModel {
+    pub pct_bps: f64,
+    pub fixed: f64,
+}
+
+/// A fee override scoped to a card scenario. Each field is matched against the same-named
+/// `ClusterKey` field; a `None` field is a wildcard (matches any value). The most specific
+/// matching tier wins (see `seed_costs`). Adding a network, currency, funding type, or
+/// program is just appending another tier — no code change.
+#[derive(Clone, Debug, serde::Deserialize)]
+pub struct SeedCostTier {
+    /// Card network, e.g. "visa", "mastercard" (case-insensitive equality).
+    /// Matches `ClusterKey::card_network`. `None` matches any.
+    #[serde(default)]
+    pub card_network: Option<String>,
+    /// Funding type, "credit" or "debit" (case-insensitive equality).
+    /// Matches `ClusterKey::payment_method_type`. `None` matches any.
+    #[serde(default)]
+    pub payment_method_type: Option<String>,
+    /// Card program / tier, e.g. "standard", "premium", "ultra_premium", "commercial"
+    /// (case-insensitive equality — exact, so "premium" and "ultra_premium" stay distinct).
+    /// Matches `ClusterKey::card_type`. `None` matches any.
+    #[serde(default)]
+    pub card_type: Option<String>,
+    /// Transaction currency, e.g. "USD", "EUR" (case-insensitive equality).
+    /// Matches `ClusterKey::transaction_currency`. `None` matches any.
+    #[serde(default)]
+    pub transaction_currency: Option<String>,
+    /// Issuer region bucket — "us", "eu", or "intl" (case-insensitive equality).
+    /// Matches `ClusterKey::card_issuing_country` (which `derive_cluster_key` normalizes
+    /// from the card's issuer country). This is the dimension that separates the otherwise
+    /// indistinguishable USD scenarios at a US merchant — regulated US debit vs EU consumer
+    /// vs international — since they share a currency but differ by who issued the card.
+    /// `None` matches any.
+    #[serde(default)]
+    pub card_issuing_country: Option<String>,
+    pub pct_bps: f64,
+    pub fixed: f64,
+}
+
+/// The seed pricing for one PSP: a `default` fee used when no tier matches, plus optional
+/// per-(network, program) `tiers`. A blended PSP needs only `default`; an IC++ PSP lists a
+/// tier per card type it prices differently.
+#[derive(Clone, Debug, serde::Deserialize)]
+pub struct SeedCostEntry {
+    /// PSP / gateway name (case-insensitive), e.g. "adyen", "stripe".
+    pub psp: String,
+    pub default: SeedFeeModel,
+    #[serde(default)]
+    pub tiers: Vec<SeedCostTier>,
 }
 
 /// TTL configuration for the in-process memory caches that sit in front of

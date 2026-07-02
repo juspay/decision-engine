@@ -88,6 +88,7 @@ pub enum FlowType {
     RoutingEvaluateError,
     RoutingCreateAbTest,
     RoutingEvaluateAbTest,
+    AutopilotCalibration,
 }
 
 impl FlowType {
@@ -154,6 +155,7 @@ impl FlowType {
             Self::RoutingEvaluateError => "routing_evaluate_error",
             Self::RoutingCreateAbTest => "routing_create_ab_test",
             Self::RoutingEvaluateAbTest => "routing_evaluate_ab_test",
+            Self::AutopilotCalibration => "autopilot_calibration",
         }
     }
 }

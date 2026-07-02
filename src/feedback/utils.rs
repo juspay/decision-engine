@@ -222,6 +222,7 @@ pub fn get_txn_card_info_from_api_payload(
         cardSwitchProvider: None,
         card_type: None,
         card_program: None,
+        card_issuer_country: None,
         nameOnCard: None,
         dateCreated: gateway_scoring_data.dateCreated,
         paymentMethodType: gateway_scoring_data.paymentMethodType.clone(),
@@ -421,9 +422,16 @@ pub async fn updateQueue(
     queue_key: String,
     score_key: String,
     value: String,
-) -> Result<Option<String>, error_stack::Report<redis_interface::errors::RedisError>> {
+    bucket_size: i32,
+) -> Result<(), error_stack::Report<redis_interface::errors::RedisError>> {
     let app_state = get_tenant_app_state().await;
-    let _value_clone = value.clone();
+    // Keep only the newest `bucket_size` outcomes. LTRIM (instead of a single RPOP) makes the
+    // window resize-in-place: on a bucket *shrink* it drops the oldest down to the new size in
+    // one shot; on a *grow* it stops trimming so the window fills organically as new outcomes
+    // arrive — no delete-and-refill, so accumulated history is never wiped. The read path
+    // (`get_score_from_redis`) already bounds reads to `bucket_size`, so a resize is correct
+    // even before the next feedback physically trims the list.
+    let last_index = i64::from(bucket_size.max(1) - 1);
     let r: Result<Vec<String>, error_stack::Report<redis_interface::errors::RedisError>> =
         app_state
             .redis_conn
@@ -437,12 +445,18 @@ pub async fn updateQueue(
                         )
                         .await?;
 
+                    // Trim to the newest `bucket_size` entries (indices 0..=last_index).
+                    transaction
+                        .ltrim::<(), _>(
+                            &fred::types::RedisKey::from(queue_key.clone()),
+                            0,
+                            last_index,
+                        )
+                        .await?;
+
                     // Set expiration for queue_key and score_key
                     transaction.expire::<(), _>(&queue_key, 10000000).await?;
                     transaction.expire::<(), _>(&score_key, 10000000).await?;
-
-                    // Remove from the end of the list
-                    transaction.rpop::<String, _>(&queue_key, None).await?;
 
                     Ok(())
                 })
@@ -457,7 +471,7 @@ pub async fn updateQueue(
                 "Successfully updated queue in Redis: {:?}",
                 result
             );
-            Ok(Some(result.last().cloned().unwrap_or_default()))
+            Ok(())
         }
         Err(e) => {
             logger::error!(
@@ -477,19 +491,15 @@ pub async fn updateMovingWindow(
     queue_key: String,
     score_key: String,
     value: String,
-) -> String {
-    let either_res = updateQueue(redis_name, queue_key, score_key, value.clone()).await;
-    match either_res {
-        Ok(maybe_val) => maybe_val.unwrap_or(value),
-        Err(err) => {
-            logger::error!(
-                action = "updateMovingWindow",
-                tag = "updateMovingWindow",
-                "Error while updating queue in redis - returning input value: {:?}",
-                err
-            );
-            value
-        }
+    bucket_size: i32,
+) {
+    if let Err(err) = updateQueue(redis_name, queue_key, score_key, value, bucket_size).await {
+        logger::error!(
+            action = "updateMovingWindow",
+            tag = "updateMovingWindow",
+            "Error while updating queue in redis: {:?}",
+            err
+        );
     }
 }
 

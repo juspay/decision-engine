@@ -260,6 +260,25 @@ pub async fn config_sr_dimensions(
     ))
 }
 
+/// Returns the merchant's SR dimension config (which dimensions clusters are split on). Empty
+/// `fields` when nothing is configured yet — so the dashboard can render the selector.
+pub async fn get_sr_dimensions(
+    Path(merchant_id): Path<String>,
+) -> Result<Json<SrDimensionConfig>, ContainerError<EuclidErrors>> {
+    let name = format!("SR_DIMENSION_CONFIG_{}", merchant_id);
+    let stored = find_config_by_name(name)
+        .await
+        .change_context(EuclidErrors::StorageError)?;
+    let config = stored
+        .and_then(|c| c.value)
+        .and_then(|v| serde_json::from_str::<SrDimensionConfig>(&v).ok())
+        .unwrap_or(SrDimensionConfig {
+            merchant_id,
+            ..Default::default()
+        });
+    Ok(Json(config))
+}
+
 pub async fn routing_create(
     headers: axum::http::HeaderMap,
     Json(payload): Json<Value>,
