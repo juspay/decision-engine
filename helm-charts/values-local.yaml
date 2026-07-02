@@ -1,0 +1,124 @@
+# =============================================================================
+# Local development setup — uses locally built images for hypersense services.
+# Decision Engine and Groovy Runner use cached GHCR images (pulled once).
+#
+# PREREQUISITES
+#   Build hypersense images and load them into your local cluster:
+#     docker build -t hypersense-backend:local <path-to-backend>
+#     docker build -t hypersense-etl:local     <path-to-etl>
+#
+#   If using minikube:
+#     minikube image load hypersense-backend:local
+#     minikube image load hypersense-etl:local
+#
+#   If using kind:
+#     kind load docker-image hypersense-backend:local
+#     kind load docker-image hypersense-etl:local
+#
+# INSTALL
+#   helm install de helm-charts/ -f helm-charts/values-local.yaml \
+#     --namespace decision-engine --create-namespace
+#
+# NOTE: DE database migrations are skipped (dbMigration.enabled: false) because
+# the migration job requires downloading and compiling Rust source which is too
+# slow for local iteration. Run DE migrations manually before first deploy:
+#   DATABASE_URL="postgres://db_user:db_pass@localhost:5432/decision_engine_db" \
+#     diesel migration run --migration-dir migrations_pg
+# =============================================================================
+
+initContainers:
+  enabled: true
+  busybox:
+    repository: busybox
+    tag: "1.28"
+    pullPolicy: IfNotPresent
+
+# Decision Engine — cached GHCR image; pulled once, reused locally
+image:
+  repository: ghcr.io/juspay/decision-engine/postgres
+  version: "v1.4"
+  pullPolicy: IfNotPresent
+
+# Groovy Runner — cached GHCR image
+groovyRunner:
+  enabled: true
+  image:
+    repository: ghcr.io/juspay/decision-engine/groovy-runner
+    version: "v1.4"
+    pullPolicy: IfNotPresent
+
+# PostgreSQL — ephemeral (no PVC); hypersense_db is created via initdb.scripts in values.yaml
+postgresql:
+  enabled: true
+  auth:
+    username: "db_user"
+    password: "db_pass"
+    database: "decision_engine_db"
+  primary:
+    persistence:
+      enabled: false
+
+# Redis — ephemeral (no PVC), single master, no replicas
+redis:
+  enabled: true
+  auth:
+    enabled: false
+  master:
+    persistence:
+      enabled: false
+  replica:
+    replicaCount: 0
+
+# Skip the migration job — it compiles diesel_cli from source and takes 30+ min
+dbMigration:
+  enabled: false
+
+# Hypersense Backend — locally built image, never pulled from registry
+hypersenseBackend:
+  enabled: true
+  image:
+    repository: hypersense-backend
+    tag: "local"
+    pullPolicy: Never
+  env:
+    runningEnv: "LOCAL"
+    mode: "DEV"
+    dbSchema: "hs_v1"
+    dbSchemaRe: "rule_engine"
+    dbSchemaAuth: "auth_v1"
+    awsRegion: "ap-south-1"
+    kafkaBootstrapServers: ""
+    kafkaTopic: "hypersense-etl-topic"
+    kafkaGroupId: "hypersense-etl-group"
+    s3Bucket: "hypersense-sbx-reports"
+    aiBackendHost: ""
+    hyperSwitchBaseUrl: ""
+  migration:
+    runOnStartup: true
+
+# Hypersense ETL — locally built image, never pulled from registry
+hypersenseEtl:
+  enabled: true
+  image:
+    repository: hypersense-etl
+    tag: "local"
+    pullPolicy: Never
+  env:
+    runningEnv: "LOCAL"
+    mode: "DEV"
+    dbSchema: "hs_v1"
+    dbSchemaRe: "rule_engine"
+    dbSchemaAuth: "auth_v1"
+    awsRegion: "ap-south-1"
+    kafkaBootstrapServers: ""
+    kafkaTopic: "hypersense-etl-topic"
+    kafkaGroupId: "hypersense-etl-group"
+    s3Bucket: "hypersense-sbx-reports"
+    clickhouseHost: ""
+    clickhousePort: 8123
+    clickhouseUser: "default"
+    clickhouseName: "default"
+    aiBackendHost: ""
+    hyperSwitchBaseUrl: ""
+  migration:
+    runOnStartup: true

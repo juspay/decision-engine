@@ -1,0 +1,116 @@
+# =============================================================================
+# Deployed setup — all services use their remote registry images.
+# Covers: decision-engine, groovy-runner, hypersense-backend, hypersense-etl.
+#
+# Hypersense images live in a PRIVATE ECR registry; you must have been granted
+# pull access by Juspay before using this file.
+#
+# PREREQUISITES
+#   1. Create the ECR image-pull secret from the credentials Juspay provided:
+#
+#        kubectl create secret docker-registry hypersense-ecr \
+#          --docker-server=701342709052.dkr.ecr.eu-central-1.amazonaws.com \
+#          --docker-username=AWS \
+#          --docker-password="<ECR-TOKEN-FROM-JUSPAY>" \
+#          --namespace decision-engine
+#
+# INSTALL
+#   helm install de helm-charts/ -f helm-charts/values-hypersense.yaml \
+#     --namespace decision-engine --create-namespace
+#
+# The migration job (dbMigration.enabled: true) downloads and compiles Diesel
+# to run schema migrations on first install. It can be disabled after the first
+# successful install by adding --set dbMigration.enabled=false on upgrades.
+# =============================================================================
+
+# Pull secret for private ECR images (hypersense-backend, hypersense-etl).
+# Decision Engine and Groovy Runner are on public GHCR and don't need it,
+# but Kubernetes applies imagePullSecrets to all containers in the pod spec.
+imagePullSecrets:
+  - name: hypersense-ecr
+
+# Decision Engine — remote GHCR image, always pull latest
+image:
+  repository: ghcr.io/juspay/decision-engine/postgres
+  version: "v1.4"
+  pullPolicy: Always
+
+# Groovy Runner — remote GHCR image, always pull latest
+groovyRunner:
+  enabled: true
+  image:
+    repository: ghcr.io/juspay/decision-engine/groovy-runner
+    version: "v1.4"
+    pullPolicy: Always
+
+# PostgreSQL — persistent storage for deployed environment
+postgresql:
+  enabled: true
+  auth:
+    username: "db_user"
+    password: "db_pass"
+    database: "decision_engine_db"
+  primary:
+    persistence:
+      enabled: true
+      size: 8Gi
+
+# Redis — persistent storage for deployed environment
+redis:
+  enabled: true
+  auth:
+    enabled: false
+  master:
+    persistence:
+      enabled: true
+      size: 8Gi
+  replica:
+    replicaCount: 1
+    persistence:
+      enabled: true
+      size: 8Gi
+
+# Run the DE schema migration job on install/upgrade
+dbMigration:
+  enabled: true
+  postgresql:
+    enabled: true
+
+# Shared config + secret for the Hypersense services (backend + etl).
+#
+# Default below: the chart renders the ConfigMap + Secret from the in-cluster
+# PostgreSQL/Redis values — deployed setup works out of the box.
+#
+# To use EXTERNAL (pre-created) resources instead — e.g. DB_HOST pointing at an
+# RDS instance managed outside the chart — flip create to false and name them:
+#
+#   hypersenseShared:
+#     create: false
+#     configMapName: hypersense-config   # you create this ConfigMap first
+#     secretName: hypersense-secret      # you create this Secret first
+#
+#   Required ConfigMap keys: DB_HOST, DB_PORT, DB_USER, DB_NAME, REDIS_URL
+#   Required Secret key:     DB_PASSWD
+hypersenseShared:
+  create: true
+  dbName: "hypersense_db"
+
+# Hypersense Backend — remote ECR image, always pull latest
+hypersenseBackend:
+  enabled: true
+  image:
+    repository: 701342709052.dkr.ecr.eu-central-1.amazonaws.com/hypersense/backend
+    tag: "hypersense-backend-sandbox-latest"
+    pullPolicy: Always
+  migration:
+    runOnStartup: true
+
+# Hypersense ETL — remote ECR image, always pull latest
+hypersenseEtl:
+  enabled: true
+  image:
+    repository: 701342709052.dkr.ecr.eu-central-1.amazonaws.com/hypersense/backend
+    tag: "hypersense-etl-sandbox-latest"
+    pullPolicy: Always
+  migration:
+    runOnStartup: true

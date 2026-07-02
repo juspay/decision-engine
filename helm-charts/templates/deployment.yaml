@@ -68,6 +68,20 @@ spec:
           env:
             - name: GROOVY_RUNNER_HOST
               value: "{{ include "decision-engine.groovyRunnerName" . }}:{{ .Values.groovyRunner.service.port }}"
+            {{- if .Values.decisionEngine.usePostgreSQL }}
+            - name: DECISION_ENGINE__PG_DATABASE__PG_HOST
+              value: {{ include "decision-engine.postgresqlHost" . | quote }}
+            - name: DECISION_ENGINE__PG_DATABASE__PG_USERNAME
+              value: {{ .Values.postgresql.auth.username | quote }}
+            - name: DECISION_ENGINE__PG_DATABASE__PG_PASSWORD
+              value: {{ .Values.postgresql.auth.password | quote }}
+            - name: DECISION_ENGINE__PG_DATABASE__PG_DBNAME
+              value: {{ .Values.postgresql.auth.database | quote }}
+            {{- end }}
+            - name: DECISION_ENGINE__SERVER__HOST
+              value: "0.0.0.0"
+            - name: DECISION_ENGINE__REDIS__HOST
+              value: {{ include "decision-engine.redisHost" . | quote }}
             - name: DECISION_ENGINE__ANALYTICS__ENABLED
               value: {{ ternary "true" "false" .Values.analytics.enabled | quote }}
             - name: DECISION_ENGINE__ANALYTICS__KAFKA__BROKERS

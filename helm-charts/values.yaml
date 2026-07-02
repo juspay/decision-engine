@@ -174,6 +174,11 @@ postgresql:
     persistence:
       enabled: true
       size: 8Gi
+    initdb:
+      scripts:
+        create_hypersense_db.sql: |
+          CREATE DATABASE hypersense_db;
+          GRANT ALL PRIVILEGES ON DATABASE hypersense_db TO db_user;
 
 # Redis configuration
 redis:
@@ -263,6 +268,116 @@ extraEnvVars: {}
   #     configMapKeyRef:
   #       name: app-config
   #       key: config.json
+
+# Shared config + secret for the Hypersense services (backend + etl).
+# Modelled on the hypersense-main chart: connection coordinates live in a
+# ConfigMap and the DB password in a Secret, both referenced by the deployments
+# via configMapKeyRef / secretKeyRef.
+hypersenseShared:
+  # true  → the chart renders the ConfigMap + Secret from the values below
+  #         (works out of the box for the local + in-cluster deployed setups).
+  # false → use pre-existing (external) resources; you must create them first
+  #         and set configMapName / secretName to their names. Lets you point
+  #         DB_HOST at an external DB (e.g. RDS) without the chart knowing.
+  create: true
+  # Names to reference. Empty => chart-generated "<release>-hypersense-config"
+  # and "<release>-hypersense-secret".
+  configMapName: ""
+  secretName: ""
+  # Hypersense database name (shared by backend + etl; distinct from decision_engine_db)
+  dbName: "hypersense_db"
+
+# Hypersense Backend configuration
+hypersenseBackend:
+  enabled: false
+  image:
+    repository: "701342709052.dkr.ecr.eu-central-1.amazonaws.com/hypersense/backend"
+    tag: "hypersense-backend-sandbox-latest"
+    pullPolicy: "Always"
+  service:
+    port: 8081
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"
+  healthcheck:
+    path: "/healthcheck"
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 5
+  migration:
+    runOnStartup: false
+  env:
+    runningEnv: "LOCAL"
+    mode: "DEV"
+    # dbName / DB connection now come from hypersenseShared via the ConfigMap
+    dbSchema: "hs_v1"
+    dbSchemaRe: "rule_engine"
+    dbSchemaAuth: "auth_v1"
+    awsRegion: "ap-south-1"
+    kafkaBootstrapServers: ""
+    kafkaTopic: "hypersense-etl-topic"
+    kafkaGroupId: "hypersense-etl-group"
+    s3Bucket: "hypersense-sbx-reports"
+    aiBackendHost: ""
+    hyperSwitchBaseUrl: "https://integ.hyperswitch.io/api"
+  extraEnvVars: {}
+  metadata:
+    labels:
+      component: hypersense-backend
+
+# Hypersense ETL configuration
+hypersenseEtl:
+  enabled: false
+  image:
+    repository: "701342709052.dkr.ecr.eu-central-1.amazonaws.com/hypersense/backend"
+    tag: "hypersense-etl-sandbox-latest"
+    pullPolicy: "Always"
+  service:
+    port: 8081
+  resources: {}
+  healthcheck:
+    path: "/healthcheck"
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 5
+  env:
+    runningEnv: "LOCAL"
+    mode: "DEV"
+    # dbName / DB connection now come from hypersenseShared via the ConfigMap
+    dbSchema: "hs_v1"
+    dbSchemaRe: "rule_engine"
+    dbSchemaAuth: "auth_v1"
+    awsRegion: "ap-south-1"
+    kafkaBootstrapServers: ""
+    kafkaTopic: "hypersense-etl-topic"
+    kafkaGroupId: "hypersense-etl-group"
+    s3Bucket: "hypersense-sbx-reports"
+    # ClickHouse — leave empty to fall back to analytics.clickhouse.host
+    clickhouseHost: ""
+    clickhousePort: 8123
+    clickhouseUser: "default"
+    clickhouseName: "default"
+    aiBackendHost: ""
+    hyperSwitchBaseUrl: "https://integ.hyperswitch.io/api"
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"
+  migration:
+    runOnStartup: false
+  extraEnvVars: {}
+  metadata:
+    labels:
+      component: hypersense-etl
 
 # Istio configuration (optional)
 istio:
