@@ -117,6 +117,22 @@ const DEFAULT_GW_SIM_CONFIG: GatewaySimConfig = {
   errorInfo: { ...DEFAULT_ERROR_INFO },
 }
 
+// Per-gateway default for the SR slider. Any gateway not listed falls back to
+// DEFAULT_GW_SIM_CONFIG.successRate. Keyed lowercase; look-ups normalize case.
+const DEFAULT_GW_SUCCESS_RATE: Record<string, number> = {
+  stripe: 94,
+  adyen: 93,
+}
+
+// Default sim config for a gateway, applying its per-gateway default SR.
+function defaultGwSimConfig(gw: string): GatewaySimConfig {
+  return {
+    ...DEFAULT_GW_SIM_CONFIG,
+    successRate: DEFAULT_GW_SUCCESS_RATE[gw.trim().toLowerCase()] ?? DEFAULT_GW_SIM_CONFIG.successRate,
+    errorInfo: { ...DEFAULT_ERROR_INFO },
+  }
+}
+
 interface SimulationResult {
   paymentId: string
   decidedGateway: string
@@ -1473,7 +1489,7 @@ export function DecisionSimulatorPage() {
   }
 
   function getGwSimConfig(gw: string): GatewaySimConfig {
-    return gatewaySimConfigsRef.current[gw] ?? { ...DEFAULT_GW_SIM_CONFIG }
+    return gatewaySimConfigsRef.current[gw] ?? defaultGwSimConfig(gw)
   }
 
   function getGwSuccessRate(gw: string): number {
@@ -2239,7 +2255,7 @@ export function DecisionSimulatorPage() {
       const next = { ...prev }
       for (const gw of eligibleGatewaysParsed) {
         if (prev[gw]?.errorInfo?.error_code) continue
-        const config = prev[gw] ?? { ...DEFAULT_GW_SIM_CONFIG }
+        const config = prev[gw] ?? defaultGwSimConfig(gw)
         const resolved = resolveSimErrorInfo(gw, config.gsmDecision, config.penalized)
         if (resolved) {
           next[gw] = { ...config, errorInfo: { error_code: resolved.errorCode, error_message: resolved.errorMessage, issuer_error_code: '', card_network: '' } }
@@ -2907,7 +2923,7 @@ export function DecisionSimulatorPage() {
               // Read from state (not the ref-backed getGwSuccessRate, which only
               // syncs in a post-render effect) so the controlled input reflects each
               // keystroke immediately instead of snapping back to a stale value.
-              const rate = (gatewaySimConfigs[key] ?? DEFAULT_GW_SIM_CONFIG).successRate
+              const rate = (gatewaySimConfigs[key] ?? defaultGwSimConfig(key)).successRate
               return (
                 <div key={key} className="flex w-[190px] flex-col gap-1.5">
                   <div className="flex items-center gap-1.5">
@@ -3414,7 +3430,7 @@ export function DecisionSimulatorPage() {
                       // before any simulated payment has been routed.
                       const previewGateways = eligibleGatewaysParsed
                       if (previewGateways.length === 0) return null
-                      const previewScores = previewGateways.map(gw => ({ gw, sr: (gatewaySimConfigs[gw] ?? DEFAULT_GW_SIM_CONFIG).successRate }))
+                      const previewScores = previewGateways.map(gw => ({ gw, sr: (gatewaySimConfigs[gw] ?? defaultGwSimConfig(gw)).successRate }))
                       const target = totalSimulationPayments || Number(SIMULATION_TOTAL_PAYMENTS)
                       // Empty plot area until a simulation runs — only the axis range
                       // is seeded so the chart frame renders without any band or lines.
