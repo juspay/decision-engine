@@ -105,6 +105,22 @@ const DEFAULT_GW_SIM_CONFIG: GatewaySimConfig = {
   errorInfo: { ...DEFAULT_ERROR_INFO },
 }
 
+// Per-gateway default for the SR slider. Any gateway not listed falls back to
+// DEFAULT_GW_SIM_CONFIG.successRate. Keyed lowercase; look-ups normalize case.
+const DEFAULT_GW_SUCCESS_RATE: Record<string, number> = {
+  stripe: 94,
+  adyen: 93,
+}
+
+// Default sim config for a gateway, applying its per-gateway default SR.
+function defaultGwSimConfig(gw: string): GatewaySimConfig {
+  return {
+    ...DEFAULT_GW_SIM_CONFIG,
+    successRate: DEFAULT_GW_SUCCESS_RATE[gw.trim().toLowerCase()] ?? DEFAULT_GW_SIM_CONFIG.successRate,
+    errorInfo: { ...DEFAULT_ERROR_INFO },
+  }
+}
+
 interface SimulationResult {
   paymentId: string
   decidedGateway: string
@@ -1226,7 +1242,7 @@ export function DecisionExplorerPage() {
   }
 
   function getGwSimConfig(gw: string): GatewaySimConfig {
-    return gatewaySimConfigsRef.current[gw] ?? { ...DEFAULT_GW_SIM_CONFIG }
+    return gatewaySimConfigsRef.current[gw] ?? defaultGwSimConfig(gw)
   }
 
   function getGwSuccessRate(gw: string): number {
@@ -1862,7 +1878,7 @@ export function DecisionExplorerPage() {
       const next = { ...prev }
       for (const gw of eligibleGatewaysParsed) {
         if (prev[gw]?.errorInfo?.error_code) continue
-        const config = prev[gw] ?? { ...DEFAULT_GW_SIM_CONFIG }
+        const config = prev[gw] ?? defaultGwSimConfig(gw)
         const resolved = resolveSimErrorInfo(gw, config.gsmDecision, config.penalized)
         if (resolved) {
           next[gw] = { ...config, errorInfo: { error_code: resolved.errorCode, error_message: resolved.errorMessage, issuer_error_code: '', card_network: '' } }
@@ -2694,7 +2710,7 @@ export function DecisionExplorerPage() {
                     {/* Gateway accordion rows */}
                     <div className="space-y-2">
                       {eligibleGatewaysParsed.map(gw => {
-                        const gwRate = gatewaySimConfigs[gw]?.successRate ?? 70
+                        const gwRate = gatewaySimConfigs[gw]?.successRate ?? defaultGwSimConfig(gw).successRate
                         const gwFailureMode = gatewaySimConfigs[gw]?.failureMode ?? 'decline'
                         const gwGsmDecision = gatewaySimConfigs[gw]?.gsmDecision ?? 'retry'
                         const gwPenalized = gatewaySimConfigs[gw]?.penalized ?? true
