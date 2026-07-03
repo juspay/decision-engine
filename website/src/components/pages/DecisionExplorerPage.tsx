@@ -23,10 +23,12 @@ import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
 import { FEATURE_FLAGS } from '../../lib/featureFlags'
 import { Play, RefreshCw, ChevronDown, ChevronUp, Activity, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings } from 'lucide-react'
 
-// UI-local algorithm tokens for the simulation dropdown. Maps to the backend
-// /decide-gateway request as follows:
-//   'SR_BASED_ROUTING'   → { rankingAlgorithm: 'SR_BASED_ROUTING' }
-//   'SR_MULTI_OBJECTIVE' → { rankingAlgorithm: 'SR_BASED_ROUTING', enableMultiObjective: true }
+// UI-local algorithm tokens for the simulation dropdown. Both map to
+// { rankingAlgorithm: 'SR_BASED_ROUTING' } on the backend /decide-gateway request;
+// the dropdown no longer forces multi-objective. Whether cost-savings (multi-objective)
+// runs is decided entirely by the merchant's Autopilot "Optimize for economic value"
+// flag — we no longer send enableMultiObjective. 'SR_MULTI_OBJECTIVE' is kept because it
+// still constrains the form to a card-only cluster shape.
 type SimulationAlgorithm = 'SR_BASED_ROUTING' | 'SR_MULTI_OBJECTIVE'
 
 const ALGORITHMS: SimulationAlgorithm[] = [
@@ -1445,7 +1447,9 @@ export function DecisionExplorerPage() {
         },
         eligibleGatewayList: gateways,
         rankingAlgorithm: 'SR_BASED_ROUTING',
-        enableMultiObjective: form.ranking_algorithm === 'SR_MULTI_OBJECTIVE',
+        // Multi-objective (cost savings) is governed solely by the merchant's Autopilot
+        // "Optimize for economic value" flag — we intentionally don't send
+        // enableMultiObjective so the decider falls back to that single source of truth.
         eliminationEnabled: eliminationEnabled,
       })
       const scoreRes = await apiPost<UpdateScoreResponse>('/update-gateway-score', {
@@ -1605,7 +1609,7 @@ export function DecisionExplorerPage() {
             },
             eligibleGatewayList: gateways,
             rankingAlgorithm: 'SR_BASED_ROUTING',
-            enableMultiObjective: isMultiObjective,
+            // Cost savings is driven by the merchant Autopilot flag, not this request.
             eliminationEnabled: eliminationEnabled,
           })
 
