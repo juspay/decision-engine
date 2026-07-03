@@ -7,7 +7,8 @@ image:
   pullPolicy: Always
   version: "v1.4"
 
-# Configure these if your images are in a private registry
+# Only needed if you enable Hypersense with images in a private registry.
+# Decision Engine + Groovy Runner are public (GHCR) and need no pull secret.
 imagePullSecrets:
   # - name: regcred
 nameOverride: ""
@@ -31,7 +32,7 @@ initContainers:
   # Set to false to disable all init containers
   enabled: true
   busybox:
-    repository: public.ecr.aws/docker/library/busybox
+    repository: docker.io/library/busybox
     tag: "1.28"
     pullPolicy: IfNotPresent
 
@@ -287,12 +288,16 @@ hypersenseShared:
   # Hypersense database name (shared by backend + etl; distinct from decision_engine_db)
   dbName: "hypersense_db"
 
-# Hypersense Backend configuration
+# Hypersense Backend — OFF by default (proprietary Juspay add-on).
+# The image source is deployment-specific (a private registry you were granted
+# access to, or an image Juspay provides) — it is intentionally left blank.
+# To enable: set image.repository/tag to a registry you can pull from, uncomment
+# imagePullSecrets above if it is private, then flip enabled: true.
 hypersenseBackend:
   enabled: false
   image:
-    repository: "701342709052.dkr.ecr.eu-central-1.amazonaws.com/hypersense/backend"
-    tag: "hypersense-backend-sandbox-latest"
+    repository: ""   # e.g. 701342709052.dkr.ecr.eu-central-1.amazonaws.com/hypersense/backend
+    tag: ""          # e.g. hypersense-backend-sandbox-latest
     pullPolicy: "Always"
   service:
     port: 8081
@@ -330,12 +335,14 @@ hypersenseBackend:
     labels:
       component: hypersense-backend
 
-# Hypersense ETL configuration
+# Hypersense ETL — OFF by default (proprietary Juspay add-on). See hypersenseBackend
+# above for how to enable. Set the image to a registry you can pull from, then flip
+# enabled: true.
 hypersenseEtl:
   enabled: false
   image:
-    repository: "701342709052.dkr.ecr.eu-central-1.amazonaws.com/hypersense/backend"
-    tag: "hypersense-etl-sandbox-latest"
+    repository: ""   # e.g. 701342709052.dkr.ecr.eu-central-1.amazonaws.com/hypersense/backend
+    tag: ""          # e.g. hypersense-etl-sandbox-latest
     pullPolicy: "Always"
   service:
     port: 8081

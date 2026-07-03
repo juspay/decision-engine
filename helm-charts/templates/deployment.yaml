@@ -84,6 +84,10 @@ spec:
               value: {{ include "decision-engine.redisHost" . | quote }}
             - name: DECISION_ENGINE__ANALYTICS__ENABLED
               value: {{ ternary "true" "false" .Values.analytics.enabled | quote }}
+            - name: DECISION_ENGINE__ANALYTICS__KAFKA__ENABLED
+              value: {{ ternary "true" "false" .Values.analytics.enabled | quote }}
+            - name: DECISION_ENGINE__ANALYTICS__CLICKHOUSE__ENABLED
+              value: {{ ternary "true" "false" .Values.analytics.enabled | quote }}
             - name: DECISION_ENGINE__ANALYTICS__KAFKA__BROKERS
               value: {{ .Values.analytics.kafka.brokers | quote }}
             - name: DECISION_ENGINE__ANALYTICS__KAFKA__API_TOPIC
