@@ -2081,9 +2081,9 @@
                   "multi_objective_routing": {
                     "summary": "Multi-objective routing — auth won (SR head retained)",
                     "value": {
-                      "decided_gateway": "stripe",
+                      "decided_gateway": "adyen",
                       "fallback_gateways": [
-                        "adyen",
+                        "stripe",
                         "checkout"
                       ],
                       "gateway_priority_map": {
