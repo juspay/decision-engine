@@ -106,6 +106,9 @@ impl DomainAnalyticsEvent {
         payment_method_type: Option<String>,
         payment_method: Option<String>,
         auth_type: Option<String>,
+        card_network: Option<String>,
+        currency: Option<String>,
+        country: Option<String>,
     ) {
         let approach = routing_approach
             .clone()
@@ -133,6 +136,9 @@ impl DomainAnalyticsEvent {
             payment_method_type,
             payment_method,
             auth_type,
+            card_network,
+            currency,
+            country,
             created_at_ms,
         )
         .emit();
@@ -374,6 +380,44 @@ impl DomainAnalyticsEvent {
             status,
             details,
             event_stage,
+            now_ms(),
+        )
+        .emit();
+    }
+
+    /// Emit a calibration retune event from the SR auto-calibrator, surfaced in the
+    /// routing-events feed as `calibration_applied`. Fire-and-forget via the shared
+    /// domain-event queue (no-op when the analytics write path is disabled).
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_autopilot_calibration(
+        flow: AnalyticsFlowContext,
+        route: AnalyticsRoute,
+        merchant_id: Option<String>,
+        payment_method_type: Option<String>,
+        payment_method: Option<String>,
+        card_network: Option<String>,
+        currency: Option<String>,
+        country: Option<String>,
+        auth_type: Option<String>,
+        new_bucket: i32,
+        previous_bucket: Option<i32>,
+        new_hedge: f64,
+        previous_hedge: Option<f64>,
+    ) {
+        Self::autopilot_calibration(
+            flow,
+            route,
+            merchant_id,
+            payment_method_type,
+            payment_method,
+            card_network,
+            currency,
+            country,
+            auth_type,
+            new_bucket,
+            previous_bucket,
+            new_hedge,
+            previous_hedge,
             now_ms(),
         )
         .emit();

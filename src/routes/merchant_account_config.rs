@@ -46,6 +46,12 @@ pub enum KnownFeature {
     ExploreExploitSrv3,
     AbTestRealPayments,
     MultiObjectiveRouting,
+    Elimination,
+    // Serialize as "auto-calibration" (not the kebab default "sr-auto-calibration") so it matches
+    // the dashboard slug used in GET responses and POST paths.
+    #[serde(rename = "auto-calibration")]
+    SrAutoCalibration,
+    Autopilot,
 }
 
 impl KnownFeature {
@@ -55,6 +61,9 @@ impl KnownFeature {
             Self::ExploreExploitSrv3,
             Self::AbTestRealPayments,
             Self::MultiObjectiveRouting,
+            Self::Elimination,
+            Self::SrAutoCalibration,
+            Self::Autopilot,
         ]
     }
 
@@ -64,6 +73,9 @@ impl KnownFeature {
             "explore-exploit-srv3" => Some(Self::ExploreExploitSrv3),
             "ab-test-real-payments" => Some(Self::AbTestRealPayments),
             "multi-objective-routing" => Some(Self::MultiObjectiveRouting),
+            "elimination" => Some(Self::Elimination),
+            "auto-calibration" => Some(Self::SrAutoCalibration),
+            "autopilot" => Some(Self::Autopilot),
             _ => None,
         }
     }
@@ -76,6 +88,9 @@ impl KnownFeature {
             Self::ExploreExploitSrv3 => "ENABLE_EXPLORE_AND_EXPLOIT_ON_SRV3_CARD",
             Self::AbTestRealPayments => "ab_test_real_payments_enabled",
             Self::MultiObjectiveRouting => "multi_objective_routing_enabled",
+            Self::Elimination => "enable_gateway_level_sr_elimination",
+            Self::SrAutoCalibration => "sr_auto_calibration_enabled",
+            Self::Autopilot => "autopilot_enabled",
         }
     }
 

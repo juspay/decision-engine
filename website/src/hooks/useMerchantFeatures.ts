@@ -7,6 +7,9 @@ export type KnownFeature =
   | 'explore-exploit-srv3'
   | 'ab-test-real-payments'
   | 'multi-objective-routing'
+  | 'elimination'
+  | 'auto-calibration'
+  | 'autopilot'
 
 export function useMerchantFeatures(merchantId?: string) {
   const path = merchantId ? `/merchant-account/${merchantId}/features` : null

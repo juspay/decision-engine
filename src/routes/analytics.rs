@@ -5,7 +5,7 @@ use crate::analytics::{
     gateway_scores as fetch_gateway_scores, log_summaries as fetch_log_summaries,
     overview as fetch_overview, payment_audit as fetch_payment_audit,
     preview_trace as fetch_preview_trace, routing_events as fetch_routing_events,
-    routing_stats as fetch_routing_stats, AnalyticsQuery, ExperimentResultsQuery,
+    routing_stats as fetch_routing_stats, AnalyticsQuery, AuthBandSpec, ExperimentResultsQuery,
     ExperimentTransactionsQuery, PaymentAuditQuery, RoutingEventsQuery,
 };
 use crate::custom_extractors::{AuthenticatedAnalyticsContext, TenantStateResolver};
@@ -215,10 +215,9 @@ pub async fn routing_events(
 ) -> Result<Json<crate::analytics::RoutingEventsResponse>, error::ContainerError<error::ApiError>> {
     // Auth-band events are a multi-objective concept, so only surface them when MO
     // routing is enabled for the merchant (same feature flag the decider checks).
-    // When on, mirror the live decision band: caller override → configured tolerance.
-    // When off, leave tolerance unset so only LeaderChanged events are emitted.
-    let tolerance_pp =
-        resolve_auth_band_tolerance(&auth_context.merchant_id, params.tolerance_pp).await;
+    // When on, mirror the live decision band: caller override → per-candidate noise
+    // floor. When off, leave the band Off so only LeaderChanged events are emitted.
+    let auth_band = resolve_auth_band(&auth_context.merchant_id, params.tolerance_pp).await;
     let query = RoutingEventsQuery::from_request(
         auth_context.merchant_id.clone(),
         params.range,
@@ -228,35 +227,43 @@ pub async fn routing_events(
         params.payment_method,
         params.min_transaction_count,
         params.min_score_delta,
-        tolerance_pp,
+        auth_band,
         params.limit,
         params.bucket,
     );
     Ok(Json(fetch_routing_events(&state, &query).await?))
 }
 
-/// Auth-band tolerance for routing-events detection. `None` when multi-objective
-/// routing is off for the merchant (the band is meaningless, so no entered/exited
-/// events fire). When on, an explicit caller override wins; otherwise the merchant's
-/// configured `default_tolerance_pp`, falling back to the multi-objective default —
-/// matching exactly what the live decider applies.
-async fn resolve_auth_band_tolerance(merchant_id: &str, explicit: Option<f64>) -> Option<f64> {
-    let multi_objective_on = crate::redis::feature::is_feature_enabled(
-        "multi_objective_routing_enabled".to_string(),
-        merchant_id.to_string(),
-        crate::feedback::constants::kvRedis(),
-    )
-    .await;
-    if !multi_objective_on {
-        return None;
-    }
-    let tolerance = match explicit {
-        Some(value) => value,
-        None => crate::decider::gatewaydecider::flow_new::load_default_tolerance_pp(merchant_id)
-            .await
-            .unwrap_or(crate::decider::gatewaydecider::multi_objective::DEFAULT_TOLERANCE_BAND_PP),
-    };
-    Some(tolerance)
+/// Resolve how the routing-events historical detector should compute the auth band.
+///
+/// Auth-band crossing events (`gateway_entered_auth_band` / `gateway_exited_auth_band`,
+/// surfaced in the UI as "{gateway} fluctuating at the cost-savings cutoff") are turned
+/// OFF: this always returns `AuthBandSpec::Off`, so `emit_auth_band_events` never runs and
+/// only `leader_changed` events are emitted.
+///
+/// To re-enable, restore the derivation below (kept for reference): mirror the live decider —
+/// `Off` when multi-objective routing is off for the merchant; otherwise an explicit caller
+/// override wins as a fixed band, and absent that a per-candidate **noise floor** derived from
+/// the merchant's SRV3 bucket size (`z·√(σ_leader² + σ_cand²)`):
+///
+/// ```ignore
+/// let multi_objective_on = crate::redis::feature::is_feature_enabled(
+///     "multi_objective_routing_enabled".to_string(),
+///     merchant_id.to_string(),
+///     crate::feedback::constants::kvRedis(),
+/// ).await;
+/// if !multi_objective_on { return AuthBandSpec::Off; }
+/// match explicit {
+///     Some(half_width) => AuthBandSpec::Fixed(half_width.max(0.0)),
+///     None => {
+///         let bucket_size =
+///             crate::decider::gatewaydecider::flow_new::load_srv3_default_bucket_size(merchant_id).await;
+///         AuthBandSpec::NoiseFloor { bucket_size, z: crate::decider::gatewaydecider::multi_objective::Z_NOISE }
+///     }
+/// }
+/// ```
+async fn resolve_auth_band(_merchant_id: &str, _explicit: Option<f64>) -> AuthBandSpec {
+    AuthBandSpec::Off
 }
 
 #[derive(Debug, Clone, Deserialize)]

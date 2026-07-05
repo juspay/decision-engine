@@ -1923,7 +1923,7 @@ export function AnalyticsPage() {
                 <div>
                   <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Cost saved over time</h2>
                   <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                    Savings from multi-objective routing promoting the cheaper PSP within the SR tolerance band.
+                    Savings from multi-objective routing promoting the higher-EV PSP within the derived auth band.
                   </p>
                 </div>
               </div>
@@ -1954,7 +1954,7 @@ export function AnalyticsPage() {
               ) : (
                 <EmptyState
                   title="No cost savings yet"
-                  body="Cost savings appear once multi-objective routing promotes a cheaper PSP within the SR tolerance band."
+                  body="Cost savings appear once multi-objective routing promotes a higher-EV PSP within the derived auth band."
                 />
               )}
             </CardBody>

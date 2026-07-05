@@ -563,12 +563,10 @@ pub async fn get_cached_scores_based_on_srv3(
         "{:?}",
         merchant_bucket_size
     );
-    Utils::delete_score_key_if_bucket_size_changes(
-        decider_flow,
-        merchant_bucket_size,
-        sr_gateway_redis_key_map.clone(),
-    )
-    .await;
+    // NOTE: bucket-size changes are now applied via resize-in-place — the feedback path trims
+    // the queue to the current size (LPUSH + LTRIM) and reads are already bounded to the size,
+    // so we no longer delete/refill the score key on change (which used to wipe history and
+    // snap the gateway to a fake 100%). The score key is left intact.
     Utils::set_srv3_bucket_size(decider_flow, merchant_bucket_size);
 
     let mut score_map = GatewayScoreMap::new();

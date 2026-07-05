@@ -23,10 +23,12 @@ import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
 import { FEATURE_FLAGS } from '../../lib/featureFlags'
 import { Play, RefreshCw, ChevronDown, ChevronUp, Activity, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings } from 'lucide-react'
 
-// UI-local algorithm tokens for the simulation dropdown. Maps to the backend
-// /decide-gateway request as follows:
-//   'SR_BASED_ROUTING'   → { rankingAlgorithm: 'SR_BASED_ROUTING' }
-//   'SR_MULTI_OBJECTIVE' → { rankingAlgorithm: 'SR_BASED_ROUTING', enableMultiObjective: true }
+// UI-local algorithm tokens for the simulation dropdown. Both map to
+// { rankingAlgorithm: 'SR_BASED_ROUTING' } on the backend /decide-gateway request;
+// the dropdown no longer forces multi-objective. Whether cost-savings (multi-objective)
+// runs is decided entirely by the merchant's Autopilot "Optimize for economic value"
+// flag — we no longer send enableMultiObjective. 'SR_MULTI_OBJECTIVE' is kept because it
+// still constrains the form to a card-only cluster shape.
 type SimulationAlgorithm = 'SR_BASED_ROUTING' | 'SR_MULTI_OBJECTIVE'
 
 const ALGORITHMS: SimulationAlgorithm[] = [
@@ -101,6 +103,22 @@ const DEFAULT_GW_SIM_CONFIG: GatewaySimConfig = {
   gsmDecision: 'retry',
   penalized: true,
   errorInfo: { ...DEFAULT_ERROR_INFO },
+}
+
+// Per-gateway default for the SR slider. Any gateway not listed falls back to
+// DEFAULT_GW_SIM_CONFIG.successRate. Keyed lowercase; look-ups normalize case.
+const DEFAULT_GW_SUCCESS_RATE: Record<string, number> = {
+  stripe: 94,
+  adyen: 93,
+}
+
+// Default sim config for a gateway, applying its per-gateway default SR.
+function defaultGwSimConfig(gw: string): GatewaySimConfig {
+  return {
+    ...DEFAULT_GW_SIM_CONFIG,
+    successRate: DEFAULT_GW_SUCCESS_RATE[gw.trim().toLowerCase()] ?? DEFAULT_GW_SIM_CONFIG.successRate,
+    errorInfo: { ...DEFAULT_ERROR_INFO },
+  }
 }
 
 interface SimulationResult {
@@ -1224,7 +1242,7 @@ export function DecisionExplorerPage() {
   }
 
   function getGwSimConfig(gw: string): GatewaySimConfig {
-    return gatewaySimConfigsRef.current[gw] ?? { ...DEFAULT_GW_SIM_CONFIG }
+    return gatewaySimConfigsRef.current[gw] ?? defaultGwSimConfig(gw)
   }
 
   function getGwSuccessRate(gw: string): number {
@@ -1445,7 +1463,9 @@ export function DecisionExplorerPage() {
         },
         eligibleGatewayList: gateways,
         rankingAlgorithm: 'SR_BASED_ROUTING',
-        enableMultiObjective: form.ranking_algorithm === 'SR_MULTI_OBJECTIVE',
+        // Multi-objective (cost savings) is governed solely by the merchant's Autopilot
+        // "Optimize for economic value" flag — we intentionally don't send
+        // enableMultiObjective so the decider falls back to that single source of truth.
         eliminationEnabled: eliminationEnabled,
       })
       const scoreRes = await apiPost<UpdateScoreResponse>('/update-gateway-score', {
@@ -1605,7 +1625,7 @@ export function DecisionExplorerPage() {
             },
             eligibleGatewayList: gateways,
             rankingAlgorithm: 'SR_BASED_ROUTING',
-            enableMultiObjective: isMultiObjective,
+            // Cost savings is driven by the merchant Autopilot flag, not this request.
             eliminationEnabled: eliminationEnabled,
           })
 
@@ -1858,7 +1878,7 @@ export function DecisionExplorerPage() {
       const next = { ...prev }
       for (const gw of eligibleGatewaysParsed) {
         if (prev[gw]?.errorInfo?.error_code) continue
-        const config = prev[gw] ?? { ...DEFAULT_GW_SIM_CONFIG }
+        const config = prev[gw] ?? defaultGwSimConfig(gw)
         const resolved = resolveSimErrorInfo(gw, config.gsmDecision, config.penalized)
         if (resolved) {
           next[gw] = { ...config, errorInfo: { error_code: resolved.errorCode, error_message: resolved.errorMessage, issuer_error_code: '', card_network: '' } }
@@ -2690,7 +2710,7 @@ export function DecisionExplorerPage() {
                     {/* Gateway accordion rows */}
                     <div className="space-y-2">
                       {eligibleGatewaysParsed.map(gw => {
-                        const gwRate = gatewaySimConfigs[gw]?.successRate ?? 70
+                        const gwRate = gatewaySimConfigs[gw]?.successRate ?? defaultGwSimConfig(gw).successRate
                         const gwFailureMode = gatewaySimConfigs[gw]?.failureMode ?? 'decline'
                         const gwGsmDecision = gatewaySimConfigs[gw]?.gsmDecision ?? 'retry'
                         const gwPenalized = gatewaySimConfigs[gw]?.penalized ?? true
@@ -4396,14 +4416,6 @@ function MultiObjectiveDecisionPanel({ info }: { info: MultiObjectiveInfo }) {
                 {isCostWin ? 'Cost won' : 'Auth won'}
               </span>
             </div>
-            <div className="text-right">
-              <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
-                Tolerance band
-              </span>
-              <p className="font-mono text-sm font-semibold text-slate-800 dark:text-slate-100">
-                {info.tolerancePp.toFixed(2)} pp
-              </p>
-            </div>
           </div>
 
           <p className="mt-3 text-sm text-slate-700 dark:text-slate-200 leading-relaxed">
@@ -4427,7 +4439,7 @@ function MultiObjectiveDecisionPanel({ info }: { info: MultiObjectiveInfo }) {
               )}
               {info.chosen && (
                 <MultiObjectivePspCard
-                  label={isCostWin ? 'Chosen by cost' : 'Final pick'}
+                  label={isCostWin ? 'Chosen by EV' : 'Final pick'}
                   summary={info.chosen}
                   emphasis={isCostWin}
                 />
@@ -4436,7 +4448,7 @@ function MultiObjectiveDecisionPanel({ info }: { info: MultiObjectiveInfo }) {
           )}
 
           <p className="mt-3 text-[11px] text-slate-500 dark:text-slate-400">
-            {info.qualifiedCount} PSP{info.qualifiedCount === 1 ? '' : 's'} qualified under the band.
+            {info.qualifiedCount} PSP{info.qualifiedCount === 1 ? '' : 's'} ranked on EV.
           </p>
         </div>
       </CardBody>

@@ -9,6 +9,7 @@ use crate::analytics::service::now_ms;
 use crate::error::ApiError;
 
 use super::super::metrics;
+use super::super::metrics::calibration_events::CalibrationEventRow;
 use super::super::metrics::score_bucket_series::ScoreBucketPoint;
 
 pub async fn load(
@@ -21,7 +22,21 @@ pub async fn load(
     let lookback_start_ms = start_ms.saturating_sub(staleness_horizon_ms(query.bucket_ms));
     let points =
         metrics::score_bucket_series::load(client, query, lookback_start_ms, end_ms).await?;
-    let events = detect_routing_events(&points, query, start_ms);
+    let mut events = detect_routing_events(&points, query, start_ms);
+
+    // Autopilot calibration retunes are real emitted domain events (not derivable from the
+    // score series), so replay them from their own store and merge into the same feed.
+    let calibration_rows =
+        metrics::calibration_events::load(client, query, start_ms, end_ms).await?;
+    events.extend(calibration_events_to_routing_events(
+        &query.merchant_id,
+        calibration_rows,
+    ));
+    // Re-establish the newest-first, deterministic order across both sources and re-cap:
+    // `detect_routing_events` already sorted/truncated its own output, so the calibration
+    // rows we appended need folding back in.
+    events.sort_by(|a, b| b.bucket_ms.cmp(&a.bucket_ms).then_with(|| a.id.cmp(&b.id)));
+    events.truncate(query.limit);
 
     Ok(RoutingEventsResponse {
         merchant_id: query.merchant_id.clone(),
@@ -104,6 +119,57 @@ fn event_id(
     )
 }
 
+/// Deterministic ID for a calibration event, stable across polls so the client dedupes on
+/// it. Keyed on the full cluster grain (finer than the pmt/pm the derived events use) plus
+/// the emit timestamp, so every distinct retune surfaces exactly once.
+fn calibration_event_id(merchant_id: &str, row: &CalibrationEventRow) -> String {
+    format!(
+        "{}:{}:{}:{}:{}:{}:{}:{}:{}",
+        RoutingEventType::CalibrationApplied.as_str(),
+        merchant_id,
+        row.payment_method_type.as_deref().unwrap_or("-"),
+        row.payment_method.as_deref().unwrap_or("-"),
+        row.card_network.as_deref().unwrap_or("-"),
+        row.currency.as_deref().unwrap_or("-"),
+        row.country.as_deref().unwrap_or("-"),
+        row.auth_type.as_deref().unwrap_or("-"),
+        row.created_at_ms,
+    )
+}
+
+/// Map raw calibration domain-event rows into `calibration_applied` routing events. The
+/// score/leader fields are unused for this type; the retune knobs ride the dedicated
+/// `bucket_size`/`hedging_percent` fields, and `bucket_ms` carries the emit time so the
+/// event slots into the shared newest-first timeline.
+fn calibration_events_to_routing_events(
+    merchant_id: &str,
+    rows: Vec<CalibrationEventRow>,
+) -> Vec<RoutingEvent> {
+    rows.into_iter()
+        .map(|row| RoutingEvent {
+            id: calibration_event_id(merchant_id, &row),
+            event_type: RoutingEventType::CalibrationApplied,
+            merchant_id: merchant_id.to_string(),
+            payment_method_type: row.payment_method_type.clone(),
+            payment_method: row.payment_method.clone(),
+            bucket_ms: row.created_at_ms,
+            gateway: String::new(),
+            previous_gateway: None,
+            score: None,
+            previous_score: None,
+            transaction_count: None,
+            bucket_size: row.new_bucket.map(|b| b as i32),
+            previous_bucket_size: row.previous_bucket.map(|b| b.round() as i32),
+            hedging_percent: row.new_hedge,
+            previous_hedging_percent: row.previous_hedge,
+            card_network: row.card_network,
+            currency: row.currency,
+            country: row.country,
+            auth_type: row.auth_type,
+        })
+        .collect()
+}
+
 /// Walk bucketed score points per dimension, carrying the last known score per
 /// gateway forward across sparse buckets, and emit routing events. Pure and
 /// deterministic so event IDs are stable across polls.
@@ -182,17 +248,15 @@ fn detect_routing_events(
                 let former_leader = prior_bucket_leader.clone();
                 prior_bucket_leader = Some(leader_name.clone());
 
-                // Auth-band detection runs only when multi-objective routing is on
-                // (tolerance set); otherwise the band is meaningless and we emit
-                // leader changes alone.
-                if let Some(tolerance_pp) = query.tolerance_pp {
+                // Auth-band detection runs only when multi-objective routing is on;
+                // otherwise the band is meaningless and we emit leader changes alone.
+                if query.auth_band.is_on() {
                     emit_auth_band_events(
                         &mut events,
                         &mut in_auth_band,
                         &state,
                         &leader_name,
                         leader_score,
-                        tolerance_pp,
                         bucket_ms,
                         dimension,
                         query,
@@ -240,6 +304,14 @@ fn detect_routing_events(
                                 transaction_count: state
                                     .get(&leader_name)
                                     .and_then(|gateway_state| gateway_state.transaction_count),
+                                bucket_size: None,
+                                previous_bucket_size: None,
+                                hedging_percent: None,
+                                previous_hedging_percent: None,
+                                card_network: None,
+                                currency: None,
+                                country: None,
+                                auth_type: None,
                             });
                             previous_leader = Some(leader_name);
                         }
@@ -263,14 +335,16 @@ fn detect_routing_events(
 }
 
 /// Emit auth-band crossing events for every eligible non-leader gateway.
-/// `GatewayEnteredAuthBand` fires when a gateway's score first rises to within
-/// `tolerance_pp` of the leader's; `GatewayExitedAuthBand` fires when it later
-/// drops below that floor or ages out. Membership is edge-triggered via
+/// `GatewayEnteredAuthBand` fires when a gateway's score first rises into the
+/// leader's band (`>= query.auth_band.band_floor(leader, candidate)`);
+/// `GatewayExitedAuthBand` fires when it later drops below that floor or ages out.
+/// The floor is **per candidate** — under `NoiseFloor` it widens with each gateway's
+/// own SR variance, matching the live decider's gate. Membership is edge-triggered via
 /// `in_auth_band`, so each crossing fires exactly once. The leader is the band
 /// reference and never a member — a member promoted to leader exits silently.
-/// A leader that gets overtaken but stays within tolerance never actually left
-/// the band (only the reference moved), so it is re-seeded as a member silently
-/// via `former_leader` and does not fire a spurious entry.
+/// A leader that gets overtaken but stays within its band never actually left it
+/// (only the reference moved), so it is re-seeded as a member silently via
+/// `former_leader` and does not fire a spurious entry.
 #[allow(clippy::too_many_arguments)]
 fn emit_auth_band_events(
     events: &mut Vec<RoutingEvent>,
@@ -278,7 +352,6 @@ fn emit_auth_band_events(
     state: &HashMap<String, GatewayState>,
     leader_name: &str,
     leader_score: f64,
-    tolerance_pp: f64,
     bucket_ms: i64,
     dimension: &DimensionKey,
     query: &RoutingEventsQuery,
@@ -286,7 +359,6 @@ fn emit_auth_band_events(
     is_first_bucket: bool,
     former_leader: Option<&str>,
 ) {
-    let band_floor = leader_score - tolerance_pp;
     // The leader is the reference, never a member.
     in_auth_band.remove(leader_name);
 
@@ -304,9 +376,12 @@ fn emit_auth_band_events(
                 >= query.min_transaction_count
                 && bucket_ms - former_state.last_seen_bucket_ms <= staleness_ms;
             // A demoted leader was already inside the band, so seed it as a member
-            // if it still holds at/above the band floor (same threshold a member is
-            // held to before exiting).
-            if eligible && former_state.score >= band_floor {
+            // if it still holds at/above its own band floor (same threshold a member
+            // is held to before exiting).
+            if eligible
+                && former_state.score
+                    >= query.auth_band.band_floor(leader_score, former_state.score)
+            {
                 in_auth_band.insert(former.to_string());
             }
         }
@@ -325,6 +400,9 @@ fn emit_auth_band_events(
         // — no hysteresis/deadband. Flap protection instead lives downstream (the UI
         // collapses any rapid re-crossings into one "contesting ×N" row), and the
         // deterministic outcome scheduler keeps scores from jittering at the edge.
+        let band_floor = query
+            .auth_band
+            .band_floor(leader_score, gateway_state.score);
         let in_band_now = eligible && gateway_state.score >= band_floor;
 
         if in_band_now && !was_in_band {
@@ -392,15 +470,66 @@ fn auth_band_event(
         score: Some(gateway_state.score),
         previous_score: Some(leader_score),
         transaction_count: gateway_state.transaction_count,
+        bucket_size: None,
+        previous_bucket_size: None,
+        hedging_percent: None,
+        previous_hedging_percent: None,
+        card_network: None,
+        currency: None,
+        country: None,
+        auth_type: None,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analytics::models::{RoutingEventsQuery, ROUTING_EVENTS_BUCKET_MS};
+    use crate::analytics::models::{AuthBandSpec, RoutingEventsQuery, ROUTING_EVENTS_BUCKET_MS};
 
     const BUCKET: i64 = ROUTING_EVENTS_BUCKET_MS;
+
+    fn calibration_row(created_at_ms: i64) -> CalibrationEventRow {
+        CalibrationEventRow {
+            created_at_ms,
+            payment_method_type: Some("card".to_string()),
+            payment_method: Some("credit".to_string()),
+            card_network: Some("VISA".to_string()),
+            currency: None,
+            country: None,
+            auth_type: None,
+            new_hedge: Some(8.5),
+            previous_hedge: Some(5.0),
+            new_bucket: Some(250),
+            previous_bucket: Some(100.0),
+        }
+    }
+
+    #[test]
+    fn calibration_rows_map_to_calibration_events_with_stable_ids() {
+        let rows = vec![calibration_row(1_700_000_000_000)];
+        let events = calibration_events_to_routing_events("m_123", rows);
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+        assert_eq!(event.event_type, RoutingEventType::CalibrationApplied);
+        assert_eq!(event.bucket_ms, 1_700_000_000_000);
+        assert_eq!(event.bucket_size, Some(250));
+        assert_eq!(event.previous_bucket_size, Some(100));
+        assert_eq!(event.hedging_percent, Some(8.5));
+        assert_eq!(event.previous_hedging_percent, Some(5.0));
+        assert_eq!(event.card_network.as_deref(), Some("VISA"));
+        // The score/leader fields are unused for calibration events.
+        assert_eq!(event.gateway, "");
+        assert!(event.score.is_none());
+        // ID embeds the full cluster grain + emit time; "-" fills unset dims.
+        assert_eq!(
+            event.id,
+            "calibration_applied:m_123:card:credit:VISA:-:-:-:1700000000000"
+        );
+        // Deterministic across polls.
+        let rerun =
+            calibration_events_to_routing_events("m_123", vec![calibration_row(1_700_000_000_000)]);
+        assert_eq!(rerun[0].id, event.id);
+    }
 
     fn query() -> RoutingEventsQuery {
         RoutingEventsQuery {
@@ -412,9 +541,9 @@ mod tests {
             payment_method: None,
             min_transaction_count: 10,
             min_score_delta: 0.5,
-            // Test scores are on a 0..100 scale, so a 5-point band is workable.
-            // Some(..) = multi-objective on; None disables auth-band detection.
-            tolerance_pp: Some(5.0),
+            // Test scores are on a 0..100 scale, so a fixed 5-point band is workable.
+            // Fixed(..) = multi-objective on; Off disables auth-band detection.
+            auth_band: AuthBandSpec::Fixed(5.0),
             limit: 50,
             bucket_ms: ROUTING_EVENTS_BUCKET_MS,
         }
@@ -487,13 +616,25 @@ mod tests {
             .all(|event| event.event_type != RoutingEventType::LeaderChanged));
     }
 
-    // 0..1 scores with the auth band on (5pp tolerance), so the noise-based band
-    // hysteresis (z * SE) produces a real deadband rather than collapsing to the
-    // floor as it does for the 0..100 fixtures.
+    // 0..1 scores with a fixed 5pp auth band, used by the band-floor edge tests.
     fn unit_scale_band_query() -> RoutingEventsQuery {
         RoutingEventsQuery {
             min_score_delta: 0.001,
-            tolerance_pp: Some(0.05),
+            auth_band: AuthBandSpec::Fixed(0.05),
+            ..query()
+        }
+    }
+
+    // 0..1 scores with the derived per-candidate noise-floor band (z = 1), the live
+    // decider's cost-independent gate. The band width follows each candidate's SR
+    // variance and the SRV3 bucket size.
+    fn noise_floor_query(bucket_size: i32) -> RoutingEventsQuery {
+        RoutingEventsQuery {
+            min_score_delta: 0.001,
+            auth_band: AuthBandSpec::NoiseFloor {
+                bucket_size,
+                z: 1.0,
+            },
             ..query()
         }
     }
@@ -833,10 +974,10 @@ mod tests {
 
     #[test]
     fn multi_objective_off_suppresses_band_events_but_keeps_leader_changes() {
-        // tolerance_pp = None models a merchant with multi-objective routing off:
+        // AuthBandSpec::Off models a merchant with multi-objective routing off:
         // the band is meaningless, so only the leader flip surfaces.
         let mut mo_off = query();
-        mo_off.tolerance_pp = None;
+        mo_off.auth_band = AuthBandSpec::Off;
         let points = vec![
             point(0, "adyen", 89.0, 100),
             point(0, "stripe", 80.0, 100),
@@ -852,6 +993,47 @@ mod tests {
         assert!(events
             .iter()
             .any(|event| event.event_type == RoutingEventType::LeaderChanged));
+    }
+
+    #[test]
+    fn noise_floor_band_rejects_gateway_beyond_its_derived_floor() {
+        // Leader 0.90, B=125 → stripe's per-candidate floor ≈ 4.17pp. stripe only
+        // climbs to 0.85 (5pp back), so it never enters the band.
+        let points = vec![
+            point(0, "adyen", 0.90, 100),
+            point(0, "stripe", 0.80, 100),
+            point(BUCKET, "adyen", 0.90, 100),
+            point(BUCKET, "stripe", 0.85, 100),
+        ];
+        let events = detect_routing_events(&points, &noise_floor_query(125), 0);
+        assert!(
+            entered_band_events(&events).is_empty(),
+            "5pp gap exceeds the ~4.2pp noise floor at B=125; stripe stays out"
+        );
+    }
+
+    #[test]
+    fn larger_bucket_tightens_noise_floor_band() {
+        // A 0.88 candidate 2pp behind a 0.90 leader is inside the band at B=125
+        // (floor ≈ 3.96pp) but outside it at B=2000 (floor ≈ 1.0pp): the noise floor
+        // scales as 1/√B, exactly like the live decider. This is the lever that
+        // actually tightens the band — not margin (see scratch/deriving-routing-config).
+        let points = vec![
+            point(0, "adyen", 0.90, 100),
+            point(0, "stripe", 0.80, 100),
+            point(BUCKET, "adyen", 0.90, 100),
+            point(BUCKET, "stripe", 0.88, 100),
+        ];
+        let small_bucket = detect_routing_events(&points, &noise_floor_query(125), 0);
+        let entered = entered_band_events(&small_bucket);
+        assert_eq!(entered.len(), 1, "enters the band at B=125");
+        assert_eq!(entered[0].gateway, "stripe");
+
+        let large_bucket = detect_routing_events(&points, &noise_floor_query(2000), 0);
+        assert!(
+            entered_band_events(&large_bucket).is_empty(),
+            "the same 2pp gap is outside the tighter B=2000 floor"
+        );
     }
 
     #[test]

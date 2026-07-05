@@ -6,6 +6,7 @@ pub mod analytics;
 pub mod body;
 pub mod decide_gateway;
 pub mod decision_gateway;
+pub mod gateway_score;
 pub mod gsm;
 pub mod health;
 pub mod merchant_account_config;

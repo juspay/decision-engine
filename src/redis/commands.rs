@@ -480,6 +480,40 @@ impl RedisConnectionWrapper {
             .change_context(errors::RedisError::DeleteFailed)
     }
 
+    /// Delete every key matching `pattern` (glob, e.g. `prefix_*`) and return how many
+    /// were removed. Uses a cursor-based `SCAN` (never `KEYS`, which blocks the server)
+    /// and deletes each key individually: in cluster mode each SR key carries its own hash
+    /// tag, so a single multi-key `DEL` could span slots and fail — one at a time stays
+    /// slot-safe. Intended for scoped admin flushes (e.g. clearing one merchant's gateway
+    /// scores), not hot-path use.
+    pub async fn delete_keys_by_pattern(&self, pattern: &str) -> Result<usize, errors::RedisError> {
+        use fred::types::Scanner;
+        use futures::stream::StreamExt;
+
+        let client = self.conn.pool.next();
+        let mut scan_stream = client.scan(pattern.to_string(), Some(100), None);
+        let mut deleted = 0usize;
+
+        while let Some(page) = scan_stream.next().await {
+            let mut page = page.change_context(errors::RedisError::GetFailed)?;
+            if let Some(keys) = page.take_results() {
+                for key in keys {
+                    let _: i64 = self
+                        .conn
+                        .pool
+                        .del(key)
+                        .await
+                        .change_context(errors::RedisError::DeleteFailed)?;
+                    deleted += 1;
+                }
+            }
+            // Advance the cursor; without this the scan stops after the first page.
+            let _ = page.next();
+        }
+
+        Ok(deleted)
+    }
+
     pub async fn increment_key(&self, key: &str) -> Result<i64, errors::RedisError> {
         self.conn
             .pool

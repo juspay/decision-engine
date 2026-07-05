@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowRightLeft, Bell, Target, TrendingDown } from 'lucide-react'
+import { ArrowRightLeft, Bell, Target, TrendingDown, SlidersHorizontal } from 'lucide-react'
 import { describeRoutingEvent, useRoutingEvents } from '../../hooks/useRoutingEvents'
 import { RoutingEventType } from '../../types/api'
 
@@ -8,12 +8,14 @@ const EVENT_ICONS: Record<RoutingEventType, React.ElementType> = {
   leader_changed: ArrowRightLeft,
   gateway_entered_auth_band: Target,
   gateway_exited_auth_band: TrendingDown,
+  calibration_applied: SlidersHorizontal,
 }
 
 const EVENT_ICON_CLASSES: Record<RoutingEventType, string> = {
   leader_changed: 'text-sky-600 dark:text-sky-300',
   gateway_entered_auth_band: 'text-emerald-600 dark:text-emerald-300',
   gateway_exited_auth_band: 'text-amber-600 dark:text-amber-300',
+  calibration_applied: 'text-violet-600 dark:text-violet-300',
 }
 
 function formatEventTime(bucketMs: number) {

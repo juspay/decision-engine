@@ -9,3 +9,4 @@ pub mod payment_audit;
 pub mod preview_trace;
 pub mod routing_events;
 pub mod routing_stats;
+pub mod segment_traffic;

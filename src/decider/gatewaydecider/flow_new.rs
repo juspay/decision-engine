@@ -243,17 +243,44 @@ fn handle_enforced_gateway(gateway_list: Option<Vec<String>>) -> Option<Vec<Stri
     }
 }
 
-/// The merchant's configured multi-objective auth-band tolerance (`default_tolerance_pp`
-/// from `SR_V3_INPUT_CONFIG_<merchant_id>`). Shared with the routing-events analytics so
-/// the visualized band matches the band the live decider actually applied.
-pub async fn load_default_tolerance_pp(merchant_id: &str) -> Option<f64> {
-    let key = format!("SR_V3_INPUT_CONFIG_{}", merchant_id);
-    let row = service_configuration::find_config_by_name(key)
+/// The merchant's configured margin (fraction of ticket) from
+/// `SR_V3_INPUT_CONFIG_<merchant_id>`. Used in the multi-objective expected-value
+/// ranking `EV = auth·(margin − cost/10_000)` — there is no auth band or admission
+/// gate. Falls back to [`multi_objective::DEFAULT_MARGIN`] when unset.
+pub async fn load_margin(merchant_id: &str) -> f64 {
+    let read = || async {
+        let key = format!("SR_V3_INPUT_CONFIG_{}", merchant_id);
+        let row = service_configuration::find_config_by_name(key)
+            .await
+            .ok()??;
+        let value = row.value?;
+        let cfg: SuccessRateData = serde_json::from_str(&value).ok()?;
+        cfg.margin
+    };
+    read()
         .await
-        .ok()??;
-    let value = row.value?;
-    let cfg: SuccessRateData = serde_json::from_str(&value).ok()?;
-    cfg.default_tolerance_pp
+        .filter(|m| *m > 0.0)
+        .unwrap_or(multi_objective::DEFAULT_MARGIN)
+}
+
+/// The merchant's configured default SRV3 bucket size (`defaultBucketSize` from
+/// `SR_V3_INPUT_CONFIG_<merchant_id>`). Shared with the routing-events analytics so the
+/// historically-detected auth band uses the same `B` the live decider does when sizing
+/// its noise floor. Falls back to [`C::DEFAULT_SR_V3_BASED_BUCKET_SIZE`] when unset.
+pub async fn load_srv3_default_bucket_size(merchant_id: &str) -> i32 {
+    let read = || async {
+        let key = format!("SR_V3_INPUT_CONFIG_{}", merchant_id);
+        let row = service_configuration::find_config_by_name(key)
+            .await
+            .ok()??;
+        let value = row.value?;
+        let cfg: SuccessRateData = serde_json::from_str(&value).ok()?;
+        cfg.default_bucket_size
+    };
+    read()
+        .await
+        .filter(|b| *b > 0)
+        .unwrap_or(C::DEFAULT_SR_V3_BASED_BUCKET_SIZE)
 }
 
 pub async fn run_decider_flow(
@@ -508,6 +535,12 @@ pub async fn run_decider_flow(
 
             let merchant_id_text =
                 merchant_id_to_text(deciderParams.dpMerchantAccount.merchantId.clone());
+            // Cost-savings (multi-objective economic reorder) enablement:
+            //   - if the request explicitly sets `enableMultiObjective`, honor it (per-request
+            //     override, letting a caller force it on or off), otherwise
+            //   - fall back to the merchant's `multi_objective_routing_enabled` feature flag.
+            // The feature flag is the primary rollout switch, so a caller that omits the field
+            // must not silently lose multi-objective routing.
             let multi_obj_on = match enable_multi_objective_override {
                 Some(b) => b,
                 None => {
@@ -554,16 +587,14 @@ pub async fn run_decider_flow(
 
                     let mut cost_fallbacks_override: Option<Vec<String>> = None;
                     if multi_obj_on && !hedging_on {
-                        let tolerance_pp = load_default_tolerance_pp(&merchant_id_text)
-                            .await
-                            .unwrap_or(multi_objective::DEFAULT_TOLERANCE_BAND_PP);
+                        let margin = load_margin(&merchant_id_text).await;
                         let outcome =
                             multi_objective::algorithm::try_apply_multi_objective_post_step(
                                 &currentGatewayScoreMap,
                                 &merchant_id_text,
                                 &deciderParams.dpTxnDetail,
                                 &deciderParams.dpTxnCardInfo,
-                                tolerance_pp,
+                                margin,
                             )
                             .await;
                         if outcome.info.outcome == multi_objective::MultiObjectiveOutcome::CostWon {
