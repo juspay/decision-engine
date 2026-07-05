@@ -9,6 +9,7 @@ import { Button } from '../ui/Button'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { Spinner } from '../ui/Spinner'
 import { useMerchantStore } from '../../store/merchantStore'
+import { useAuthStore } from '../../store/authStore'
 import { apiPost, fetcher } from '../../lib/api'
 import { PAYMENT_METHOD_TYPES, PAYMENT_METHODS } from '../../lib/constants'
 import { Plus, Trash2, Eye, PowerOff, Info } from 'lucide-react'
@@ -222,7 +223,11 @@ function CurrentConfigDetails({ config }: { config: SRConfigResponse['config'] }
 type SRTab = 'autopilot' | 'manual' | 'flags'
 
 export function SRRoutingPage() {
-  const { merchantId } = useMerchantStore()
+  // Same merchant resolution as OverviewPage/RoutingHubPage — this page must
+  // never disagree with the Overview setup checklist about what is configured.
+  const selectedMerchantId = useMerchantStore((state) => state.merchantId)
+  const authMerchantId = useAuthStore((state) => state.user?.merchantId || '')
+  const merchantId = selectedMerchantId || authMerchantId
   const [activeTab, setActiveTab] = useState<SRTab>('autopilot')
   const [manualTab, setManualTab] = useState<'scoring' | 'elimination' | 'dimensions'>('scoring')
   const [saving, setSaving] = useState(false)
@@ -234,8 +239,10 @@ export function SRRoutingPage() {
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
 
+  // Shares the SWR key used by OverviewPage/RoutingHubPage so all three surfaces
+  // read (and invalidate) the same cached config.
   const { data: existing, isLoading, mutate } = useSWR<SRConfigResponse>(
-    merchantId ? ['rule-sr', merchantId] : null,
+    merchantId ? ['/rule/get', 'successRate', merchantId] : null,
     () => apiPost('/rule/get', { merchant_id: merchantId, algorithm: 'successRate' }),
     { shouldRetryOnError: false, revalidateOnFocus: false }
   )
