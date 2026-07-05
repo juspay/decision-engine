@@ -1953,6 +1953,31 @@
                     "rankingAlgorithm": "NTW_SR_HYBRID_ROUTING",
                     "eliminationEnabled": false
                   }
+                },
+                "multi_objective_routing": {
+                  "summary": "Multi-objective routing",
+                  "value": {
+                    "merchantId": "merchant_demo",
+                    "paymentInfo": {
+                      "paymentId": "mo_001",
+                      "amount": 1000,
+                      "currency": "USD",
+                      "country": "US",
+                      "paymentType": "ORDER_PAYMENT",
+                      "paymentMethodType": "CARD",
+                      "paymentMethod": "CREDIT",
+                      "authType": "THREE_DS",
+                      "cardIsin": "424242"
+                    },
+                    "eligibleGatewayList": [
+                      "stripe",
+                      "adyen",
+                      "checkout"
+                    ],
+                    "rankingAlgorithm": "SR_BASED_ROUTING",
+                    "eliminationEnabled": true,
+                    "enableMultiObjective": true
+                  }
                 }
               }
             }
@@ -1966,20 +1991,192 @@
                 "schema": {
                   "$ref": "#/components/schemas/DecidedGateway"
                 },
-                "example": {
-                  "decided_gateway": "stripe",
-                  "routing_approach": "SR_SELECTION_V3_ROUTING",
-                  "gateway_priority_map": {
-                    "stripe": 0.94,
-                    "adyen": 0.87,
-                    "paypal": 0.72
+                "examples": {
+                  "sr_routing": {
+                    "summary": "SR-based routing",
+                    "value": {
+                      "decided_gateway": "stripe",
+                      "routing_approach": "SR_SELECTION_V3_ROUTING",
+                      "gateway_priority_map": {
+                        "stripe": 0.94,
+                        "adyen": 0.87,
+                        "paypal": 0.72
+                      },
+                      "routing_dimension": "CARD_BRAND",
+                      "routing_dimension_level": "visa",
+                      "reset_approach": "NoReset",
+                      "is_scheduled_outage": false,
+                      "is_rust_based_decider": true,
+                      "latency": 8,
+                      "multi_objective_info": null
+                    }
                   },
-                  "routing_dimension": "CARD_BRAND",
-                  "routing_dimension_level": "visa",
-                  "reset_approach": "NoReset",
-                  "is_scheduled_outage": false,
-                  "is_rust_based_decider": true,
-                  "latency": 8
+                  "debit_routing": {
+                    "summary": "Debit/network-based routing",
+                    "value": {
+                      "decided_gateway": "stripe",
+                      "gateway_priority_map": null,
+                      "filter_wise_gateways": null,
+                      "priority_logic_tag": null,
+                      "routing_approach": "NTW_BASED_ROUTING",
+                      "gateway_before_evaluation": null,
+                      "priority_logic_output": null,
+                      "debit_routing_output": {
+                        "co_badged_card_networks_info": [
+                          {
+                            "network": "NYCE",
+                            "saving_percentage": 1.2
+                          },
+                          {
+                            "network": "PULSE",
+                            "saving_percentage": 0.9
+                          },
+                          {
+                            "network": "VISA",
+                            "saving_percentage": 0.1
+                          }
+                        ],
+                        "issuer_country": "US",
+                        "is_regulated": false,
+                        "regulated_name": null,
+                        "card_type": "debit"
+                      },
+                      "reset_approach": "NO_RESET",
+                      "routing_dimension": null,
+                      "routing_dimension_level": null,
+                      "is_scheduled_outage": false,
+                      "is_dynamic_mga_enabled": false,
+                      "gateway_mga_id_map": null,
+                      "is_rust_based_decider": true,
+                      "multi_objective_info": null
+                    }
+                  },
+                  "hybrid_routing": {
+                    "summary": "Hybrid SR + debit routing",
+                    "value": {
+                      "decided_gateway": "stripe",
+                      "routing_approach": "NTW_BASED_ROUTING",
+                      "debit_routing_output": {
+                        "co_badged_card_networks_info": [
+                          {
+                            "network": "NYCE",
+                            "saving_percentage": 1.2
+                          },
+                          {
+                            "network": "PULSE",
+                            "saving_percentage": 0.9
+                          }
+                        ],
+                        "issuer_country": "US",
+                        "is_regulated": false,
+                        "regulated_name": null,
+                        "card_type": "debit"
+                      },
+                      "reset_approach": "NO_RESET",
+                      "is_scheduled_outage": false,
+                      "is_rust_based_decider": true,
+                      "multi_objective_info": null
+                    }
+                  },
+                  "multi_objective_routing": {
+                    "summary": "Multi-objective routing — auth won (SR head retained)",
+                    "value": {
+                      "decided_gateway": "stripe",
+                      "fallback_gateways": [
+                        "adyen",
+                        "checkout"
+                      ],
+                      "gateway_priority_map": {
+                        "adyen": 0.65,
+                        "checkout": 0.58,
+                        "stripe": 0.65
+                      },
+                      "filter_wise_gateways": null,
+                      "priority_logic_tag": null,
+                      "routing_approach": "SR_SELECTION_V3_ROUTING",
+                      "gateway_before_evaluation": "adyen",
+                      "priority_logic_output": {
+                        "isEnforcement": false,
+                        "gws": [
+                          "stripe",
+                          "adyen",
+                          "checkout"
+                        ],
+                        "priorityLogicTag": null,
+                        "gatewayReferenceIds": {},
+                        "primaryLogic": null,
+                        "fallbackLogic": null
+                      },
+                      "debit_routing_output": null,
+                      "reset_approach": "NO_RESET",
+                      "routing_dimension": "ORDER_PAYMENT, CARD, DEBIT, DEBIT",
+                      "routing_dimension_level": "CARD_LEVEL",
+                      "is_scheduled_outage": false,
+                      "is_dynamic_mga_enabled": false,
+                      "gateway_mga_id_map": null,
+                      "is_rust_based_decider": true,
+                      "latency": 3,
+                      "multi_objective_info": {
+                        "outcome": "AUTH_WON",
+                        "reason": "SR head retained — it is the highest expected-value PSP (3 ranked on EV).",
+                        "srHead": {
+                          "psp": "adyen",
+                          "authRate": 0.65,
+                          "costBps": 156.94736842105263
+                        },
+                        "chosen": {
+                          "psp": "adyen",
+                          "authRate": 0.65,
+                          "costBps": 156.94736842105263
+                        },
+                        "costSavedBps": null,
+                        "qualifiedCount": 3,
+                        "margin": 1,
+                        "evGapTop2": 0.013780000000000014
+                      }
+                    }
+                  },
+                  "multi_objective_cost_won": {
+                    "summary": "Multi-objective routing — cost won (cheaper gateway promoted)",
+                    "value": {
+                      "decided_gateway": "adyen",
+                      "fallback_gateways": [
+                        "stripe",
+                        "checkout"
+                      ],
+                      "gateway_priority_map": {
+                        "stripe": 0.94,
+                        "adyen": 0.91,
+                        "checkout": 0.88
+                      },
+                      "routing_approach": "SR_SELECTION_MULTI_OBJECTIVE",
+                      "gateway_before_evaluation": "stripe",
+                      "reset_approach": "NO_RESET",
+                      "routing_dimension": "ORDER_PAYMENT,CARD,CREDIT,UNKNOWN",
+                      "routing_dimension_level": "CARD_LEVEL",
+                      "is_scheduled_outage": false,
+                      "is_dynamic_mga_enabled": false,
+                      "is_rust_based_decider": true,
+                      "multi_objective_info": {
+                        "outcome": "COST_WON",
+                        "reason": "Promoted 'adyen' over 'stripe' on expected value — saves 80.00 bps for 3.00pp auth.",
+                        "srHead": {
+                          "psp": "stripe",
+                          "authRate": 0.94,
+                          "costBps": 180.0
+                        },
+                        "chosen": {
+                          "psp": "adyen",
+                          "authRate": 0.91,
+                          "costBps": 100.0
+                        },
+                        "costSavedBps": 80.0,
+                        "qualifiedCount": 3,
+                        "margin": 0.2,
+                        "evGapTop2": 0.00182
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -3269,6 +3466,10 @@
           "eliminationEnabled": {
             "type": "boolean",
             "default": false
+          },
+          "enableMultiObjective": {
+            "type": "boolean",
+            "description": "Per-request override for the multi-objective (cost-aware) post-step. true forces it on, false forces it off; omitted falls back to the merchant's multi_objective_routing_enabled feature flag."
           }
         }
       },
@@ -3281,7 +3482,8 @@
           },
           "routing_approach": {
             "type": "string",
-            "example": "SR_SELECTION_V3_ROUTING"
+            "example": "SR_SELECTION_V3_ROUTING",
+            "description": "Routing approach used. SR_SELECTION_MULTI_OBJECTIVE indicates the multi-objective post-step promoted a cheaper gateway over the SR head."
           },
           "gateway_priority_map": {
             "type": "object",
@@ -3314,6 +3516,15 @@
           },
           "latency": {
             "type": "number"
+          },
+          "multi_objective_info": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MultiObjectiveInfo"
+              }
+            ],
+            "nullable": true,
+            "description": "Populated when the multi-objective post-step ran (multi_objective_routing_enabled feature flag or enableMultiObjective request field, outside hedging). Null otherwise."
           }
         }
       },
@@ -3872,6 +4083,82 @@
           },
           "error_code": {
             "type": "string"
+          }
+        }
+      },
+      "PspSummary": {
+        "type": "object",
+        "properties": {
+          "psp": {
+            "type": "string",
+            "example": "adyen"
+          },
+          "authRate": {
+            "type": "number",
+            "example": 0.91
+          },
+          "costBps": {
+            "type": "number",
+            "nullable": true,
+            "example": 100.0
+          }
+        }
+      },
+      "MultiObjectiveInfo": {
+        "type": "object",
+        "description": "Present when the multi-objective (cost-aware) post-step ran. Explains why the gateway was picked: the SR head was kept (AUTH_WON) or a higher expected-value PSP was promoted (COST_WON). Expected value is auth_rate * (margin - cost_bps / 10000).",
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "COST_WON",
+              "AUTH_WON"
+            ],
+            "example": "COST_WON"
+          },
+          "reason": {
+            "type": "string",
+            "example": "Promoted 'adyen' over 'stripe' on expected value — saves 80.00 bps for 3.00pp auth."
+          },
+          "srHead": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PspSummary"
+              }
+            ],
+            "nullable": true,
+            "description": "The PSP the SR scorer would have picked."
+          },
+          "chosen": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PspSummary"
+              }
+            ],
+            "nullable": true,
+            "description": "The PSP the post-step actually chose. Equals srHead when auth won."
+          },
+          "costSavedBps": {
+            "type": "number",
+            "nullable": true,
+            "description": "Fee saved in bps when outcome is COST_WON (srHead.costBps - chosen.costBps).",
+            "example": 80.0
+          },
+          "qualifiedCount": {
+            "type": "integer",
+            "description": "Number of PSPs that had cost data and were ranked on expected value.",
+            "example": 3
+          },
+          "margin": {
+            "type": "number",
+            "description": "Merchant margin (fraction of ticket) applied for this transaction. Configured via the successRate config margin field; defaults to 1.0.",
+            "example": 0.2
+          },
+          "evGapTop2": {
+            "type": "number",
+            "nullable": true,
+            "description": "Expected-value gap between the top-two EV-ranked PSPs, as a fraction of ticket. Null when fewer than two PSPs had cost data.",
+            "example": 0.00182
           }
         }
       }
