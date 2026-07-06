@@ -71,7 +71,7 @@ type RoutingFilters = {
 
 type AnalyticsView = 'transactions' | 'rule_based'
 const ANALYTICS_VIEW_LABELS: Record<AnalyticsView, string> = {
-  transactions: 'Auth-rate based',
+  transactions: 'Multi-objective',
   rule_based: 'Rule based / Volume based',
 }
 
@@ -182,7 +182,7 @@ const CARD_INFO: Record<'hits' | 'share' | 'alignment' | 'sr' | 'preview_hits' |
   },
   preview_share: {
     title: 'Rule-based gateway selection mix',
-    purpose: 'Use this to see which connectors lead selected rule decisions, separate from auth-rate transaction decisions.',
+    purpose: 'Use this to see which connectors lead selected rule decisions, separate from multi-objective transaction decisions.',
     calculation: 'Returned decision traces are grouped by latest selected connector and displayed as share of selected rule decisions.',
     source: 'Reads rule decision activity through `/analytics/preview-trace`.',
   },
@@ -1843,7 +1843,7 @@ export function AnalyticsPage() {
                         {formatCurrencyValue(costSavings.data.totals.saved_value, costSavings.data.currency)}
                       </p>
                       <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                        {formatNumber(costSavings.data.totals.cost_won_count, 0)} of {formatNumber(costSavings.data.totals.total_decisions, 0)} decisions
+                        {formatNumber(costSavings.data.totals.cost_won_count, 0)} of {formatNumber(costSavings.data.totals.total_decisions, 0)} cost decisions
                       </p>
                     </>
                   ) : (

@@ -46,7 +46,7 @@ type AuditFilters = {
 type InspectorTab = (typeof INSPECTOR_TABS)[number]
 type AuditMode = 'transactions' | 'rule_based' | 'debit_routing'
 const AUDIT_MODE_LABELS: Record<AuditMode, string> = {
-  transactions: 'Auth-rate based',
+  transactions: 'Multi-objective',
   rule_based: 'Rule based / Volume based',
   debit_routing: 'Debit routing',
 }
@@ -648,7 +648,7 @@ export function PaymentAuditPage() {
   const content = mode === 'rule_based'
     ? {
         title: 'Decision Audit',
-        description: 'Inspect rule decisions from /routing/evaluate without mixing them into auth-rate transaction outcomes.',
+        description: 'Inspect rule decisions from /routing/evaluate without mixing them into multi-objective transaction outcomes.',
         merchantPrompt: 'Audit data follows your signed-in merchant account.',
         searchTitle: 'Search Rule Decision Trail',
         searchDescription: 'Use decision payment IDs or request IDs when you have them. Gateway, status, and error code help narrow rule decision activity quickly.',
