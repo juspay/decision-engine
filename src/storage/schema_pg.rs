@@ -53,6 +53,40 @@ diesel::table! {
 }
 
 diesel::table! {
+    cost_ingestion (id) {
+        id -> Int8,
+        #[max_length = 255]
+        merchant_id -> Varchar,
+        #[max_length = 64]
+        connector -> Varchar,
+        #[max_length = 255]
+        account -> Varchar,
+        #[max_length = 16]
+        source -> Varchar,
+        #[max_length = 255]
+        notification_id -> Nullable<Varchar>,
+        report_ref -> Text,
+        #[max_length = 32]
+        status -> Varchar,
+        attempts -> Int4,
+        last_error -> Nullable<Text>,
+        staged_rows -> Int8,
+        report_date -> Nullable<Date>,
+        period_start -> Nullable<Date>,
+        period_end -> Nullable<Date>,
+        currency_count -> Int4,
+        currencies -> Nullable<Text>,
+        country_count -> Int4,
+        countries -> Nullable<Text>,
+        total_gross -> Float8,
+        total_clusters -> Int8,
+        good_clusters -> Int8,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     emi_bank_code (id) {
         id -> Int8,
         emi_bank -> Text,
@@ -569,6 +603,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     card_brand_routes,
     card_info,
     co_badged_cards_info_test,
+    cost_ingestion,
     emi_bank_code,
     feature,
     gateway_bank_emi_support,

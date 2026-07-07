@@ -10,6 +10,7 @@ use crate::config::HypersenseConfig;
 use crate::logger;
 
 use super::cluster_key::ClusterKey;
+use super::{CostModel, CostSource};
 
 const SIGNIN_PATH: &str = "/api/onboarding/signin_v2";
 const FEE_ESTIMATE_PATH: &str = "/api/fee-analysis/get-fee-rate-estimate";
@@ -22,6 +23,10 @@ const FEE_TIMEOUT_MS: u64 = 2_000;
 pub struct PspCost {
     pub available: bool,
     pub effective_cost_bps: f64,
+    /// Which source produced this cost (for observability on the response).
+    pub source: CostSource,
+    /// The fitted model behind `effective_cost_bps`, when the source exposes it.
+    pub cost_model: Option<CostModel>,
 }
 
 #[derive(Debug, Serialize)]
@@ -302,6 +307,16 @@ impl CostCache {
                             PspCost {
                                 available: m.available,
                                 effective_cost_bps: m.effective_cost_bps(amount),
+                                source: CostSource::Hypersense,
+                                cost_model: Some(CostModel {
+                                    pct_bps: Some(m.pct_bps),
+                                    fixed_fee: Some(m.fixed),
+                                    brand: None,
+                                    variant: None,
+                                    issuer: None,
+                                    ccy: None,
+                                    ic_category: None,
+                                }),
                             },
                         )
                     })
@@ -477,12 +492,99 @@ async fn sign_in(cfg: &HypersenseConfig) -> Option<SigninResponse> {
     }
 }
 
-/// Best-effort cost lookup. Returns an empty map on any failure; the algorithm
-/// treats an empty map as "no PSP has cost data" and short-circuits to no-op.
+/// Best-effort cost lookup for the candidate PSPs. Returns an empty map when nothing can price a
+/// PSP; the algorithm treats a missing PSP as "no cost data" and leaves it unranked.
 ///
-/// Flow: resolve an access token (Redis-cached, minted via the sign-in API on
-/// miss), then call the fee-rate-estimate API with it for the candidate PSPs.
+/// **Source precedence: our own ingested data first.** Each PSP is priced from the in-house
+/// serving view of the fitted `cost_fee_model` when a GOOD model covers its decide-time key;
+/// anything not covered there falls back to the configured seed / live-Hypersense source. In-house
+/// coverage is money-weighted (see the coverage card), so the tail legitimately relies on fallback.
 pub async fn lookup_costs(
+    merchant_id: &str,
+    cluster: &ClusterKey,
+    psps: &[String],
+) -> HashMap<String, PspCost> {
+    if psps.is_empty() {
+        return HashMap::new();
+    }
+
+    // 1. In-house first, straight from memory (no network, no ClickHouse on the hot path).
+    let mut costs = inhouse_costs(merchant_id, cluster, psps);
+
+    // 2. Fall back to seed / live Hypersense only for PSPs in-house couldn't price.
+    let missing: Vec<String> = psps
+        .iter()
+        .filter(|p| !costs.contains_key(*p))
+        .cloned()
+        .collect();
+    if !missing.is_empty() {
+        for (psp, cost) in fallback_lookup_costs(merchant_id, cluster, &missing).await {
+            costs.entry(psp).or_insert(cost);
+        }
+    }
+    costs
+}
+
+/// Price PSPs from the in-house serving view of the fitted models. PSPs with no GOOD model for the
+/// decide-time key are simply absent (caller falls back). `psp` maps to the `connector` column by
+/// lowercase name.
+fn inhouse_costs(
+    merchant_id: &str,
+    cluster: &ClusterKey,
+    psps: &[String],
+) -> HashMap<String, PspCost> {
+    let network = cluster.card_network.as_deref().unwrap_or("");
+    let funding = cluster.payment_method_type.as_deref().unwrap_or("");
+    let program = cluster.card_type.as_deref().unwrap_or("");
+    let currency = cluster.transaction_currency.as_deref().unwrap_or("");
+    let issuer = cluster.card_issuing_country_raw.as_deref().unwrap_or("");
+    let region = cluster.card_issuing_country.as_deref().unwrap_or("");
+    let channel = cluster.channel.as_deref().unwrap_or("");
+    let wallet = cluster.wallet.as_deref().unwrap_or("");
+    let amount = cluster.amount.unwrap_or(0.0);
+
+    let mut out = HashMap::new();
+    for psp in psps {
+        if let Some(m) = crate::cost_ingestion::serving::lookup(
+            merchant_id,
+            &psp.to_lowercase(),
+            network,
+            funding,
+            program,
+            currency,
+            issuer,
+            region,
+            channel,
+            wallet,
+            amount,
+        ) {
+            out.insert(
+                psp.clone(),
+                PspCost {
+                    available: true,
+                    effective_cost_bps: m.effective_bps,
+                    source: CostSource::InHouse,
+                    cost_model: Some(CostModel {
+                        brand: Some(m.brand),
+                        variant: m.variant,
+                        issuer: m.issuer,
+                        ccy: Some(m.currency),
+                        ic_category: m.ic_category,
+                        pct_bps: Some(m.pct_bps),
+                        fixed_fee: Some(m.fixed),
+                    }),
+                },
+            );
+        }
+    }
+    out
+}
+
+/// Fallback cost lookup: config seed table (simulator) or the live Hypersense fee-rate API.
+///
+/// Flow (live): resolve an access token (Redis-cached, minted via the sign-in API on miss), then
+/// call the fee-rate-estimate API with it for the candidate PSPs.
+async fn fallback_lookup_costs(
     merchant_id: &str,
     cluster: &ClusterKey,
     psps: &[String],
@@ -601,6 +703,8 @@ pub async fn lookup_costs(
                 PspCost {
                     available: row.available,
                     effective_cost_bps: row.effective_cost_bps.unwrap_or(0.0),
+                    source: CostSource::Hypersense,
+                    cost_model: None,
                 },
             )
         })

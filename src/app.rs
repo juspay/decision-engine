@@ -326,6 +326,19 @@ where
         global_app_state.global_config.sr_auto_calibration.clone(),
     );
 
+    // Background job: drain the settlement-report ingest queue (download → parse → stage).
+    // No-op unless `cost_ingestion.worker_enabled` is set.
+    crate::cost_ingestion::worker::spawn(
+        global_app_state.global_config.cost_ingestion.clone(),
+        global_app_state.global_config.analytics.clickhouse.clone(),
+    );
+
+    // Background job: refresh the in-house cost serving view from the fitted models, so the
+    // multi-objective router can price candidates from our own ingested data.
+    crate::cost_ingestion::serving::spawn(
+        global_app_state.global_config.analytics.clickhouse.clone(),
+    );
+
     // Create a signal stream for SIGTERM
     let mut sigterm = signal(SignalKind::terminate()).expect("Failed to create SIGTERM handler");
 
@@ -405,6 +418,40 @@ where
             get(routes::merchant_account_config::get_debit_routing),
         )
         .route(
+            "/merchant-account/:merchant-id/connectors",
+            get(routes::connector_credentials::list_connector_credentials),
+        )
+        .route(
+            "/merchant-account/:merchant-id/connectors/:connector/credentials",
+            post(routes::connector_credentials::set_connector_credentials),
+        )
+        .route(
+            "/merchant-account/:merchant-id/connectors/:connector/report",
+            // Monthly settlement reports run to several GB. The handler streams the body to disk
+            // and parses in batches (O(batch) RAM), so lift the body cap to the same hard limit it
+            // enforces itself. DefaultBodyLimit otherwise errors the stream at its default.
+            post(routes::report_upload::upload_report)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    routes::report_upload::MAX_UPLOAD_BYTES,
+                )),
+        )
+        .route(
+            "/merchant-account/:merchant-id/cost-coverage",
+            get(routes::cost_coverage::get_cost_coverage),
+        )
+        .route(
+            "/merchant-account/:merchant-id/cost-ingestions",
+            get(routes::report_upload::list_ingestions),
+        )
+        .route(
+            "/merchant-account/:merchant-id/cost-ingestions/:ingestion-id",
+            delete(routes::report_upload::delete_ingestion),
+        )
+        .route(
+            "/merchant-account/:merchant-id/cost-price-changes",
+            get(routes::report_upload::list_price_changes),
+        )
+        .route(
             "/merchant-account/:merchant-id/debit-routing",
             post(routes::merchant_account_config::update_debit_routing),
         )
@@ -460,6 +507,10 @@ where
         .route(
             "/merchant-account/create",
             post(routes::merchant_account_config::create_merchant_config),
+        )
+        .route(
+            "/webhooks/settlement/:connector",
+            post(routes::settlement_webhook::settlement_webhook),
         )
         .route("/auth/signup", post(routes::user_auth::signup))
         .route("/auth/login", post(routes::user_auth::login))

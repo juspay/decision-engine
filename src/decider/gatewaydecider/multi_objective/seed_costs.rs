@@ -135,6 +135,16 @@ pub fn lookup_seed_costs(
                 PspCost {
                     available: true,
                     effective_cost_bps: effective_cost_bps(pct_bps, fixed, amount),
+                    source: super::CostSource::Seed,
+                    cost_model: Some(super::CostModel {
+                        brand: cluster.card_network.clone(),
+                        ccy: cluster.transaction_currency.clone(),
+                        pct_bps: Some(pct_bps),
+                        fixed_fee: Some(fixed),
+                        variant: None,
+                        issuer: None,
+                        ic_category: None,
+                    }),
                 },
             ))
         })

@@ -27,6 +27,15 @@ pub struct ClusterKey {
     pub card_issuing_bank: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub card_issuing_country: Option<String>,
+    /// Raw issuer country (ISO-2 or region label) *before* region bucketing — used by the in-house
+    /// category predictor to look up the specific fitted cluster. Not sent to Hypersense.
+    #[serde(skip)]
+    pub card_issuing_country_raw: Option<String>,
+    /// Acceptance channel (`ecom`/`pos`) and wallet (`applepay`/…) — in-house predictor features.
+    #[serde(skip)]
+    pub channel: Option<String>,
+    #[serde(skip)]
+    pub wallet: Option<String>,
     pub psp_array: Vec<String>,
 }
 
@@ -66,6 +75,21 @@ pub fn derive_cluster_key(txn_detail: &TxnDetail, txn_card_info: &TxnCardInfo) -
             .as_ref()
             .and_then(|s| non_empty(s))
             .map(|s| issuer_region(&s)),
+        // Raw issuer country (uppercased) for the in-house fine lookup; region bucketing above is
+        // kept for the coarse fallback.
+        card_issuing_country_raw: txn_card_info
+            .card_issuer_country
+            .as_ref()
+            .and_then(|s| non_empty(s))
+            .map(|s| s.trim().to_uppercase()),
+        // Acceptance channel (from the request) and wallet (inferred from the payment method) —
+        // predictor features that resolve the online-vs-in-person and wallet interchange categories.
+        channel: txn_card_info
+            .channel
+            .as_ref()
+            .and_then(|s| non_empty(s))
+            .map(|s| s.trim().to_lowercase()),
+        wallet: wallet_from_payment_method(&txn_card_info.paymentMethod),
         // Cross-border = card issued outside the merchant's home region (here: anything that
         // normalizes to "intl"). Derived for completeness; pricing matches on the region.
         cross_border_flag: txn_card_info
@@ -82,7 +106,10 @@ pub fn derive_cluster_key(txn_detail: &TxnDetail, txn_card_info: &TxnCardInfo) -
 /// region the seed-cost tiers key on: "us", "eu", or "intl". Case-insensitive. EU/UK
 /// consumer interchange is capped, so those issuers share the cheap "eu" bucket; the US
 /// merchant's own region is "us"; everything else is cross-border "intl".
-fn issuer_region(raw: &str) -> String {
+///
+/// `pub(crate)` so the in-house cost serving cache buckets `cost_fee_model`'s raw issuer
+/// countries the *same* way decide-time does — otherwise the lookup key wouldn't match.
+pub(crate) fn issuer_region(raw: &str) -> String {
     const EU: &[&str] = &[
         "eu", "gb", "uk", "ie", "de", "fr", "es", "it", "nl", "be", "pt", "at", "fi", "se", "dk",
         "pl", "cz", "gr", "hu", "ro", "sk", "bg", "hr", "si", "ee", "lv", "lt", "lu", "mt", "cy",
@@ -93,6 +120,19 @@ fn issuer_region(raw: &str) -> String {
         "intl" => "intl".to_string(),
         s if EU.contains(&s) => "eu".to_string(),
         _ => "intl".to_string(),
+    }
+}
+
+/// Infer the wallet from the payment method string (`applepay` / `googlepay`), so the predictor can
+/// route to the wallet-specific report variant (`visa_applepay`). `None` for a plain card.
+fn wallet_from_payment_method(pm: &str) -> Option<String> {
+    let p = pm.to_lowercase();
+    if p.contains("apple") {
+        Some("applepay".to_string())
+    } else if p.contains("google") {
+        Some("googlepay".to_string())
+    } else {
+        None
     }
 }
 

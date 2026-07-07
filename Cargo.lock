@@ -3634,6 +3634,7 @@ dependencies = [
  "console-subscriber",
  "cpu-time",
  "criterion",
+ "csv",
  "diesel",
  "diesel-async",
  "dyn-clone",

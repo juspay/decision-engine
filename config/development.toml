@@ -90,6 +90,16 @@ service_config_ttl = 300    # 5 minutes
 [compression_filepath]
 zstd_compression_filepath = "/tmp/extra-paths/redis-zstd-dictionaries/sbx"
 
+[cost_ingestion]
+# Key id used to encrypt NEW connector credentials. Rotate by adding another key below and
+# pointing this at it; keep the old key listed so existing credentials still decrypt.
+creds_encryption_current = "v1"
+
+[cost_ingestion.creds_encryption_keys]
+# key-id = AES-256 key (hex, 64 chars). Dev-only placeholder; per environment generate with
+# `openssl rand -hex 32`. On rotation add e.g. `v2 = "..."` and set current = "v2" above.
+v1 = "0000000000000000000000000000000000000000000000000000000000000000"
+
 [hypersense]
 base_url = "https://eu.hyperswitch.io/cost-observability/router"
 username = "hypersense_user"

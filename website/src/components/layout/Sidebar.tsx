@@ -15,6 +15,7 @@ import {
   Users,
   FlaskConical,
   Key,
+  Coins,
   ChevronDown,
   KeyRound,
   LogOut,
@@ -145,6 +146,7 @@ export function Sidebar() {
         <SideLink to="/routing/rules" icon={BookOpen} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Rule-Based</SideLink>
         <SideLink to="/routing/volume" icon={PieChart} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Volume Split</SideLink>
         <SideLink to="/routing/debit" icon={Network} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Debit Routing</SideLink>
+        <SideLink to="/routing/cost" icon={Coins} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Cost Estimation</SideLink>
         <SideLink to="/routing/ab-testing" icon={FlaskConical} indent beta selectedPath={selectedPath} onNavigate={setPendingPath}>A/B Testing</SideLink>
 
         <div className="flex items-center gap-2 px-3 pb-2 pt-5">

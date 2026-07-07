@@ -111,6 +111,7 @@ tracing = { version = "0.1.41" }
 rand = "0.8.5"
 tower-http = { version = "0.6.2", features = ["trace"] }
 bytes = "1.10.1"
+csv = "1.3.1"
 pin-project-lite = "0.2.16"
 strum = { version = "0.26.2", features = ["derive"] }
 regex = "1.10"

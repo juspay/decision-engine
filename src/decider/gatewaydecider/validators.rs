@@ -263,6 +263,7 @@ pub fn parse_from_api_txn_card_info(apiType: T::ApiTxnCardInfo) -> Option<ETCa::
         card_type: apiType.cardType.as_deref().map(Ca::to_card_type)?.ok(),
         card_program: None,
         card_issuer_country: None,
+        channel: None,
         // cardLastFourDigits: apiType.cardLastFourDigits,
         nameOnCard: apiType.nameOnCard.map(Secret::new),
         // cardFingerprint: apiType.cardFingerprint,

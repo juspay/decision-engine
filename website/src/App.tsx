@@ -3,6 +3,7 @@ import { AnalyticsPage } from './components/pages/AnalyticsPage'
 import { DecisionExplorerPage } from './components/pages/DecisionExplorerPage'
 import { DecisionSimulatorPage } from './components/pages/DecisionSimulatorPage'
 import { DebitRoutingPage } from './components/pages/DebitRoutingPage'
+import { CostRoutingPage } from './components/pages/CostRoutingPage'
 import { EuclidRulesPage } from './components/pages/EuclidRulesPage'
 import { OverviewPage } from './components/pages/OverviewPage'
 import { PaymentAuditPage } from './components/pages/PaymentAuditPage'
@@ -35,6 +36,7 @@ export default function App() {
           <Route path="routing/rules" element={<EuclidRulesPage />} />
           <Route path="routing/volume" element={<VolumeSplitPage />} />
           <Route path="routing/debit" element={<DebitRoutingPage />} />
+          <Route path="routing/cost" element={<CostRoutingPage />} />
           <Route path="routing/ab-testing" element={<ABTestingPage />} />
           <Route path="decisions" element={<DecisionExplorerPage />} />
           <Route path="decisions/simulator" element={<DecisionSimulatorPage />} />

@@ -47,27 +47,41 @@ interface FormState {
 }
 
 const MULTI_OBJECTIVE_CURRENCY = 'USD'
+// Currencies selectable for the multi-objective sim. USD exercises the seed-cost fallback; EUR/AUD
+// (and others) let a transaction match the in-house fitted models, which are keyed by currency.
+const MULTI_OBJECTIVE_CURRENCIES = ['USD', 'EUR', 'GBP', 'AUD', 'CAD'] as const
 const MULTI_OBJECTIVE_PAYMENT_METHODS = ['CREDIT'] as const
 const CARD_PROGRAM_OPTIONS = ['STANDARD', 'PREMIUM'] as const
 const MULTI_OBJECTIVE_CARD_BRANDS = ['VISA', 'MASTERCARD'] as const
 
-// Each variant is one card scenario the seed-cost table prices distinctly. Cost is keyed by
-// issuer region (cardIssuerCountry → us/eu/intl), funding (CREDIT/DEBIT), network, and program
-// — so these span the full Stripe-vs-Adyen spread: Adyen wins big on regulated US debit / EU
-// consumer / international, wins modestly on US standard credit, and loses to Stripe's blended
-// rate on premium-rewards / corporate / amex.
+// Each variant is one card scenario. Cost is keyed by issuer region (cardIssuerCountry →
+// us/eu/intl), funding (CREDIT/DEBIT), network, and program. The US variants span the full
+// Stripe-vs-Adyen seed-cost spread. The EU / INTL variants (Visa/Mastercard, standard debit &
+// credit) mirror the shape of the in-house fitted models — so paired with EUR (or AUD) they let a
+// simulated transaction actually land on an in-house cost model (`costSource: IN_HOUSE`) instead of
+// falling back to the seed table.
 const MULTI_OBJECTIVE_CLUSTER_VARIANTS: Array<{
   label: string
   paymentMethod: 'CREDIT' | 'DEBIT'
   cardSwitchProvider: 'VISA' | 'MASTERCARD' | 'AMEX'
   cardProgram: 'STANDARD' | 'PREMIUM' | 'COMMERCIAL'
-  cardIssuerCountry: 'US' | 'EU' | 'INTL'
+  // Raw issuer country a BIN lookup would supply (ISO-2, e.g. 'US', 'FR', 'AU'). The engine buckets
+  // it to a pricing region for the coarse fallback and uses the raw value for the fine predictor.
+  cardIssuerCountry: string
 }> = [
   { label: 'US debit', paymentMethod: 'DEBIT',  cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD',   cardIssuerCountry: 'US'   },
   { label: 'US standard credit', paymentMethod: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD',   cardIssuerCountry: 'US'   },
   { label: 'US premium credit', paymentMethod: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'PREMIUM',    cardIssuerCountry: 'US'   },
   { label: 'US corporate',       paymentMethod: 'CREDIT', cardSwitchProvider: 'MASTERCARD', cardProgram: 'COMMERCIAL', cardIssuerCountry: 'US'   },
   { label: 'Amex US consumer',   paymentMethod: 'CREDIT', cardSwitchProvider: 'AMEX',       cardProgram: 'PREMIUM',    cardIssuerCountry: 'US'   },
+  // EU / AU scenarios carry a *raw* issuer country (as a BIN lookup would supply), so the in-house
+  // category predictor resolves the specific fitted cluster. Pair the EU cards with EUR and the AU
+  // card with AUD to land on in-house models.
+  { label: 'FR debit (Visa)',        paymentMethod: 'DEBIT',  cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD', cardIssuerCountry: 'FR' },
+  { label: 'IT debit (Mastercard)',  paymentMethod: 'DEBIT',  cardSwitchProvider: 'MASTERCARD', cardProgram: 'STANDARD', cardIssuerCountry: 'IT' },
+  { label: 'FR credit (Visa)',       paymentMethod: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD', cardIssuerCountry: 'FR' },
+  { label: 'IT credit (Mastercard)', paymentMethod: 'CREDIT', cardSwitchProvider: 'MASTERCARD', cardProgram: 'STANDARD', cardIssuerCountry: 'IT' },
+  { label: 'AU debit (Visa)',        paymentMethod: 'DEBIT',  cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD', cardIssuerCountry: 'AU' },
 ]
 
 // Scenario the simulator opens on. 'US debit' is the headline Adyen-wins-on-cost case, so it's the
@@ -971,6 +985,13 @@ export function DecisionSimulatorPage() {
   const [multiObjScenario, setMultiObjScenario] = useState<number | 'ALL'>(initialState.multiObjScenario)
   const multiObjScenarioRef = useRef<number | 'ALL'>(multiObjScenario)
   useEffect(() => { multiObjScenarioRef.current = multiObjScenario }, [multiObjScenario])
+  // Currency for the multi-objective sim (was hardcoded to USD). Drives whether a transaction can
+  // match an in-house fitted cost model (keyed by currency) or falls back to the seed table.
+  const [moCurrency, setMoCurrency] = useState<string>(MULTI_OBJECTIVE_CURRENCY)
+  // Acceptance channel sent on each multi-objective transaction. Drives the in-house category
+  // predictor (ecom vs pos resolves the online/in-person interchange split). VGS-collected cards
+  // are ecommerce, so that's the default.
+  const [moChannel, setMoChannel] = useState<'ecom' | 'pos'>('ecom')
   const [error, setError] = useState<string | null>(null)
   const txLogRef = useRef<HTMLDivElement>(null)
 
@@ -1231,15 +1252,15 @@ export function DecisionSimulatorPage() {
   ])
 
   // SR_MULTI_OBJECTIVE constrains the form to a card-only cluster shape:
-  // Currency = USD, Method Type = CARD, Payment Method = CREDIT, and Card Brand
-  // defaults to Visa/Mastercard when the prior selection isn't one of them.
+  // Currency = the selected `moCurrency`, Method Type = CARD, Payment Method = CREDIT, and Card
+  // Brand defaults to Visa/Mastercard when the prior selection isn't one of them.
   useEffect(() => {
     if (form.ranking_algorithm !== 'SR_MULTI_OBJECTIVE') return
     setForm(prev => {
       if (prev.ranking_algorithm !== 'SR_MULTI_OBJECTIVE') return prev
       const next = { ...prev }
       let changed = false
-      if (next.currency !== MULTI_OBJECTIVE_CURRENCY) { next.currency = MULTI_OBJECTIVE_CURRENCY; changed = true }
+      if (next.currency !== moCurrency) { next.currency = moCurrency; changed = true }
       const cardType = paymentMethodTypeOptions.find(p => p === 'CARD') || 'CARD'
       if (next.payment_method_type !== cardType) { next.payment_method_type = cardType; changed = true }
       if (!MULTI_OBJECTIVE_PAYMENT_METHODS.includes(next.payment_method as 'CREDIT')) {
@@ -1257,7 +1278,7 @@ export function DecisionSimulatorPage() {
       }
       return changed ? next : prev
     })
-  }, [form.ranking_algorithm, paymentMethodTypeOptions, cardBrandOptions])
+  }, [form.ranking_algorithm, paymentMethodTypeOptions, cardBrandOptions, moCurrency])
 
   useEffect(() => {
     if (!selectedAuditPaymentId && !selectedPreviewPaymentId && !setupPrompt) return
@@ -1927,6 +1948,7 @@ export function DecisionSimulatorPage() {
           cardType: paymentMethod,
           cardProgram,
           ...(cardIssuerCountry && { cardIssuerCountry }),
+          channel: moChannel,
         },
         eligibleGatewayList: gateways,
         rankingAlgorithm: 'SR_BASED_ROUTING',
@@ -2538,7 +2560,7 @@ export function DecisionSimulatorPage() {
     return { value, currency }
   }, [deferredSimulationResults])
 
-  // Honest economics of cost routing. The gross fee saved (totalCostSaved) is only the
+  // Honest economics of cost Estimation. The gross fee saved (totalCostSaved) is only the
   // upside; an override also accepts a small auth-rate risk. We value that risk the way
   // the band does — the *expected* sale value given up, (headAuthRate − chosenAuthRate)
   // × amount × margin — and net it. This is counterfactual-free: it never books a single
@@ -2806,6 +2828,7 @@ export function DecisionSimulatorPage() {
       setResponseOpen(defaults.responseOpen)
     } else if (activeTab === 'batch') {
       setForm({ ...populatedForm(defaults.form), currency: MULTI_OBJECTIVE_CURRENCY })
+      setMoCurrency(MULTI_OBJECTIVE_CURRENCY)
       setSimulationConfig(defaults.simulationConfig)
       setMultiObjScenario(defaults.multiObjScenario)
       // Preserve the currently selected per-gateway success rate scores (e.g.
@@ -2977,6 +3000,41 @@ export function DecisionSimulatorPage() {
                   {MULTI_OBJECTIVE_CLUSTER_VARIANTS.map((v, idx) => (
                     <option key={v.label} value={idx}>{v.label}</option>
                   ))}
+                </select>
+              </div>
+            )}
+
+            {form.ranking_algorithm === 'SR_MULTI_OBJECTIVE' && (
+              <div className="flex w-[130px] flex-col gap-1.5">
+                <SurfaceLabel>
+                  <span title="Settlement currency sent on each transaction. USD exercises the seed-cost fallback; EUR/AUD (and others) let a transaction match the in-house fitted cost models, which are keyed by currency.">Currency</span>
+                </SurfaceLabel>
+                <select
+                  value={moCurrency}
+                  disabled={isSimulating && !isPaused}
+                  onChange={e => setMoCurrency(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50 disabled:cursor-not-allowed dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100"
+                >
+                  {MULTI_OBJECTIVE_CURRENCIES.map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {form.ranking_algorithm === 'SR_MULTI_OBJECTIVE' && (
+              <div className="flex w-[130px] flex-col gap-1.5">
+                <SurfaceLabel>
+                  <span title="Acceptance channel. Drives the in-house category predictor: 'ecom' (online / card-not-present, e.g. VGS-collected) vs 'pos' (in-person terminal). This resolves the online-vs-in-person interchange category — the biggest signal for debit.">Channel</span>
+                </SurfaceLabel>
+                <select
+                  value={moChannel}
+                  disabled={isSimulating && !isPaused}
+                  onChange={e => setMoChannel(e.target.value as 'ecom' | 'pos')}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50 disabled:cursor-not-allowed dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100"
+                >
+                  <option value="ecom">ecom (online)</option>
+                  <option value="pos">pos (in-person)</option>
                 </select>
               </div>
             )}
