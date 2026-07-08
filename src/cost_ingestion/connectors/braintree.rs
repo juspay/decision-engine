@@ -33,6 +33,7 @@ use axum::http::HeaderMap;
 use bytes::Bytes;
 use masking::Secret;
 
+use crate::cost_ingestion::connectors::csv_reader;
 use crate::cost_ingestion::source::SettlementReportSource;
 use crate::cost_ingestion::types::{ConnectorCreds, IngestError, ReportNotification, SettledFeeRow};
 
@@ -109,101 +110,106 @@ impl SettlementReportSource for BraintreeReportSource {
         reader: Box<dyn std::io::Read + Send>,
         on_row: &mut dyn FnMut(SettledFeeRow) -> Result<(), IngestError>,
     ) -> Result<(), IngestError> {
-        // `csv::Reader` pulls records lazily off `reader`, so a multi-GB report is never fully
-        // resident — one parsed record at a time.
-        let mut reader = csv::ReaderBuilder::new().flexible(true).from_reader(reader);
-
-        // Resolve column indices by header label — Braintree's field order can drift between report
+        // Resolved column indices for one report. Braintree's field order can drift between report
         // versions (the spec even flags planned column additions), so never index positionally.
-        let headers = reader
-            .headers()
-            .map_err(|e| IngestError::Parse(e.to_string()))?
-            .clone();
-        let idx = |name: &str| headers.iter().position(|h| h == name);
-        let col = |name: &str| -> Result<usize, IngestError> {
-            idx(name).ok_or_else(|| IngestError::Parse(format!("missing column: {name}")))
-        };
-
-        // Required columns — identity, currency, funding, and the fee amounts.
-        let c_txn = col("Transaction ID")?;
-        let c_type = col("Transaction Type")?;
-        let c_ccy = col("Settlement Currency")?;
-        let c_amount = col("Settlement Amount")?;
-        let c_brand = col("Card Brand")?;
-        let c_card_type = col("Card Type")?;
-        let c_instrument = col("Payment Instrument")?;
-        let c_interchange = col("Interchange Total Amount")?;
-        let c_braintree = col("Braintree Total Amount")?;
-        // Optional columns — nullable per spec or absent in older/test reports. Missing ⇒ blank/0.
-        let c_scheme = idx("Total Scheme Fees");
-        let c_ic_desc = idx("Interchange Description");
-        let c_issuer = idx("Card Issuing Country");
-        let c_settle_date = idx("Settlement Date");
-        // For pinless-debit rows the network is carried here rather than in `Card Brand`.
-        let c_network = idx("Payment Network");
-
-        for record in reader.records() {
-            let record = record.map_err(|e| IngestError::Parse(e.to_string()))?;
-            let get = |i: usize| record.get(i).unwrap_or("");
-            let get_opt = |i: Option<usize>| i.map(get).unwrap_or("");
-
-            // Keep only settled sales; skip credits/disputes whose signed amounts would pollute
-            // the gross→fee regression.
-            if !FEE_TRANSACTION_TYPES.contains(&get(c_type).trim().to_lowercase().as_str()) {
-                continue;
-            }
-
-            let interchange = to_float(get(c_interchange));
-            let scheme_fee = to_float(get_opt(c_scheme));
-            // Braintree reports its own take as a single bundled amount; there is no separate
-            // markup line, so `markup` stays 0 and `commission` carries the full processor take.
-            let commission = to_float(get(c_braintree));
-            let markup = 0.0;
-            let total_fee = interchange + scheme_fee + markup + commission;
-            // `Settlement Amount` is already the gross transaction value (the fee's calculation
-            // base), so it maps to `gross` as-is — do NOT add `total_fee` (that's the Adyen path,
-            // where `Payable (SC)` is net-of-fees).
-            let gross = to_float(get(c_amount));
-
-            // Prefer the card brand; fall back to the debit network (pinless), then the instrument.
-            let network = {
-                let brand = normalize_network(get(c_brand));
-                if !brand.is_empty() {
-                    brand
-                } else {
-                    let net = normalize_network(get_opt(c_network));
-                    if !net.is_empty() {
-                        net
-                    } else {
-                        get(c_instrument).trim().to_lowercase()
-                    }
-                }
-            };
-            let funding = funding_from_card_type(get(c_card_type));
-            let variant = build_variant(get(c_instrument), &network, &funding);
-            let txn_date = c_settle_date.and_then(|i| parse_date(get(i)));
-
-            on_row(SettledFeeRow {
-                txn_ref: get(c_txn).to_string(),
-                card_network: network,
-                variant,
-                funding,
-                issuer_country: get_opt(c_issuer).trim().to_string(),
-                currency: get(c_ccy).trim().to_string(),
-                ic_category: get_opt(c_ic_desc).trim().to_string(),
-                txn_date,
-                // Braintree's PAR carries no terminal/POS indicator, so every row is treated as
-                // online. Revisit if in-person / pinless acceptance data becomes distinguishable.
-                channel: "ecom".to_string(),
-                gross,
-                total_fee,
-                interchange,
-                scheme_fee,
-                markup,
-                commission,
-            })?;
+        struct Cols {
+            txn: usize,
+            r#type: usize,
+            ccy: usize,
+            amount: usize,
+            brand: usize,
+            card_type: usize,
+            instrument: usize,
+            interchange: usize,
+            braintree: usize,
+            // Optional columns — nullable per spec or absent in older/test reports. Missing ⇒ blank/0.
+            scheme: Option<usize>,
+            ic_desc: Option<usize>,
+            issuer: Option<usize>,
+            settle_date: Option<usize>,
+            // For pinless-debit rows the network is carried here rather than in `Card Brand`.
+            network: Option<usize>,
         }
-        Ok(())
+
+        csv_reader::parse(
+            reader,
+            |h| {
+                Ok(Cols {
+                    txn: h.require("Transaction ID")?,
+                    r#type: h.require("Transaction Type")?,
+                    ccy: h.require("Settlement Currency")?,
+                    amount: h.require("Settlement Amount")?,
+                    brand: h.require("Card Brand")?,
+                    card_type: h.require("Card Type")?,
+                    instrument: h.require("Payment Instrument")?,
+                    interchange: h.require("Interchange Total Amount")?,
+                    braintree: h.require("Braintree Total Amount")?,
+                    scheme: h.index("Total Scheme Fees"),
+                    ic_desc: h.index("Interchange Description"),
+                    issuer: h.index("Card Issuing Country"),
+                    settle_date: h.index("Settlement Date"),
+                    network: h.index("Payment Network"),
+                })
+            },
+            |c, row| {
+                // Keep only settled sales; skip credits/disputes whose signed amounts would pollute
+                // the gross→fee regression — done before any field extraction.
+                if !FEE_TRANSACTION_TYPES.contains(&row.get(c.r#type).trim().to_lowercase().as_str()) {
+                    return Ok(None);
+                }
+
+                let interchange = to_float(row.get(c.interchange));
+                let scheme_fee = to_float(row.get_opt(c.scheme));
+                // Braintree reports its own take as a single bundled amount; there is no separate
+                // markup line, so `markup` stays 0 and `commission` carries the full processor take.
+                let commission = to_float(row.get(c.braintree));
+                let markup = 0.0;
+                let total_fee = interchange + scheme_fee + markup + commission;
+                // `Settlement Amount` is already the gross transaction value (the fee's calculation
+                // base), so it maps to `gross` as-is — do NOT add `total_fee` (that's the Adyen path,
+                // where `Payable (SC)` is net-of-fees).
+                let gross = to_float(row.get(c.amount));
+
+                // Prefer the card brand; fall back to the debit network (pinless), then the instrument.
+                let network = {
+                    let brand = normalize_network(row.get(c.brand));
+                    if !brand.is_empty() {
+                        brand
+                    } else {
+                        let net = normalize_network(row.get_opt(c.network));
+                        if !net.is_empty() {
+                            net
+                        } else {
+                            row.get(c.instrument).trim().to_lowercase()
+                        }
+                    }
+                };
+                let funding = funding_from_card_type(row.get(c.card_type));
+                let variant = build_variant(row.get(c.instrument), &network, &funding);
+                let txn_date = c.settle_date.and_then(|i| parse_date(row.get(i)));
+
+                Ok(Some(SettledFeeRow {
+                    txn_ref: row.get(c.txn).to_string(),
+                    card_network: network,
+                    variant,
+                    funding,
+                    issuer_country: row.get_opt(c.issuer).trim().to_string(),
+                    currency: row.get(c.ccy).trim().to_string(),
+                    ic_category: row.get_opt(c.ic_desc).trim().to_string(),
+                    txn_date,
+                    // Braintree's PAR carries no terminal/POS indicator, so every row is treated as
+                    // online. Revisit if in-person / pinless acceptance data becomes distinguishable.
+                    channel: "ecom".to_string(),
+                    gross,
+                    total_fee,
+                    interchange,
+                    scheme_fee,
+                    markup,
+                    commission,
+                }))
+            },
+            on_row,
+        )
     }
 }
 

@@ -188,6 +188,13 @@ export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   })
 }
 
+export async function apiPut<T>(path: string, body?: unknown): Promise<T> {
+  return apiFetch<T>(path, {
+    method: 'PUT',
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  })
+}
+
 export async function apiDelete<T = void>(path: string): Promise<T> {
   return apiFetch<T>(path, { method: 'DELETE' })
 }

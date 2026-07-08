@@ -1,5 +1,5 @@
 import useSWR from 'swr'
-import { apiDelete, apiPost, apiUploadWithProgress, fetcher, type UploadProgress } from '../lib/api'
+import { apiDelete, apiPost, apiPut, apiUploadWithProgress, fetcher, type UploadProgress } from '../lib/api'
 
 export interface CoverageSummary {
   total_clusters: number
@@ -97,6 +97,126 @@ export function useCostCoverage(merchantId?: string) {
     dedupingInterval: 60_000,
   })
   return { coverage: data, error, isLoading, mutate }
+}
+
+/**
+ * One connector's fee picture: the model-derived blended fee (rolled up from the fitted snapshot),
+ * any manual override, and the effective fee actually used at decide time.
+ */
+export interface ConnectorFee {
+  connector: string
+  account: string | null
+  has_credentials: boolean
+  model_pct_bps: number | null
+  model_fixed: number | null
+  good_gross: number | null
+  override_pct_bps: number | null
+  override_fixed: number | null
+  override_updated_at: string | null
+  effective_pct_bps: number | null
+  effective_fixed: number | null
+  source: 'override' | 'model' | 'none' | string
+}
+
+/** Per-connector blended fees (model + override) for the merchant. */
+export function useConnectorFees(merchantId?: string) {
+  const path = merchantId ? `/merchant-account/${merchantId}/connector-fees` : null
+  const { data, error, isLoading, mutate } = useSWR<ConnectorFee[]>(path, fetcher, {
+    revalidateOnFocus: false,
+  })
+  return { fees: data ?? [], error, isLoading, mutate }
+}
+
+/** Set (upsert) a connector's manual blended-fee override. All new EV calculations then use it. */
+export async function setFeeOverride(
+  merchantId: string,
+  connector: string,
+  body: { pct_bps: number; fixed: number },
+) {
+  return apiPut(`/merchant-account/${merchantId}/connectors/${connector}/fee-override`, body)
+}
+
+/** Clear a connector's override, reverting to the learned model. */
+export async function deleteFeeOverride(merchantId: string, connector: string) {
+  return apiDelete(`/merchant-account/${merchantId}/connectors/${connector}/fee-override`)
+}
+
+/**
+ * One fitted cluster (a specific segment like "Visa debit · US · USD"): its learned fee, GMV/txn
+ * volume, and any per-cluster override. `key` identifies the cluster for the override endpoints.
+ */
+export interface ClusterFee {
+  key: string
+  connector: string
+  card_network: string
+  /** Fitted card program/tier, e.g. `visastandarddebit` (surfaced as the Program column). */
+  variant: string
+  funding: string
+  issuer_country: string
+  currency: string
+  ic_category: string
+  n: number
+  gross_sum: number
+  model_pct_bps: number | null
+  model_fixed: number | null
+  override_pct_bps: number | null
+  override_fixed: number | null
+  override_updated_at: string | null
+  effective_pct_bps: number
+  effective_fixed: number
+  source: 'override' | 'model' | string
+}
+
+export interface ClustersScope {
+  /** Scope to one ingested snapshot's segments (all three required together). */
+  connector?: string
+  account?: string
+  reportDate?: string
+}
+
+/**
+ * The merchant's top clusters by GMV. Merchant-wide by default (the override targets, plus any
+ * overridden clusters); pass a snapshot scope to get one ingestion's fitted segments instead.
+ */
+export function useCostClusters(
+  merchantId?: string,
+  opts: { limit?: number } & ClustersScope = {},
+) {
+  const { limit = 10, connector, account, reportDate } = opts
+  let path: string | null = null
+  if (merchantId) {
+    const params = new URLSearchParams({ limit: String(limit) })
+    // Each scope dimension is independent: a connector (+optional account) narrows to that
+    // connector's latest-snapshot segments; adding report_date pins one exact ingestion. The
+    // backend AND-combines whichever are present, so send each one we have.
+    if (connector) params.set('connector', connector)
+    if (account) params.set('account', account)
+    if (reportDate) params.set('report_date', reportDate)
+    path = `/merchant-account/${merchantId}/cost-clusters?${params.toString()}`
+  }
+  const { data, error, isLoading, mutate } = useSWR<ClusterFee[]>(path, fetcher, {
+    revalidateOnFocus: false,
+  })
+  return { clusters: data ?? [], error, isLoading, mutate }
+}
+
+/** Set (upsert) a per-cluster fee override. Wins over the connector override and the learned model. */
+export async function setClusterOverride(
+  merchantId: string,
+  clusterKey: string,
+  body: { pct_bps: number; fixed: number },
+) {
+  return apiPut(
+    `/merchant-account/${merchantId}/cost-clusters/${encodeURIComponent(clusterKey)}/fee-override`,
+    body,
+  )
+}
+
+/** Clear a per-cluster override, reverting that segment to the learned model. */
+export async function deleteClusterOverride(merchantId: string, clusterKey: string) {
+  return apiDelete(
+    `/merchant-account/${merchantId}/cost-clusters/${encodeURIComponent(clusterKey)}/fee-override`,
+  )
 }
 
 /** The (connector, account) pairs a merchant has configured (no secrets). */

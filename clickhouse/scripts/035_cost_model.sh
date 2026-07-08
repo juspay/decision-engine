@@ -4,10 +4,11 @@ set -eu
 # In-house cost estimation — settlement ingestion + fitted cost models.
 #
 # Unlike the analytics scripts (015/025) this pipeline does NOT use Kafka: settlement
-# reports are a once-daily-per-merchant batch, so the ingest worker bulk-INSERTs cleaned
-# rows directly (see scratch/inhouse-cost-architecture.md §7). Hence plain MergeTree
-# tables, no *_queue / *_mv. Everything is connector-generic: a connector is a value in
-# the `connector` column, never a separate table.
+# reports are a once-daily-per-merchant batch, so the ingest worker aggregates each report
+# in-flight and bulk-INSERTs per-day sufficient statistics directly (see
+# scratch/inhouse-cost-architecture.md §7). Hence plain MergeTree tables, no *_queue / *_mv.
+# Everything is connector-generic: a connector is a value in the `connector` column, never a
+# separate table. Individual transactions are never stored — only per-day cluster summaries.
 
 CLICKHOUSE_DATABASE="${CLICKHOUSE_DATABASE:-default}"
 CLICKHOUSE_USER="${CLICKHOUSE_USER:-default}"
@@ -20,41 +21,59 @@ fi
 
 clickhouse-client ${auth_args} --multiquery <<SQL
 -- ─────────────────────────────────────────────────────────────────────────────
--- Staging: one canonical normalized settled-transaction row per fee-bearing txn.
--- Every connector native report is mapped onto THIS schema (the SettledFeeRow of §7.1).
--- Once here, the fit and serving are 100% connector-agnostic. Short-lived: retained
--- only long enough to fit and reconcile, then expired by TTL.
+-- Daily per-cluster sufficient statistics — the ONLY persistent settlement store.
+-- We do NOT keep individual transactions. As each report streams in it is aggregated
+-- (in the ingest worker) into one row per (cluster × transaction-day × amount-band ×
+-- channel), holding the additive sums an OLS fit needs (n, Σx, Σy, Σx², Σxy, Σy² and the
+-- reciprocal terms for the bps-RMSE / NON_LINEAR check). Because these sums are additive
+-- across days, the fit reconstructs the exact same line it would get from raw rows, for any
+-- window — and can re-slice at a price-change date. See
+-- scratch/settlement-table-removal-worked-example.md for the correctness walkthrough.
+--
+-- band + channel are carried so the §9 interchange-category predictor (which keys on the
+-- amount band and pos/ecom channel) can be served from the same rollup; the fit sums them
+-- away. The €5 micro-amount floor (WHERE gross >= 5) is applied at aggregation time, so it
+-- cannot be recovered later — no consumer wants sub-floor txns.
 -- ─────────────────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS settlement_txn_fees (
+DROP TABLE IF EXISTS settlement_txn_fees;
+
+CREATE TABLE IF NOT EXISTS cost_daily_stats (
     connector        LowCardinality(String),   -- 'adyen', 'stripe', … (never a code branch)
     account          String,                    -- connector-side account (e.g. Adyen merchantAccountCode)
     merchant_id      String,                    -- our merchant that owns the account
-    txn_date         Date,                      -- the TRANSACTION (booking) date — the fit windows on this
-    ingestion_id     Int64 DEFAULT 0,           -- the cost_ingestion row that staged this (for delete-by-ingestion)
-    txn_ref          String,                    -- connector's unique txn id (e.g. Psp Reference)
-    card_network     LowCardinality(String),    -- 'visa', 'mc', …
-    variant          String,                    -- 'visastandarddebit', … (carries tier + funding)
-    funding          LowCardinality(String),    -- 'debit' | 'credit' | '' (derived from variant)
-    issuer_country   LowCardinality(String),    -- 'FR', 'IT', …
-    currency         LowCardinality(String),    -- settlement currency: 'EUR', 'AUD', …
-    ic_category      String,                     -- interchange category ('' = flat-fee methods)
-    channel          LowCardinality(String) DEFAULT '',  -- 'pos' | 'ecom' — predictor feature (§9)
-    gross            Float64,                    -- payable + total_fee  (regression x)
-    total_fee        Float64,                    -- sum of fee components (regression y)
-    interchange      Float64 DEFAULT 0,          -- fee components kept split so we can later
-    scheme_fee       Float64 DEFAULT 0,          -- separate the shared interchange model from
-    markup           Float64 DEFAULT 0,          -- the per-connector markup overlay (§3.3)
-    commission       Float64 DEFAULT 0,
+    txn_date         Date,                      -- the TRANSACTION (booking) day this bucket aggregates
+    ingestion_id     Int64 DEFAULT 0,           -- the cost_ingestion row that last wrote this bucket (delete-by-ingestion)
+    card_network     LowCardinality(String),    -- 'visa', 'mc', …          ┐
+    variant          String,                    -- 'visastandarddebit', …    │ cluster key
+    funding          LowCardinality(String),    -- 'debit' | 'credit' | ''   │ (fit groups on this)
+    issuer_country   LowCardinality(String),    -- 'FR', 'IT', …             │
+    currency         LowCardinality(String),    -- 'EUR', 'AUD', …           │
+    ic_category      String,                     -- interchange category (''=flat-fee) ┘
+    channel          LowCardinality(String) DEFAULT '',  -- 'pos' | 'ecom' — predictor feature (§9), summed away by the fit
+    band             LowCardinality(String) DEFAULT '',  -- amount band ('lo'..'hi') — predictor feature, summed away by the fit
+    -- Sufficient statistics over the txns in this bucket (gross >= 5 only). All additive.
+    n                UInt64,                     -- count
+    sx               Float64,                    -- Σ gross            (regression x)
+    sy               Float64,                    -- Σ total_fee        (regression y)
+    sxx              Float64,                    -- Σ gross²
+    sxy              Float64,                    -- Σ gross·total_fee
+    syy              Float64,                    -- Σ total_fee²
+    su               Float64,                    -- Σ 1/gross          ┐ reciprocal terms:
+    suu              Float64,                    -- Σ 1/gross²         │ the bps-RMSE sum-of-squares
+    suy              Float64,                    -- Σ total_fee/gross  │ and NON_LINEAR check are
+    suuy             Float64,                    -- Σ total_fee/gross² │ built from these
+    syyuu            Float64,                    -- Σ total_fee²/gross²┘
     ingested_at      DateTime DEFAULT now()
 )
--- Identity is the TRANSACTION, not the file: sorting/deduping by (connector, account, txn_ref)
--- means the same txn delivered twice (overlapping monthly+daily reports, a re-upload, webhook +
--- manual) collapses to one row — the latest `ingested_at` wins. So ingestion is cadence- and
--- source-agnostic and overlap-safe. The fit windows on `txn_date` (see §10), independent of when
--- or how the rows arrived.
+-- Identity is the (cluster, DAY, band, channel) bucket, NOT the transaction. A day re-delivered by
+-- a later, authoritative report (overlapping monthly+daily, a re-upload, webhook+manual) collapses
+-- to one bucket — the latest `ingested_at` wins. This is the "latest report wins per day" de-dup:
+-- correct as long as a report is complete for each day it covers (settlement reports are day- or
+-- month-complete batches). The fit windows on `txn_date`, independent of when the rows arrived.
 ENGINE = ReplacingMergeTree(ingested_at)
 PARTITION BY toYYYYMM(txn_date)
-ORDER BY (connector, account, txn_ref)
+ORDER BY (connector, account, merchant_id, txn_date,
+          card_network, variant, funding, issuer_country, currency, ic_category, channel, band)
 -- Generous retention: the fit windows on the *latest* transaction date in the data (not the wall
 -- clock), so this only needs to outlast a backfill of older reports, not track "now".
 TTL txn_date + INTERVAL 400 DAY;

@@ -1,5 +1,13 @@
 import type { ReactNode } from 'react'
 
+/** Connectors whose settlement report can be manually uploaded (their parser is implemented). The
+ * automatic/webhook path is a superset gated separately — Braintree's download/webhook is not wired
+ * yet, so it's upload-only for now. */
+export const UPLOAD_CONNECTORS = [
+  { value: 'adyen', label: 'Adyen' },
+  { value: 'braintree', label: 'Braintree' },
+] as const
+
 /** Shared input styling for the cost-routing forms (credentials + manual upload). */
 export const inputClass =
   'w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 ' +

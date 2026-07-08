@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ChevronDown, ChevronRight, History, Trash2 } from 'lucide-react'
 import { Card, CardBody, CardHeader, SurfaceLabel } from '../ui/Card'
 import { Spinner } from '../ui/Spinner'
+import { ClustersPanel } from './ClustersPanel'
 import {
   deleteIngestion,
   useCostCoverage,
@@ -100,6 +101,7 @@ export function IngestionHistory({ merchantId }: { merchantId?: string }) {
                 {ingestions.map((job) => (
                   <Row
                     key={job.id}
+                    merchantId={merchantId}
                     job={job}
                     open={expanded.has(job.id)}
                     onToggle={() => toggle(job.id)}
@@ -117,12 +119,14 @@ export function IngestionHistory({ merchantId }: { merchantId?: string }) {
 }
 
 function Row({
+  merchantId,
   job,
   open,
   onToggle,
   onDelete,
   deleting,
 }: {
+  merchantId?: string
   job: IngestionDto
   open: boolean
   onToggle: () => void
@@ -204,6 +208,25 @@ function Row({
                 <Detail label="Error" value={job.last_error} error />
               )}
             </dl>
+
+            {/* This report's fitted segments and the fee we learned for each. */}
+            {job.status === 'completed' && job.report_date && (
+              <div className="mt-4 border-t border-slate-200 pt-3 dark:border-[#232833]">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+                  Fitted segments (top by volume)
+                </p>
+                <ClustersPanel
+                  merchantId={merchantId}
+                  editable={false}
+                  limit={20}
+                  scope={{
+                    connector: job.connector,
+                    account: job.account,
+                    reportDate: job.report_date,
+                  }}
+                />
+              </div>
+            )}
           </td>
         </tr>
       )}

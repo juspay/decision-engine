@@ -1,72 +1,57 @@
-import { Coins } from 'lucide-react'
-import { Card, CardBody, CardHeader, SurfaceLabel } from '../ui/Card'
-import { ErrorMessage } from '../ui/ErrorMessage'
 import { Spinner } from '../ui/Spinner'
 import { useCostCoverage, type CoverageSummary } from '../../hooks/useCostRouting'
 
 /**
- * Headline health card. A one-glance money-weighted coverage number, then a per-verdict breakdown
- * table — the table makes the key insight visible: GOOD covers most *transactions* but far less
- * *volume*, because the big-ticket segments (high avg ticket) fall into THIN / NON_LINEAR. Shares
- * its SWR key with the ingestion flow, so a new report refreshes it automatically.
+ * Coverage of the merchant's fitted cost models. {@link CoverageBreakdown} is the per-verdict table
+ * (shown on demand, e.g. inside a collapsible) — it makes the key insight visible: GOOD covers most
+ * *transactions* but far less *volume*, because the big-ticket segments fall into THIN / NON_LINEAR.
+ * The headline numbers themselves are surfaced by the host on the collapsible's header.
  */
-export function CostCoverageCard({ merchantId }: { merchantId?: string }) {
+
+/** Per-verdict breakdown table + accuracy footnote. No card wrapper — meant to be embedded. */
+export function CoverageBreakdown({ merchantId }: { merchantId?: string }) {
   const { coverage, error, isLoading } = useCostCoverage(merchantId)
   const hasData = !!coverage && coverage.total_clusters > 0
 
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <Coins size={16} className="text-brand-500" />
-          <div>
-            <SurfaceLabel>Cost model coverage</SurfaceLabel>
-            <h2 className="mt-2 font-medium text-slate-800 dark:text-white">
-              How much volume we can cost accurately
-            </h2>
-          </div>
-        </div>
-      </CardHeader>
-      <CardBody className="space-y-5">
-        {merchantId && isLoading ? (
-          <div className="flex items-center gap-2 py-4 text-sm text-slate-500">
-            <Spinner size={16} />
-            Loading coverage...
-          </div>
-        ) : hasData && coverage ? (
-          <>
-            <VerdictTable coverage={coverage} />
+  if (merchantId && isLoading) {
+    return (
+      <div className="flex items-center gap-2 py-2 text-sm text-slate-500">
+        <Spinner size={16} /> Loading breakdown…
+      </div>
+    )
+  }
+  if (error) {
+    return <p className="text-sm text-red-500">Failed to load coverage.</p>
+  }
+  if (!hasData || !coverage) {
+    return (
+      <p className="text-sm text-slate-500">
+        The breakdown appears once a settlement report has been fitted.
+      </p>
+    )
+  }
 
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-[#9ca7ba]">
-              <span>
-                Model accuracy:{' '}
-                <span className="font-semibold text-slate-700 dark:text-[#c7cfdd]">
-                  ±{coverage.bps_rmse_p50.toFixed(1)} bps
-                </span>{' '}
-                median · ±{coverage.bps_rmse_p90.toFixed(1)} bps p90
-              </span>
-              <span aria-hidden>·</span>
-              <span>{coverage.good_clusters.toLocaleString()} active cost models</span>
-              {coverage.report_date && (
-                <>
-                  <span aria-hidden>·</span>
-                  <span>as of {coverage.report_date}</span>
-                </>
-              )}
-            </div>
+  return (
+    <div className="space-y-4">
+      <VerdictTable coverage={coverage} />
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-[#9ca7ba]">
+        <span>
+          Model accuracy:{' '}
+          <span className="font-semibold text-slate-700 dark:text-[#c7cfdd]">
+            ±{coverage.bps_rmse_p50.toFixed(1)} bps
+          </span>{' '}
+          median · ±{coverage.bps_rmse_p90.toFixed(1)} bps p90
+        </span>
+        <span aria-hidden>·</span>
+        <span>{coverage.good_clusters.toLocaleString()} active cost models</span>
+        {coverage.report_date && (
+          <>
+            <span aria-hidden>·</span>
+            <span>as of {coverage.report_date}</span>
           </>
-        ) : (
-          <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500 dark:border-[#232833] dark:bg-[#0b1017]">
-            No fitted cost models yet. They appear after the first settlement report is ingested.
-          </p>
         )}
-        <ErrorMessage
-          error={
-            error instanceof Error ? error.message : error ? 'Failed to load coverage' : null
-          }
-        />
-      </CardBody>
-    </Card>
+      </div>
+    </div>
   )
 }
 

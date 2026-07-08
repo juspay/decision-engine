@@ -24,8 +24,12 @@ function formatEventTime(bucketMs: number) {
 
 export function NotificationBell() {
   const navigate = useNavigate()
-  const { events, unseenCount, markAllSeen, isUnavailable } = useRoutingEvents('1h')
   const [open, setOpen] = useState(false)
+  // Only poll while the dropdown is open; the badge otherwise keeps its last
+  // known count without holding the shared poll on across every page.
+  const { events, unseenCount, markAllSeen, isUnavailable } = useRoutingEvents('1h', {
+    enabled: open,
+  })
   const dropdownRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {

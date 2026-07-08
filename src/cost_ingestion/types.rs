@@ -46,6 +46,23 @@ pub struct SettledFeeRow {
     pub commission: f64,
 }
 
+/// Amount bands (settlement-currency units) the interchange-category predictor keys on. Shared by
+/// the rollup aggregator (which stamps each txn's band at ingestion) and the decide-time predictor
+/// lookup in `serving.rs`, so the two can never drift. Thresholds mirror the prototype.
+pub fn amount_band(amount: f64) -> &'static str {
+    if amount <= 20.0 {
+        "lo"
+    } else if amount <= 50.0 {
+        "b50"
+    } else if amount <= 100.0 {
+        "b100"
+    } else if amount <= 250.0 {
+        "b250"
+    } else {
+        "hi"
+    }
+}
+
 impl SettledFeeRow {
     /// Map a variant string onto a funding bucket. Case-insensitive substring match, mirroring
     /// the Python `par_extract` behavior. Returns `""` for methods that are neither (iDEAL, …).

@@ -11,6 +11,8 @@ pub mod gsm;
 pub mod health;
 pub mod merchant_account_config;
 pub mod connector_credentials;
+pub mod connector_fees;
+pub mod cost_clusters;
 pub mod cost_coverage;
 pub mod report_upload;
 pub mod rule_configuration;

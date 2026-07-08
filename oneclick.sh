@@ -14,6 +14,31 @@ API_EXAMPLES_URL="${DOCS_URL}/api-refs/api-ref"
 DOCS_LOG_PATH="$SCRIPT_DIR/.mintlify-dev.log"
 ONECLICK_AUTO_CONFIRM="${ONECLICK_AUTO_CONFIRM:-0}"
 
+# Build profile for the backend. Debug (default) compiles fast but runs slower — notably CSV report
+# parsing is ~10x slower, so large settlement uploads crawl. Pass `--release` (or ONECLICK_RELEASE=1)
+# to compile optimized: slower first build, dramatically faster ingestion/decide at runtime.
+ONECLICK_RELEASE="${ONECLICK_RELEASE:-0}"
+for arg in "$@"; do
+    case "$arg" in
+        --release) ONECLICK_RELEASE=1 ;;
+        --debug) ONECLICK_RELEASE=0 ;;
+        -h|--help)
+            echo "Usage: ./oneclick.sh [--release|--debug]"
+            echo "  --release   build the backend optimized (fast runtime; e.g. ~10x faster report parsing)"
+            echo "  --debug     build the backend unoptimized (default; faster compile)"
+            exit 0
+            ;;
+    esac
+done
+
+if [ "${ONECLICK_RELEASE}" -eq 1 ]; then
+    CARGO_PROFILE_FLAG="--release"
+    CARGO_BUILD_MODE="release"
+else
+    CARGO_PROFILE_FLAG=""
+    CARGO_BUILD_MODE="debug"
+fi
+
 POSTGRES_HOST="${POSTGRES_HOST:-localhost}"
 POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 POSTGRES_USER="${POSTGRES_USER:-db_user}"
@@ -337,7 +362,7 @@ wait_for_postgres() {
 
 wait_for_redis() {
     local attempts=0
-    local max_attempts=60
+    local max_attempts=120
 
     echo "Waiting for Redis on ${REDIS_HOST}:${REDIS_PORT}..."
 
@@ -421,7 +446,7 @@ wait_for_mailpit() {
 
 wait_for_backend() {
     local attempts=0
-    local max_attempts=90
+    local max_attempts=480
 
     echo "Waiting for Decision Engine API on http://localhost:8080/health..."
 
@@ -447,7 +472,7 @@ wait_for_backend() {
 
 wait_for_docs() {
     local attempts=0
-    local max_attempts=120
+    local max_attempts=480
 
     echo "Waiting for docs preview on ${DOCS_HOME_URL}..."
 
@@ -524,9 +549,12 @@ just migrate-pg
 seed_global_configs
 
 # Start backend, npm install, and docs in parallel — none of them depend on each other.
-echo "Starting Decision Engine server, installing dashboard dependencies, and starting docs preview..."
+echo "Starting Decision Engine server (${CARGO_BUILD_MODE} build), installing dashboard dependencies, and starting docs preview..."
+if [ "${CARGO_BUILD_MODE}" = "release" ]; then
+    echo "  (release build: the first compile takes longer, but runtime — including large report ingestion — is far faster)"
+fi
 
-cargo run --no-default-features --features postgres &
+cargo run ${CARGO_PROFILE_FLAG} --no-default-features --features postgres &
 SERVER_PID=$!
 
 cd "$SCRIPT_DIR/website"

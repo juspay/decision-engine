@@ -19,6 +19,9 @@ use masking::PeekInterface;
 use crate::config::ClickHouseAnalyticsConfig;
 use crate::decider::gatewaydecider::multi_objective::cluster_key::issuer_region;
 use crate::logger;
+// Shared with the rollup aggregator so decide-time bucketing and the stored `band` column (which is
+// stamped by the same thresholds at ingestion) can never diverge.
+use super::types::amount_band;
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(300);
 const QUERY_TIMEOUT: Duration = Duration::from_secs(60);
@@ -44,7 +47,7 @@ impl ServingCost {
 
 /// Everything served for one merchant: the coarse region blend (fallback), the fine per-category
 /// clusters, and the category predictor's back-off tables.
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct MerchantModels {
     /// `connector|network|funding|currency|region` → blended cost (graceful fallback).
     coarse: HashMap<String, ServingCost>,
@@ -52,6 +55,26 @@ struct MerchantModels {
     fine: HashMap<String, ServingCost>,
     /// Predictor back-off levels (most specific first): level-key → modal `ic_category`.
     predictor: Vec<HashMap<String, String>>,
+    /// Manual per-connector blended-fee overrides (lowercase connector → flat cost). When present
+    /// for a connector, it wins over the learned model at [`lookup`] — the merchant told us the
+    /// contract rate, so every EV calculation on that connector uses it.
+    overrides: HashMap<String, ServingCost>,
+    /// Manual per-cluster overrides (fine_key → flat cost). Highest precedence: a surgical fee for
+    /// one specific segment, checked before the connector override and the learned model.
+    cluster_overrides: HashMap<String, ServingCost>,
+}
+
+impl MerchantModels {
+    /// No served models at all — the merchant should be absent from the cache (e.g. after its last
+    /// ingestion was deleted), not left as a stale entry. An override alone keeps the merchant
+    /// present (an override-only connector like Stripe must still price).
+    fn is_empty(&self) -> bool {
+        self.coarse.is_empty()
+            && self.fine.is_empty()
+            && self.predictor.iter().all(|l| l.is_empty())
+            && self.overrides.is_empty()
+            && self.cluster_overrides.is_empty()
+    }
 }
 
 type Snapshot = HashMap<String, MerchantModels>;
@@ -73,20 +96,6 @@ fn normalize_network(network: &str) -> &str {
     }
 }
 
-/// Amount bands the predictor keys on (settlement-currency units), from the prototype.
-fn amount_band(amount: f64) -> &'static str {
-    if amount <= 20.0 {
-        "lo"
-    } else if amount <= 50.0 {
-        "b50"
-    } else if amount <= 100.0 {
-        "b100"
-    } else if amount <= 250.0 {
-        "b250"
-    } else {
-        "hi"
-    }
-}
 
 fn coarse_key(connector: &str, network: &str, funding: &str, currency: &str, region: &str) -> String {
     format!(
@@ -120,6 +129,7 @@ fn fine_key(
         ic_category.to_lowercase(),
     )
 }
+
 
 /// Reconstruct the report's `variant` string from decide-time card attributes
 /// (`visa` + `standard` + `debit` → `visastandarddebit`). A wallet is its own variant in the report
@@ -207,28 +217,70 @@ pub fn lookup(
     let snapshot = cache().read().ok()?.clone();
     let m = snapshot.get(merchant_id)?;
 
-    // Fine path: predict the interchange category, then serve that specific cluster.
-    if !issuer.is_empty() {
+    // Resolve the fine cluster key once (needs a raw issuer + a predicted interchange category).
+    // Reused for both the highest-precedence cluster-override check and the learned fine-model
+    // lookup, so the two can never disagree on which cluster this transaction is.
+    let fine = if issuer.is_empty() {
+        None
+    } else {
         let variant = reconstruct_variant(network, program, funding, wallet);
         let band = amount_band(amount);
-        if let Some(cat) = predict_category(m, network, &variant, funding, issuer, band, channel) {
+        predict_category(m, network, &variant, funding, issuer, band, channel).map(|cat| {
             let key = fine_key(connector, network, &variant, funding, issuer, currency, &cat);
-            if let Some(cost) = m.fine.get(&key) {
-                return Some(InhouseMatch {
-                    effective_bps: cost.effective_cost_bps(amount),
-                    pct_bps: cost.pct_bps,
-                    fixed: cost.fixed,
-                    brand: normalize_network(&network.to_lowercase()).to_string(),
-                    currency: currency.to_uppercase(),
-                    variant: Some(variant),
-                    issuer: Some(issuer.to_uppercase()),
-                    ic_category: Some(cat),
-                });
-            }
+            (key, variant, cat)
+        })
+    };
+
+    // 1. Cluster override — the merchant set a fee for this exact segment (including its card
+    //    program). Most specific, wins over everything (connector override + learned model).
+    if let Some((key, variant, cat)) = &fine {
+        if let Some(cost) = m.cluster_overrides.get(key) {
+            return Some(InhouseMatch {
+                effective_bps: cost.effective_cost_bps(amount),
+                pct_bps: cost.pct_bps,
+                fixed: cost.fixed,
+                brand: normalize_network(&network.to_lowercase()).to_string(),
+                currency: currency.to_uppercase(),
+                variant: Some(variant.clone()),
+                issuer: Some(issuer.to_uppercase()),
+                ic_category: Some(cat.clone()),
+            });
         }
     }
 
-    // Fallback: the coarse region blend (previous behavior) — no single variant/issuer/category.
+    // 2. Connector override: the merchant gave us this connector's blanket contract rate, so use it
+    //    flat for every transaction not covered by a cluster override above. `connector` is already
+    //    lowercased by the caller; lowercase again defensively so the key always matches.
+    if let Some(cost) = m.overrides.get(&connector.to_lowercase()) {
+        return Some(InhouseMatch {
+            effective_bps: cost.effective_cost_bps(amount),
+            pct_bps: cost.pct_bps,
+            fixed: cost.fixed,
+            brand: normalize_network(&network.to_lowercase()).to_string(),
+            currency: currency.to_uppercase(),
+            variant: None,
+            issuer: None,
+            ic_category: None,
+        });
+    }
+
+    // 3. Learned fine model: serve the specific fitted cluster.
+    if let Some((key, variant, cat)) = &fine {
+        if let Some(cost) = m.fine.get(key) {
+            return Some(InhouseMatch {
+                effective_bps: cost.effective_cost_bps(amount),
+                pct_bps: cost.pct_bps,
+                fixed: cost.fixed,
+                brand: normalize_network(&network.to_lowercase()).to_string(),
+                currency: currency.to_uppercase(),
+                variant: Some(variant.clone()),
+                issuer: Some(issuer.to_uppercase()),
+                ic_category: Some(cat.clone()),
+            });
+        }
+    }
+
+    // 4. Fallback: the coarse region blend (previous behavior) — no single variant/issuer/category.
     let key = coarse_key(connector, network, funding, currency, region);
     m.coarse.get(&key).map(|cost| InhouseMatch {
         effective_bps: cost.effective_cost_bps(amount),
@@ -289,6 +341,9 @@ pub fn spawn(clickhouse: ClickHouseAnalyticsConfig) {
 
 /// Latest GOOD clusters (per merchant/connector/account snapshot), for the coarse blend and the
 /// fine per-category table. Per-country weighted numerators so we finish region bucketing here.
+/// `{merchant_filter}` / `{merchant_filter_sub}` are replaced with a `merchant_id = {merchant:String}`
+/// predicate for a single-merchant refresh (cheap, scans only that merchant — including the
+/// `max(report_date)` subquery), or with `""` for the periodic global rebuild.
 const COST_SQL: &str = r#"
 SELECT
     merchant_id, connector, card_network, variant, funding, issuer_country, currency, ic_category,
@@ -296,31 +351,70 @@ SELECT
     sum(fixed * gross_sum)   AS fixed_num,
     sum(gross_sum)           AS w
 FROM __DB__.cost_fee_model FINAL
-WHERE verdict = 'GOOD' AND gross_sum > 0
+WHERE verdict = 'GOOD' AND gross_sum > 0{merchant_filter}
   AND (merchant_id, connector, account, report_date) IN (
       SELECT merchant_id, connector, account, max(report_date)
-      FROM __DB__.cost_fee_model GROUP BY merchant_id, connector, account)
+      FROM __DB__.cost_fee_model{merchant_filter_sub} GROUP BY merchant_id, connector, account)
 GROUP BY merchant_id, connector, card_network, variant, funding, issuer_country, currency, ic_category
 FORMAT TSV
 "#;
 
 /// Per-(merchant, network, variant, funding, issuer, band, channel) category counts, for the
 /// predictor. `channel` (pos/ecom) is the strongest disambiguator between in-person and online
-/// interchange categories.
+/// interchange categories. `band` is a stored column of the rollup (stamped at ingestion by the same
+/// `amount_band` thresholds this file uses at decide time); the €5 floor was applied at aggregation.
+/// `{merchant_filter}` is a `WHERE merchant_id = {merchant:String}` for a single-merchant refresh,
+/// or `""` for the global rebuild.
 const PREDICTOR_SQL: &str = r#"
 SELECT
-    merchant_id, card_network, variant, funding, issuer_country,
-    multiIf(gross <= 20, 'lo', gross <= 50, 'b50', gross <= 100, 'b100', gross <= 250, 'b250', 'hi') AS band,
-    channel, ic_category, count() AS c
-FROM __DB__.settlement_txn_fees FINAL
-WHERE gross >= 5
+    merchant_id, card_network, variant, funding, issuer_country, band, channel, ic_category,
+    sum(n) AS c
+FROM __DB__.cost_daily_stats FINAL
+{merchant_filter}
 GROUP BY merchant_id, card_network, variant, funding, issuer_country, band, channel, ic_category
 FORMAT TSV
 "#;
 
+/// Rebuild the **entire** served-model cache from ClickHouse. Used by the periodic background ticker
+/// (off the request path). `O(all merchants)` — for the inline post-ingest/-delete refresh prefer
+/// [`refresh_merchant`], which touches only the affected merchant.
 pub async fn refresh(cfg: &ClickHouseAnalyticsConfig) -> Result<usize, String> {
-    let cost_rows = query(cfg, COST_SQL).await?;
-    let pred_rows = query(cfg, PREDICTOR_SQL).await?;
+    refresh_inner(cfg, None).await
+}
+
+/// Rebuild **one merchant's** served models and merge the result into the cache, leaving every other
+/// merchant untouched. This is what runs inline after an ingest or delete: the ClickHouse queries
+/// scan only that merchant (including the `max(report_date)` subquery), turning the old ~2s global
+/// rebuild into a small filtered read. If the merchant now has no models (its data was deleted), it
+/// is removed from the cache rather than left stale.
+pub async fn refresh_merchant(
+    cfg: &ClickHouseAnalyticsConfig,
+    merchant_id: &str,
+) -> Result<usize, String> {
+    refresh_inner(cfg, Some(merchant_id)).await
+}
+
+async fn refresh_inner(
+    cfg: &ClickHouseAnalyticsConfig,
+    merchant: Option<&str>,
+) -> Result<usize, String> {
+    // Splice the merchant predicate into the queries (or clear the placeholders for a global rebuild).
+    let (cost_sql, pred_sql) = match merchant {
+        Some(_) => (
+            COST_SQL
+                .replace("{merchant_filter}", " AND merchant_id = {merchant:String}")
+                .replace("{merchant_filter_sub}", " WHERE merchant_id = {merchant:String}"),
+            PREDICTOR_SQL.replace("{merchant_filter}", "WHERE merchant_id = {merchant:String}"),
+        ),
+        None => (
+            COST_SQL
+                .replace("{merchant_filter}", "")
+                .replace("{merchant_filter_sub}", ""),
+            PREDICTOR_SQL.replace("{merchant_filter}", ""),
+        ),
+    };
+    let cost_rows = query(cfg, &cost_sql, merchant).await?;
+    let pred_rows = query(cfg, &pred_sql, merchant).await?;
 
     let mut snap: Snapshot = HashMap::new();
 
@@ -398,11 +492,106 @@ pub async fn refresh(cfg: &ClickHouseAnalyticsConfig) -> Result<usize, String> {
         snap.entry(merchant).or_default().predictor = tables;
     }
 
-    let n = snap.len();
-    if let Ok(mut guard) = cache().write() {
-        *guard = Arc::new(snap);
+    // 3. Manual blended-fee overrides (Postgres, not ClickHouse). Attach them to the snapshot so
+    //    `lookup` can prefer them. A single-merchant refresh loads just that merchant; the global
+    //    rebuild walks the override-merchant index so override-only connectors (no ClickHouse data)
+    //    still price. Failures here are logged but non-fatal — the learned models are still served.
+    match merchant {
+        Some(mid) => load_overrides_into(&mut snap, mid).await,
+        None => match super::overrides::list_merchants().await {
+            Ok(merchants) => {
+                for mid in merchants {
+                    load_overrides_into(&mut snap, &mid).await;
+                }
+            }
+            Err(e) => logger::warn!(tag = "cost_serving", "override index load failed: {:?}", e),
+        },
     }
-    Ok(n)
+
+    // Global rebuild → replace the whole cache. Single-merchant → merge just that merchant's entry
+    // into the existing cache (clone-modify-swap under the write lock, so readers see one atomic
+    // switch). An absent/empty result removes the merchant so stale models don't linger.
+    match merchant {
+        None => {
+            let n = snap.len();
+            if let Ok(mut guard) = cache().write() {
+                *guard = Arc::new(snap);
+            }
+            Ok(n)
+        }
+        Some(mid) => {
+            let models = snap.remove(mid);
+            let mut guard = cache().write().map_err(|_| "serving cache poisoned".to_string())?;
+            let mut merged: Snapshot = (**guard).clone();
+            match models {
+                Some(m) if !m.is_empty() => {
+                    merged.insert(mid.to_string(), m);
+                }
+                _ => {
+                    merged.remove(mid);
+                }
+            }
+            let n = merged.len();
+            *guard = Arc::new(merged);
+            Ok(n)
+        }
+    }
+}
+
+/// Load a merchant's manual overrides and set them on its snapshot entry (creating the entry when
+/// the merchant has overrides but no ClickHouse-derived models). Non-fatal on error.
+async fn load_overrides_into(snap: &mut Snapshot, merchant_id: &str) {
+    // Connector-level overrides (lowercase connector → flat cost).
+    match super::overrides::list(merchant_id).await {
+        Ok(list) if !list.is_empty() => {
+            let overrides = list
+                .into_iter()
+                .map(|(connector, ov)| {
+                    (
+                        connector.to_lowercase(),
+                        ServingCost { pct_bps: ov.pct_bps, fixed: ov.fixed },
+                    )
+                })
+                .collect();
+            snap.entry(merchant_id.to_string()).or_default().overrides = overrides;
+        }
+        Ok(_) => {}
+        Err(e) => logger::warn!(
+            tag = "cost_serving",
+            "connector override load failed for {}: {:?}",
+            merchant_id,
+            e
+        ),
+    }
+
+    // Cluster-level overrides, keyed by the same fine_key the lookup builds at decide time.
+    match super::overrides::list_clusters(merchant_id).await {
+        Ok(list) if !list.is_empty() => {
+            let cluster_overrides = list
+                .into_iter()
+                .map(|c| {
+                    let key = fine_key(
+                        &c.dims.connector,
+                        &c.dims.card_network,
+                        &c.dims.variant,
+                        &c.dims.funding,
+                        &c.dims.issuer_country,
+                        &c.dims.currency,
+                        &c.dims.ic_category,
+                    );
+                    (key, ServingCost { pct_bps: c.pct_bps, fixed: c.fixed })
+                })
+                .collect();
+            snap.entry(merchant_id.to_string()).or_default().cluster_overrides = cluster_overrides;
+        }
+        Ok(_) => {}
+        Err(e) => logger::warn!(
+            tag = "cost_serving",
+            "cluster override load failed for {}: {:?}",
+            merchant_id,
+            e
+        ),
+    }
 }
 
 fn accumulate(map: &mut HashMap<String, (f64, f64, f64)>, key: String, pct_num: f64, fix_num: f64, w: f64) {
@@ -419,9 +608,17 @@ fn finalize(keys: HashMap<String, (f64, f64, f64)>) -> HashMap<String, ServingCo
         .collect()
 }
 
-async fn query(cfg: &ClickHouseAnalyticsConfig, sql: &str) -> Result<String, String> {
+async fn query(
+    cfg: &ClickHouseAnalyticsConfig,
+    sql: &str,
+    merchant: Option<&str>,
+) -> Result<String, String> {
     let sql = sql.replace("__DB__", &cfg.database);
     let mut req = client().post(cfg.url.trim_end_matches('/')).body(sql);
+    // Bound as `param_merchant` for the `{merchant:String}` placeholder in a single-merchant refresh.
+    if let Some(m) = merchant {
+        req = req.query(&[("param_merchant", m)]);
+    }
     if !cfg.user.is_empty() {
         req = req.basic_auth(&cfg.user, cfg.password.as_ref().map(|p| p.peek().clone()));
     }

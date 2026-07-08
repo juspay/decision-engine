@@ -9,7 +9,7 @@ import {
   useCostCoverage,
   useIngestionHistory,
 } from '../../hooks/useCostRouting'
-import { Field, inputClass } from './CostRoutingShared'
+import { Field, UPLOAD_CONNECTORS, inputClass } from './CostRoutingShared'
 
 /**
  * Manual-ingestion tab: upload a settlement report file directly. The upload returns immediately
@@ -98,7 +98,11 @@ export function ManualReportUpload({ merchantId }: { merchantId?: string }) {
             value={connector}
             onChange={(e) => setConnector(e.target.value)}
           >
-            <option value="adyen">Adyen</option>
+            {UPLOAD_CONNECTORS.map((c) => (
+              <option key={c.value} value={c.value}>
+                {c.label}
+              </option>
+            ))}
           </select>
         </Field>
         <Field label="Account" hint="Connector-side account the report belongs to">

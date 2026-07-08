@@ -67,6 +67,7 @@ async fn run_once(batch: usize, clickhouse: &ClickHouseAnalyticsConfig) {
 
     for job in claimed {
         let id = job.id;
+        let merchant_id = job.merchant_id.clone();
         match process(job, clickhouse).await {
             Ok(outcome) => {
                 log_fit(id, &outcome);
@@ -74,7 +75,8 @@ async fn run_once(batch: usize, clickhouse: &ClickHouseAnalyticsConfig) {
                     logger::warn!(tag = "ingest_worker", "mark_completed {} failed: {:?}", id, e);
                 }
                 // Serve the freshly-fitted models immediately (don't wait for the periodic refresh).
-                if let Err(e) = super::serving::refresh(clickhouse).await {
+                // Per-merchant: only this merchant is rebuilt, off the global-refresh path.
+                if let Err(e) = super::serving::refresh_merchant(clickhouse, &merchant_id).await {
                     logger::warn!(tag = "ingest_worker", "serving refresh after ingest failed: {}", e);
                 }
             }

@@ -15,6 +15,7 @@ use masking::{PeekInterface, Secret};
 use ring::hmac;
 use serde_json::Value;
 
+use crate::cost_ingestion::connectors::csv_reader;
 use crate::cost_ingestion::source::SettlementReportSource;
 use crate::cost_ingestion::types::{ConnectorCreds, IngestError, ReportNotification, SettledFeeRow};
 
@@ -163,84 +164,90 @@ impl SettlementReportSource for AdyenReportSource {
         reader: Box<dyn std::io::Read + Send>,
         on_row: &mut dyn FnMut(SettledFeeRow) -> Result<(), IngestError>,
     ) -> Result<(), IngestError> {
-        // `csv::Reader` wraps `reader` in its own buffered reader and pulls records lazily, so a
-        // huge report is never fully resident — one parsed record at a time.
-        let mut reader = csv::ReaderBuilder::new()
-            .flexible(true)
-            .from_reader(reader);
-
-        // Resolve column indices by header label (order can drift between report versions).
-        let headers = reader
-            .headers()
-            .map_err(|e| IngestError::Parse(e.to_string()))?
-            .clone();
-        let idx = |name: &str| headers.iter().position(|h| h == name);
-        let col = |name: &str| -> Result<usize, IngestError> {
-            idx(name).ok_or_else(|| IngestError::Parse(format!("missing column: {name}")))
-        };
-
-        let c_record = col("Record Type")?;
-        let c_psp = col("Psp Reference")?;
-        let c_variant = col("Payment Method Variant")?;
-        let c_brand = col("Global Card Brand")?;
-        let c_issuer = col("Issuer Country")?;
-        let c_ccy = col("Settlement Currency")?;
-        let c_payable = col("Payable (SC)")?;
-        let c_commission = col("Commission (SC)")?;
-        let c_markup = col("Markup (SC)")?;
-        let c_scheme = col("Scheme Fees (SC)")?;
-        let c_interchange = col("Interchange (SC)")?;
-        let c_icsf = col("ICSF details")?;
-        // Optional: used only for the ingested report's period; absent in older/test reports.
-        let c_booking = idx("Booking Date");
-        // Optional: a terminal id marks an in-person (POS) acceptance; its absence ⇒ online (ecom).
-        // Drives the channel feature of the category predictor.
-        let c_terminal = idx("Unique Terminal ID");
-
-        for record in reader.records() {
-            let record = record.map_err(|e| IngestError::Parse(e.to_string()))?;
-            let get = |i: usize| record.get(i).unwrap_or("");
-
-            if !FEE_RECORD_TYPES.contains(&get(c_record)) {
-                continue;
-            }
-
-            let commission = to_float(get(c_commission));
-            let markup = to_float(get(c_markup));
-            let scheme_fee = to_float(get(c_scheme));
-            let interchange = to_float(get(c_interchange));
-            let total_fee = commission + markup + scheme_fee + interchange;
-            let gross = to_float(get(c_payable)) + total_fee;
-
-            let variant = get(c_variant).to_lowercase();
-            let funding = SettledFeeRow::funding_from_variant(&variant);
-            let txn_date = c_booking.and_then(|i| parse_booking_date(get(i)));
-            // POS when a terminal id is present, else online. Absent column ⇒ unknown ⇒ ecom.
-            let channel = match c_terminal {
-                Some(i) if !get(i).trim().is_empty() => "pos",
-                _ => "ecom",
-            }
-            .to_string();
-
-            on_row(SettledFeeRow {
-                txn_ref: get(c_psp).to_string(),
-                card_network: get(c_brand).to_lowercase(),
-                variant,
-                funding,
-                issuer_country: get(c_issuer).to_string(),
-                currency: get(c_ccy).to_string(),
-                ic_category: ic_category(get(c_icsf)),
-                txn_date,
-                channel,
-                gross,
-                total_fee,
-                interchange,
-                scheme_fee,
-                markup,
-                commission,
-            })?;
+        // Resolved column indices for one report (order can drift between report versions).
+        struct Cols {
+            record: usize,
+            psp: usize,
+            variant: usize,
+            brand: usize,
+            issuer: usize,
+            ccy: usize,
+            payable: usize,
+            commission: usize,
+            markup: usize,
+            scheme: usize,
+            interchange: usize,
+            icsf: usize,
+            booking: Option<usize>,
+            terminal: Option<usize>,
         }
-        Ok(())
+
+        csv_reader::parse(
+            reader,
+            |h| {
+                Ok(Cols {
+                    record: h.require("Record Type")?,
+                    psp: h.require("Psp Reference")?,
+                    variant: h.require("Payment Method Variant")?,
+                    brand: h.require("Global Card Brand")?,
+                    issuer: h.require("Issuer Country")?,
+                    ccy: h.require("Settlement Currency")?,
+                    payable: h.require("Payable (SC)")?,
+                    commission: h.require("Commission (SC)")?,
+                    markup: h.require("Markup (SC)")?,
+                    scheme: h.require("Scheme Fees (SC)")?,
+                    interchange: h.require("Interchange (SC)")?,
+                    icsf: h.require("ICSF details")?,
+                    // Optional: used only for the ingested report's period; absent in older/test reports.
+                    booking: h.index("Booking Date"),
+                    // Optional: a terminal id marks in-person (POS) acceptance; absence ⇒ online (ecom).
+                    // Drives the channel feature of the category predictor.
+                    terminal: h.index("Unique Terminal ID"),
+                })
+            },
+            |c, row| {
+                // Skip non-fee rows before any field extraction — this is the ~90% majority.
+                if !FEE_RECORD_TYPES.contains(&row.get(c.record)) {
+                    return Ok(None);
+                }
+
+                let commission = to_float(row.get(c.commission));
+                let markup = to_float(row.get(c.markup));
+                let scheme_fee = to_float(row.get(c.scheme));
+                let interchange = to_float(row.get(c.interchange));
+                let total_fee = commission + markup + scheme_fee + interchange;
+                let gross = to_float(row.get(c.payable)) + total_fee;
+
+                let variant = row.get(c.variant).to_lowercase();
+                let funding = SettledFeeRow::funding_from_variant(&variant);
+                let txn_date = c.booking.and_then(|i| parse_booking_date(row.get(i)));
+                // POS when a terminal id is present, else online. Absent column ⇒ unknown ⇒ ecom.
+                let channel = match c.terminal {
+                    Some(i) if !row.get(i).trim().is_empty() => "pos",
+                    _ => "ecom",
+                }
+                .to_string();
+
+                Ok(Some(SettledFeeRow {
+                    txn_ref: row.get(c.psp).to_string(),
+                    card_network: row.get(c.brand).to_lowercase(),
+                    variant,
+                    funding,
+                    issuer_country: row.get(c.issuer).to_string(),
+                    currency: row.get(c.ccy).to_string(),
+                    ic_category: ic_category(row.get(c.icsf)),
+                    txn_date,
+                    channel,
+                    gross,
+                    total_fee,
+                    interchange,
+                    scheme_fee,
+                    markup,
+                    commission,
+                }))
+            },
+            on_row,
+        )
     }
 }
 

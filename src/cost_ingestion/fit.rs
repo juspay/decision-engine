@@ -1,13 +1,16 @@
-//! Fit per-cluster cost models from staged settlement rows — the OLS of `par_fit.py` expressed
-//! as a ClickHouse `GROUP BY`.
+//! Fit per-cluster cost models from the daily sufficient-statistics rollup — the OLS of
+//! `par_fit.py` expressed as a ClickHouse `GROUP BY`.
 //!
-//! For each cluster `total_fee = slope·gross + intercept` is fit from streaming sufficient
-//! statistics (`Σx, Σy, Σxx, Σxy, …`), giving `pct_bps = slope·10⁴`, `fixed = intercept`, and a
-//! per-transaction `bps_rmse`. Clusters are graded `GOOD` / `NON_LINEAR` / `THIN` by the §10 rule
-//! (`n ≥ 200 AND bps_rmse ≤ 15`). The €5 micro-amount floor is a `WHERE gross >= 5`.
+//! `cost_daily_stats` already holds, per (cluster × day × band × channel), the additive sums an OLS
+//! fit needs (`Σx, Σy, Σxx, Σxy, Σyy` and reciprocal terms). The fit sums those buckets over the
+//! window — first collapsing band/channel, then across days — to reconstruct the exact per-cluster
+//! sums it would get from raw transactions, and computes `pct_bps = slope·10⁴`, `fixed = intercept`,
+//! and a per-transaction `bps_rmse`. Clusters are graded `GOOD` / `NON_LINEAR` / `THIN` by the §10
+//! rule (`n ≥ 200 AND bps_rmse ≤ 15`). The €5 micro-amount floor was already applied at aggregation.
 //!
 //! Runs entirely in ClickHouse: one `INSERT … SELECT` writes the snapshot, then a summary query
-//! reports coverage for the validation gate. See `scratch/inhouse-cost-architecture.md` §3, §7.
+//! reports coverage for the validation gate. See `scratch/inhouse-cost-architecture.md` §3, §7 and
+//! `scratch/settlement-table-removal-worked-example.md`.
 
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -73,43 +76,63 @@ FROM
              - 2 * intercept * suuy - 2 * slope * suy + 2 * intercept * slope * su) AS sum_sq
         FROM
         (
+            -- Sum the per-day buckets that fall in each cluster's adaptive window into one set of
+            -- per-cluster sufficient statistics (all sums are additive across days/bands/channels).
             SELECT
                 card_network, variant, funding, issuer_country, currency, ic_category,
-                count() AS n,
-                sum(gross) AS sx,
-                sum(total_fee) AS sy,
-                sum(gross * gross) AS sxx,
-                sum(gross * total_fee) AS sxy,
-                sum(total_fee * total_fee) AS syy,
-                sum(1 / gross) AS su,
-                sum(1 / (gross * gross)) AS suu,
-                sum(total_fee / gross) AS suy,
-                sum(total_fee / (gross * gross)) AS suuy,
-                sum(total_fee * total_fee / (gross * gross)) AS syyuu
+                sum(n) AS n,
+                sum(sx) AS sx,
+                sum(sy) AS sy,
+                sum(sxx) AS sxx,
+                sum(sxy) AS sxy,
+                sum(syy) AS syy,
+                sum(su) AS su,
+                sum(suu) AS suu,
+                sum(suy) AS suy,
+                sum(suuy) AS suuy,
+                sum(syyuu) AS syyuu
             FROM
             (
-                -- FINAL dedups the ReplacingMergeTree by txn_ref, so a transaction delivered in
-                -- more than one report (overlapping monthly+daily, a re-upload, webhook+manual) is
-                -- counted exactly once. Rank each cluster's txns by recency for the adaptive window.
-                SELECT
-                    card_network, variant, funding, issuer_country, currency, ic_category,
-                    gross, total_fee, txn_date,
-                    row_number() OVER (
-                        PARTITION BY card_network, variant, funding, issuer_country, currency, ic_category
-                        ORDER BY txn_date DESC
-                    ) AS rn
-                FROM __DB__.settlement_txn_fees FINAL
-                WHERE connector = {connector:String}
-                  AND account = {account:String}
-                  AND merchant_id = {merchant_id:String}
-                  AND gross >= 5
-                  AND txn_date >= {max_window_start:Date}
+                -- Adaptive per-cluster window at day granularity: keep every day in the base window
+                -- (recent, so high-volume clusters stay agile to price changes), and let thin
+                -- clusters reach back over older days until the running txn count crosses
+                -- MIN_SAMPLES (capped at the max window) so they can cross the GOOD sample gate
+                -- instead of being stuck THIN. `cum_n_before` = txns on strictly-more-recent days.
+                SELECT *
+                FROM
+                (
+                    SELECT
+                        card_network, variant, funding, issuer_country, currency, ic_category,
+                        txn_date, n, sx, sy, sxx, sxy, syy, su, suu, suy, suuy, syyuu,
+                        sum(n) OVER (
+                            PARTITION BY card_network, variant, funding, issuer_country, currency, ic_category
+                            ORDER BY txn_date DESC
+                            ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                        ) AS cum_n_before
+                    FROM
+                    (
+                        -- Collapse band/channel to per-(cluster, day) sums. FINAL dedups the
+                        -- ReplacingMergeTree so a day re-delivered by a later report (overlapping
+                        -- monthly+daily, a re-upload, webhook+manual) is counted once — its latest
+                        -- authoritative bucket wins.
+                        SELECT
+                            card_network, variant, funding, issuer_country, currency, ic_category,
+                            txn_date,
+                            sum(n) AS n, sum(sx) AS sx, sum(sy) AS sy, sum(sxx) AS sxx,
+                            sum(sxy) AS sxy, sum(syy) AS syy, sum(su) AS su, sum(suu) AS suu,
+                            sum(suy) AS suy, sum(suuy) AS suuy, sum(syyuu) AS syyuu
+                        FROM __DB__.cost_daily_stats FINAL
+                        WHERE connector = {connector:String}
+                          AND account = {account:String}
+                          AND merchant_id = {merchant_id:String}
+                          AND txn_date >= {max_window_start:Date}
+                        GROUP BY card_network, variant, funding, issuer_country, currency,
+                                 ic_category, txn_date
+                    )
+                )
+                WHERE txn_date >= {base_window_start:Date}
+                   OR coalesce(cum_n_before, 0) < {min_samples:UInt32}
             )
-            -- Adaptive per-cluster window: keep every transaction in the base window (recent, so
-            -- high-volume clusters stay agile to price changes), and let thin clusters reach back to
-            -- their most-recent MIN_SAMPLES (capped at the max window) so they can cross the GOOD
-            -- sample gate instead of being stuck THIN.
-            WHERE txn_date >= {base_window_start:Date} OR rn <= {min_samples:UInt32}
             GROUP BY card_network, variant, funding, issuer_country, currency, ic_category
         )
     )
@@ -134,6 +157,17 @@ WHERE connector = {connector:String} AND account = {account:String}
   AND merchant_id = {merchant_id:String} AND report_date = {report_date:Date}
 "#;
 
+/// When a refit yields an empty snapshot — the data behind this `(connector, account)` is gone
+/// (e.g. its last ingestion was deleted) — drop ALL of its prior `cost_fee_model` snapshots too.
+/// Coverage and serving read the *latest* snapshot by `report_date`; without this, an empty refit
+/// (which inserts no rows for today) leaves an older non-empty snapshot as the max, so the dashboard
+/// and the router keep showing / routing on models that no longer have any supporting data.
+const PURGE_MODEL_SQL: &str = r#"
+DELETE FROM __DB__.cost_fee_model
+WHERE connector = {connector:String} AND account = {account:String}
+  AND merchant_id = {merchant_id:String}
+"#;
+
 /// Base trailing window (days of transactions) every cluster fits over — recent enough that
 /// high-volume clusters react quickly to a fee change.
 pub const BASE_WINDOW_DAYS: i64 = 90;
@@ -143,7 +177,24 @@ const MAX_WINDOW_DAYS: i64 = 365;
 /// Must match the `n < 200 -> THIN` verdict gate in `FIT_SQL`.
 const MIN_SAMPLES: u32 = 200;
 
-/// Fit `(connector, account, merchant_id)` from the last `FIT_WINDOW_DAYS` of `settlement_txn_fees`
+/// Whether a fit result should trigger the empty-refit purge ([`PURGE_MODEL_SQL`]). Extracted as a
+/// pure function because it is the one decision coupled to a destructive `DELETE`, so it is locked
+/// in by unit tests: purge fires ONLY on a *definitively-parsed* zero cluster count — never on a
+/// parse failure (`None`), which would otherwise masquerade as "empty" and delete a healthy model —
+/// and never with a blank identifier that could widen the delete's scope.
+fn should_purge_empty(
+    total_parsed: Option<u64>,
+    connector: &str,
+    account: &str,
+    merchant_id: &str,
+) -> bool {
+    total_parsed == Some(0)
+        && !connector.is_empty()
+        && !account.is_empty()
+        && !merchant_id.is_empty()
+}
+
+/// Fit `(connector, account, merchant_id)` from the last `BASE_WINDOW_DAYS` of `cost_daily_stats`
 /// (by transaction date) into a `cost_fee_model` snapshot stamped `report_date` (the fit-run date),
 /// and return the resulting coverage.
 pub async fn fit_snapshot(
@@ -164,7 +215,7 @@ pub async fn fit_snapshot(
     let bounds_sql = format!(
         "SELECT toString(max(txn_date) - toIntervalDay({BASE_WINDOW_DAYS})), \
                 toString(max(txn_date) - toIntervalDay({MAX_WINDOW_DAYS})) \
-         FROM {}.settlement_txn_fees FINAL \
+         FROM {}.cost_daily_stats FINAL \
          WHERE connector = {{connector:String}} AND account = {{account:String}} \
          AND merchant_id = {{merchant_id:String}} FORMAT TSV",
         cfg.database
@@ -199,8 +250,22 @@ pub async fn fit_snapshot(
     let summary = exec(cfg, &SUMMARY_SQL.replace("__DB__", &cfg.database), &params).await?;
 
     let mut fields = summary.trim().split('\t');
-    let total = fields.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    // Parse `total` strictly: a parse *failure* must NOT collapse to "0 clusters", because that
+    // value drives the destructive purge below. `unwrap_or(0)` here would turn a malformed/empty
+    // summary response into an accidental table-wide delete. Only a definitively-parsed 0 purges.
+    let total_parsed = fields.next().and_then(|s| s.parse::<u64>().ok());
     let good = fields.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let total = total_parsed.unwrap_or(0);
+
+    // A definitively-empty refit means this (connector, account) has no fittable data left in the
+    // entire fit window — its rows were deleted, or it never had any. A single sparse report cannot
+    // cause this, since the fit windows over ALL staged days, not just the one just ingested. Purge
+    // its stale snapshots so coverage/serving don't fall back to an older non-empty one (see
+    // PURGE_MODEL_SQL and `should_purge_empty`).
+    if should_purge_empty(total_parsed, connector, account, merchant_id) {
+        exec(cfg, &PURGE_MODEL_SQL.replace("__DB__", &cfg.database), &params).await?;
+    }
+
     Ok(FitSummary {
         total_clusters: total,
         good_clusters: good,
@@ -240,4 +305,39 @@ async fn exec(
     resp.text()
         .await
         .map_err(|e| IngestError::Storage(e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_purge_empty;
+
+    // The purge is a table-scoped DELETE, so its trigger must be exact. These tests lock in that
+    // it fires on — and only on — a definitively-parsed zero cluster count with a full identifier.
+
+    #[test]
+    fn purges_on_definitive_zero() {
+        // The one case that should purge: the fit ran and produced zero clusters (data is gone).
+        assert!(should_purge_empty(Some(0), "adyen", "acc", "m1"));
+    }
+
+    #[test]
+    fn never_purges_when_clusters_exist() {
+        assert!(!should_purge_empty(Some(1), "adyen", "acc", "m1"));
+        assert!(!should_purge_empty(Some(8318), "adyen", "acc", "m1"));
+    }
+
+    #[test]
+    fn never_purges_on_parse_failure() {
+        // A malformed/empty summary response parses to None; it must NOT look like "0 clusters" and
+        // delete a healthy model. This is the sharp edge the strict parse closed.
+        assert!(!should_purge_empty(None, "adyen", "acc", "m1"));
+    }
+
+    #[test]
+    fn never_purges_with_blank_identifier() {
+        // A blank identifier must never widen the delete's scope, even on a genuine zero count.
+        assert!(!should_purge_empty(Some(0), "", "acc", "m1"));
+        assert!(!should_purge_empty(Some(0), "adyen", "", "m1"));
+        assert!(!should_purge_empty(Some(0), "adyen", "acc", ""));
+    }
 }

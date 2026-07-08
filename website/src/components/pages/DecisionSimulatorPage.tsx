@@ -20,6 +20,7 @@ import { DecideGatewayResponse, GatewayConnector, MultiObjectiveInfo, PaymentAud
 import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
 import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
+import { useConnectorFees } from '../../hooks/useCostRouting'
 import { describeRoutingEvent, useRoutingEvents } from '../../hooks/useRoutingEvents'
 import { FEATURE_FLAGS } from '../../lib/featureFlags'
 import { Play, Pause, RefreshCw, ChevronDown, ChevronUp, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings, ArrowRightLeft, Target, TrendingDown, Flag, SlidersHorizontal } from 'lucide-react'
@@ -136,6 +137,7 @@ const DEFAULT_GW_SIM_CONFIG: GatewaySimConfig = {
 const DEFAULT_GW_SUCCESS_RATE: Record<string, number> = {
   stripe: 94,
   adyen: 93,
+  braintree: 92,
 }
 
 // Default sim config for a gateway, applying its per-gateway default SR.
@@ -907,6 +909,15 @@ export function DecisionSimulatorPage() {
   const merchantFeatures = useMerchantFeatures(effectiveMerchantId || undefined)
   const gsmScoringFilterEnabled = merchantFeatures.isEnabled('gsm-scoring-filter')
   const debitRoutingFlag = useDebitRoutingFlag(effectiveMerchantId)
+  // Connectors we've learned a cost model for from ingested settlement reports. In the
+  // multi-objective (economic-value) sim these drive the eligible-gateway set, so the ranking is
+  // scored on real fitted costs instead of the static stripe+adyen default — see the seeding effect
+  // below. Only connectors with a fit (`model_pct_bps != null`) qualify.
+  const { fees: connectorFees } = useConnectorFees(effectiveMerchantId || undefined)
+  const ingestedConnectors = useMemo(
+    () => connectorFees.filter(f => f.model_pct_bps != null).map(f => f.connector.toLowerCase()),
+    [connectorFees],
+  )
   const { routingKeysConfig, isLoading: routingKeysLoading, error: routingKeysError } = useDynamicRoutingConfig()
   const hasRoutingKeys = Object.keys(routingKeysConfig).length > 0
   const routingConfigUnavailable = !routingKeysLoading && (!hasRoutingKeys || Boolean(routingKeysError))
@@ -918,6 +929,12 @@ export function DecisionSimulatorPage() {
   )
 
   const [form, setForm] = useState<FormState>(initialState.form)
+  // The run loop closes over `form` when it starts and idles on that same closure
+  // across a pause, so a plain read would freeze at the pre-pause values. Mirror
+  // it into a ref (like amountRangeRef / multiObjScenarioRef) and read that live so
+  // a currency switch made while paused takes effect on the next resumed txn.
+  const formRef = useRef(form)
+  useEffect(() => { formRef.current = form }, [form])
 
   const [simulationConfig, setSimulationConfig] = useState<SimulationConfig>(initialState.simulationConfig)
   // Live amount range: the run loop reads this ref (not the captured config) so dragging
@@ -992,6 +1009,10 @@ export function DecisionSimulatorPage() {
   // predictor (ecom vs pos resolves the online/in-person interchange split). VGS-collected cards
   // are ecommerce, so that's the default.
   const [moChannel, setMoChannel] = useState<'ecom' | 'pos'>('ecom')
+  // Read live in the run loop (see formRef) so switching the channel while paused
+  // takes effect on resume instead of only after a full stop/restart.
+  const moChannelRef = useRef(moChannel)
+  useEffect(() => { moChannelRef.current = moChannel }, [moChannel])
   const [error, setError] = useState<string | null>(null)
   const txLogRef = useRef<HTMLDivElement>(null)
 
@@ -1015,7 +1036,9 @@ export function DecisionSimulatorPage() {
   // Live routing-event stream (leader flips, auth-band crossings), filtered to the run.
   // Poll tightly while a run is producing events so the Autopilot feed keeps up;
   // relax back to the idle cadence once it finishes.
-  const routingEvents = useRoutingEvents('1h', isSimulating && !isPaused ? 500 : 15_000)
+  const routingEvents = useRoutingEvents('1h', {
+    refreshInterval: isSimulating && !isPaused ? 500 : 15_000,
+  })
   const sessionRoutingEvents = useMemo(() => {
     if (simulationStartedAtMs == null) return []
     const sinceMs = simulationStartedAtMs - EVENTS_RUN_START_MARGIN_MS
@@ -1279,6 +1302,22 @@ export function DecisionSimulatorPage() {
       return changed ? next : prev
     })
   }, [form.ranking_algorithm, paymentMethodTypeOptions, cardBrandOptions, moCurrency])
+
+  // Cost mode only: in the multi-objective (economic-value) sim, drive the eligible connectors from
+  // the ones we've actually learned a cost model for, so the EV ranking is scored on real fitted
+  // costs rather than the static stripe+adyen default (which would rank stripe on fictional costs
+  // and omit an ingested connector like braintree). Falls back to the default when nothing is
+  // ingested yet. SR-based mode keeps the stripe+adyen default — the field is shared, so we reset it
+  // there. There is no manual editor for this field, so owning it here clobbers nothing; we stay out
+  // of the way of an in-flight run.
+  useEffect(() => {
+    if (isSimulating) return
+    const target =
+      form.ranking_algorithm === 'SR_MULTI_OBJECTIVE' && ingestedConnectors.length > 0
+        ? ingestedConnectors.join(', ')
+        : DEFAULT_FORM.eligible_gateways
+    setForm(prev => (prev.eligible_gateways === target ? prev : { ...prev, eligible_gateways: target }))
+  }, [form.ranking_algorithm, ingestedConnectors, isSimulating])
 
   useEffect(() => {
     if (!selectedAuditPaymentId && !selectedPreviewPaymentId && !setupPrompt) return
@@ -1938,7 +1977,7 @@ export function DecisionSimulatorPage() {
         paymentInfo: {
           paymentId: paymentId,
           amount,
-          currency: form.currency,
+          currency: formRef.current.currency,
           paymentType: 'ORDER_PAYMENT',
           paymentMethodType,
           paymentMethod,
@@ -1948,7 +1987,7 @@ export function DecisionSimulatorPage() {
           cardType: paymentMethod,
           cardProgram,
           ...(cardIssuerCountry && { cardIssuerCountry }),
-          channel: moChannel,
+          channel: moChannelRef.current,
         },
         eligibleGatewayList: gateways,
         rankingAlgorithm: 'SR_BASED_ROUTING',
@@ -2019,7 +2058,7 @@ export function DecisionSimulatorPage() {
         margin: mo?.margin ?? null,
         evGapTop2: mo?.evGapTop2 ?? null,
         amount,
-        currency: form.currency,
+        currency: formRef.current.currency,
         cardNetwork: cardBrand,
         cardProgram,
         cardIssuerRegion: cardIssuerCountry,
@@ -2938,10 +2977,11 @@ export function DecisionSimulatorPage() {
 
       {activeTab === 'batch' && (
         <div className="flex flex-wrap items-start gap-x-6 gap-y-4 rounded-2xl border border-slate-200 bg-white px-5 py-3 dark:border-[#222226] dark:bg-[#0b0b10]">
-            {[
-              { key: 'stripe', label: 'Stripe success rate' },
-              { key: 'adyen', label: 'Adyen success rate' },
-            ].map(({ key, label }) => {
+            {/* One SR slider per eligible connector. In cost mode the eligible set is driven by the
+                merchant's ingested connectors (see the seeding effect), so these follow suit instead
+                of a hardcoded stripe+adyen pair. */}
+            {eligibleGatewaysParsed.map((key) => {
+              const label = `${key.charAt(0).toUpperCase() + key.slice(1)} success rate`
               const color = gatewayColorMap[key] ?? GW_PALETTE[0]
               // Read from state (not the ref-backed getGwSuccessRate, which only
               // syncs in a post-render effect) so the controlled input reflects each

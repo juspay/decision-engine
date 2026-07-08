@@ -5,9 +5,11 @@
 //! is processed *identically* to a webhook-delivered one.
 //!
 //! Ingestion streams: the connector parses records off a `Read` in a blocking task and hands
-//! fixed-size batches across a bounded channel to the async inserter here. Peak memory is O(batch),
-//! not O(file), so a monthly multi-GB report stays flat. As batches flow we fold the report's shape
-//! (period, currencies, countries, volume) for the history record and tick per-job progress.
+//! fixed-size batches across a bounded channel to the aggregator here. Each batch is folded into
+//! per-day sufficient statistics (never stored row-by-row), so peak memory is O(distinct buckets)
+//! for one report — clusters × days × bands × channels, a few MB — not O(transactions). As batches
+//! flow we also fold the report's shape (period, currencies, countries, volume) for the history
+//! record and tick per-job progress. When the report is fully aggregated we insert the buckets once.
 
 use std::collections::BTreeSet;
 use std::io::{Cursor, Read};
@@ -18,6 +20,7 @@ use chrono::NaiveDate;
 use crate::config::ClickHouseAnalyticsConfig;
 
 use super::fit::{self, FitSummary};
+use super::rollup::RollupAccumulator;
 use super::sink;
 use super::source::{parse_in_batches, ConnectorRegistry};
 use super::store;
@@ -103,17 +106,20 @@ pub async fn ingest_report_reader(
     // The fit runs today (the snapshot's `report_date` = fit-run date); it windows on transaction
     // date internally, so a monthly file, daily files, or a mix all fold into the same model.
     let report_date = crate::utils::date_time::now().date().to_string();
+    // Rows whose report carries no transaction date are dated to the ingest day for the rollup.
+    let fallback_date = NaiveDate::parse_from_str(&report_date, "%Y-%m-%d")
+        .map_err(|e| IngestError::Storage(format!("bad report date: {e}")))?;
 
-    // Blocking CSV parse → bounded channel → async batched inserts. `blocking_send` inside the
-    // parser applies backpressure, so parsing never runs more than CHANNEL_DEPTH batches ahead.
+    // Blocking CSV parse → bounded channel → async aggregation. `blocking_send` inside the parser
+    // applies backpressure, so parsing never runs more than CHANNEL_DEPTH batches ahead.
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<SettledFeeRow>>(CHANNEL_DEPTH);
     let parse = tokio::task::spawn_blocking(move || {
         // Connector parses row-by-row; `parse_in_batches` does the generic accumulate-and-flush.
         parse_in_batches(source.as_ref(), reader, BATCH_SIZE, |batch| {
             tx.blocking_send(batch)
-                // The receiver drops only when the insert loop has already errored out; end the
+                // The receiver drops only when the consume loop has already errored out; end the
                 // parse quietly and let that error surface to the caller.
-                .map_err(|_| IngestError::Storage("insert side closed".to_string()))
+                .map_err(|_| IngestError::Storage("aggregate side closed".to_string()))
         })
     });
 
@@ -124,8 +130,10 @@ pub async fn ingest_report_reader(
     let mut period_end: Option<NaiveDate> = None;
     let mut total_gross = 0.0_f64;
 
-    let mut staged = 0usize;
-    let mut insert_err = None;
+    // The report is aggregated into per-day sufficient statistics as it streams (never stored
+    // row-by-row); we insert the buckets once, after the whole report is folded.
+    let mut acc = RollupAccumulator::new();
+    let mut processed = 0usize;
     while let Some(batch) = rx.recv().await {
         for row in &batch {
             if !row.currency.is_empty() {
@@ -139,50 +147,40 @@ pub async fn ingest_report_reader(
                 period_end = Some(period_end.map_or(d, |p| p.max(d)));
             }
             total_gross += row.gross;
+            acc.add_row(row, fallback_date);
         }
-
-        match sink::insert_settled_rows(
-            clickhouse,
-            connector,
-            account,
-            merchant_id,
-            &report_date,
-            progress_job.unwrap_or(0),
-            &batch,
-        )
-        .await
-        {
-            Ok(n) => {
-                staged += n;
-                if let Some(id) = progress_job {
-                    // Best-effort: a failed progress tick must not fail the ingest.
-                    let _ = store::update_progress(id, staged as i64).await;
-                }
-            }
-            Err(e) => {
-                // Stop consuming; dropping `rx` unblocks the parser's `blocking_send` with an error.
-                insert_err = Some(e);
-                break;
-            }
+        processed += batch.len();
+        if let Some(id) = progress_job {
+            // Best-effort: a failed progress tick must not fail the ingest.
+            let _ = store::update_progress(id, processed as i64).await;
         }
     }
     drop(rx);
 
-    // Join the parser. A parse error wins over the "insert side closed" it may have observed.
+    // Join the parser. A parse error wins over any "aggregate side closed" it may have observed.
     let parse_result = parse
         .await
         .map_err(|e| IngestError::Storage(format!("parse task panicked: {e}")))?;
-
-    if let Some(e) = insert_err {
-        return Err(e);
-    }
     parse_result?;
+
+    // One insert of the fully-aggregated buckets, then fit from what the rollup now holds. The
+    // history record reports transactions *processed* (`staged`), not bucket count.
+    let rows = acc.into_rows();
+    sink::insert_daily_stats(
+        clickhouse,
+        connector,
+        account,
+        merchant_id,
+        progress_job.unwrap_or(0),
+        &rows,
+    )
+    .await?;
 
     let summary =
         fit::fit_snapshot(clickhouse, connector, account, merchant_id, &report_date).await?;
 
     Ok(IngestOutcome {
-        staged,
+        staged: processed,
         report_date,
         period_start,
         period_end,

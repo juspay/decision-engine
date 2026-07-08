@@ -5,7 +5,7 @@ use axum::{
     extract::{Request, State},
     middleware::{self, Next},
     response::Response,
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
 };
 use axum_server::{tls_rustls::RustlsConfig, Handle};
 use error_stack::ResultExt;
@@ -434,6 +434,24 @@ where
                 .layer(axum::extract::DefaultBodyLimit::max(
                     routes::report_upload::MAX_UPLOAD_BYTES,
                 )),
+        )
+        .route(
+            "/merchant-account/:merchant-id/connector-fees",
+            get(routes::connector_fees::list_connector_fees),
+        )
+        .route(
+            "/merchant-account/:merchant-id/connectors/:connector/fee-override",
+            put(routes::connector_fees::set_fee_override)
+                .delete(routes::connector_fees::delete_fee_override),
+        )
+        .route(
+            "/merchant-account/:merchant-id/cost-clusters",
+            get(routes::cost_clusters::list_cost_clusters),
+        )
+        .route(
+            "/merchant-account/:merchant-id/cost-clusters/:cluster-key/fee-override",
+            put(routes::cost_clusters::set_cluster_override)
+                .delete(routes::cost_clusters::delete_cluster_override),
         )
         .route(
             "/merchant-account/:merchant-id/cost-coverage",

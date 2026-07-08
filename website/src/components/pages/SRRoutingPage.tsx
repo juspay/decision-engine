@@ -3,6 +3,7 @@ import { useForm, useFieldArray } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Card, CardBody, CardHeader } from '../ui/Card'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
@@ -14,6 +15,7 @@ import { PAYMENT_METHOD_TYPES, PAYMENT_METHODS } from '../../lib/constants'
 import { Plus, Trash2, Eye, PowerOff, Info } from 'lucide-react'
 import { useMerchantFeatures, type KnownFeature } from '../../hooks/useMerchantFeatures'
 import { BucketHedgingTuner } from './BucketHedgingTuner'
+import { CostEstimationPanel } from './CostEstimationPanel'
 
 // Ensures a stored value is always selectable in a dropdown, even when it isn't in the known
 // option list (e.g. auto-calibration writes the casing live txns use, "CARD"/"CREDIT", while the
@@ -219,11 +221,27 @@ function CurrentConfigDetails({ config }: { config: SRConfigResponse['config'] }
   )
 }
 
-type SRTab = 'autopilot' | 'manual' | 'flags'
+type SRTab = 'autopilot' | 'manual' | 'flags' | 'cost'
+const SR_TABS: readonly SRTab[] = ['autopilot', 'manual', 'flags', 'cost']
 
 export function SRRoutingPage() {
   const { merchantId } = useMerchantStore()
-  const [activeTab, setActiveTab] = useState<SRTab>('autopilot')
+  // Active tab is kept in the URL (?tab=…) so a reload or shared link reopens it directly.
+  // Unknown/absent values fall back to Autopilot, and the default is left out of the URL.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tabParam = searchParams.get('tab')
+  const activeTab: SRTab = SR_TABS.includes(tabParam as SRTab) ? (tabParam as SRTab) : 'autopilot'
+  const setActiveTab = (tab: SRTab) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        if (tab === 'autopilot') next.delete('tab')
+        else next.set('tab', tab)
+        return next
+      },
+      { replace: true },
+    )
+  }
   const [manualTab, setManualTab] = useState<'scoring' | 'elimination' | 'dimensions'>('scoring')
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -375,7 +393,9 @@ export function SRRoutingPage() {
     }`
 
   return (
-    <div className="space-y-6 max-w-4xl">
+    // Cost Estimation is a wide two-column dashboard, so it takes the full page width;
+    // the config tabs read better constrained.
+    <div className={`space-y-6 ${activeTab === 'cost' ? 'w-full' : 'max-w-4xl'}`}>
       {/* Page header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
@@ -427,6 +447,7 @@ export function SRRoutingPage() {
           <button type="button" className={tabClass('autopilot')} onClick={() => setActiveTab('autopilot')}>Autopilot</button>
           <button type="button" className={tabClass('manual')} onClick={() => setActiveTab('manual')}>Manual</button>
           <button type="button" className={tabClass('flags')} onClick={() => setActiveTab('flags')}>Feature Flags</button>
+          <button type="button" className={tabClass('cost')} onClick={() => setActiveTab('cost')}>Cost Estimation</button>
         </nav>
       </div>
 
@@ -605,6 +626,9 @@ export function SRRoutingPage() {
 
           {/* ── Feature Flags tab ── */}
           {activeTab === 'flags' && <SRFeatureFlags merchantId={merchantId} />}
+
+          {/* ── Cost Estimation tab ── */}
+          {activeTab === 'cost' && <CostEstimationPanel merchantId={merchantId} />}
         </>
       )}
     </div>

@@ -158,8 +158,14 @@ pub async fn delete_ingestion(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
 
-    // Revert the served models immediately rather than waiting for the periodic refresh.
-    if let Err(e) = crate::cost_ingestion::serving::refresh(&clickhouse).await {
+    // Revert the served models immediately rather than waiting for the periodic refresh. Runs
+    // unconditionally — including when the refit above was empty (last data deleted), in which case
+    // the fit has purged the stale snapshot and this rebuilds this merchant's cache entry without it
+    // (dropping it), so the router stops using models with no supporting data right away instead of
+    // after the 300s tick. Per-merchant: other merchants' cached models are left untouched.
+    if let Err(e) =
+        crate::cost_ingestion::serving::refresh_merchant(&clickhouse, &merchant_id).await
+    {
         logger::warn!(tag = "report_upload", "serving refresh after delete failed: {}", e);
     }
 
@@ -333,7 +339,11 @@ async fn process_upload(
             }
             // Serve the freshly-fitted models immediately, rather than waiting for the periodic
             // serving refresh (otherwise a just-ingested cluster keeps falling back for ~5 min).
-            if let Err(e) = crate::cost_ingestion::serving::refresh(&clickhouse).await {
+            // Per-merchant: only this merchant's models are rebuilt, keeping the upload off the
+            // ~2s global-refresh path (the periodic ticker still does the full rebuild).
+            if let Err(e) =
+                crate::cost_ingestion::serving::refresh_merchant(&clickhouse, &merchant_id).await
+            {
                 logger::warn!(tag = "report_upload", "serving refresh after ingest failed: {}", e);
             }
         }

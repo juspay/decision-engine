@@ -9,12 +9,15 @@
 //! lives behind that trait, so adding a connector is a new impl plus its credentials — the queue,
 //! staging, fit, and serving never change.
 
+pub mod blended;
 pub mod connectors;
 pub mod coverage;
 pub mod creds;
 pub mod detect;
 pub mod fit;
+pub mod overrides;
 pub mod pipeline;
+pub mod rollup;
 pub mod serving;
 pub mod sink;
 pub mod source;
