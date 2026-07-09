@@ -40,14 +40,17 @@ pub struct Completion {
     pub good_clusters: i64,
 }
 
-/// Enqueue a webhook-delivered report. **Idempotent** on `(connector, notification_id)`: a
-/// re-delivered webhook is a no-op. Returns `true` when a new job was created.
-pub async fn enqueue_webhook(
+/// Enqueue a report discovered automatically — either pushed by a connector webhook (`source =
+/// "webhook"`) or found by polling a connector's API (`source = "poll"`). **Idempotent** on
+/// `(connector, notification_id)`: a re-delivered/re-listed report is a no-op. Returns `true` when a
+/// new job was created.
+pub async fn enqueue_pending(
     connector: &str,
     account: &str,
     merchant_id: &str,
     notification_id: &str,
     report_ref: &str,
+    source: &str,
 ) -> Result<bool, IngestError> {
     let app_state = get_tenant_app_state().await;
 
@@ -71,7 +74,7 @@ pub async fn enqueue_webhook(
         merchant_id: merchant_id.to_string(),
         connector: connector.to_string(),
         account: account.to_string(),
-        source: "webhook".to_string(),
+        source: source.to_string(),
         notification_id: Some(notification_id.to_string()),
         report_ref: report_ref.to_string(),
         status: "pending".to_string(),

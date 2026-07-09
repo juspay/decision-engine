@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react'
 
 /** Connectors whose settlement report can be manually uploaded (their parser is implemented). The
- * automatic/webhook path is a superset gated separately — Braintree's and Chase's download/webhook
- * is not wired yet, so they're upload-only for now. */
+ * automatic path is gated separately — Chase pulls via its poller (OAuth + reporting API), while
+ * Braintree's webhook/download is still upload-only. */
 export const UPLOAD_CONNECTORS = [
   { value: 'adyen', label: 'Adyen' },
   { value: 'braintree', label: 'Braintree' },

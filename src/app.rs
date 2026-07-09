@@ -333,6 +333,12 @@ where
         global_app_state.global_config.analytics.clickhouse.clone(),
     );
 
+    // Background job: poll every pull-based connector's reporting API for ready reports and enqueue
+    // them. Connector-agnostic; no-op unless `report_poll_enabled`.
+    crate::cost_ingestion::poller::spawn(
+        global_app_state.global_config.cost_ingestion.clone(),
+    );
+
     // Background job: refresh the in-house cost serving view from the fitted models, so the
     // multi-objective router can price candidates from our own ingested data.
     crate::cost_ingestion::serving::spawn(

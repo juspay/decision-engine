@@ -160,6 +160,61 @@ fn config_name(connector: &str, account: &str) -> String {
     format!("cost_ingest_creds::{connector}::{account}")
 }
 
+/// Whether a connector is *pulled* (we poll its API for ready reports) rather than *pushed* (it
+/// calls our webhook). Sourced from the connector's own [`SettlementReportSource::is_pull`], so no
+/// connector id is hardcoded here. Pull connectors need a discoverable, cross-merchant list of their
+/// sources (see [`list_poll_sources`]); push connectors are found via their webhook payload instead.
+pub fn is_pull_connector(connector: &str) -> bool {
+    super::ConnectorRegistry::with_builtins()
+        .get(connector)
+        .map(|s| s.is_pull())
+        .unwrap_or(false)
+}
+
+/// Per-connector index name holding every `(connector, account)` the poller must sweep. The KV
+/// store has no prefix/list-all query, so a pull connector's sources are enumerated from here
+/// rather than by scanning `cost_ingest_creds::{connector}::*`.
+fn poll_index_name(connector: &str) -> String {
+    format!("cost_ingest_poll::{connector}")
+}
+
+/// List all `(connector, account)` sources the poller should sweep for `connector`, across every
+/// merchant. Empty when none are configured.
+pub async fn list_poll_sources(connector: &str) -> Result<Vec<SourceRef>, IngestError> {
+    let stored = service_configuration::find_config_by_name(poll_index_name(connector))
+        .await
+        .map_err(|e| IngestError::Storage(e.to_string()))?;
+    match stored.and_then(|c| c.value) {
+        Some(v) => serde_json::from_str(&v).map_err(|e| IngestError::Storage(e.to_string())),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// Record a pull connector's `(connector, account)` in its poll index (idempotent).
+async fn add_poll_source(connector: &str, account: &str) -> Result<(), IngestError> {
+    let mut sources = list_poll_sources(connector).await?;
+    let entry = SourceRef {
+        connector: connector.to_string(),
+        account: account.to_string(),
+    };
+    if sources.contains(&entry) {
+        return Ok(());
+    }
+    sources.push(entry);
+    let value = serde_json::to_string(&sources).map_err(|e| IngestError::Storage(e.to_string()))?;
+    let name = poll_index_name(connector);
+    let exists = service_configuration::find_config_by_name(name.clone())
+        .await
+        .map_err(|e| IngestError::Storage(e.to_string()))?
+        .is_some();
+    if exists {
+        service_configuration::update_config(name, Some(value)).await
+    } else {
+        service_configuration::insert_config(name, Some(value)).await
+    }
+    .map_err(|e| IngestError::Storage(e.to_string()))
+}
+
 /// On-the-wire shape of the encrypted blob (before AES). Secrets are peeked only here, at the
 /// encryption boundary.
 #[derive(Serialize, Deserialize)]
@@ -274,7 +329,14 @@ impl ConnectorCredsStore {
         .map_err(|e| IngestError::Storage(e.to_string()))?;
 
         // Record the source in the merchant's index so the dashboard can list it.
-        add_source(merchant_id, connector, account).await
+        add_source(merchant_id, connector, account).await?;
+
+        // Pull connectors also go in a per-connector poll index so the background poller can find
+        // every source to sweep, across merchants, without a prefix scan.
+        if is_pull_connector(connector) {
+            add_poll_source(connector, account).await?;
+        }
+        Ok(())
     }
 
     /// List a merchant's configured sources with masked credential previews. Decrypts each blob to
@@ -362,6 +424,14 @@ mod tests {
         assert_eq!(opened.merchant_id, "merchant_A");
         assert_eq!(opened.creds.webhook_secret.peek(), creds.webhook_secret.peek());
         assert_eq!(opened.creds.download_auth.peek(), creds.download_auth.peek());
+    }
+
+    #[test]
+    fn only_pull_connectors_are_polled() {
+        assert!(is_pull_connector("chase"));
+        assert!(!is_pull_connector("adyen"));
+        assert!(!is_pull_connector("braintree"));
+        assert_eq!(poll_index_name("chase"), "cost_ingest_poll::chase");
     }
 
     #[test]

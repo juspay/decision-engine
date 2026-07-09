@@ -74,12 +74,13 @@ async fn handle(connector: &str, headers: &HeaderMap, body: &[u8]) -> Result<boo
     let note = source.verify_and_parse_notification(headers, body, &resolved.creds.webhook_secret)?;
 
     // 4. Enqueue (idempotent on the notification id).
-    store::enqueue_webhook(
+    store::enqueue_pending(
         connector,
         &account,
         &resolved.merchant_id,
         &note.notification_id,
         &note.report_ref,
+        "webhook",
     )
     .await
 }

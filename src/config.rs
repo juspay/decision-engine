@@ -312,6 +312,12 @@ pub struct CostIngestionConfig {
     pub worker_interval_secs: u64,
     /// Max jobs claimed per poll cycle.
     pub worker_batch_size: usize,
+    /// Enable the report poller for pull-based connectors: it lists each connector's ready reports
+    /// and enqueues them. Connector-agnostic. Off by default; enable on the deployment that owns
+    /// ingestion.
+    pub report_poll_enabled: bool,
+    /// How often the report poller lists reports, in seconds. Reports are daily, so hourly is ample.
+    pub report_poll_interval_secs: u64,
 }
 
 impl Default for CostIngestionConfig {
@@ -322,6 +328,8 @@ impl Default for CostIngestionConfig {
             worker_enabled: false,
             worker_interval_secs: 60,
             worker_batch_size: 20,
+            report_poll_enabled: false,
+            report_poll_interval_secs: 3600,
         }
     }
 }

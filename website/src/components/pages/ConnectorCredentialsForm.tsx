@@ -13,9 +13,12 @@ import {
 import { Field, inputClass } from './CostRoutingShared'
 
 /**
- * Automatic-ingestion tab: store a connector's webhook secret + report-download auth (encrypted at
- * rest) so the webhook worker can pull settlement reports. Lists the (connector, account) pairs
- * already configured.
+ * Automatic-ingestion tab: store a connector's report-access credentials (encrypted at rest) so the
+ * ingest worker can pull settlement reports. Two credential shapes:
+ *  - webhook connectors (Adyen): a webhook signing secret + report-download auth.
+ *  - Chase (J.P. Morgan): OAuth2 client-assertion credentials — no webhook — packed as a JSON blob
+ *    into `download_auth` (the pull poller reads it). Lists the (connector, account) pairs already
+ *    configured.
  */
 export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }) {
   const { sources, mutate: mutateSources } = useConnectorSources(merchantId)
@@ -27,36 +30,76 @@ export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }
   // When set, the form is editing this existing source: the account is its identity (locked), a
   // save upserts its secrets, and its masked hints show what's currently stored.
   const [editing, setEditing] = useState<ConnectorSource | null>(null)
+  // Chase OAuth fields (used only when connector === 'chase').
+  const [clientId, setClientId] = useState('')
+  const [resource, setResource] = useState('')
+  const [privateKeyPem, setPrivateKeyPem] = useState('')
+  const [tokenUrl, setTokenUrl] = useState('')
+  const [reportsUrl, setReportsUrl] = useState('')
+  // Local/mock testing: a pre-supplied bearer token that skips OAuth (the mock/local stub ignores
+  // it). When set, the OAuth fields aren't required.
+  const [accessToken, setAccessToken] = useState('')
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
+  function resetSecrets() {
+    setWebhookSecret('')
+    setDownloadAuth('')
+    setPrivateKeyPem('')
+    setAccessToken('')
+  }
+
   function resetForm() {
     setEditing(null)
     setAccount('')
-    setWebhookSecret('')
-    setDownloadAuth('')
+    resetSecrets()
   }
+
+  const isChase = connector === 'chase'
 
   async function handleSave() {
     if (!merchantId) {
       setError('Set a merchant ID first')
       return
     }
-    if (!account || !webhookSecret || !downloadAuth) {
-      setError('Account, webhook secret and download auth are all required')
-      return
+
+    // Build the (webhook_secret, download_auth) pair for this connector's credential shape.
+    let payload: { account: string; webhook_secret: string; download_auth: string }
+    if (isChase) {
+      // Two credential modes: real OAuth (client id + resource + private key) or a pre-supplied
+      // access token for local/mock testing. Exactly one must be complete.
+      const hasOAuth = clientId && resource && privateKeyPem
+      if (!account || (!accessToken && !hasOAuth)) {
+        setError(
+          'Chase needs an Account (EntityId) plus either an Access token (testing) or all of Client ID, Resource and Private key',
+        )
+        return
+      }
+      // Chase has no webhook; the OAuth credentials ride in download_auth as JSON. Only include the
+      // optional fields when set, so the backend defaults apply otherwise.
+      const creds: Record<string, string> = {}
+      if (clientId) creds.client_id = clientId
+      if (resource) creds.resource = resource
+      if (privateKeyPem) creds.private_key_pem = privateKeyPem
+      if (accessToken) creds.access_token = accessToken
+      if (tokenUrl) creds.token_url = tokenUrl
+      if (reportsUrl) creds.reports_url = reportsUrl
+      payload = { account, webhook_secret: '', download_auth: JSON.stringify(creds) }
+    } else {
+      if (!account || !webhookSecret || !downloadAuth) {
+        setError('Account, webhook secret and download auth are all required')
+        return
+      }
+      payload = { account, webhook_secret: webhookSecret, download_auth: downloadAuth }
     }
+
     setSaving(true)
     setError(null)
     setSuccess(null)
     try {
-      await setConnectorCredentials(merchantId, connector, {
-        account,
-        webhook_secret: webhookSecret,
-        download_auth: downloadAuth,
-      })
+      await setConnectorCredentials(merchantId, connector, payload)
       setSuccess(`Saved credentials for ${connector} / ${account}.`)
       resetForm()
       await mutateSources()
@@ -115,59 +158,103 @@ export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }
           <select
             className={inputClass}
             value={connector}
-            onChange={(e) => setConnector(e.target.value)}
+            onChange={(e) => {
+              setConnector(e.target.value)
+              setError(null)
+            }}
           >
             <option value="adyen">Adyen</option>
+            <option value="chase">Chase (J.P. Morgan)</option>
           </select>
         </Field>
         <Field
           label="Account"
-          hint={
-            editing
-              ? 'Editing an existing source — account is locked'
-              : 'Connector-side account (e.g. Adyen merchantAccountCode)'
-          }
+          hint={isChase ? 'J.P. Morgan EntityId' : 'Connector-side account (e.g. Adyen merchantAccountCode)'}
         >
           <input
             className={inputClass}
             value={account}
             onChange={(e) => setAccount(e.target.value)}
-            placeholder="AcmeMerchantEU"
-            disabled={editing !== null}
+            placeholder={isChase ? '418553' : 'AcmeMerchantEU'}
           />
         </Field>
-        <Field
-          label="Webhook secret"
-          hint={
-            editing
-              ? 'Enter a new value to replace the stored secret'
-              : 'Used to verify inbound webhook signatures (HMAC key)'
-          }
-        >
-          <input
-            className={inputClass}
-            type="password"
-            value={webhookSecret}
-            onChange={(e) => setWebhookSecret(e.target.value)}
-            placeholder={editing?.webhook_secret_hint || '••••••••'}
-          />
-        </Field>
-        <Field
-          label="Report download auth"
-          hint={
-            editing
-              ? 'Enter a new value to replace the stored auth'
-              : 'Report-user Basic auth as user:password, or a Report Service API key on its own'
-          }
-        >
-          <input
-            className={inputClass}
-            type="password"
-            value={downloadAuth}
-            onChange={(e) => setDownloadAuth(e.target.value)}
-            placeholder={editing?.download_auth_hint || 'user:password or API key'}
-          />
-        </Field>
+
+        {isChase ? (
+          <>
+            <Field label="Client ID" hint="OAuth client id issued by J.P. Morgan">
+              <input
+                className={inputClass}
+                value={clientId}
+                onChange={(e) => setClientId(e.target.value)}
+                placeholder="CC-100000-A0000000"
+              />
+            </Field>
+            <Field label="Resource" hint="OAuth resource issued by J.P. Morgan">
+              <input
+                className={inputClass}
+                value={resource}
+                onChange={(e) => setResource(e.target.value)}
+                placeholder="JPMC:URI:RS-000000-00-..."
+              />
+            </Field>
+            <Field label="Private key (PEM)" hint="RSA private key that signs the JWT client assertion">
+              <textarea
+                className={`${inputClass} h-28 font-mono text-xs`}
+                value={privateKeyPem}
+                onChange={(e) => setPrivateKeyPem(e.target.value)}
+                placeholder={'-----BEGIN PRIVATE KEY-----\n...'}
+              />
+            </Field>
+            <Field label="Token URL (optional)" hint="Defaults to the J.P. Morgan production token endpoint">
+              <input
+                className={inputClass}
+                value={tokenUrl}
+                onChange={(e) => setTokenUrl(e.target.value)}
+                placeholder="https://idag2.jpmorganchase.com/adfs/oauth2/token"
+              />
+            </Field>
+            <Field label="Reports URL (optional)" hint="Defaults to production; use the mock or local stub host to test">
+              <input
+                className={inputClass}
+                value={reportsUrl}
+                onChange={(e) => setReportsUrl(e.target.value)}
+                placeholder="https://api.reports.jpmorgan.com/api/v1/reports"
+              />
+            </Field>
+            <Field
+              label="Access token (testing only)"
+              hint="Skips OAuth — for the mock or local stub, which ignore token validity. Leave blank for real J.P. Morgan auth."
+            >
+              <input
+                className={inputClass}
+                value={accessToken}
+                onChange={(e) => setAccessToken(e.target.value)}
+                placeholder="test"
+              />
+            </Field>
+          </>
+        ) : (
+          <>
+            <Field label="Webhook secret" hint="Used to verify inbound webhook signatures (HMAC key)">
+              <input
+                className={inputClass}
+                type="password"
+                value={webhookSecret}
+                onChange={(e) => setWebhookSecret(e.target.value)}
+                placeholder="••••••••"
+              />
+            </Field>
+            <Field label="Report download auth" hint="e.g. reportuser:password">
+              <input
+                className={inputClass}
+                type="password"
+                value={downloadAuth}
+                onChange={(e) => setDownloadAuth(e.target.value)}
+                placeholder="••••••••"
+              />
+            </Field>
+          </>
+        )}
 
         <div className="flex items-center gap-3">
           <Button onClick={handleSave} disabled={!merchantId || saving}>

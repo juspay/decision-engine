@@ -34,26 +34,67 @@
 //! return a descriptive error until then; the parser (`parse_rows`) is complete and independently
 //! testable.
 
+use std::collections::HashMap;
 use std::io::{BufReader, Read};
-use std::sync::OnceLock;
-use std::time::Duration;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant, SystemTime};
 
 use async_trait::async_trait;
 use axum::http::HeaderMap;
 use bytes::Bytes;
-use masking::Secret;
+use chrono::NaiveDate;
+use josekit::jws::JwsHeader;
+use josekit::jwt::{self, JwtPayload};
+use masking::{PeekInterface, Secret};
+use serde::Deserialize;
+use uuid::Uuid;
 
 use crate::cost_ingestion::connectors::csv_reader;
 use crate::cost_ingestion::source::SettlementReportSource;
-use crate::cost_ingestion::types::{ConnectorCreds, IngestError, ReportNotification, SettledFeeRow};
+use crate::cost_ingestion::types::{
+    ConnectorCreds, IngestError, ReadyReport, ReportNotification, SettledFeeRow,
+};
 
 /// `Action Type Code Text` value that carries a settled processing fee. Only sales feed the fit;
 /// `REFUND` rows are reversals whose signed amounts would distort the gross→fee regression, so they
 /// are skipped (mirrors Adyen's record-type and Braintree's transaction-type filter).
 const SALE_ACTION: &str = "SALE";
 
-#[allow(dead_code)] // used once download_report is implemented
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// The report *type* the J.P. Morgan **Deposit details** preset report is delivered under. Deposit
+/// details carries the per-transaction split interchange/assessment fees plus every cluster
+/// dimension the fit keys on; its report type is `Submission details`. A merchant configured for
+/// cost ingestion runs only Deposit details, so the poller keeps every completed `Submission
+/// details` report. Compared with whitespace stripped and case-insensitively, because the reporting
+/// API spells it `"Submission details"` while the report envelope spells it `"SubmissionDetails"`.
+const SUBMISSION_DETAILS_REPORT_TYPE: &str = "submissiondetails";
+
+/// OAuth2 client-assertion type for the signed-JWT `client_credentials` grant.
+const CLIENT_ASSERTION_TYPE: &str = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
+/// The signed JWT assertion is short-lived — it is exchanged for the access token immediately.
+const ASSERTION_TTL: Duration = Duration::from_secs(300);
+/// Refresh the cached access token this far before its stated expiry, to avoid racing a 401.
+const TOKEN_REFRESH_SKEW: u64 = 300;
+/// Cap on pages followed when listing reports — a backstop against a runaway `next` cursor.
+const MAX_REPORT_PAGES: usize = 50;
+
+fn default_token_url() -> String {
+    "https://idag2.jpmorganchase.com/adfs/oauth2/token".to_string()
+}
+fn default_reports_url() -> String {
+    // Reporting API host (distinct from the report-files host `api.reports-files.jpmorgan.com`).
+    // Override for the mock (`api-mock.payments.jpmorgan.com`) or a local stub when testing.
+    "https://api.reports.jpmorgan.com/api/v1/reports".to_string()
+}
+
+/// Whether a `reportTypeNames` entry is the Submission details type, tolerant of the API's spacing
+/// (`"Submission details"`) vs the envelope's (`"SubmissionDetails"`).
+fn is_submission_details(name: &str) -> bool {
+    name.split_whitespace()
+        .collect::<String>()
+        .eq_ignore_ascii_case(SUBMISSION_DETAILS_REPORT_TYPE)
+}
 
 pub struct ChaseReportSource;
 
@@ -69,7 +110,6 @@ impl Default for ChaseReportSource {
     }
 }
 
-#[allow(dead_code)] // used once download_report is implemented
 fn http_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
@@ -80,6 +120,92 @@ fn http_client() -> &'static reqwest::Client {
     })
 }
 
+/// Chase's OAuth + reporting-API access, carried inside the opaque [`ConnectorCreds::download_auth`]
+/// as a JSON blob (Chase has no webhook, so `webhook_secret` is unused). `token_url`/`reports_url`
+/// default to production but are overridable — point them at `api-mock.payments.jpmorgan.com` to
+/// run against J.P. Morgan's mock, which accepts any bearer token.
+#[derive(Debug, Clone, Deserialize)]
+struct ChaseCreds {
+    /// OAuth client id issued by J.P. Morgan. Required for real auth; unused when `access_token` is
+    /// set.
+    #[serde(default)]
+    client_id: String,
+    /// OAuth `resource` parameter issued by J.P. Morgan. Unused when `access_token` is set.
+    #[serde(default)]
+    resource: String,
+    /// RSA private key (PEM) that signs the JWT client assertion. Unused when `access_token` is set.
+    #[serde(default)]
+    private_key_pem: String,
+    /// Local/mock testing escape hatch: a pre-supplied bearer token. When set, OAuth signing is
+    /// skipped and this token is sent directly — J.P. Morgan's mock and a local stub ignore the
+    /// token's validity, so no `client_id`/`resource`/`private_key_pem` is needed. Leave unset for
+    /// real J.P. Morgan auth.
+    #[serde(default)]
+    access_token: Option<String>,
+    #[serde(default = "default_token_url")]
+    token_url: String,
+    #[serde(default = "default_reports_url")]
+    reports_url: String,
+}
+
+impl ChaseCreds {
+    /// Read the JSON credential blob out of `download_auth`.
+    fn parse(creds: &ConnectorCreds) -> Result<Self, IngestError> {
+        serde_json::from_str(creds.download_auth.peek()).map_err(|e| {
+            IngestError::MalformedNotification(format!(
+                "chase download_auth must be a JSON credential blob: {e}"
+            ))
+        })
+    }
+}
+
+// ── JSON shapes for the reporting API (only the fields we read; camelCase → snake_case). ──
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReportsListResponse {
+    #[serde(default)]
+    summarized_reports: Vec<SummarizedReport>,
+    /// Opaque cursor for the next page; echoed back as the `next` request header. Absent on last page.
+    next: Option<String>,
+    /// True when this is the final page of results.
+    #[serde(default)]
+    last_page: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SummarizedReport {
+    #[serde(default)]
+    report_identifier: String,
+    #[serde(default)]
+    report_type_names: Vec<String>,
+    #[serde(default)]
+    report_status: String,
+    interval_param: Option<IntervalParam>,
+    report_details: Option<ReportDetails>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IntervalParam {
+    reporting_period_start_timestamp: Option<String>,
+    reporting_period_end_timestamp: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReportDetails {
+    url: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct TokenResponse {
+    access_token: String,
+    #[serde(default)]
+    expires_in: u64,
+}
+
 #[async_trait]
 impl SettlementReportSource for ChaseReportSource {
     fn connector(&self) -> &'static str {
@@ -87,9 +213,8 @@ impl SettlementReportSource for ChaseReportSource {
     }
 
     fn peek_account(&self, _raw_body: &[u8]) -> Result<String, IngestError> {
-        // TODO(chase-webhook): extract the Chase merchant/entity identifier from the unverified
-        // notification body once the report-ready webhook shape is confirmed. The report frames it
-        // as `EntityId=…` in the BEGIN/metadata lines; the webhook envelope is TBD.
+        // Chase is pull-based (no report-ready webhook), so the webhook ingress never routes here —
+        // discovery happens in the report poller via `poll_ready_reports`.
         Err(not_implemented("peek_account"))
     }
 
@@ -99,19 +224,51 @@ impl SettlementReportSource for ChaseReportSource {
         _raw_body: &[u8],
         _secret: &Secret<String>,
     ) -> Result<ReportNotification, IngestError> {
-        // TODO(chase-webhook): verify Chase's report-available webhook signature and extract the
-        // report handle. Signature scheme and notification shape need confirmation before wiring.
+        // Pull-based: no inbound webhook to verify. See `chase_poller`.
         Err(not_implemented("verify_and_parse_notification"))
     }
 
+    /// Chase is pull-based: the report poller lists ready reports (below) rather than receiving a
+    /// webhook.
+    fn is_pull(&self) -> bool {
+        true
+    }
+
+    /// List the completed Deposit details (Submission details) reports ready to ingest for one
+    /// settlement source. Driven by the generic report poller.
+    async fn poll_ready_reports(
+        &self,
+        creds: &ConnectorCreds,
+    ) -> Result<Vec<ReadyReport>, IngestError> {
+        let chase = ChaseCreds::parse(creds)?;
+        list_ready_reports(&chase).await
+    }
+
+    /// Fetch a completed report's file. `note.report_ref` is the `reportDetails.url` captured at
+    /// poll time (on J.P. Morgan's file host, distinct from the reports API), fetched with a fresh
+    /// bearer token.
     async fn download_report(
         &self,
-        _creds: &ConnectorCreds,
-        _note: &ReportNotification,
+        creds: &ConnectorCreds,
+        note: &ReportNotification,
     ) -> Result<Bytes, IngestError> {
-        // TODO(chase-webhook): fetch the report using the merchant's stored credentials. Chase
-        // delivers preset reports over SFTP/API — confirm the transport before wiring `http_client`.
-        Err(not_implemented("download_report"))
+        let chase = ChaseCreds::parse(creds)?;
+        let token = oauth_token(&chase).await?;
+        let resp = http_client()
+            .get(&note.report_ref)
+            .bearer_auth(&token)
+            .send()
+            .await
+            .map_err(|e| IngestError::Download(format!("chase report download: {e}")))?;
+        if !resp.status().is_success() {
+            return Err(IngestError::Download(format!(
+                "chase report download status {}",
+                resp.status()
+            )));
+        }
+        resp.bytes()
+            .await
+            .map_err(|e| IngestError::Download(e.to_string()))
     }
 
     fn parse_rows(
@@ -223,11 +380,209 @@ impl SettlementReportSource for ChaseReportSource {
     }
 }
 
-/// Placeholder error for the not-yet-wired notification/download path.
+/// The webhook path is unused for Chase (pull-based); these trait methods are never called.
 fn not_implemented(method: &str) -> IngestError {
     IngestError::MalformedNotification(format!(
-        "chase connector: {method} not yet implemented (webhook/download shape TBD)"
+        "chase connector: {method} is unused — chase is pull-based (see the report poller)"
     ))
+}
+
+/// `GET /api/v1/reports`, following the `next`/`lastPage` cursor → all completed Submission details
+/// instances across pages.
+async fn list_ready_reports(creds: &ChaseCreds) -> Result<Vec<ReadyReport>, IngestError> {
+    let token = oauth_token(creds).await?;
+    let mut out = Vec::new();
+    let mut next: Option<String> = None;
+    for _ in 0..MAX_REPORT_PAGES {
+        let mut req = http_client()
+            .get(&creds.reports_url)
+            .bearer_auth(&token)
+            .header("Accept", "application/json");
+        // The cursor is passed as a request header (per the reporting API spec), not a query param.
+        if let Some(cursor) = &next {
+            req = req.header("next", cursor.as_str());
+        }
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| IngestError::Download(format!("chase reports request: {e}")))?;
+        if !resp.status().is_success() {
+            return Err(IngestError::Download(format!(
+                "chase reports status {}",
+                resp.status()
+            )));
+        }
+        let body = resp
+            .bytes()
+            .await
+            .map_err(|e| IngestError::Download(format!("chase reports body: {e}")))?;
+        let page = parse_reports_page(&body)?;
+        let last = page.last_page || page.next.is_none();
+        next = page.next.clone();
+        out.extend(ready_reports(page));
+        if last {
+            break;
+        }
+    }
+    Ok(out)
+}
+
+/// Parse one `GET /reports` page (typed), leaving pagination and filtering to the caller.
+fn parse_reports_page(body: &[u8]) -> Result<ReportsListResponse, IngestError> {
+    serde_json::from_slice(body)
+        .map_err(|e| IngestError::Download(format!("chase reports parse: {e}")))
+}
+
+/// Keep only completed Submission details instances that carry a download URL.
+fn ready_reports(resp: ReportsListResponse) -> Vec<ReadyReport> {
+    resp.summarized_reports
+        .into_iter()
+        .filter_map(ready_report)
+        .collect()
+}
+
+/// Buffered convenience over [`parse_reports_page`] + [`ready_reports`] for one page (used by tests).
+#[cfg(test)]
+fn parse_reports_list(body: &[u8]) -> Result<Vec<ReadyReport>, IngestError> {
+    Ok(ready_reports(parse_reports_page(body)?))
+}
+
+/// One `summarizedReports` entry → a [`ReadyReport`], or `None` if it isn't a completed Submission
+/// details report with a download URL. `reportStatus` is capitalized in the API (`"Completed"`), so
+/// compare case-insensitively; `Requested`/`Initiated`/`Errored` reports carry no `reportDetails`
+/// and are skipped.
+fn ready_report(r: SummarizedReport) -> Option<ReadyReport> {
+    if !r.report_status.eq_ignore_ascii_case("completed") {
+        return None;
+    }
+    if !r.report_type_names.iter().any(|n| is_submission_details(n)) {
+        return None;
+    }
+    let report_ref = r
+        .report_details
+        .and_then(|d| d.url)
+        .filter(|u| !u.trim().is_empty())?;
+    let (period_start, period_end) = match r.interval_param {
+        Some(p) => (
+            p.reporting_period_start_timestamp
+                .as_deref()
+                .and_then(parse_ts_date),
+            p.reporting_period_end_timestamp
+                .as_deref()
+                .and_then(parse_ts_date),
+        ),
+        None => (None, None),
+    };
+    Some(ReadyReport {
+        report_id: r.report_identifier,
+        report_ref,
+        period_start,
+        period_end,
+    })
+}
+
+/// Parse the date out of a JPM timestamp cell (`2021-08-20 00:18:18` → `2021-08-20`).
+fn parse_ts_date(s: &str) -> Option<NaiveDate> {
+    let date = s.trim().split_whitespace().next()?;
+    NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()
+}
+
+// ── OAuth2: signed-JWT `client_credentials` grant, with a per-`client_id` token cache. ──
+
+/// Return a valid access token for `creds`, minting a new one only when the cache is empty/expired.
+/// Caching respects J.P. Morgan's token-request rate limit (tokens are valid ~8h).
+async fn oauth_token(creds: &ChaseCreds) -> Result<String, IngestError> {
+    // Local/mock testing: a pre-supplied token bypasses OAuth signing entirely.
+    if let Some(tok) = creds.access_token.as_ref().filter(|t| !t.is_empty()) {
+        return Ok(tok.clone());
+    }
+    if let Some(tok) = cached_token(&creds.client_id) {
+        return Ok(tok);
+    }
+    let assertion =
+        build_client_assertion(creds, SystemTime::now(), &Uuid::new_v4().to_string())?;
+    let form = build_token_form(creds, &assertion);
+    let resp = http_client()
+        .post(&creds.token_url)
+        .form(&form)
+        .send()
+        .await
+        .map_err(|e| IngestError::Download(format!("chase token request: {e}")))?;
+    if !resp.status().is_success() {
+        return Err(IngestError::Download(format!(
+            "chase token status {}",
+            resp.status()
+        )));
+    }
+    let token: TokenResponse = resp
+        .json()
+        .await
+        .map_err(|e| IngestError::Download(format!("chase token parse: {e}")))?;
+    store_token(&creds.client_id, &token);
+    Ok(token.access_token)
+}
+
+fn token_cache() -> &'static Mutex<HashMap<String, (String, Instant)>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, (String, Instant)>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// A still-valid cached token for `client_id`, if any. Never holds the lock across an await.
+fn cached_token(client_id: &str) -> Option<String> {
+    let cache = token_cache().lock().ok()?;
+    cache
+        .get(client_id)
+        .and_then(|(tok, exp)| (Instant::now() < *exp).then(|| tok.clone()))
+}
+
+/// Cache a freshly minted token, refreshing a little before its stated expiry. Falls back to a
+/// conservative 1h TTL if the server omits `expires_in`.
+fn store_token(client_id: &str, token: &TokenResponse) {
+    let ttl = token
+        .expires_in
+        .checked_sub(TOKEN_REFRESH_SKEW)
+        .filter(|s| *s > 0)
+        .unwrap_or(3600);
+    if let Ok(mut cache) = token_cache().lock() {
+        cache.insert(
+            client_id.to_string(),
+            (token.access_token.clone(), Instant::now() + Duration::from_secs(ttl)),
+        );
+    }
+}
+
+/// Build the RS256-signed JWT client assertion. `now`/`jti` are parameters so this is deterministic
+/// to test; production passes `SystemTime::now()` and a fresh UUID.
+fn build_client_assertion(
+    creds: &ChaseCreds,
+    now: SystemTime,
+    jti: &str,
+) -> Result<String, IngestError> {
+    let signer = josekit::jws::RS256
+        .signer_from_pem(creds.private_key_pem.as_bytes())
+        .map_err(|e| IngestError::Download(format!("chase jwt signer: {e}")))?;
+    let mut header = JwsHeader::new();
+    header.set_token_type("JWT");
+    let mut payload = JwtPayload::new();
+    payload.set_issuer(&creds.client_id);
+    payload.set_subject(&creds.client_id);
+    payload.set_audience(vec![creds.token_url.clone()]);
+    payload.set_issued_at(&now);
+    payload.set_expires_at(&(now + ASSERTION_TTL));
+    payload.set_jwt_id(jti);
+    jwt::encode_with_signer(&payload, &header, &signer)
+        .map_err(|e| IngestError::Download(format!("chase jwt encode: {e}")))
+}
+
+/// The `application/x-www-form-urlencoded` body of the `client_credentials` token request.
+fn build_token_form(creds: &ChaseCreds, assertion: &str) -> Vec<(&'static str, String)> {
+    vec![
+        ("grant_type", "client_credentials".to_string()),
+        ("client_id", creds.client_id.clone()),
+        ("client_assertion_type", CLIENT_ASSERTION_TYPE.to_string()),
+        ("client_assertion", assertion.to_string()),
+        ("resource", creds.resource.clone()),
+    ]
 }
 
 /// Map a Chase `Payment Method Code` (MOP) onto the lowercased network ids the rest of the pipeline
@@ -507,5 +862,100 @@ o2,ED,3,GB,GBP,EDBT,SALE,100,-1.00,-0.20\n";
         assert_eq!(parse_date("3/3/2025"), chrono::NaiveDate::from_ymd_opt(2025, 3, 3));
         assert_eq!(parse_date("12/21/2024"), chrono::NaiveDate::from_ymd_opt(2024, 12, 21));
         assert_eq!(parse_date(""), None);
+    }
+
+    /// Shaped after J.P. Morgan's live `GET /api/v1/reports`: a `Requested` report (no
+    /// `reportDetails`), the completed **Submission details** report we want (Deposit details' type,
+    /// spelled with a space by the API), and a completed report of another type. Only the middle one
+    /// survives.
+    const REPORTS_LIST: &[u8] = br#"{
+      "summarizedReports": [
+        { "reportIdentifier": "req-1", "reportTypeNames": ["Submission details"],
+          "reportStatus": "Requested",
+          "intervalParam": { "reportingPeriodStartTimestamp": "2021-08-22 00:18:18" } },
+        { "reportIdentifier": "dep-1", "reportTypeNames": ["Submission details"],
+          "reportStatus": "Completed",
+          "intervalParam": { "reportingPeriodStartTimestamp": "2021-08-20 00:18:18",
+                             "reportingPeriodEndTimestamp": "2021-08-21 00:19:18" },
+          "reportDetails": { "reportFileName": "dd.2021-08-20",
+                             "url": "https://api.reports-files.jpmorgan.com/api/v1/report-files/dep-1" } },
+        { "reportIdentifier": "set-1", "reportTypeNames": ["Settlement Summary", "Settlement Details"],
+          "reportStatus": "Completed",
+          "reportDetails": { "url": "https://api.reports-files.jpmorgan.com/api/v1/report-files/set-1" } }
+      ],
+      "lastPage": true
+    }"#;
+
+    #[test]
+    fn parse_reports_list_keeps_only_completed_submission_details() {
+        let ready = parse_reports_list(REPORTS_LIST).unwrap();
+        assert_eq!(ready.len(), 1, "only the completed Submission details report survives");
+        let r = &ready[0];
+        assert_eq!(r.report_id, "dep-1");
+        assert_eq!(
+            r.report_ref,
+            "https://api.reports-files.jpmorgan.com/api/v1/report-files/dep-1"
+        );
+        assert_eq!(r.period_start, chrono::NaiveDate::from_ymd_opt(2021, 8, 20));
+        assert_eq!(r.period_end, chrono::NaiveDate::from_ymd_opt(2021, 8, 21));
+    }
+
+    #[test]
+    fn submission_details_type_matches_both_spellings() {
+        assert!(is_submission_details("Submission details"));
+        assert!(is_submission_details("SubmissionDetails"));
+        assert!(is_submission_details("submission details"));
+        assert!(!is_submission_details("Settlement Details"));
+        assert!(!is_submission_details("Transaction Details"));
+    }
+
+    #[test]
+    fn parse_reports_list_tolerates_empty_and_missing_fields() {
+        assert!(parse_reports_list(br#"{"summarizedReports": []}"#).unwrap().is_empty());
+        assert!(parse_reports_list(br#"{}"#).unwrap().is_empty());
+        assert!(parse_reports_list(b"not json").is_err());
+    }
+
+    #[test]
+    fn creds_parse_applies_url_defaults() {
+        let creds = ConnectorCreds {
+            webhook_secret: Secret::new(String::new()),
+            download_auth: Secret::new(
+                r#"{"client_id":"c","resource":"r","private_key_pem":"pem"}"#.to_string(),
+            ),
+        };
+        let chase = ChaseCreds::parse(&creds).unwrap();
+        assert_eq!(chase.client_id, "c");
+        assert_eq!(chase.token_url, default_token_url());
+        assert_eq!(chase.reports_url, default_reports_url());
+        // A bad blob is a clear, typed error.
+        let bad = ConnectorCreds {
+            webhook_secret: Secret::new(String::new()),
+            download_auth: Secret::new("nope".to_string()),
+        };
+        assert!(matches!(
+            ChaseCreds::parse(&bad),
+            Err(IngestError::MalformedNotification(_))
+        ));
+    }
+
+    #[test]
+    fn token_form_has_the_five_client_credentials_params() {
+        let creds = ChaseCreds {
+            client_id: "cid".to_string(),
+            resource: "res".to_string(),
+            private_key_pem: String::new(),
+            access_token: None,
+            token_url: default_token_url(),
+            reports_url: default_reports_url(),
+        };
+        let form = build_token_form(&creds, "ASSERTION");
+        assert_eq!(form.len(), 5);
+        let get = |k: &str| form.iter().find(|(n, _)| *n == k).map(|(_, v)| v.as_str());
+        assert_eq!(get("grant_type"), Some("client_credentials"));
+        assert_eq!(get("client_id"), Some("cid"));
+        assert_eq!(get("client_assertion_type"), Some(CLIENT_ASSERTION_TYPE));
+        assert_eq!(get("client_assertion"), Some("ASSERTION"));
+        assert_eq!(get("resource"), Some("res"));
     }
 }
