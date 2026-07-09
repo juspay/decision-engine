@@ -62,6 +62,12 @@ struct MerchantModels {
     /// Manual per-cluster overrides (fine_key → flat cost). Highest precedence: a surgical fee for
     /// one specific segment, checked before the connector override and the learned model.
     cluster_overrides: HashMap<String, ServingCost>,
+    /// Invoice-derived cost add-on per connector (lowercase connector → `{pct_addon_bps, fixed}`).
+    /// Added on top of the **learned** fine/coarse model at [`lookup`] to recover the invoice-only
+    /// fees the settlement report can't (flat per-txn processing/risk fees + amortized periodic
+    /// fees). Deliberately *not* applied to the manual overrides above — those are all-in contract
+    /// rates a merchant stated, already inclusive of everything.
+    addons: HashMap<String, ServingCost>,
 }
 
 impl MerchantModels {
@@ -74,6 +80,21 @@ impl MerchantModels {
             && self.predictor.iter().all(|l| l.is_empty())
             && self.overrides.is_empty()
             && self.cluster_overrides.is_empty()
+            && self.addons.is_empty()
+    }
+}
+
+impl ServingCost {
+    /// Layer an invoice add-on on top of a learned cost: the add-on's amortized periodic rate joins
+    /// `pct_bps` and its flat per-txn fee joins `fixed`. The identity when `addon` is `None`.
+    fn with_addon(self, addon: Option<&ServingCost>) -> ServingCost {
+        match addon {
+            Some(a) => ServingCost {
+                pct_bps: self.pct_bps + a.pct_bps,
+                fixed: self.fixed + a.fixed,
+            },
+            None => self,
+        }
     }
 }
 
@@ -264,9 +285,14 @@ pub fn lookup(
         });
     }
 
-    // 3. Learned fine model: serve the specific fitted cluster.
+    // The invoice-derived add-on for this connector (if any), layered onto the *learned* models
+    // below — never onto the overrides above, which are already all-in contract rates.
+    let addon = m.addons.get(&connector.to_lowercase());
+
+    // 3. Learned fine model: serve the specific fitted cluster, plus the invoice add-on.
     if let Some((key, variant, cat)) = &fine {
         if let Some(cost) = m.fine.get(key) {
+            let cost = cost.with_addon(addon);
             return Some(InhouseMatch {
                 effective_bps: cost.effective_cost_bps(amount),
                 pct_bps: cost.pct_bps,
@@ -282,15 +308,18 @@ pub fn lookup(
 
     // 4. Fallback: the coarse region blend (previous behavior) — no single variant/issuer/category.
     let key = coarse_key(connector, network, funding, currency, region);
-    m.coarse.get(&key).map(|cost| InhouseMatch {
-        effective_bps: cost.effective_cost_bps(amount),
-        pct_bps: cost.pct_bps,
-        fixed: cost.fixed,
-        brand: normalize_network(&network.to_lowercase()).to_string(),
-        currency: currency.to_uppercase(),
-        variant: None,
-        issuer: None,
-        ic_category: None,
+    m.coarse.get(&key).map(|cost| {
+        let cost = cost.with_addon(addon);
+        InhouseMatch {
+            effective_bps: cost.effective_cost_bps(amount),
+            pct_bps: cost.pct_bps,
+            fixed: cost.fixed,
+            brand: normalize_network(&network.to_lowercase()).to_string(),
+            currency: currency.to_uppercase(),
+            variant: None,
+            issuer: None,
+            ic_category: None,
+        }
     })
 }
 
@@ -497,15 +526,28 @@ async fn refresh_inner(
     //    rebuild walks the override-merchant index so override-only connectors (no ClickHouse data)
     //    still price. Failures here are logged but non-fatal — the learned models are still served.
     match merchant {
-        Some(mid) => load_overrides_into(&mut snap, mid).await,
-        None => match super::overrides::list_merchants().await {
-            Ok(merchants) => {
-                for mid in merchants {
-                    load_overrides_into(&mut snap, &mid).await;
+        Some(mid) => load_overlays_into(&mut snap, mid).await,
+        None => {
+            // Union the override-merchant and invoice-add-on-merchant indices, so an overlay-only
+            // merchant (manual override *or* invoice add-on, no ClickHouse data) is still hydrated.
+            let mut merchants = super::overrides::list_merchants().await.unwrap_or_else(|e| {
+                logger::warn!(tag = "cost_serving", "override index load failed: {:?}", e);
+                Vec::new()
+            });
+            match super::invoice::store::list_merchants().await {
+                Ok(addon_merchants) => {
+                    for mid in addon_merchants {
+                        if !merchants.contains(&mid) {
+                            merchants.push(mid);
+                        }
+                    }
                 }
+                Err(e) => logger::warn!(tag = "cost_serving", "add-on index load failed: {:?}", e),
             }
-            Err(e) => logger::warn!(tag = "cost_serving", "override index load failed: {:?}", e),
-        },
+            for mid in merchants {
+                load_overlays_into(&mut snap, &mid).await;
+            }
+        }
     }
 
     // Global rebuild → replace the whole cache. Single-merchant → merge just that merchant's entry
@@ -538,9 +580,10 @@ async fn refresh_inner(
     }
 }
 
-/// Load a merchant's manual overrides and set them on its snapshot entry (creating the entry when
-/// the merchant has overrides but no ClickHouse-derived models). Non-fatal on error.
-async fn load_overrides_into(snap: &mut Snapshot, merchant_id: &str) {
+/// Load a merchant's serving-time overlays — manual overrides *and* the invoice-derived cost add-on
+/// — and set them on its snapshot entry (creating the entry when the merchant has overlays but no
+/// ClickHouse-derived models). Each overlay is non-fatal on error.
+async fn load_overlays_into(snap: &mut Snapshot, merchant_id: &str) {
     // Connector-level overrides (lowercase connector → flat cost).
     match super::overrides::list(merchant_id).await {
         Ok(list) if !list.is_empty() => {
@@ -588,6 +631,30 @@ async fn load_overrides_into(snap: &mut Snapshot, merchant_id: &str) {
         Err(e) => logger::warn!(
             tag = "cost_serving",
             "cluster override load failed for {}: {:?}",
+            merchant_id,
+            e
+        ),
+    }
+
+    // Invoice-derived add-ons (lowercase connector → {pct_addon_bps, fixed}). Layered onto the
+    // learned models at lookup; stored connector keys are already lowercased by the invoice store.
+    match super::invoice::store::list(merchant_id).await {
+        Ok(list) if !list.is_empty() => {
+            let addons = list
+                .into_iter()
+                .map(|(connector, a)| {
+                    (
+                        connector.to_lowercase(),
+                        ServingCost { pct_bps: a.pct_addon_bps, fixed: a.fixed_addon },
+                    )
+                })
+                .collect();
+            snap.entry(merchant_id.to_string()).or_default().addons = addons;
+        }
+        Ok(_) => {}
+        Err(e) => logger::warn!(
+            tag = "cost_serving",
+            "invoice add-on load failed for {}: {:?}",
             merchant_id,
             e
         ),
@@ -663,6 +730,22 @@ mod tests {
         assert_eq!(reconstruct_variant("MASTERCARD", "PREMIUM", "CREDIT", ""), "mcpremiumcredit");
         // A wallet is its own report variant.
         assert_eq!(reconstruct_variant("VISA", "STANDARD", "DEBIT", "APPLE_PAY"), "visa_applepay");
+    }
+
+    #[test]
+    fn invoice_addon_adds_to_pct_and_fixed() {
+        let learned = ServingCost { pct_bps: 40.0, fixed: 0.10 };
+        let addon = ServingCost { pct_bps: 0.06, fixed: 0.04 }; // ~invoice add-on
+        let combined = learned.with_addon(Some(&addon));
+        assert!((combined.pct_bps - 40.06).abs() < 1e-9);
+        assert!((combined.fixed - 0.14).abs() < 1e-9);
+        // On a €50 sale the flat add-on moves effective cost by 0.04/50·1e4 = 8 bps.
+        let before = learned.effective_cost_bps(50.0);
+        let after = combined.effective_cost_bps(50.0);
+        assert!((after - before - (0.06 + 8.0)).abs() < 1e-9);
+        // No add-on is the identity.
+        assert_eq!(learned.with_addon(None).pct_bps, learned.pct_bps);
+        assert_eq!(learned.with_addon(None).fixed, learned.fixed);
     }
 
     #[test]

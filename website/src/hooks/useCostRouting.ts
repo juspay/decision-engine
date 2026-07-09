@@ -279,3 +279,93 @@ export async function uploadReport(
 export async function deleteIngestion(merchantId: string, id: number) {
   return apiDelete(`/merchant-account/${merchantId}/cost-ingestions/${id}`)
 }
+
+// ── Invoice ingestion (the second data source: recovers the fees the PAR structurally can't) ─────
+
+/** How an identified invoice line participates in the cost. */
+export type InvoiceLineKind =
+  | 'flat_per_txn'
+  | 'periodic'
+  | 'credit'
+  | 'already_modeled'
+  | 'volume'
+  | string
+
+/** One identified fee type from the uploaded invoice. */
+export interface InvoiceLineDto {
+  description: string
+  kind: InvoiceLineKind
+  /** True for a missing PAR fee we now apply; false for a line we ignored (already modeled / volume). */
+  added: boolean
+  /** Total on the invoice for this fee type (credits are negative). */
+  amount: number
+  /** Amortized contribution per transaction (0 for ignored lines). */
+  per_txn: number
+}
+
+/** Result of an invoice upload — the computed add-on plus the identified detail. */
+export interface InvoiceUploadResponse {
+  merchant_id: string
+  connector: string
+  account: string
+  pct_addon_bps: number
+  fixed_addon: number
+  /** Total additional fee applied per transaction for this connector account (the headline). */
+  total_addon_per_txn: number
+  subtotal_ex_tax: number | null
+  card_volume: number | null
+  txn_count: number | null
+  currency: string
+  lines: number
+  breakdown: InvoiceLineDto[]
+}
+
+/** A currently-active invoice add-on for a connector (layered onto every learned cost). */
+export interface InvoiceAddon {
+  connector: string
+  pct_addon_bps: number
+  fixed_addon: number
+  invoice_ref: string
+  subtotal_ex_tax: number | null
+  card_volume: number | null
+  txn_count: number | null
+  currency: string
+  period_start: string | null
+  period_end: string | null
+  updated_at: string
+}
+
+/** The invoice add-ons currently in effect for the merchant. */
+export function useInvoiceAddons(merchantId?: string) {
+  const path = merchantId ? `/merchant-account/${merchantId}/invoice-addons` : null
+  const { data, error, isLoading, mutate } = useSWR<InvoiceAddon[]>(path, fetcher, {
+    revalidateOnFocus: false,
+  })
+  return { addons: data ?? [], error, isLoading, mutate }
+}
+
+/**
+ * Upload a connector invoice. Synchronous: returns the computed add-on and the identified fee
+ * breakdown once parsed (invoices are small). The add-on then applies to every routing decision.
+ */
+export async function uploadInvoice(
+  merchantId: string,
+  connector: string,
+  account: string,
+  file: Blob,
+  invoiceRef?: string,
+  onProgress?: (p: UploadProgress) => void,
+) {
+  const params = new URLSearchParams({ account })
+  if (invoiceRef) params.set('invoice_ref', invoiceRef)
+  return apiUploadWithProgress<InvoiceUploadResponse>(
+    `/merchant-account/${merchantId}/connectors/${connector}/invoice?${params.toString()}`,
+    file,
+    onProgress,
+  )
+}
+
+/** Clear a connector's invoice add-on, reverting its served cost to the learned-only model. */
+export async function deleteInvoiceAddon(merchantId: string, connector: string) {
+  return apiDelete(`/merchant-account/${merchantId}/connectors/${connector}/invoice-addon`)
+}

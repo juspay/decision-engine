@@ -436,6 +436,29 @@ where
                 )),
         )
         .route(
+            "/merchant-account/:merchant-id/connectors/:connector/invoice",
+            // Invoices are small (a few hundred lines): buffered and processed synchronously, so the
+            // computed cost add-on is returned in the response. Cap the body to reject a settlement
+            // report accidentally uploaded here.
+            post(routes::invoice_upload::upload_invoice).layer(
+                axum::extract::DefaultBodyLimit::max(
+                    routes::invoice_upload::MAX_INVOICE_BYTES,
+                ),
+            ),
+        )
+        .route(
+            "/merchant-account/:merchant-id/connectors/:connector/invoice-addon",
+            delete(routes::invoice_upload::delete_addon),
+        )
+        .route(
+            "/merchant-account/:merchant-id/invoice-addons",
+            get(routes::invoice_upload::list_addons),
+        )
+        .route(
+            "/merchant-account/:merchant-id/invoice-reconciliation",
+            get(routes::invoice_upload::get_reconciliation),
+        )
+        .route(
             "/merchant-account/:merchant-id/connector-fees",
             get(routes::connector_fees::list_connector_fees),
         )

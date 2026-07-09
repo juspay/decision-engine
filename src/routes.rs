@@ -14,6 +14,7 @@ pub mod connector_credentials;
 pub mod connector_fees;
 pub mod cost_clusters;
 pub mod cost_coverage;
+pub mod invoice_upload;
 pub mod report_upload;
 pub mod rule_configuration;
 pub mod settlement_webhook;
