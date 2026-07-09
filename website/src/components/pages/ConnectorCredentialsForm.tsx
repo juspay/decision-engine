@@ -1,10 +1,15 @@
 import { useState } from 'react'
-import { ShieldCheck } from 'lucide-react'
+import { Pencil, ShieldCheck, Trash2 } from 'lucide-react'
 import { Card, CardBody, CardHeader, SurfaceLabel } from '../ui/Card'
 import { Button } from '../ui/Button'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { Spinner } from '../ui/Spinner'
-import { setConnectorCredentials, useConnectorSources } from '../../hooks/useCostRouting'
+import {
+  deleteConnectorCredentials,
+  setConnectorCredentials,
+  useConnectorSources,
+  type ConnectorSource,
+} from '../../hooks/useCostRouting'
 import { Field, inputClass } from './CostRoutingShared'
 
 /**
@@ -19,9 +24,20 @@ export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }
   const [account, setAccount] = useState('')
   const [webhookSecret, setWebhookSecret] = useState('')
   const [downloadAuth, setDownloadAuth] = useState('')
+  // When set, the form is editing this existing source: the account is its identity (locked), a
+  // save upserts its secrets, and its masked hints show what's currently stored.
+  const [editing, setEditing] = useState<ConnectorSource | null>(null)
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+
+  function resetForm() {
+    setEditing(null)
+    setAccount('')
+    setWebhookSecret('')
+    setDownloadAuth('')
+  }
 
   async function handleSave() {
     if (!merchantId) {
@@ -42,13 +58,42 @@ export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }
         download_auth: downloadAuth,
       })
       setSuccess(`Saved credentials for ${connector} / ${account}.`)
-      setWebhookSecret('')
-      setDownloadAuth('')
+      resetForm()
       await mutateSources()
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to save credentials')
     } finally {
       setSaving(false)
+    }
+  }
+
+  // Secrets are write-only (never returned), so editing loads the identity and clears the secret
+  // fields — the user re-enters them, and the save overwrites the stored blob.
+  function handleEdit(s: ConnectorSource) {
+    setEditing(s)
+    setConnector(s.connector)
+    setAccount(s.account)
+    setWebhookSecret('')
+    setDownloadAuth('')
+    setError(null)
+    setSuccess(null)
+  }
+
+  async function handleDelete(s: ConnectorSource) {
+    if (!merchantId) return
+    if (!window.confirm(`Delete credentials for ${s.connector} / ${s.account}?`)) return
+    const key = `${s.connector}:${s.account}`
+    setDeleting(key)
+    setError(null)
+    setSuccess(null)
+    try {
+      await deleteConnectorCredentials(merchantId, s.connector, s.account)
+      if (editing && account === s.account && connector === s.connector) resetForm()
+      await mutateSources()
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to delete credentials')
+    } finally {
+      setDeleting(null)
     }
   }
 
@@ -75,30 +120,52 @@ export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }
             <option value="adyen">Adyen</option>
           </select>
         </Field>
-        <Field label="Account" hint="Connector-side account (e.g. Adyen merchantAccountCode)">
+        <Field
+          label="Account"
+          hint={
+            editing
+              ? 'Editing an existing source — account is locked'
+              : 'Connector-side account (e.g. Adyen merchantAccountCode)'
+          }
+        >
           <input
             className={inputClass}
             value={account}
             onChange={(e) => setAccount(e.target.value)}
             placeholder="AcmeMerchantEU"
+            disabled={editing !== null}
           />
         </Field>
-        <Field label="Webhook secret" hint="Used to verify inbound webhook signatures (HMAC key)">
+        <Field
+          label="Webhook secret"
+          hint={
+            editing
+              ? 'Enter a new value to replace the stored secret'
+              : 'Used to verify inbound webhook signatures (HMAC key)'
+          }
+        >
           <input
             className={inputClass}
             type="password"
             value={webhookSecret}
             onChange={(e) => setWebhookSecret(e.target.value)}
-            placeholder="••••••••"
+            placeholder={editing?.webhook_secret_hint || '••••••••'}
           />
         </Field>
-        <Field label="Report download auth" hint="e.g. reportuser:password">
+        <Field
+          label="Report download auth"
+          hint={
+            editing
+              ? 'Enter a new value to replace the stored auth'
+              : 'Report-user Basic auth as user:password, or a Report Service API key on its own'
+          }
+        >
           <input
             className={inputClass}
             type="password"
             value={downloadAuth}
             onChange={(e) => setDownloadAuth(e.target.value)}
-            placeholder="••••••••"
+            placeholder={editing?.download_auth_hint || 'user:password or API key'}
           />
         </Field>
 
@@ -109,10 +176,17 @@ export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }
                 <Spinner size={14} />
                 Saving...
               </>
+            ) : editing ? (
+              'Update credentials'
             ) : (
               'Save credentials'
             )}
           </Button>
+          {editing && (
+            <Button variant="ghost" size="sm" onClick={resetForm} disabled={saving}>
+              Cancel
+            </Button>
+          )}
           <span className="text-xs text-slate-400">Secrets are encrypted at rest.</span>
         </div>
 
@@ -125,11 +199,35 @@ export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }
               Configured
             </p>
             <ul className="mt-2 space-y-1 text-sm text-slate-600 dark:text-[#9ca7ba]">
-              {sources.map((s) => (
-                <li key={`${s.connector}:${s.account}`}>
-                  {s.connector} · {s.account}
-                </li>
-              ))}
+              {sources.map((s) => {
+                const key = `${s.connector}:${s.account}`
+                return (
+                  <li key={key} className="flex items-center justify-between gap-2 py-0.5">
+                    <span>
+                      {s.connector} · {s.account}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        title="Edit credentials"
+                        onClick={() => handleEdit(s)}
+                        className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-[#121214] dark:hover:text-white"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        title="Delete credentials"
+                        disabled={deleting === key}
+                        onClick={() => handleDelete(s)}
+                        className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-500 disabled:opacity-50 dark:hover:bg-red-950/30"
+                      >
+                        {deleting === key ? <Spinner size={14} /> : <Trash2 size={14} />}
+                      </button>
+                    </span>
+                  </li>
+                )
+              })}
             </ul>
           </div>
         )}

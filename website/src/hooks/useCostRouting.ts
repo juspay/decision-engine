@@ -26,6 +26,10 @@ export interface CoverageSummary {
 export interface ConnectorSource {
   connector: string
   account: string
+  /** Masked preview of the stored webhook secret (e.g. "••••a3f9"), never the full value. */
+  webhook_secret_hint?: string
+  /** Masked preview of the report-download auth ("reportuser:••••" or "••••a3f9"). */
+  download_auth_hint?: string
 }
 
 export interface SetCredentialsResponse {
@@ -251,6 +255,17 @@ export async function setConnectorCredentials(
   return apiPost<SetCredentialsResponse>(
     `/merchant-account/${merchantId}/connectors/${connector}/credentials`,
     body,
+  )
+}
+
+/** Delete a connector's stored credentials and drop it from the configured sources list. */
+export async function deleteConnectorCredentials(
+  merchantId: string,
+  connector: string,
+  account: string,
+) {
+  return apiDelete(
+    `/merchant-account/${merchantId}/connectors/${connector}/credentials/${encodeURIComponent(account)}`,
   )
 }
 

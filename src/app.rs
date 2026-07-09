@@ -426,6 +426,10 @@ where
             post(routes::connector_credentials::set_connector_credentials),
         )
         .route(
+            "/merchant-account/:merchant-id/connectors/:connector/credentials/:account",
+            delete(routes::connector_credentials::delete_connector_credentials),
+        )
+        .route(
             "/merchant-account/:merchant-id/connectors/:connector/report",
             // Monthly settlement reports run to several GB. The handler streams the body to disk
             // and parses in batches (O(batch) RAM), so lift the body cap to the same hard limit it

@@ -91,6 +91,9 @@ service_config_ttl = 300    # 5 minutes
 zstd_compression_filepath = "/tmp/extra-paths/redis-zstd-dictionaries/sbx"
 
 [cost_ingestion]
+# Drain webhook-enqueued jobs in this process. Off by default so only a dedicated ingest
+# deployment owns the worker; enable in dev to process pending jobs locally.
+worker_enabled = true
 # Key id used to encrypt NEW connector credentials. Rotate by adding another key below and
 # pointing this at it; keep the old key listed so existing credentials still decrypt.
 creds_encryption_current = "v1"

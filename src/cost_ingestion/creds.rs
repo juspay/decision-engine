@@ -37,6 +37,41 @@ pub struct SourceRef {
     pub account: String,
 }
 
+/// A configured source plus *masked* previews of its stored credentials — just enough to recognize
+/// which key is set (the last few characters) without disclosing it. Never carries a full secret.
+#[derive(Debug, Clone, Serialize)]
+pub struct MaskedSource {
+    pub connector: String,
+    pub account: String,
+    /// e.g. `"••••a3f9"`, or `"—"` when no credential blob is stored / decryptable.
+    pub webhook_secret_hint: String,
+    /// Basic auth shows the user (`"reportuser:••••"`); an API key shows its tail (`"••••a3f9"`).
+    pub download_auth_hint: String,
+}
+
+/// Mask a secret to a recognizable hint: bullets followed by the last 4 characters. Fully masked
+/// when too short to reveal 4 without exposing most of it.
+fn mask_secret(s: &str) -> String {
+    let n = s.chars().count();
+    if n == 0 {
+        return "—".to_string();
+    }
+    if n <= 4 {
+        return "••••".to_string();
+    }
+    let last4: String = s.chars().skip(n - 4).collect();
+    format!("••••{last4}")
+}
+
+/// Report-download auth: Basic auth (`user:password`) shows the non-secret user and masks the
+/// password; a bare API key shows its tail via [`mask_secret`].
+fn mask_download_auth(s: &str) -> String {
+    match s.split_once(':') {
+        Some((user, _)) => format!("{user}:••••"),
+        None => mask_secret(s),
+    }
+}
+
 /// Per-merchant index name holding the (non-secret) list of configured sources. Lets the
 /// dashboard show what's set up without scanning/decrypting every credential blob.
 fn sources_index_name(merchant_id: &str) -> String {
@@ -77,6 +112,45 @@ async fn add_source(merchant_id: &str, connector: &str, account: &str) -> Result
         service_configuration::insert_config(name, Some(value)).await
     }
     .map_err(|e| IngestError::Storage(e.to_string()))
+}
+
+/// Remove a `(connector, account)` from the merchant's source index (idempotent). When the last
+/// source goes, the index row is dropped entirely rather than left as an empty `[]`.
+async fn remove_source(
+    merchant_id: &str,
+    connector: &str,
+    account: &str,
+) -> Result<(), IngestError> {
+    let mut sources = list_sources(merchant_id).await?;
+    let before = sources.len();
+    sources.retain(|s| !(s.connector == connector && s.account == account));
+    if sources.len() == before {
+        return Ok(()); // nothing was configured under this pair
+    }
+    let name = sources_index_name(merchant_id);
+    if sources.is_empty() {
+        return service_configuration::delete_config(name)
+            .await
+            .map_err(|e| IngestError::Storage(e.to_string()));
+    }
+    let value = serde_json::to_string(&sources).map_err(|e| IngestError::Storage(e.to_string()))?;
+    service_configuration::update_config(name, Some(value))
+        .await
+        .map_err(|e| IngestError::Storage(e.to_string()))
+}
+
+/// Delete a settlement source: its encrypted credentials *and* its entry in the merchant's source
+/// index, so it disappears from the configured list. Idempotent — deleting an absent source is not
+/// an error. No keyring needed (we're removing, not decrypting), so this is a free function.
+pub async fn delete_source(
+    connector: &str,
+    account: &str,
+    merchant_id: &str,
+) -> Result<(), IngestError> {
+    service_configuration::delete_config(config_name(connector, account))
+        .await
+        .map_err(|e| IngestError::Storage(e.to_string()))?;
+    remove_source(merchant_id, connector, account).await
 }
 
 /// `service_configuration.name` under which a `(connector, account)`'s encrypted creds live.
@@ -201,6 +275,30 @@ impl ConnectorCredsStore {
 
         // Record the source in the merchant's index so the dashboard can list it.
         add_source(merchant_id, connector, account).await
+    }
+
+    /// List a merchant's configured sources with masked credential previews. Decrypts each blob to
+    /// derive the hint, but only ever returns the masked form — never a full secret.
+    pub async fn list_masked(&self, merchant_id: &str) -> Result<Vec<MaskedSource>, IngestError> {
+        let sources = list_sources(merchant_id).await?;
+        let mut out = Vec::with_capacity(sources.len());
+        for s in sources {
+            // A missing/undecryptable blob still lists the source, just without hints.
+            let (webhook_secret_hint, download_auth_hint) = match self.get(&s.connector, &s.account).await {
+                Ok(Some(r)) => (
+                    mask_secret(r.creds.webhook_secret.peek()),
+                    mask_download_auth(r.creds.download_auth.peek()),
+                ),
+                _ => ("—".to_string(), "—".to_string()),
+            };
+            out.push(MaskedSource {
+                connector: s.connector,
+                account: s.account,
+                webhook_secret_hint,
+                download_auth_hint,
+            });
+        }
+        Ok(out)
     }
 
     /// Load and decrypt a settlement source's credentials, or `None` if none are stored.
