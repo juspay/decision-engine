@@ -138,6 +138,7 @@ const DEFAULT_GW_SUCCESS_RATE: Record<string, number> = {
   stripe: 94,
   adyen: 93,
   braintree: 92,
+  chase: 92,
 }
 
 // Default sim config for a gateway, applying its per-gateway default SR.
