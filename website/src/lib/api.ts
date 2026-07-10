@@ -262,6 +262,7 @@ export function apiUploadWithProgress<T>(
       logError(requestPath, error)
       reject(error)
     }
+    xhr.timeout = 30 * 60 * 1000
     xhr.onerror = () => reject(new Error('Network error during upload'))
     xhr.ontimeout = () => reject(new Error('Upload timed out'))
 

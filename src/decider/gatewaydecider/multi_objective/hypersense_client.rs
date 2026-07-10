@@ -194,10 +194,8 @@ fn solve_fee_models(
         } else {
             pct_bps
         };
-        if fixed < 0.0
-            || fixed > MAX_PLAUSIBLE_FIXED
-            || pct_bps < 0.0
-            || pct_bps > MAX_PLAUSIBLE_PCT_BPS
+        if !(0.0..=MAX_PLAUSIBLE_FIXED).contains(&fixed)
+            || !(0.0..=MAX_PLAUSIBLE_PCT_BPS).contains(&pct_bps)
         {
             return None;
         }

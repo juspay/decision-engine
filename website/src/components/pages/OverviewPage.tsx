@@ -22,6 +22,7 @@ import {
 import { Badge } from '../ui/Badge'
 import { Card as GlassCard, SurfaceLabel } from '../ui/Card'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
+import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
 
 const OVERVIEW_RANGE_OPTIONS: {
   value: AnalyticsRange
@@ -154,6 +155,7 @@ export function OverviewPage() {
     { shouldRetryOnError: false },
   )
   const debitRoutingFlag = useDebitRoutingFlag(effectiveMerchantId)
+  const merchantFeatures = useMerchantFeatures(effectiveMerchantId || undefined)
 
   const analyticsOverviewUrl = `/analytics/overview?range=${range}`
   const analyticsRoutingUrl = `/analytics/routing-stats?range=${range}`
@@ -217,11 +219,21 @@ export function OverviewPage() {
   const topGateway = gatewayUsage[0]?.gateway || analyticsOverview.data?.top_scores?.[0]?.gateway
   const selectedWindow =
     OVERVIEW_RANGE_OPTIONS.find((option) => option.value === range) || OVERVIEW_RANGE_OPTIONS[1]
-  const hasAuthRateConfig = Boolean(srConfig?.config?.data)
+  // Multi-objective is set up when either the merchant saved a manual successRate
+  // config on /routing/sr (a merchant-specific /rule/get response — the same
+  // condition that page uses) or turned on Autopilot mode there (the `autopilot`
+  // merchant feature flag). A global default config alone counts as neither.
+  const hasMultiObjectiveConfig = Boolean(
+    srConfig?.config?.type === 'successRate' &&
+      srConfig.config.data &&
+      srConfig.merchant_id === effectiveMerchantId,
+  )
+  const autopilotEnabled = merchantFeatures.isEnabled('autopilot')
+  const multiObjectiveReady = hasMultiObjectiveConfig || autopilotEnabled
   const hasDebitRouting = debitRoutingFlag.isEnabled
   const configuredBasics = [
     Boolean(activeRouting),
-    hasAuthRateConfig,
+    multiObjectiveReady,
     hasRuleBasedRouting,
     hasDebitRouting,
   ].filter(Boolean).length
@@ -236,9 +248,13 @@ export function OverviewPage() {
       href: '../routing',
     },
     {
-      label: 'Auth-rate config',
-      description: hasAuthRateConfig ? 'Configured' : 'Not configured',
-      state: hasAuthRateConfig ? 'Configured' : 'Not set',
+      label: 'Multi-objective config',
+      description: autopilotEnabled
+        ? 'Autopilot mode enabled'
+        : hasMultiObjectiveConfig
+          ? 'Configured'
+          : 'Not configured',
+      state: autopilotEnabled ? 'Auto-pilot' : hasMultiObjectiveConfig ? 'Configured' : 'Not set',
       icon: TrendingUp,
       required: true,
       href: '../routing/sr',
@@ -453,22 +469,26 @@ export function OverviewPage() {
               {/* Checklist */}
               <div className="mt-4 divide-y divide-slate-100 dark:divide-[#1e2535]">
                 {setupItems.map((item) => {
+                  const readyState =
+                    item.state === 'Live' ||
+                    item.state === 'Configured' ||
+                    item.state === 'Enabled' ||
+                    item.state === 'Auto-pilot'
                   const iconColor =
                     item.state === 'Issue'
                       ? 'text-red-500'
-                      : item.state === 'Live' || item.state === 'Configured' || item.state === 'Enabled'
+                      : readyState
                         ? 'text-emerald-500'
                         : 'text-slate-400 dark:text-[#5a6a82]'
-                  const badgeVariant =
-                    item.state === 'Live' || item.state === 'Configured' || item.state === 'Enabled'
-                      ? 'green'
-                      : item.state === 'Issue'
-                        ? 'red'
-                        : item.state === 'Checking'
-                          ? 'gray'
-                          : item.required
-                            ? 'orange'
-                            : 'gray'
+                  const badgeVariant = readyState
+                    ? 'green'
+                    : item.state === 'Issue'
+                      ? 'red'
+                      : item.state === 'Checking'
+                        ? 'gray'
+                        : item.required
+                          ? 'orange'
+                          : 'gray'
                   const inner = (
                     <>
                       <div className="flex items-center gap-3 min-w-0">

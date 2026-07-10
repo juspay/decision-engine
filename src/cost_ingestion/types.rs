@@ -78,6 +78,20 @@ impl SettledFeeRow {
     }
 }
 
+/// A report instance a *pull* connector has found ready to ingest (from listing its reporting API).
+/// The connector-agnostic report poller enqueues one job per [`ReadyReport`]; the download → parse →
+/// fit path is then identical to a webhook-delivered report.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReadyReport {
+    /// Connector's unique report id — the queue's idempotency key (`notification_id`).
+    pub report_id: String,
+    /// Opaque handle used to fetch the report (a URL, a filename, …). Connector-specific; stored as
+    /// the job's `report_ref` and passed back to `download_report`.
+    pub report_ref: String,
+    pub period_start: Option<NaiveDate>,
+    pub period_end: Option<NaiveDate>,
+}
+
 /// A "report is ready" event, extracted from a (verified) connector webhook.
 #[derive(Debug, Clone)]
 pub struct ReportNotification {

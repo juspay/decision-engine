@@ -61,25 +61,24 @@ async fn handle(connector: &str, headers: &HeaderMap, body: &[u8]) -> Result<boo
         &cfg.creds_encryption_keys,
     )
     .ok_or_else(|| IngestError::Storage("credential encryption keyring not configured".into()))?;
-    let resolved = creds_store
-        .get(connector, &account)
-        .await?
-        .ok_or_else(|| {
-            IngestError::MalformedNotification(format!(
-                "no credentials stored for {connector}/{account}"
-            ))
-        })?;
+    let resolved = creds_store.get(connector, &account).await?.ok_or_else(|| {
+        IngestError::MalformedNotification(format!(
+            "no credentials stored for {connector}/{account}"
+        ))
+    })?;
 
     // 3. Verify the signature against that account's secret and extract the report handle.
-    let note = source.verify_and_parse_notification(headers, body, &resolved.creds.webhook_secret)?;
+    let note =
+        source.verify_and_parse_notification(headers, body, &resolved.creds.webhook_secret)?;
 
     // 4. Enqueue (idempotent on the notification id).
-    store::enqueue_webhook(
+    store::enqueue_pending(
         connector,
         &account,
         &resolved.merchant_id,
         &note.notification_id,
         &note.report_ref,
+        "webhook",
     )
     .await
 }

@@ -128,8 +128,9 @@ pub fn reorder_for_cost(
 
     let ev_gap_top2 = top2_gap(ranked_evs);
 
-    let head_summary =
-        head_psp.as_ref().map(|psp| make_summary(psp.clone(), best_auth, Some(head_cost), costs));
+    let head_summary = head_psp
+        .as_ref()
+        .map(|psp| make_summary(psp.clone(), best_auth, Some(head_cost), costs));
 
     // Head still wins: it was already the highest-EV PSP.
     if chosen_psp == head_psp {

@@ -17,7 +17,7 @@ import { inputClass } from './CostRoutingShared'
 // Connectors a merchant can set a manual blended fee for even before any settlement report is
 // ingested (e.g. Stripe from contract terms). The list a fee can be *added* against; connectors
 // that already have a fit/override show up from the API regardless.
-const KNOWN_CONNECTORS = ['adyen', 'stripe', 'checkout', 'worldpay', 'braintree', 'cybersource']
+const KNOWN_CONNECTORS = ['adyen', 'stripe', 'checkout', 'worldpay', 'braintree', 'chase', 'cybersource']
 
 function titleCase(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1)

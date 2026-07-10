@@ -17,6 +17,7 @@ pub mod detect;
 pub mod fit;
 pub mod overrides;
 pub mod pipeline;
+pub mod poller;
 pub mod rollup;
 pub mod serving;
 pub mod sink;

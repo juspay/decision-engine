@@ -17,6 +17,7 @@ curl --location "$BASE_URL/rule/create" \
         "defaultBucketSize": 20,
         "defaultLatencyThreshold": null,
         "defaultHedgingPercent": null,
+        "margin": 0.20,
         "subLevelInputConfig": {
           "paymentMethodType": {
             "CARD": { "bucketSize": 30, "hedgingPercent": 0.05 }
@@ -30,3 +31,5 @@ curl --location "$BASE_URL/rule/create" \
 ```json
 { "merchant_id": "merchant_demo", "config": { "type": "successRate" } }
 ```
+
+`margin` is the merchant margin as a fraction of ticket (e.g. `0.20` for 20%). It feeds the [multi-objective routing](./decide-gateway-multi-objective.mdx) expected-value ranking `EV = auth × (margin − cost_bps / 10 000)` and defaults to `1.0` when unset.

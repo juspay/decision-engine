@@ -26,6 +26,10 @@ export interface CoverageSummary {
 export interface ConnectorSource {
   connector: string
   account: string
+  /** Masked preview of the stored webhook secret (e.g. "••••a3f9"), never the full value. */
+  webhook_secret_hint?: string
+  /** Masked preview of the report-download auth ("reportuser:••••" or "••••a3f9"). */
+  download_auth_hint?: string
 }
 
 export interface SetCredentialsResponse {
@@ -230,14 +234,17 @@ export function useConnectorSources(merchantId?: string) {
 
 /**
  * A merchant's ingestion history (and in-flight jobs). Polls every 2s while any job is still
- * processing, so an in-progress upload's `staged_rows` climbs live; idles otherwise.
+ * pending or processing, so a queued webhook job's start and an in-progress upload's climbing
+ * `staged_rows` show up live; idles otherwise.
  */
 export function useIngestionHistory(merchantId?: string) {
   const path = merchantId ? `/merchant-account/${merchantId}/cost-ingestions` : null
   const { data, error, isLoading, mutate } = useSWR<IngestionDto[]>(path, fetcher, {
     revalidateOnFocus: false,
     refreshInterval: (latest) =>
-      latest?.some((j) => j.status === 'processing') ? 2000 : 0,
+      latest?.some((j) => j.status === 'processing' || j.status === 'pending')
+        ? 2000
+        : 0,
   })
   return { ingestions: data ?? [], error, isLoading, mutate }
 }
@@ -251,6 +258,17 @@ export async function setConnectorCredentials(
   return apiPost<SetCredentialsResponse>(
     `/merchant-account/${merchantId}/connectors/${connector}/credentials`,
     body,
+  )
+}
+
+/** Delete a connector's stored credentials and drop it from the configured sources list. */
+export async function deleteConnectorCredentials(
+  merchantId: string,
+  connector: string,
+  account: string,
+) {
+  return apiDelete(
+    `/merchant-account/${merchantId}/connectors/${connector}/credentials/${encodeURIComponent(account)}`,
   )
 }
 

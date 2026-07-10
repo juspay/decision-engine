@@ -106,6 +106,32 @@ curl --location "$BASE_URL/decide-gateway" \
 }'
 ```
 
+### Multi-objective routing
+
+```bash
+curl --location "$BASE_URL/decide-gateway" \
+  --header "$AUTH_HEADER" \
+  --header "Content-Type: application/json" \
+  --data '{
+  "merchantId": "merchant_demo",
+  "eligibleGatewayList": ["stripe", "adyen", "checkout"],
+  "rankingAlgorithm": "SR_BASED_ROUTING",
+  "eliminationEnabled": true,
+  "enableMultiObjective": true,
+  "paymentInfo": {
+    "paymentId": "pay_mo_001",
+    "amount": 1000,
+    "currency": "USD",
+    "country": "US",
+    "paymentType": "ORDER_PAYMENT",
+    "paymentMethodType": "CARD",
+    "paymentMethod": "CREDIT",
+    "authType": "THREE_DS",
+    "cardIsin": "424242"
+  }
+}'
+```
+
 ### Network + SR hybrid routing
 
 ```bash
@@ -160,6 +186,7 @@ curl --location "$BASE_URL/decide-gateway" \
 
 - Use backend enum strings exactly; camelCase values such as `NtwBasedRouting` are invalid.
 - Debit routing requires the merchant debit-routing flag to be enabled and debit metadata encoded as a JSON string in `paymentInfo.metadata`.
+- Multi-objective routing is not a `rankingAlgorithm` value: it is a cost-aware post-step on SR-based scoring, toggled per request with `enableMultiObjective` or per merchant with the `multi_objective_routing_enabled` feature flag. When it runs, the response carries a `multi_objective_info` block, and `routing_approach` becomes `SR_SELECTION_MULTI_OBJECTIVE` when a cheaper gateway wins on expected value.
 - A successful call emits analytics/audit events asynchronously.
 
 ## Related
@@ -168,4 +195,5 @@ curl --location "$BASE_URL/decide-gateway" \
 - [Decide Gateway: PL Based Routing](../../api-refs/decide-gateway-pl-based.mdx)
 - [Decide Gateway: Debit Routing](../../api-refs/decide-gateway-debit-routing.mdx)
 - [Decide Gateway: Hybrid Routing](../../api-refs/decide-gateway-hybrid-routing.mdx)
+- [Decide Gateway: Multi-Objective Routing](../../api-refs/decide-gateway-multi-objective.mdx)
 - [Update Gateway Score](./updateGatewayScore.mdx)
