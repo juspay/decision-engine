@@ -56,7 +56,9 @@ use serde_json::Value;
 
 use crate::cost_ingestion::connectors::csv_reader;
 use crate::cost_ingestion::source::SettlementReportSource;
-use crate::cost_ingestion::types::{ConnectorCreds, IngestError, ReportNotification, SettledFeeRow};
+use crate::cost_ingestion::types::{
+    ConnectorCreds, IngestError, ReportNotification, SettledFeeRow,
+};
 
 /// The `type` of the report-ready webhook event this connector handles.
 const REPORT_GENERATED_EVENT: &str = "report_generated";
@@ -228,7 +230,10 @@ impl SettlementReportSource for CheckoutReportSource {
 
         let event = parse_event(raw_body)?;
 
-        let event_type = event.get("type").and_then(Value::as_str).unwrap_or_default();
+        let event_type = event
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
         if event_type != REPORT_GENERATED_EVENT {
             return Err(IngestError::MalformedNotification(format!(
                 "unexpected event type '{event_type}', expected {REPORT_GENERATED_EVENT}"
@@ -296,7 +301,9 @@ impl SettlementReportSource for CheckoutReportSource {
         let cko = CheckoutCreds::parse(creds)?;
         let report_id = note.report_ref.trim();
         if report_id.is_empty() {
-            return Err(IngestError::Download("checkout: empty report id".to_string()));
+            return Err(IngestError::Download(
+                "checkout: empty report id".to_string(),
+            ));
         }
 
         // 1. Get report details → the file ids that make up this report.
@@ -616,7 +623,11 @@ pay_4,Partial Capture,Partial Capture,AMEX,Credit,GB,GBP,20.00,2026-07-09T12:00:
         let rows = parse();
         // pay_1 (captured) and pay_2 (captured) and pay_4 (partial-captured) are emitted; pay_3
         // (auth-only) is not.
-        assert_eq!(rows.len(), 3, "one row per captured payment; auth-only dropped");
+        assert_eq!(
+            rows.len(),
+            3,
+            "one row per captured payment; auth-only dropped"
+        );
 
         let p1 = by_ref(&rows, "pay_1");
         assert_eq!(p1.card_network, "visa");
@@ -643,9 +654,15 @@ pay_4,Partial Capture,Partial Capture,AMEX,Credit,GB,GBP,20.00,2026-07-09T12:00:
         assert_eq!(p2.card_network, "mc", "MASTERCARD -> mc");
         assert_eq!(p2.funding, "debit");
         assert_eq!(p2.variant, "mcdebit");
-        assert!((p2.gross - 20.00).abs() < 1e-9, "refund not subtracted from gross");
+        assert!(
+            (p2.gross - 20.00).abs() < 1e-9,
+            "refund not subtracted from gross"
+        );
         assert_eq!(p2.scheme_fee, 0.0);
-        assert!((p2.commission - 0.03).abs() < 1e-9, "blended fees only; refund fee skipped");
+        assert!(
+            (p2.commission - 0.03).abs() < 1e-9,
+            "blended fees only; refund fee skipped"
+        );
         assert!((p2.total_fee - 0.03).abs() < 1e-9);
     }
 
@@ -689,7 +706,10 @@ pay_4,Partial Capture,Partial Capture,AMEX,Credit,GB,GBP,20.00,2026-07-09T12:00:
             parse_date("2026-07-09T18:07:06.844"),
             NaiveDate::from_ymd_opt(2026, 7, 9)
         );
-        assert_eq!(parse_date("2026-07-09"), NaiveDate::from_ymd_opt(2026, 7, 9));
+        assert_eq!(
+            parse_date("2026-07-09"),
+            NaiveDate::from_ymd_opt(2026, 7, 9)
+        );
         assert_eq!(parse_date(""), None);
         assert_eq!(parse_date("garbage"), None);
     }
