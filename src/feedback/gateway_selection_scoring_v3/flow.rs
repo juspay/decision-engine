@@ -291,6 +291,7 @@ pub async fn getSrV3MerchantBucketSize(txn_detail: TxnDetail, txn_card_info: Txn
         &pmt,
         &pm,
         &sr_routing_dimensions,
+        true,
     );
     let merchant_bucket_size = match maybe_bucket_size {
         None => {
@@ -301,6 +302,7 @@ pub async fn getSrV3MerchantBucketSize(txn_detail: TxnDetail, txn_card_info: Txn
                 &pmt,
                 &pm,
                 &sr_routing_dimensions,
+                true,
             )
             .unwrap_or(C::DEFAULT_SR_V3_BASED_BUCKET_SIZE)
         }

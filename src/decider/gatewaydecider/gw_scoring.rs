@@ -285,6 +285,15 @@ pub async fn scoring_flow(
                     auth_type: txn_card_info.authType.as_ref().map(|a| a.to_string()),
                 };
 
+                // A/B "manual" arm (use_autopilot = false) ignores autopilot-calibrated
+                // bucket/hedging; absent → true (honor autopilot, the standard behavior).
+                let ab_use_autopilot = decider_flow
+                    .writer
+                    .ab_test_sr_override
+                    .as_ref()
+                    .and_then(|o| o.use_autopilot)
+                    .unwrap_or(true);
+
                 let hedging_percent = decider_flow
                     .writer
                     .ab_test_sr_override
@@ -296,6 +305,7 @@ pub async fn scoring_flow(
                             &pmt_str,
                             pm.clone().as_str(),
                             &sr_routing_dimensions,
+                            ab_use_autopilot,
                         )
                     })
                     .or_else(|| {
@@ -304,6 +314,7 @@ pub async fn scoring_flow(
                             &pmt_str,
                             pm.clone().as_str(),
                             &sr_routing_dimensions,
+                            ab_use_autopilot,
                         )
                     })
                     .unwrap_or(C::DEFAULT_SR_V3_BASED_HEDGING_PERCENT);
@@ -541,11 +552,20 @@ pub async fn get_cached_scores_based_on_srv3(
         auth_type: txn_card_info.authType.as_ref().map(|a| a.to_string()),
     };
 
+    // A/B "manual" arm ignores autopilot-calibrated bucket size (absent → honor autopilot).
+    let ab_use_autopilot = decider_flow
+        .writer
+        .ab_test_sr_override
+        .as_ref()
+        .and_then(|o| o.use_autopilot)
+        .unwrap_or(true);
+
     let merchant_bucket_size = Utils::get_sr_v3_bucket_size(
         merchant_srv3_input_config.clone(),
         &pmt_str,
         &pm,
         &sr_routing_dimensions,
+        ab_use_autopilot,
     )
     .or_else(|| {
         Utils::get_sr_v3_bucket_size(
@@ -553,6 +573,7 @@ pub async fn get_cached_scores_based_on_srv3(
             &pmt_str,
             &pm,
             &sr_routing_dimensions,
+            ab_use_autopilot,
         )
     })
     .unwrap_or(C::DEFAULT_SR_V3_BASED_BUCKET_SIZE);

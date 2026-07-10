@@ -15,12 +15,61 @@ import {
   ExperimentResultsResponse,
   ExperimentTransactionsResponse,
 } from '../../types/api'
-import { ShieldAlert, PowerOff, Plus, FlaskConical, CheckCircle2, XCircle, Clock, AlertTriangle, Sliders } from 'lucide-react'
+import { ShieldAlert, PowerOff, Plus, FlaskConical, CheckCircle2, XCircle, Clock, AlertTriangle, Sliders, Coins, Rocket, Pencil, Trash2 } from 'lucide-react'
 import { validateABTestForm } from '../../features/routing/abTesting/schema'
 import { toABTestCreatePayload } from '../../features/routing/abTesting/payload'
+import { toABTestFormValues } from '../../features/routing/abTesting/state'
 import { ABTestFormValues, ABTestExperimentType, SrConfigOverrideForm, DEFAULT_VARIANT_SR_CONFIG } from '../../features/routing/abTesting/types'
 
 const SAMPLE_SIZE_PRESETS = [1000, 5000, 10000, 50000]
+
+const EXPERIMENT_TYPE_HELP: Record<ABTestExperimentType, string> = {
+  algorithm_comparison: 'Compare two different routing strategies (e.g. SR vs priority list).',
+  sr_config_tuning: 'Same SR algorithm, different hyperparameters — tune hedging % or elimination threshold on the variant arm.',
+  cost_on_off: 'Control routes on auth rate only; variant turns on multi-objective (cost-aware) routing. Measures cost saved vs auth traded.',
+  autopilot_value: 'Both arms are cost-aware SR routing; control uses your manual config, variant uses autopilot’s auto-tuned bucket/hedging. Measures whether autopilot is a net win.',
+}
+
+// Detect the experiment type from the persisted arm overrides (the backend stores no "type").
+// Order matters: use_autopilot ⇒ autopilot; else enable_multi_objective ⇒ cost; else hedging/elim ⇒ tuning.
+function abExperimentKind(abData?: ABTestAlgorithmData): ABTestExperimentType {
+  const v = abData?.variant_sr_config
+  const c = abData?.control_sr_config
+  if (v?.use_autopilot !== undefined || c?.use_autopilot !== undefined) return 'autopilot_value'
+  if (v?.enable_multi_objective !== undefined || c?.enable_multi_objective !== undefined) return 'cost_on_off'
+  if (v && (v.hedging_percent !== undefined || v.elimination_threshold !== undefined)) return 'sr_config_tuning'
+  return 'algorithm_comparison'
+}
+
+// True for the SR-arm experiment types where cost/net-value metrics are meaningful.
+function isCostKind(kind: ABTestExperimentType): boolean {
+  return kind === 'cost_on_off' || kind === 'autopilot_value'
+}
+
+function KindBadge({ kind }: { kind: ABTestExperimentType }) {
+  if (kind === 'sr_config_tuning') return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300">
+      <Sliders size={9} /> SR Config Tuning
+    </span>
+  )
+  if (kind === 'cost_on_off') return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+      <Coins size={9} /> Turn cost on
+    </span>
+  )
+  if (kind === 'autopilot_value') return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300">
+      <Rocket size={9} /> Autopilot value
+    </span>
+  )
+  return null
+}
+
+function bps(n: number | null | undefined): string {
+  if (n === null || n === undefined) return '—'
+  const sign = n > 0 ? '+' : ''
+  return `${sign}${n.toFixed(1)} bps`
+}
 
 function deltaLabel(deltaPp: number) {
   const sign = deltaPp > 0 ? '+' : ''
@@ -79,9 +128,14 @@ interface SrParamDiffProps {
   abData: ABTestAlgorithmData
 }
 
+// Only the numeric SR-tuning params are shown here (hedging / elimination). Other override
+// fields (enable_multi_objective, margin, use_autopilot) belong to the cost/autopilot experiment
+// types, which render their own arm-config views.
+const SR_TUNING_KEYS = ['hedging_percent', 'elimination_threshold'] as const
+
 function SrParamDiff({ abData }: SrParamDiffProps) {
   const vari = abData.variant_sr_config ?? {}
-  const keys = Object.keys(vari) as (keyof typeof vari)[]
+  const keys = SR_TUNING_KEYS.filter(k => typeof vari[k] === 'number')
 
   if (keys.length === 0) return null
 
@@ -106,7 +160,7 @@ function SrParamDiff({ abData }: SrParamDiffProps) {
                 <td className="px-4 py-2 text-slate-500">{srParamLabel(String(k))}</td>
                 <td className="px-4 py-2 text-slate-400 italic">Live SR config</td>
                 <td className="px-4 py-2 font-mono font-semibold text-brand-600 dark:text-brand-400">
-                  {vv !== undefined ? srParamFormat(String(k), vv) : '—'}
+                  {typeof vv === 'number' ? srParamFormat(String(k), vv) : '—'}
                 </td>
               </tr>
             )
@@ -126,6 +180,8 @@ interface DetailPanelProps {
   algorithmName: (id: string) => string
   onActivate: () => void
   onStop: () => void
+  onEdit: () => void
+  onDelete: () => void
 }
 
 function formatTime(ms: number) {
@@ -139,12 +195,19 @@ function ExperimentDetailPanel({
   algorithmName,
   onActivate,
   onStop,
+  onEdit,
+  onDelete,
 }: DetailPanelProps) {
   const abData = (algorithm.algorithm_data || algorithm.algorithm)?.data as ABTestAlgorithmData | undefined
-  const isTuning = Boolean(abData?.variant_sr_config)
+  const kind = abExperimentKind(abData)
+  const isTuning = kind === 'sr_config_tuning'
+  const costKind = isCostKind(kind)
 
+  // For cost experiments, value net EV at the variant's configured margin (falls back to the
+  // backend default when unset) so the net-value verdict reflects the merchant's economics.
+  const evalMargin = abData?.variant_sr_config?.margin
   const resultsUrl = abData
-    ? `/analytics/experiment/${algorithm.id}/results?min_sample_size=${abData.min_sample_size}&guardrail_threshold_pp=${abData.guardrail_threshold_pp}`
+    ? `/analytics/experiment/${algorithm.id}/results?min_sample_size=${abData.min_sample_size}&guardrail_threshold_pp=${abData.guardrail_threshold_pp}${evalMargin !== undefined ? `&evaluation_margin=${evalMargin}` : ''}`
     : null
 
   const { data: results, isLoading } = useSWR<ExperimentResultsResponse>(
@@ -168,6 +231,8 @@ function ExperimentDetailPanel({
     const algorithmId = variantArm === 'control' ? abData.control_algorithm_id : abData.variant_algorithm_id
     if (algorithmId === 'sr_routing') {
       if (isTuning) return variantArm === 'variant' ? 'SR Routing (custom params)' : 'SR Routing (live config)'
+      if (kind === 'cost_on_off') return variantArm === 'variant' ? 'SR + cost (multi-objective)' : 'SR (auth only)'
+      if (kind === 'autopilot_value') return variantArm === 'variant' ? 'SR + cost (autopilot)' : 'SR + cost (manual)'
       return 'SR Routing'
     }
     return algorithmName(algorithmId)
@@ -195,11 +260,7 @@ function ExperimentDetailPanel({
         <div>
           <div className="flex items-center gap-2">
             <h2 className="text-base font-semibold text-slate-900 dark:text-white">{algorithm.name}</h2>
-            {isTuning && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300">
-                <Sliders size={9} /> SR Config Tuning
-              </span>
-            )}
+            <KindBadge kind={kind} />
             {isActive
               ? <Badge variant="green">Active</Badge>
               : <Badge variant="gray">Inactive</Badge>
@@ -212,10 +273,17 @@ function ExperimentDetailPanel({
           )}
         </div>
         <div className="flex items-center gap-2">
-          {isActive
-            ? <Button size="sm" variant="danger" onClick={onStop}><PowerOff size={13} /> Stop</Button>
-            : <Button size="sm" variant="primary" onClick={onActivate}>Activate</Button>
-          }
+          {isActive ? (
+            <Button size="sm" variant="danger" onClick={onStop}><PowerOff size={13} /> Stop</Button>
+          ) : (
+            <>
+              {/* Edit / Delete are only offered while inactive — a running experiment must be
+                  stopped first to avoid corrupting its collected results (enforced server-side too). */}
+              <Button size="sm" variant="secondary" onClick={onEdit}><Pencil size={13} /> Edit</Button>
+              <Button size="sm" variant="secondary" onClick={onDelete}><Trash2 size={13} /> Delete</Button>
+              <Button size="sm" variant="primary" onClick={onActivate}>Activate</Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -223,6 +291,25 @@ function ExperimentDetailPanel({
       {abData && (
         isTuning ? (
           <SrParamDiff abData={abData} />
+        ) : costKind ? (
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-xl border border-slate-200 dark:border-[#222226] bg-slate-50 dark:bg-[#0c0c10] px-4 py-3">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400 mb-1">Control ({controlPct}%)</p>
+              <p className="text-sm font-medium text-slate-800 dark:text-white truncate">
+                {kind === 'cost_on_off' ? 'Auth-only SR' : 'Cost-aware SR · manual'}
+              </p>
+              <p className="text-[10px] text-slate-400 mt-0.5">{kind === 'cost_on_off' ? 'Cost off' : 'Ignores autopilot'}</p>
+            </div>
+            <div className="rounded-xl border border-brand-200 dark:border-brand-800/50 bg-brand-50/50 dark:bg-brand-900/10 px-4 py-3">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-brand-400 mb-1">Variant ({variantPct}%)</p>
+              <p className="text-sm font-medium text-slate-800 dark:text-white truncate">
+                {kind === 'cost_on_off'
+                  ? `Cost-aware SR${abData.variant_sr_config?.margin !== undefined ? ` · margin ${abData.variant_sr_config.margin}` : ''}`
+                  : 'Cost-aware SR · autopilot'}
+              </p>
+              <p className="text-[10px] text-slate-400 mt-0.5">{kind === 'cost_on_off' ? 'Cost on' : 'Uses autopilot'}</p>
+            </div>
+          </div>
         ) : (
           <div className="grid grid-cols-2 gap-3">
             <div className="rounded-xl border border-slate-200 dark:border-[#222226] bg-slate-50 dark:bg-[#0c0c10] px-4 py-3">
@@ -293,6 +380,11 @@ function ExperimentDetailPanel({
                           {noOutcome.toLocaleString()} no outcome
                         </p>
                       )}
+                      {costKind && metrics.avg_cost_saved_bps !== null && (
+                        <p className="text-xs text-sky-600 dark:text-sky-400" title="Average bps saved vs the SR head on cost-routed payments">
+                          {metrics.avg_cost_saved_bps.toFixed(1)} bps saved
+                        </p>
+                      )}
                     </div>
                   )
                 })}
@@ -314,6 +406,21 @@ function ExperimentDetailPanel({
                   )}
                 </div>
               </div>
+
+              {/* Net economic value — the decision metric for cost/autopilot experiments. */}
+              {costKind && results.net_delta_bps !== null && (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-200 dark:border-sky-800/50 bg-sky-50/60 dark:bg-sky-900/15 px-4 py-3">
+                  <div>
+                    <p className="text-[10px] font-medium uppercase tracking-wide text-sky-500">Net value delta (variant − control)</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      Auth × margin − fees, valued at margin {results.evaluation_margin}. Positive = variant is more profitable.
+                    </p>
+                  </div>
+                  <p className={`text-xl font-bold ${results.net_delta_bps > 0 ? 'text-emerald-600 dark:text-emerald-400' : results.net_delta_bps < 0 ? 'text-red-500' : 'text-slate-800 dark:text-white'}`}>
+                    {bps(results.net_delta_bps)}
+                  </p>
+                </div>
+              )}
 
               {/* Guardrail warning */}
               {results.verdict === 'guardrail_breached' && (
@@ -527,13 +634,14 @@ interface CreateFormProps {
   success: string | null
   createdId: string | null
   merchantId: string | null
+  isEditing: boolean
   onCreate: () => void
   onActivateCreated: (id: string) => void
 }
 
 function CreateForm({
   form, setForm, eligibleAlgorithms, saving, error, success, createdId,
-  merchantId, onCreate, onActivateCreated,
+  merchantId, isEditing, onCreate, onActivateCreated,
 }: CreateFormProps) {
   const isTuningMode = form.experimentType === 'sr_config_tuning'
 
@@ -565,7 +673,7 @@ function CreateForm({
   return (
     <Card>
       <CardHeader>
-        <h2 className="text-sm font-semibold text-slate-800 dark:text-white">New Experiment</h2>
+        <h2 className="text-sm font-semibold text-slate-800 dark:text-white">{isEditing ? 'Edit Experiment' : 'New Experiment'}</h2>
         <p className="text-xs text-slate-500 mt-0.5">Define the arms and safety parameters for this experiment.</p>
       </CardHeader>
       <CardBody className="space-y-5">
@@ -573,19 +681,22 @@ function CreateForm({
         {/* Experiment type toggle */}
         <div>
           <label className="block text-xs text-slate-500 mb-2">Experiment type</label>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button type="button" className={tabClass('algorithm_comparison')} onClick={() => setForm(f => ({ ...f, experimentType: 'algorithm_comparison' }))}>
               Algorithm comparison
             </button>
             <button type="button" className={tabClass('sr_config_tuning')} onClick={() => setForm(f => ({ ...f, experimentType: 'sr_config_tuning' }))}>
               <Sliders size={12} className="inline mr-1" />SR config tuning
             </button>
+            <button type="button" className={tabClass('cost_on_off')} onClick={() => setForm(f => ({ ...f, experimentType: 'cost_on_off' }))}>
+              <Coins size={12} className="inline mr-1" />Turn cost on
+            </button>
+            <button type="button" className={tabClass('autopilot_value')} onClick={() => setForm(f => ({ ...f, experimentType: 'autopilot_value' }))}>
+              <Rocket size={12} className="inline mr-1" />Autopilot value
+            </button>
           </div>
           <p className="mt-1.5 text-[11px] text-slate-400">
-            {form.experimentType === 'algorithm_comparison'
-              ? 'Compare two different routing strategies (e.g. SR vs priority list).'
-              : 'Same SR algorithm, different hyperparameters — tune bucket size, hedging %, elimination threshold, or scoring weights.'
-            }
+            {EXPERIMENT_TYPE_HELP[form.experimentType]}
           </p>
         </div>
 
@@ -677,6 +788,61 @@ function CreateForm({
           </div>
         )}
 
+        {/* ── Turn cost on arms ── */}
+        {form.experimentType === 'cost_on_off' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="rounded-xl border border-slate-200 dark:border-[#222226] bg-slate-50/50 dark:bg-[#0c0c10] px-4 py-4 space-y-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                Control ({100 - form.variantSplitPct}%) — cost off
+              </p>
+              <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Auth-only SR routing</p>
+              <p className="text-[11px] text-slate-400">Routes purely on success rate — multi-objective disabled.</p>
+            </div>
+            <div className="rounded-xl border border-brand-200 dark:border-brand-800/50 bg-brand-50/30 dark:bg-brand-900/10 px-4 py-4 space-y-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-500">
+                Variant ({form.variantSplitPct}%) — cost on
+              </p>
+              <div>
+                <label className="block text-[11px] text-slate-500 mb-1">Variant margin (fraction of ticket, 0–1)</label>
+                <input
+                  type="number" min={0.01} max={1} step={0.01}
+                  value={form.variantMargin ?? ''}
+                  placeholder="e.g. 0.15"
+                  onChange={e => setForm(f => ({ ...f, variantMargin: e.target.value === '' ? null : Number(e.target.value) }))}
+                  className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                />
+                <p className="text-[10px] text-slate-400 mt-0.5">Lower margin lets cheaper PSPs win more often. The default 1.0 is effectively auth-only, so set a realistic business margin.</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Autopilot value arms ── */}
+        {form.experimentType === 'autopilot_value' && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="rounded-xl border border-slate-200 dark:border-[#222226] bg-slate-50/50 dark:bg-[#0c0c10] px-4 py-4 space-y-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                  Control ({100 - form.variantSplitPct}%) — manual
+                </p>
+                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Cost-aware SR, manual config</p>
+                <p className="text-[11px] text-slate-400">Ignores autopilot’s auto-tuned bucket/hedging — uses your manual/default values.</p>
+              </div>
+              <div className="rounded-xl border border-brand-200 dark:border-brand-800/50 bg-brand-50/30 dark:bg-brand-900/10 px-4 py-4 space-y-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-500">
+                  Variant ({form.variantSplitPct}%) — autopilot
+                </p>
+                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Cost-aware SR, autopilot config</p>
+                <p className="text-[11px] text-slate-400">Uses autopilot’s live auto-calibrated bucket size and discovery share.</p>
+              </div>
+            </div>
+            <div className="flex items-start gap-2 rounded-lg border border-amber-200 dark:border-amber-800/50 bg-amber-50 dark:bg-amber-900/15 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-300">
+              <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+              <span>Enable <span className="font-medium">Autopilot → Self-tuning</span> for this merchant first, otherwise there are no autopilot-tuned values and both arms behave identically.</span>
+            </div>
+          </div>
+        )}
+
         {/* Traffic split */}
         <div>
           <label className="block text-xs text-slate-500 mb-1">
@@ -745,7 +911,7 @@ function CreateForm({
         )}
 
         <Button variant="primary" onClick={onCreate} disabled={saving || !merchantId}>
-          {saving ? <><Spinner size={14} /> Creating…</> : 'Create Experiment'}
+          {saving ? <><Spinner size={14} /> {isEditing ? 'Saving…' : 'Creating…'}</> : isEditing ? 'Save Changes' : 'Create Experiment'}
         </Button>
       </CardBody>
     </Card>
@@ -763,6 +929,7 @@ const DEFAULT_FORM: ABTestFormValues = {
   minSampleSize: 5000,
   guardrailThresholdPp: 3,
   variantSrConfig: { ...DEFAULT_VARIANT_SR_CONFIG },
+  variantMargin: 0.15,
 }
 
 export function ABTestingPage() {
@@ -796,6 +963,9 @@ export function ABTestingPage() {
 
   const [pendingActivateId, setPendingActivateId] = useState<string | null>(null)
   const [pendingDeactivateId, setPendingDeactivateId] = useState<string | null>(null)
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
+  // When set, the form is editing an existing (inactive) experiment rather than creating one.
+  const [editingId, setEditingId] = useState<string | null>(null)
 
   // Auto-select the active experiment when the page loads with no selection
   useEffect(() => {
@@ -812,6 +982,18 @@ export function ABTestingPage() {
   function openCreate() {
     setSearchParams({}, { replace: true })
     setShowCreate(true)
+    setEditingId(null)
+    setForm({ ...DEFAULT_FORM })
+    setSuccess(null)
+    setError(null)
+  }
+
+  function openEdit(algo: RoutingAlgorithm) {
+    const values = toABTestFormValues(algo)
+    if (!values) return
+    setForm(values)
+    setEditingId(algo.id)
+    setShowCreate(true)
     setSuccess(null)
     setError(null)
   }
@@ -823,18 +1005,48 @@ export function ABTestingPage() {
     setSaving(true); setError(null); setSuccess(null)
     try {
       const payload = toABTestCreatePayload(form, merchantId)
-      const result = await apiPost<RoutingAlgorithm>('/routing/create', payload)
-      const id = result.rule_id || result.id
-      setCreatedId(id)
-      setSuccess(`"${form.name}" created.`)
-      setForm({ ...DEFAULT_FORM })
-      await mutateAll()
-      setSearchParams({ experiment: id }, { replace: true })
-      setShowCreate(false)
+      if (editingId) {
+        // Edit in place — keeps the same id so history/links stay valid.
+        await apiPost('/routing/update', {
+          created_by: merchantId,
+          routing_algorithm_id: editingId,
+          name: payload.name,
+          description: payload.description,
+          algorithm: payload.algorithm,
+        })
+        await mutateAll()
+        setSuccess(`"${form.name}" updated.`)
+        setSearchParams({ experiment: editingId }, { replace: true })
+        setEditingId(null)
+        setForm({ ...DEFAULT_FORM })
+        setShowCreate(false)
+      } else {
+        const result = await apiPost<RoutingAlgorithm>('/routing/create', payload)
+        const id = result.rule_id || result.id
+        setCreatedId(id)
+        setSuccess(`"${form.name}" created.`)
+        setForm({ ...DEFAULT_FORM })
+        await mutateAll()
+        setSearchParams({ experiment: id }, { replace: true })
+        setShowCreate(false)
+      }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to create experiment')
+      setError(e instanceof Error ? e.message : editingId ? 'Failed to update experiment' : 'Failed to create experiment')
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function doDelete(id: string) {
+    if (!merchantId) return
+    try {
+      await apiPost('/routing/delete', { created_by: merchantId, routing_algorithm_id: id })
+      await Promise.all([mutateActive(), mutateAll()])
+      if (selectedId === id) setSearchParams({}, { replace: true })
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to delete experiment')
+    } finally {
+      setPendingDeleteId(null)
     }
   }
 
@@ -916,7 +1128,7 @@ export function ABTestingPage() {
                 const abData = (algo.algorithm_data || algo.algorithm)?.data as ABTestAlgorithmData | undefined
                 const isActive = activeAbTest?.id === algo.id
                 const isSelected = selectedId === algo.id
-                const isTuning = Boolean(abData?.variant_sr_config)
+                const kind = abExperimentKind(abData)
 
                 return (
                   <button
@@ -945,8 +1157,12 @@ export function ABTestingPage() {
                     </div>
                     {abData && (
                       <p className="text-[11px] text-slate-400 mt-0.5 truncate">
-                        {isTuning
+                        {kind === 'sr_config_tuning'
                           ? 'SR config tuning'
+                          : kind === 'cost_on_off'
+                          ? 'Cost on vs off'
+                          : kind === 'autopilot_value'
+                          ? 'Autopilot vs manual'
                           : `${algorithmName(abData.control_algorithm_id)} → ${algorithmName(abData.variant_algorithm_id)}`
                         }
                       </p>
@@ -968,6 +1184,8 @@ export function ABTestingPage() {
               algorithmName={algorithmName}
               onActivate={() => handleActivate(selectedAlgo.id)}
               onStop={() => setPendingDeactivateId(selectedAlgo.id)}
+              onEdit={() => openEdit(selectedAlgo)}
+              onDelete={() => setPendingDeleteId(selectedAlgo.id)}
             />
           )}
 
@@ -981,6 +1199,7 @@ export function ABTestingPage() {
               success={success}
               createdId={createdId}
               merchantId={merchantId}
+              isEditing={editingId !== null}
               onCreate={handleCreate}
               onActivateCreated={(id) => handleActivate(id)}
             />
@@ -1012,6 +1231,15 @@ export function ABTestingPage() {
         variant="danger"
         onConfirm={() => { const id = pendingDeactivateId!; void doDeactivate(id) }}
         onCancel={() => setPendingDeactivateId(null)}
+      />
+      <ConfirmDialog
+        open={pendingDeleteId !== null}
+        title="Delete experiment?"
+        description="This permanently deletes the experiment definition. Any results already collected remain in analytics. This cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => { const id = pendingDeleteId!; void doDelete(id) }}
+        onCancel={() => setPendingDeleteId(null)}
       />
     </div>
   )

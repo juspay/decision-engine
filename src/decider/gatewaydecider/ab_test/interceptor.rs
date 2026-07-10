@@ -90,10 +90,13 @@ pub async fn intercept(dreq: &DomainDeciderRequestForApiCallV2) -> AbTestInterce
 
     // SR arm: gateway unknown until the decider runs — emit routing event without gateway.
     if arm_algorithm_id == "sr_routing" {
+        // Per-arm routing overrides: the variant carries variant_sr_config, the control carries
+        // control_sr_config. Either may be None (→ live SR config), which preserves the original
+        // "control always uses live config" behavior for standard A/B tests.
         let sr_config_override = if arm == "variant" {
             data.variant_sr_config.clone()
         } else {
-            None
+            data.control_sr_config.clone()
         };
         emit_routing_event(
             payment_id,

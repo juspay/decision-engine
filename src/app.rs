@@ -357,6 +357,14 @@ where
             axum::routing::post(crate::euclid::handlers::routing_rules::deactivate_routing_rule),
         )
         .route(
+            "/routing/update",
+            axum::routing::post(crate::euclid::handlers::routing_rules::update_routing_rule),
+        )
+        .route(
+            "/routing/delete",
+            axum::routing::post(crate::euclid::handlers::routing_rules::delete_routing_rule),
+        )
+        .route(
             "/routing/list/:created_by",
             axum::routing::post(
                 crate::euclid::handlers::routing_rules::list_all_routing_algorithm_id,

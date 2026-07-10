@@ -493,6 +493,16 @@ pub struct ExperimentArmMetrics {
     pub failure_count: i64,
     pub auth_rate: f64,
     pub avg_latency_ms: Option<f64>,
+    /// Average chosen-PSP cost (bps) over outcome events that carried cost data. `None` for
+    /// auth-only arms / experiments where multi-objective did not run.
+    pub avg_chosen_cost_bps: Option<f64>,
+    /// Average cost saved vs the SR head (bps); positive only on CostWon decisions. `None` when
+    /// no cost data was recorded.
+    pub avg_cost_saved_bps: Option<f64>,
+    /// Net economic value per attempt in bps of ticket, valued at the experiment's common
+    /// business margin `M`: `auth_rate · (M·10_000 − avg_chosen_cost_bps)`. `None` when the arm
+    /// has no cost data (so cost/autopilot experiments can be judged on net value).
+    pub net_ev_bps: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -523,6 +533,11 @@ pub struct ExperimentResultsResponse {
     pub verdict: ExperimentVerdict,
     /// Min sample size from experiment config; used to show progress.
     pub min_sample_size: u32,
+    /// Net economic value delta in bps of ticket (variant − control), valued at
+    /// `evaluation_margin`. `None` for auth-only experiments (no cost data on either arm).
+    pub net_delta_bps: Option<f64>,
+    /// The common business margin (fraction of ticket) used to value both arms' net EV.
+    pub evaluation_margin: f64,
 }
 
 pub struct ExperimentResultsQuery {
@@ -532,6 +547,9 @@ pub struct ExperimentResultsQuery {
     pub end_ms: Option<i64>,
     pub min_sample_size: u32,
     pub guardrail_threshold_pp: f64,
+    /// Common business margin (fraction of ticket) used to score net value for both arms.
+    /// Defaults to `DEFAULT_EVALUATION_MARGIN` when the caller omits it.
+    pub evaluation_margin: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

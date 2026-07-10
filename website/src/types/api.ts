@@ -72,6 +72,9 @@ export interface VolumeSplitItem {
 export interface SrConfigOverride {
   hedging_percent?: number
   elimination_threshold?: number
+  enable_multi_objective?: boolean
+  margin?: number
+  use_autopilot?: boolean
 }
 
 export interface ABTestAlgorithmData {
@@ -81,6 +84,7 @@ export interface ABTestAlgorithmData {
   min_sample_size: number
   guardrail_threshold_pp: number
   variant_sr_config?: SrConfigOverride
+  control_sr_config?: SrConfigOverride
 }
 
 export type RoutingAlgorithmData =
@@ -156,6 +160,9 @@ export interface ExperimentArmMetrics {
   failure_count: number
   auth_rate: number
   avg_latency_ms: number | null
+  avg_chosen_cost_bps: number | null
+  avg_cost_saved_bps: number | null
+  net_ev_bps: number | null
 }
 
 export interface ExperimentResultsResponse {
@@ -168,6 +175,8 @@ export interface ExperimentResultsResponse {
   confidence_interval: [number, number] | null
   verdict: ExperimentVerdict
   min_sample_size: number
+  net_delta_bps: number | null
+  evaluation_margin: number
 }
 
 export interface ExperimentTransaction {

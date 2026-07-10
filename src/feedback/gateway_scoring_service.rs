@@ -946,6 +946,7 @@ pub async fn update_gateway_score(
                     &pmt_str,
                     &pm_str,
                     &sr_routing_dimensions,
+                    true,
                 )
                 .or_else(|| {
                     GU::get_sr_v3_bucket_size(
@@ -953,6 +954,7 @@ pub async fn update_gateway_score(
                         &pmt_str,
                         &pm_str,
                         &sr_routing_dimensions,
+                        true,
                     )
                 })
                 .unwrap_or(DC::DEFAULT_SR_V3_BASED_BUCKET_SIZE);

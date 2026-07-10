@@ -1610,6 +1610,10 @@ pub fn get_sr_v3_bucket_size(
     pmt: &str,
     pm: &str,
     sr_routing_dimensions: &SrRoutingDimensions,
+    // When false, autopilot-calibrated sub-level entries are skipped so the lookup falls back to
+    // the merchant's manual/default bucket size (used by an A/B "manual" arm). Pass true elsewhere
+    // to preserve the standard behavior of honoring autopilot-tuned values.
+    use_autopilot: bool,
 ) -> Option<i32> {
     sr_v3_input_config.and_then(|config| {
         get_sr_v3_sub_level_input_config(
@@ -1617,7 +1621,7 @@ pub fn get_sr_v3_bucket_size(
             pmt,
             pm,
             sr_routing_dimensions,
-            |x| x.bucketSize.is_some(),
+            |x| x.bucketSize.is_some() && (use_autopilot || !is_autopilot_sourced(x)),
         )
         .and_then(|sub_config| sub_config.bucketSize)
         .or(config.defaultBucketSize)
@@ -1630,6 +1634,8 @@ pub fn get_sr_v3_hedging_percent(
     pmt: &str,
     pm: &str,
     sr_routing_dimensions: &SrRoutingDimensions,
+    // See `get_sr_v3_bucket_size`: false skips autopilot-sourced entries (manual arm).
+    use_autopilot: bool,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
         get_sr_v3_sub_level_input_config(
@@ -1637,12 +1643,17 @@ pub fn get_sr_v3_hedging_percent(
             pmt,
             pm,
             sr_routing_dimensions,
-            |x| x.hedgingPercent.is_some(),
+            |x| x.hedgingPercent.is_some() && (use_autopilot || !is_autopilot_sourced(x)),
         )
         .and_then(|sub_config| sub_config.hedgingPercent)
         .or(config.defaultHedgingPercent)
         .filter(|&percent| percent >= 0.0)
     })
+}
+
+/// A sub-level SR config entry was written by the auto-calibration (autopilot) job.
+fn is_autopilot_sourced(cfg: &SrV3SubLevelInputConfig) -> bool {
+    cfg.source.as_deref() == Some(crate::sr_auto_calibration::AUTOPILOT_SOURCE)
 }
 
 pub fn get_sr_v3_lower_reset_factor(
@@ -3181,6 +3192,7 @@ mod sr_v3_sub_level_match_tests {
             lowerResetFactor: None,
             upperResetFactor: None,
             gatewayExtraScore: None,
+            source: None,
         }
     }
 

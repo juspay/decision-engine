@@ -18,6 +18,14 @@ struct InflightContext {
     variant_arm: String,
     gateway: Option<String>,
     is_static_arm: bool,
+    /// Multi-objective cost outcome, filled in after routing (SR arms only) via
+    /// `record_cost_outcome`. `None` when the arm ran auth-only (cost off / not yet enriched).
+    #[serde(default)]
+    cost_saved_bps: Option<f64>,
+    #[serde(default)]
+    chosen_cost_bps: Option<f64>,
+    #[serde(default)]
+    margin: Option<f64>,
 }
 
 /// Returns true only for static-arm AB test payments.
@@ -49,6 +57,9 @@ pub async fn store_inflight(
         variant_arm: variant_arm.to_string(),
         gateway: gateway.map(str::to_string),
         is_static_arm,
+        cost_saved_bps: None,
+        chosen_cost_bps: None,
+        margin: None,
     };
     if let Err(e) = state
         .redis_conn
@@ -57,6 +68,45 @@ pub async fn store_inflight(
     {
         logger::warn!(
             "ab_test outcome: failed to store inflight context for {}: {:?}",
+            payment_id,
+            e
+        );
+    }
+}
+
+/// After routing completes for an SR-arm A/B payment, re-write the inflight record with the
+/// now-known decided gateway and the multi-objective cost outcome (cost saved, chosen PSP cost,
+/// margin). Lets the later outcome event (`emit_if_in_flight`) attribute cost per arm. Cost
+/// fields are `None` when the arm ran auth-only (multi-objective off), in which case this still
+/// backfills the decided gateway. Only ever called for SR arms, so `is_static_arm` stays false.
+#[allow(clippy::too_many_arguments)]
+pub async fn record_cost_outcome(
+    payment_id: &str,
+    experiment_id: &str,
+    variant_arm: &str,
+    gateway: Option<&str>,
+    cost_saved_bps: Option<f64>,
+    chosen_cost_bps: Option<f64>,
+    margin: Option<f64>,
+) {
+    let state = get_tenant_app_state().await;
+    let key = inflight_key(payment_id);
+    let ctx = InflightContext {
+        experiment_id: experiment_id.to_string(),
+        variant_arm: variant_arm.to_string(),
+        gateway: gateway.map(str::to_string),
+        is_static_arm: false,
+        cost_saved_bps,
+        chosen_cost_bps,
+        margin,
+    };
+    if let Err(e) = state
+        .redis_conn
+        .set_key_with_ttl(&key, ctx, INFLIGHT_TTL_SECS)
+        .await
+    {
+        logger::warn!(
+            "ab_test outcome: failed to enrich inflight context for {}: {:?}",
             payment_id,
             e
         );
@@ -83,6 +133,9 @@ pub async fn emit_if_in_flight(payment_id: &str, merchant_id: &str, is_success: 
         "variant_arm": ctx.variant_arm,
         "preview_kind": "routing_evaluate_ab_test",
         "outcome_source": "score_update",
+        "cost_saved_bps": ctx.cost_saved_bps,
+        "chosen_cost_bps": ctx.chosen_cost_bps,
+        "margin": ctx.margin,
     }));
 
     DomainAnalyticsEvent::record_decision(

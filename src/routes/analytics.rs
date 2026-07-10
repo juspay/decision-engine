@@ -272,6 +272,9 @@ pub struct ExperimentResultsParams {
     pub end_ms: Option<i64>,
     pub min_sample_size: Option<u32>,
     pub guardrail_threshold_pp: Option<f64>,
+    /// Common business margin (fraction of ticket) to value net EV for cost/autopilot
+    /// experiments. Omitted → `DEFAULT_EVALUATION_MARGIN`.
+    pub evaluation_margin: Option<f64>,
 }
 
 pub async fn experiment_results(
@@ -288,6 +291,9 @@ pub async fn experiment_results(
         end_ms: params.end_ms,
         min_sample_size: params.min_sample_size.unwrap_or(1000),
         guardrail_threshold_pp: params.guardrail_threshold_pp.unwrap_or(3.0),
+        evaluation_margin: params.evaluation_margin.unwrap_or(
+            crate::analytics::clickhouse::endpoints::experiment_results::DEFAULT_EVALUATION_MARGIN,
+        ),
     };
     Ok(Json(fetch_experiment_results(&state, &query).await?))
 }
