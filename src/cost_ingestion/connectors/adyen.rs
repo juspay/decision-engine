@@ -380,7 +380,7 @@ fn base64_encode(bytes: &[u8]) -> String {
 }
 
 /// Pull the interchange category from the `ICSF details` JSON array: the element with `t=="ic"`
-/// carries the product category in `n`. `""` when absent (flat-fee methods) or unparseable.
+/// carries the product category in `n`. `""` when absent (flat-fee methods) or unparsable.
 fn ic_category(raw: &str) -> String {
     if raw.is_empty() {
         return String::new();
