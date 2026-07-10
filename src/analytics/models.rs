@@ -666,7 +666,7 @@ pub enum AuthBandSpec {
 impl AuthBandSpec {
     /// Whether auth-band detection runs at all (multi-objective on).
     pub fn is_on(&self) -> bool {
-        !matches!(self, AuthBandSpec::Off)
+        !matches!(self, Self::Off)
     }
 
     /// Minimum score (0..1) a candidate must hold to be inside the leader's auth band.
@@ -676,9 +676,9 @@ impl AuthBandSpec {
     /// [`AuthBandSpec::is_on`] first).
     pub fn band_floor(&self, leader_score: f64, candidate_score: f64) -> f64 {
         match self {
-            AuthBandSpec::Off => f64::NEG_INFINITY,
-            AuthBandSpec::Fixed(half_width) => leader_score - half_width,
-            AuthBandSpec::NoiseFloor { bucket_size, z } => {
+            Self::Off => f64::NEG_INFINITY,
+            Self::Fixed(half_width) => leader_score - half_width,
+            Self::NoiseFloor { bucket_size, z } => {
                 let std_err = |p: f64| {
                     let b = (*bucket_size).max(1) as f64;
                     (p * (1.0 - p) / b).max(0.0).sqrt()

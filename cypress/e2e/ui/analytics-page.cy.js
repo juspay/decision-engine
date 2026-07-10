@@ -78,7 +78,7 @@ describe('Analytics UI', () => {
       .parents('div.space-y-8')
       .first()
       .within(() => {
-        cy.contains('button', /^Auth-rate based$/).should('be.visible')
+        cy.contains('button', /^Multi-objective$/).should('be.visible')
         cy.contains('button', /^Rule based \/ Volume based$/).should('be.visible')
       })
 
@@ -95,7 +95,7 @@ describe('Analytics UI', () => {
     cy.wait('@overviewRefresh')
     cy.wait('@routingRefresh')
     // Wait for the view to settle and API data to load
-    cy.contains('button', /^Auth-rate based$/).should('have.class', 'bg-white')
+    cy.contains('button', /^Multi-objective$/).should('have.class', 'bg-white')
 
     // Wait for analytics data to load (looking for endpoint hit cards)
     cy.contains('Decide Gateway').should('be.visible')
@@ -107,8 +107,6 @@ describe('Analytics UI', () => {
       .within(() => {
         cy.contains('button', /^Rule based \/ Volume based$/).scrollIntoView().click({ force: true })
       })
-    cy.contains(
-      'Routing decisions from /routing/evaluate, kept separate from auth-rate transaction routing and gateway scoring.',
-    ).should('exist')
+    cy.contains('Latest decisions from').should('exist')
   })
 })

@@ -10,6 +10,7 @@ import { Button } from '../ui/Button'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { Spinner } from '../ui/Spinner'
 import { useMerchantStore } from '../../store/merchantStore'
+import { useAuthStore } from '../../store/authStore'
 import { apiPost, fetcher } from '../../lib/api'
 import { PAYMENT_METHOD_TYPES, PAYMENT_METHODS } from '../../lib/constants'
 import { Plus, Trash2, Eye, PowerOff, Info } from 'lucide-react'
@@ -225,7 +226,11 @@ type SRTab = 'autopilot' | 'manual' | 'flags' | 'cost'
 const SR_TABS: readonly SRTab[] = ['autopilot', 'manual', 'flags', 'cost']
 
 export function SRRoutingPage() {
-  const { merchantId } = useMerchantStore()
+  // Same merchant resolution as OverviewPage/RoutingHubPage — this page must
+  // never disagree with the Overview setup checklist about what is configured.
+  const selectedMerchantId = useMerchantStore((state) => state.merchantId)
+  const authMerchantId = useAuthStore((state) => state.user?.merchantId || '')
+  const merchantId = selectedMerchantId || authMerchantId
   // Active tab is kept in the URL (?tab=…) so a reload or shared link reopens it directly.
   // Unknown/absent values fall back to Autopilot, and the default is left out of the URL.
   const [searchParams, setSearchParams] = useSearchParams()
@@ -252,8 +257,10 @@ export function SRRoutingPage() {
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
 
+  // Shares the SWR key used by OverviewPage/RoutingHubPage so all three surfaces
+  // read (and invalidate) the same cached config.
   const { data: existing, isLoading, mutate } = useSWR<SRConfigResponse>(
-    merchantId ? ['rule-sr', merchantId] : null,
+    merchantId ? ['/rule/get', 'successRate', merchantId] : null,
     () => apiPost('/rule/get', { merchant_id: merchantId, algorithm: 'successRate' }),
     { shouldRetryOnError: false, revalidateOnFocus: false }
   )
