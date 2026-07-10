@@ -19,7 +19,8 @@ pub struct SetCredentialsRequest {
     pub account: String,
     /// Secret used to verify inbound webhook signatures.
     pub webhook_secret: String,
-    /// Credential used to authenticate report downloads (e.g. "reportuser:password").
+    /// Credential used to authenticate report downloads. Either report-user Basic auth as
+    /// "user:password", or a Report Service API key on its own (sent as `X-API-Key`).
     pub download_auth: String,
 }
 
@@ -64,26 +65,51 @@ pub async fn set_connector_credentials(
     }))
 }
 
-#[derive(Debug, Serialize)]
-pub struct SourceItem {
-    pub connector: String,
-    pub account: String,
-}
-
-/// `GET /merchant-account/:merchant_id/connectors` — configured sources, no secrets.
-pub async fn list_connector_credentials(
-    Path(merchant_id): Path<String>,
-) -> Result<Json<Vec<SourceItem>>, (StatusCode, String)> {
-    let sources = creds::list_sources(&merchant_id)
+/// `DELETE /merchant-account/:merchant_id/connectors/:connector/credentials/:account`
+///
+/// Removes the stored credentials and the source-index entry so the pair drops off the configured
+/// list. Idempotent — deleting a source that isn't there returns success.
+pub async fn delete_connector_credentials(
+    Path((merchant_id, connector, account)): Path<(String, String, String)>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    creds::delete_source(&connector, &account, &merchant_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
-    Ok(Json(
-        sources
-            .into_iter()
-            .map(|s| SourceItem {
-                connector: s.connector,
-                account: s.account,
-            })
-            .collect(),
-    ))
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `GET /merchant-account/:merchant_id/connectors` — configured sources with *masked* credential
+/// previews (last-4 hints only, never full secrets). Falls back to source ids without hints when
+/// the credential keyring isn't configured (nothing decryptable).
+pub async fn list_connector_credentials(
+    Path(merchant_id): Path<String>,
+) -> Result<Json<Vec<creds::MaskedSource>>, (StatusCode, String)> {
+    let app_state = get_tenant_app_state().await;
+    let cfg = &app_state.config.cost_ingestion;
+    match ConnectorCredsStore::from_keyring(
+        &cfg.creds_encryption_current,
+        &cfg.creds_encryption_keys,
+    ) {
+        Some(store) => store
+            .list_masked(&merchant_id)
+            .await
+            .map(Json)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}"))),
+        None => {
+            let sources = creds::list_sources(&merchant_id)
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+            Ok(Json(
+                sources
+                    .into_iter()
+                    .map(|s| creds::MaskedSource {
+                        connector: s.connector,
+                        account: s.account,
+                        webhook_secret_hint: "—".to_string(),
+                        download_auth_hint: "—".to_string(),
+                    })
+                    .collect(),
+            ))
+        }
+    }
 }

@@ -100,6 +100,7 @@ Use `/routing/deactivate` when a saved algorithm should remain available but no 
 - [Priority-list routing](./decide-gateway-pl-based.mdx): transact with `PL_BASED_ROUTING`.
 - [Debit/network routing](./decide-gateway-debit-routing.mdx): transact with `NTW_BASED_ROUTING`.
 - [Network + SR hybrid routing](./decide-gateway-hybrid-routing.mdx): transact with `NTW_SR_HYBRID_ROUTING`.
+- [Multi-objective routing](./decide-gateway-multi-objective.mdx): cost-aware post-step on SR-based routing via the `enableMultiObjective` flag or the `multi_objective_routing_enabled` merchant feature flag; responses carry `multi_objective_info`.
 
 ### Update Gateway Score
 
@@ -133,3 +134,5 @@ Use backend enum strings in requests:
 | Priority-list based | `PL_BASED_ROUTING` | `/decide-gateway` |
 | Debit/network based | `NTW_BASED_ROUTING` | `/decide-gateway` |
 | Network + SR hybrid | `NTW_SR_HYBRID_ROUTING` | `/decide-gateway` |
+
+Multi-objective (cost-aware) routing is not a `rankingAlgorithm` value: it is a post-step on SR-based scoring, toggled per request with `enableMultiObjective` or per merchant with the `multi_objective_routing_enabled` feature flag. See [Multi-objective routing](./decide-gateway-multi-objective.mdx).

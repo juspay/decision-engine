@@ -334,9 +334,9 @@ async fn calibrate_merchant(
             let cur_bucket = entries[i].get("bucketSize").and_then(|v| v.as_i64());
             let cur_hedge = entries[i].get("hedgingPercent").and_then(|v| v.as_f64());
             let bucket_changed =
-                cur_bucket.map_or(true, |c| (c as i32 - new_bucket).abs() >= BUCKET_DEADBAND);
+                cur_bucket.is_none_or(|c| (c as i32 - new_bucket).abs() >= BUCKET_DEADBAND);
             let hedge_changed =
-                cur_hedge.map_or(true, |c| (c - new_hedge).abs() >= HEDGE_DEADBAND_PCT);
+                cur_hedge.is_none_or(|c| (c - new_hedge).abs() >= HEDGE_DEADBAND_PCT);
             if bucket_changed || hedge_changed {
                 entries[i]["bucketSize"] = serde_json::json!(new_bucket);
                 entries[i]["hedgingPercent"] = serde_json::json!(new_hedge);

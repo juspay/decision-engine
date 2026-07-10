@@ -15,7 +15,9 @@ use masking::Secret;
 
 use super::connectors::adyen::AdyenReportSource;
 use super::connectors::braintree::BraintreeReportSource;
-use super::types::{ConnectorCreds, IngestError, ReportNotification, SettledFeeRow};
+use super::connectors::chase::ChaseReportSource;
+use super::connectors::checkout::CheckoutReportSource;
+use super::types::{ConnectorCreds, IngestError, ReadyReport, ReportNotification, SettledFeeRow};
 
 /// Everything connector-specific lives behind this trait. All methods are pure functions of
 /// their inputs except `download_report` (network), so impls are straightforward to unit-test.
@@ -39,6 +41,23 @@ pub trait SettlementReportSource: Send + Sync {
         raw_body: &[u8],
         secret: &Secret<String>,
     ) -> Result<ReportNotification, IngestError>;
+
+    /// Whether this connector is discovered by **polling** its reporting API (a "pull" connector)
+    /// rather than by a pushed webhook. Pull connectors are swept by the generic report poller;
+    /// webhook connectors keep the default `false` and are driven by the webhook route instead.
+    fn is_pull(&self) -> bool {
+        false
+    }
+
+    /// For pull connectors: list the reports currently ready to ingest for one settlement source.
+    /// The poller enqueues one job per returned [`ReadyReport`]. Webhook connectors don't override
+    /// this (they receive pushes), so the default returns none.
+    async fn poll_ready_reports(
+        &self,
+        _creds: &ConnectorCreds,
+    ) -> Result<Vec<ReadyReport>, IngestError> {
+        Ok(Vec::new())
+    }
 
     /// Fetch the report bytes using the merchant's stored credentials. Buffered for now; large
     /// reports can move to a streamed body later without touching callers.
@@ -90,7 +109,10 @@ pub fn parse_in_batches(
     source.parse_rows(reader, &mut |row| {
         batch.push(row);
         if batch.len() >= batch_size {
-            on_batch(std::mem::replace(&mut batch, Vec::with_capacity(batch_size)))?;
+            on_batch(std::mem::replace(
+                &mut batch,
+                Vec::with_capacity(batch_size),
+            ))?;
         }
         Ok(())
     })?;
@@ -111,6 +133,8 @@ impl ConnectorRegistry {
         let mut sources: HashMap<&'static str, Arc<dyn SettlementReportSource>> = HashMap::new();
         Self::register(&mut sources, Arc::new(AdyenReportSource::new()));
         Self::register(&mut sources, Arc::new(BraintreeReportSource::new()));
+        Self::register(&mut sources, Arc::new(ChaseReportSource::new()));
+        Self::register(&mut sources, Arc::new(CheckoutReportSource::new()));
         Self { sources }
     }
 
@@ -127,6 +151,16 @@ impl ConnectorRegistry {
             .get(connector)
             .cloned()
             .ok_or_else(|| IngestError::UnknownConnector(connector.to_string()))
+    }
+
+    /// Every registered **pull** connector (those discovered by polling). The report poller sweeps
+    /// exactly these, so adding a pull PSP is just a new `is_pull() -> true` impl — no poller change.
+    pub fn pull_sources(&self) -> Vec<Arc<dyn SettlementReportSource>> {
+        self.sources
+            .values()
+            .filter(|s| s.is_pull())
+            .cloned()
+            .collect()
     }
 }
 

@@ -5,7 +5,7 @@ set -eu
 #
 # Unlike the analytics scripts (015/025) this pipeline does NOT use Kafka: settlement
 # reports are a once-daily-per-merchant batch, so the ingest worker aggregates each report
-# in-flight and bulk-INSERTs per-day sufficient statistics directly (see
+# in-flight and bulk-inserts per-day sufficient statistics directly (see
 # scratch/inhouse-cost-architecture.md §7). Hence plain MergeTree tables, no *_queue / *_mv.
 # Everything is connector-generic: a connector is a value in the `connector` column, never a
 # separate table. Individual transactions are never stored — only per-day cluster summaries.

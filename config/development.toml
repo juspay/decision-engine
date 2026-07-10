@@ -91,9 +91,17 @@ service_config_ttl = 300    # 5 minutes
 zstd_compression_filepath = "/tmp/extra-paths/redis-zstd-dictionaries/sbx"
 
 [cost_ingestion]
+# Drain webhook-enqueued jobs in this process. Off by default so only a dedicated ingest
+# deployment owns the worker; enable in dev to process pending jobs locally.
+worker_enabled = true
 # Key id used to encrypt NEW connector credentials. Rotate by adding another key below and
 # pointing this at it; keep the old key listed so existing credentials still decrypt.
 creds_encryption_current = "v1"
+# Poll pull-based connectors' reporting APIs for ready reports and enqueue them. Connector-agnostic.
+# Enabled in dev to exercise the pull path locally (mock, local stub, or real).
+report_poll_enabled = false
+# Short interval so a locally-configured pull source is picked up quickly during testing.
+report_poll_interval_secs = 30
 
 [cost_ingestion.creds_encryption_keys]
 # key-id = AES-256 key (hex, 64 chars). Dev-only placeholder; per environment generate with

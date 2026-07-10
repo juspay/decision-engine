@@ -16,6 +16,7 @@ curl --location "$BASE_URL/decide-gateway" \
     "eligibleGatewayList": ["stripe", "adyen", "checkout"],
     "rankingAlgorithm": "PL_BASED_ROUTING",
     "eliminationEnabled": false,
+    "enableMultiObjective": false,
     "paymentInfo": {
       "paymentId": "pl_001",
       "amount": 1000,
@@ -38,6 +39,11 @@ curl --location "$BASE_URL/decide-gateway" \
     "gws": ["stripe", "adyen", "checkout"],
     "gatewayReferenceIds": {}
   },
-  "reset_approach": "NO_RESET"
+  "reset_approach": "NO_RESET",
+  "multi_objective_info": null
 }
 ```
+
+## Multi-Objective Option
+
+When multi-objective routing is enabled (request field `enableMultiObjective`, or the `multi_objective_routing_enabled` merchant feature flag), a cost-aware post-step may re-rank the SR result and the response gains a `multi_objective_info` block. Details and examples: [Multi-objective routing](./decide-gateway-multi-objective.mdx).

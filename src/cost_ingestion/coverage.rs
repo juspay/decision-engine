@@ -160,8 +160,16 @@ pub async fn for_merchant(
         thin_gross,
         non_linear_gross,
         good_gross_pct,
-        bps_rmse_p50: if bps_rmse_p50.is_nan() { 0.0 } else { bps_rmse_p50 },
-        bps_rmse_p90: if bps_rmse_p90.is_nan() { 0.0 } else { bps_rmse_p90 },
+        bps_rmse_p50: if bps_rmse_p50.is_nan() {
+            0.0
+        } else {
+            bps_rmse_p50
+        },
+        bps_rmse_p90: if bps_rmse_p90.is_nan() {
+            0.0
+        } else {
+            bps_rmse_p90
+        },
         report_date,
     })
 }

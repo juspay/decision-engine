@@ -72,12 +72,21 @@ async fn run_once(batch: usize, clickhouse: &ClickHouseAnalyticsConfig) {
             Ok(outcome) => {
                 log_fit(id, &outcome);
                 if let Err(e) = store::mark_completed(id, &outcome.to_completion()).await {
-                    logger::warn!(tag = "ingest_worker", "mark_completed {} failed: {:?}", id, e);
+                    logger::warn!(
+                        tag = "ingest_worker",
+                        "mark_completed {} failed: {:?}",
+                        id,
+                        e
+                    );
                 }
                 // Serve the freshly-fitted models immediately (don't wait for the periodic refresh).
                 // Per-merchant: only this merchant is rebuilt, off the global-refresh path.
                 if let Err(e) = super::serving::refresh_merchant(clickhouse, &merchant_id).await {
-                    logger::warn!(tag = "ingest_worker", "serving refresh after ingest failed: {}", e);
+                    logger::warn!(
+                        tag = "ingest_worker",
+                        "serving refresh after ingest failed: {}",
+                        e
+                    );
                 }
             }
             Err(e) => {
@@ -103,16 +112,21 @@ async fn process(
     let source = registry.get(&job.connector)?;
 
     // Credentials for this (connector, account).
-    let store_ =
-        ConnectorCredsStore::from_keyring(&cfg.creds_encryption_current, &cfg.creds_encryption_keys)
-            .ok_or_else(|| {
-                IngestError::Storage("credential encryption keyring not configured".to_string())
-            })?;
+    let store_ = ConnectorCredsStore::from_keyring(
+        &cfg.creds_encryption_current,
+        &cfg.creds_encryption_keys,
+    )
+    .ok_or_else(|| {
+        IngestError::Storage("credential encryption keyring not configured".to_string())
+    })?;
     let resolved = store_
         .get(&job.connector, &job.account)
         .await?
         .ok_or_else(|| {
-            IngestError::Storage(format!("no credentials for {}/{}", job.connector, job.account))
+            IngestError::Storage(format!(
+                "no credentials for {}/{}",
+                job.connector, job.account
+            ))
         })?;
 
     // Download the report (buffered) via the connector, then normalize it.

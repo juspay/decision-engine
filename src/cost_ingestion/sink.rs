@@ -22,7 +22,8 @@ use super::types::IngestError;
 const INSERT_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Columns we provide; `ingested_at` is intentionally omitted so ClickHouse applies its DEFAULT.
-const COLUMNS: &str = "connector,account,merchant_id,txn_date,ingestion_id,card_network,variant,funding,\
+const COLUMNS: &str =
+    "connector,account,merchant_id,txn_date,ingestion_id,card_network,variant,funding,\
 issuer_country,currency,ic_category,channel,band,n,sx,sy,sxx,sxy,syy,su,suu,suy,suuy,syyuu";
 
 fn client() -> &'static reqwest::Client {
@@ -80,7 +81,9 @@ pub async fn insert_daily_stats(
             "suuy": r.suuy,
             "syyuu": r.syyuu,
         });
-        body.push_str(&serde_json::to_string(&obj).map_err(|e| IngestError::Storage(e.to_string()))?);
+        body.push_str(
+            &serde_json::to_string(&obj).map_err(|e| IngestError::Storage(e.to_string()))?,
+        );
         body.push('\n');
     }
 

@@ -38,6 +38,7 @@
           "api-refs/decide-gateway-pl-based",
           "api-refs/decide-gateway-debit-routing",
           "api-refs/decide-gateway-hybrid-routing",
+          "api-refs/decide-gateway-multi-objective",
           "api-refs/decision-gateway-legacy",
           "api-refs/update-gateway-score",
           "api-refs/update-score-legacy",
