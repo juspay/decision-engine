@@ -16,6 +16,7 @@ use masking::Secret;
 use super::connectors::adyen::AdyenReportSource;
 use super::connectors::braintree::BraintreeReportSource;
 use super::connectors::chase::ChaseReportSource;
+use super::connectors::checkout::CheckoutReportSource;
 use super::types::{ConnectorCreds, IngestError, ReadyReport, ReportNotification, SettledFeeRow};
 
 /// Everything connector-specific lives behind this trait. All methods are pure functions of
@@ -133,6 +134,7 @@ impl ConnectorRegistry {
         Self::register(&mut sources, Arc::new(AdyenReportSource::new()));
         Self::register(&mut sources, Arc::new(BraintreeReportSource::new()));
         Self::register(&mut sources, Arc::new(ChaseReportSource::new()));
+        Self::register(&mut sources, Arc::new(CheckoutReportSource::new()));
         Self { sources }
     }
 

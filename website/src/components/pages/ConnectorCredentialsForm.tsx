@@ -15,7 +15,7 @@ import { Field, inputClass } from './CostRoutingShared'
 /**
  * Automatic-ingestion tab: store a connector's report-access credentials (encrypted at rest) so the
  * ingest worker can pull settlement reports. Two credential shapes:
- *  - webhook connectors (Adyen): a webhook signing secret + report-download auth.
+ *  - webhook connectors (Adyen, Checkout): a webhook signing secret + report-download auth.
  *  - Chase (J.P. Morgan): OAuth2 client-assertion credentials — no webhook — packed as a JSON blob
  *    into `download_auth` (the pull poller reads it). Lists the (connector, account) pairs already
  *    configured.
@@ -58,6 +58,7 @@ export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }
   }
 
   const isChase = connector === 'chase'
+  const isCheckout = connector === 'checkout'
 
   async function handleSave() {
     if (!merchantId) {
@@ -164,18 +165,30 @@ export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }
             }}
           >
             <option value="adyen">Adyen</option>
+            <option value="checkout">Checkout</option>
             <option value="chase">Chase (J.P. Morgan)</option>
           </select>
         </Field>
         <Field
           label="Account"
-          hint={isChase ? 'J.P. Morgan EntityId' : 'Connector-side account (e.g. Adyen merchantAccountCode)'}
+          hint={
+            editing
+              ? 'Editing an existing source — account is locked'
+              : isChase
+                ? 'J.P. Morgan EntityId'
+                : isCheckout
+                  ? 'Checkout entity id the report relates to (ent_…)'
+                  : 'Connector-side account (e.g. Adyen merchantAccountCode)'
+          }
         >
           <input
             className={inputClass}
             value={account}
             onChange={(e) => setAccount(e.target.value)}
-            placeholder={isChase ? '418553' : 'AcmeMerchantEU'}
+            placeholder={
+              isChase ? '418553' : isCheckout ? 'ent_r7nge7vl53crsa3ozjxzoiykj4' : 'AcmeMerchantEU'
+            }
+            disabled={editing !== null}
           />
         </Field>
 
@@ -235,22 +248,40 @@ export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }
           </>
         ) : (
           <>
-            <Field label="Webhook secret" hint="Used to verify inbound webhook signatures (HMAC key)">
+            <Field
+              label="Webhook secret"
+              hint={
+                editing
+                  ? 'Enter a new value to replace the stored secret'
+                  : isCheckout
+                    ? 'Checkout webhook signature key (HMAC-SHA256 over the raw body, sent as Cko-Signature)'
+                    : 'Used to verify inbound webhook signatures (HMAC key)'
+              }
+            >
               <input
                 className={inputClass}
                 type="password"
                 value={webhookSecret}
                 onChange={(e) => setWebhookSecret(e.target.value)}
-                placeholder="••••••••"
+                placeholder={editing?.webhook_secret_hint || '••••••••'}
               />
             </Field>
-            <Field label="Report download auth" hint="e.g. reportuser:password">
+            <Field
+              label="Report download auth"
+              hint={
+                editing
+                  ? 'Enter a new value to replace the stored auth'
+                  : isCheckout
+                    ? 'Checkout secret key (sk_…). Or JSON {"secret_key":"sk_…","api_base_url":"…"} for a sandbox/regional host.'
+                    : 'Report-user Basic auth as user:password, or a Report Service API key on its own'
+              }
+            >
               <input
                 className={inputClass}
                 type="password"
                 value={downloadAuth}
                 onChange={(e) => setDownloadAuth(e.target.value)}
-                placeholder="••••••••"
+                placeholder={editing?.download_auth_hint || '••••••••'}
               />
             </Field>
           </>
