@@ -234,14 +234,17 @@ export function useConnectorSources(merchantId?: string) {
 
 /**
  * A merchant's ingestion history (and in-flight jobs). Polls every 2s while any job is still
- * processing, so an in-progress upload's `staged_rows` climbs live; idles otherwise.
+ * pending or processing, so a queued webhook job's start and an in-progress upload's climbing
+ * `staged_rows` show up live; idles otherwise.
  */
 export function useIngestionHistory(merchantId?: string) {
   const path = merchantId ? `/merchant-account/${merchantId}/cost-ingestions` : null
   const { data, error, isLoading, mutate } = useSWR<IngestionDto[]>(path, fetcher, {
     revalidateOnFocus: false,
     refreshInterval: (latest) =>
-      latest?.some((j) => j.status === 'processing') ? 2000 : 0,
+      latest?.some((j) => j.status === 'processing' || j.status === 'pending')
+        ? 2000
+        : 0,
   })
   return { ingestions: data ?? [], error, isLoading, mutate }
 }

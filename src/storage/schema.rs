@@ -609,6 +609,7 @@ diesel::table! {
 diesel::allow_tables_to_appear_in_same_query!(
     card_brand_routes,
     card_info,
+    cost_ingestion,
     emi_bank_code,
     feature,
     gateway_bank_emi_support,

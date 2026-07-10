@@ -64,7 +64,7 @@ pub async fn enqueue_pending(
         &app_state.db,
         dsl::connector
             .eq(connector.to_string())
-            .and(dsl::notification_id.eq(notification_id.to_string())),
+            .and(dsl::notification_id.eq(Some(notification_id.to_string()))),
     )
     .await
     .map_err(|e| IngestError::Storage(e.to_string()))?;
@@ -128,18 +128,24 @@ pub async fn create_manual(
 /// here and is skipped.
 pub async fn claim_pending(limit: usize) -> Result<Vec<CostIngestion>, IngestError> {
     let app_state = get_tenant_app_state().await;
+    let conn = app_state
+        .db
+        .get_conn()
+        .await
+        .map_err(|_| IngestError::Storage("db connection".to_string()))?;
 
-    let pending: Vec<CostIngestion> = generics::generic_find_all::<
-        <CostIngestion as HasTable>::Table,
-        _,
-        CostIngestion,
-    >(&app_state.db, dsl::status.eq("pending".to_string()))
-    .await
-    .map_err(|e| IngestError::Storage(format!("{e:?}")))?;
+    // Oldest-first, capped in SQL — a large backlog stays cheap and jobs are claimed in order.
+    let pending: Vec<CostIngestion> = dsl::cost_ingestion
+        .filter(dsl::status.eq("pending".to_string()))
+        .order(dsl::created_at.asc())
+        .limit(limit as i64)
+        .get_results_async(&*conn)
+        .await
+        .map_err(|e| IngestError::Storage(format!("{e:?}")))?;
 
     let now = crate::utils::date_time::now();
     let mut claimed = Vec::new();
-    for row in pending.into_iter().take(limit) {
+    for row in pending.into_iter() {
         let conn = app_state
             .db
             .get_conn()

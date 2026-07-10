@@ -87,7 +87,7 @@ function SectionRail({
         : 'Not set up',
     data:
       coverage && coverage.total_clusters > 0
-        ? ``
+        ? `${coverage.good_gross_pct.toFixed(1)}% volume covered`
         : 'No data yet',
     overrides: undefined,
   }
