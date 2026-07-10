@@ -335,9 +335,7 @@ where
 
     // Background job: poll every pull-based connector's reporting API for ready reports and enqueue
     // them. Connector-agnostic; no-op unless `report_poll_enabled`.
-    crate::cost_ingestion::poller::spawn(
-        global_app_state.global_config.cost_ingestion.clone(),
-    );
+    crate::cost_ingestion::poller::spawn(global_app_state.global_config.cost_ingestion.clone());
 
     // Background job: refresh the in-house cost serving view from the fitted models, so the
     // multi-objective router can price candidates from our own ingested data.
@@ -440,10 +438,9 @@ where
             // Monthly settlement reports run to several GB. The handler streams the body to disk
             // and parses in batches (O(batch) RAM), so lift the body cap to the same hard limit it
             // enforces itself. DefaultBodyLimit otherwise errors the stream at its default.
-            post(routes::report_upload::upload_report)
-                .layer(axum::extract::DefaultBodyLimit::max(
-                    routes::report_upload::MAX_UPLOAD_BYTES,
-                )),
+            post(routes::report_upload::upload_report).layer(axum::extract::DefaultBodyLimit::max(
+                routes::report_upload::MAX_UPLOAD_BYTES,
+            )),
         )
         .route(
             "/merchant-account/:merchant-id/connector-fees",

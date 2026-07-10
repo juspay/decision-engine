@@ -17,7 +17,9 @@ use serde_json::Value;
 
 use crate::cost_ingestion::connectors::csv_reader;
 use crate::cost_ingestion::source::SettlementReportSource;
-use crate::cost_ingestion::types::{ConnectorCreds, IngestError, ReportNotification, SettledFeeRow};
+use crate::cost_ingestion::types::{
+    ConnectorCreds, IngestError, ReportNotification, SettledFeeRow,
+};
 
 /// Adyen record types that actually carry settlement fees; everything else (Authorised,
 /// Received, Refused, …) has empty fee columns and would pollute the fit.
@@ -417,7 +419,9 @@ mod tests {
 Psp Reference,Record Type,Payment Method Variant,Global Card Brand,Issuer Country,Settlement Currency,Payable (SC),Commission (SC),Markup (SC),Scheme Fees (SC),Interchange (SC),ICSF details\n\
 ref1,Authorised,visastandarddebit,visa,FR,EUR,,,,,,\n\
 ref2,Settled,visastandarddebit,visa,FR,EUR,100.00,0.05,0.00,0.02,0.20,\"[{\"\"t\"\":\"\"ic\"\",\"\"n\"\":\"\"Intra EEA Consumer EMV Debit\"\"}]\"\n";
-        let rows = AdyenReportSource::new().parse_report(csv.as_bytes()).unwrap();
+        let rows = AdyenReportSource::new()
+            .parse_report(csv.as_bytes())
+            .unwrap();
         assert_eq!(rows.len(), 1, "only the Settled row is kept");
         let r = &rows[0];
         assert_eq!(r.txn_ref, "ref2");
@@ -447,8 +451,14 @@ ref2,Settled,visastandarddebit,visa,FR,EUR,100.00,0.05,0.00,0.02,0.20,\"[{\"\"t\
 
     #[test]
     fn funding_derivation() {
-        assert_eq!(SettledFeeRow::funding_from_variant("visastandarddebit"), "debit");
-        assert_eq!(SettledFeeRow::funding_from_variant("mcsuperpremiumcredit"), "credit");
+        assert_eq!(
+            SettledFeeRow::funding_from_variant("visastandarddebit"),
+            "debit"
+        );
+        assert_eq!(
+            SettledFeeRow::funding_from_variant("mcsuperpremiumcredit"),
+            "credit"
+        );
         assert_eq!(SettledFeeRow::funding_from_variant("ideal"), "");
     }
 

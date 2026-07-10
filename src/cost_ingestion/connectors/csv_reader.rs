@@ -75,7 +75,9 @@ pub fn parse<C>(
         .byte_headers()
         .map_err(|e| IngestError::Parse(e.to_string()))?
         .clone();
-    let cols = prepare(&Headers { record: &header_rec })?;
+    let cols = prepare(&Headers {
+        record: &header_rec,
+    })?;
 
     // One record, reused for every row — the whole point of the ByteRecord path.
     let mut rec = csv::ByteRecord::new();

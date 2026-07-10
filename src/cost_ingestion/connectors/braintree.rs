@@ -35,7 +35,9 @@ use masking::Secret;
 
 use crate::cost_ingestion::connectors::csv_reader;
 use crate::cost_ingestion::source::SettlementReportSource;
-use crate::cost_ingestion::types::{ConnectorCreds, IngestError, ReportNotification, SettledFeeRow};
+use crate::cost_ingestion::types::{
+    ConnectorCreds, IngestError, ReportNotification, SettledFeeRow,
+};
 
 /// Braintree `Transaction Type` values that carry a settled processing fee. Sales are the fit's
 /// signal; `credit` / `dispute debit` / `dispute credit` rows are reversals whose signed amounts
@@ -154,7 +156,9 @@ impl SettlementReportSource for BraintreeReportSource {
             |c, row| {
                 // Keep only settled sales; skip credits/disputes whose signed amounts would pollute
                 // the gross→fee regression — done before any field extraction.
-                if !FEE_TRANSACTION_TYPES.contains(&row.get(c.r#type).trim().to_lowercase().as_str()) {
+                if !FEE_TRANSACTION_TYPES
+                    .contains(&row.get(c.r#type).trim().to_lowercase().as_str())
+                {
                     return Ok(None);
                 }
 
@@ -295,7 +299,9 @@ mod tests {
 Transaction ID,Transaction Type,Settlement Currency,Settlement Amount,Card Brand,Card Type,Payment Instrument,Interchange Description,Interchange Total Amount,Total Scheme Fees,Braintree Total Amount,Total Fee Amount,Card Issuing Country,Settlement Date,Payment Network\n\
 9celsl42,sale,USD,72.5,MasterCard,debit,credit_card,MC-REGULATED COMM (DB),0.26,0.0395,0.08,0.3795,USA,2/2/20,\n\
 r2,credit,USD,-10.00,Visa,credit,credit_card,MC-REGULATED,0.01,0.00,0.01,0.02,USA,2/3/2020,\n";
-        let rows = BraintreeReportSource::new().parse_report(csv.as_bytes()).unwrap();
+        let rows = BraintreeReportSource::new()
+            .parse_report(csv.as_bytes())
+            .unwrap();
         assert_eq!(rows.len(), 1, "only the sale row is kept");
         let r = &rows[0];
         assert_eq!(r.txn_ref, "9celsl42");
@@ -310,8 +316,14 @@ r2,credit,USD,-10.00,Visa,credit,credit_card,MC-REGULATED,0.01,0.00,0.01,0.02,US
         assert!((r.scheme_fee - 0.0395).abs() < 1e-9);
         assert!((r.commission - 0.08).abs() < 1e-9);
         assert_eq!(r.markup, 0.0);
-        assert!((r.total_fee - 0.3795).abs() < 1e-9, "0.26+0.0395+0.08 = Total Fee Amount");
-        assert!((r.gross - 72.5).abs() < 1e-9, "Settlement Amount is already gross (not +fee)");
+        assert!(
+            (r.total_fee - 0.3795).abs() < 1e-9,
+            "0.26+0.0395+0.08 = Total Fee Amount"
+        );
+        assert!(
+            (r.gross - 72.5).abs() < 1e-9,
+            "Settlement Amount is already gross (not +fee)"
+        );
         assert_eq!(r.txn_date, chrono::NaiveDate::from_ymd_opt(2020, 2, 2));
     }
 
@@ -321,9 +333,14 @@ r2,credit,USD,-10.00,Visa,credit,credit_card,MC-REGULATED,0.01,0.00,0.01,0.02,US
         let csv = "\
 Transaction ID,Transaction Type,Settlement Currency,Settlement Amount,Card Brand,Card Type,Payment Instrument,Interchange Total Amount,Braintree Total Amount,Payment Network\n\
 p1,sale,USD,50.00,,debit,credit_card,0.10,0.05,STAR\n";
-        let rows = BraintreeReportSource::new().parse_report(csv.as_bytes()).unwrap();
+        let rows = BraintreeReportSource::new()
+            .parse_report(csv.as_bytes())
+            .unwrap();
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].card_network, "star", "empty brand -> Payment Network");
+        assert_eq!(
+            rows[0].card_network, "star",
+            "empty brand -> Payment Network"
+        );
         assert_eq!(rows[0].scheme_fee, 0.0, "absent Total Scheme Fees -> 0");
     }
 
@@ -332,9 +349,14 @@ p1,sale,USD,50.00,,debit,credit_card,0.10,0.05,STAR\n";
         let csv = "\
 Transaction ID,Transaction Type,Settlement Currency,Settlement Amount,Card Brand,Card Type,Payment Instrument,Interchange Total Amount,Braintree Total Amount\n\
 v1,sale,USD,25.00,,,venmo_account,0.00,0.15\n";
-        let rows = BraintreeReportSource::new().parse_report(csv.as_bytes()).unwrap();
+        let rows = BraintreeReportSource::new()
+            .parse_report(csv.as_bytes())
+            .unwrap();
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].card_network, "venmo_account", "no brand/network -> instrument");
+        assert_eq!(
+            rows[0].card_network, "venmo_account",
+            "no brand/network -> instrument"
+        );
         assert_eq!(rows[0].variant, "venmoaccount");
         assert_eq!(rows[0].funding, "");
     }
@@ -342,7 +364,9 @@ v1,sale,USD,25.00,,,venmo_account,0.00,0.15\n";
     #[test]
     fn missing_required_column_errors() {
         let csv = "Transaction ID,Transaction Type\nx,sale\n";
-        let err = BraintreeReportSource::new().parse_report(csv.as_bytes()).unwrap_err();
+        let err = BraintreeReportSource::new()
+            .parse_report(csv.as_bytes())
+            .unwrap_err();
         assert!(matches!(err, IngestError::Parse(_)));
     }
 
@@ -360,8 +384,14 @@ v1,sale,USD,25.00,,,venmo_account,0.00,0.15\n";
 
     #[test]
     fn date_parses_two_and_four_digit_years() {
-        assert_eq!(parse_date("2/23/2022"), chrono::NaiveDate::from_ymd_opt(2022, 2, 23));
-        assert_eq!(parse_date("2/2/20"), chrono::NaiveDate::from_ymd_opt(2020, 2, 2));
+        assert_eq!(
+            parse_date("2/23/2022"),
+            chrono::NaiveDate::from_ymd_opt(2022, 2, 23)
+        );
+        assert_eq!(
+            parse_date("2/2/20"),
+            chrono::NaiveDate::from_ymd_opt(2020, 2, 2)
+        );
         assert_eq!(parse_date(""), None);
         assert_eq!(parse_date("garbage"), None);
     }

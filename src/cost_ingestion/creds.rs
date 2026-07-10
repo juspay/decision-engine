@@ -238,10 +238,7 @@ impl ConnectorCredsStore {
     /// Build a store from the configured keyring. Returns `None` (credential storage disabled)
     /// unless there is at least one key, every key is a valid 32-byte hex string, and
     /// `current_id` names one of them.
-    pub fn from_keyring(
-        current_id: &str,
-        keys: &HashMap<String, Secret<String>>,
-    ) -> Option<Self> {
+    pub fn from_keyring(current_id: &str, keys: &HashMap<String, Secret<String>>) -> Option<Self> {
         if current_id.is_empty() || keys.is_empty() {
             return None;
         }
@@ -346,13 +343,14 @@ impl ConnectorCredsStore {
         let mut out = Vec::with_capacity(sources.len());
         for s in sources {
             // A missing/undecryptable blob still lists the source, just without hints.
-            let (webhook_secret_hint, download_auth_hint) = match self.get(&s.connector, &s.account).await {
-                Ok(Some(r)) => (
-                    mask_secret(r.creds.webhook_secret.peek()),
-                    mask_download_auth(r.creds.download_auth.peek()),
-                ),
-                _ => ("—".to_string(), "—".to_string()),
-            };
+            let (webhook_secret_hint, download_auth_hint) =
+                match self.get(&s.connector, &s.account).await {
+                    Ok(Some(r)) => (
+                        mask_secret(r.creds.webhook_secret.peek()),
+                        mask_download_auth(r.creds.download_auth.peek()),
+                    ),
+                    _ => ("—".to_string(), "—".to_string()),
+                };
             out.push(MaskedSource {
                 connector: s.connector,
                 account: s.account,
@@ -422,8 +420,14 @@ mod tests {
         assert!(sealed.starts_with("v1:"), "blob is tagged with the key id");
         let opened = s.open(&sealed).unwrap();
         assert_eq!(opened.merchant_id, "merchant_A");
-        assert_eq!(opened.creds.webhook_secret.peek(), creds.webhook_secret.peek());
-        assert_eq!(opened.creds.download_auth.peek(), creds.download_auth.peek());
+        assert_eq!(
+            opened.creds.webhook_secret.peek(),
+            creds.webhook_secret.peek()
+        );
+        assert_eq!(
+            opened.creds.download_auth.peek(),
+            creds.download_auth.peek()
+        );
     }
 
     #[test]
@@ -441,7 +445,10 @@ mod tests {
             config_name("adyen", "AcmeEU"),
             "cost_ingest_creds::adyen::AcmeEU"
         );
-        assert_ne!(config_name("adyen", "AcmeEU"), config_name("adyen", "AcmeUS"));
+        assert_ne!(
+            config_name("adyen", "AcmeEU"),
+            config_name("adyen", "AcmeUS")
+        );
     }
 
     #[test]
@@ -450,7 +457,10 @@ mod tests {
         let creds = sample();
         let a = s.seal("m", &creds).unwrap();
         let b = s.seal("m", &creds).unwrap();
-        assert!(!a.contains("hmac-key-hex"), "plaintext must not leak into the blob");
+        assert!(
+            !a.contains("hmac-key-hex"),
+            "plaintext must not leak into the blob"
+        );
         assert_ne!(a, b, "GCM nonce should randomize each ciphertext");
     }
 
@@ -478,7 +488,7 @@ mod tests {
     #[test]
     fn retiring_a_key_makes_its_blobs_fail_clearly() {
         let sealed_v1 = store().seal("m", &sample()).unwrap(); // "v1:…"
-        // A ring without v1 can't open a v1 blob — and says so, rather than returning garbage.
+                                                               // A ring without v1 can't open a v1 blob — and says so, rather than returning garbage.
         let without_v1 =
             ConnectorCredsStore::from_keyring("v2", &ring(&[("v2", "02".repeat(32))])).unwrap();
         let err = without_v1.open(&sealed_v1).unwrap_err();
@@ -495,7 +505,9 @@ mod tests {
             ConnectorCredsStore::from_keyring("v9", &ring(&[("v1", "01".repeat(32))])).is_none()
         );
         // Bad key material.
-        assert!(ConnectorCredsStore::from_keyring("v1", &ring(&[("v1", "zz".to_string())])).is_none());
+        assert!(
+            ConnectorCredsStore::from_keyring("v1", &ring(&[("v1", "zz".to_string())])).is_none()
+        );
         assert!(
             ConnectorCredsStore::from_keyring("v1", &ring(&[("v1", "01".repeat(16))])).is_none(),
             "16-byte key is not AES-256"

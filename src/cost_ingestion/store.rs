@@ -56,15 +56,18 @@ pub async fn enqueue_pending(
 
     // The UNIQUE (connector, notification_id) constraint is the real guard; this check keeps a
     // duplicate delivery from erroring in the common case.
-    let existing =
-        generics::generic_find_one_optional::<<CostIngestion as HasTable>::Table, _, CostIngestion>(
-            &app_state.db,
-            dsl::connector
-                .eq(connector.to_string())
-                .and(dsl::notification_id.eq(notification_id.to_string())),
-        )
-        .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+    let existing = generics::generic_find_one_optional::<
+        <CostIngestion as HasTable>::Table,
+        _,
+        CostIngestion,
+    >(
+        &app_state.db,
+        dsl::connector
+            .eq(connector.to_string())
+            .and(dsl::notification_id.eq(notification_id.to_string())),
+    )
+    .await
+    .map_err(|e| IngestError::Storage(e.to_string()))?;
 
     if existing.is_some() {
         return Ok(false);
@@ -108,14 +111,14 @@ pub async fn create_manual(
         .await
         .map_err(|e| IngestError::Storage(e.to_string()))?;
 
-    let row =
-        generics::generic_find_one_optional::<<CostIngestion as HasTable>::Table, _, CostIngestion>(
-            &app_state.db,
-            dsl::report_ref.eq(report_ref.to_string()),
-        )
-        .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?
-        .ok_or_else(|| IngestError::Storage("manual ingestion row vanished after insert".into()))?;
+    let row = generics::generic_find_one_optional::<
+        <CostIngestion as HasTable>::Table,
+        _,
+        CostIngestion,
+    >(&app_state.db, dsl::report_ref.eq(report_ref.to_string()))
+    .await
+    .map_err(|e| IngestError::Storage(e.to_string()))?
+    .ok_or_else(|| IngestError::Storage("manual ingestion row vanished after insert".into()))?;
     Ok(row.id)
 }
 
@@ -144,7 +147,9 @@ pub async fn claim_pending(limit: usize) -> Result<Vec<CostIngestion>, IngestErr
             .map_err(|_| IngestError::Storage("db connection".to_string()))?;
         let won = generics::generic_update_if_present::<<CostIngestion as HasTable>::Table, _, _>(
             &conn,
-            dsl::id.eq(row.id).and(dsl::status.eq("pending".to_string())),
+            dsl::id
+                .eq(row.id)
+                .and(dsl::status.eq("pending".to_string())),
             CostIngestionStatusUpdate {
                 status: "processing".to_string(),
                 last_error: None,

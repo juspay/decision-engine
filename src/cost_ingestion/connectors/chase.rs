@@ -499,8 +499,7 @@ async fn oauth_token(creds: &ChaseCreds) -> Result<String, IngestError> {
     if let Some(tok) = cached_token(&creds.client_id) {
         return Ok(tok);
     }
-    let assertion =
-        build_client_assertion(creds, SystemTime::now(), &Uuid::new_v4().to_string())?;
+    let assertion = build_client_assertion(creds, SystemTime::now(), &Uuid::new_v4().to_string())?;
     let form = build_token_form(creds, &assertion);
     let resp = http_client()
         .post(&creds.token_url)
@@ -546,7 +545,10 @@ fn store_token(client_id: &str, token: &TokenResponse) {
     if let Ok(mut cache) = token_cache().lock() {
         cache.insert(
             client_id.to_string(),
-            (token.access_token.clone(), Instant::now() + Duration::from_secs(ttl)),
+            (
+                token.access_token.clone(),
+                Instant::now() + Duration::from_secs(ttl),
+            ),
         );
     }
 }
@@ -774,7 +776,11 @@ END,EntityId=418553,Frequency=adhoc\n";
     #[test]
     fn parses_sales_and_skips_refunds_and_envelope() {
         let rows = ChaseReportSource::new().parse_report(REPORT).unwrap();
-        assert_eq!(rows.len(), 1, "only the sale row survives (refund + envelope skipped)");
+        assert_eq!(
+            rows.len(),
+            1,
+            "only the sale row survives (refund + envelope skipped)"
+        );
         let r = &rows[0];
         assert_eq!(r.txn_ref, "SYN0002500");
         assert_eq!(r.card_network, "visa", "VI -> visa");
@@ -787,10 +793,16 @@ END,EntityId=418553,Frequency=adhoc\n";
         // Fees are negated to positive cost magnitudes.
         assert!((r.interchange - 2.09).abs() < 1e-9);
         assert!((r.scheme_fee - 0.084).abs() < 1e-9);
-        assert!((r.markup - 0.01).abs() < 1e-9, "Other Debit Passthrough Fees negated");
+        assert!(
+            (r.markup - 0.01).abs() < 1e-9,
+            "Other Debit Passthrough Fees negated"
+        );
         assert_eq!(r.commission, 0.0);
         assert!((r.total_fee - (2.09 + 0.084 + 0.01)).abs() < 1e-9);
-        assert!((r.gross - 60.0).abs() < 1e-9, "Transaction Amount is gross as-is");
+        assert!(
+            (r.gross - 60.0).abs() < 1e-9,
+            "Transaction Amount is gross as-is"
+        );
         assert_eq!(r.txn_date, chrono::NaiveDate::from_ymd_opt(2025, 3, 3));
     }
 
@@ -806,7 +818,10 @@ END,EntityId=1,Frequency=adhoc\n";
         assert_eq!(rows[0].card_network, "mc");
         assert_eq!(rows[0].funding, "debit", "usage 1 = signature debit");
         assert_eq!(rows[0].variant, "mc_applepay", "wallet takes precedence");
-        assert_eq!(rows[0].markup, 0.0, "absent Other Debit Passthrough Fees -> 0");
+        assert_eq!(
+            rows[0].markup, 0.0,
+            "absent Other Debit Passthrough Fees -> 0"
+        );
     }
 
     #[test]
@@ -819,7 +834,10 @@ o2,VI,1,US,USD,VSDD,SALE,100,-0.05,-0.13\n";
         let rows = ChaseReportSource::new().parse_report(csv).unwrap();
         assert_eq!(rows.len(), 2);
         // V148 is a credit program → corrected to credit despite usage=1.
-        assert_eq!(rows[0].funding, "credit", "V148 credit program overrides usage=1");
+        assert_eq!(
+            rows[0].funding, "credit",
+            "V148 credit program overrides usage=1"
+        );
         assert_eq!(rows[0].variant, "visacredit");
         // VSDD is a genuine (regulated) debit program → stays debit, consistent with usage=1.
         assert_eq!(rows[1].funding, "debit", "VSDD debit program");
@@ -854,13 +872,35 @@ o2,ED,3,GB,GBP,EDBT,SALE,100,-1.00,-0.20\n";
         assert_eq!(funding_from_usage_type("3"), "credit");
         assert_eq!(funding_from_usage_type(""), "");
         // Reconciliation: interchange code wins over usage type when it's a known program.
-        assert_eq!(reconcile_funding("1", "V148"), "credit", "credit program beats usage=1");
-        assert_eq!(reconcile_funding("3", "VSDD"), "debit", "debit program beats usage=3");
-        assert_eq!(reconcile_funding("1", "MCEB"), "debit", "unlisted code -> usage type");
-        assert_eq!(reconcile_funding("3", "UNKNOWN"), "credit", "unlisted code -> usage type");
+        assert_eq!(
+            reconcile_funding("1", "V148"),
+            "credit",
+            "credit program beats usage=1"
+        );
+        assert_eq!(
+            reconcile_funding("3", "VSDD"),
+            "debit",
+            "debit program beats usage=3"
+        );
+        assert_eq!(
+            reconcile_funding("1", "MCEB"),
+            "debit",
+            "unlisted code -> usage type"
+        );
+        assert_eq!(
+            reconcile_funding("3", "UNKNOWN"),
+            "credit",
+            "unlisted code -> usage type"
+        );
         assert_eq!(reconcile_funding("", ""), "", "no signal -> empty");
-        assert_eq!(parse_date("3/3/2025"), chrono::NaiveDate::from_ymd_opt(2025, 3, 3));
-        assert_eq!(parse_date("12/21/2024"), chrono::NaiveDate::from_ymd_opt(2024, 12, 21));
+        assert_eq!(
+            parse_date("3/3/2025"),
+            chrono::NaiveDate::from_ymd_opt(2025, 3, 3)
+        );
+        assert_eq!(
+            parse_date("12/21/2024"),
+            chrono::NaiveDate::from_ymd_opt(2024, 12, 21)
+        );
         assert_eq!(parse_date(""), None);
     }
 
@@ -889,7 +929,11 @@ o2,ED,3,GB,GBP,EDBT,SALE,100,-1.00,-0.20\n";
     #[test]
     fn parse_reports_list_keeps_only_completed_submission_details() {
         let ready = parse_reports_list(REPORTS_LIST).unwrap();
-        assert_eq!(ready.len(), 1, "only the completed Submission details report survives");
+        assert_eq!(
+            ready.len(),
+            1,
+            "only the completed Submission details report survives"
+        );
         let r = &ready[0];
         assert_eq!(r.report_id, "dep-1");
         assert_eq!(
@@ -911,7 +955,9 @@ o2,ED,3,GB,GBP,EDBT,SALE,100,-1.00,-0.20\n";
 
     #[test]
     fn parse_reports_list_tolerates_empty_and_missing_fields() {
-        assert!(parse_reports_list(br#"{"summarizedReports": []}"#).unwrap().is_empty());
+        assert!(parse_reports_list(br#"{"summarizedReports": []}"#)
+            .unwrap()
+            .is_empty());
         assert!(parse_reports_list(br#"{}"#).unwrap().is_empty());
         assert!(parse_reports_list(b"not json").is_err());
     }

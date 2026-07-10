@@ -114,12 +114,9 @@ async fn poll_source(
     account: &str,
 ) -> Result<(), super::IngestError> {
     let connector = source.connector();
-    let resolved = creds_store
-        .get(connector, account)
-        .await?
-        .ok_or_else(|| {
-            super::IngestError::Storage(format!("no credentials for {connector}/{account}"))
-        })?;
+    let resolved = creds_store.get(connector, account).await?.ok_or_else(|| {
+        super::IngestError::Storage(format!("no credentials for {connector}/{account}"))
+    })?;
 
     let ready = source.poll_ready_reports(&resolved.creds).await?;
     let mut enqueued = 0usize;

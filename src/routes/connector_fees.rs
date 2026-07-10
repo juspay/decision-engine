@@ -88,7 +88,9 @@ pub async fn list_connector_fees(
     // actual stored credentials (tracked separately above).
     for (connector, blend) in &model {
         if let Some(account) = &blend.account {
-            accounts.entry(connector.clone()).or_insert_with(|| account.clone());
+            accounts
+                .entry(connector.clone())
+                .or_insert_with(|| account.clone());
         }
     }
 
@@ -152,7 +154,10 @@ pub async fn set_fee_override(
     Json(body): Json<SetFeeOverrideRequest>,
 ) -> Result<Json<FeeOverrideResponse>, (StatusCode, String)> {
     // A fee can't be negative; guard so a typo can't flip EV ranking into nonsense.
-    if !body.pct_bps.is_finite() || !body.fixed.is_finite() || body.pct_bps < 0.0 || body.fixed < 0.0
+    if !body.pct_bps.is_finite()
+        || !body.fixed.is_finite()
+        || body.pct_bps < 0.0
+        || body.fixed < 0.0
     {
         return Err((
             StatusCode::BAD_REQUEST,

@@ -125,7 +125,10 @@ impl RollupAccumulator {
             channel: row.channel.clone(),
             band: amount_band(row.gross),
         };
-        self.buckets.entry(key).or_default().add(row.gross, row.total_fee);
+        self.buckets
+            .entry(key)
+            .or_default()
+            .add(row.gross, row.total_fee);
     }
 
     /// Number of distinct buckets accumulated (for capacity hints / diagnostics).

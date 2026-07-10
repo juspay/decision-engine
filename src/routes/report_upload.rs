@@ -137,9 +137,15 @@ pub async fn delete_ingestion(
 
     // Remove this ingestion's staged transactions, then refit from what remains so the served model
     // and coverage reflect the deletion. The fit stamps today as the new snapshot.
-    sink::delete_ingestion_rows(&clickhouse, &row.connector, &row.account, &merchant_id, ingestion_id)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+    sink::delete_ingestion_rows(
+        &clickhouse,
+        &row.connector,
+        &row.account,
+        &merchant_id,
+        ingestion_id,
+    )
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
 
     let report_date = crate::utils::date_time::now().date().to_string();
     if let Err(e) = crate::cost_ingestion::fit::fit_snapshot(
@@ -166,7 +172,11 @@ pub async fn delete_ingestion(
     if let Err(e) =
         crate::cost_ingestion::serving::refresh_merchant(&clickhouse, &merchant_id).await
     {
-        logger::warn!(tag = "report_upload", "serving refresh after delete failed: {}", e);
+        logger::warn!(
+            tag = "report_upload",
+            "serving refresh after delete failed: {}",
+            e
+        );
     }
 
     Ok(StatusCode::NO_CONTENT)
@@ -195,8 +205,13 @@ pub async fn list_price_changes(
 }
 
 fn split_list(s: Option<String>) -> Vec<String> {
-    s.map(|v| v.split(',').filter(|x| !x.is_empty()).map(String::from).collect())
-        .unwrap_or_default()
+    s.map(|v| {
+        v.split(',')
+            .filter(|x| !x.is_empty())
+            .map(String::from)
+            .collect()
+    })
+    .unwrap_or_default()
 }
 
 fn date_str(d: time::Date) -> String {
@@ -330,12 +345,25 @@ async fn process_upload(
     account: String,
     merchant_id: String,
 ) {
-    let result = run_ingest(job_id, &path, &clickhouse, &connector, &account, &merchant_id).await;
+    let result = run_ingest(
+        job_id,
+        &path,
+        &clickhouse,
+        &connector,
+        &account,
+        &merchant_id,
+    )
+    .await;
 
     match result {
         Ok(outcome) => {
             if let Err(e) = store::mark_completed(job_id, &outcome.to_completion()).await {
-                logger::warn!(tag = "report_upload", "mark_completed {} failed: {:?}", job_id, e);
+                logger::warn!(
+                    tag = "report_upload",
+                    "mark_completed {} failed: {:?}",
+                    job_id,
+                    e
+                );
             }
             // Serve the freshly-fitted models immediately, rather than waiting for the periodic
             // serving refresh (otherwise a just-ingested cluster keeps falling back for ~5 min).
@@ -344,21 +372,40 @@ async fn process_upload(
             if let Err(e) =
                 crate::cost_ingestion::serving::refresh_merchant(&clickhouse, &merchant_id).await
             {
-                logger::warn!(tag = "report_upload", "serving refresh after ingest failed: {}", e);
+                logger::warn!(
+                    tag = "report_upload",
+                    "serving refresh after ingest failed: {}",
+                    e
+                );
             }
         }
         Err(e) => {
             let msg = format!("{e:?}");
-            logger::warn!(tag = "report_upload", "manual ingest {} failed: {}", job_id, msg);
+            logger::warn!(
+                tag = "report_upload",
+                "manual ingest {} failed: {}",
+                job_id,
+                msg
+            );
             if let Err(e2) = store::mark_failed(job_id, &msg).await {
-                logger::warn!(tag = "report_upload", "mark_failed {} failed: {:?}", job_id, e2);
+                logger::warn!(
+                    tag = "report_upload",
+                    "mark_failed {} failed: {:?}",
+                    job_id,
+                    e2
+                );
             }
         }
     }
 
     // Always remove the temp file, success or failure.
     if let Err(e) = tokio::fs::remove_file(&path).await {
-        logger::warn!(tag = "report_upload", "temp cleanup {:?} failed: {}", path, e);
+        logger::warn!(
+            tag = "report_upload",
+            "temp cleanup {:?} failed: {}",
+            path,
+            e
+        );
     }
 }
 
@@ -376,6 +423,13 @@ async fn run_ingest(
         .map_err(|e| IngestError::Storage(format!("could not reopen temp file: {e}")))?;
     let reader = Box::new(std::io::BufReader::new(std_file));
 
-    pipeline::ingest_report_reader(clickhouse, connector, account, merchant_id, reader, Some(job_id))
-        .await
+    pipeline::ingest_report_reader(
+        clickhouse,
+        connector,
+        account,
+        merchant_id,
+        reader,
+        Some(job_id),
+    )
+    .await
 }

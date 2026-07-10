@@ -108,7 +108,10 @@ pub fn parse_in_batches(
     source.parse_rows(reader, &mut |row| {
         batch.push(row);
         if batch.len() >= batch_size {
-            on_batch(std::mem::replace(&mut batch, Vec::with_capacity(batch_size)))?;
+            on_batch(std::mem::replace(
+                &mut batch,
+                Vec::with_capacity(batch_size),
+            ))?;
         }
         Ok(())
     })?;
