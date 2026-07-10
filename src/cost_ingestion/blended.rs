@@ -161,8 +161,10 @@ pub async fn top_clusters(
         .replace("{snapshot_filter}", &build_snapshot_filter(&scope))
         .replace("__DB__", &cfg.database);
     let limit_s = limit.to_string();
-    let mut params: Vec<(&str, &str)> =
-        vec![("param_merchant_id", merchant_id), ("param_limit", &limit_s)];
+    let mut params: Vec<(&str, &str)> = vec![
+        ("param_merchant_id", merchant_id),
+        ("param_limit", &limit_s),
+    ];
     // Bind only the params the filter actually references.
     if let Some(c) = scope.connector {
         params.push(("param_connector", c));
@@ -260,7 +262,11 @@ pub async fn by_connector(
         let pct_bps: f64 = f[1].trim().parse().unwrap_or(0.0);
         let fixed: f64 = f[2].trim().parse().unwrap_or(0.0);
         let good_gross: f64 = f[3].trim().parse().unwrap_or(0.0);
-        let account = f.get(4).map(|s| s.trim()).filter(|s| !s.is_empty()).map(str::to_string);
+        let account = f
+            .get(4)
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
         if connector.is_empty() {
             continue;
         }

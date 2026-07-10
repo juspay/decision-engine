@@ -216,7 +216,10 @@ pub async fn set_cluster_override(
     Path((merchant_id, cluster_key)): Path<(String, String)>,
     Json(body): Json<SetClusterOverrideRequest>,
 ) -> Result<Json<ClusterOverride>, (StatusCode, String)> {
-    if !body.pct_bps.is_finite() || !body.fixed.is_finite() || body.pct_bps < 0.0 || body.fixed < 0.0
+    if !body.pct_bps.is_finite()
+        || !body.fixed.is_finite()
+        || body.pct_bps < 0.0
+        || body.fixed < 0.0
     {
         return Err((
             StatusCode::BAD_REQUEST,

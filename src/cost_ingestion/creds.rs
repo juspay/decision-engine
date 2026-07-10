@@ -37,6 +37,41 @@ pub struct SourceRef {
     pub account: String,
 }
 
+/// A configured source plus *masked* previews of its stored credentials — just enough to recognize
+/// which key is set (the last few characters) without disclosing it. Never carries a full secret.
+#[derive(Debug, Clone, Serialize)]
+pub struct MaskedSource {
+    pub connector: String,
+    pub account: String,
+    /// e.g. `"••••a3f9"`, or `"—"` when no credential blob is stored / decryptable.
+    pub webhook_secret_hint: String,
+    /// Basic auth shows the user (`"reportuser:••••"`); an API key shows its tail (`"••••a3f9"`).
+    pub download_auth_hint: String,
+}
+
+/// Mask a secret to a recognizable hint: bullets followed by the last 4 characters. Fully masked
+/// when too short to reveal 4 without exposing most of it.
+fn mask_secret(s: &str) -> String {
+    let n = s.chars().count();
+    if n == 0 {
+        return "—".to_string();
+    }
+    if n <= 4 {
+        return "••••".to_string();
+    }
+    let last4: String = s.chars().skip(n - 4).collect();
+    format!("••••{last4}")
+}
+
+/// Report-download auth: Basic auth (`user:password`) shows the non-secret user and masks the
+/// password; a bare API key shows its tail via [`mask_secret`].
+fn mask_download_auth(s: &str) -> String {
+    match s.split_once(':') {
+        Some((user, _)) => format!("{user}:••••"),
+        None => mask_secret(s),
+    }
+}
+
 /// Per-merchant index name holding the (non-secret) list of configured sources. Lets the
 /// dashboard show what's set up without scanning/decrypting every credential blob.
 fn sources_index_name(merchant_id: &str) -> String {
@@ -79,11 +114,105 @@ async fn add_source(merchant_id: &str, connector: &str, account: &str) -> Result
     .map_err(|e| IngestError::Storage(e.to_string()))
 }
 
+/// Remove a `(connector, account)` from the merchant's source index (idempotent). When the last
+/// source goes, the index row is dropped entirely rather than left as an empty `[]`.
+async fn remove_source(
+    merchant_id: &str,
+    connector: &str,
+    account: &str,
+) -> Result<(), IngestError> {
+    let mut sources = list_sources(merchant_id).await?;
+    let before = sources.len();
+    sources.retain(|s| !(s.connector == connector && s.account == account));
+    if sources.len() == before {
+        return Ok(()); // nothing was configured under this pair
+    }
+    let name = sources_index_name(merchant_id);
+    if sources.is_empty() {
+        return service_configuration::delete_config(name)
+            .await
+            .map_err(|e| IngestError::Storage(e.to_string()));
+    }
+    let value = serde_json::to_string(&sources).map_err(|e| IngestError::Storage(e.to_string()))?;
+    service_configuration::update_config(name, Some(value))
+        .await
+        .map_err(|e| IngestError::Storage(e.to_string()))
+}
+
+/// Delete a settlement source: its encrypted credentials *and* its entry in the merchant's source
+/// index, so it disappears from the configured list. Idempotent — deleting an absent source is not
+/// an error. No keyring needed (we're removing, not decrypting), so this is a free function.
+pub async fn delete_source(
+    connector: &str,
+    account: &str,
+    merchant_id: &str,
+) -> Result<(), IngestError> {
+    service_configuration::delete_config(config_name(connector, account))
+        .await
+        .map_err(|e| IngestError::Storage(e.to_string()))?;
+    remove_source(merchant_id, connector, account).await
+}
+
 /// `service_configuration.name` under which a `(connector, account)`'s encrypted creds live.
 /// The account (e.g. Adyen `merchantAccountCode`) is unique within a connector, so this key is
 /// stable even when one merchant owns several accounts.
 fn config_name(connector: &str, account: &str) -> String {
     format!("cost_ingest_creds::{connector}::{account}")
+}
+
+/// Whether a connector is *pulled* (we poll its API for ready reports) rather than *pushed* (it
+/// calls our webhook). Sourced from the connector's own [`SettlementReportSource::is_pull`], so no
+/// connector id is hardcoded here. Pull connectors need a discoverable, cross-merchant list of their
+/// sources (see [`list_poll_sources`]); push connectors are found via their webhook payload instead.
+pub fn is_pull_connector(connector: &str) -> bool {
+    super::ConnectorRegistry::with_builtins()
+        .get(connector)
+        .map(|s| s.is_pull())
+        .unwrap_or(false)
+}
+
+/// Per-connector index name holding every `(connector, account)` the poller must sweep. The KV
+/// store has no prefix/list-all query, so a pull connector's sources are enumerated from here
+/// rather than by scanning `cost_ingest_creds::{connector}::*`.
+fn poll_index_name(connector: &str) -> String {
+    format!("cost_ingest_poll::{connector}")
+}
+
+/// List all `(connector, account)` sources the poller should sweep for `connector`, across every
+/// merchant. Empty when none are configured.
+pub async fn list_poll_sources(connector: &str) -> Result<Vec<SourceRef>, IngestError> {
+    let stored = service_configuration::find_config_by_name(poll_index_name(connector))
+        .await
+        .map_err(|e| IngestError::Storage(e.to_string()))?;
+    match stored.and_then(|c| c.value) {
+        Some(v) => serde_json::from_str(&v).map_err(|e| IngestError::Storage(e.to_string())),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// Record a pull connector's `(connector, account)` in its poll index (idempotent).
+async fn add_poll_source(connector: &str, account: &str) -> Result<(), IngestError> {
+    let mut sources = list_poll_sources(connector).await?;
+    let entry = SourceRef {
+        connector: connector.to_string(),
+        account: account.to_string(),
+    };
+    if sources.contains(&entry) {
+        return Ok(());
+    }
+    sources.push(entry);
+    let value = serde_json::to_string(&sources).map_err(|e| IngestError::Storage(e.to_string()))?;
+    let name = poll_index_name(connector);
+    let exists = service_configuration::find_config_by_name(name.clone())
+        .await
+        .map_err(|e| IngestError::Storage(e.to_string()))?
+        .is_some();
+    if exists {
+        service_configuration::update_config(name, Some(value)).await
+    } else {
+        service_configuration::insert_config(name, Some(value)).await
+    }
+    .map_err(|e| IngestError::Storage(e.to_string()))
 }
 
 /// On-the-wire shape of the encrypted blob (before AES). Secrets are peeked only here, at the
@@ -109,10 +238,7 @@ impl ConnectorCredsStore {
     /// Build a store from the configured keyring. Returns `None` (credential storage disabled)
     /// unless there is at least one key, every key is a valid 32-byte hex string, and
     /// `current_id` names one of them.
-    pub fn from_keyring(
-        current_id: &str,
-        keys: &HashMap<String, Secret<String>>,
-    ) -> Option<Self> {
+    pub fn from_keyring(current_id: &str, keys: &HashMap<String, Secret<String>>) -> Option<Self> {
         if current_id.is_empty() || keys.is_empty() {
             return None;
         }
@@ -200,7 +326,39 @@ impl ConnectorCredsStore {
         .map_err(|e| IngestError::Storage(e.to_string()))?;
 
         // Record the source in the merchant's index so the dashboard can list it.
-        add_source(merchant_id, connector, account).await
+        add_source(merchant_id, connector, account).await?;
+
+        // Pull connectors also go in a per-connector poll index so the background poller can find
+        // every source to sweep, across merchants, without a prefix scan.
+        if is_pull_connector(connector) {
+            add_poll_source(connector, account).await?;
+        }
+        Ok(())
+    }
+
+    /// List a merchant's configured sources with masked credential previews. Decrypts each blob to
+    /// derive the hint, but only ever returns the masked form — never a full secret.
+    pub async fn list_masked(&self, merchant_id: &str) -> Result<Vec<MaskedSource>, IngestError> {
+        let sources = list_sources(merchant_id).await?;
+        let mut out = Vec::with_capacity(sources.len());
+        for s in sources {
+            // A missing/undecryptable blob still lists the source, just without hints.
+            let (webhook_secret_hint, download_auth_hint) =
+                match self.get(&s.connector, &s.account).await {
+                    Ok(Some(r)) => (
+                        mask_secret(r.creds.webhook_secret.peek()),
+                        mask_download_auth(r.creds.download_auth.peek()),
+                    ),
+                    _ => ("—".to_string(), "—".to_string()),
+                };
+            out.push(MaskedSource {
+                connector: s.connector,
+                account: s.account,
+                webhook_secret_hint,
+                download_auth_hint,
+            });
+        }
+        Ok(out)
     }
 
     /// Load and decrypt a settlement source's credentials, or `None` if none are stored.
@@ -262,8 +420,22 @@ mod tests {
         assert!(sealed.starts_with("v1:"), "blob is tagged with the key id");
         let opened = s.open(&sealed).unwrap();
         assert_eq!(opened.merchant_id, "merchant_A");
-        assert_eq!(opened.creds.webhook_secret.peek(), creds.webhook_secret.peek());
-        assert_eq!(opened.creds.download_auth.peek(), creds.download_auth.peek());
+        assert_eq!(
+            opened.creds.webhook_secret.peek(),
+            creds.webhook_secret.peek()
+        );
+        assert_eq!(
+            opened.creds.download_auth.peek(),
+            creds.download_auth.peek()
+        );
+    }
+
+    #[test]
+    fn only_pull_connectors_are_polled() {
+        assert!(is_pull_connector("chase"));
+        assert!(!is_pull_connector("adyen"));
+        assert!(!is_pull_connector("braintree"));
+        assert_eq!(poll_index_name("chase"), "cost_ingest_poll::chase");
     }
 
     #[test]
@@ -273,7 +445,10 @@ mod tests {
             config_name("adyen", "AcmeEU"),
             "cost_ingest_creds::adyen::AcmeEU"
         );
-        assert_ne!(config_name("adyen", "AcmeEU"), config_name("adyen", "AcmeUS"));
+        assert_ne!(
+            config_name("adyen", "AcmeEU"),
+            config_name("adyen", "AcmeUS")
+        );
     }
 
     #[test]
@@ -282,7 +457,10 @@ mod tests {
         let creds = sample();
         let a = s.seal("m", &creds).unwrap();
         let b = s.seal("m", &creds).unwrap();
-        assert!(!a.contains("hmac-key-hex"), "plaintext must not leak into the blob");
+        assert!(
+            !a.contains("hmac-key-hex"),
+            "plaintext must not leak into the blob"
+        );
         assert_ne!(a, b, "GCM nonce should randomize each ciphertext");
     }
 
@@ -310,7 +488,7 @@ mod tests {
     #[test]
     fn retiring_a_key_makes_its_blobs_fail_clearly() {
         let sealed_v1 = store().seal("m", &sample()).unwrap(); // "v1:…"
-        // A ring without v1 can't open a v1 blob — and says so, rather than returning garbage.
+                                                               // A ring without v1 can't open a v1 blob — and says so, rather than returning garbage.
         let without_v1 =
             ConnectorCredsStore::from_keyring("v2", &ring(&[("v2", "02".repeat(32))])).unwrap();
         let err = without_v1.open(&sealed_v1).unwrap_err();
@@ -327,7 +505,9 @@ mod tests {
             ConnectorCredsStore::from_keyring("v9", &ring(&[("v1", "01".repeat(32))])).is_none()
         );
         // Bad key material.
-        assert!(ConnectorCredsStore::from_keyring("v1", &ring(&[("v1", "zz".to_string())])).is_none());
+        assert!(
+            ConnectorCredsStore::from_keyring("v1", &ring(&[("v1", "zz".to_string())])).is_none()
+        );
         assert!(
             ConnectorCredsStore::from_keyring("v1", &ring(&[("v1", "01".repeat(16))])).is_none(),
             "16-byte key is not AES-256"

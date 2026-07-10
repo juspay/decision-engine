@@ -96,8 +96,13 @@ fn normalize_network(network: &str) -> &str {
     }
 }
 
-
-fn coarse_key(connector: &str, network: &str, funding: &str, currency: &str, region: &str) -> String {
+fn coarse_key(
+    connector: &str,
+    network: &str,
+    funding: &str,
+    currency: &str,
+    region: &str,
+) -> String {
     format!(
         "{}|{}|{}|{}|{}",
         connector.to_lowercase(),
@@ -129,7 +134,6 @@ fn fine_key(
         ic_category.to_lowercase(),
     )
 }
-
 
 /// Reconstruct the report's `variant` string from decide-time card attributes
 /// (`visa` + `standard` + `debit` → `visastandarddebit`). A wallet is its own variant in the report
@@ -226,7 +230,9 @@ pub fn lookup(
         let variant = reconstruct_variant(network, program, funding, wallet);
         let band = amount_band(amount);
         predict_category(m, network, &variant, funding, issuer, band, channel).map(|cat| {
-            let key = fine_key(connector, network, &variant, funding, issuer, currency, &cat);
+            let key = fine_key(
+                connector, network, &variant, funding, issuer, currency, &cat,
+            );
             (key, variant, cat)
         })
     };
@@ -403,7 +409,10 @@ async fn refresh_inner(
         Some(_) => (
             COST_SQL
                 .replace("{merchant_filter}", " AND merchant_id = {merchant:String}")
-                .replace("{merchant_filter_sub}", " WHERE merchant_id = {merchant:String}"),
+                .replace(
+                    "{merchant_filter_sub}",
+                    " WHERE merchant_id = {merchant:String}",
+                ),
             PREDICTOR_SQL.replace("{merchant_filter}", "WHERE merchant_id = {merchant:String}"),
         ),
         None => (
@@ -436,9 +445,21 @@ async fn refresh_inner(
         }
         let region = issuer_region(issuer);
         let ck = coarse_key(connector, network, funding, currency, &region);
-        accumulate(coarse_acc.entry(merchant.to_string()).or_default(), ck, pct_num, fix_num, w);
+        accumulate(
+            coarse_acc.entry(merchant.to_string()).or_default(),
+            ck,
+            pct_num,
+            fix_num,
+            w,
+        );
         let fk = fine_key(connector, network, variant, funding, issuer, currency, ic);
-        accumulate(fine_acc.entry(merchant.to_string()).or_default(), fk, pct_num, fix_num, w);
+        accumulate(
+            fine_acc.entry(merchant.to_string()).or_default(),
+            fk,
+            pct_num,
+            fix_num,
+            w,
+        );
     }
     for (merchant, keys) in coarse_acc {
         let m = snap.entry(merchant).or_default();
@@ -470,7 +491,11 @@ async fn refresh_inner(
             .into_iter()
             .enumerate()
         {
-            *levels[i].entry(key).or_default().entry(ic.to_string()).or_insert(0) += c;
+            *levels[i]
+                .entry(key)
+                .or_default()
+                .entry(ic.to_string())
+                .or_insert(0) += c;
         }
     }
     for (merchant, levels) in pred_acc {
@@ -484,7 +509,9 @@ async fn refresh_inner(
                         if total < MIN_SUPPORT {
                             return None;
                         }
-                        cats.into_iter().max_by_key(|(_, n)| *n).map(|(cat, _)| (key, cat))
+                        cats.into_iter()
+                            .max_by_key(|(_, n)| *n)
+                            .map(|(cat, _)| (key, cat))
                     })
                     .collect()
             })
@@ -521,7 +548,9 @@ async fn refresh_inner(
         }
         Some(mid) => {
             let models = snap.remove(mid);
-            let mut guard = cache().write().map_err(|_| "serving cache poisoned".to_string())?;
+            let mut guard = cache()
+                .write()
+                .map_err(|_| "serving cache poisoned".to_string())?;
             let mut merged: Snapshot = (**guard).clone();
             match models {
                 Some(m) if !m.is_empty() => {
@@ -549,7 +578,10 @@ async fn load_overrides_into(snap: &mut Snapshot, merchant_id: &str) {
                 .map(|(connector, ov)| {
                     (
                         connector.to_lowercase(),
-                        ServingCost { pct_bps: ov.pct_bps, fixed: ov.fixed },
+                        ServingCost {
+                            pct_bps: ov.pct_bps,
+                            fixed: ov.fixed,
+                        },
                     )
                 })
                 .collect();
@@ -579,10 +611,18 @@ async fn load_overrides_into(snap: &mut Snapshot, merchant_id: &str) {
                         &c.dims.currency,
                         &c.dims.ic_category,
                     );
-                    (key, ServingCost { pct_bps: c.pct_bps, fixed: c.fixed })
+                    (
+                        key,
+                        ServingCost {
+                            pct_bps: c.pct_bps,
+                            fixed: c.fixed,
+                        },
+                    )
                 })
                 .collect();
-            snap.entry(merchant_id.to_string()).or_default().cluster_overrides = cluster_overrides;
+            snap.entry(merchant_id.to_string())
+                .or_default()
+                .cluster_overrides = cluster_overrides;
         }
         Ok(_) => {}
         Err(e) => logger::warn!(
@@ -594,7 +634,13 @@ async fn load_overrides_into(snap: &mut Snapshot, merchant_id: &str) {
     }
 }
 
-fn accumulate(map: &mut HashMap<String, (f64, f64, f64)>, key: String, pct_num: f64, fix_num: f64, w: f64) {
+fn accumulate(
+    map: &mut HashMap<String, (f64, f64, f64)>,
+    key: String,
+    pct_num: f64,
+    fix_num: f64,
+    w: f64,
+) {
     let e = map.entry(key).or_insert((0.0, 0.0, 0.0));
     e.0 += pct_num;
     e.1 += fix_num;
@@ -604,7 +650,15 @@ fn accumulate(map: &mut HashMap<String, (f64, f64, f64)>, key: String, pct_num: 
 fn finalize(keys: HashMap<String, (f64, f64, f64)>) -> HashMap<String, ServingCost> {
     keys.into_iter()
         .filter(|(_, (_, _, w))| *w > 0.0)
-        .map(|(k, (pn, fn_, w))| (k, ServingCost { pct_bps: pn / w, fixed: fn_ / w }))
+        .map(|(k, (pn, fn_, w))| {
+            (
+                k,
+                ServingCost {
+                    pct_bps: pn / w,
+                    fixed: fn_ / w,
+                },
+            )
+        })
         .collect()
 }
 
@@ -626,7 +680,9 @@ async fn query(
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(format!("clickhouse serving query failed ({status}): {text}"));
+        return Err(format!(
+            "clickhouse serving query failed ({status}): {text}"
+        ));
     }
     resp.text().await.map_err(|e| e.to_string())
 }
@@ -659,10 +715,19 @@ mod tests {
 
     #[test]
     fn variant_reconstruction_matches_report() {
-        assert_eq!(reconstruct_variant("VISA", "STANDARD", "DEBIT", ""), "visastandarddebit");
-        assert_eq!(reconstruct_variant("MASTERCARD", "PREMIUM", "CREDIT", ""), "mcpremiumcredit");
+        assert_eq!(
+            reconstruct_variant("VISA", "STANDARD", "DEBIT", ""),
+            "visastandarddebit"
+        );
+        assert_eq!(
+            reconstruct_variant("MASTERCARD", "PREMIUM", "CREDIT", ""),
+            "mcpremiumcredit"
+        );
         // A wallet is its own report variant.
-        assert_eq!(reconstruct_variant("VISA", "STANDARD", "DEBIT", "APPLE_PAY"), "visa_applepay");
+        assert_eq!(
+            reconstruct_variant("VISA", "STANDARD", "DEBIT", "APPLE_PAY"),
+            "visa_applepay"
+        );
     }
 
     #[test]

@@ -245,7 +245,12 @@ pub async fn fit_snapshot(
     ];
 
     // Idempotent snapshot: clear then re-insert, so the result exactly reflects current staging.
-    exec(cfg, &CLEAR_SNAPSHOT_SQL.replace("__DB__", &cfg.database), &params).await?;
+    exec(
+        cfg,
+        &CLEAR_SNAPSHOT_SQL.replace("__DB__", &cfg.database),
+        &params,
+    )
+    .await?;
     exec(cfg, &FIT_SQL.replace("__DB__", &cfg.database), &params).await?;
     let summary = exec(cfg, &SUMMARY_SQL.replace("__DB__", &cfg.database), &params).await?;
 
@@ -263,7 +268,12 @@ pub async fn fit_snapshot(
     // its stale snapshots so coverage/serving don't fall back to an older non-empty one (see
     // PURGE_MODEL_SQL and `should_purge_empty`).
     if should_purge_empty(total_parsed, connector, account, merchant_id) {
-        exec(cfg, &PURGE_MODEL_SQL.replace("__DB__", &cfg.database), &params).await?;
+        exec(
+            cfg,
+            &PURGE_MODEL_SQL.replace("__DB__", &cfg.database),
+            &params,
+        )
+        .await?;
     }
 
     Ok(FitSummary {

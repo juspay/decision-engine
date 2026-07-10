@@ -176,11 +176,7 @@ pub async fn get(merchant_id: &str, connector: &str) -> Result<Option<FeeOverrid
 }
 
 /// Upsert a merchant's blended-fee override for a connector, and record it in both indices.
-pub async fn put(
-    merchant_id: &str,
-    connector: &str,
-    ov: &FeeOverride,
-) -> Result<(), IngestError> {
+pub async fn put(merchant_id: &str, connector: &str, ov: &FeeOverride) -> Result<(), IngestError> {
     write_json(override_name(merchant_id, connector), ov).await?;
     index_add(merchant_index_name(merchant_id), connector).await?;
     index_add(GLOBAL_INDEX_NAME.to_string(), merchant_id).await?;
@@ -212,9 +208,11 @@ async fn prune_global_index(merchant_id: &str) -> Result<(), IngestError> {
 
 /// A merchant's cluster overrides (identity is the dims).
 pub async fn list_clusters(merchant_id: &str) -> Result<Vec<ClusterOverride>, IngestError> {
-    Ok(read_json::<Vec<ClusterOverride>>(cluster_overrides_name(merchant_id))
-        .await?
-        .unwrap_or_default())
+    Ok(
+        read_json::<Vec<ClusterOverride>>(cluster_overrides_name(merchant_id))
+            .await?
+            .unwrap_or_default(),
+    )
 }
 
 /// Upsert a cluster override (replaces any existing one with the same dims).

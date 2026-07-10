@@ -173,6 +173,7 @@ pub async fn update_gateway_score(
                 })
             });
 
+            let analytics_gsm_info = gsm_info.clone();
             let response = UpdateScoreResponse {
                 message: "Gateway score updated successfully".to_string(),
                 merchant_id: merchant_id.clone(),
@@ -225,7 +226,7 @@ pub async fn update_gateway_score(
                                             merchant_id: merchant_id.clone(),
                                             gateway: gateway.clone(),
                                             payment_id: payment_id.clone(),
-                                            gsm_info: None,
+                                            gsm_info: analytics_gsm_info.clone(),
                                         },
                                         selection_reason: UpdateGatewayScoreSelectionReason {
                                             transaction_status: &transaction_status,

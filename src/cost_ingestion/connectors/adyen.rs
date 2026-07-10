@@ -17,7 +17,9 @@ use serde_json::Value;
 
 use crate::cost_ingestion::connectors::csv_reader;
 use crate::cost_ingestion::source::SettlementReportSource;
-use crate::cost_ingestion::types::{ConnectorCreds, IngestError, ReportNotification, SettledFeeRow};
+use crate::cost_ingestion::types::{
+    ConnectorCreds, IngestError, ReportNotification, SettledFeeRow,
+};
 
 /// Adyen record types that actually carry settlement fees; everything else (Authorised,
 /// Received, Refused, …) has empty fee columns and would pollute the fit.
@@ -56,10 +58,9 @@ impl SettlementReportSource for AdyenReportSource {
     }
 
     fn peek_account(&self, raw_body: &[u8]) -> Result<String, IngestError> {
-        let v: Value = serde_json::from_slice(raw_body)
-            .map_err(|e| IngestError::MalformedNotification(e.to_string()))?;
-        first_item(&v)
-            .and_then(|item| item.get("merchantAccountCode").and_then(Value::as_str))
+        let item = notification_item(raw_body)?;
+        item.get("merchantAccountCode")
+            .and_then(Value::as_str)
             .map(str::to_string)
             .ok_or_else(|| {
                 IngestError::MalformedNotification("missing merchantAccountCode".to_string())
@@ -72,11 +73,7 @@ impl SettlementReportSource for AdyenReportSource {
         raw_body: &[u8],
         secret: &Secret<String>,
     ) -> Result<ReportNotification, IngestError> {
-        let v: Value = serde_json::from_slice(raw_body)
-            .map_err(|e| IngestError::MalformedNotification(e.to_string()))?;
-        let item = first_item(&v).ok_or_else(|| {
-            IngestError::MalformedNotification("no NotificationRequestItem".to_string())
-        })?;
+        let item = notification_item(raw_body)?;
 
         // Adyen carries the HMAC in the body (additionalData.hmacSignature), not a header.
         let provided_sig = item
@@ -90,7 +87,7 @@ impl SettlementReportSource for AdyenReportSource {
         // NOTE: field set/ordering below follows Adyen's *standard* notification signing scheme.
         // The exact payload for REPORT_AVAILABLE must be confirmed against Adyen docs before
         // production (see architecture doc §7.7) — the HMAC *mechanism* here is correct.
-        let payload = hmac_payload(item);
+        let payload = hmac_payload(&item);
         if !verify_hmac(&payload, provided_sig, secret.peek()) {
             return Err(IngestError::SignatureMismatch);
         }
@@ -137,16 +134,19 @@ impl SettlementReportSource for AdyenReportSource {
         creds: &ConnectorCreds,
         note: &ReportNotification,
     ) -> Result<Bytes, IngestError> {
-        // Adyen report downloads use report-user Basic Auth. We store "user:password" in
-        // `download_auth`; split once for the request.
+        // Adyen accepts two ways to authenticate a report download (see
+        // https://docs.adyen.com/reporting/automatically-get-reports): report-user Basic auth, or a
+        // Report Service API key sent as `X-API-Key`. We store one string in `download_auth` and
+        // disambiguate by the ':' — Basic auth is always "user:password"; an Adyen API key never
+        // contains a colon, so a colon-less value is treated as the API key.
         let auth = creds.download_auth.peek();
-        let (user, pass) = auth
-            .split_once(':')
-            .ok_or_else(|| IngestError::Download("download_auth must be 'user:password'".into()))?;
+        let request = http_client().get(&note.report_ref);
+        let request = match auth.split_once(':') {
+            Some((user, pass)) => request.basic_auth(user, Some(pass)),
+            None => request.header("X-API-Key", auth),
+        };
 
-        let resp = http_client()
-            .get(&note.report_ref)
-            .basic_auth(user, Some(pass))
+        let resp = request
             .send()
             .await
             .map_err(|e| IngestError::Download(e.to_string()))?;
@@ -251,12 +251,70 @@ impl SettlementReportSource for AdyenReportSource {
     }
 }
 
-/// First `NotificationRequestItem` in an Adyen webhook envelope.
+/// Normalize an Adyen webhook body into a single `NotificationRequestItem`-shaped object,
+/// accepting both formats Adyen can post: the JSON envelope
+/// (`{"notificationItems":[{"NotificationRequestItem":{…}}]}`) and the legacy / "Test
+/// configuration" `application/x-www-form-urlencoded` post (flat `key=value` pairs, with the
+/// signature under `additionalData.hmacSignature` and amount split across `value`/`currency`).
+/// Everything downstream (`hmac_payload`, field extraction) reads this one shape.
+fn notification_item(raw_body: &[u8]) -> Result<Value, IngestError> {
+    // JSON envelope first: a form-urlencoded body isn't valid JSON, so this falls through.
+    if let Ok(v) = serde_json::from_slice::<Value>(raw_body) {
+        if let Some(item) = first_item(&v) {
+            return Ok(item.clone());
+        }
+        // Tolerate a bare NotificationRequestItem posted without the envelope.
+        if v.get("merchantAccountCode").is_some() {
+            return Ok(v);
+        }
+        return Err(IngestError::MalformedNotification(
+            "no NotificationRequestItem".to_string(),
+        ));
+    }
+    Ok(form_to_item(raw_body))
+}
+
+/// First `NotificationRequestItem` in an Adyen JSON webhook envelope.
 fn first_item(v: &Value) -> Option<&Value> {
     v.get("notificationItems")?
         .as_array()?
         .first()?
         .get("NotificationRequestItem")
+}
+
+/// Rebuild the `NotificationRequestItem` shape from Adyen's flat form-urlencoded post: `value` and
+/// `currency` fold into a nested `amount`, and dotted keys (`additionalData.hmacSignature`) become
+/// nested objects. All values stay strings — `hmac_payload`/`value_to_string` handle that.
+fn form_to_item(raw_body: &[u8]) -> Value {
+    let mut item = serde_json::Map::new();
+    let mut amount = serde_json::Map::new();
+    let mut additional = serde_json::Map::new();
+    for (k, v) in form_urlencoded::parse(raw_body) {
+        let value = Value::String(v.into_owned());
+        match k.as_ref() {
+            "value" => {
+                amount.insert("value".to_string(), value);
+            }
+            "currency" => {
+                amount.insert("currency".to_string(), value);
+            }
+            key => match key.strip_prefix("additionalData.") {
+                Some(sub) => {
+                    additional.insert(sub.to_string(), value);
+                }
+                None => {
+                    item.insert(key.to_string(), value);
+                }
+            },
+        }
+    }
+    if !amount.is_empty() {
+        item.insert("amount".to_string(), Value::Object(amount));
+    }
+    if !additional.is_empty() {
+        item.insert("additionalData".to_string(), Value::Object(additional));
+    }
+    Value::Object(item)
 }
 
 /// Adyen's colon-joined, backslash-escaped signing payload (standard-notification field order).
@@ -361,7 +419,9 @@ mod tests {
 Psp Reference,Record Type,Payment Method Variant,Global Card Brand,Issuer Country,Settlement Currency,Payable (SC),Commission (SC),Markup (SC),Scheme Fees (SC),Interchange (SC),ICSF details\n\
 ref1,Authorised,visastandarddebit,visa,FR,EUR,,,,,,\n\
 ref2,Settled,visastandarddebit,visa,FR,EUR,100.00,0.05,0.00,0.02,0.20,\"[{\"\"t\"\":\"\"ic\"\",\"\"n\"\":\"\"Intra EEA Consumer EMV Debit\"\"}]\"\n";
-        let rows = AdyenReportSource::new().parse_report(csv.as_bytes()).unwrap();
+        let rows = AdyenReportSource::new()
+            .parse_report(csv.as_bytes())
+            .unwrap();
         assert_eq!(rows.len(), 1, "only the Settled row is kept");
         let r = &rows[0];
         assert_eq!(r.txn_ref, "ref2");
@@ -391,8 +451,14 @@ ref2,Settled,visastandarddebit,visa,FR,EUR,100.00,0.05,0.00,0.02,0.20,\"[{\"\"t\
 
     #[test]
     fn funding_derivation() {
-        assert_eq!(SettledFeeRow::funding_from_variant("visastandarddebit"), "debit");
-        assert_eq!(SettledFeeRow::funding_from_variant("mcsuperpremiumcredit"), "credit");
+        assert_eq!(
+            SettledFeeRow::funding_from_variant("visastandarddebit"),
+            "debit"
+        );
+        assert_eq!(
+            SettledFeeRow::funding_from_variant("mcsuperpremiumcredit"),
+            "credit"
+        );
         assert_eq!(SettledFeeRow::funding_from_variant("ideal"), "");
     }
 

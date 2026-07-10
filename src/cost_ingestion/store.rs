@@ -40,28 +40,34 @@ pub struct Completion {
     pub good_clusters: i64,
 }
 
-/// Enqueue a webhook-delivered report. **Idempotent** on `(connector, notification_id)`: a
-/// re-delivered webhook is a no-op. Returns `true` when a new job was created.
-pub async fn enqueue_webhook(
+/// Enqueue a report discovered automatically — either pushed by a connector webhook (`source =
+/// "webhook"`) or found by polling a connector's API (`source = "poll"`). **Idempotent** on
+/// `(connector, notification_id)`: a re-delivered/re-listed report is a no-op. Returns `true` when a
+/// new job was created.
+pub async fn enqueue_pending(
     connector: &str,
     account: &str,
     merchant_id: &str,
     notification_id: &str,
     report_ref: &str,
+    source: &str,
 ) -> Result<bool, IngestError> {
     let app_state = get_tenant_app_state().await;
 
     // The UNIQUE (connector, notification_id) constraint is the real guard; this check keeps a
     // duplicate delivery from erroring in the common case.
-    let existing =
-        generics::generic_find_one_optional::<<CostIngestion as HasTable>::Table, _, CostIngestion>(
-            &app_state.db,
-            dsl::connector
-                .eq(connector.to_string())
-                .and(dsl::notification_id.eq(notification_id.to_string())),
-        )
-        .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+    let existing = generics::generic_find_one_optional::<
+        <CostIngestion as HasTable>::Table,
+        _,
+        CostIngestion,
+    >(
+        &app_state.db,
+        dsl::connector
+            .eq(connector.to_string())
+            .and(dsl::notification_id.eq(notification_id.to_string())),
+    )
+    .await
+    .map_err(|e| IngestError::Storage(e.to_string()))?;
 
     if existing.is_some() {
         return Ok(false);
@@ -71,7 +77,7 @@ pub async fn enqueue_webhook(
         merchant_id: merchant_id.to_string(),
         connector: connector.to_string(),
         account: account.to_string(),
-        source: "webhook".to_string(),
+        source: source.to_string(),
         notification_id: Some(notification_id.to_string()),
         report_ref: report_ref.to_string(),
         status: "pending".to_string(),
@@ -105,14 +111,14 @@ pub async fn create_manual(
         .await
         .map_err(|e| IngestError::Storage(e.to_string()))?;
 
-    let row =
-        generics::generic_find_one_optional::<<CostIngestion as HasTable>::Table, _, CostIngestion>(
-            &app_state.db,
-            dsl::report_ref.eq(report_ref.to_string()),
-        )
-        .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?
-        .ok_or_else(|| IngestError::Storage("manual ingestion row vanished after insert".into()))?;
+    let row = generics::generic_find_one_optional::<
+        <CostIngestion as HasTable>::Table,
+        _,
+        CostIngestion,
+    >(&app_state.db, dsl::report_ref.eq(report_ref.to_string()))
+    .await
+    .map_err(|e| IngestError::Storage(e.to_string()))?
+    .ok_or_else(|| IngestError::Storage("manual ingestion row vanished after insert".into()))?;
     Ok(row.id)
 }
 
@@ -141,7 +147,9 @@ pub async fn claim_pending(limit: usize) -> Result<Vec<CostIngestion>, IngestErr
             .map_err(|_| IngestError::Storage("db connection".to_string()))?;
         let won = generics::generic_update_if_present::<<CostIngestion as HasTable>::Table, _, _>(
             &conn,
-            dsl::id.eq(row.id).and(dsl::status.eq("pending".to_string())),
+            dsl::id
+                .eq(row.id)
+                .and(dsl::status.eq("pending".to_string())),
             CostIngestionStatusUpdate {
                 status: "processing".to_string(),
                 last_error: None,
