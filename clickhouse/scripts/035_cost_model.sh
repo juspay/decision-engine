@@ -5,7 +5,7 @@ set -eu
 #
 # Unlike the analytics scripts (015/025) this pipeline does NOT use Kafka: settlement
 # reports are a once-daily-per-merchant batch, so the ingest worker aggregates each report
-# in-flight and bulk-inserts per-day sufficient statistics directly (see
+# in-flight and bulk-INSERTs per-day sufficient statistics directly (see
 # scratch/inhouse-cost-architecture.md §7). Hence plain MergeTree tables, no *_queue / *_mv.
 # Everything is connector-generic: a connector is a value in the `connector` column, never a
 # separate table. Individual transactions are never stored — only per-day cluster summaries.
@@ -35,8 +35,6 @@ clickhouse-client ${auth_args} --multiquery <<SQL
 -- away. The €5 micro-amount floor (WHERE gross >= 5) is applied at aggregation time, so it
 -- cannot be recovered later — no consumer wants sub-floor txns.
 -- ─────────────────────────────────────────────────────────────────────────────
-DROP TABLE IF EXISTS settlement_txn_fees;
-
 CREATE TABLE IF NOT EXISTS cost_daily_stats (
     connector        LowCardinality(String),   -- 'adyen', 'stripe', … (never a code branch)
     account          String,                    -- connector-side account (e.g. Adyen merchantAccountCode)
@@ -106,24 +104,4 @@ CREATE TABLE IF NOT EXISTS cost_fee_model (
 PARTITION BY toYYYYMM(report_date)
 ORDER BY (connector, account, merchant_id, report_date,
           card_network, variant, issuer_country, currency, ic_category);
-
--- ─────────────────────────────────────────────────────────────────────────────
--- Per-connector scheme + markup delta layered on top of the (shared) interchange
--- model, so EV has a rankable cost for connectors whose own report we don't yet fit.
--- ─────────────────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS connector_markup_overlay (
-    report_date      Date,
-    connector        LowCardinality(String),
-    account          String,
-    merchant_id      String,
-    card_network     LowCardinality(String),
-    funding          LowCardinality(String),
-    currency         LowCardinality(String),
-    scheme_bps       Float64,
-    markup_bps       Float64,
-    fixed            Float64,
-    fitted_at        DateTime DEFAULT now()
-) ENGINE = ReplacingMergeTree(fitted_at)
-PARTITION BY toYYYYMM(report_date)
-ORDER BY (connector, account, merchant_id, report_date, card_network, funding, currency);
 SQL
