@@ -60,9 +60,18 @@ pub async fn reconcile_merchant(
         ];
         let row = exec(cfg, &sql, &params).await?;
         let mut cols = row.trim().split('\t');
-        let model_captured = cols.next().and_then(|s| s.trim().parse::<f64>().ok()).unwrap_or(0.0);
-        let volume = cols.next().and_then(|s| s.trim().parse::<f64>().ok()).unwrap_or(0.0);
-        let count = cols.next().and_then(|s| s.trim().parse::<f64>().ok()).unwrap_or(0.0);
+        let model_captured = cols
+            .next()
+            .and_then(|s| s.trim().parse::<f64>().ok())
+            .unwrap_or(0.0);
+        let volume = cols
+            .next()
+            .and_then(|s| s.trim().parse::<f64>().ok())
+            .unwrap_or(0.0);
+        let count = cols
+            .next()
+            .and_then(|s| s.trim().parse::<f64>().ok())
+            .unwrap_or(0.0);
 
         let addon_contribution = a.pct_addon_bps / 10_000.0 * volume + a.fixed_addon * count;
         let model_all_in = model_captured + addon_contribution;

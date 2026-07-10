@@ -55,90 +55,92 @@ impl InvoiceSource for AdyenInvoiceSource {
 /// Parse the CSV export: a table of line items with `Description`, `Amount`, and optional
 /// `Quantity`/`Currency` columns (see [`Cols`]).
 fn parse_csv(bytes: &[u8]) -> Result<ParsedInvoice, IngestError> {
-        // Invoices are tiny (a few hundred lines at most), so — unlike the multi-GB settlement
-        // report — buffering and a simple typed CSV read is fine here.
-        let mut rdr = csv::ReaderBuilder::new()
-            .flexible(true)
-            .from_reader(bytes);
+    // Invoices are tiny (a few hundred lines at most), so — unlike the multi-GB settlement
+    // report — buffering and a simple typed CSV read is fine here.
+    let mut rdr = csv::ReaderBuilder::new().flexible(true).from_reader(bytes);
 
-        let header = rdr
-            .byte_headers()
-            .map_err(|e| IngestError::Parse(e.to_string()))?
-            .clone();
-        let cols = Cols::resolve(&header)?;
+    let header = rdr
+        .byte_headers()
+        .map_err(|e| IngestError::Parse(e.to_string()))?
+        .clone();
+    let cols = Cols::resolve(&header)?;
 
-        let mut lines = Vec::new();
-        let mut currency = String::new();
-        let mut record = csv::ByteRecord::new();
-        while rdr
-            .read_byte_record(&mut record)
-            .map_err(|e| IngestError::Parse(e.to_string()))?
-        {
-            let get = |i: usize| -> &str {
-                record.get(i).and_then(|b| std::str::from_utf8(b).ok()).unwrap_or("").trim()
-            };
-            let description = get(cols.description).to_lowercase();
-            if description.is_empty() {
-                continue;
-            }
-            let amount = to_float(get(cols.amount));
-            let quantity = cols
-                .quantity
-                .map(|i| get(i).parse::<u64>().unwrap_or(0))
-                .unwrap_or(0);
-            let line_ccy = cols
-                .currency
-                .map(|i| get(i).to_uppercase())
-                .filter(|c| !c.is_empty());
-            if currency.is_empty() {
-                if let Some(c) = &line_ccy {
-                    currency = c.clone();
-                }
-            }
-            lines.push(InvoiceLine {
-                kind: classify(&description, amount),
-                description,
-                amount,
-                quantity,
-                currency: line_ccy.unwrap_or_else(|| currency.clone()),
-            });
+    let mut lines = Vec::new();
+    let mut currency = String::new();
+    let mut record = csv::ByteRecord::new();
+    while rdr
+        .read_byte_record(&mut record)
+        .map_err(|e| IngestError::Parse(e.to_string()))?
+    {
+        let get = |i: usize| -> &str {
+            record
+                .get(i)
+                .and_then(|b| std::str::from_utf8(b).ok())
+                .unwrap_or("")
+                .trim()
+        };
+        let description = get(cols.description).to_lowercase();
+        if description.is_empty() {
+            continue;
         }
-
-        // Summary totals derived from the lines (a connector that states them explicitly on a header
-        // row can override these in a richer parse; for the CSV export we derive):
-        //  - subtotal  = sum of every fee-and-credit line (everything except pure turnover lines),
-        //  - card_volume = sum of Volume lines (0 → None, so the reducer falls back to CH volume),
-        //  - txn_count = total FlatPerTxn quantity (the per-txn fees are billed once per transaction).
-        let subtotal_ex_tax: f64 = lines
-            .iter()
-            .filter(|l| l.kind != LineKind::Volume)
-            .map(|l| l.amount)
-            .sum();
-        let card_volume: f64 = lines
-            .iter()
-            .filter(|l| l.kind == LineKind::Volume)
-            .map(|l| l.amount)
-            .sum();
-        let txn_count: u64 = lines
-            .iter()
-            .filter(|l| l.kind == LineKind::FlatPerTxn)
-            .map(|l| l.quantity)
-            .max()
+        let amount = to_float(get(cols.amount));
+        let quantity = cols
+            .quantity
+            .map(|i| get(i).parse::<u64>().unwrap_or(0))
             .unwrap_or(0);
+        let line_ccy = cols
+            .currency
+            .map(|i| get(i).to_uppercase())
+            .filter(|c| !c.is_empty());
+        if currency.is_empty() {
+            if let Some(c) = &line_ccy {
+                currency = c.clone();
+            }
+        }
+        lines.push(InvoiceLine {
+            kind: classify(&description, amount),
+            description,
+            amount,
+            quantity,
+            currency: line_ccy.unwrap_or_else(|| currency.clone()),
+        });
+    }
 
-        Ok(ParsedInvoice {
-            summary: InvoiceSummary {
-                invoice_ref: String::new(),
-                account: String::new(),
-                card_volume: (card_volume > 0.0).then_some(card_volume),
-                txn_count: (txn_count > 0).then_some(txn_count),
-                subtotal_ex_tax: Some(subtotal_ex_tax),
-                currency,
-                period_start: None,
-                period_end: None,
-            },
-            lines,
-        })
+    // Summary totals derived from the lines (a connector that states them explicitly on a header
+    // row can override these in a richer parse; for the CSV export we derive):
+    //  - subtotal  = sum of every fee-and-credit line (everything except pure turnover lines),
+    //  - card_volume = sum of Volume lines (0 → None, so the reducer falls back to CH volume),
+    //  - txn_count = total FlatPerTxn quantity (the per-txn fees are billed once per transaction).
+    let subtotal_ex_tax: f64 = lines
+        .iter()
+        .filter(|l| l.kind != LineKind::Volume)
+        .map(|l| l.amount)
+        .sum();
+    let card_volume: f64 = lines
+        .iter()
+        .filter(|l| l.kind == LineKind::Volume)
+        .map(|l| l.amount)
+        .sum();
+    let txn_count: u64 = lines
+        .iter()
+        .filter(|l| l.kind == LineKind::FlatPerTxn)
+        .map(|l| l.quantity)
+        .max()
+        .unwrap_or(0);
+
+    Ok(ParsedInvoice {
+        summary: InvoiceSummary {
+            invoice_ref: String::new(),
+            account: String::new(),
+            card_volume: (card_volume > 0.0).then_some(card_volume),
+            txn_count: (txn_count > 0).then_some(txn_count),
+            subtotal_ex_tax: Some(subtotal_ex_tax),
+            currency,
+            period_start: None,
+            period_end: None,
+        },
+        lines,
+    })
 }
 
 /// Parse the invoice **PDF**: extract text (pdf-extract) and read the page-1 "Summary" buckets —
@@ -234,10 +236,16 @@ fn parse_summary_text(text: &str) -> Result<ParsedInvoice, IngestError> {
         }
     }
 
-    let subtotal_ex_tax: f64 =
-        lines.iter().filter(|l| l.kind != LineKind::Volume).map(|l| l.amount).sum();
-    let card_volume: f64 =
-        lines.iter().filter(|l| l.kind == LineKind::Volume).map(|l| l.amount).sum();
+    let subtotal_ex_tax: f64 = lines
+        .iter()
+        .filter(|l| l.kind != LineKind::Volume)
+        .map(|l| l.amount)
+        .sum();
+    let card_volume: f64 = lines
+        .iter()
+        .filter(|l| l.kind == LineKind::Volume)
+        .map(|l| l.amount)
+        .sum();
     let txn_count: u64 = lines
         .iter()
         .filter(|l| l.kind == LineKind::FlatPerTxn)
@@ -295,7 +303,11 @@ fn transaction_fee_detail(text: &str) -> Option<(u64, f64)> {
 
 /// Parse a European-format money string (`42.547,47`, `-1.786,15`, `136.752.869,52`) to `f64`.
 fn parse_eu_amount(s: &str) -> Option<f64> {
-    s.trim().replace('.', "").replace(',', ".").parse::<f64>().ok()
+    s.trim()
+        .replace('.', "")
+        .replace(',', ".")
+        .parse::<f64>()
+        .ok()
 }
 
 /// Parse a European-format integer (`1.418.249`) to `u64`.
@@ -324,7 +336,7 @@ impl Cols {
         let amount = idx("Amount")
             .or_else(|| idx("Booked Amount"))
             .ok_or_else(|| IngestError::Parse("invoice missing Amount column".into()))?;
-        Ok(Cols {
+        Ok(Self {
             description,
             amount,
             quantity: idx("Quantity"),
@@ -419,30 +431,72 @@ mod tests {
         // Flat per-transaction fees:
         assert_eq!(classify("processing fees", 42547.47), LineKind::FlatPerTxn);
         assert_eq!(classify("transaction fee", 42547.47), LineKind::FlatPerTxn);
-        assert_eq!(classify("revenue protect service", 17524.20), LineKind::FlatPerTxn);
-        assert_eq!(classify("risk fee (revenueprotect)", 17524.20), LineKind::FlatPerTxn);
+        assert_eq!(
+            classify("revenue protect service", 17524.20),
+            LineKind::FlatPerTxn
+        );
+        assert_eq!(
+            classify("risk fee (revenueprotect)", 17524.20),
+            LineKind::FlatPerTxn
+        );
         // Periodic:
         assert_eq!(classify("management service", 115.31), LineKind::Periodic);
-        assert_eq!(classify("management & reconciliation service", 1236.10), LineKind::Periodic);
+        assert_eq!(
+            classify("management & reconciliation service", 1236.10),
+            LineKind::Periodic
+        );
         assert_eq!(classify("chargeback service", 1504.72), LineKind::Periodic);
         assert_eq!(classify("managed risk service", 5500.0), LineKind::Periodic);
-        assert_eq!(classify("non-transactional scheme fees", 4480.47), LineKind::Periodic);
-        assert_eq!(classify("mastercard 3d secure fee", 1911.98), LineKind::Periodic);
-        assert_eq!(classify("visa acquirer access fee", 771.90), LineKind::Periodic);
+        assert_eq!(
+            classify("non-transactional scheme fees", 4480.47),
+            LineKind::Periodic
+        );
+        assert_eq!(
+            classify("mastercard 3d secure fee", 1911.98),
+            LineKind::Periodic
+        );
+        assert_eq!(
+            classify("visa acquirer access fee", 771.90),
+            LineKind::Periodic
+        );
         // Credits:
         assert_eq!(classify("refund fees", -1786.15), LineKind::Credit);
-        assert_eq!(classify("dynamic currency conversion", -12182.51), LineKind::Credit);
         assert_eq!(
-            classify("scheme fee correction (overrcharge) - mastercard eu 3ds2", -1783.73),
+            classify("dynamic currency conversion", -12182.51),
+            LineKind::Credit
+        );
+        assert_eq!(
+            classify(
+                "scheme fee correction (overrcharge) - mastercard eu 3ds2",
+                -1783.73
+            ),
             LineKind::Credit
         );
         assert_eq!(classify("transaction fee refunds", -0.03), LineKind::Credit);
         // Already in the PAR — MUST NOT be added (the €549k bucket + the acquiring lines):
-        assert_eq!(classify("payment method fees", 549256.67), LineKind::AlreadyModeled);
-        assert_eq!(classify("interchange issuing banks (adyen eu acquiring)", 114546.51), LineKind::AlreadyModeled);
-        assert_eq!(classify("commission markup (adyen eu acquiring)", 47015.33), LineKind::AlreadyModeled);
-        assert_eq!(classify("scheme fee visa & mastercard (adyen eu acquiring)", 69464.04), LineKind::AlreadyModeled);
-        assert_eq!(classify("authorisation scheme fee authorised", 228.99), LineKind::AlreadyModeled);
+        assert_eq!(
+            classify("payment method fees", 549256.67),
+            LineKind::AlreadyModeled
+        );
+        assert_eq!(
+            classify("interchange issuing banks (adyen eu acquiring)", 114546.51),
+            LineKind::AlreadyModeled
+        );
+        assert_eq!(
+            classify("commission markup (adyen eu acquiring)", 47015.33),
+            LineKind::AlreadyModeled
+        );
+        assert_eq!(
+            classify(
+                "scheme fee visa & mastercard (adyen eu acquiring)",
+                69464.04
+            ),
+            LineKind::AlreadyModeled
+        );
+        assert_eq!(
+            classify("authorisation scheme fee authorised", 228.99),
+            LineKind::AlreadyModeled
+        );
         // Turnover:
         assert_eq!(classify("turnover", 136752869.52), LineKind::Volume);
     }
@@ -481,7 +535,12 @@ Amount due EUR 6.654,17\n\
         assert_eq!(parsed.summary.card_volume, Some(136_752_869.52));
         // The €549k Payment Method Fees line parsed and is excluded from the add-on.
         assert_eq!(
-            parsed.lines.iter().find(|l| l.description.contains("payment method")).unwrap().kind,
+            parsed
+                .lines
+                .iter()
+                .find(|l| l.description.contains("payment method"))
+                .unwrap()
+                .kind,
             LineKind::AlreadyModeled
         );
         // Everything after the 2nd subtotal (Invoiced on Merchant / VAT / Amount due) was ignored.
@@ -493,7 +552,11 @@ Amount due EUR 6.654,17\n\
         assert!((sub - 606_412.55).abs() < 0.01, "subtotal={sub}");
 
         let addon = reduce_to_addon(&parsed, VolumeFallback::default());
-        assert!((addon.fixed_addon - 0.042356).abs() < 1e-5, "fixed={}", addon.fixed_addon);
+        assert!(
+            (addon.fixed_addon - 0.042356).abs() < 1e-5,
+            "fixed={}",
+            addon.fixed_addon
+        );
     }
 
     /// End-to-end over the real invoice's summary buckets: the parser + reduction reproduce the
@@ -516,21 +579,35 @@ Refund Fees,-1786.15,,EUR\n\
 Dynamic Currency Conversion,-12182.51,,EUR\n\
 Scheme Fee Correction (overcharge) - Mastercard EU 3DS2,-1783.73,,EUR\n\
 Turnover,136752869.52,,EUR\n";
-        let parsed = AdyenInvoiceSource::new().parse_invoice(csv.as_bytes()).unwrap();
+        let parsed = AdyenInvoiceSource::new()
+            .parse_invoice(csv.as_bytes())
+            .unwrap();
         assert_eq!(parsed.summary.currency, "EUR");
         assert_eq!(parsed.summary.txn_count, Some(1_418_249));
 
         // The €549k Payment Method Fees line is present but classified AlreadyModeled (not added).
-        let pmf = parsed.lines.iter().find(|l| l.description.contains("payment method")).unwrap();
+        let pmf = parsed
+            .lines
+            .iter()
+            .find(|l| l.description.contains("payment method"))
+            .unwrap();
         assert_eq!(pmf.kind, LineKind::AlreadyModeled);
 
         let addon = reduce_to_addon(&parsed, VolumeFallback::default());
         // Flat: (42547.47 + 17524.20) / 1_418_249 ≈ €0.04235/txn — matches the coverage analysis.
-        assert!((addon.fixed_addon - 0.042356).abs() < 1e-5, "fixed={}", addon.fixed_addon);
+        assert!(
+            (addon.fixed_addon - 0.042356).abs() < 1e-5,
+            "fixed={}",
+            addon.fixed_addon
+        );
         // pct: (periodic − credits) / turnover · 1e4 ≈ −0.21 bps (credits net the periodics down).
         let periodic = 115.31 + 1236.10 + 1504.72 + 5500.0 + 4480.47;
         let credits = -1786.15 - 12182.51 - 1783.73;
         let expected = (periodic + credits) / 136_752_869.52 * 10_000.0;
-        assert!((addon.pct_addon_bps - expected).abs() < 1e-6, "pct={}", addon.pct_addon_bps);
+        assert!(
+            (addon.pct_addon_bps - expected).abs() < 1e-6,
+            "pct={}",
+            addon.pct_addon_bps
+        );
     }
 }

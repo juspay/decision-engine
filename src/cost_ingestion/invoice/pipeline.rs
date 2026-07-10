@@ -77,8 +77,7 @@ pub async fn ingest_invoice_bytes(
     }
 
     // Only reach for ClickHouse when the invoice itself does not state both denominators.
-    let need_fallback =
-        parsed.summary.card_volume.is_none() || parsed.summary.txn_count.is_none();
+    let need_fallback = parsed.summary.card_volume.is_none() || parsed.summary.txn_count.is_none();
     let fallback = if need_fallback {
         settled_volume(clickhouse, &connector, account, merchant_id)
             .await
@@ -92,8 +91,11 @@ pub async fn ingest_invoice_bytes(
     // The denominators actually used (invoice-stated, else the settled fallback) — reused for the
     // per-transaction display so it exactly matches what the reduction amortized over.
     let txn_count = parsed.summary.txn_count.unwrap_or(fallback.txn_count);
-    let card_volume =
-        parsed.summary.card_volume.filter(|v| *v > 0.0).unwrap_or(fallback.card_volume);
+    let card_volume = parsed
+        .summary
+        .card_volume
+        .filter(|v| *v > 0.0)
+        .unwrap_or(fallback.card_volume);
     let (breakdown, total_addon_per_txn) = build_breakdown(&parsed, txn_count);
 
     let updated_at = crate::utils::date_time::now().to_string();
@@ -101,10 +103,13 @@ pub async fn ingest_invoice_bytes(
     store::put(merchant_id, &connector, &stored).await?;
 
     // Serve the new add-on now rather than after the periodic tick (same as the report upload path).
-    if let Err(e) =
-        crate::cost_ingestion::serving::refresh_merchant(clickhouse, merchant_id).await
+    if let Err(e) = crate::cost_ingestion::serving::refresh_merchant(clickhouse, merchant_id).await
     {
-        crate::logger::warn!(tag = "invoice_ingest", "serving refresh after invoice failed: {}", e);
+        crate::logger::warn!(
+            tag = "invoice_ingest",
+            "serving refresh after invoice failed: {}",
+            e
+        );
     }
 
     Ok(InvoiceOutcome {
@@ -129,7 +134,9 @@ fn build_breakdown(parsed: &ParsedInvoice, txn_count: u64) -> (Vec<InvoiceLineGr
     // (kind tag, description) → summed amount. BTreeMap keeps it deterministic.
     let mut sums: BTreeMap<(&'static str, String), (LineKind, f64)> = BTreeMap::new();
     for l in &parsed.lines {
-        let e = sums.entry((l.kind.as_str(), l.description.clone())).or_insert((l.kind, 0.0));
+        let e = sums
+            .entry((l.kind.as_str(), l.description.clone()))
+            .or_insert((l.kind, 0.0));
         e.1 += l.amount;
     }
 
@@ -141,7 +148,12 @@ fn build_breakdown(parsed: &ParsedInvoice, txn_count: u64) -> (Vec<InvoiceLineGr
             } else {
                 0.0
             };
-            InvoiceLineGroup { description, kind, amount, per_txn }
+            InvoiceLineGroup {
+                description,
+                kind,
+                amount,
+                per_txn,
+            }
         })
         .collect();
 
@@ -151,11 +163,25 @@ fn build_breakdown(parsed: &ParsedInvoice, txn_count: u64) -> (Vec<InvoiceLineGr
             .is_added()
             .cmp(&a.kind.is_added())
             .then((a.kind == LineKind::Volume).cmp(&(b.kind == LineKind::Volume)))
-            .then(b.per_txn.abs().partial_cmp(&a.per_txn.abs()).unwrap_or(std::cmp::Ordering::Equal))
-            .then(b.amount.abs().partial_cmp(&a.amount.abs()).unwrap_or(std::cmp::Ordering::Equal))
+            .then(
+                b.per_txn
+                    .abs()
+                    .partial_cmp(&a.per_txn.abs())
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            )
+            .then(
+                b.amount
+                    .abs()
+                    .partial_cmp(&a.amount.abs())
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            )
     });
 
-    let total_addon_per_txn = groups.iter().filter(|g| g.kind.is_added()).map(|g| g.per_txn).sum();
+    let total_addon_per_txn = groups
+        .iter()
+        .filter(|g| g.kind.is_added())
+        .map(|g| g.per_txn)
+        .sum();
     (groups, total_addon_per_txn)
 }
 
@@ -190,9 +216,18 @@ async fn settled_volume(
     }
     let out = exec(cfg, &sql, &params).await?;
     let mut cols = out.trim().split('\t');
-    let card_volume = cols.next().and_then(|s| s.trim().parse::<f64>().ok()).unwrap_or(0.0);
-    let txn_count = cols.next().and_then(|s| s.trim().parse::<u64>().ok()).unwrap_or(0);
-    Ok(VolumeFallback { card_volume, txn_count })
+    let card_volume = cols
+        .next()
+        .and_then(|s| s.trim().parse::<f64>().ok())
+        .unwrap_or(0.0);
+    let txn_count = cols
+        .next()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or(0);
+    Ok(VolumeFallback {
+        card_volume,
+        txn_count,
+    })
 }
 
 /// POST a `{name:Type}`-parameterized query to ClickHouse (same transport as `fit`/`serving`).
@@ -212,11 +247,18 @@ pub(super) async fn exec(
     if !cfg.user.is_empty() {
         req = req.basic_auth(&cfg.user, cfg.password.as_ref().map(|p| p.peek().clone()));
     }
-    let resp = req.send().await.map_err(|e| IngestError::Storage(e.to_string()))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| IngestError::Storage(e.to_string()))?;
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(IngestError::Storage(format!("clickhouse invoice query failed ({status}): {text}")));
+        return Err(IngestError::Storage(format!(
+            "clickhouse invoice query failed ({status}): {text}"
+        )));
     }
-    resp.text().await.map_err(|e| IngestError::Storage(e.to_string()))
+    resp.text()
+        .await
+        .map_err(|e| IngestError::Storage(e.to_string()))
 }

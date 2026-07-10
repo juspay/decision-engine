@@ -13,6 +13,7 @@ pub mod decision_gateway;
 pub mod gateway_score;
 pub mod gsm;
 pub mod health;
+pub mod invoice_upload;
 pub mod merchant_account_config;
 pub mod report_upload;
 pub mod rule_configuration;

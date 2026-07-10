@@ -448,9 +448,7 @@ where
             // computed cost add-on is returned in the response. Cap the body to reject a settlement
             // report accidentally uploaded here.
             post(routes::invoice_upload::upload_invoice).layer(
-                axum::extract::DefaultBodyLimit::max(
-                    routes::invoice_upload::MAX_INVOICE_BYTES,
-                ),
+                axum::extract::DefaultBodyLimit::max(routes::invoice_upload::MAX_INVOICE_BYTES),
             ),
         )
         .route(

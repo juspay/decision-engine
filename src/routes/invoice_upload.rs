@@ -136,7 +136,9 @@ pub async fn list_addons(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
     Ok(Json(
-        list.into_iter().map(|(connector, addon)| AddonDto { connector, addon }).collect(),
+        list.into_iter()
+            .map(|(connector, addon)| AddonDto { connector, addon })
+            .collect(),
     ))
 }
 

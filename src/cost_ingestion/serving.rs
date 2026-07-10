@@ -87,9 +87,9 @@ impl MerchantModels {
 impl ServingCost {
     /// Layer an invoice add-on on top of a learned cost: the add-on's amortized periodic rate joins
     /// `pct_bps` and its flat per-txn fee joins `fixed`. The identity when `addon` is `None`.
-    fn with_addon(self, addon: Option<&ServingCost>) -> ServingCost {
+    fn with_addon(self, addon: Option<&Self>) -> Self {
         match addon {
-            Some(a) => ServingCost {
+            Some(a) => Self {
                 pct_bps: self.pct_bps + a.pct_bps,
                 fixed: self.fixed + a.fixed,
             },
@@ -557,10 +557,12 @@ async fn refresh_inner(
         None => {
             // Union the override-merchant and invoice-add-on-merchant indices, so an overlay-only
             // merchant (manual override *or* invoice add-on, no ClickHouse data) is still hydrated.
-            let mut merchants = super::overrides::list_merchants().await.unwrap_or_else(|e| {
-                logger::warn!(tag = "cost_serving", "override index load failed: {:?}", e);
-                Vec::new()
-            });
+            let mut merchants = super::overrides::list_merchants()
+                .await
+                .unwrap_or_else(|e| {
+                    logger::warn!(tag = "cost_serving", "override index load failed: {:?}", e);
+                    Vec::new()
+                });
             match super::invoice::store::list_merchants().await {
                 Ok(addon_merchants) => {
                     for mid in addon_merchants {
@@ -685,7 +687,10 @@ async fn load_overlays_into(snap: &mut Snapshot, merchant_id: &str) {
                 .map(|(connector, a)| {
                     (
                         connector.to_lowercase(),
-                        ServingCost { pct_bps: a.pct_addon_bps, fixed: a.fixed_addon },
+                        ServingCost {
+                            pct_bps: a.pct_addon_bps,
+                            fixed: a.fixed_addon,
+                        },
                     )
                 })
                 .collect();
@@ -799,8 +804,14 @@ mod tests {
 
     #[test]
     fn invoice_addon_adds_to_pct_and_fixed() {
-        let learned = ServingCost { pct_bps: 40.0, fixed: 0.10 };
-        let addon = ServingCost { pct_bps: 0.06, fixed: 0.04 }; // ~invoice add-on
+        let learned = ServingCost {
+            pct_bps: 40.0,
+            fixed: 0.10,
+        };
+        let addon = ServingCost {
+            pct_bps: 0.06,
+            fixed: 0.04,
+        }; // ~invoice add-on
         let combined = learned.with_addon(Some(&addon));
         assert!((combined.pct_bps - 40.06).abs() < 1e-9);
         assert!((combined.fixed - 0.14).abs() < 1e-9);

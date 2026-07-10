@@ -45,18 +45,18 @@ impl LineKind {
     /// Stable snake_case tag for API responses / the dashboard.
     pub fn as_str(&self) -> &'static str {
         match self {
-            LineKind::FlatPerTxn => "flat_per_txn",
-            LineKind::Periodic => "periodic",
-            LineKind::Credit => "credit",
-            LineKind::AlreadyModeled => "already_modeled",
-            LineKind::Volume => "volume",
+            Self::FlatPerTxn => "flat_per_txn",
+            Self::Periodic => "periodic",
+            Self::Credit => "credit",
+            Self::AlreadyModeled => "already_modeled",
+            Self::Volume => "volume",
         }
     }
 
     /// Whether this line contributes to the served add-on (the "missing" PAR fees). `AlreadyModeled`
     /// and `Volume` do not — the former is already priced by the fit, the latter is just a denominator.
     pub fn is_added(&self) -> bool {
-        matches!(self, LineKind::FlatPerTxn | LineKind::Periodic | LineKind::Credit)
+        matches!(self, Self::FlatPerTxn | Self::Periodic | Self::Credit)
     }
 }
 
@@ -126,5 +126,8 @@ pub struct CostAddon {
 
 impl CostAddon {
     /// A no-op add-on (the identity for the serving overlay).
-    pub const ZERO: CostAddon = CostAddon { pct_addon_bps: 0.0, fixed_addon: 0.0 };
+    pub const ZERO: Self = Self {
+        pct_addon_bps: 0.0,
+        fixed_addon: 0.0,
+    };
 }

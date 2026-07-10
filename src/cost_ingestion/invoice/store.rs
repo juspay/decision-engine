@@ -42,13 +42,16 @@ pub struct StoredAddon {
 impl StoredAddon {
     /// The served two-parameter view (what the serving overlay actually adds).
     pub fn addon(&self) -> CostAddon {
-        CostAddon { pct_addon_bps: self.pct_addon_bps, fixed_addon: self.fixed_addon }
+        CostAddon {
+            pct_addon_bps: self.pct_addon_bps,
+            fixed_addon: self.fixed_addon,
+        }
     }
 
     /// Build from a computed add-on + the invoice summary + a timestamp (RFC3339, passed in because
     /// the wall clock is sourced by the caller).
     pub fn new(addon: CostAddon, summary: &InvoiceSummary, updated_at: String) -> Self {
-        StoredAddon {
+        Self {
             pct_addon_bps: addon.pct_addon_bps,
             fixed_addon: addon.fixed_addon,
             invoice_ref: summary.invoice_ref.clone(),
@@ -155,7 +158,11 @@ pub async fn list_merchants() -> Result<Vec<String>, IngestError> {
 }
 
 /// Upsert a merchant's invoice add-on for a connector, recording it in both indices.
-pub async fn put(merchant_id: &str, connector: &str, addon: &StoredAddon) -> Result<(), IngestError> {
+pub async fn put(
+    merchant_id: &str,
+    connector: &str,
+    addon: &StoredAddon,
+) -> Result<(), IngestError> {
     let connector = connector.to_lowercase();
     write_json(addon_name(merchant_id, &connector), addon).await?;
     index_add(merchant_index_name(merchant_id), &connector).await?;

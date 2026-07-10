@@ -11,6 +11,7 @@
 //!   * `scheme_fee`  ← `Total Scheme Fees`
 //!   * `commission`  ← `Braintree Total Amount` (Braintree's own per-txn + discount take)
 //!   * `markup`      ← 0.0 (Braintree bundles its take into one amount; no separate markup line)
+//!
 //! and `total_fee = interchange + scheme_fee + markup + commission`, which the report's
 //! `Total Fee Amount` column equals.
 //!

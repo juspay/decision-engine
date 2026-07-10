@@ -35,7 +35,12 @@ pub struct VolumeFallback {
 /// missing denominator zeroes only the term that needs it, never the whole add-on).
 pub fn reduce_to_addon(invoice: &ParsedInvoice, fallback: VolumeFallback) -> CostAddon {
     let sum_kind = |kind: LineKind| -> f64 {
-        invoice.lines.iter().filter(|l| l.kind == kind).map(|l| l.amount).sum()
+        invoice
+            .lines
+            .iter()
+            .filter(|l| l.kind == kind)
+            .map(|l| l.amount)
+            .sum()
     };
 
     let flat_total = sum_kind(LineKind::FlatPerTxn);
@@ -49,23 +54,36 @@ pub fn reduce_to_addon(invoice: &ParsedInvoice, fallback: VolumeFallback) -> Cos
         .filter(|v| *v > 0.0)
         .unwrap_or(fallback.card_volume);
 
-    let fixed_addon = if txn_count > 0 { flat_total / txn_count as f64 } else { 0.0 };
+    let fixed_addon = if txn_count > 0 {
+        flat_total / txn_count as f64
+    } else {
+        0.0
+    };
     let pct_addon_bps = if card_volume > 0.0 {
         (periodic_total + credit_total) / card_volume * 10_000.0
     } else {
         0.0
     };
 
-    CostAddon { pct_addon_bps, fixed_addon }
+    CostAddon {
+        pct_addon_bps,
+        fixed_addon,
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::types::{InvoiceLine, InvoiceSummary};
+    use super::*;
 
     fn line(desc: &str, kind: LineKind, amount: f64, quantity: u64) -> InvoiceLine {
-        InvoiceLine { description: desc.into(), kind, amount, quantity, currency: "EUR".into() }
+        InvoiceLine {
+            description: desc.into(),
+            kind,
+            amount,
+            quantity,
+            currency: "EUR".into(),
+        }
     }
 
     /// The FootLocker-Eurasia October-2025 figures from the coverage analysis reduce to the add-on
@@ -82,9 +100,19 @@ mod tests {
                 line("processing fee", LineKind::FlatPerTxn, 42_547.0, 1_418_233),
                 line("revenueprotect", LineKind::FlatPerTxn, 17_524.0, 1_418_233),
                 line("managed risk service", LineKind::Periodic, 5_500.0, 0),
-                line("non-transactional scheme fees", LineKind::Periodic, 4_480.0, 0),
+                line(
+                    "non-transactional scheme fees",
+                    LineKind::Periodic,
+                    4_480.0,
+                    0,
+                ),
                 line("chargeback service", LineKind::Periodic, 1_505.0, 0),
-                line("management + reconciliation", LineKind::Periodic, 1_351.0, 0),
+                line(
+                    "management + reconciliation",
+                    LineKind::Periodic,
+                    1_351.0,
+                    0,
+                ),
                 line("dcc markup", LineKind::Credit, -12_183.0, 0),
                 line("interchange", LineKind::AlreadyModeled, 549_256.0, 0),
                 line("turnover", LineKind::Volume, 101_600_000.0, 0),
@@ -93,11 +121,20 @@ mod tests {
         let addon = reduce_to_addon(&invoice, VolumeFallback::default());
 
         // Flat: (42547 + 17524) / 1_418_233 ≈ €0.0424/txn.
-        assert!((addon.fixed_addon - 0.04236).abs() < 1e-4, "fixed={}", addon.fixed_addon);
+        assert!(
+            (addon.fixed_addon - 0.04236).abs() < 1e-4,
+            "fixed={}",
+            addon.fixed_addon
+        );
 
         // pct: (5500 + 4480 + 1505 + 1351 - 12183) / 101.6M · 1e4 ≈ 0.064 bps.
-        let expected = (5_500.0 + 4_480.0 + 1_505.0 + 1_351.0 - 12_183.0) / 101_600_000.0 * 10_000.0;
-        assert!((addon.pct_addon_bps - expected).abs() < 1e-6, "pct={}", addon.pct_addon_bps);
+        let expected =
+            (5_500.0 + 4_480.0 + 1_505.0 + 1_351.0 - 12_183.0) / 101_600_000.0 * 10_000.0;
+        assert!(
+            (addon.pct_addon_bps - expected).abs() < 1e-6,
+            "pct={}",
+            addon.pct_addon_bps
+        );
     }
 
     #[test]
@@ -124,7 +161,10 @@ mod tests {
                 line("managed risk", LineKind::Periodic, 200.0, 0),
             ],
         };
-        let fallback = VolumeFallback { card_volume: 1_000_000.0, txn_count: 10_000 };
+        let fallback = VolumeFallback {
+            card_volume: 1_000_000.0,
+            txn_count: 10_000,
+        };
         let addon = reduce_to_addon(&invoice, fallback);
         assert!((addon.fixed_addon - 0.01).abs() < 1e-9); // 100 / 10_000
         assert!((addon.pct_addon_bps - 2.0).abs() < 1e-9); // 200 / 1M · 1e4
