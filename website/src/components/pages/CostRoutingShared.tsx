@@ -6,6 +6,7 @@ import type { ReactNode } from 'react'
 export const UPLOAD_CONNECTORS = [
   { value: 'adyen', label: 'Adyen' },
   { value: 'braintree', label: 'Braintree' },
+  { value: 'stripe', label: 'Stripe' },
 ] as const
 
 /** Shared input styling for the cost-routing forms (credentials + manual upload). */

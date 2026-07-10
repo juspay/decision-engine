@@ -15,6 +15,7 @@ use masking::Secret;
 
 use super::connectors::adyen::AdyenReportSource;
 use super::connectors::braintree::BraintreeReportSource;
+use super::connectors::stripe::StripeReportSource;
 use super::types::{ConnectorCreds, IngestError, ReportNotification, SettledFeeRow};
 
 /// Everything connector-specific lives behind this trait. All methods are pure functions of
@@ -111,6 +112,7 @@ impl ConnectorRegistry {
         let mut sources: HashMap<&'static str, Arc<dyn SettlementReportSource>> = HashMap::new();
         Self::register(&mut sources, Arc::new(AdyenReportSource::new()));
         Self::register(&mut sources, Arc::new(BraintreeReportSource::new()));
+        Self::register(&mut sources, Arc::new(StripeReportSource::new()));
         Self { sources }
     }
 
