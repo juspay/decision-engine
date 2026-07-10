@@ -7,6 +7,7 @@ export const UPLOAD_CONNECTORS = [
   { value: 'adyen', label: 'Adyen' },
   { value: 'braintree', label: 'Braintree' },
   { value: 'chase', label: 'Chase' },
+  { value: 'checkout', label: 'Checkout' },
 ] as const
 
 /** Shared input styling for the cost-routing forms (credentials + manual upload). */
