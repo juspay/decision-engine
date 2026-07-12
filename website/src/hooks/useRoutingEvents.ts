@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react'
 import useSWR from 'swr'
@@ -71,6 +72,10 @@ interface RoutingEventsContextValue {
   // Let a single consumer (the simulator) tighten the shared poll while it is
   // actively producing events; pass null to release back to the idle default.
   requestPollInterval: (intervalMs: number | null) => void
+  // Register as an active live-feed consumer; returns an unsubscribe. The shared
+  // poll only runs while the subscriber count is > 0, so pages that never show
+  // events never trigger a request.
+  subscribe: () => () => void
 }
 
 const RoutingEventsContext = createContext<RoutingEventsContextValue | null>(null)
@@ -82,8 +87,27 @@ export function RoutingEventsProvider({ children }: { children: ReactNode }) {
   const merchantId = useAuthStore((state) => state.user?.merchantId) ?? ''
   const [pollIntervalMs, setPollIntervalMs] = useState(POLL_INTERVAL_MS)
 
+  // The live poll runs only while at least one consumer is actively subscribed
+  // (the bell while its dropdown is open, the simulator/events page while
+  // mounted). With no subscribers the SWR key goes null and polling stops, so we
+  // don't hit /analytics/routing-events on pages that never surface events.
+  const subscribersRef = useRef(0)
+  const [hasSubscribers, setHasSubscribers] = useState(false)
+
+  const subscribe = useCallback(() => {
+    subscribersRef.current += 1
+    setHasSubscribers(true)
+    return () => {
+      subscribersRef.current -= 1
+      if (subscribersRef.current <= 0) {
+        subscribersRef.current = 0
+        setHasSubscribers(false)
+      }
+    }
+  }, [])
+
   const { data, error, isLoading, mutate } = useSWR<RoutingEventsResponse>(
-    routingEventsKey(merchantId, LIVE_RANGE),
+    hasSubscribers ? routingEventsKey(merchantId, LIVE_RANGE) : null,
     fetcher,
     { refreshInterval: pollIntervalMs, revalidateOnFocus: false },
   )
@@ -118,8 +142,19 @@ export function RoutingEventsProvider({ children }: { children: ReactNode }) {
     setPollIntervalMs(intervalMs ?? POLL_INTERVAL_MS)
   }, [])
 
+  // Keep the last non-empty feed so a consumer that unsubscribes (e.g. the bell
+  // closing, pausing the poll) still shows its last known badge count instead of
+  // snapping to zero while nothing is polling.
+  const lastEventsRef = useRef<RoutingEvent[]>([])
+  useEffect(() => {
+    if (data?.events) lastEventsRef.current = data.events
+  }, [data])
+
   // Degrade silently when analytics is unavailable (e.g. ClickHouse disabled).
-  const liveEvents = useMemo<RoutingEvent[]>(() => (error ? [] : data?.events ?? []), [error, data])
+  const liveEvents = useMemo<RoutingEvent[]>(
+    () => (error ? [] : data?.events ?? lastEventsRef.current),
+    [error, data],
+  )
 
   const value = useMemo<RoutingEventsContextValue>(
     () => ({
@@ -130,8 +165,9 @@ export function RoutingEventsProvider({ children }: { children: ReactNode }) {
       markSeen,
       refresh,
       requestPollInterval,
+      subscribe,
     }),
-    [liveEvents, isLoading, error, isSeen, markSeen, refresh, requestPollInterval],
+    [liveEvents, isLoading, error, isSeen, markSeen, refresh, requestPollInterval, subscribe],
   )
 
   return createElement(RoutingEventsContext.Provider, { value }, children)
@@ -145,13 +181,22 @@ function useRoutingEventsContext(): RoutingEventsContextValue {
   return context
 }
 
-export function useRoutingEvents(
-  range: AnalyticsRangeValue = LIVE_RANGE,
+interface UseRoutingEventsOptions {
   // Override the shared poll cadence — e.g. tighten it while a simulation is
   // actively producing events so the Autopilot feed keeps up. Omit to use the
   // idle default. Only honored for the live feed (the bell + simulator share it).
-  refreshInterval?: number,
+  refreshInterval?: number
+  // Whether this consumer currently needs live data. Defaults to true; pass
+  // false (e.g. the bell while its dropdown is closed) so the consumer doesn't
+  // subscribe and the shared poll can stay paused when nothing else needs it.
+  enabled?: boolean
+}
+
+export function useRoutingEvents(
+  range: AnalyticsRangeValue = LIVE_RANGE,
+  options: UseRoutingEventsOptions = {},
 ) {
+  const { refreshInterval, enabled = true } = options
   const merchantId = useAuthStore((state) => state.user?.merchantId) ?? ''
   const {
     liveEvents,
@@ -161,13 +206,22 @@ export function useRoutingEvents(
     markSeen,
     refresh: refreshLive,
     requestPollInterval,
+    subscribe,
   } = useRoutingEventsContext()
 
   const isLive = range === LIVE_RANGE
 
+  // Register as an active live-feed consumer so the provider polls; the cleanup
+  // releases on unmount / when disabled, pausing the shared poll once nothing
+  // needs it. Non-live windows drive their own SWR below instead.
+  useEffect(() => {
+    if (!isLive || !enabled) return
+    return subscribe()
+  }, [isLive, enabled, subscribe])
+
   // Live consumers share the provider's single poll; a caller that passes an
   // explicit cadence retunes it, then releases on unmount/stop so the bell's
-  // idle 15s cadence is restored.
+  // idle cadence is restored.
   useEffect(() => {
     if (!isLive || refreshInterval === undefined) return
     requestPollInterval(refreshInterval)
@@ -177,7 +231,7 @@ export function useRoutingEvents(
   // Wider, user-driven windows (the events page) open their own subscription;
   // the live feed already covers LIVE_RANGE for the bell + simulator.
   const { data, error, isLoading: rangeLoading, mutate } = useSWR<RoutingEventsResponse>(
-    isLive ? null : routingEventsKey(merchantId, range),
+    !isLive && enabled ? routingEventsKey(merchantId, range) : null,
     fetcher,
     { refreshInterval: refreshInterval ?? POLL_INTERVAL_MS, revalidateOnFocus: false },
   )

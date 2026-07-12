@@ -128,11 +128,9 @@ pub fn reorder_for_cost(
 
     let ev_gap_top2 = top2_gap(ranked_evs);
 
-    let head_summary = head_psp.as_ref().map(|psp| PspSummary {
-        psp: psp.clone(),
-        auth_rate: best_auth,
-        cost_bps: Some(head_cost),
-    });
+    let head_summary = head_psp
+        .as_ref()
+        .map(|psp| make_summary(psp.clone(), best_auth, Some(head_cost), costs));
 
     // Head still wins: it was already the highest-EV PSP.
     if chosen_psp == head_psp {
@@ -173,11 +171,12 @@ pub fn reorder_for_cost(
             outcome: MultiObjectiveOutcome::CostWon,
             reason,
             sr_head: head_summary,
-            chosen: Some(PspSummary {
-                psp: chosen_name.clone(),
-                auth_rate: chosen_score,
-                cost_bps: Some(chosen_cost),
-            }),
+            chosen: Some(make_summary(
+                chosen_name.clone(),
+                chosen_score,
+                Some(chosen_cost),
+                costs,
+            )),
             cost_saved_bps: Some(cost_saved_bps),
             qualified_count: ranked_count,
             margin,
@@ -244,11 +243,7 @@ fn auth_won(
                 None
             }
         });
-        PspSummary {
-            psp,
-            auth_rate,
-            cost_bps,
-        }
+        make_summary(psp, auth_rate, cost_bps, costs)
     });
     ReorderOutcome {
         head_moved: false,
@@ -268,6 +263,24 @@ fn auth_won(
     }
 }
 
+/// Build a `PspSummary`, pulling the cost source and fitted breakdown (pct/fixed/ic_category) from
+/// the PSP's cost entry so callers can see *which* model priced it.
+fn make_summary(
+    psp: String,
+    auth_rate: f64,
+    cost_bps: Option<f64>,
+    costs: &HashMap<String, PspCost>,
+) -> PspSummary {
+    let c = costs.get(&psp);
+    PspSummary {
+        psp,
+        auth_rate,
+        cost_bps,
+        cost_source: c.map(|c| c.source),
+        cost_model: c.and_then(|c| c.cost_model.clone()),
+    }
+}
+
 /// Gap between the two largest values (`max − second_max`), or `None` with fewer than
 /// two entries. Used to report the EV margin between the top-two eligible PSPs.
 fn top2_gap(mut evs: Vec<f64>) -> Option<f64> {
@@ -280,6 +293,7 @@ fn top2_gap(mut evs: Vec<f64>) -> Option<f64> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::CostSource;
     use super::*;
 
     fn scores(pairs: &[(&str, f64)]) -> HashMap<String, f64> {
@@ -294,6 +308,8 @@ mod tests {
                     PspCost {
                         available: true,
                         effective_cost_bps: *c,
+                        source: CostSource::InHouse,
+                        cost_model: None,
                     },
                 )
             })

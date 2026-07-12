@@ -149,6 +149,9 @@ pub struct TxnCardInfo {
     /// unavailable.
     #[serde(rename = "cardIssuerCountry", default)]
     pub card_issuer_country: Option<String>,
+    /// Acceptance channel (`ecom`/`pos`/`contactless`) — feeds the in-house category predictor.
+    #[serde(rename = "channel", default)]
+    pub channel: Option<String>,
     #[serde(rename = "nameOnCard")]
     pub nameOnCard: Option<Secret<String>>,
     // #[serde(rename = "txnDetailId")]
@@ -235,6 +238,7 @@ pub fn convert_safe_to_txn_card_info(
         card_type: safe_info.card_type,
         card_program: safe_info.card_program,
         card_issuer_country: safe_info.card_issuer_country,
+        channel: None,
         nameOnCard: safe_info.nameOnCard,
         dateCreated: safe_info.dateCreated,
         paymentMethodType: safe_info.paymentMethodType,

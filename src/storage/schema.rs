@@ -13,6 +13,40 @@ diesel::table! {
 }
 
 diesel::table! {
+    cost_ingestion (id) {
+        id -> Bigint,
+        #[max_length = 255]
+        merchant_id -> Varchar,
+        #[max_length = 64]
+        connector -> Varchar,
+        #[max_length = 255]
+        account -> Varchar,
+        #[max_length = 16]
+        source -> Varchar,
+        #[max_length = 255]
+        notification_id -> Nullable<Varchar>,
+        report_ref -> Text,
+        #[max_length = 32]
+        status -> Varchar,
+        attempts -> Integer,
+        last_error -> Nullable<Text>,
+        staged_rows -> Bigint,
+        report_date -> Nullable<Date>,
+        period_start -> Nullable<Date>,
+        period_end -> Nullable<Date>,
+        currency_count -> Integer,
+        currencies -> Nullable<Text>,
+        country_count -> Integer,
+        countries -> Nullable<Text>,
+        total_gross -> Double,
+        total_clusters -> Bigint,
+        good_clusters -> Bigint,
+        created_at -> Datetime,
+        updated_at -> Datetime,
+    }
+}
+
+diesel::table! {
     use diesel::sql_types::*;
     card_info (card_isin) {
         card_isin -> Text,
@@ -575,6 +609,7 @@ diesel::table! {
 diesel::allow_tables_to_appear_in_same_query!(
     card_brand_routes,
     card_info,
+    cost_ingestion,
     emi_bank_code,
     feature,
     gateway_bank_emi_support,

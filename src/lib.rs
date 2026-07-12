@@ -30,6 +30,7 @@ pub mod api_client;
 pub mod app;
 pub mod auth;
 pub mod config;
+pub mod cost_ingestion;
 pub mod crypto;
 pub mod custom_extractors;
 pub mod decider;
