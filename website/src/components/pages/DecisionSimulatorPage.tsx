@@ -162,6 +162,8 @@ interface SimulationResult {
   costSavedBps?: number | null
   costWon?: boolean
   authWon?: boolean
+  // Cost source that priced the chosen gateway (IN_HOUSE | SEED | HYPERSENSE); null when no cost data.
+  costSource?: string | null
   // Captured on cost-override decisions so the run can value the auth-rate the
   // override risked: (headAuthRate − chosenAuthRate) × amount × margin.
   headAuthRate?: number | null
@@ -2054,6 +2056,7 @@ export function DecisionSimulatorPage() {
         costSavedBps: mo?.costSavedBps ?? null,
         costWon: mo?.outcome === 'COST_WON',
         authWon: mo?.outcome === 'AUTH_WON',
+        costSource: mo?.chosen?.costSource ?? null,
         headAuthRate: mo?.srHead?.authRate ?? null,
         chosenAuthRate: mo?.chosen?.authRate ?? null,
         margin: mo?.margin ?? null,
@@ -2503,6 +2506,7 @@ export function DecisionSimulatorPage() {
     const outcomes = new Set<string>()
     const retryGateways = new Set<string>()
     const retryOutcomes = new Set<string>()
+    const costSources = new Set<string>()
     for (const res of deferredSimulationResults) {
       gateways.add(res.decidedGateway)
       if (res.cardNetwork) networks.add(res.cardNetwork)
@@ -2511,6 +2515,7 @@ export function DecisionSimulatorPage() {
       if (res.status) outcomes.add(res.status)
       if (res.retryGateway) retryGateways.add(res.retryGateway)
       if (res.retryStatus) retryOutcomes.add(res.retryStatus)
+      if (res.costSource) costSources.add(res.costSource)
     }
     const sorted = (s: Set<string>) => Array.from(s).sort()
     return {
@@ -2521,6 +2526,7 @@ export function DecisionSimulatorPage() {
       outcomes: sorted(outcomes),
       retryGateways: sorted(retryGateways),
       retryOutcomes: sorted(retryOutcomes),
+      costSources: sorted(costSources),
     }
   }, [deferredSimulationResults])
 
@@ -2543,6 +2549,7 @@ export function DecisionSimulatorPage() {
       if (f.outcome && res.status !== f.outcome) return false
       if (f.retryGateway && (res.retryGateway ?? '') !== f.retryGateway) return false
       if (f.retryOutcome && (res.retryStatus ?? '') !== f.retryOutcome) return false
+      if (f.costSource && (res.costSource ?? '') !== f.costSource) return false
       if (f.amount && !formatCurrencyValue(res.amount, res.currency).toLowerCase().includes(f.amount.toLowerCase())) return false
       if (f.sr && !srText(res).includes(f.sr)) return false
       if (f.evGap && !(res.evGapTop2 != null ? (res.evGapTop2 * 100).toFixed(2) : '').includes(f.evGap)) return false
@@ -4864,6 +4871,7 @@ export function DecisionSimulatorPage() {
                       <th className="text-left px-3 py-2">Routing</th>
                       <th className="text-left px-3 py-2">Outcome</th>
                       <th className="text-right px-3 py-2 whitespace-nowrap">Cost Savings</th>
+                      <th className="text-left px-3 py-2 whitespace-nowrap">Cost Source</th>
                       {smartRetryEnabled && <th className="text-left px-3 py-2 whitespace-nowrap">Retry Gateway</th>}
                       {smartRetryEnabled && <th className="text-left px-3 py-2">Retry Outcome</th>}
                     </tr>
@@ -4900,6 +4908,7 @@ export function DecisionSimulatorPage() {
                               <option value="no">None</option>
                             </select>
                           </th>
+                          <th className="px-2 py-1.5">{sel('costSource', txFilterOptions.costSources, 'All')}</th>
                           {smartRetryEnabled && <th className="px-2 py-1.5">{sel('retryGateway', txFilterOptions.retryGateways, 'All')}</th>}
                           {smartRetryEnabled && <th className="px-2 py-1.5">{sel('retryOutcome', txFilterOptions.retryOutcomes, 'All')}</th>}
                         </tr>
@@ -4964,6 +4973,15 @@ export function DecisionSimulatorPage() {
                             </span>
                           ) : null}
                         </td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          {res.costSource ? (
+                            <span className={`text-xs font-medium ${res.costSource === 'IN_HOUSE' ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400'}`}>
+                              {res.costSource}
+                            </span>
+                          ) : (
+                            <span className="text-[11px] text-slate-400">—</span>
+                          )}
+                        </td>
                         {smartRetryEnabled && (
                           <td className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
                             {res.retryGateway ?? '—'}
@@ -4982,7 +5000,7 @@ export function DecisionSimulatorPage() {
                     ))}
                     {txFilteredRows.length === 0 && (
                       <tr>
-                        <td colSpan={smartRetryEnabled ? 12 : 10} className="px-3 py-8 text-center text-sm text-slate-400 dark:text-slate-500">
+                        <td colSpan={smartRetryEnabled ? 13 : 11} className="px-3 py-8 text-center text-sm text-slate-400 dark:text-slate-500">
                           No transactions match the current filters.
                         </td>
                       </tr>
@@ -5003,6 +5021,7 @@ export function DecisionSimulatorPage() {
                         <td className="px-3 py-2" />
                         <td className="px-3 py-2" />
                         <td className="px-3 py-2 text-right whitespace-nowrap tabular-nums text-emerald-700 dark:text-emerald-400">{formatCurrencyValue(txColumnTotals.savings, txColumnTotals.currency)}</td>
+                        <td className="px-3 py-2" />
                         {smartRetryEnabled && <td className="px-3 py-2" />}
                         {smartRetryEnabled && <td className="px-3 py-2" />}
                       </tr>

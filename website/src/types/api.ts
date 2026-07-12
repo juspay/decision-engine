@@ -17,10 +17,15 @@ export interface DecideGatewayResponse {
 
 export type MultiObjectiveOutcome = 'COST_WON' | 'AUTH_WON'
 
+// Which source priced a PSP's cost: our own ingested data, the config seed table, or live Hypersense.
+export type CostSource = 'IN_HOUSE' | 'SEED' | 'HYPERSENSE'
+
 export interface PspSummary {
   psp: string
   authRate: number
   costBps: number | null
+  // Where costBps came from; null when the PSP had no cost data.
+  costSource?: CostSource | null
 }
 
 export interface MultiObjectiveInfo {
