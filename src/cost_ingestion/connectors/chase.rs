@@ -14,6 +14,7 @@
 //!   * `scheme_fee`  ← `Total Assessment Amount`
 //!   * `markup`      ← `Other Debit Passthrough Fees` (debit pass-through; 0 for credit)
 //!   * `commission`  ← 0.0 (Chase's discount rate is not in this report)
+//!
 //! and `total_fee = interchange + scheme_fee + markup + commission`. The served cost therefore
 //! excludes Chase's discount rate — a roughly constant offset that does not affect PSP *ranking*.
 //! Backfilling `commission` from Funded Transaction Fee Details (joined on `Merchant Order Number`)
@@ -483,7 +484,7 @@ fn ready_report(r: SummarizedReport) -> Option<ReadyReport> {
 
 /// Parse the date out of a JPM timestamp cell (`2021-08-20 00:18:18` → `2021-08-20`).
 fn parse_ts_date(s: &str) -> Option<NaiveDate> {
-    let date = s.trim().split_whitespace().next()?;
+    let date = s.split_whitespace().next()?;
     NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()
 }
 

@@ -111,7 +111,7 @@ impl RollupAccumulator {
     /// would make the reciprocal terms explode) are skipped — the same rows the fit/predictor
     /// filtered out at read time. `fallback_date` dates rows whose report carried no txn date.
     pub fn add_row(&mut self, row: &SettledFeeRow, fallback_date: NaiveDate) {
-        if !(row.gross >= MICRO_AMOUNT_FLOOR) {
+        if row.gross.is_nan() || row.gross < MICRO_AMOUNT_FLOOR {
             return;
         }
         let key = BucketKey {

@@ -8,6 +8,7 @@ export const UPLOAD_CONNECTORS = [
   { value: 'braintree', label: 'Braintree' },
   { value: 'stripe', label: 'Stripe' },
   { value: 'chase', label: 'Chase' },
+  { value: 'checkout', label: 'Checkout' },
 ] as const
 
 /** Shared input styling for the cost-routing forms (credentials + manual upload). */

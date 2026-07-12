@@ -7,5 +7,6 @@
 pub mod adyen;
 pub mod braintree;
 pub mod chase;
+pub mod checkout;
 pub mod csv_reader;
 pub mod stripe;

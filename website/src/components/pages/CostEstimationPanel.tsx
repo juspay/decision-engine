@@ -5,13 +5,14 @@ import { CoverageBreakdown } from './CostCoverageCard'
 import { ConnectorsPanel } from './ConnectorsPanel'
 import { ConnectorCredentialsForm } from './ConnectorCredentialsForm'
 import { ManualReportUpload } from './ManualReportUpload'
+import { InvoiceUpload } from './InvoiceUpload'
 import { IngestionHistory } from './IngestionHistory'
 import { PriceChanges } from './PriceChanges'
 import { useCostCoverage, useIngestionHistory } from '../../hooks/useCostRouting'
 
 /** The three concerns of cost estimation, as vertical sections. */
 type Section = 'ingestion' | 'data' | 'overrides'
-type IngestMode = 'automatic' | 'manual'
+type IngestMode = 'automatic' | 'manual' | 'invoice'
 
 interface SectionDef {
   id: Section
@@ -194,7 +195,7 @@ function IngestionSection({ merchantId }: { merchantId?: string }) {
     <div>
       <SectionHeading
         title="Data ingestion"
-        subtitle="Connect a settlement source so reports flow in automatically, or upload a report file manually."
+        subtitle="Connect a settlement source so reports flow in automatically, or upload a report file manually. Add the monthly invoice to also recover the fees the report can't carry."
       />
       <div className="mb-5 border-b border-slate-200 dark:border-[#1c1c23]">
         <nav className="-mb-px flex gap-1">
@@ -204,13 +205,14 @@ function IngestionSection({ merchantId }: { merchantId?: string }) {
           <button type="button" className={tabClass('manual')} onClick={() => setMode('manual')}>
             Manual
           </button>
+          <button type="button" className={tabClass('invoice')} onClick={() => setMode('invoice')}>
+            Invoice
+          </button>
         </nav>
       </div>
-      {mode === 'automatic' ? (
-        <ConnectorCredentialsForm merchantId={merchantId} />
-      ) : (
-        <ManualReportUpload merchantId={merchantId} />
-      )}
+      {mode === 'automatic' && <ConnectorCredentialsForm merchantId={merchantId} />}
+      {mode === 'manual' && <ManualReportUpload merchantId={merchantId} />}
+      {mode === 'invoice' && <InvoiceUpload merchantId={merchantId} />}
     </div>
   )
 }

@@ -71,7 +71,7 @@ pub struct IngestionDto {
 
 impl From<CostIngestion> for IngestionDto {
     fn from(r: CostIngestion) -> Self {
-        IngestionDto {
+        Self {
             id: r.id,
             connector: r.connector,
             account: r.account,

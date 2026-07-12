@@ -15,6 +15,7 @@ pub mod coverage;
 pub mod creds;
 pub mod detect;
 pub mod fit;
+pub mod invoice;
 pub mod overrides;
 pub mod pipeline;
 pub mod poller;
