@@ -61,6 +61,9 @@ EXPECTED_CLICKHOUSE_TABLES=(
     analytics_domain_events_queue
     analytics_api_events
     analytics_domain_events
+    cost_daily_stats
+    cost_fee_model
+    connector_markup_overlay
 )
 
 check_and_kill_ports() {
@@ -538,9 +541,24 @@ run_infra_checklist
 
 if ! check_clickhouse_schema; then
     echo ""
-    echo "ClickHouse is reachable but the analytics schema is incomplete."
-    echo "Run 'make reset-analytics-clickhouse' to recreate the ClickHouse analytics volume."
-    cleanup 1
+    echo "ClickHouse schema is incomplete — attempting to (re)create cost-ingestion tables..."
+    # The cost tables (cost_daily_stats / cost_fee_model / connector_markup_overlay) come from
+    # 035_cost_model.sh, which the container only auto-runs on a fresh clickhouse-data volume.
+    # All its DDL is IF NOT EXISTS, so re-running it against an existing DB is idempotent and
+    # non-destructive — this heals a pre-existing volume without wiping analytics data.
+    if docker compose exec -T clickhouse sh /docker-entrypoint-initdb.d/035_cost_model.sh >/dev/null 2>&1; then
+        echo "  Ran 035_cost_model.sh."
+    else
+        echo "  Could not run 035_cost_model.sh in the clickhouse container."
+    fi
+
+    if ! check_clickhouse_schema; then
+        echo ""
+        echo "ClickHouse schema is still incomplete after re-running the cost-model DDL."
+        echo "Run 'make reset-analytics-clickhouse' to recreate the ClickHouse analytics volume."
+        cleanup 1
+    fi
+    echo "ClickHouse schema is now complete."
 fi
 
 echo "Running Postgres migrations..."
