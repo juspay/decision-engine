@@ -25,7 +25,7 @@ export interface PspSummary {
   authRate: number
   costBps: number | null
   // Where costBps came from; null when the PSP had no cost data.
-  costSource?: CostSource | null
+  costSource: CostSource | null
 }
 
 export interface MultiObjectiveInfo {

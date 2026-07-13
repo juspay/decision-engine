@@ -13,7 +13,10 @@ use masking::Secret;
 /// stamped by the worker from the queue row, so the parser stays reusable and testable.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SettledFeeRow {
-    /// Connector's unique transaction id (e.g. Adyen `Psp Reference`) — the staging dedup key.
+    /// Connector's per-transaction id when the report carries one (e.g. Adyen `Psp Reference`),
+    /// else a synthetic best-effort key (Stripe's aggregated report). Provenance only: the rollup
+    /// aggregates by the cluster fields below (read straight off this struct) and nothing
+    /// downstream reads `txn_ref`, so it is NOT a dedup key.
     pub txn_ref: String,
     /// Card network, lowercased: `visa`, `mc`, …
     pub card_network: String,
