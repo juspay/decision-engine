@@ -314,7 +314,7 @@ pub struct MerchantAccountUpdate {
 #[cfg_attr(feature = "mysql", diesel(table_name = schema::cost_ingestion))]
 #[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::cost_ingestion))]
 pub struct CostIngestion {
-    pub id: i64,
+    pub id: String,
     pub merchant_id: String,
     pub connector: String,
     pub account: String,
@@ -346,6 +346,9 @@ pub struct CostIngestion {
 #[cfg_attr(feature = "mysql", diesel(table_name = schema::cost_ingestion))]
 #[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::cost_ingestion))]
 pub struct CostIngestionNew {
+    /// Client-generated UUIDv7 primary key (`storage::utils::generate_uuid`). Set at insert so the
+    /// caller already holds the id — no read-back needed.
+    pub id: String,
     pub merchant_id: String,
     pub connector: String,
     pub account: String,

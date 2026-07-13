@@ -38,7 +38,7 @@ pub struct UploadParams {
 /// Returned immediately (202): the created job's id, which the dashboard polls for progress.
 #[derive(Debug, Serialize)]
 pub struct UploadAccepted {
-    pub id: i64,
+    pub id: String,
     pub status: String,
 }
 
@@ -49,7 +49,7 @@ const HISTORY_LIMIT: i64 = 50;
 /// currency/country lists split back into arrays).
 #[derive(Debug, Serialize)]
 pub struct IngestionDto {
-    pub id: i64,
+    pub id: String,
     pub connector: String,
     pub account: String,
     pub source: String,
@@ -110,9 +110,9 @@ pub async fn list_ingestions(
 /// so the served model reflects what remains, and deletes the history row. In-progress jobs can't
 /// be deleted.
 pub async fn delete_ingestion(
-    Path((merchant_id, ingestion_id)): Path<(String, i64)>,
+    Path((merchant_id, ingestion_id)): Path<(String, String)>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let row = store::get_for_merchant(&merchant_id, ingestion_id)
+    let row = store::get_for_merchant(&merchant_id, &ingestion_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?
         .ok_or((StatusCode::NOT_FOUND, "ingestion not found".to_string()))?;
@@ -142,7 +142,7 @@ pub async fn delete_ingestion(
         &row.connector,
         &row.account,
         &merchant_id,
-        ingestion_id,
+        &ingestion_id,
     )
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
@@ -160,7 +160,7 @@ pub async fn delete_ingestion(
         logger::warn!(tag = "report_upload", "refit after delete failed: {:?}", e);
     }
 
-    store::delete(&merchant_id, ingestion_id)
+    store::delete(&merchant_id, &ingestion_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
 
@@ -277,7 +277,7 @@ pub async fn upload_report(
 
     // Process in the background: the request returns now; the merchant watches progress via polling.
     tokio::spawn(process_upload(
-        job_id,
+        job_id.clone(),
         path,
         clickhouse,
         connector,
@@ -338,7 +338,7 @@ async fn stream_to_file(path: &PathBuf, body: Body) -> Result<(), (StatusCode, S
 /// Background task: run the same parse → stage → fit pipeline the worker uses, record the outcome,
 /// and clean up the temp file. Progress ticks against `job_id` as batches stage.
 async fn process_upload(
-    job_id: i64,
+    job_id: String,
     path: PathBuf,
     clickhouse: crate::config::ClickHouseAnalyticsConfig,
     connector: String,
@@ -346,7 +346,7 @@ async fn process_upload(
     merchant_id: String,
 ) {
     let result = run_ingest(
-        job_id,
+        &job_id,
         &path,
         &clickhouse,
         &connector,
@@ -357,7 +357,7 @@ async fn process_upload(
 
     match result {
         Ok(outcome) => {
-            if let Err(e) = store::mark_completed(job_id, &outcome.to_completion()).await {
+            if let Err(e) = store::mark_completed(&job_id, &outcome.to_completion()).await {
                 logger::warn!(
                     tag = "report_upload",
                     "mark_completed {} failed: {:?}",
@@ -387,7 +387,7 @@ async fn process_upload(
                 job_id,
                 msg
             );
-            if let Err(e2) = store::mark_failed(job_id, &msg).await {
+            if let Err(e2) = store::mark_failed(&job_id, &msg).await {
                 logger::warn!(
                     tag = "report_upload",
                     "mark_failed {} failed: {:?}",
@@ -411,7 +411,7 @@ async fn process_upload(
 
 /// Open the staged file as a blocking reader and run the ingest pipeline.
 async fn run_ingest(
-    job_id: i64,
+    job_id: &str,
     path: &PathBuf,
     clickhouse: &crate::config::ClickHouseAnalyticsConfig,
     connector: &str,

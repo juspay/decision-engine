@@ -66,12 +66,12 @@ async fn run_once(batch: usize, clickhouse: &ClickHouseAnalyticsConfig) {
     };
 
     for job in claimed {
-        let id = job.id;
+        let id = job.id.clone();
         let merchant_id = job.merchant_id.clone();
         match process(job, clickhouse).await {
             Ok(outcome) => {
-                log_fit(id, &outcome);
-                if let Err(e) = store::mark_completed(id, &outcome.to_completion()).await {
+                log_fit(&id, &outcome);
+                if let Err(e) = store::mark_completed(&id, &outcome.to_completion()).await {
                     logger::warn!(
                         tag = "ingest_worker",
                         "mark_completed {} failed: {:?}",
@@ -92,7 +92,7 @@ async fn run_once(batch: usize, clickhouse: &ClickHouseAnalyticsConfig) {
             Err(e) => {
                 let msg = format!("{e:?}");
                 logger::warn!(tag = "ingest_worker", "job {} failed: {}", id, msg);
-                if let Err(e2) = store::mark_failed(id, &msg).await {
+                if let Err(e2) = store::mark_failed(&id, &msg).await {
                     logger::warn!(tag = "ingest_worker", "mark_failed {} failed: {:?}", id, e2);
                 }
             }
@@ -145,14 +145,14 @@ async fn process(
         &job.account,
         &job.merchant_id,
         bytes,
-        Some(job.id),
+        Some(job.id.as_str()),
     )
     .await
 }
 
 /// Log the fit outcome. A snapshot with no GOOD clusters is written but flagged — serving only ever
 /// reads GOOD rows (§10), so this is "no coverage", never a bad cost.
-fn log_fit(id: i64, outcome: &IngestOutcome) {
+fn log_fit(id: &str, outcome: &IngestOutcome) {
     if outcome.summary.good_clusters == 0 {
         logger::warn!(
             tag = "ingest_worker",

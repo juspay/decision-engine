@@ -46,7 +46,7 @@ pub async fn insert_daily_stats(
     connector: &str,
     account: &str,
     merchant_id: &str,
-    ingestion_id: i64,
+    ingestion_id: &str,
     rows: &[DailyStatRow],
 ) -> Result<usize, IngestError> {
     if rows.is_empty() {
@@ -124,22 +124,21 @@ pub async fn delete_ingestion_rows(
     connector: &str,
     account: &str,
     merchant_id: &str,
-    ingestion_id: i64,
+    ingestion_id: &str,
 ) -> Result<(), IngestError> {
     let sql = format!(
         "DELETE FROM {}.cost_daily_stats WHERE connector = {{connector:String}} \
          AND account = {{account:String}} AND merchant_id = {{merchant_id:String}} \
-         AND ingestion_id = {{ingestion_id:Int64}}",
+         AND ingestion_id = {{ingestion_id:String}}",
         cfg.database
     );
-    let id = ingestion_id.to_string();
     let mut req = client()
         .post(cfg.url.trim_end_matches('/'))
         .query(&[
             ("param_connector", connector),
             ("param_account", account),
             ("param_merchant_id", merchant_id),
-            ("param_ingestion_id", id.as_str()),
+            ("param_ingestion_id", ingestion_id),
         ])
         .body(sql);
     if !cfg.user.is_empty() {

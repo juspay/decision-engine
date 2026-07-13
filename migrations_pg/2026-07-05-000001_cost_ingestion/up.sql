@@ -7,7 +7,7 @@
 -- so the dashboard can show ingestion history. Connector-generic: `connector` is a value, never a
 -- table. See scratch/inhouse-cost-architecture.md §7.
 CREATE TABLE cost_ingestion (
-    id               BIGSERIAL PRIMARY KEY,
+    id               VARCHAR(36)  PRIMARY KEY,
     merchant_id      VARCHAR(255) NOT NULL,          -- our merchant that owns the account
     connector        VARCHAR(64)  NOT NULL,          -- 'adyen', 'stripe', …
     account          VARCHAR(255) NOT NULL,          -- connector-side account (Adyen merchantAccountCode)

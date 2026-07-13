@@ -14,7 +14,8 @@ diesel::table! {
 
 diesel::table! {
     cost_ingestion (id) {
-        id -> Bigint,
+        #[max_length = 36]
+        id -> Varchar,
         #[max_length = 255]
         merchant_id -> Varchar,
         #[max_length = 64]

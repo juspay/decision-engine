@@ -22,6 +22,7 @@ use crate::storage::types::{
     CostIngestion, CostIngestionNew, CostIngestionOutcomeUpdate, CostIngestionProgressUpdate,
     CostIngestionStatusUpdate,
 };
+use crate::storage::utils::generate_uuid;
 
 use super::types::IngestError;
 
@@ -74,6 +75,7 @@ pub async fn enqueue_pending(
     }
 
     let new = CostIngestionNew {
+        id: generate_uuid(),
         merchant_id: merchant_id.to_string(),
         connector: connector.to_string(),
         account: account.to_string(),
@@ -89,16 +91,18 @@ pub async fn enqueue_pending(
 }
 
 /// Create a `processing` row for a manual upload and return its id, so the caller's background task
-/// can report progress and record the outcome against it. `report_ref` is the on-disk temp path,
-/// unique per upload, which is how we read the freshly-inserted id back.
+/// can report progress and record the outcome against it. The id is generated client-side (UUIDv7),
+/// so it's known up front — no read-back of the freshly-inserted row is needed.
 pub async fn create_manual(
     merchant_id: &str,
     connector: &str,
     account: &str,
     report_ref: &str,
-) -> Result<i64, IngestError> {
+) -> Result<String, IngestError> {
     let app_state = get_tenant_app_state().await;
+    let id = generate_uuid();
     let new = CostIngestionNew {
+        id: id.clone(),
         merchant_id: merchant_id.to_string(),
         connector: connector.to_string(),
         account: account.to_string(),
@@ -110,16 +114,7 @@ pub async fn create_manual(
     generics::generic_insert::<<CostIngestion as HasTable>::Table, _>(&app_state.db, new)
         .await
         .map_err(|e| IngestError::Storage(e.to_string()))?;
-
-    let row = generics::generic_find_one_optional::<
-        <CostIngestion as HasTable>::Table,
-        _,
-        CostIngestion,
-    >(&app_state.db, dsl::report_ref.eq(report_ref.to_string()))
-    .await
-    .map_err(|e| IngestError::Storage(e.to_string()))?
-    .ok_or_else(|| IngestError::Storage("manual ingestion row vanished after insert".into()))?;
-    Ok(row.id)
+    Ok(id)
 }
 
 /// Claim up to `limit` pending jobs by compare-and-swapping each `pending → processing`. The CAS
@@ -154,7 +149,7 @@ pub async fn claim_pending(limit: usize) -> Result<Vec<CostIngestion>, IngestErr
         let won = generics::generic_update_if_present::<<CostIngestion as HasTable>::Table, _, _>(
             &conn,
             dsl::id
-                .eq(row.id)
+                .eq(row.id.clone())
                 .and(dsl::status.eq("pending".to_string())),
             CostIngestionStatusUpdate {
                 status: "processing".to_string(),
@@ -172,7 +167,7 @@ pub async fn claim_pending(limit: usize) -> Result<Vec<CostIngestion>, IngestErr
 }
 
 /// Bump the staged-row counter the dashboard polls for progress.
-pub async fn update_progress(id: i64, staged_rows: i64) -> Result<(), IngestError> {
+pub async fn update_progress(id: &str, staged_rows: i64) -> Result<(), IngestError> {
     let app_state = get_tenant_app_state().await;
     let conn = app_state
         .db
@@ -181,7 +176,7 @@ pub async fn update_progress(id: i64, staged_rows: i64) -> Result<(), IngestErro
         .map_err(|_| IngestError::Storage("db connection".to_string()))?;
     generics::generic_update_if_present::<<CostIngestion as HasTable>::Table, _, _>(
         &conn,
-        dsl::id.eq(id),
+        dsl::id.eq(id.to_string()),
         CostIngestionProgressUpdate {
             staged_rows,
             updated_at: crate::utils::date_time::now(),
@@ -193,7 +188,7 @@ pub async fn update_progress(id: i64, staged_rows: i64) -> Result<(), IngestErro
 }
 
 /// Mark a job `completed` and record its full outcome for history.
-pub async fn mark_completed(id: i64, c: &Completion) -> Result<(), IngestError> {
+pub async fn mark_completed(id: &str, c: &Completion) -> Result<(), IngestError> {
     let app_state = get_tenant_app_state().await;
     let conn = app_state
         .db
@@ -217,7 +212,7 @@ pub async fn mark_completed(id: i64, c: &Completion) -> Result<(), IngestError> 
     };
     generics::generic_update_if_present::<<CostIngestion as HasTable>::Table, _, _>(
         &conn,
-        dsl::id.eq(id),
+        dsl::id.eq(id.to_string()),
         update,
     )
     .await
@@ -226,7 +221,7 @@ pub async fn mark_completed(id: i64, c: &Completion) -> Result<(), IngestError> 
 }
 
 /// Mark a job `failed`, recording the error for operators / the dashboard.
-pub async fn mark_failed(id: i64, error: &str) -> Result<(), IngestError> {
+pub async fn mark_failed(id: &str, error: &str) -> Result<(), IngestError> {
     let app_state = get_tenant_app_state().await;
     let conn = app_state
         .db
@@ -235,7 +230,7 @@ pub async fn mark_failed(id: i64, error: &str) -> Result<(), IngestError> {
         .map_err(|_| IngestError::Storage("db connection".to_string()))?;
     generics::generic_update_if_present::<<CostIngestion as HasTable>::Table, _, _>(
         &conn,
-        dsl::id.eq(id),
+        dsl::id.eq(id.to_string()),
         CostIngestionStatusUpdate {
             status: "failed".to_string(),
             last_error: Some(error.to_string()),
@@ -271,13 +266,13 @@ pub async fn list_for_merchant(
 /// A single ingestion by id, scoped to the merchant (used for progress polling).
 pub async fn get_for_merchant(
     merchant_id: &str,
-    id: i64,
+    id: &str,
 ) -> Result<Option<CostIngestion>, IngestError> {
     let app_state = get_tenant_app_state().await;
     generics::generic_find_one_optional::<<CostIngestion as HasTable>::Table, _, CostIngestion>(
         &app_state.db,
         dsl::id
-            .eq(id)
+            .eq(id.to_string())
             .and(dsl::merchant_id.eq(merchant_id.to_string())),
     )
     .await
@@ -286,7 +281,7 @@ pub async fn get_for_merchant(
 
 /// Hard-delete an ingestion's history row, scoped to the merchant. Returns `true` if a row was
 /// removed. The caller deletes the ClickHouse data separately (see `sink::delete_snapshot`).
-pub async fn delete(merchant_id: &str, id: i64) -> Result<bool, IngestError> {
+pub async fn delete(merchant_id: &str, id: &str) -> Result<bool, IngestError> {
     let app_state = get_tenant_app_state().await;
     let conn = app_state
         .db
@@ -296,7 +291,7 @@ pub async fn delete(merchant_id: &str, id: i64) -> Result<bool, IngestError> {
     let n = generics::generic_delete::<<CostIngestion as HasTable>::Table, _>(
         &conn,
         dsl::id
-            .eq(id)
+            .eq(id.to_string())
             .and(dsl::merchant_id.eq(merchant_id.to_string())),
     )
     .await
