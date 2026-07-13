@@ -1,7 +1,7 @@
 -- Unified settlement-report ingestion table: work queue + live progress + history (MySQL parity
 -- of the Postgres migration). See scratch/inhouse-cost-architecture.md §7.
 CREATE TABLE cost_ingestion (
-    id               BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    id               VARCHAR(36)  NOT NULL PRIMARY KEY,
     merchant_id      VARCHAR(255) NOT NULL,
     connector        VARCHAR(64)  NOT NULL,
     account          VARCHAR(255) NOT NULL,

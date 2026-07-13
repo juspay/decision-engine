@@ -76,7 +76,7 @@ pub async fn ingest_report_bytes(
     account: &str,
     merchant_id: &str,
     bytes: Bytes,
-    progress_job: Option<i64>,
+    progress_job: Option<&str>,
 ) -> Result<IngestOutcome, IngestError> {
     ingest_report_reader(
         clickhouse,
@@ -98,7 +98,7 @@ pub async fn ingest_report_reader(
     account: &str,
     merchant_id: &str,
     reader: Box<dyn Read + Send>,
-    progress_job: Option<i64>,
+    progress_job: Option<&str>,
 ) -> Result<IngestOutcome, IngestError> {
     let registry = ConnectorRegistry::with_builtins();
     let source = registry.get(connector)?;
@@ -171,7 +171,7 @@ pub async fn ingest_report_reader(
         connector,
         account,
         merchant_id,
-        progress_job.unwrap_or(0),
+        progress_job.unwrap_or_default(),
         &rows,
     )
     .await?;

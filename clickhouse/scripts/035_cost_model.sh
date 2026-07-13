@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS cost_daily_stats (
     account          String,                    -- connector-side account (e.g. Adyen merchantAccountCode)
     merchant_id      String,                    -- our merchant that owns the account
     txn_date         Date,                      -- the TRANSACTION (booking) day this bucket aggregates
-    ingestion_id     Int64 DEFAULT 0,           -- the cost_ingestion row that last wrote this bucket (delete-by-ingestion)
+    ingestion_id     String DEFAULT '',         -- the cost_ingestion row (UUIDv7) that last wrote this bucket (delete-by-ingestion)
     card_network     LowCardinality(String),    -- 'visa', 'mc', …          ┐
     variant          String,                    -- 'visastandarddebit', …    │ cluster key
     funding          LowCardinality(String),    -- 'debit' | 'credit' | ''   │ (fit groups on this)
