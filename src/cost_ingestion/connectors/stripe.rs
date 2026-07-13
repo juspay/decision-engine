@@ -15,9 +15,12 @@
 //! cluster cover different transaction subsets (their `Count`s differ).
 //!
 //! Consequences the caller must know about:
-//!   * There is no per-transaction id. `txn_ref` is a *synthetic* deterministic key built from the
-//!     row's identifying fields so a re-upload of the same month replaces (not duplicates) its
-//!     rows under the ReplacingMergeTree — it is NOT a real transaction reference.
+//!   * There is no per-transaction id. `txn_ref` is a *synthetic* best-effort key built from the
+//!     row's identifying fields — provenance only. Nothing downstream reads it: the rollup
+//!     (`rollup.rs`) sums each row into a `(cluster, day, band, channel)` bucket keyed by the real
+//!     fields, and ClickHouse `cost_daily_stats` de-dups per bucket by `ingested_at` ("latest
+//!     report per day wins"), never by `txn_ref`. It is NOT a real transaction reference, and NOT
+//!     a dedup key — so which fields go into it does not affect aggregation.
 //!   * `gross`/`total_fee` here are aggregate turnover/fee for a bucket, not one transaction. The
 //!     per-transaction OLS in `fit.rs` (`total_fee = slope·gross + intercept`, `n ≥ 200`) assumes
 //!     transaction-level scatter; fed these aggregate lines it will not produce meaningful `GOOD`
@@ -44,7 +47,9 @@ use bytes::Bytes;
 use masking::Secret;
 
 use crate::cost_ingestion::source::SettlementReportSource;
-use crate::cost_ingestion::types::{ConnectorCreds, IngestError, ReportNotification, SettledFeeRow};
+use crate::cost_ingestion::types::{
+    ConnectorCreds, IngestError, ReportNotification, SettledFeeRow,
+};
 
 /// `Refund Flag` value for forward (settled) fees. `Refund` rows are fee reversals whose amounts
 /// would pollute the gross→fee relationship, so they're skipped (mirrors Adyen's record-type
@@ -116,7 +121,6 @@ impl SettlementReportSource for StripeReportSource {
         reader: Box<dyn std::io::Read + Send>,
         on_row: &mut dyn FnMut(SettledFeeRow) -> Result<(), IngestError>,
     ) -> Result<(), IngestError> {
-
         let mut reader = csv::ReaderBuilder::new().flexible(true).from_reader(reader);
 
         let headers = reader
@@ -138,10 +142,10 @@ impl SettlementReportSource for StripeReportSource {
         // Currency: prefer the gross-side currency, fall back to the cost-side.
         let c_gross_ccy = col("Gross Ccy")?;
         let c_cost_ccy = idx("Cost Ccy");
-        // Optional — used only for the ingested report's period, and to make `txn_ref` unique.
+        // Optional — used for the ingested report's period, and folded into the synthetic `txn_ref`.
         let c_month = idx("Month");
-        // Optional — carried into the synthetic key so different fee lines/rates in the same
-        // cluster don't collapse onto one another under the ReplacingMergeTree dedup.
+        // Optional — folded into the synthetic `txn_ref` so distinct fee lines/rates get distinct
+        // keys. Provenance only; `txn_ref` is not a dedup key (see module docs).
         let c_fee_name = idx("Fee Name");
         let c_variable_fee = idx("Variable Fee");
         let c_fixed_fee = idx("Fixed Fee");
@@ -164,15 +168,20 @@ impl SettlementReportSource for StripeReportSource {
             let funding = funding_from_source(get(c_funding));
             let currency = {
                 let g = get(c_gross_ccy).trim();
-                if g.is_empty() { get_opt(c_cost_ccy).trim() } else { g }.to_string()
+                if g.is_empty() {
+                    get_opt(c_cost_ccy).trim()
+                } else {
+                    g
+                }
+                .to_string()
             };
             let channel = channel_from_interaction(get(c_interaction));
             let month = get_opt(c_month).trim();
             let txn_date = parse_month(month);
 
             on_row(SettledFeeRow {
-                // Synthetic, deterministic key (see module docs): identifies this aggregate line so
-                // a same-month re-upload replaces rather than duplicates. NOT a real txn reference.
+                // Synthetic best-effort key (see module docs). Provenance only — not a real txn
+                // reference and not a dedup key; the rollup aggregates by the cluster fields below.
                 txn_ref: synth_ref(&[
                     &variant,
                     get(c_interaction).trim(),
@@ -214,7 +223,7 @@ fn not_implemented(method: &str) -> IngestError {
 }
 
 /// Build a deterministic key from a row's identifying parts, joined with a delimiter unlikely to
-/// appear in the values. Stable across re-uploads ⇒ idempotent staging via the ReplacingMergeTree.
+/// appear in the values.
 fn synth_ref(parts: &[&str]) -> String {
     format!("stripe|{}", parts.join("\u{1f}"))
 }
@@ -280,7 +289,9 @@ mod tests {
 Company,Merchant,Card Brand,Shopper Interaction,Regionality,Funding Source,Payment Method Variant,Fee Name,Fee,Count,Gross Ccy,Gross Qty,Cost Ccy,Cost Qty,Month,Lookup String,Refund Flag,Fixed Fee Ccy,Fixed Fee,Fixed Fee in USD,Variable Fee,USD Amount,USD Fee,Fixed Amount,Variable Amount\n\
 Merchant-A,Merchant-A-Stripe-US,mc,Ecommerce,DOMESTIC,DEBIT,maestro,Clearing Sender Connectivity Fee,1.65% + USD 0.1500,23155,USD,453160.54,USD,10950.39891,2025/01,GGH-ADYEN-USmcUSD,Settle,USD,0.15,0.15,0.0165,453160.54,10950.39891,3473.25,7477.14891\n\
 Merchant-A,Merchant-A-Stripe-US,mc,Ecommerce,DOMESTIC,CREDIT,mccommercialcredit,Clearing Sender Connectivity Fee,2.16%,9,USD,497828.26,USD,10753.09042,2025/01,GGH-ADYEN-USmcUSD,Refund,,0.0,0.0,0.0216,497828.26,10753.09042,0.0,10753.09042\n";
-        let rows = StripeReportSource::new().parse_report(csv.as_bytes()).unwrap();
+        let rows = StripeReportSource::new()
+            .parse_report(csv.as_bytes())
+            .unwrap();
         assert_eq!(rows.len(), 1, "only the Settle row is kept");
         let r = &rows[0];
         assert_eq!(r.card_network, "mc");
@@ -289,7 +300,10 @@ Merchant-A,Merchant-A-Stripe-US,mc,Ecommerce,DOMESTIC,CREDIT,mccommercialcredit,
         assert_eq!(r.currency, "USD");
         assert_eq!(r.channel, "ecom");
         assert_eq!(r.issuer_country, "", "not present in the Stripe report");
-        assert_eq!(r.ic_category, "", "Fee Name is not the interchange category");
+        assert_eq!(
+            r.ic_category, "",
+            "Fee Name is not the interchange category"
+        );
         assert!((r.gross - 453160.54).abs() < 1e-6, "Gross Qty");
         assert!((r.total_fee - 10950.39891).abs() < 1e-6, "Cost Qty");
         assert_eq!(r.txn_date, chrono::NaiveDate::from_ymd_opt(2025, 1, 1));
@@ -298,20 +312,28 @@ Merchant-A,Merchant-A-Stripe-US,mc,Ecommerce,DOMESTIC,CREDIT,mccommercialcredit,
 
     #[test]
     fn synthetic_ref_is_stable_and_distinguishes_fee_lines() {
-        // Same cluster, two different fee lines ⇒ two distinct keys (so neither dedups the other).
+        // Same cluster, two different fee lines ⇒ two distinct synthetic keys (a property of
+        // synth_ref itself; txn_ref is provenance only and not used for dedup).
         let csv = "\
 Card Brand,Shopper Interaction,Regionality,Funding Source,Payment Method Variant,Fee Name,Gross Qty,Cost Qty,Gross Ccy,Cost Ccy,Month,Refund Flag,Fixed Fee,Variable Fee\n\
 mc,Ecommerce,DOMESTIC,CREDIT,mccommercialcredit,Interchange,100000,2100,USD,USD,2025/01,Settle,0.10,0.019\n\
 mc,Ecommerce,DOMESTIC,CREDIT,mccommercialcredit,Scheme Fee,100000,150,USD,USD,2025/01,Settle,0.00,0.0015\n";
-        let rows = StripeReportSource::new().parse_report(csv.as_bytes()).unwrap();
+        let rows = StripeReportSource::new()
+            .parse_report(csv.as_bytes())
+            .unwrap();
         assert_eq!(rows.len(), 2);
-        assert_ne!(rows[0].txn_ref, rows[1].txn_ref, "distinct fee lines keep distinct keys");
+        assert_ne!(
+            rows[0].txn_ref, rows[1].txn_ref,
+            "distinct fee lines keep distinct keys"
+        );
     }
 
     #[test]
     fn missing_required_column_errors() {
         let csv = "Card Brand,Shopper Interaction\nmc,Ecommerce\n";
-        let err = StripeReportSource::new().parse_report(csv.as_bytes()).unwrap_err();
+        let err = StripeReportSource::new()
+            .parse_report(csv.as_bytes())
+            .unwrap_err();
         assert!(matches!(err, IngestError::Parse(_)));
     }
 
@@ -327,7 +349,10 @@ mc,Ecommerce,DOMESTIC,CREDIT,mccommercialcredit,Scheme Fee,100000,150,USD,USD,20
         assert_eq!(channel_from_interaction("Ecommerce"), "ecom");
         assert_eq!(channel_from_interaction("ContAuth"), "ecom");
         assert_eq!(channel_from_interaction("CardPresent"), "pos");
-        assert_eq!(parse_month("2025/01"), chrono::NaiveDate::from_ymd_opt(2025, 1, 1));
+        assert_eq!(
+            parse_month("2025/01"),
+            chrono::NaiveDate::from_ymd_opt(2025, 1, 1)
+        );
         assert_eq!(parse_month(""), None);
     }
 }
