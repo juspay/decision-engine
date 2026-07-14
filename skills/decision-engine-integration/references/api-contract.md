@@ -202,11 +202,12 @@ auth feedback:
 | Category | Values | Send when |
 | --- | --- | --- |
 | Success | `CHARGED`, `AUTHORIZED`, `PARTIAL_CHARGED` | Payment authorized/captured. `CHARGED` = captured, `AUTHORIZED` = auth-only. |
-| Failure | `AUTHORIZATION_FAILED`, `FAILURE`, `DECLINED`, `JUSPAY_DECLINED`, `AUTHENTICATION_FAILED` | PSP declined / auth failed / 3DS failed. `AUTHORIZATION_FAILED` is the common card-decline case. |
+| Failure | `AUTHORIZATION_FAILED`, `FAILURE`, `DECLINED`, `AUTHENTICATION_FAILED` | PSP declined / auth failed / 3DS failed. `AUTHORIZATION_FAILED` is the common card-decline case. |
 | **Do NOT send (non-terminal)** | `STARTED`, `PENDING`, `PENDING_VBV`, `AUTHORIZING`, `TO_BE_CHARGED`, `CAPTURE_INITIATED`, `VOID_INITIATED` | Wait for a terminal state first. |
 
-Full enum (for reference): `STARTED`, `AUTHENTICATION_FAILED`,
-`JUSPAY_DECLINED`, `PENDING_VBV`, `VBV_SUCCESSFUL`, `AUTHORIZED`,
+Other `TxnStatus` values the engine defines (for reference; map your PSP
+outcome to the closest generic status in the table above): `STARTED`,
+`AUTHENTICATION_FAILED`, `PENDING_VBV`, `VBV_SUCCESSFUL`, `AUTHORIZED`,
 `AUTHORIZATION_FAILED`, `CHARGED`, `AUTHORIZING`, `COD_INITIATED`, `VOIDED`,
 `VOID_INITIATED`, `NOP`, `CAPTURE_INITIATED`, `CAPTURE_FAILED`, `VOID_FAILED`,
 `AUTO_REFUNDED`, `PARTIAL_CHARGED`, `TO_BE_CHARGED`, `PENDING`, `FAILURE`,

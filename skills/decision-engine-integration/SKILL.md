@@ -145,8 +145,8 @@ After the PSP returns a **terminal** Authorize/Charge result, report it:
 - Send `merchantId`, `gateway` (the PSP you actually used), `paymentId` (the
   same one from Phase 2), and `status` mapped to a Decision Engine `TxnStatus`.
 - Success → `CHARGED` (captured) or `AUTHORIZED`. Failure →
-  `AUTHORIZATION_FAILED` (most common), `FAILURE`, `AUTHENTICATION_FAILED`, or
-  `JUSPAY_DECLINED`. **Do not report non-terminal states** like `PENDING` /
+  `AUTHORIZATION_FAILED` (most common), `FAILURE`, `DECLINED`, or
+  `AUTHENTICATION_FAILED`. **Do not report non-terminal states** like `PENDING` /
   `AUTHORIZING` — wait for the final outcome. Full status table is in the API
   contract reference.
 - Make this call **out of the critical path** (fire-and-forget / async / queued)
