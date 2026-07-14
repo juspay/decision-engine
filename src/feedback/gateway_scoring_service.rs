@@ -1496,7 +1496,7 @@ mod tests {
     #[test]
     fn explore_gate_admits_hedging_and_multi_objective() {
         assert!(is_routing_approach_in_explore(Some("SR_V3_HEDGING".into())));
-        // Cost routing picks a non-top, SR-equivalent PSP — off-policy exploration.
+        // Cost estimation picks a non-top, SR-equivalent PSP — off-policy exploration.
         assert!(is_routing_approach_in_explore(Some(
             "SR_SELECTION_MULTI_OBJECTIVE".into()
         )));

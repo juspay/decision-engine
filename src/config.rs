@@ -64,6 +64,8 @@ pub struct GlobalConfig {
     #[serde(default)]
     pub hypersense: HypersenseConfig,
     #[serde(default)]
+    pub cost_ingestion: CostIngestionConfig,
+    #[serde(default)]
     pub sr_auto_calibration: SrAutoCalibrationConfig,
 }
 
@@ -287,6 +289,49 @@ pub struct TenantConfig {
     pub debit_routing_config: network_decider::types::DebitRoutingConfig,
     pub cache_config: CacheConfig,
     pub hypersense: HypersenseConfig,
+    pub cost_ingestion: CostIngestionConfig,
+}
+
+/// Configuration for the in-house cost-estimation settlement ingestion pipeline
+/// (see `scratch/inhouse-cost-architecture.md` §7).
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(default)]
+pub struct CostIngestionConfig {
+    /// Key id used to encrypt *new* connector credentials. Must name a key present in
+    /// `creds_encryption_keys`. Rotate by adding a new key there and pointing this at it —
+    /// old keys stay in the ring so existing credentials still decrypt. Empty ⇒ storage disabled.
+    pub creds_encryption_current: String,
+    /// Keyring: key-id → hex-encoded 32-byte AES-256 key. Retaining old ids is what makes
+    /// rotation non-destructive: a credential is stored tagged with the id that encrypted it,
+    /// and decryption looks the id up here. Generate keys with `openssl rand -hex 32`.
+    pub creds_encryption_keys: std::collections::HashMap<String, masking::Secret<String>>,
+    /// Enable the background ingest worker that drains `report_ingest_queue`. Off by default so
+    /// only the deployment(s) meant to run ingestion do.
+    pub worker_enabled: bool,
+    /// How often the ingest worker polls the queue, in seconds.
+    pub worker_interval_secs: u64,
+    /// Max jobs claimed per poll cycle.
+    pub worker_batch_size: usize,
+    /// Enable the report poller for pull-based connectors: it lists each connector's ready reports
+    /// and enqueues them. Connector-agnostic. Off by default; enable on the deployment that owns
+    /// ingestion.
+    pub report_poll_enabled: bool,
+    /// How often the report poller lists reports, in seconds. Reports are daily, so hourly is ample.
+    pub report_poll_interval_secs: u64,
+}
+
+impl Default for CostIngestionConfig {
+    fn default() -> Self {
+        Self {
+            creds_encryption_current: String::new(),
+            creds_encryption_keys: std::collections::HashMap::new(),
+            worker_enabled: false,
+            worker_interval_secs: 60,
+            worker_batch_size: 20,
+            report_poll_enabled: false,
+            report_poll_interval_secs: 3600,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, serde::Deserialize)]
@@ -391,6 +436,7 @@ impl TenantConfig {
             debit_routing_config: global_config.debit_routing_config.clone(),
             cache_config: global_config.cache_config.clone(),
             hypersense: global_config.hypersense.clone(),
+            cost_ingestion: global_config.cost_ingestion.clone(),
         }
     }
 }

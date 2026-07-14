@@ -308,6 +308,97 @@ pub struct MerchantAccountUpdate {
     pub gateway_success_rate_based_decider_input: Option<String>,
 }
 
+/// One settlement-report ingestion — the unified queue + progress + history row (`cost_ingestion`).
+/// Field order matches the schema column order (diesel `Queryable` maps by position).
+#[derive(Debug, Clone, Identifiable, Queryable)]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::cost_ingestion))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::cost_ingestion))]
+pub struct CostIngestion {
+    pub id: String,
+    pub merchant_id: String,
+    pub connector: String,
+    pub account: String,
+    pub source: String,
+    pub notification_id: Option<String>,
+    pub report_ref: String,
+    pub status: String,
+    pub attempts: i32,
+    pub last_error: Option<String>,
+    pub staged_rows: i64,
+    pub report_date: Option<time::Date>,
+    pub period_start: Option<time::Date>,
+    pub period_end: Option<time::Date>,
+    pub currency_count: i32,
+    pub currencies: Option<String>,
+    pub country_count: i32,
+    pub countries: Option<String>,
+    pub total_gross: f64,
+    pub total_clusters: i64,
+    pub good_clusters: i64,
+    pub created_at: PrimitiveDateTime,
+    pub updated_at: PrimitiveDateTime,
+}
+
+/// Insert shape for a new ingestion. `status` is explicit (`pending` for webhook jobs the worker
+/// claims, `processing` for manual uploads that run immediately); progress/outcome columns and
+/// timestamps take DB defaults.
+#[derive(Debug, Clone, Insertable)]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::cost_ingestion))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::cost_ingestion))]
+pub struct CostIngestionNew {
+    /// Client-generated UUIDv7 primary key (`storage::utils::generate_uuid`). Set at insert so the
+    /// caller already holds the id — no read-back needed.
+    pub id: String,
+    pub merchant_id: String,
+    pub connector: String,
+    pub account: String,
+    pub source: String,
+    pub notification_id: Option<String>,
+    pub report_ref: String,
+    pub status: String,
+}
+
+/// Status-transition changeset (claim / fail). `last_error` is `Option`, so `None` leaves the
+/// column untouched (diesel skips `None` in `AsChangeset`).
+#[derive(Debug, Clone, AsChangeset)]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::cost_ingestion))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::cost_ingestion))]
+pub struct CostIngestionStatusUpdate {
+    pub status: String,
+    pub last_error: Option<String>,
+    pub updated_at: PrimitiveDateTime,
+}
+
+/// Live-progress changeset: bump the staged-row counter the dashboard polls.
+#[derive(Debug, Clone, AsChangeset)]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::cost_ingestion))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::cost_ingestion))]
+pub struct CostIngestionProgressUpdate {
+    pub staged_rows: i64,
+    pub updated_at: PrimitiveDateTime,
+}
+
+/// Completion changeset: mark done and record the ingested report's full shape for history. Every
+/// field is set on success (all `Some`); nullable columns are `Option` only to match the schema.
+#[derive(Debug, Clone, AsChangeset)]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::cost_ingestion))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::cost_ingestion))]
+pub struct CostIngestionOutcomeUpdate {
+    pub status: String,
+    pub staged_rows: i64,
+    pub report_date: Option<time::Date>,
+    pub period_start: Option<time::Date>,
+    pub period_end: Option<time::Date>,
+    pub currency_count: i32,
+    pub currencies: Option<String>,
+    pub country_count: i32,
+    pub countries: Option<String>,
+    pub total_gross: f64,
+    pub total_clusters: i64,
+    pub good_clusters: i64,
+    pub updated_at: PrimitiveDateTime,
+}
+
 #[derive(Debug, Clone, Identifiable, Queryable)]
 #[cfg_attr(feature = "mysql", diesel(table_name = schema::merchant_config))]
 #[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::merchant_config))]

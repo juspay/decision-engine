@@ -5,7 +5,7 @@ use axum::{
     extract::{Request, State},
     middleware::{self, Next},
     response::Response,
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
 };
 use axum_server::{tls_rustls::RustlsConfig, Handle};
 use error_stack::ResultExt;
@@ -326,6 +326,23 @@ where
         global_app_state.global_config.sr_auto_calibration.clone(),
     );
 
+    // Background job: drain the settlement-report ingest queue (download → parse → stage).
+    // No-op unless `cost_ingestion.worker_enabled` is set.
+    crate::cost_ingestion::worker::spawn(
+        global_app_state.global_config.cost_ingestion.clone(),
+        global_app_state.global_config.analytics.clickhouse.clone(),
+    );
+
+    // Background job: poll every pull-based connector's reporting API for ready reports and enqueue
+    // them. Connector-agnostic; no-op unless `report_poll_enabled`.
+    crate::cost_ingestion::poller::spawn(global_app_state.global_config.cost_ingestion.clone());
+
+    // Background job: refresh the in-house cost serving view from the fitted models, so the
+    // multi-objective router can price candidates from our own ingested data.
+    crate::cost_ingestion::serving::spawn(
+        global_app_state.global_config.analytics.clickhouse.clone(),
+    );
+
     // Create a signal stream for SIGTERM
     let mut sigterm = signal(SignalKind::terminate()).expect("Failed to create SIGTERM handler");
 
@@ -413,6 +430,82 @@ where
             get(routes::merchant_account_config::get_debit_routing),
         )
         .route(
+            "/merchant-account/:merchant-id/connectors",
+            get(routes::connector_credentials::list_connector_credentials),
+        )
+        .route(
+            "/merchant-account/:merchant-id/connectors/:connector/credentials",
+            post(routes::connector_credentials::set_connector_credentials),
+        )
+        .route(
+            "/merchant-account/:merchant-id/connectors/:connector/credentials/:account",
+            delete(routes::connector_credentials::delete_connector_credentials),
+        )
+        .route(
+            "/merchant-account/:merchant-id/connectors/:connector/report",
+            // Monthly settlement reports run to several GB. The handler streams the body to disk
+            // and parses in batches (O(batch) RAM), so lift the body cap to the same hard limit it
+            // enforces itself. DefaultBodyLimit otherwise errors the stream at its default.
+            post(routes::report_upload::upload_report).layer(axum::extract::DefaultBodyLimit::max(
+                routes::report_upload::MAX_UPLOAD_BYTES,
+            )),
+        )
+        .route(
+            "/merchant-account/:merchant-id/connectors/:connector/invoice",
+            // Invoices are small (a few hundred lines): buffered and processed synchronously, so the
+            // computed cost add-on is returned in the response. Cap the body to reject a settlement
+            // report accidentally uploaded here.
+            post(routes::invoice_upload::upload_invoice).layer(
+                axum::extract::DefaultBodyLimit::max(routes::invoice_upload::MAX_INVOICE_BYTES),
+            ),
+        )
+        .route(
+            "/merchant-account/:merchant-id/connectors/:connector/invoice-addon",
+            delete(routes::invoice_upload::delete_addon),
+        )
+        .route(
+            "/merchant-account/:merchant-id/invoice-addons",
+            get(routes::invoice_upload::list_addons),
+        )
+        .route(
+            "/merchant-account/:merchant-id/invoice-reconciliation",
+            get(routes::invoice_upload::get_reconciliation),
+        )
+        .route(
+            "/merchant-account/:merchant-id/connector-fees",
+            get(routes::connector_fees::list_connector_fees),
+        )
+        .route(
+            "/merchant-account/:merchant-id/connectors/:connector/fee-override",
+            put(routes::connector_fees::set_fee_override)
+                .delete(routes::connector_fees::delete_fee_override),
+        )
+        .route(
+            "/merchant-account/:merchant-id/cost-clusters",
+            get(routes::cost_clusters::list_cost_clusters),
+        )
+        .route(
+            "/merchant-account/:merchant-id/cost-clusters/:cluster-key/fee-override",
+            put(routes::cost_clusters::set_cluster_override)
+                .delete(routes::cost_clusters::delete_cluster_override),
+        )
+        .route(
+            "/merchant-account/:merchant-id/cost-coverage",
+            get(routes::cost_coverage::get_cost_coverage),
+        )
+        .route(
+            "/merchant-account/:merchant-id/cost-ingestions",
+            get(routes::report_upload::list_ingestions),
+        )
+        .route(
+            "/merchant-account/:merchant-id/cost-ingestions/:ingestion-id",
+            delete(routes::report_upload::delete_ingestion),
+        )
+        .route(
+            "/merchant-account/:merchant-id/cost-price-changes",
+            get(routes::report_upload::list_price_changes),
+        )
+        .route(
             "/merchant-account/:merchant-id/debit-routing",
             post(routes::merchant_account_config::update_debit_routing),
         )
@@ -468,6 +561,10 @@ where
         .route(
             "/merchant-account/create",
             post(routes::merchant_account_config::create_merchant_config),
+        )
+        .route(
+            "/webhooks/settlement/:connector",
+            post(routes::settlement_webhook::settlement_webhook),
         )
         .route("/auth/signup", post(routes::user_auth::signup))
         .route("/auth/login", post(routes::user_auth::login))

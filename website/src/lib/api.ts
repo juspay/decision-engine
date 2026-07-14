@@ -188,6 +188,88 @@ export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   })
 }
 
+export async function apiPut<T>(path: string, body?: unknown): Promise<T> {
+  return apiFetch<T>(path, {
+    method: 'PUT',
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  })
+}
+
+export async function apiDelete<T = void>(path: string): Promise<T> {
+  return apiFetch<T>(path, { method: 'DELETE' })
+}
+
+/** Progress of a tracked upload. `phase` flips to `processing` once all bytes are sent and the
+ * server is parsing/fitting — where the request can sit for minutes on a large report. */
+export interface UploadProgress {
+  loaded: number
+  total: number
+  phase: 'uploading' | 'processing'
+}
+
+/**
+ * POST a raw binary body with upload-progress reporting. Uses `XMLHttpRequest` because `fetch`
+ * exposes no upload-progress events. `onProgress` fires during transfer (`uploading`) and once more
+ * when the last byte is sent (`processing`) — the server-side parse/fit is not observable from here.
+ */
+export function apiUploadWithProgress<T>(
+  path: string,
+  file: Blob,
+  onProgress?: (p: UploadProgress) => void,
+): Promise<T> {
+  const requestPath = resolveApiPath(path)
+  const token = tokenRef.get()
+
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', requestPath)
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream')
+    xhr.setRequestHeader('x-tenant-id', DEFAULT_TENANT_ID)
+    xhr.setRequestHeader('x-feature', FEATURE_HEADER)
+    if (token) {
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+    }
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        onProgress?.({ loaded: e.loaded, total: e.total, phase: 'uploading' })
+      }
+    }
+    // All bytes sent — the server is now parsing/staging/fitting.
+    xhr.upload.onload = () => {
+      onProgress?.({ loaded: file.size, total: file.size, phase: 'processing' })
+    }
+
+    xhr.onload = () => {
+      const responseText = xhr.responseText ?? ''
+      if (xhr.status >= 200 && xhr.status < 300) {
+        if (!responseText.trim()) {
+          resolve(undefined as T)
+          return
+        }
+        try {
+          resolve(JSON.parse(responseText) as T)
+        } catch {
+          reject(new Error('Invalid JSON in upload response'))
+        }
+        return
+      }
+      const error = new Error(
+        buildApiErrorMessage(xhr.status, xhr.statusText, responseText),
+      ) as Error & { status?: number; responseText?: string }
+      error.status = xhr.status
+      error.responseText = responseText
+      logError(requestPath, error)
+      reject(error)
+    }
+    xhr.timeout = 30 * 60 * 1000
+    xhr.onerror = () => reject(new Error('Network error during upload'))
+    xhr.ontimeout = () => reject(new Error('Upload timed out'))
+
+    xhr.send(file)
+  })
+}
+
 export async function fetcher<T>(url: string): Promise<T> {
   return apiFetch<T>(url)
 }

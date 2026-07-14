@@ -55,10 +55,52 @@ pub enum MultiObjectiveOutcome {
     AuthWon,
 }
 
+/// Which source priced a PSP's cost — surfaced so callers can see whether a decision used our own
+/// ingested data (`InHouse`) or fell back to the seed table / live Hypersense.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum CostSource {
+    /// Fitted from the merchant's own settlement reports (`cost_fee_model`).
+    InHouse,
+    /// Config seed table (simulator / offline).
+    Seed,
+    /// Live Hypersense fee-rate API.
+    Hypersense,
+}
+
+/// The fitted model that priced a candidate — mirrors the `par_clusters_ic.csv` columns so callers
+/// can see *which* cluster produced `cost_bps` and reconstruct it. `variant`/`issuer`/`icCategory`
+/// are present on the in-house fine (category-predicted) path; the coarse blend and seed carry just
+/// the network/currency and the fitted `pctBps`/`fixedFee`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CostModel {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub brand: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub variant: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub issuer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ccy: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ic_category: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pct_bps: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fixed_fee: Option<f64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PspSummary {
     pub psp: String,
     pub auth_rate: f64,
     pub cost_bps: Option<f64>,
+    /// Where `cost_bps` came from (`None` when the PSP had no cost data).
+    #[serde(default)]
+    pub cost_source: Option<CostSource>,
+    /// The fitted model behind `cost_bps` (which cluster priced it), when the source exposes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_model: Option<CostModel>,
 }

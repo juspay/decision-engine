@@ -35,6 +35,9 @@ export default function App() {
           <Route path="routing/rules" element={<EuclidRulesPage />} />
           <Route path="routing/volume" element={<VolumeSplitPage />} />
           <Route path="routing/debit" element={<DebitRoutingPage />} />
+          {/* Cost Estimation moved into the Multi Objective page as a tab; keep the
+              old path working for bookmarks/links. */}
+          <Route path="routing/cost" element={<Navigate to="/routing/sr?tab=cost" replace />} />
           <Route path="routing/ab-testing" element={<ABTestingPage />} />
           <Route path="decisions" element={<DecisionExplorerPage />} />
           <Route path="decisions/simulator" element={<DecisionSimulatorPage />} />

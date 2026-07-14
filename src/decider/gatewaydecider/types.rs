@@ -1029,6 +1029,10 @@ pub struct PaymentInfo {
     card_program: Option<String>,
     #[serde(default)]
     card_issuer_country: Option<String>,
+    /// Acceptance channel: `ecom` / `pos` / `contactless`. Feeds the in-house category predictor
+    /// (the strongest signal between online and in-person interchange categories). Optional.
+    #[serde(default, rename = "channel")]
+    channel: Option<String>,
 }
 
 // write a function to transfer DomainDeciderRequestForApiCallV2 to DomainDeciderRequest
@@ -1146,6 +1150,7 @@ impl DomainDeciderRequestForApiCallV2 {
                 card_type: self.payment_info.card_type.clone(),
                 card_program: self.payment_info.card_program.clone(),
                 card_issuer_country: self.payment_info.card_issuer_country.clone(),
+                channel: self.payment_info.channel.clone(),
                 nameOnCard: None,
                 dateCreated: OffsetDateTime::now_utc(),
                 paymentMethodType: self.payment_info.payment_method_type.to_string(),

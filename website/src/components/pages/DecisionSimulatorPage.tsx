@@ -20,6 +20,7 @@ import { DecideGatewayResponse, GatewayConnector, MultiObjectiveInfo, PaymentAud
 import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
 import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
+import { useConnectorFees } from '../../hooks/useCostRouting'
 import { describeRoutingEvent, useRoutingEvents } from '../../hooks/useRoutingEvents'
 import { FEATURE_FLAGS } from '../../lib/featureFlags'
 import { Play, Pause, RefreshCw, ChevronDown, ChevronUp, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings, ArrowRightLeft, Target, TrendingDown, Flag, SlidersHorizontal } from 'lucide-react'
@@ -47,27 +48,41 @@ interface FormState {
 }
 
 const MULTI_OBJECTIVE_CURRENCY = 'USD'
+// Currencies selectable for the multi-objective sim. USD exercises the seed-cost fallback; EUR/AUD
+// (and others) let a transaction match the in-house fitted models, which are keyed by currency.
+const MULTI_OBJECTIVE_CURRENCIES = ['USD', 'EUR', 'GBP', 'AUD', 'CAD'] as const
 const MULTI_OBJECTIVE_PAYMENT_METHODS = ['CREDIT'] as const
 const CARD_PROGRAM_OPTIONS = ['STANDARD', 'PREMIUM'] as const
 const MULTI_OBJECTIVE_CARD_BRANDS = ['VISA', 'MASTERCARD'] as const
 
-// Each variant is one card scenario the seed-cost table prices distinctly. Cost is keyed by
-// issuer region (cardIssuerCountry → us/eu/intl), funding (CREDIT/DEBIT), network, and program
-// — so these span the full Stripe-vs-Adyen spread: Adyen wins big on regulated US debit / EU
-// consumer / international, wins modestly on US standard credit, and loses to Stripe's blended
-// rate on premium-rewards / corporate / amex.
+// Each variant is one card scenario. Cost is keyed by issuer region (cardIssuerCountry →
+// us/eu/intl), funding (CREDIT/DEBIT), network, and program. The US variants span the full
+// Stripe-vs-Adyen seed-cost spread. The EU / INTL variants (Visa/Mastercard, standard debit &
+// credit) mirror the shape of the in-house fitted models — so paired with EUR (or AUD) they let a
+// simulated transaction actually land on an in-house cost model (`costSource: IN_HOUSE`) instead of
+// falling back to the seed table.
 const MULTI_OBJECTIVE_CLUSTER_VARIANTS: Array<{
   label: string
   paymentMethod: 'CREDIT' | 'DEBIT'
   cardSwitchProvider: 'VISA' | 'MASTERCARD' | 'AMEX'
   cardProgram: 'STANDARD' | 'PREMIUM' | 'COMMERCIAL'
-  cardIssuerCountry: 'US' | 'EU' | 'INTL'
+  // Raw issuer country a BIN lookup would supply (ISO-2, e.g. 'US', 'FR', 'AU'). The engine buckets
+  // it to a pricing region for the coarse fallback and uses the raw value for the fine predictor.
+  cardIssuerCountry: string
 }> = [
   { label: 'US debit', paymentMethod: 'DEBIT',  cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD',   cardIssuerCountry: 'US'   },
   { label: 'US standard credit', paymentMethod: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD',   cardIssuerCountry: 'US'   },
   { label: 'US premium credit', paymentMethod: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'PREMIUM',    cardIssuerCountry: 'US'   },
   { label: 'US corporate',       paymentMethod: 'CREDIT', cardSwitchProvider: 'MASTERCARD', cardProgram: 'COMMERCIAL', cardIssuerCountry: 'US'   },
   { label: 'Amex US consumer',   paymentMethod: 'CREDIT', cardSwitchProvider: 'AMEX',       cardProgram: 'PREMIUM',    cardIssuerCountry: 'US'   },
+  // EU / AU scenarios carry a *raw* issuer country (as a BIN lookup would supply), so the in-house
+  // category predictor resolves the specific fitted cluster. Pair the EU cards with EUR and the AU
+  // card with AUD to land on in-house models.
+  { label: 'FR debit (Visa)',        paymentMethod: 'DEBIT',  cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD', cardIssuerCountry: 'FR' },
+  { label: 'IT debit (Mastercard)',  paymentMethod: 'DEBIT',  cardSwitchProvider: 'MASTERCARD', cardProgram: 'STANDARD', cardIssuerCountry: 'IT' },
+  { label: 'FR credit (Visa)',       paymentMethod: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD', cardIssuerCountry: 'FR' },
+  { label: 'IT credit (Mastercard)', paymentMethod: 'CREDIT', cardSwitchProvider: 'MASTERCARD', cardProgram: 'STANDARD', cardIssuerCountry: 'IT' },
+  { label: 'AU debit (Visa)',        paymentMethod: 'DEBIT',  cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD', cardIssuerCountry: 'AU' },
 ]
 
 // Scenario the simulator opens on. 'US debit' is the headline Adyen-wins-on-cost case, so it's the
@@ -122,6 +137,8 @@ const DEFAULT_GW_SIM_CONFIG: GatewaySimConfig = {
 const DEFAULT_GW_SUCCESS_RATE: Record<string, number> = {
   stripe: 94,
   adyen: 93,
+  braintree: 92,
+  chase: 92,
 }
 
 // Default sim config for a gateway, applying its per-gateway default SR.
@@ -893,6 +910,15 @@ export function DecisionSimulatorPage() {
   const merchantFeatures = useMerchantFeatures(effectiveMerchantId || undefined)
   const gsmScoringFilterEnabled = merchantFeatures.isEnabled('gsm-scoring-filter')
   const debitRoutingFlag = useDebitRoutingFlag(effectiveMerchantId)
+  // Connectors we've learned a cost model for from ingested settlement reports. In the
+  // multi-objective (economic-value) sim these drive the eligible-gateway set, so the ranking is
+  // scored on real fitted costs instead of the static stripe+adyen default — see the seeding effect
+  // below. Only connectors with a fit (`model_pct_bps != null`) qualify.
+  const { fees: connectorFees } = useConnectorFees(effectiveMerchantId || undefined)
+  const ingestedConnectors = useMemo(
+    () => connectorFees.filter(f => f.model_pct_bps != null).map(f => f.connector.toLowerCase()),
+    [connectorFees],
+  )
   const { routingKeysConfig, isLoading: routingKeysLoading, error: routingKeysError } = useDynamicRoutingConfig()
   const hasRoutingKeys = Object.keys(routingKeysConfig).length > 0
   const routingConfigUnavailable = !routingKeysLoading && (!hasRoutingKeys || Boolean(routingKeysError))
@@ -904,6 +930,12 @@ export function DecisionSimulatorPage() {
   )
 
   const [form, setForm] = useState<FormState>(initialState.form)
+  // The run loop closes over `form` when it starts and idles on that same closure
+  // across a pause, so a plain read would freeze at the pre-pause values. Mirror
+  // it into a ref (like amountRangeRef / multiObjScenarioRef) and read that live so
+  // a currency switch made while paused takes effect on the next resumed txn.
+  const formRef = useRef(form)
+  useEffect(() => { formRef.current = form }, [form])
 
   const [simulationConfig, setSimulationConfig] = useState<SimulationConfig>(initialState.simulationConfig)
   // Live amount range: the run loop reads this ref (not the captured config) so dragging
@@ -971,6 +1003,17 @@ export function DecisionSimulatorPage() {
   const [multiObjScenario, setMultiObjScenario] = useState<number | 'ALL'>(initialState.multiObjScenario)
   const multiObjScenarioRef = useRef<number | 'ALL'>(multiObjScenario)
   useEffect(() => { multiObjScenarioRef.current = multiObjScenario }, [multiObjScenario])
+  // Currency for the multi-objective sim (was hardcoded to USD). Drives whether a transaction can
+  // match an in-house fitted cost model (keyed by currency) or falls back to the seed table.
+  const [moCurrency, setMoCurrency] = useState<string>(MULTI_OBJECTIVE_CURRENCY)
+  // Acceptance channel sent on each multi-objective transaction. Drives the in-house category
+  // predictor (ecom vs pos resolves the online/in-person interchange split). VGS-collected cards
+  // are ecommerce, so that's the default.
+  const [moChannel, setMoChannel] = useState<'ecom' | 'pos'>('ecom')
+  // Read live in the run loop (see formRef) so switching the channel while paused
+  // takes effect on resume instead of only after a full stop/restart.
+  const moChannelRef = useRef(moChannel)
+  useEffect(() => { moChannelRef.current = moChannel }, [moChannel])
   const [error, setError] = useState<string | null>(null)
   const txLogRef = useRef<HTMLDivElement>(null)
 
@@ -994,7 +1037,9 @@ export function DecisionSimulatorPage() {
   // Live routing-event stream (leader flips, auth-band crossings), filtered to the run.
   // Poll tightly while a run is producing events so the Autopilot feed keeps up;
   // relax back to the idle cadence once it finishes.
-  const routingEvents = useRoutingEvents('1h', isSimulating && !isPaused ? 500 : 15_000)
+  const routingEvents = useRoutingEvents('1h', {
+    refreshInterval: isSimulating && !isPaused ? 500 : 15_000,
+  })
   const sessionRoutingEvents = useMemo(() => {
     if (simulationStartedAtMs == null) return []
     const sinceMs = simulationStartedAtMs - EVENTS_RUN_START_MARGIN_MS
@@ -1231,15 +1276,15 @@ export function DecisionSimulatorPage() {
   ])
 
   // SR_MULTI_OBJECTIVE constrains the form to a card-only cluster shape:
-  // Currency = USD, Method Type = CARD, Payment Method = CREDIT, and Card Brand
-  // defaults to Visa/Mastercard when the prior selection isn't one of them.
+  // Currency = the selected `moCurrency`, Method Type = CARD, Payment Method = CREDIT, and Card
+  // Brand defaults to Visa/Mastercard when the prior selection isn't one of them.
   useEffect(() => {
     if (form.ranking_algorithm !== 'SR_MULTI_OBJECTIVE') return
     setForm(prev => {
       if (prev.ranking_algorithm !== 'SR_MULTI_OBJECTIVE') return prev
       const next = { ...prev }
       let changed = false
-      if (next.currency !== MULTI_OBJECTIVE_CURRENCY) { next.currency = MULTI_OBJECTIVE_CURRENCY; changed = true }
+      if (next.currency !== moCurrency) { next.currency = moCurrency; changed = true }
       const cardType = paymentMethodTypeOptions.find(p => p === 'CARD') || 'CARD'
       if (next.payment_method_type !== cardType) { next.payment_method_type = cardType; changed = true }
       if (!MULTI_OBJECTIVE_PAYMENT_METHODS.includes(next.payment_method as 'CREDIT')) {
@@ -1257,7 +1302,23 @@ export function DecisionSimulatorPage() {
       }
       return changed ? next : prev
     })
-  }, [form.ranking_algorithm, paymentMethodTypeOptions, cardBrandOptions])
+  }, [form.ranking_algorithm, paymentMethodTypeOptions, cardBrandOptions, moCurrency])
+
+  // Cost mode only: in the multi-objective (economic-value) sim, drive the eligible connectors from
+  // the ones we've actually learned a cost model for, so the EV ranking is scored on real fitted
+  // costs rather than the static stripe+adyen default (which would rank stripe on fictional costs
+  // and omit an ingested connector like braintree). Falls back to the default when nothing is
+  // ingested yet. SR-based mode keeps the stripe+adyen default — the field is shared, so we reset it
+  // there. There is no manual editor for this field, so owning it here clobbers nothing; we stay out
+  // of the way of an in-flight run.
+  useEffect(() => {
+    if (isSimulating) return
+    const target =
+      form.ranking_algorithm === 'SR_MULTI_OBJECTIVE' && ingestedConnectors.length > 0
+        ? ingestedConnectors.join(', ')
+        : DEFAULT_FORM.eligible_gateways
+    setForm(prev => (prev.eligible_gateways === target ? prev : { ...prev, eligible_gateways: target }))
+  }, [form.ranking_algorithm, ingestedConnectors, isSimulating])
 
   useEffect(() => {
     if (!selectedAuditPaymentId && !selectedPreviewPaymentId && !setupPrompt) return
@@ -1917,7 +1978,7 @@ export function DecisionSimulatorPage() {
         paymentInfo: {
           paymentId: paymentId,
           amount,
-          currency: form.currency,
+          currency: formRef.current.currency,
           paymentType: 'ORDER_PAYMENT',
           paymentMethodType,
           paymentMethod,
@@ -1927,6 +1988,7 @@ export function DecisionSimulatorPage() {
           cardType: paymentMethod,
           cardProgram,
           ...(cardIssuerCountry && { cardIssuerCountry }),
+          channel: moChannelRef.current,
         },
         eligibleGatewayList: gateways,
         rankingAlgorithm: 'SR_BASED_ROUTING',
@@ -1997,7 +2059,7 @@ export function DecisionSimulatorPage() {
         margin: mo?.margin ?? null,
         evGapTop2: mo?.evGapTop2 ?? null,
         amount,
-        currency: form.currency,
+        currency: formRef.current.currency,
         cardNetwork: cardBrand,
         cardProgram,
         cardIssuerRegion: cardIssuerCountry,
@@ -2538,7 +2600,7 @@ export function DecisionSimulatorPage() {
     return { value, currency }
   }, [deferredSimulationResults])
 
-  // Honest economics of cost routing. The gross fee saved (totalCostSaved) is only the
+  // Honest economics of cost Estimation. The gross fee saved (totalCostSaved) is only the
   // upside; an override also accepts a small auth-rate risk. We value that risk the way
   // the band does — the *expected* sale value given up, (headAuthRate − chosenAuthRate)
   // × amount × margin — and net it. This is counterfactual-free: it never books a single
@@ -2806,6 +2868,7 @@ export function DecisionSimulatorPage() {
       setResponseOpen(defaults.responseOpen)
     } else if (activeTab === 'batch') {
       setForm({ ...populatedForm(defaults.form), currency: MULTI_OBJECTIVE_CURRENCY })
+      setMoCurrency(MULTI_OBJECTIVE_CURRENCY)
       setSimulationConfig(defaults.simulationConfig)
       setMultiObjScenario(defaults.multiObjScenario)
       // Preserve the currently selected per-gateway success rate scores (e.g.
@@ -2915,10 +2978,11 @@ export function DecisionSimulatorPage() {
 
       {activeTab === 'batch' && (
         <div className="flex flex-wrap items-start gap-x-6 gap-y-4 rounded-2xl border border-slate-200 bg-white px-5 py-3 dark:border-[#222226] dark:bg-[#0b0b10]">
-            {[
-              { key: 'stripe', label: 'Stripe success rate' },
-              { key: 'adyen', label: 'Adyen success rate' },
-            ].map(({ key, label }) => {
+            {/* One SR slider per eligible connector. In cost mode the eligible set is driven by the
+                merchant's ingested connectors (see the seeding effect), so these follow suit instead
+                of a hardcoded stripe+adyen pair. */}
+            {eligibleGatewaysParsed.map((key) => {
+              const label = `${key.charAt(0).toUpperCase() + key.slice(1)} success rate`
               const color = gatewayColorMap[key] ?? GW_PALETTE[0]
               // Read from state (not the ref-backed getGwSuccessRate, which only
               // syncs in a post-render effect) so the controlled input reflects each
@@ -2977,6 +3041,41 @@ export function DecisionSimulatorPage() {
                   {MULTI_OBJECTIVE_CLUSTER_VARIANTS.map((v, idx) => (
                     <option key={v.label} value={idx}>{v.label}</option>
                   ))}
+                </select>
+              </div>
+            )}
+
+            {form.ranking_algorithm === 'SR_MULTI_OBJECTIVE' && (
+              <div className="flex w-[130px] flex-col gap-1.5">
+                <SurfaceLabel>
+                  <span title="Settlement currency sent on each transaction. USD exercises the seed-cost fallback; EUR/AUD (and others) let a transaction match the in-house fitted cost models, which are keyed by currency.">Currency</span>
+                </SurfaceLabel>
+                <select
+                  value={moCurrency}
+                  disabled={isSimulating && !isPaused}
+                  onChange={e => setMoCurrency(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50 disabled:cursor-not-allowed dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100"
+                >
+                  {MULTI_OBJECTIVE_CURRENCIES.map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {form.ranking_algorithm === 'SR_MULTI_OBJECTIVE' && (
+              <div className="flex w-[130px] flex-col gap-1.5">
+                <SurfaceLabel>
+                  <span title="Acceptance channel. Drives the in-house category predictor: 'ecom' (online / card-not-present, e.g. VGS-collected) vs 'pos' (in-person terminal). This resolves the online-vs-in-person interchange category — the biggest signal for debit.">Channel</span>
+                </SurfaceLabel>
+                <select
+                  value={moChannel}
+                  disabled={isSimulating && !isPaused}
+                  onChange={e => setMoChannel(e.target.value as 'ecom' | 'pos')}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50 disabled:cursor-not-allowed dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100"
+                >
+                  <option value="ecom">ecom (online)</option>
+                  <option value="pos">pos (in-person)</option>
                 </select>
               </div>
             )}
