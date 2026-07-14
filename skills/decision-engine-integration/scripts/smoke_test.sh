@@ -57,12 +57,19 @@ if [ -z "$API_KEY" ]; then
 fi
 AUTH="x-api-key: $API_KEY"
 
-# 3. SR config (idempotent-ish; ignore 'already exists') ----------------------
-curl -s --location "$BASE_URL/rule/create" \
+# 3. SR config (idempotent-ish; a repeat "already exists" is fine) ------------
+sr_out=$(mktemp)
+sr_code=$(curl -s -o "$sr_out" -w '%{http_code}' --location "$BASE_URL/rule/create" \
   --header "$AUTH" --header "Content-Type: application/json" \
-  --data "{\"merchant_id\":\"$MERCHANT_ID\",\"config\":{\"type\":\"successRate\",\"data\":{\"defaultBucketSize\":20,\"defaultLatencyThreshold\":null,\"defaultHedgingPercent\":null,\"subLevelInputConfig\":{\"paymentMethodType\":{\"CARD\":{\"bucketSize\":30,\"hedgingPercent\":0.05}}}}}}" \
-  >/dev/null 2>&1
-ok "SR config ensured"
+  --data "{\"merchant_id\":\"$MERCHANT_ID\",\"config\":{\"type\":\"successRate\",\"data\":{\"defaultBucketSize\":20,\"defaultLatencyThreshold\":null,\"defaultHedgingPercent\":null,\"subLevelInputConfig\":{\"paymentMethodType\":{\"CARD\":{\"bucketSize\":30,\"hedgingPercent\":0.05}}}}}}")
+sr_body=$(cat "$sr_out"); rm -f "$sr_out"
+if [ "$sr_code" = "200" ] || [ "$sr_code" = "201" ]; then
+  ok "SR config created"
+elif printf '%s' "$sr_body" | grep -qi 'exist'; then
+  ok "SR config already present"
+else
+  bad "SR config create failed (HTTP $sr_code): $sr_body"
+fi
 
 hr
 # 4. decide-gateway -----------------------------------------------------------
@@ -88,9 +95,11 @@ fi
 hr
 # 5. update-gateway-score -----------------------------------------------------
 score_body="{\"merchantId\":\"$MERCHANT_ID\",\"gateway\":\"$decided\",\"gatewayReferenceId\":null,\"status\":\"CHARGED\",\"paymentId\":\"$PAYMENT_ID\",\"enforceDynamicRoutingFailure\":null}"
-score_code=$(curl -s -o /tmp/de_score_out -w '%{http_code}' --location "$BASE_URL/update-gateway-score" \
+score_out=$(mktemp)
+score_code=$(curl -s -o "$score_out" -w '%{http_code}' --location "$BASE_URL/update-gateway-score" \
   --header "$AUTH" --header "Content-Type: application/json" --data "$score_body")
-echo "update-gateway-score -> HTTP $score_code, body: $(cat /tmp/de_score_out)"
+echo "update-gateway-score -> HTTP $score_code, body: $(cat "$score_out")"
+rm -f "$score_out"
 [ "$score_code" = "200" ] && ok "score accepted (same paymentId)" || bad "score returned $score_code"
 
 hr

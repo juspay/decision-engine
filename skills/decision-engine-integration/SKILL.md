@@ -103,7 +103,12 @@ guessing here produces a broken integration.
 
 Add a client call that, at the selection point, sends the payment context to
 `decide-gateway` and uses `decided_gateway` as the PSP to authorize with (and
-`gateway_priority_map` / `priorityLogicOutput.gws` as the fallback order).
+`gateway_priority_map` / `priority_logic_output.gws` as the fallback order).
+
+Note the casing: **request** bodies use camelCase (`merchantId`, `paymentInfo`,
+`cardIsin`), but the **response** uses snake_case (`decided_gateway`,
+`gateway_priority_map`, `priority_logic_output`). The contract reference spells
+this out field by field.
 
 Map the orchestrator's data into the request. **Full field reference and every
 enum value is in [references/api-contract.md](references/api-contract.md)** —

@@ -44,9 +44,14 @@ ready regardless of the rest.
 Against a real/local Decision Engine, run [../scripts/smoke_test.sh](../scripts/smoke_test.sh)
 (bootstrap → decide → score) and
 [../scripts/certify_integration.py](../scripts/certify_integration.py), which
-asserts contract invariants: `decided_gateway ∈ eligibleGatewayList`, decide is
-idempotent-safe, score accepts the same `paymentId`, and a malformed request is
-rejected with the documented error shape.
+asserts contract invariants: `decided_gateway ∈ eligibleGatewayList`, that
+`update-gateway-score` accepts the same `paymentId` and can be called again for
+that id without erroring (score is idempotent-safe for retries), and that a
+malformed request is rejected with the documented error shape so the
+orchestrator's fail-open branch is actually reachable. It does **not** re-run
+`decide-gateway` to compare outputs — SR routing is intentionally
+non-deterministic (exploration/hedging), so a stable-output assertion there
+would be wrong.
 
 ## Part 3 — AI eval rubric (LLM-as-judge)
 

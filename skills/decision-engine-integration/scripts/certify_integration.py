@@ -65,6 +65,11 @@ def call(path, body, extra_headers=None):
             return e.code, json.loads(raw)
         except json.JSONDecodeError:
             return e.code, raw
+    except urllib.error.URLError as e:
+        # Engine unreachable (connection refused / DNS / TLS). Surface a clean
+        # sentinel instead of a stack trace — a certifier that can't reach the
+        # engine should report FAIL, not crash.
+        return 0, {"error": f"unreachable: {e.reason}"}
 
 
 def main():

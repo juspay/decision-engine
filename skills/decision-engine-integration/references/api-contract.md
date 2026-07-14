@@ -1,7 +1,16 @@
 # Decision Engine API Contract
 
 Everything the orchestrator client needs for the two integration endpoints.
-Fields are the exact wire names (camelCase). All bodies are JSON.
+All bodies are JSON.
+
+**Casing matters and is not uniform.** Request bodies use **camelCase**
+(`merchantId`, `paymentInfo`, `cardIsin`, `rankingAlgorithm`). The
+`/decide-gateway` **response uses snake_case** (`decided_gateway`,
+`gateway_priority_map`, `routing_approach`, `priority_logic_output`) — with the
+exception of the nested `priority_logic_output` object, whose inner keys are
+camelCase (`isEnforcement`, `gws`, `priorityLogicTag`, `gatewayReferenceIds`).
+Field names below are given exactly as they appear on the wire; deserialize
+against these, not a normalized guess.
 
 ## Table of contents
 
