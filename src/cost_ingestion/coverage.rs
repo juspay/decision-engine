@@ -75,12 +75,7 @@ FORMAT TSV
 
 fn client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(TIMEOUT)
-            .build()
-            .expect("failed to build clickhouse coverage client")
-    })
+    CLIENT.get_or_init(|| super::ch_http::client(TIMEOUT))
 }
 
 /// Coverage of a merchant's latest fitted snapshot across all its connectors/accounts.

@@ -72,8 +72,8 @@ function VerdictTable({ coverage }: { coverage: CoverageSummary }) {
       gross: coverage.thin_gross,
     },
     {
-      verdict: 'NON_LINEAR',
-      note: 'non-linear cost — needs attention',
+      verdict: 'Poor fit',
+      note: 'model failed to converge',
       dot: 'bg-amber-500',
       txns: coverage.non_linear_txns,
       gross: coverage.non_linear_gross,

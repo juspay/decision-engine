@@ -140,12 +140,7 @@ fn build_snapshot_filter(scope: &ClusterScope<'_>) -> String {
 
 fn client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(TIMEOUT)
-            .build()
-            .expect("failed to build clickhouse blend client")
-    })
+    CLIENT.get_or_init(|| super::ch_http::client(TIMEOUT))
 }
 
 /// The merchant's highest-GMV GOOD segments ranked by settled volume, narrowed by `scope` (empty =

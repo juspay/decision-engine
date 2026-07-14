@@ -32,12 +32,7 @@ pub struct FitSummary {
 
 fn client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(FIT_TIMEOUT)
-            .build()
-            .expect("failed to build clickhouse fit client")
-    })
+    CLIENT.get_or_init(|| super::ch_http::client(FIT_TIMEOUT))
 }
 
 /// The OLS fit as nested aggregation. `__DB__` is replaced with the configured database (the

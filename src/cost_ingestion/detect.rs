@@ -133,10 +133,5 @@ pub async fn price_changes(
 
 fn client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(TIMEOUT)
-            .build()
-            .expect("failed to build clickhouse detect client")
-    })
+    CLIENT.get_or_init(|| super::ch_http::client(TIMEOUT))
 }

@@ -21,6 +21,16 @@ use super::types::IngestError;
 
 const INSERT_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// Max buckets per INSERT request. A large or high-cardinality report (e.g. Braintree's free-text
+/// `Interchange Description` → `ic_category`) can roll up into far more buckets than fit comfortably
+/// in one HTTP body. Sending them all at once produced multi-MB requests that could exceed the ~30s
+/// proxy timeout in front of ClickHouse and get the connection reset mid-send — surfacing as an
+/// opaque transport error (`error sending request`) rather than a ClickHouse error. Chunking bounds
+/// each request's size and duration; ~25k JSONEachRow rows is a few MB. Because `cost_daily_stats`
+/// is a `ReplacingMergeTree` keyed by the bucket identity, splitting the buckets across requests is
+/// safe: each bucket is still written exactly once.
+const INSERT_CHUNK_ROWS: usize = 25_000;
+
 /// Columns we provide; `ingested_at` is intentionally omitted so ClickHouse applies its DEFAULT.
 const COLUMNS: &str =
     "connector,account,merchant_id,txn_date,ingestion_id,card_network,variant,funding,\
@@ -28,19 +38,16 @@ issuer_country,currency,ic_category,channel,band,n,sx,sy,sxx,sxy,syy,su,suu,suy,
 
 fn client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(INSERT_TIMEOUT)
-            .build()
-            .expect("failed to build clickhouse sink client")
-    })
+    CLIENT.get_or_init(|| super::ch_http::client(INSERT_TIMEOUT))
 }
 
 /// Bulk-insert one report's aggregated per-day buckets into `cost_daily_stats`, stamped with the
 /// ingestion context. Each bucket's `txn_date` is a transaction (booking) day. `ingestion_id` ties
 /// every bucket to its `cost_ingestion` job so an ingestion can later be deleted. A day re-delivered
 /// by a later report collapses onto the same key — the latest `ingested_at` wins (see the table's
-/// `ReplacingMergeTree` in `035_cost_model.sh`). Returns the number of buckets written.
+/// `ReplacingMergeTree` in `035_cost_model.sh`). The buckets are sent in bounded chunks (see
+/// [`INSERT_CHUNK_ROWS`]) so a large report stays within the request budget. Returns the number of
+/// buckets written.
 pub async fn insert_daily_stats(
     cfg: &ClickHouseAnalyticsConfig,
     connector: &str,
@@ -53,6 +60,24 @@ pub async fn insert_daily_stats(
         return Ok(0);
     }
 
+    // Split into bounded requests so one big report can't exceed the proxy/ClickHouse request budget
+    // (see [`INSERT_CHUNK_ROWS`]). Any chunk failing aborts the whole insert; the buckets already
+    // written are harmless — a re-run overwrites them via the `ReplacingMergeTree` key.
+    for chunk in rows.chunks(INSERT_CHUNK_ROWS) {
+        insert_chunk(cfg, connector, account, merchant_id, ingestion_id, chunk).await?;
+    }
+    Ok(rows.len())
+}
+
+/// Insert one bounded batch of buckets in a single `FORMAT JSONEachRow` request. Caller chunks.
+async fn insert_chunk(
+    cfg: &ClickHouseAnalyticsConfig,
+    connector: &str,
+    account: &str,
+    merchant_id: &str,
+    ingestion_id: &str,
+    rows: &[DailyStatRow],
+) -> Result<(), IngestError> {
     let mut body = String::with_capacity(rows.len() * 256);
     for r in rows {
         let obj = json!({
@@ -110,7 +135,7 @@ pub async fn insert_daily_stats(
             "clickhouse insert failed ({status}): {text}"
         )));
     }
-    Ok(rows.len())
+    Ok(())
 }
 
 /// Delete the daily buckets an ingestion last wrote, identified by its `ingestion_id`, then the
