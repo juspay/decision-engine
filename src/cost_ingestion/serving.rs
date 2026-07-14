@@ -761,12 +761,7 @@ async fn query(
 
 fn client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(QUERY_TIMEOUT)
-            .build()
-            .expect("failed to build clickhouse serving client")
-    })
+    CLIENT.get_or_init(|| super::ch_http::client(QUERY_TIMEOUT))
 }
 
 #[cfg(test)]

@@ -10,6 +10,7 @@
 //! staging, fit, and serving never change.
 
 pub mod blended;
+pub mod ch_http;
 pub mod connectors;
 pub mod coverage;
 pub mod creds;
