@@ -294,6 +294,165 @@ pub async fn upload_report(
     ))
 }
 
+/// `POST /merchant-account/:id/connectors/:connector/report/sample` — run a curated **sample**
+/// report for `connector` through the normal pipeline, so a merchant without a report file of their
+/// own can still exercise the ingest → fit → coverage flow. The sample CSV is fetched from S3 at
+/// `<sample_bucket>/<connector>_report.csv` and filed under `acc_<connector>`. If the connector is
+/// not one that supports manual/report ingestion, or no `sample_bucket` is configured, the endpoint
+/// returns 404. Like the manual upload, it returns the job id immediately (202) and processes in
+/// the background — the dashboard polls the same history/progress.
+pub async fn run_sample_report(
+    Path((merchant_id, connector)): Path<(String, String)>,
+) -> Result<(StatusCode, Json<UploadAccepted>), (StatusCode, String)> {
+    // Only connectors that support report ingestion can have samples.
+    let registry = crate::cost_ingestion::source::ConnectorRegistry::with_builtins();
+    let _ = registry.get(&connector).map_err(|_| {
+        (
+            StatusCode::NOT_FOUND,
+            format!("connector {connector} does not support sample reports"),
+        )
+    })?;
+
+    // Sample config + ClickHouse both live on the global config.
+    let state = crate::app::APP_STATE.get().ok_or((
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "app state not initialized".to_string(),
+    ))?;
+    let cost_cfg = &state.global_config.cost_ingestion;
+    let bucket = Some(cost_cfg.aws_bucket.clone())
+        .filter(|b| !b.is_empty())
+        .ok_or((
+            StatusCode::NOT_FOUND,
+            "no sample bucket configured".to_string(),
+        ))?;
+    let region = cost_cfg.aws_region.clone();
+
+    let account = format!("acc_{connector}");
+    let key = format!("{connector}_report.csv");
+    let report_ref = format!("s3://{bucket}/{key}");
+    let clickhouse = state.global_config.analytics.clickhouse.clone();
+
+    // Create the ingestion row (status=processing) up front so the dashboard can poll it. The row
+    // records the S3 location as its ref, mirroring how a manual upload records its temp path.
+    let job_id = store::create_sample(&merchant_id, &connector, &account, &report_ref)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("could not create ingestion job: {e:?}"),
+            )
+        })?;
+
+    let path = temp_report_path();
+    tokio::spawn(process_sample(
+        job_id.clone(),
+        path,
+        clickhouse,
+        connector,
+        account,
+        merchant_id,
+        bucket,
+        key,
+        region,
+    ));
+
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(UploadAccepted {
+            id: job_id,
+            status: "processing".to_string(),
+        }),
+    ))
+}
+
+/// Background task for a sample run: download the sample CSV from S3 to a temp file, run it through
+/// the same parse → stage → fit pipeline as an upload, and record the outcome. Progress ticks
+/// against `job_id` as batches stage.
+async fn process_sample(
+    job_id: String,
+    path: PathBuf,
+    clickhouse: crate::config::ClickHouseAnalyticsConfig,
+    connector: String,
+    account: String,
+    merchant_id: String,
+    bucket: String,
+    key: String,
+    region: Option<String>,
+) {
+    let download_result = fetch_sample_from_s3(&bucket, &key, region.as_deref(), &path).await;
+    let result = match download_result {
+        Ok(()) => run_ingest(&job_id, &path, &clickhouse, &connector, &account, &merchant_id).await,
+        Err(e) => Err(e),
+    };
+
+    finish_ingest(&job_id, result, &clickhouse, &merchant_id).await;
+
+    // Always remove the temp file, success or failure. Ignore "not found" — that just means the
+    // download failed before the file was created.
+    if let Err(e) = tokio::fs::remove_file(&path).await {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            logger::warn!(
+                tag = "report_upload",
+                "sample temp cleanup {:?} failed: {}",
+                path,
+                e
+            );
+        }
+    }
+}
+
+/// Download a sample report from S3 into `path`. Streams chunks so multi-GB samples don't need to
+/// be held in memory. Credentials come from the default AWS credential chain in the runtime
+/// environment (IAM role, env vars, profile, etc.).
+async fn fetch_sample_from_s3(
+    bucket: &str,
+    key: &str,
+    region: Option<&str>,
+    path: &PathBuf,
+) -> Result<(), crate::cost_ingestion::IngestError> {
+    use crate::cost_ingestion::IngestError;
+    use aws_config::BehaviorVersion;
+
+    let mut loader = aws_config::defaults(BehaviorVersion::latest());
+    if let Some(region) = region {
+        loader = loader.region(aws_config::Region::new(region.to_string()));
+    }
+    let sdk_config = loader.load().await;
+    let client = aws_sdk_s3::Client::new(&sdk_config);
+
+    let mut output = client
+        .get_object()
+        .bucket(bucket)
+        .key(key)
+        .send()
+        .await
+        .map_err(|e| IngestError::Download(format!("s3 get_object s3://{bucket}/{key} failed: {e}")))?;
+
+    let mut file = tokio::fs::File::create(path).await.map_err(|e| {
+        IngestError::Download(format!("could not open temp file {path:?} for sample: {e}"))
+    })?;
+
+    let mut total: usize = 0;
+    while let Some(chunk) = output.body.next().await {
+        let chunk = chunk.map_err(|e| IngestError::Download(format!("s3 body stream error: {e}")))?;
+        total = total.saturating_add(chunk.len());
+        if total > MAX_UPLOAD_BYTES {
+            return Err(IngestError::Download(format!(
+                "sample exceeds {MAX_UPLOAD_BYTES} byte limit"
+            )));
+        }
+        file.write_all(&chunk).await.map_err(|e| {
+            IngestError::Download(format!("temp file write failed: {e}"))
+        })?;
+    }
+    file.flush().await.map_err(|e| IngestError::Download(format!("temp flush failed: {e}")))?;
+
+    if total == 0 {
+        return Err(IngestError::Download("empty sample object".to_string()));
+    }
+    Ok(())
+}
+
 /// Stream a request body to `path`, enforcing `MAX_UPLOAD_BYTES`. Never holds the whole body in RAM.
 async fn stream_to_file(path: &PathBuf, body: Body) -> Result<(), (StatusCode, String)> {
     let mut file = tokio::fs::File::create(path).await.map_err(|e| {
@@ -355,9 +514,31 @@ async fn process_upload(
     )
     .await;
 
+    finish_ingest(&job_id, result, &clickhouse, &merchant_id).await;
+
+    // Always remove the temp file, success or failure.
+    if let Err(e) = tokio::fs::remove_file(&path).await {
+        logger::warn!(
+            tag = "report_upload",
+            "temp cleanup {:?} failed: {}",
+            path,
+            e
+        );
+    }
+}
+
+/// Record the outcome of an ingest run: on success mark the job completed and refresh this
+/// merchant's served models immediately (so a just-ingested cluster doesn't fall back for ~5 min);
+/// on failure mark it failed with the error. Shared by the manual upload and sample flows.
+async fn finish_ingest(
+    job_id: &str,
+    result: Result<pipeline::IngestOutcome, crate::cost_ingestion::IngestError>,
+    clickhouse: &crate::config::ClickHouseAnalyticsConfig,
+    merchant_id: &str,
+) {
     match result {
         Ok(outcome) => {
-            if let Err(e) = store::mark_completed(&job_id, &outcome.to_completion()).await {
+            if let Err(e) = store::mark_completed(job_id, &outcome.to_completion()).await {
                 logger::warn!(
                     tag = "report_upload",
                     "mark_completed {} failed: {:?}",
@@ -370,7 +551,7 @@ async fn process_upload(
             // Per-merchant: only this merchant's models are rebuilt, keeping the upload off the
             // ~2s global-refresh path (the periodic ticker still does the full rebuild).
             if let Err(e) =
-                crate::cost_ingestion::serving::refresh_merchant(&clickhouse, &merchant_id).await
+                crate::cost_ingestion::serving::refresh_merchant(clickhouse, merchant_id).await
             {
                 logger::warn!(
                     tag = "report_upload",
@@ -381,13 +562,8 @@ async fn process_upload(
         }
         Err(e) => {
             let msg = format!("{e:?}");
-            logger::warn!(
-                tag = "report_upload",
-                "manual ingest {} failed: {}",
-                job_id,
-                msg
-            );
-            if let Err(e2) = store::mark_failed(&job_id, &msg).await {
+            logger::warn!(tag = "report_upload", "ingest {} failed: {}", job_id, msg);
+            if let Err(e2) = store::mark_failed(job_id, &msg).await {
                 logger::warn!(
                     tag = "report_upload",
                     "mark_failed {} failed: {:?}",
@@ -396,16 +572,6 @@ async fn process_upload(
                 );
             }
         }
-    }
-
-    // Always remove the temp file, success or failure.
-    if let Err(e) = tokio::fs::remove_file(&path).await {
-        logger::warn!(
-            tag = "report_upload",
-            "temp cleanup {:?} failed: {}",
-            path,
-            e
-        );
     }
 }
 

@@ -291,6 +291,18 @@ export async function uploadReport(
 }
 
 /**
+ * Run a curated sample report for a connector ("Use a sample file") — for merchants without a
+ * report file of their own. The server downloads the configured sample and runs the identical
+ * pipeline, returning a job id (202) to poll via {@link useIngestionHistory}. Rejects with a 404 if
+ * no sample is configured for the connector.
+ */
+export async function runSampleReport(merchantId: string, connector: string) {
+  return apiPost<UploadAccepted>(
+    `/merchant-account/${merchantId}/connectors/${connector}/report/sample`,
+  )
+}
+
+/**
  * Delete (undo) an ingestion: removes its fitted snapshot + staged rows and its history row.
  * Coverage/serving revert to the previous snapshot automatically.
  */

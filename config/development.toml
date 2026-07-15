@@ -102,6 +102,11 @@ creds_encryption_current = "v1"
 report_poll_enabled = false
 # Short interval so a locally-configured pull source is picked up quickly during testing.
 report_poll_interval_secs = 30
+# Curated demo reports for "Use a sample file". Only the bucket and region are configured here;
+# each supported connector's sample is expected at `<connector>_report.csv` (e.g.
+# `chase_report.csv`) and is filed under `acc_<connector>` automatically.
+aws_bucket = ""
+aws_region = ""
 
 [cost_ingestion.creds_encryption_keys]
 # key-id = AES-256 key (hex, 64 chars). Dev-only placeholder; per environment generate with

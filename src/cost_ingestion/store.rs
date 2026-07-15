@@ -117,6 +117,33 @@ pub async fn create_manual(
     Ok(id)
 }
 
+/// Create a `processing` row for a **sample** run (the "Use a sample file" flow) and return its id.
+/// Identical to [`create_manual`] but tagged `source = "sample"` so history/coverage can label it a
+/// demo run; it still shares the pipeline, progress ticking, and undo path (`delete_ingestion`).
+pub async fn create_sample(
+    merchant_id: &str,
+    connector: &str,
+    account: &str,
+    report_ref: &str,
+) -> Result<String, IngestError> {
+    let app_state = get_tenant_app_state().await;
+    let id = generate_uuid();
+    let new = CostIngestionNew {
+        id: id.clone(),
+        merchant_id: merchant_id.to_string(),
+        connector: connector.to_string(),
+        account: account.to_string(),
+        source: "sample".to_string(),
+        notification_id: None,
+        report_ref: report_ref.to_string(),
+        status: "processing".to_string(),
+    };
+    generics::generic_insert::<<CostIngestion as HasTable>::Table, _>(&app_state.db, new)
+        .await
+        .map_err(|e| IngestError::Storage(e.to_string()))?;
+    Ok(id)
+}
+
 /// Claim up to `limit` pending jobs by compare-and-swapping each `pending → processing`. The CAS
 /// (`WHERE id = ? AND status = 'pending'` affecting exactly one row) makes this safe with multiple
 /// workers without `FOR UPDATE SKIP LOCKED`: a row another worker already flipped updates zero rows
