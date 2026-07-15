@@ -1,18 +1,27 @@
 //! Shared HTTP client builder for the cost pipeline's direct ClickHouse calls.
 //!
-//! Unlike the analytics read path (which uses the pooled `clickhouse` crate), the cost pipeline
-//! talks to ClickHouse over hand-rolled `reqwest` requests: `app → ALB → ClickHouse`. These calls
-//! fire infrequently — the serving refresh every 5 min, dashboards on demand — so a pooled keep-alive
-//! connection sits idle between uses. An AWS ALB silently closes idle connections at its idle timeout
-//! (~60s); a connection left idle past that is reaped, and reqwest then hands the *reaped* socket back
-//! from its pool for the next request, which fails at the transport layer with the opaque
-//! `error sending request for url (...)` — the symptom that looked like a ClickHouse outage but was a
-//! stale connection. (See `scratch/repro-ch-stale-conn` for a local reproduction, and note the analytics
-//! `payment-audit` path never hit this because it is used often enough to keep its pool warm.)
+//! Unlike the analytics read path (which uses the pooled `clickhouse` crate over hyper), the cost
+//! pipeline talks to ClickHouse over hand-rolled `reqwest` requests: `app → internal ALB → ClickHouse`.
+//! Every cost ClickHouse client is built here so this configuration can't drift between call sites.
 //!
-//! Every cost ClickHouse client is built here so the pool settings can't drift between call sites:
-//! bound the idle-pool lifetime well under the ALB idle timeout and enable TCP keepalive, so a
-//! connection reqwest reuses is either fresh or provably alive — never one the ALB already dropped.
+//! ## `no_proxy` — why the cost path was failing with `error sending request`
+//! The sandbox runs in a private subnet with a Squid egress proxy, so the pod sets `HTTP_PROXY`/
+//! `http_proxy`. `reqwest` honors those env vars by DEFAULT, so without `.no_proxy()` the cost client
+//! sent requests for the *internal* ClickHouse ALB *through the external egress proxy*, which cannot
+//! route to an internal ELB — the request hung until the request timeout and surfaced as the opaque
+//! `error sending request for url (...)`. The analytics `clickhouse` crate never hit this because it
+//! uses hyper directly and ignores the proxy env vars, connecting straight to ClickHouse (which is
+//! why analytics reads succeeded against the same URL while every cost call failed, even on a fresh
+//! connection). ClickHouse is an internal endpoint that must always be reached directly, so we force
+//! `.no_proxy()` here.
+//!
+//! ## pool_idle_timeout / tcp_keepalive — defense-in-depth for LB-reaped connections
+//! These calls fire infrequently (serving refresh every 5 min, dashboards on demand), so a pooled
+//! keep-alive connection can sit idle long enough for the ALB to silently reap it (half-open, no
+//! FIN/RST). reqwest cannot detect that and would reuse the dead socket → the same transport error.
+//! We bound the idle-pool lifetime below the ALB idle timeout and enable TCP keepalive so a reused
+//! connection is either fresh or provably alive. (See `scratch/repro-ch-stale-conn` for a local
+//! reproduction of that failure mode.)
 
 use std::time::Duration;
 
@@ -25,10 +34,14 @@ const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(15);
 const TCP_KEEPALIVE: Duration = Duration::from_secs(15);
 
 /// Build a cost-pipeline ClickHouse HTTP client. Callers pass their own total-request `timeout`
-/// (inserts/fits get a longer budget than reads); the pool/keepalive hardening is shared.
+/// (inserts/fits get a longer budget than reads); the proxy/pool/keepalive hardening is shared.
 pub fn client(timeout: Duration) -> reqwest::Client {
     reqwest::Client::builder()
         .timeout(timeout)
+        // ClickHouse is an internal endpoint: never route it through the egress proxy that reqwest
+        // would otherwise pick up from HTTP_PROXY/http_proxy. This is the fix for the cost path
+        // hanging while the (proxy-ignoring) analytics `clickhouse` crate succeeded on the same URL.
+        .no_proxy()
         .pool_idle_timeout(POOL_IDLE_TIMEOUT)
         .tcp_keepalive(TCP_KEEPALIVE)
         .build()
