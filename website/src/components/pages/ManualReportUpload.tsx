@@ -5,11 +5,14 @@ import { Button } from '../ui/Button'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { Spinner } from '../ui/Spinner'
 import {
+  runSampleReport,
   uploadReport,
   useCostCoverage,
   useIngestionHistory,
 } from '../../hooks/useCostRouting'
 import { Field, UPLOAD_CONNECTORS, inputClass } from './CostRoutingShared'
+
+type IngestMode = 'upload' | 'sample'
 
 /**
  * Manual-ingestion tab: upload a settlement report file directly. The upload returns immediately
@@ -23,6 +26,7 @@ export function ManualReportUpload({ merchantId }: { merchantId?: string }) {
   const { ingestions, mutate: mutateHistory } = useIngestionHistory(merchantId)
 
   const fileRef = useRef<HTMLInputElement>(null)
+  const [mode, setMode] = useState<IngestMode>('upload')
   const [connector, setConnector] = useState('adyen')
   const [account, setAccount] = useState('')
   const [file, setFile] = useState<File | null>(null)
@@ -30,6 +34,9 @@ export function ManualReportUpload({ merchantId }: { merchantId?: string }) {
   const [uploadPct, setUploadPct] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [activeJobId, setActiveJobId] = useState<number | null>(null)
+
+  const connectorLabel =
+    UPLOAD_CONNECTORS.find((c) => c.value === connector)?.label ?? connector
 
   const activeJob = activeJobId != null ? ingestions.find((j) => j.id === activeJobId) : undefined
 
@@ -70,6 +77,32 @@ export function ManualReportUpload({ merchantId }: { merchantId?: string }) {
     }
   }
 
+  async function handleRunSample() {
+    if (!merchantId) {
+      setError('Set a merchant ID first')
+      return
+    }
+    setUploading(true)
+    setUploadPct(100)
+    setError(null)
+    setActiveJobId(null)
+    try {
+      const res = await runSampleReport(merchantId, connector)
+      setActiveJobId(res.id)
+      await mutateHistory() // start polling immediately
+    } catch (e: unknown) {
+      // A 404 means no sample is configured for this connector — surface it plainly.
+      const msg = e instanceof Error ? e.message : ''
+      setError(
+        /404|not found|no sample/i.test(msg)
+          ? `No sample report available for ${connectorLabel}.`
+          : msg || 'Failed to run sample report',
+      )
+    } finally {
+      setUploading(false)
+    }
+  }
+
   const processing = activeJob?.status === 'processing'
   const done = activeJob?.status === 'completed'
   const failed = activeJob?.status === 'failed'
@@ -88,9 +121,36 @@ export function ManualReportUpload({ merchantId }: { merchantId?: string }) {
         </div>
       </CardHeader>
       <CardBody className="space-y-4">
+        {/* Choose between a real file upload and a curated sample, for merchants without a report. */}
+        <div className="inline-flex rounded-lg border border-slate-200 p-0.5 dark:border-[#2a3344]">
+          {(
+            [
+              ['upload', 'Upload a file'],
+              ['sample', 'Use a sample file'],
+            ] as [IngestMode, string][]
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => {
+                setMode(value)
+                setError(null)
+              }}
+              className={
+                'rounded-md px-3 py-1.5 text-sm font-medium transition-colors ' +
+                (mode === value
+                  ? 'bg-brand-500 text-white'
+                  : 'text-slate-500 hover:text-slate-700 dark:text-[#9ca7ba] dark:hover:text-white')
+              }
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <p className="text-sm text-slate-500 dark:text-[#9ca7ba]">
-          Upload a settlement report file directly — no webhook needed. Processing runs in the
-          background (the upload won't hang on large files); watch progress below and in the history.
+          {mode === 'upload'
+            ? "Upload a settlement report file directly — no webhook needed. Processing runs in the background (the upload won't hang on large files); watch progress below and in the history."
+            : `No report file? Run a curated ${connectorLabel} sample report through the exact same fit, so you can see the ingest → cost-coverage flow end to end. Progress shows below and in the history.`}
         </p>
         <Field label="Connector">
           <select
@@ -105,40 +165,61 @@ export function ManualReportUpload({ merchantId }: { merchantId?: string }) {
             ))}
           </select>
         </Field>
-        <Field label="Account" hint="Connector-side account the report belongs to">
-          <input
-            className={inputClass}
-            value={account}
-            onChange={(e) => setAccount(e.target.value)}
-            placeholder="AcmeMerchantEU"
-          />
-        </Field>
-        <Field label="Report file" hint="The connector's settlement / PAR report (CSV)">
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".csv,text/csv,text/plain"
-            className={inputClass}
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          />
-        </Field>
+        {mode === 'upload' && (
+          <>
+            <Field label="Account" hint="Connector-side account the report belongs to">
+              <input
+                className={inputClass}
+                value={account}
+                onChange={(e) => setAccount(e.target.value)}
+                placeholder="AcmeMerchantEU"
+              />
+            </Field>
+            <Field label="Report file" hint="The connector's settlement / PAR report (CSV)">
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".csv,text/csv,text/plain"
+                className={inputClass}
+                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              />
+            </Field>
+          </>
+        )}
 
         <div className="flex items-center gap-3">
-          <Button onClick={handleUpload} disabled={!merchantId || uploading || processing}>
-            {uploading || processing ? (
-              <>
-                <Spinner size={14} />
-                {uploading ? 'Uploading…' : 'Processing…'}
-              </>
-            ) : (
-              'Upload & fit'
-            )}
-          </Button>
-          <span className="text-xs text-slate-400">Runs in the background after upload.</span>
+          {mode === 'upload' ? (
+            <Button onClick={handleUpload} disabled={!merchantId || uploading || processing}>
+              {uploading || processing ? (
+                <>
+                  <Spinner size={14} />
+                  {uploading ? 'Uploading…' : 'Processing…'}
+                </>
+              ) : (
+                'Upload & fit'
+              )}
+            </Button>
+          ) : (
+            <Button onClick={handleRunSample} disabled={!merchantId || uploading || processing}>
+              {uploading || processing ? (
+                <>
+                  <Spinner size={14} />
+                  {uploading ? 'Starting…' : 'Processing…'}
+                </>
+              ) : (
+                'Run sample'
+              )}
+            </Button>
+          )}
+          <span className="text-xs text-slate-400">
+            {mode === 'upload'
+              ? 'Runs in the background after upload.'
+              : 'Fetches the sample and runs in the background.'}
+          </span>
         </div>
 
-        {/* Upload transfer bar */}
-        {uploading && (
+        {/* Upload transfer bar (file upload only) */}
+        {mode === 'upload' && uploading && (
           <ProgressBar
             label={`Uploading report… ${uploadPct}%`}
             pct={uploadPct}

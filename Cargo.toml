@@ -29,6 +29,7 @@ redis_compression = ["dep:zstd"]
 gsm = { path = "crates/gsm", features = ["loader", "s3"] }
 aws-config = { version = "1.5.5" }
 aws-sdk-kms = { version = "1.40.0", optional = true }
+aws-sdk-s3 = { version = "1" }
 aws-sdk-sesv2 = { version = "1" }
 aws-smithy-runtime = { version = "1", features = ["connector-hyper-0-14-x"] }
 aws-smithy-runtime-api = { version = "1" }

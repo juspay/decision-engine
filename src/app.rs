@@ -451,6 +451,12 @@ where
             )),
         )
         .route(
+            // "Use a sample file": run a curated demo report (fetched from configured URL) through
+            // the same pipeline, so a merchant without a report file can still exercise the flow.
+            "/merchant-account/:merchant-id/connectors/:connector/report/sample",
+            post(routes::report_upload::run_sample_report),
+        )
+        .route(
             "/merchant-account/:merchant-id/connectors/:connector/invoice",
             // Invoices are small (a few hundred lines): buffered and processed synchronously, so the
             // computed cost add-on is returned in the response. Cap the body to reject a settlement

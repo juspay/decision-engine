@@ -318,6 +318,13 @@ pub struct CostIngestionConfig {
     pub report_poll_enabled: bool,
     /// How often the report poller lists reports, in seconds. Reports are daily, so hourly is ample.
     pub report_poll_interval_secs: u64,
+    /// S3 bucket for curated sample reports used by the "Use a sample file" flow. Each connector's
+    /// sample is expected at `<connector>_report.csv` inside this bucket, and is filed under the
+    /// account `acc_<connector>`. If empty, the sample endpoint returns 404.
+    pub aws_bucket: String,
+    /// AWS region for S3 sample downloads. If omitted, the SDK uses the default region provider
+    /// chain (env vars, profile, IMDS, etc.).
+    pub aws_region: Option<String>,
 }
 
 impl Default for CostIngestionConfig {
@@ -330,6 +337,8 @@ impl Default for CostIngestionConfig {
             worker_batch_size: 20,
             report_poll_enabled: false,
             report_poll_interval_secs: 3600,
+            aws_bucket: String::new(),
+            aws_region: None,
         }
     }
 }
