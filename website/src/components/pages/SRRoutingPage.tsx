@@ -487,6 +487,8 @@ export function SRRoutingPage() {
               </div>
 
               {manualTab === 'scoring' && (
+              <div className="space-y-6">
+              <ManualCostToggle merchantId={merchantId} />
               <form onSubmit={handleSubmit(onSave)} className="space-y-6">
               <Card>
                 <CardHeader>
@@ -623,6 +625,7 @@ export function SRRoutingPage() {
                 {saving ? <><Spinner size={14} /> Saving…</> : 'Save Manual Config'}
               </Button>
               </form>
+              </div>
               )}
 
               {manualTab === 'elimination' && <EliminationConfig merchantId={merchantId} />}
@@ -668,6 +671,48 @@ function Switch({ on, onClick, disabled }: { on: boolean; onClick: () => void; d
 // toggle is the real switch: turning it OFF hard-disables every autopilot decision (their
 // backend flags are set off) so the engine falls back to the Manual configuration. SR base
 // routing ("switch PSP on low auth") is always on and shown as a status pill.
+// Cost-savings toggle for the Manual config. Cost (multi-objective routing) is a feature flag that
+// was previously only reachable from the Autopilot card (and disabled unless Autopilot was on), so a
+// manual-config merchant could never turn cost on. This surfaces the same flag here, ungated, so
+// cost-aware routing can run on the manual scoring config independently of Autopilot.
+function ManualCostToggle({ merchantId }: { merchantId: string | null }) {
+  const features = useMerchantFeatures(merchantId ?? undefined)
+  const [toggling, setToggling] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const costOn = features.isEnabled('multi-objective-routing')
+
+  async function toggle() {
+    setToggling(true)
+    setError(null)
+    try {
+      await features.setFeatureEnabled('multi-objective-routing', !costOn)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setToggling(false)
+    }
+  }
+
+  return (
+    <Card>
+      <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-4">
+        <div className="max-w-2xl">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium text-slate-800 dark:text-white">Optimize for economic value (cost awareness), not just approval rate</span>
+            <Badge variant="gray">Cost savings</Badge>
+            {costOn ? <Badge variant="green">On</Badge> : <Badge variant="gray">Off</Badge>}
+          </div>
+          <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#9aa6bb]">
+            Multi-objective routing: picks the highest expected-value PSP inside it.
+          </p>
+          {error && <p className="mt-1 text-xs text-red-500">{error}</p>}
+        </div>
+        <Switch on={costOn} disabled={!merchantId || features.isLoading || toggling} onClick={toggle} />
+      </div>
+    </Card>
+  )
+}
+
 function AutopilotConfig({ merchantId }: { merchantId: string | null }) {
   const features = useMerchantFeatures(merchantId ?? undefined)
   const [toggling, setToggling] = useState<KnownFeature | 'master' | null>(null)

@@ -1,4 +1,21 @@
-export type ABTestExperimentType = 'algorithm_comparison' | 'sr_config_tuning'
+export type ABTestExperimentType =
+  // Compare any two routing strategies. The SR strategies (auth / multi-objective manual /
+  // multi-objective autopilot) and rule-based/volume-split configs are all pickable arms here —
+  // this is where auth-vs-cost and manual-vs-autopilot experiments now live.
+  | 'algorithm_comparison'
+  | 'sr_config_tuning'
+
+// Synthetic arm values for the SR strategies. They all resolve to algorithm_id 'sr_routing' but
+// carry different per-arm overrides (see payload.ts `resolveArm`). Two independent dials —
+// cost-awareness (multi-objective) and autopilot self-tuning — give four combinations. Kept
+// distinct in the form so the arm dropdown and the `control !== variant` check can tell them apart.
+export type SrStrategy = 'sr_auth' | 'sr_auth_autopilot' | 'sr_mo_manual' | 'sr_mo_autopilot'
+export const SR_STRATEGY_LABELS: Record<SrStrategy, string> = {
+  sr_auth: 'SR Routing (auth based)',
+  sr_auth_autopilot: 'SR Routing (auth based autopilot)',
+  sr_mo_manual: 'SR Routing (Multi-Objective manual)',
+  sr_mo_autopilot: 'SR Routing (Multi-Objective autopilot)',
+}
 
 export interface SrConfigOverrideForm {
   hedgingPercent: number | null
@@ -25,6 +42,9 @@ export interface ABTestFormValues {
 export interface SrConfigOverridePayload {
   hedging_percent?: number
   elimination_threshold?: number
+  enable_multi_objective?: boolean
+  margin?: number
+  use_autopilot?: boolean
 }
 
 export interface ABTestAlgorithmPayload {
@@ -34,6 +54,7 @@ export interface ABTestAlgorithmPayload {
   min_sample_size: number
   guardrail_threshold_pp: number
   variant_sr_config?: SrConfigOverridePayload
+  control_sr_config?: SrConfigOverridePayload
 }
 
 export interface ABTestCreatePayload {

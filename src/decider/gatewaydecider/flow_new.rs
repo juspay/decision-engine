@@ -118,6 +118,9 @@ pub async fn decider_full_payload_hs_function(
     // AB test intercept — must run before SR routing. Feature-flagged per merchant.
     // Disabled by default; enable via service config AB_TEST_REAL_PAYMENTS_ENABLED_{merchant_id}.
     let mut ab_test_sr_override: Option<crate::euclid::types::SrConfigOverride> = None;
+    // For SR-arm A/B payments, keep (experiment_id, variant_arm) so we can attribute the
+    // multi-objective cost outcome to the arm after routing completes (see below).
+    let mut ab_test_experiment: Option<(String, String)> = None;
     match super::ab_test::intercept(&dreq_).await {
         super::ab_test::AbTestIntercept::StaticArm {
             result,
@@ -127,11 +130,14 @@ pub async fn decider_full_payload_hs_function(
             return Ok(*result);
         }
         super::ab_test::AbTestIntercept::SrArm {
-            sr_config_override, ..
+            sr_config_override,
+            experiment_id,
+            variant_arm,
         } => {
-            // Carry on with normal SR routing. If this is a variant arm in an SR Config Tuning
-            // experiment, sr_config_override carries the per-arm overrides to apply at routing time.
+            // Carry on with normal SR routing. sr_config_override carries the per-arm overrides
+            // (hedging / elimination / margin / multi-objective / autopilot) to apply at routing time.
             ab_test_sr_override = sr_config_override;
+            ab_test_experiment = Some((experiment_id, variant_arm));
         }
         super::ab_test::AbTestIntercept::Disabled => {}
     }
@@ -185,7 +191,7 @@ pub async fn decider_full_payload_hs_function(
         }
     } else {
         logger::debug!("Performing gateway routing");
-        run_decider_flow(
+        let result = run_decider_flow(
             decider_params,
             dreq_.clone().ranking_algorithm,
             dreq_.clone().elimination_enabled,
@@ -194,7 +200,27 @@ pub async fn decider_full_payload_hs_function(
             ab_test_sr_override,
             dreq_.enable_multi_objective,
         )
-        .await
+        .await;
+
+        // Cost measurement: for an SR-arm A/B payment, enrich the inflight record with the
+        // decided gateway + multi-objective cost outcome so the later outcome event can
+        // attribute cost per arm. No-op (aside from gateway backfill) when the arm ran auth-only.
+        if let (Ok(decided), Some((experiment_id, variant_arm))) = (&result, &ab_test_experiment) {
+            let mo = decided.multi_objective_info.as_ref();
+            super::ab_test::record_cost_outcome(
+                dreq_.payment_id(),
+                experiment_id,
+                variant_arm,
+                Some(decided.decided_gateway.as_str()),
+                mo.and_then(|m| m.cost_saved_bps),
+                mo.and_then(|m| m.chosen.as_ref().and_then(|c| c.cost_bps)),
+                mo.map(|m| m.margin),
+                Some(dreq_.payment_info.amount),
+            )
+            .await;
+        }
+
+        result
     }
 }
 
@@ -536,21 +562,31 @@ pub async fn run_decider_flow(
             let merchant_id_text =
                 merchant_id_to_text(deciderParams.dpMerchantAccount.merchantId.clone());
             // Cost-savings (multi-objective economic reorder) enablement:
-            //   - if the request explicitly sets `enableMultiObjective`, honor it (per-request
-            //     override, letting a caller force it on or off), otherwise
+            //   - an A/B arm override (`SrConfigOverride.enable_multi_objective`) wins first,
+            //     letting the "Turn cost on" experiment run cost off on control and on in variant,
+            //   - else if the request explicitly sets `enableMultiObjective`, honor it (per-request
+            //     override), otherwise
             //   - fall back to the merchant's `multi_objective_routing_enabled` feature flag.
             // The feature flag is the primary rollout switch, so a caller that omits the field
             // must not silently lose multi-objective routing.
-            let multi_obj_on = match enable_multi_objective_override {
+            let multi_obj_on = match decider_flow
+                .writer
+                .ab_test_sr_override
+                .as_ref()
+                .and_then(|o| o.enable_multi_objective)
+            {
                 Some(b) => b,
-                None => {
-                    is_feature_enabled(
-                        "multi_objective_routing_enabled".to_string(),
-                        merchant_id_text.clone(),
-                        kvRedis(),
-                    )
-                    .await
-                }
+                None => match enable_multi_objective_override {
+                    Some(b) => b,
+                    None => {
+                        is_feature_enabled(
+                            "multi_objective_routing_enabled".to_string(),
+                            merchant_id_text.clone(),
+                            kvRedis(),
+                        )
+                        .await
+                    }
+                },
             };
             let hedging_on = decider_flow.writer.gwDeciderApproach.is_hedging();
 
@@ -587,7 +623,17 @@ pub async fn run_decider_flow(
 
                     let mut cost_fallbacks_override: Option<Vec<String>> = None;
                     if multi_obj_on && !hedging_on {
-                        let margin = load_margin(&merchant_id_text).await;
+                        // An A/B arm can override the EV margin (the auth↔cost dial); otherwise
+                        // load it from the merchant SR config (default 1.0 ≈ auth-dominant).
+                        let margin = match decider_flow
+                            .writer
+                            .ab_test_sr_override
+                            .as_ref()
+                            .and_then(|o| o.margin)
+                        {
+                            Some(m) => m,
+                            None => load_margin(&merchant_id_text).await,
+                        };
                         let outcome =
                             multi_objective::algorithm::try_apply_multi_objective_post_step(
                                 &currentGatewayScoreMap,

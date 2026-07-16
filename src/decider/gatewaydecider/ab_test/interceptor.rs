@@ -90,10 +90,13 @@ pub async fn intercept(dreq: &DomainDeciderRequestForApiCallV2) -> AbTestInterce
 
     // SR arm: gateway unknown until the decider runs — emit routing event without gateway.
     if arm_algorithm_id == "sr_routing" {
+        // Per-arm routing overrides: the variant carries variant_sr_config, the control carries
+        // control_sr_config. Either may be None (→ live SR config), which preserves the original
+        // "control always uses live config" behavior for standard A/B tests.
         let sr_config_override = if arm == "variant" {
             data.variant_sr_config.clone()
         } else {
-            None
+            data.control_sr_config.clone()
         };
         emit_routing_event(
             payment_id,
@@ -103,7 +106,15 @@ pub async fn intercept(dreq: &DomainDeciderRequestForApiCallV2) -> AbTestInterce
             "sr_routing",
             None,
         );
-        outcome::store_inflight(payment_id, &experiment_id, arm, None, false).await;
+        outcome::store_inflight(
+            payment_id,
+            &experiment_id,
+            arm,
+            None,
+            false,
+            Some(dreq.payment_info.amount),
+        )
+        .await;
         return AbTestIntercept::SrArm {
             experiment_id,
             variant_arm: arm.to_string(),
@@ -112,7 +123,7 @@ pub async fn intercept(dreq: &DomainDeciderRequestForApiCallV2) -> AbTestInterce
     }
 
     // Static arm: evaluate, emit routing event with decided gateway.
-    match evaluator::evaluate_static_arm(arm_algorithm_id, payment_id).await {
+    match evaluator::evaluate_static_arm(arm_algorithm_id, payment_id, dreq).await {
         Some(static_result) => {
             emit_routing_event(
                 payment_id,
@@ -128,6 +139,7 @@ pub async fn intercept(dreq: &DomainDeciderRequestForApiCallV2) -> AbTestInterce
                 arm,
                 Some(static_result.decided_gateway.as_str()),
                 true,
+                Some(dreq.payment_info.amount),
             )
             .await;
             AbTestIntercept::StaticArm {
@@ -156,24 +168,18 @@ pub async fn intercept(dreq: &DomainDeciderRequestForApiCallV2) -> AbTestInterce
             }
         }
         None => {
+            // Do NOT fall back to SR routing under this arm's attribution — the payment would
+            // route via SR but still get counted in the rule arm's auth/cost stats, silently
+            // corrupting the experiment (a broken rule config would make the "rule" arm's
+            // results actually be SR results). Opt this payment out of the experiment entirely:
+            // no routing/outcome events, no store_inflight, normal live-config SR routing.
             logger::warn!(
-                "ab_test intercept: static arm evaluation failed for '{}', falling back to SR routing",
-                arm_algorithm_id
-            );
-            emit_routing_event(
-                payment_id,
-                &dreq.merchant_id,
-                &experiment_id,
-                arm,
+                "ab_test intercept: static arm evaluation failed for '{}', excluding payment {} from experiment {} and routing normally",
                 arm_algorithm_id,
-                None,
+                payment_id,
+                experiment_id
             );
-            outcome::store_inflight(payment_id, &experiment_id, arm, None, false).await;
-            AbTestIntercept::SrArm {
-                experiment_id,
-                variant_arm: arm.to_string(),
-                sr_config_override: None,
-            }
+            AbTestIntercept::Disabled
         }
     }
 }

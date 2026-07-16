@@ -48,9 +48,10 @@ pub enum StaticRoutingAlgorithm {
     AbTest(ABTestData),
 }
 
-/// Per-arm SR hyperparameter overrides for SR Config Tuning experiments.
-/// Only routing-time parameters are supported — both are applied inside scoring_flow
-/// before gateway selection, so no isolated score pools are needed.
+/// Per-arm routing overrides for A/B experiments. Applied inside scoring_flow / the
+/// multi-objective post-step before gateway selection, so no isolated score pools are
+/// needed. All fields are optional — an absent field falls through to the merchant
+/// config / feature flag / default, exactly as if no override were present.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SrConfigOverride {
     /// Share of traffic (0–100) sent to non-top gateways to keep scores fresh (explore-exploit).
@@ -61,6 +62,21 @@ pub struct SrConfigOverride {
     /// Overrides the merchant's elimination rule threshold.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub elimination_threshold: Option<f64>,
+    /// Whether the multi-objective (cost-aware) post-step runs for this arm. Overrides the
+    /// merchant `multi_objective_routing_enabled` flag / per-request value. Used by the
+    /// "Turn cost on" experiment (control = false, variant = true).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_multi_objective: Option<bool>,
+    /// Merchant margin (fraction of ticket) the multi-objective EV ranking applies for this
+    /// arm. Overrides `SuccessRateData.margin`. Lower margin lets cost win more often.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub margin: Option<f64>,
+    /// Whether this arm honors autopilot-calibrated (source = "autopilot") bucket/hedging
+    /// sub-level config. When `false`, autopilot-sourced entries are skipped and the arm
+    /// falls back to the merchant's manual/default config. Used by the "Autopilot value"
+    /// experiment (control = false → manual, variant = true → live autopilot).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub use_autopilot: Option<bool>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -73,10 +89,15 @@ pub struct ABTestData {
     pub min_sample_size: u32,
     /// Auto-pause threshold: if variant auth rate drops more than this many pp below control, flag for pause.
     pub guardrail_threshold_pp: f64,
-    /// SR hyperparameter overrides for the variant arm (SR Config Tuning experiments only).
-    /// Absent means the variant also uses the live SR config (standard A/B test).
+    /// Routing overrides for the variant arm. Absent means the variant uses the live SR config
+    /// (standard A/B test / algorithm comparison).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub variant_sr_config: Option<SrConfigOverride>,
+    /// Routing overrides for the control arm. Absent means the control uses the live SR config
+    /// (the common case). Set by experiments that need to pin the control arm — e.g. "Turn cost
+    /// on" (control = multi-objective off) or "Autopilot value" (control = manual config).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub control_sr_config: Option<SrConfigOverride>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, strum::Display)]
@@ -260,6 +281,26 @@ pub struct ActivateRoutingConfigRequest {
 pub struct DeactivateRoutingConfigRequest {
     pub created_by: String,
     pub routing_algorithm_id: String,
+}
+
+/// Delete an existing routing algorithm (e.g. an A/B experiment). Only permitted while the
+/// algorithm is inactive.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct DeleteRoutingConfigRequest {
+    pub created_by: String,
+    pub routing_algorithm_id: String,
+}
+
+/// Edit an existing (inactive) routing algorithm in place — updates its name/description and
+/// algorithm definition without minting a new id.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct UpdateRoutingConfigRequest {
+    pub created_by: String,
+    pub routing_algorithm_id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    pub algorithm: StaticRoutingAlgorithm,
 }
 
 #[derive(AsChangeset, Debug, serde::Serialize, serde::Deserialize, Queryable, Selectable)]

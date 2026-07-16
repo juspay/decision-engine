@@ -385,7 +385,9 @@ impl Default for KafkaAnalyticsConfig {
             acks: "all".to_string(),
             compression: "lz4".to_string(),
             message_timeout_ms: 5_000,
-            queue_capacity: 250,
+            // Sized for bursts (simulator runs emit hundreds of events/sec); events over
+            // capacity are silently dropped, which surfaces as "no outcome" A/B payments.
+            queue_capacity: 5_000,
             security_protocol: None,
             sasl_mechanism: None,
             sasl_username: None,

@@ -298,8 +298,14 @@ impl KafkaAnalyticsStore {
 #[async_trait]
 impl AnalyticsWriteStore for KafkaAnalyticsStore {
     async fn persist_domain_events(&self, events: &[DomainAnalyticsEvent]) -> Result<(), ApiError> {
-        for event in events {
-            let outcome = self.send_domain_event(event).await;
+        // Publish the batch concurrently: each send awaits its own delivery report, so a
+        // sequential loop costs one broker round-trip per event and can't keep up with
+        // bursts (the runtime queue then fills and drops events). Concurrent sends share
+        // the producer's internal batching, so the whole batch costs ~one round-trip.
+        let outcomes =
+            futures::future::join_all(events.iter().map(|event| self.send_domain_event(event)))
+                .await;
+        for (event, outcome) in events.iter().zip(outcomes) {
             if !outcome.is_success() {
                 crate::logger::warn!(
                     outcome = ?outcome,
@@ -312,8 +318,9 @@ impl AnalyticsWriteStore for KafkaAnalyticsStore {
     }
 
     async fn persist_api_events(&self, events: &[ApiEvent]) -> Result<(), ApiError> {
-        for event in events {
-            let outcome = self.send_api_event(event).await;
+        let outcomes =
+            futures::future::join_all(events.iter().map(|event| self.send_api_event(event))).await;
+        for (event, outcome) in events.iter().zip(outcomes) {
             if !outcome.is_success() {
                 crate::logger::warn!(
                     outcome = ?outcome,

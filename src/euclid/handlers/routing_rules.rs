@@ -1112,6 +1112,194 @@ pub async fn deactivate_routing_rule(
     }
 }
 
+/// Guard for the edit/delete flows: reject the operation if this algorithm is the merchant's
+/// currently active routing algorithm. Editing/deleting a running experiment would corrupt its
+/// collected results, so the caller must Stop (deactivate) it first.
+async fn ensure_routing_algorithm_inactive(
+    state: &crate::app::TenantAppState,
+    created_by: &str,
+    routing_algorithm_id: &str,
+) -> Result<(), ContainerError<EuclidErrors>> {
+    let active = crate::generics::generic_find_one_optional::<
+        <RoutingAlgorithmMapper as HasTable>::Table,
+        _,
+        RoutingAlgorithmMapper,
+    >(
+        &state.db,
+        mapper_dsl::created_by
+            .eq(created_by.to_string())
+            .and(mapper_dsl::routing_algorithm_id.eq(routing_algorithm_id.to_string())),
+    )
+    .await
+    .change_context(EuclidErrors::StorageError)?;
+
+    if active.is_some() {
+        return Err(EuclidErrors::InvalidRequest(
+            "This experiment is active. Stop it before editing or deleting.".to_string(),
+        )
+        .into());
+    }
+    Ok(())
+}
+
+/// Edit an existing inactive routing algorithm in place (name/description/definition). Used by the
+/// A/B Testing dashboard's Edit action. Keeps the same id so history/links remain valid.
+pub async fn update_routing_rule(
+    Json(payload): Json<crate::euclid::types::UpdateRoutingConfigRequest>,
+) -> Result<Json<RoutingDictionaryRecord>, ContainerError<EuclidErrors>> {
+    let timer = API_LATENCY_HISTOGRAM
+        .with_label_values(&["update_routing_rule"])
+        .start_timer();
+    API_REQUEST_TOTAL_COUNTER
+        .with_label_values(&["update_routing_rule"])
+        .inc();
+    let fail = || {
+        API_REQUEST_COUNTER
+            .with_label_values(&["update_routing_rule", "failure"])
+            .inc();
+    };
+
+    let run = async {
+        let state = get_tenant_app_state().await;
+        let conn = state
+            .db
+            .get_conn()
+            .await
+            .map_err(|_| EuclidErrors::StorageError)?;
+
+        // Only inactive experiments can be edited.
+        ensure_routing_algorithm_inactive(
+            &state,
+            &payload.created_by,
+            &payload.routing_algorithm_id,
+        )
+        .await?;
+
+        // Load the existing row (also verifies ownership) so we can preserve created_at/algorithm_for.
+        let existing = crate::generics::generic_find_one::<
+            <RoutingAlgorithm as HasTable>::Table,
+            _,
+            RoutingAlgorithm,
+        >(&state.db, dsl::id.eq(payload.routing_algorithm_id.clone()))
+        .await
+        .change_context(EuclidErrors::RoutingAlgorithmNotFound(
+            payload.routing_algorithm_id.clone(),
+        ))?;
+
+        if existing.created_by != payload.created_by {
+            return Err(ContainerError::from(EuclidErrors::InvalidRequest(
+                "Routing algorithm does not belong to this merchant".to_string(),
+            )));
+        }
+
+        let utc_date_time = time::OffsetDateTime::now_utc();
+        let timestamp = time::PrimitiveDateTime::new(utc_date_time.date(), utc_date_time.time());
+        let algorithm_data = serde_json::to_string(&payload.algorithm)
+            .change_context(EuclidErrors::FailedToSerializeJsonToString)?;
+
+        crate::generics::generic_update::<<RoutingAlgorithm as HasTable>::Table, _, _>(
+            &conn,
+            dsl::id.eq(payload.routing_algorithm_id.clone()),
+            (
+                dsl::name.eq(payload.name.clone()),
+                dsl::description.eq(payload.description.clone()),
+                dsl::algorithm_data.eq(algorithm_data),
+                dsl::modified_at.eq(timestamp),
+            ),
+        )
+        .await
+        .change_context(EuclidErrors::StorageError)?;
+
+        invalidate_routing_algorithm_cache(&state, &payload.created_by).await;
+
+        Ok(RoutingDictionaryRecord::new(
+            payload.routing_algorithm_id.clone(),
+            payload.name.clone(),
+            existing.algorithm_for,
+            existing.created_at,
+            timestamp,
+        ))
+    };
+
+    match run.await {
+        Ok(record) => {
+            API_REQUEST_COUNTER
+                .with_label_values(&["update_routing_rule", "success"])
+                .inc();
+            timer.observe_duration();
+            Ok(Json(record))
+        }
+        Err(e) => {
+            fail();
+            timer.observe_duration();
+            Err(e)
+        }
+    }
+}
+
+/// Delete an existing inactive routing algorithm. Used by the A/B Testing dashboard's Delete
+/// action. Removes the `routing_algorithm` row (results already collected remain in analytics).
+pub async fn delete_routing_rule(
+    Json(payload): Json<crate::euclid::types::DeleteRoutingConfigRequest>,
+) -> Result<Json<serde_json::Value>, ContainerError<EuclidErrors>> {
+    let timer = API_LATENCY_HISTOGRAM
+        .with_label_values(&["delete_routing_rule"])
+        .start_timer();
+    API_REQUEST_TOTAL_COUNTER
+        .with_label_values(&["delete_routing_rule"])
+        .inc();
+    let fail = || {
+        API_REQUEST_COUNTER
+            .with_label_values(&["delete_routing_rule", "failure"])
+            .inc();
+    };
+
+    let run = async {
+        let state = get_tenant_app_state().await;
+        let conn = state
+            .db
+            .get_conn()
+            .await
+            .map_err(|_| EuclidErrors::StorageError)?;
+
+        // Only inactive experiments can be deleted.
+        ensure_routing_algorithm_inactive(
+            &state,
+            &payload.created_by,
+            &payload.routing_algorithm_id,
+        )
+        .await?;
+
+        crate::generics::generic_delete::<<RoutingAlgorithm as HasTable>::Table, _>(
+            &conn,
+            dsl::id.eq(payload.routing_algorithm_id.clone()),
+        )
+        .await
+        .change_context(EuclidErrors::StorageError)?;
+
+        invalidate_routing_algorithm_cache(&state, &payload.created_by).await;
+        Ok(())
+    };
+
+    match run.await {
+        Ok(()) => {
+            API_REQUEST_COUNTER
+                .with_label_values(&["delete_routing_rule", "success"])
+                .inc();
+            timer.observe_duration();
+            Ok(Json(serde_json::json!({
+                "status": "deleted",
+                "routing_algorithm_id": payload.routing_algorithm_id,
+            })))
+        }
+        Err(e) => {
+            fail();
+            timer.observe_duration();
+            Err(e)
+        }
+    }
+}
+
 pub async fn list_all_routing_algorithm_id(
     Path(created_by): Path<String>,
 ) -> Result<Json<Vec<JsonifiedRoutingAlgorithm>>, ContainerError<EuclidErrors>> {

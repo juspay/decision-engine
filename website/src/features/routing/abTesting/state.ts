@@ -1,16 +1,34 @@
-import { RoutingAlgorithm, ABTestAlgorithmData } from '../../../types/api'
-import { ABTestFormValues, DEFAULT_VARIANT_SR_CONFIG } from './types'
+import { RoutingAlgorithm, ABTestAlgorithmData, SrConfigOverride } from '../../../types/api'
+import { ABTestExperimentType, ABTestFormValues, DEFAULT_VARIANT_SR_CONFIG } from './types'
+
+// Infer the experiment type from the persisted arm shape (the backend stores no "type").
+function inferExperimentType(abData: ABTestAlgorithmData): ABTestExperimentType {
+  const v = abData.variant_sr_config
+  // SR config tuning: variant tweaks hedging/elimination.
+  if (v && (v.hedging_percent !== undefined || v.elimination_threshold !== undefined)) return 'sr_config_tuning'
+  // Everything else (including SR auth / multi-objective strategy pairs, and rule-based configs
+  // picked as arms) is an algorithm comparison.
+  return 'algorithm_comparison'
+}
+
+// Reverse of payload.ts `resolveArm`: turn a stored (algorithm_id, sr_config) pair back into the
+// synthetic form arm value the ArmSelector uses.
+function armFormValue(id: string, config?: SrConfigOverride): string {
+  if (id !== 'sr_routing') return id
+  if (config?.enable_multi_objective === true) return config.use_autopilot === true ? 'sr_mo_autopilot' : 'sr_mo_manual'
+  // Auth-based (cost off / absent) — split by autopilot: use_autopilot true → auth+autopilot.
+  return config?.use_autopilot === true ? 'sr_auth_autopilot' : 'sr_auth'
+}
 
 export function toABTestFormValues(algorithm: RoutingAlgorithm): ABTestFormValues | null {
   const data = (algorithm.algorithm_data || algorithm.algorithm)
   if (!data || data.type !== 'ab_test') return null
   const abData = data.data as ABTestAlgorithmData
-  const isTuning = Boolean(abData.variant_sr_config)
   return {
     name: algorithm.name,
-    experimentType: isTuning ? 'sr_config_tuning' : 'algorithm_comparison',
-    controlAlgorithmId: abData.control_algorithm_id,
-    variantAlgorithmId: abData.variant_algorithm_id,
+    experimentType: inferExperimentType(abData),
+    controlAlgorithmId: armFormValue(abData.control_algorithm_id, abData.control_sr_config),
+    variantAlgorithmId: armFormValue(abData.variant_algorithm_id, abData.variant_sr_config),
     variantSplitPct: abData.variant_split_pct,
     minSampleSize: abData.min_sample_size,
     guardrailThresholdPp: abData.guardrail_threshold_pp,

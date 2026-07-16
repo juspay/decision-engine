@@ -1074,6 +1074,15 @@ impl DomainDeciderRequestForApiCallV2 {
         self.payment_info.country.as_ref().map(ToString::to_string)
     }
 
+    /// Card funding type (debit / credit) as an uppercase string, e.g. "DEBIT". Callers that
+    /// match against Euclid rule values should lowercase it (the rule builder uses "debit"/"credit").
+    pub fn card_type(&self) -> Option<String> {
+        self.payment_info
+            .card_type
+            .as_ref()
+            .map(ToString::to_string)
+    }
+
     pub async fn to_domain_decider_request(&self) -> DomainDeciderRequest {
         DomainDeciderRequest {
             orderReference: ETO::Order {
@@ -1278,6 +1287,12 @@ pub struct SrV3SubLevelInputConfig {
     pub lowerResetFactor: Option<f64>,
     pub upperResetFactor: Option<f64>,
     pub gatewayExtraScore: Option<Vec<GatewayWiseExtraScore>>,
+    /// Provenance of this sub-level entry. The auto-calibration job stamps `"autopilot"` on
+    /// entries it manages; human-authored entries have no source. Lets a routing path (e.g. an
+    /// A/B control arm with `use_autopilot = false`) skip autopilot-tuned entries and fall back
+    /// to the manual/default config. Mirrors `SRSubLevelInputConfig.source` on the API struct.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

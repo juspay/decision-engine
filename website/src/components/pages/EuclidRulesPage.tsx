@@ -97,7 +97,7 @@ function formatOp(comparison: string): string {
 }
 
 
-function RuleBreakdown({ algo }: { algo: RoutingAlgorithm }) {
+export function RuleBreakdown({ algo }: { algo: RoutingAlgorithm }) {
   const algorithm = algo.algorithm_data || algo.algorithm
   const data = algorithm?.data as EuclidAlgorithmData | undefined
   const defaultSel = data?.default_selection || data?.defaultSelection
