@@ -13,6 +13,11 @@ use crate::config::AnalyticsConfig;
 use crate::error::ConfigurationError;
 use crate::metrics::{ANALYTICS_EVENTS_DROPPED_TOTAL, ANALYTICS_SINK_QUEUE_DEPTH};
 
+/// Max events drained from the queue per publish call. Keeps the publisher ahead of
+/// burst producers (a simulator run emits hundreds of events/second) so the bounded
+/// queue doesn't fill and drop events.
+const PUBLISH_BATCH_SIZE: usize = 200;
+
 #[derive(Clone)]
 pub struct AnalyticsRuntime {
     config: AnalyticsConfig,
@@ -136,12 +141,16 @@ impl AnalyticsRuntime {
         let depth = self.domain_depth.clone();
 
         tokio::spawn(async move {
-            while let Some(event) = receiver.recv().await {
-                update_depth("domain", &depth, -1);
-                let batch = [event];
+            // Drain in batches: one awaited publish per event can't keep up with bursts
+            // (e.g. simulator runs), which fills the bounded queue and silently drops
+            // events — surfacing as "no outcome" A/B payments and missing audit events.
+            let mut batch = Vec::with_capacity(PUBLISH_BATCH_SIZE);
+            while receiver.recv_many(&mut batch, PUBLISH_BATCH_SIZE).await > 0 {
+                update_depth("domain", &depth, -(batch.len() as isize));
                 if let Err(error) = write_store.persist_domain_events(&batch).await {
-                    crate::logger::warn!(error = %error, "Failed to publish analytics domain event");
+                    crate::logger::warn!(error = %error, "Failed to publish analytics domain events");
                 }
+                batch.clear();
             }
         });
     }
@@ -151,12 +160,13 @@ impl AnalyticsRuntime {
         let depth = self.api_depth.clone();
 
         tokio::spawn(async move {
-            while let Some(event) = receiver.recv().await {
-                update_depth("api", &depth, -1);
-                let batch = [event];
+            let mut batch = Vec::with_capacity(PUBLISH_BATCH_SIZE);
+            while receiver.recv_many(&mut batch, PUBLISH_BATCH_SIZE).await > 0 {
+                update_depth("api", &depth, -(batch.len() as isize));
                 if let Err(error) = write_store.persist_api_events(&batch).await {
-                    crate::logger::warn!(error = %error, "Failed to publish analytics api event");
+                    crate::logger::warn!(error = %error, "Failed to publish analytics api events");
                 }
+                batch.clear();
             }
         });
     }

@@ -490,8 +490,16 @@ pub struct ExperimentArmMetrics {
     pub arm: String,
     pub transaction_count: i64,
     pub success_count: i64,
+    /// Payments that resolved without ever succeeding (a fail-then-retry-success payment counts
+    /// only as a success).
     pub failure_count: i64,
+    /// NAR — net auth rate: payments that eventually succeeded (any attempt) / all payments.
     pub auth_rate: f64,
+    /// FAAR — first-attempt auth rate: payments whose first attempt succeeded / all payments.
+    pub first_attempt_auth_rate: f64,
+    /// TCS — total cost saved in money on successful payments: Σ (saved_bps/10⁴)·amount.
+    /// `None` for arms that never ran cost routing (they save nothing by definition).
+    pub total_cost_saved: Option<f64>,
     pub avg_latency_ms: Option<f64>,
     /// Average chosen-PSP cost (bps) over outcome events that carried cost data. `None` for
     /// auth-only arms / experiments where multi-objective did not run.
@@ -499,9 +507,13 @@ pub struct ExperimentArmMetrics {
     /// Average cost saved vs the SR head (bps); positive only on CostWon decisions. `None` when
     /// no cost data was recorded.
     pub avg_cost_saved_bps: Option<f64>,
-    /// Net economic value per attempt in bps of ticket, valued at the experiment's common
-    /// business margin `M`: `auth_rate · (M·10_000 − avg_chosen_cost_bps)`. `None` when the arm
-    /// has no cost data (so cost/autopilot experiments can be judged on net value).
+    /// Economic value per transaction in bps of ticket: the arm's mean of
+    /// `v = success · (M·10_000 + saved_bps)` at the experiment's common business margin `M` —
+    /// a success earns the margin plus whatever fee it saved vs the SR head (the gateway a
+    /// cost-blind arm would have used on that transaction), a failure earns 0. Arms that never
+    /// ran multi-objective record no cost_saved_bps (extracted as 0) — they truly saved
+    /// nothing, so their EV is `auth_rate · M·10_000`, a pure auth comparison. `None` only when
+    /// the arm has no transactions.
     pub net_ev_bps: Option<f64>,
 }
 
@@ -526,17 +538,25 @@ pub struct ExperimentResultsResponse {
     pub merchant_id: String,
     pub control: ExperimentArmMetrics,
     pub variant: ExperimentArmMetrics,
-    /// Auth rate delta in percentage points (variant - control).
+    /// Auth rate delta in percentage points (variant - control). Context metric — the verdict
+    /// comes from the EV z-test.
     pub delta_pp: f64,
+    /// Two-tailed p-value of the EV z-test on the per-transaction value distribution. For
+    /// auth-only experiments (saved ≡ 0 on both arms) this is exactly the (unpooled)
+    /// two-proportion auth z-test.
     pub p_value: Option<f64>,
+    /// 95% CI on the tested delta. Units match what the UI displays: bps of EV delta for cost
+    /// experiments, auth percentage points for auth-only experiments.
     pub confidence_interval: Option<(f64, f64)>,
     pub verdict: ExperimentVerdict,
     /// Min sample size from experiment config; used to show progress.
     pub min_sample_size: u32,
-    /// Net economic value delta in bps of ticket (variant − control), valued at
-    /// `evaluation_margin`. `None` for auth-only experiments (no cost data on either arm).
+    /// EV delta in bps of ticket (variant − control), valued at `evaluation_margin`. The verdict
+    /// metric when at least one arm ran multi-objective; `None` for auth-only experiments
+    /// (no cost data on either arm), which are judged on the auth z-test instead.
     pub net_delta_bps: Option<f64>,
-    /// The common business margin (fraction of ticket) used to value both arms' net EV.
+    /// The common business margin (fraction of ticket, net of baseline processing fees) used to
+    /// value both arms' EV.
     pub evaluation_margin: f64,
 }
 

@@ -1074,6 +1074,15 @@ impl DomainDeciderRequestForApiCallV2 {
         self.payment_info.country.as_ref().map(ToString::to_string)
     }
 
+    /// Card funding type (debit / credit) as an uppercase string, e.g. "DEBIT". Callers that
+    /// match against Euclid rule values should lowercase it (the rule builder uses "debit"/"credit").
+    pub fn card_type(&self) -> Option<String> {
+        self.payment_info
+            .card_type
+            .as_ref()
+            .map(ToString::to_string)
+    }
+
     pub async fn to_domain_decider_request(&self) -> DomainDeciderRequest {
         DomainDeciderRequest {
             orderReference: ETO::Order {

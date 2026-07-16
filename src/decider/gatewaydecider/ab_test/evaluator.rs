@@ -1,9 +1,13 @@
 use crate::app::get_tenant_app_state;
-use crate::euclid::types::{RoutingAlgorithm, StaticRoutingAlgorithm};
+use crate::decider::gatewaydecider::types::DomainDeciderRequestForApiCallV2;
+use crate::euclid::ast::ValueType;
+use crate::euclid::interpreter::InterpreterBackend;
+use crate::euclid::types::{Context, RoutingAlgorithm, StaticRoutingAlgorithm};
 use crate::generics::generic_find_one;
 use crate::logger;
 use diesel::associations::HasTable;
 use diesel::prelude::*;
+use std::collections::HashMap;
 
 #[cfg(feature = "mysql")]
 use crate::storage::schema::routing_algorithm::dsl;
@@ -16,7 +20,45 @@ pub struct StaticArmResult {
     pub rule_name: Option<String>,
 }
 
-pub async fn evaluate_static_arm(algorithm_id: &str, payment_id: &str) -> Option<StaticArmResult> {
+/// Build the Euclid interpreter context from the payment for a rule-based (Advanced) arm.
+/// v1 scope: card dimensions only (`payment_method`, `payment_method_type`, `card_type`/`card`).
+/// Values are lowercased to match the Rule-Based builder's enum casing — the interpreter compares
+/// enum variants with exact, case-sensitive string equality, so a casing mismatch silently skips
+/// the rule. Dimensions not populated here make any rule that references them fall through to the
+/// program's default_selection.
+fn build_card_context(dreq: &DomainDeciderRequestForApiCallV2) -> Context {
+    let mut params: HashMap<String, Option<ValueType>> = HashMap::new();
+
+    params.insert(
+        "payment_method".to_string(),
+        Some(ValueType::EnumVariant(dreq.payment_method().to_lowercase())),
+    );
+    params.insert(
+        "payment_method_type".to_string(),
+        Some(ValueType::EnumVariant(
+            dreq.payment_method_type().to_lowercase(),
+        )),
+    );
+    if let Some(card_type) = dreq.card_type() {
+        // CardType Display is SCREAMING_SNAKE ("DEBIT") — config uses "debit"/"credit".
+        let ct = card_type.to_lowercase();
+        params.insert(
+            "card_type".to_string(),
+            Some(ValueType::EnumVariant(ct.clone())),
+        );
+        // The `card` dimension in the routing-keys config is also debit/credit — populate both so
+        // rules keyed on either name match.
+        params.insert("card".to_string(), Some(ValueType::EnumVariant(ct)));
+    }
+
+    Context::new(params)
+}
+
+pub async fn evaluate_static_arm(
+    algorithm_id: &str,
+    payment_id: &str,
+    dreq: &DomainDeciderRequestForApiCallV2,
+) -> Option<StaticArmResult> {
     let state = get_tenant_app_state().await;
 
     let algorithm = generic_find_one::<<RoutingAlgorithm as HasTable>::Table, _, RoutingAlgorithm>(
@@ -78,15 +120,32 @@ pub async fn evaluate_static_arm(algorithm_id: &str, payment_id: &str) -> Option
             }
             None
         }
-        // Advanced (rule-based) arms in real payment flow need full payment parameters
-        // which aren't available here without significant refactoring.
-        // Graceful degradation: fall back to SR routing for this arm.
-        StaticRoutingAlgorithm::Advanced(_) => {
-            logger::warn!(
-                "ab_test evaluator: Advanced/rule-based arm '{}' cannot be evaluated in real payment flow without payment parameters — falling back to SR routing",
-                algorithm_id
-            );
-            None
+        // Advanced (rule-based) arm: evaluate the Euclid program against the payment's card
+        // dimensions. When no rule matches, eval_program returns the program's default_selection
+        // (the merchant's catch-all gateway) — that is the correct rule-based outcome, not an SR
+        // fallback. We only fall back to SR (None) if the program can't be evaluated or yields no
+        // gateway.
+        StaticRoutingAlgorithm::Advanced(program) => {
+            let ctx = build_card_context(dreq);
+            let result = InterpreterBackend::eval_program(&program, &ctx)
+                .inspect_err(|e| {
+                    logger::warn!(
+                        "ab_test evaluator: Advanced arm '{}' interpreter error: {:?} — falling back to SR routing",
+                        algorithm_id,
+                        e.error_type
+                    )
+                })
+                .ok()?;
+
+            let mut gateways = result.evaluated_output.into_iter().map(|c| c.gateway_name);
+            let decided_gateway = gateways.next()?;
+            Some(StaticArmResult {
+                decided_gateway,
+                fallback_gateways: gateways.collect(),
+                rule_name: result
+                    .rule_name
+                    .or_else(|| Some("ab_test_rule_based".to_string())),
+            })
         }
         StaticRoutingAlgorithm::AbTest(_) => {
             logger::error!(

@@ -9,38 +9,24 @@ function toSrConfigPayload(form: SrConfigOverrideForm): SrConfigOverridePayload 
 
 const DESCRIPTIONS: Record<ABTestFormValues['experimentType'], (pct: number) => string> = {
   sr_config_tuning: (pct) => `SR config tuning: ${pct}% variant traffic`,
-  cost_on_off: (pct) => `Cost on/off: ${pct}% variant traffic`,
-  autopilot_value: (pct) => `Autopilot value: ${pct}% variant traffic`,
   algorithm_comparison: (pct) => `A/B test: ${pct}% variant traffic`,
 }
 
-// Per-arm overrides for each experiment type. SR-arm experiments (all but algorithm_comparison)
-// route both arms through `sr_routing` and differentiate them via control_sr_config / variant_sr_config.
-function armConfigs(values: ABTestFormValues): {
-  control?: SrConfigOverridePayload
-  variant?: SrConfigOverridePayload
-} {
-  switch (values.experimentType) {
-    case 'sr_config_tuning':
-      // Control uses live SR config (no override); variant tweaks hedging/elimination.
-      return { variant: toSrConfigPayload(values.variantSrConfig) }
-    case 'cost_on_off':
-      // Control: multi-objective off (auth-only). Variant: multi-objective on at the chosen margin.
-      return {
-        control: { enable_multi_objective: false },
-        variant: {
-          enable_multi_objective: true,
-          ...(values.variantMargin !== null && { margin: values.variantMargin }),
-        },
-      }
-    case 'autopilot_value':
-      // Both arms cost-on; control ignores autopilot-tuned config (manual), variant uses it.
-      return {
-        control: { enable_multi_objective: true, use_autopilot: false },
-        variant: { enable_multi_objective: true, use_autopilot: true },
-      }
+// Resolve a form arm value into the stored (algorithm_id, sr_config) pair. The three SR strategies
+// all map to 'sr_routing' with a distinguishing per-arm override; a real algorithm id maps to itself.
+//  - sr_auth        → auth-only SR (multi-objective forced off, so it's a true auth baseline)
+//  - sr_mo_manual   → cost-aware SR using the merchant's manual config
+//  - sr_mo_autopilot→ cost-aware SR using autopilot's auto-tuned config
+function resolveArm(value: string): { id: string; config?: SrConfigOverridePayload } {
+  switch (value) {
+    case 'sr_auth':
+      return { id: 'sr_routing', config: { enable_multi_objective: false } }
+    case 'sr_mo_manual':
+      return { id: 'sr_routing', config: { enable_multi_objective: true, use_autopilot: false } }
+    case 'sr_mo_autopilot':
+      return { id: 'sr_routing', config: { enable_multi_objective: true, use_autopilot: true } }
     default:
-      return {}
+      return { id: value }
   }
 }
 
@@ -48,17 +34,32 @@ export function toABTestCreatePayload(
   values: ABTestFormValues,
   merchantId: string,
 ): ABTestCreatePayload {
-  const isAlgoComparison = values.experimentType === 'algorithm_comparison'
-  const { control, variant } = armConfigs(values)
-
-  const data: ABTestAlgorithmPayload = {
-    control_algorithm_id: isAlgoComparison ? values.controlAlgorithmId : 'sr_routing',
-    variant_algorithm_id: isAlgoComparison ? values.variantAlgorithmId : 'sr_routing',
+  const base = {
     variant_split_pct: values.variantSplitPct,
     min_sample_size: values.minSampleSize,
     guardrail_threshold_pp: values.guardrailThresholdPp,
-    ...(variant && { variant_sr_config: variant }),
-    ...(control && { control_sr_config: control }),
+  }
+
+  let data: ABTestAlgorithmPayload
+  if (values.experimentType === 'sr_config_tuning') {
+    // Both arms SR; control uses live config, variant tweaks hedging/elimination.
+    data = {
+      ...base,
+      control_algorithm_id: 'sr_routing',
+      variant_algorithm_id: 'sr_routing',
+      variant_sr_config: toSrConfigPayload(values.variantSrConfig),
+    }
+  } else {
+    // algorithm_comparison — each arm is a resolved strategy (SR variants carry an override).
+    const c = resolveArm(values.controlAlgorithmId)
+    const v = resolveArm(values.variantAlgorithmId)
+    data = {
+      ...base,
+      control_algorithm_id: c.id,
+      variant_algorithm_id: v.id,
+      ...(c.config && { control_sr_config: c.config }),
+      ...(v.config && { variant_sr_config: v.config }),
+    }
   }
 
   return {

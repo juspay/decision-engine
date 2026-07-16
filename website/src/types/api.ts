@@ -163,7 +163,12 @@ export interface ExperimentArmMetrics {
   transaction_count: number
   success_count: number
   failure_count: number
+  /** NAR — net auth rate (success on any attempt). */
   auth_rate: number
+  /** FAAR — first-attempt auth rate. */
+  first_attempt_auth_rate: number
+  /** TCS — total fees saved in money; null for arms without cost routing. */
+  total_cost_saved: number | null
   avg_latency_ms: number | null
   avg_chosen_cost_bps: number | null
   avg_cost_saved_bps: number | null

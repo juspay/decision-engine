@@ -11,20 +11,12 @@ export function validateABTestForm(values: ABTestFormValues): string | null {
       return 'Elimination threshold must be between 0 and 1'
     if (v.hedgingPercent === null && v.eliminationThreshold === null)
       return 'Set at least one parameter override for the variant arm'
-  } else if (values.experimentType === 'cost_on_off') {
-    // The variant needs a realistic margin (< 1) for cost to actually win — the default 1.0 is
-    // effectively auth-only, which would make the experiment meaningless.
-    if (values.variantMargin === null)
-      return 'Set the variant margin so cost routing has an effect'
-    if (values.variantMargin <= 0 || values.variantMargin > 1)
-      return 'Variant margin must be between 0 and 1 (fraction of ticket)'
-  } else if (values.experimentType === 'autopilot_value') {
-    // No extra fields — both arms are SR routing; the only difference is manual vs autopilot config.
   } else {
-    if (!values.controlAlgorithmId) return 'Select a control routing algorithm'
-    if (!values.variantAlgorithmId) return 'Select a variant routing algorithm'
+    // algorithm_comparison — each arm is a strategy (an SR variant or a saved config).
+    if (!values.controlAlgorithmId) return 'Select a control strategy'
+    if (!values.variantAlgorithmId) return 'Select a variant strategy'
     if (values.controlAlgorithmId === values.variantAlgorithmId)
-      return 'Control and variant must be different algorithms'
+      return 'Control and variant must be different strategies'
   }
 
   if (values.variantSplitPct < 5 || values.variantSplitPct > 30)

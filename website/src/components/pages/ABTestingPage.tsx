@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import useSWR, { useSWRConfig } from 'swr'
 import { Card, CardBody, CardHeader } from '../ui/Card'
@@ -12,38 +12,36 @@ import { apiPost, fetcher } from '../../lib/api'
 import {
   RoutingAlgorithm,
   ABTestAlgorithmData,
+  SrConfigOverride,
   ExperimentResultsResponse,
   ExperimentTransactionsResponse,
 } from '../../types/api'
-import { ShieldAlert, PowerOff, Plus, FlaskConical, CheckCircle2, XCircle, Clock, AlertTriangle, Sliders, Coins, Rocket, Pencil, Trash2 } from 'lucide-react'
+import { ShieldAlert, PowerOff, Plus, FlaskConical, CheckCircle2, XCircle, Clock, AlertTriangle, Sliders, Pencil, Trash2, Info } from 'lucide-react'
+import { RuleBreakdown } from './EuclidRulesPage'
 import { validateABTestForm } from '../../features/routing/abTesting/schema'
 import { toABTestCreatePayload } from '../../features/routing/abTesting/payload'
 import { toABTestFormValues } from '../../features/routing/abTesting/state'
-import { ABTestFormValues, ABTestExperimentType, SrConfigOverrideForm, DEFAULT_VARIANT_SR_CONFIG } from '../../features/routing/abTesting/types'
+import { ABTestFormValues, ABTestExperimentType, SrConfigOverrideForm, DEFAULT_VARIANT_SR_CONFIG, SR_STRATEGY_LABELS, SrStrategy } from '../../features/routing/abTesting/types'
+import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
 
 const SAMPLE_SIZE_PRESETS = [1000, 5000, 10000, 50000]
 
 const EXPERIMENT_TYPE_HELP: Record<ABTestExperimentType, string> = {
-  algorithm_comparison: 'Compare two different routing strategies (e.g. SR vs priority list).',
-  sr_config_tuning: 'Same SR algorithm, different hyperparameters — tune hedging % or elimination threshold on the variant arm.',
-  cost_on_off: 'Control routes on auth rate only; variant turns on multi-objective (cost-aware) routing. Measures cost saved vs auth traded.',
-  autopilot_value: 'Both arms are cost-aware SR routing; control uses your manual config, variant uses autopilot’s auto-tuned bucket/hedging. Measures whether autopilot is a net win.',
+  algorithm_comparison: 'Compare any two routing strategies — SR (auth), SR cost-aware (manual/autopilot), rule-based, or volume split.',
+  sr_config_tuning: 'Same SR algorithm, different hedging % or elimination threshold on the variant.',
 }
 
-// Detect the experiment type from the persisted arm overrides (the backend stores no "type").
-// Order matters: use_autopilot ⇒ autopilot; else enable_multi_objective ⇒ cost; else hedging/elim ⇒ tuning.
+// Detect the experiment type from the persisted arm shape (the backend stores no "type").
 function abExperimentKind(abData?: ABTestAlgorithmData): ABTestExperimentType {
   const v = abData?.variant_sr_config
-  const c = abData?.control_sr_config
-  if (v?.use_autopilot !== undefined || c?.use_autopilot !== undefined) return 'autopilot_value'
-  if (v?.enable_multi_objective !== undefined || c?.enable_multi_objective !== undefined) return 'cost_on_off'
   if (v && (v.hedging_percent !== undefined || v.elimination_threshold !== undefined)) return 'sr_config_tuning'
   return 'algorithm_comparison'
 }
 
-// True for the SR-arm experiment types where cost/net-value metrics are meaningful.
-function isCostKind(kind: ABTestExperimentType): boolean {
-  return kind === 'cost_on_off' || kind === 'autopilot_value'
+// Cost/net-value metrics are meaningful when either arm runs multi-objective (cost-aware) routing.
+function hasCostArm(abData?: ABTestAlgorithmData): boolean {
+  return abData?.control_sr_config?.enable_multi_objective === true
+    || abData?.variant_sr_config?.enable_multi_objective === true
 }
 
 function KindBadge({ kind }: { kind: ABTestExperimentType }) {
@@ -52,23 +50,196 @@ function KindBadge({ kind }: { kind: ABTestExperimentType }) {
       <Sliders size={9} /> SR Config Tuning
     </span>
   )
-  if (kind === 'cost_on_off') return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
-      <Coins size={9} /> Turn cost on
-    </span>
-  )
-  if (kind === 'autopilot_value') return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300">
-      <Rocket size={9} /> Autopilot value
-    </span>
-  )
   return null
 }
 
-function bps(n: number | null | undefined): string {
-  if (n === null || n === undefined) return '—'
-  const sign = n > 0 ? '+' : ''
-  return `${sign}${n.toFixed(1)} bps`
+// Display label for an arm (algorithm_id + sr_config) — resolves the three SR strategies.
+function armLabel(id: string, config: SrConfigOverride | undefined, algorithmName: (id: string) => string): string {
+  if (id === 'sr_routing') {
+    if (config?.enable_multi_objective === true) return config.use_autopilot === true ? 'SR Routing (MO autopilot)' : 'SR Routing (MO manual)'
+    return 'SR Routing (auth based)'
+  }
+  return algorithmName(id)
+}
+
+// Renders the actual routing logic behind a static arm (rule-based / priority / volume split /
+// single connector) so the merchant can see what the algorithm ID label stands for, instead of
+// just its name. Returns nothing for SR-based arms (`sr_routing`) — those have no static config.
+function ArmRuleDetail({ algorithmId, algorithms }: { algorithmId: string; algorithms: RoutingAlgorithm[] }) {
+  const algo = algorithms.find(a => a.id === algorithmId)
+  if (!algo) return null
+  const algorithm = algo.algorithm_data || algo.algorithm
+  const type = algorithm?.type
+  const data = algorithm?.data
+
+  if (type === 'advanced') {
+    return <RuleBreakdown algo={algo} />
+  }
+  if (type === 'priority') {
+    const gateways = (Array.isArray(data) ? data : []) as { gateway_name: string }[]
+    return gateways.length > 0 ? (
+      <div className="flex flex-wrap gap-1">
+        {gateways.map((g, i) => (
+          <span key={i} className="rounded-full bg-brand-50 dark:bg-brand-900/20 px-2 py-0.5 text-[11px] font-medium text-brand-700 dark:text-brand-300">
+            {i + 1}. {g.gateway_name}
+          </span>
+        ))}
+      </div>
+    ) : <p className="text-xs text-slate-400 italic">No connectors configured.</p>
+  }
+  if (type === 'volume_split') {
+    const splits = (Array.isArray(data) ? data : []) as { split: number; output: { gateway_name: string } }[]
+    return splits.length > 0 ? (
+      <div className="flex flex-wrap gap-1">
+        {splits.map((s, i) => (
+          <span key={i} className="rounded-full bg-emerald-50 dark:bg-emerald-900/20 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
+            {s.output.gateway_name} {s.split}%
+          </span>
+        ))}
+      </div>
+    ) : <p className="text-xs text-slate-400 italic">No splits configured.</p>
+  }
+  if (type === 'single') {
+    const conn = data as { gateway_name: string } | undefined
+    return conn ? (
+      <span className="rounded-full bg-slate-100 dark:bg-[#1a1f2a] px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:text-[#8090a8]">
+        {conn.gateway_name}
+      </span>
+    ) : <p className="text-xs text-slate-400 italic">No connector configured.</p>
+  }
+  return null
+}
+
+// Hover affordance that moves a long explanation off the page into an info icon — keeps
+// labels short while the detail stays one hover away.
+function InfoHint({ text }: { text: string }) {
+  return (
+    <span title={text} className="inline-flex cursor-help align-middle text-slate-300 hover:text-slate-500 dark:text-slate-600 dark:hover:text-slate-400">
+      <Info size={12} />
+    </span>
+  )
+}
+
+// Compact field label: name + required marker + optional info tooltip, replacing verbose
+// helper paragraphs under each input.
+function FieldLabel({ children, hint, required }: { children: ReactNode; hint?: string; required?: boolean }) {
+  return (
+    <label className="mb-1.5 flex items-center gap-1 text-xs font-medium text-slate-600 dark:text-slate-300">
+      {children}{required && <span className="text-slate-400">*</span>}
+      {hint && <InfoHint text={hint} />}
+    </label>
+  )
+}
+
+// Human labels for routing-strategy types (the `algorithm_data.type` values).
+const ALGO_TYPE_LABELS: Record<string, string> = {
+  advanced: 'Rule-based',
+  volume_split: 'Volume split',
+  priority: 'Priority list',
+  single: 'Single connector',
+}
+
+// The three SR strategies are top-level arm choices (each resolves to a distinct override).
+const SR_STRATEGIES = Object.keys(SR_STRATEGY_LABELS) as (keyof typeof SR_STRATEGY_LABELS)[]
+const isSrStrategy = (v: string): boolean => (SR_STRATEGIES as string[]).includes(v)
+
+// Cascading arm picker for Algorithm comparison. Level 1 picks the strategy: an SR strategy
+// (auth / multi-objective manual / multi-objective autopilot) resolves directly to an arm; a saved
+// config type (Rule-based / Volume split / …) shows a 2nd dropdown when it has more than one config
+// (a single-config type is auto-selected). `value` is the resolved arm form value:
+// '' | 'sr_auth' | 'sr_mo_manual' | 'sr_mo_autopilot' | <algorithmId>.
+function ArmSelector({ label, help, algorithms, value, excludeId, allowedSrStrategies, liveSrConfig, onChange }: {
+  label: string
+  help: string
+  algorithms: RoutingAlgorithm[]
+  value: string
+  excludeId: string
+  // SR strategies the merchant's features permit; the currently-selected value is always kept
+  // visible so editing an experiment whose feature was later disabled still works.
+  allowedSrStrategies: SrStrategy[]
+  // The merchant's base SR config (hedging / elimination / bucket size) plus how many segments
+  // autopilot is actively tuning — shown when the resolved arm is SR-based. All three SR
+  // strategies share the same base config; they differ in whether they honor autopilot's
+  // per-segment overrides on top of it (see `honorsAutopilot` below).
+  liveSrConfig: { hedging: number | null; elimination: number | null; bucketSize: number | null; autopilotSegmentCount: number }
+  onChange: (id: string) => void
+}) {
+  const srOptions = SR_STRATEGIES.filter(s => allowedSrStrategies.includes(s) || value === s)
+  const typeOf = (id: string): string => {
+    if (isSrStrategy(id)) return id // SR strategies are their own top-level "strategy"
+    const a = algorithms.find(x => x.id === id)
+    return a ? ((a.algorithm_data || a.algorithm)?.type ?? '') : ''
+  }
+  const [strategy, setStrategy] = useState<string>(() => typeOf(value))
+  // Keep the strategy in sync when the value is set externally (edit prefill) or once algorithms load.
+  useEffect(() => {
+    const t = typeOf(value)
+    if (t) setStrategy(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, algorithms])
+
+  const realTypes = Array.from(
+    new Set(algorithms.map(a => (a.algorithm_data || a.algorithm)?.type).filter(Boolean) as string[]),
+  )
+  const configs = strategy && !isSrStrategy(strategy)
+    ? algorithms.filter(a => (a.algorithm_data || a.algorithm)?.type === strategy)
+    : []
+
+  function pickStrategy(t: string) {
+    setStrategy(t)
+    if (isSrStrategy(t)) { onChange(t); return } // SR strategy resolves directly to the arm value
+    if (!t) { onChange(''); return }
+    const c = algorithms.filter(a => (a.algorithm_data || a.algorithm)?.type === t)
+    // One config → auto-select it; multiple → clear so the 2nd dropdown forces a choice.
+    onChange(c.length === 1 ? c[0].id : '')
+  }
+
+  const selectCls = 'w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500'
+
+  return (
+    <div>
+      <FieldLabel hint={help} required>{label}</FieldLabel>
+      <select className={selectCls} value={strategy} onChange={e => pickStrategy(e.target.value)}>
+        <option value="">Select strategy</option>
+        {srOptions.map(s => (
+          <option key={s} value={s} disabled={excludeId === s}>{SR_STRATEGY_LABELS[s]}</option>
+        ))}
+        {realTypes.map(t => (
+          <option key={t} value={t}>{ALGO_TYPE_LABELS[t] ?? t}</option>
+        ))}
+      </select>
+      {configs.length > 1 && (
+        <select className={`${selectCls} mt-2`} value={value} onChange={e => onChange(e.target.value)}>
+          <option value="">Select {ALGO_TYPE_LABELS[strategy]?.toLowerCase() ?? 'config'}</option>
+          {configs.map(a => (
+            <option key={a.id} value={a.id} disabled={a.id === excludeId}>{a.name}</option>
+          ))}
+        </select>
+      )}
+      {configs.length === 1 && (
+        <p className="mt-1.5 text-[11px] text-slate-400">Using <span className="font-medium text-slate-600 dark:text-slate-300">{configs[0].name}</span></p>
+      )}
+      {value && !isSrStrategy(value) && (
+        <div className="mt-2 rounded-lg border border-slate-100 dark:border-[#1a1f2a] bg-slate-50/60 dark:bg-[#0a0a0f]/60 p-2">
+          <ArmRuleDetail algorithmId={value} algorithms={algorithms} />
+        </div>
+      )}
+      {value && isSrStrategy(value) && (
+        <div className="mt-2 rounded-lg border border-slate-100 dark:border-[#1a1f2a] bg-slate-50/60 dark:bg-[#0a0a0f]/60 p-2">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400 mb-1.5">Base SR config</p>
+          <LiveSrConfigPanel
+            hedging={liveSrConfig.hedging}
+            elimination={liveSrConfig.elimination}
+            bucketSize={liveSrConfig.bucketSize}
+            autopilotSegmentCount={liveSrConfig.autopilotSegmentCount}
+            // "MO manual" explicitly skips autopilot-tuned segments (see payload.ts); auth and
+            // "MO autopilot" both honor them by default.
+            honorsAutopilot={value !== 'sr_mo_manual'}
+          />
+        </div>
+      )}
+    </div>
+  )
 }
 
 function deltaLabel(deltaPp: number) {
@@ -124,8 +295,95 @@ function srParamFormat(key: string, value: number): string {
   return String(value)
 }
 
+// Fetches the merchant's live SR config (hedging %, elimination threshold) — the same values
+// SR-based routing actually applies right now. Shared by the create form and the results view so
+// any SR-backed arm (auth, MO manual, MO autopilot, or SR config tuning's control) can show its
+// real current config instead of just a strategy name.
+// The autopilot auto-calibration job writes cluster-specific hedging/bucket overrides tagged
+// with this source string (see `sr_auto_calibration::AUTOPILOT_SOURCE` in the backend). A
+// sub-level entry carrying it means autopilot is actively tuning that segment away from the
+// merchant's flat default — the value below can't be read as "the" current hedging/bucket size.
+const AUTOPILOT_SOURCE = 'autopilot'
+
+function useLiveSrConfig(merchantId: string | undefined) {
+  const { data: srConfig } = useSWR(
+    merchantId ? ['rule-sr-live', merchantId] : null,
+    () => apiPost<{
+      config: {
+        data: {
+          defaultHedgingPercent: number | null
+          defaultBucketSize: number | null
+          subLevelInputConfig: { source?: string | null }[] | null
+        }
+      }
+    }>('/rule/get', { merchant_id: merchantId, algorithm: 'successRate' }),
+    { shouldRetryOnError: false, revalidateOnFocus: false },
+  )
+  const { data: elimConfig } = useSWR(
+    merchantId ? ['rule-elim-live', merchantId] : null,
+    () => apiPost<{ config: { data: { threshold: number } } }>(
+      '/rule/get', { merchant_id: merchantId, algorithm: 'elimination' }
+    ),
+    { shouldRetryOnError: false, revalidateOnFocus: false },
+  )
+  return {
+    liveHedging: srConfig?.config?.data?.defaultHedgingPercent ?? null,
+    liveElimination: elimConfig?.config?.data?.threshold ?? null,
+    liveBucketSize: srConfig?.config?.data?.defaultBucketSize ?? null,
+    autopilotSegmentCount: (srConfig?.config?.data?.subLevelInputConfig ?? [])
+      .filter(c => c.source === AUTOPILOT_SOURCE).length,
+  }
+}
+
+// `honorsAutopilot` reflects the arm's `use_autopilot` resolution (see `get_sr_v3_hedging_percent`
+// / `get_sr_v3_bucket_size` in gw_scoring — absent override defaults to true). Only the "MO
+// manual" strategy forces it false; auth and "MO autopilot" both honor autopilot-tuned segments
+// by default, so both need the caveat when any exist.
+function LiveSrConfigPanel({ hedging, elimination, bucketSize, autopilotSegmentCount, honorsAutopilot }: {
+  hedging: number | null
+  elimination: number | null
+  bucketSize: number | null
+  autopilotSegmentCount: number
+  honorsAutopilot: boolean
+}) {
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between text-[11px]">
+        <span className="text-slate-500">Hedging % (explore-exploit)</span>
+        <span className="font-medium text-slate-700 dark:text-slate-300">
+          {hedging !== null ? `${hedging}%` : <span className="text-slate-400 italic">Not configured</span>}
+        </span>
+      </div>
+      <div className="flex items-center justify-between text-[11px]">
+        <span className="text-slate-500">Elimination threshold</span>
+        <span className="font-medium text-slate-700 dark:text-slate-300">
+          {elimination !== null ? `SR < ${(elimination * 100).toFixed(0)}%` : <span className="text-slate-400 italic">Not configured</span>}
+        </span>
+      </div>
+      <div className="flex items-center justify-between text-[11px]">
+        <span className="text-slate-500">Bucket size (score window)</span>
+        <span className="font-medium text-slate-700 dark:text-slate-300">
+          {bucketSize !== null ? `${bucketSize} requests` : <span className="text-slate-400 italic">Not configured</span>}
+        </span>
+      </div>
+      {honorsAutopilot && (
+        <p className="flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400 pt-1.5 mt-0.5 border-t border-slate-100 dark:border-[#1e2330]">
+          Auto configures the Learning window and Discovery share based on your traffic volume.
+          <InfoHint text={
+            autopilotSegmentCount > 0
+              ? `Autopilot is tuning ${autopilotSegmentCount} segment${autopilotSegmentCount === 1 ? '' : 's'} (by payment method / network / currency / country) and over time — the hedging % and bucket size above are just the base config, not what every transaction uses.`
+              : `Autopilot hasn't tuned any segments yet — the hedging % and bucket size above are the base config it starts from.`
+          } />
+        </p>
+      )}
+    </div>
+  )
+}
+
 interface SrParamDiffProps {
   abData: ABTestAlgorithmData
+  liveHedging: number | null
+  liveElimination: number | null
 }
 
 // Only the numeric SR-tuning params are shown here (hedging / elimination). Other override
@@ -133,9 +391,13 @@ interface SrParamDiffProps {
 // types, which render their own arm-config views.
 const SR_TUNING_KEYS = ['hedging_percent', 'elimination_threshold'] as const
 
-function SrParamDiff({ abData }: SrParamDiffProps) {
+function SrParamDiff({ abData, liveHedging, liveElimination }: SrParamDiffProps) {
   const vari = abData.variant_sr_config ?? {}
   const keys = SR_TUNING_KEYS.filter(k => typeof vari[k] === 'number')
+  const liveValue: Record<string, number | null> = {
+    hedging_percent: liveHedging,
+    elimination_threshold: liveElimination,
+  }
 
   if (keys.length === 0) return null
 
@@ -155,10 +417,13 @@ function SrParamDiff({ abData }: SrParamDiffProps) {
         <tbody>
           {keys.map(k => {
             const vv = vari[k]
+            const lv = liveValue[k]
             return (
               <tr key={String(k)} className="border-b border-slate-50 dark:border-[#131318]">
                 <td className="px-4 py-2 text-slate-500">{srParamLabel(String(k))}</td>
-                <td className="px-4 py-2 text-slate-400 italic">Live SR config</td>
+                <td className="px-4 py-2 font-mono text-slate-600 dark:text-slate-400">
+                  {lv !== null && lv !== undefined ? srParamFormat(String(k), lv) : <span className="italic text-slate-400">Not configured</span>}
+                </td>
                 <td className="px-4 py-2 font-mono font-semibold text-brand-600 dark:text-brand-400">
                   {typeof vv === 'number' ? srParamFormat(String(k), vv) : '—'}
                 </td>
@@ -178,6 +443,7 @@ interface DetailPanelProps {
   isActive: boolean
   merchantId: string
   algorithmName: (id: string) => string
+  algorithms: RoutingAlgorithm[]
   onActivate: () => void
   onStop: () => void
   onEdit: () => void
@@ -193,6 +459,7 @@ function ExperimentDetailPanel({
   isActive,
   merchantId,
   algorithmName,
+  algorithms,
   onActivate,
   onStop,
   onEdit,
@@ -201,10 +468,10 @@ function ExperimentDetailPanel({
   const abData = (algorithm.algorithm_data || algorithm.algorithm)?.data as ABTestAlgorithmData | undefined
   const kind = abExperimentKind(abData)
   const isTuning = kind === 'sr_config_tuning'
-  const costKind = isCostKind(kind)
+  const costKind = hasCostArm(abData)
+  const { liveHedging, liveElimination, liveBucketSize, autopilotSegmentCount } = useLiveSrConfig(merchantId || undefined)
 
-  // For cost experiments, value net EV at the variant's configured margin (falls back to the
-  // backend default when unset) so the net-value verdict reflects the merchant's economics.
+  // If the variant carries a margin override, value net EV at it; otherwise the backend default.
   const evalMargin = abData?.variant_sr_config?.margin
   const resultsUrl = abData
     ? `/analytics/experiment/${algorithm.id}/results?min_sample_size=${abData.min_sample_size}&guardrail_threshold_pp=${abData.guardrail_threshold_pp}${evalMargin !== undefined ? `&evaluation_margin=${evalMargin}` : ''}`
@@ -229,13 +496,12 @@ function ExperimentDetailPanel({
   function routingType(variantArm: string): string {
     if (!abData) return '—'
     const algorithmId = variantArm === 'control' ? abData.control_algorithm_id : abData.variant_algorithm_id
-    if (algorithmId === 'sr_routing') {
-      if (isTuning) return variantArm === 'variant' ? 'SR Routing (custom params)' : 'SR Routing (live config)'
-      if (kind === 'cost_on_off') return variantArm === 'variant' ? 'SR + cost (multi-objective)' : 'SR (auth only)'
-      if (kind === 'autopilot_value') return variantArm === 'variant' ? 'SR + cost (autopilot)' : 'SR + cost (manual)'
-      return 'SR Routing'
+    const config = variantArm === 'control' ? abData.control_sr_config : abData.variant_sr_config
+    if (algorithmId === 'sr_routing' && isTuning) {
+      return variantArm === 'variant' ? 'SR Routing (custom params)' : 'SR Routing (live config)'
     }
-    return algorithmName(algorithmId)
+    // armLabel resolves the SR strategies (auth / MO manual / MO autopilot) and real algo names.
+    return armLabel(algorithmId, config, algorithmName)
   }
 
   function openAuditForTxn(paymentId: string, variantArm: string) {
@@ -290,40 +556,56 @@ function ExperimentDetailPanel({
       {/* Arm config */}
       {abData && (
         isTuning ? (
-          <SrParamDiff abData={abData} />
-        ) : costKind ? (
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-xl border border-slate-200 dark:border-[#222226] bg-slate-50 dark:bg-[#0c0c10] px-4 py-3">
-              <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400 mb-1">Control ({controlPct}%)</p>
-              <p className="text-sm font-medium text-slate-800 dark:text-white truncate">
-                {kind === 'cost_on_off' ? 'Auth-only SR' : 'Cost-aware SR · manual'}
-              </p>
-              <p className="text-[10px] text-slate-400 mt-0.5">{kind === 'cost_on_off' ? 'Cost off' : 'Ignores autopilot'}</p>
-            </div>
-            <div className="rounded-xl border border-brand-200 dark:border-brand-800/50 bg-brand-50/50 dark:bg-brand-900/10 px-4 py-3">
-              <p className="text-[10px] font-medium uppercase tracking-wide text-brand-400 mb-1">Variant ({variantPct}%)</p>
-              <p className="text-sm font-medium text-slate-800 dark:text-white truncate">
-                {kind === 'cost_on_off'
-                  ? `Cost-aware SR${abData.variant_sr_config?.margin !== undefined ? ` · margin ${abData.variant_sr_config.margin}` : ''}`
-                  : 'Cost-aware SR · autopilot'}
-              </p>
-              <p className="text-[10px] text-slate-400 mt-0.5">{kind === 'cost_on_off' ? 'Cost on' : 'Uses autopilot'}</p>
-            </div>
-          </div>
+          <SrParamDiff abData={abData} liveHedging={liveHedging} liveElimination={liveElimination} />
         ) : (
           <div className="grid grid-cols-2 gap-3">
             <div className="rounded-xl border border-slate-200 dark:border-[#222226] bg-slate-50 dark:bg-[#0c0c10] px-4 py-3">
               <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400 mb-1">Control ({controlPct}%)</p>
-              <p className="text-sm font-medium text-slate-800 dark:text-white truncate">{algorithmName(abData.control_algorithm_id)}</p>
+              <p className="text-sm font-medium text-slate-800 dark:text-white truncate">{armLabel(abData.control_algorithm_id, abData.control_sr_config, algorithmName)}</p>
               <p className="text-[10px] text-slate-400 mt-0.5">Baseline</p>
             </div>
             <div className="rounded-xl border border-brand-200 dark:border-brand-800/50 bg-brand-50/50 dark:bg-brand-900/10 px-4 py-3">
               <p className="text-[10px] font-medium uppercase tracking-wide text-brand-400 mb-1">Variant ({variantPct}%)</p>
-              <p className="text-sm font-medium text-slate-800 dark:text-white truncate">{algorithmName(abData.variant_algorithm_id)}</p>
+              <p className="text-sm font-medium text-slate-800 dark:text-white truncate">{armLabel(abData.variant_algorithm_id, abData.variant_sr_config, algorithmName)}</p>
               <p className="text-[10px] text-slate-400 mt-0.5">Being tested</p>
             </div>
           </div>
         )
+      )}
+
+      {/* Routing rule breakdown — the actual logic behind each arm's algorithm ID. Static
+          algorithms (rule-based, priority, volume split, single) show their configured rule;
+          SR-based arms (auth / MO manual / MO autopilot) show the merchant's live SR config,
+          fetched the same way SR config tuning's create-form panel does. */}
+      {abData && !isTuning && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-start">
+          <div className="rounded-xl border border-slate-200 dark:border-[#222226] px-4 py-3">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400 mb-2">Control routing rule</p>
+            {abData.control_algorithm_id === 'sr_routing'
+              ? <LiveSrConfigPanel
+                  hedging={liveHedging}
+                  elimination={liveElimination}
+                  bucketSize={liveBucketSize}
+                  autopilotSegmentCount={autopilotSegmentCount}
+                  // Absent override honors autopilot by default (see gw_scoring's `unwrap_or(true)`);
+                  // only an explicit `use_autopilot: false` (the "MO manual" strategy) skips it.
+                  honorsAutopilot={abData.control_sr_config?.use_autopilot !== false}
+                />
+              : <ArmRuleDetail algorithmId={abData.control_algorithm_id} algorithms={algorithms} />}
+          </div>
+          <div className="rounded-xl border border-brand-200 dark:border-brand-800/50 px-4 py-3">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-brand-400 mb-2">Variant routing rule</p>
+            {abData.variant_algorithm_id === 'sr_routing'
+              ? <LiveSrConfigPanel
+                  hedging={liveHedging}
+                  elimination={liveElimination}
+                  bucketSize={liveBucketSize}
+                  autopilotSegmentCount={autopilotSegmentCount}
+                  honorsAutopilot={abData.variant_sr_config?.use_autopilot !== false}
+                />
+              : <ArmRuleDetail algorithmId={abData.variant_algorithm_id} algorithms={algorithms} />}
+          </div>
+        </div>
       )}
 
       {/* Stats */}
@@ -369,7 +651,17 @@ function ExperimentDetailPanel({
                   return (
                     <div key={label} className={`rounded-xl border px-4 py-3 space-y-1 ${accent ? 'border-brand-200 dark:border-brand-800/50' : 'border-slate-200 dark:border-[#222226]'}`}>
                       <p className={`text-[10px] ${accent ? 'text-brand-500' : 'text-slate-400'}`}>{label}</p>
-                      <p className="text-xl font-bold text-slate-800 dark:text-white">{authRatePct(metrics.auth_rate)}</p>
+                      <p className="text-xl font-bold text-slate-800 dark:text-white">
+                        {authRatePct(metrics.auth_rate)} <span className="text-[10px] font-normal text-slate-400" title="Net auth rate — payments that succeeded on any attempt">NAR</span>
+                      </p>
+                      <p className="text-xs text-slate-500" title="First-attempt auth rate — payments that succeeded without a retry">
+                        FAAR {authRatePct(metrics.first_attempt_auth_rate)}
+                      </p>
+                      {costKind && metrics.total_cost_saved !== null && (
+                        <p className="text-xs text-sky-600 dark:text-sky-400" title="Total cost saved — gateway fees saved on successful payments">
+                          TCS {metrics.total_cost_saved.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                        </p>
+                      )}
                       <p className="text-xs text-slate-400">{metrics.transaction_count.toLocaleString()} txns</p>
                       <p className="text-xs text-emerald-600 dark:text-emerald-400">{metrics.success_count.toLocaleString()} success</p>
                       {metrics.failure_count > 0 && (
@@ -389,38 +681,27 @@ function ExperimentDetailPanel({
                   )
                 })}
 
+                {/* Merchant-facing delta: NAR / FAAR / TCS differences only. The verdict itself
+                    still comes from the backend's EV z-test (shown as the VerdictChip); the
+                    statistical internals (p, CI, EV bps) are deliberately not displayed. */}
                 <div key="delta" className="rounded-xl border border-slate-200 dark:border-[#222226] px-4 py-3 space-y-1">
-                  <p className="text-[10px] text-slate-400">Delta</p>
+                  <p className="text-[10px] text-slate-400">Delta (variant − control)</p>
                   <p className={`text-xl font-bold ${results.delta_pp > 0 ? 'text-emerald-600 dark:text-emerald-400' : results.delta_pp < 0 ? 'text-red-500' : 'text-slate-800 dark:text-white'}`}>
-                    {deltaLabel(results.delta_pp)}
+                    {deltaLabel(results.delta_pp)} <span className="text-[10px] font-normal text-slate-400">NAR</span>
                   </p>
-                  {results.p_value !== null ? (
-                    <p className="text-xs text-slate-400">p = {results.p_value.toFixed(4)}</p>
-                  ) : (
-                    <p className="text-xs text-slate-400">p = —</p>
-                  )}
-                  {results.confidence_interval !== null && results.confidence_interval !== undefined && (
-                    <p className="text-[10px] text-slate-400">
-                      95% CI [{deltaLabel(results.confidence_interval[0])}, {deltaLabel(results.confidence_interval[1])}]
+                  <p className="text-xs text-slate-500">
+                    FAAR {deltaLabel((results.variant.first_attempt_auth_rate - results.control.first_attempt_auth_rate) * 100)}
+                  </p>
+                  {costKind && (
+                    <p className="text-xs text-sky-600 dark:text-sky-400" title="Extra gateway fees saved by the variant vs the control">
+                      TCS {(() => {
+                        const d = (results.variant.total_cost_saved ?? 0) - (results.control.total_cost_saved ?? 0)
+                        return `${d > 0 ? '+' : ''}${d.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+                      })()}
                     </p>
                   )}
                 </div>
               </div>
-
-              {/* Net economic value — the decision metric for cost/autopilot experiments. */}
-              {costKind && results.net_delta_bps !== null && (
-                <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-200 dark:border-sky-800/50 bg-sky-50/60 dark:bg-sky-900/15 px-4 py-3">
-                  <div>
-                    <p className="text-[10px] font-medium uppercase tracking-wide text-sky-500">Net value delta (variant − control)</p>
-                    <p className="text-[10px] text-slate-400 mt-0.5">
-                      Auth × margin − fees, valued at margin {results.evaluation_margin}. Positive = variant is more profitable.
-                    </p>
-                  </div>
-                  <p className={`text-xl font-bold ${results.net_delta_bps > 0 ? 'text-emerald-600 dark:text-emerald-400' : results.net_delta_bps < 0 ? 'text-red-500' : 'text-slate-800 dark:text-white'}`}>
-                    {bps(results.net_delta_bps)}
-                  </p>
-                </div>
-              )}
 
               {/* Guardrail warning */}
               {results.verdict === 'guardrail_breached' && (
@@ -440,7 +721,7 @@ function ExperimentDetailPanel({
           <div>
             <h3 className="text-sm font-semibold text-slate-800 dark:text-white">Transactions</h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              {txnData ? `${txnData.total.toLocaleString()} decisions · click any row to open in Decision Audit` : 'Loading…'}
+              {txnData ? `${txnData.total.toLocaleString()} decisions` : 'Loading…'}
             </p>
           </div>
           {txnsLoading && <Spinner size={14} />}
@@ -596,7 +877,10 @@ function SrArmEditor({ label, splitPct, config, onChange }: SrArmEditorProps) {
 
       <div className="space-y-2.5">
         <div>
-          <label className="block text-[11px] text-slate-500 mb-1">Hedging % (explore-exploit)</label>
+          <label className="mb-1 flex items-center gap-1 text-[11px] text-slate-500">
+            Hedging % (explore-exploit)
+            <InfoHint text="Share of traffic sent to non-top gateways to keep their scores fresh." />
+          </label>
           <input
             type="number" min={0} max={100} step={1}
             value={config.hedgingPercent ?? ''}
@@ -604,11 +888,13 @@ function SrArmEditor({ label, splitPct, config, onChange }: SrArmEditorProps) {
             onChange={e => onChange(c => ({ ...c, hedgingPercent: e.target.value === '' ? null : Number(e.target.value) }))}
             className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
           />
-          <p className="text-[10px] text-slate-400 mt-0.5">Share of traffic sent to non-top gateways to keep scores fresh</p>
         </div>
 
         <div>
-          <label className="block text-[11px] text-slate-500 mb-1">Elimination threshold (0–1)</label>
+          <label className="mb-1 flex items-center gap-1 text-[11px] text-slate-500">
+            Elimination threshold (0–1)
+            <InfoHint text="SR score (0–1) below which a gateway is dropped from routing." />
+          </label>
           <input
             type="number" min={0} max={1} step={0.01}
             value={config.eliminationThreshold ?? ''}
@@ -616,7 +902,6 @@ function SrArmEditor({ label, splitPct, config, onChange }: SrArmEditorProps) {
             onChange={e => onChange(c => ({ ...c, eliminationThreshold: e.target.value === '' ? null : Number(e.target.value) }))}
             className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
           />
-          <p className="text-[10px] text-slate-400 mt-0.5">SR score (0–1) below which a gateway is dropped from routing</p>
         </div>
       </div>
     </div>
@@ -643,25 +928,22 @@ function CreateForm({
   form, setForm, eligibleAlgorithms, saving, error, success, createdId,
   merchantId, isEditing, onCreate, onActivateCreated,
 }: CreateFormProps) {
-  const isTuningMode = form.experimentType === 'sr_config_tuning'
+  // Only offer the Multi-Objective SR strategies when the merchant has the backing features on:
+  //  - MO manual needs cost-aware (multi-objective) routing enabled
+  //  - MO autopilot additionally needs autopilot self-tuning (auto-calibration) enabled, otherwise
+  //    there are no autopilot-tuned values and it would behave identically to manual.
+  const features = useMerchantFeatures(merchantId || undefined)
+  const moOn = features.isEnabled('multi-objective-routing')
+  const autopilotOn = features.isEnabled('auto-calibration') || features.isEnabled('autopilot')
+  const allowedSrStrategies: SrStrategy[] = [
+    'sr_auth',
+    ...(moOn ? (['sr_mo_manual'] as SrStrategy[]) : []),
+    ...(moOn && autopilotOn ? (['sr_mo_autopilot'] as SrStrategy[]) : []),
+  ]
 
-  const { data: srConfig } = useSWR(
-    isTuningMode && merchantId ? ['rule-sr-ab', merchantId] : null,
-    () => apiPost<{ config: { data: { defaultHedgingPercent: number | null } } }>(
-      '/rule/get', { merchant_id: merchantId, algorithm: 'successRate' }
-    ),
-    { shouldRetryOnError: false, revalidateOnFocus: false }
-  )
-  const { data: elimConfig } = useSWR(
-    isTuningMode && merchantId ? ['rule-elim-ab', merchantId] : null,
-    () => apiPost<{ config: { data: { threshold: number } } }>(
-      '/rule/get', { merchant_id: merchantId, algorithm: 'elimination' }
-    ),
-    { shouldRetryOnError: false, revalidateOnFocus: false }
-  )
-
-  const liveHedging = srConfig?.config?.data?.defaultHedgingPercent ?? null
-  const liveElimination = elimConfig?.config?.data?.threshold ?? null
+  // Shared across both experiment types: SR config tuning needs it for the control panel below,
+  // and any SR-based arm in Algorithm comparison (auth / MO manual / MO autopilot) shows it too.
+  const { liveHedging, liveElimination, liveBucketSize, autopilotSegmentCount } = useLiveSrConfig(merchantId || undefined)
 
   const tabClass = (type: ABTestExperimentType) =>
     `px-3 py-1.5 text-xs font-medium rounded-md border transition-colors ${
@@ -674,7 +956,6 @@ function CreateForm({
     <Card>
       <CardHeader>
         <h2 className="text-sm font-semibold text-slate-800 dark:text-white">{isEditing ? 'Edit Experiment' : 'New Experiment'}</h2>
-        <p className="text-xs text-slate-500 mt-0.5">Define the arms and safety parameters for this experiment.</p>
       </CardHeader>
       <CardBody className="space-y-5">
 
@@ -688,12 +969,6 @@ function CreateForm({
             <button type="button" className={tabClass('sr_config_tuning')} onClick={() => setForm(f => ({ ...f, experimentType: 'sr_config_tuning' }))}>
               <Sliders size={12} className="inline mr-1" />SR config tuning
             </button>
-            <button type="button" className={tabClass('cost_on_off')} onClick={() => setForm(f => ({ ...f, experimentType: 'cost_on_off' }))}>
-              <Coins size={12} className="inline mr-1" />Turn cost on
-            </button>
-            <button type="button" className={tabClass('autopilot_value')} onClick={() => setForm(f => ({ ...f, experimentType: 'autopilot_value' }))}>
-              <Rocket size={12} className="inline mr-1" />Autopilot value
-            </button>
           </div>
           <p className="mt-1.5 text-[11px] text-slate-400">
             {EXPERIMENT_TYPE_HELP[form.experimentType]}
@@ -702,7 +977,7 @@ function CreateForm({
 
         {/* Name */}
         <div>
-          <label className="block text-xs text-slate-500 mb-1">Experiment name *</label>
+          <FieldLabel required>Experiment name</FieldLabel>
           <input
             className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
             placeholder={form.experimentType === 'sr_config_tuning' ? 'e.g. Hedging 10% vs 5%' : 'e.g. Stripe vs Checkout.com'}
@@ -714,40 +989,26 @@ function CreateForm({
         {/* ── Algorithm comparison arms ── */}
         {form.experimentType === 'algorithm_comparison' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs text-slate-500 mb-1">Control arm *</label>
-              <p className="text-[11px] text-slate-400 mb-1.5">Your current strategy — the baseline.</p>
-              <select
-                className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-                value={form.controlAlgorithmId}
-                onChange={e => setForm(f => ({ ...f, controlAlgorithmId: e.target.value }))}
-              >
-                <option value="">Select algorithm</option>
-                <option value="sr_routing" disabled={form.variantAlgorithmId === 'sr_routing'}>SR Routing (Dynamic)</option>
-                {eligibleAlgorithms.map(a => (
-                  <option key={a.id} value={a.id} disabled={a.id === form.variantAlgorithmId}>
-                    {a.name} ({(a.algorithm_data || a.algorithm)?.type})
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs text-slate-500 mb-1">Variant arm *</label>
-              <p className="text-[11px] text-slate-400 mb-1.5">The new strategy you want to test.</p>
-              <select
-                className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-                value={form.variantAlgorithmId}
-                onChange={e => setForm(f => ({ ...f, variantAlgorithmId: e.target.value }))}
-              >
-                <option value="">Select algorithm</option>
-                <option value="sr_routing" disabled={form.controlAlgorithmId === 'sr_routing'}>SR Routing (Dynamic)</option>
-                {eligibleAlgorithms.map(a => (
-                  <option key={a.id} value={a.id} disabled={a.id === form.controlAlgorithmId}>
-                    {a.name} ({(a.algorithm_data || a.algorithm)?.type})
-                  </option>
-                ))}
-              </select>
-            </div>
+            <ArmSelector
+              label="Control arm"
+              help="Your current strategy — the baseline."
+              algorithms={eligibleAlgorithms}
+              value={form.controlAlgorithmId}
+              excludeId={form.variantAlgorithmId}
+              allowedSrStrategies={allowedSrStrategies}
+              liveSrConfig={{ hedging: liveHedging, elimination: liveElimination, bucketSize: liveBucketSize, autopilotSegmentCount }}
+              onChange={id => setForm(f => ({ ...f, controlAlgorithmId: id }))}
+            />
+            <ArmSelector
+              label="Variant arm"
+              help="The new strategy you want to test."
+              algorithms={eligibleAlgorithms}
+              value={form.variantAlgorithmId}
+              excludeId={form.controlAlgorithmId}
+              allowedSrStrategies={allowedSrStrategies}
+              liveSrConfig={{ hedging: liveHedging, elimination: liveElimination, bucketSize: liveBucketSize, autopilotSegmentCount }}
+              onChange={id => setForm(f => ({ ...f, variantAlgorithmId: id }))}
+            />
           </div>
         )}
 
@@ -788,67 +1049,11 @@ function CreateForm({
           </div>
         )}
 
-        {/* ── Turn cost on arms ── */}
-        {form.experimentType === 'cost_on_off' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div className="rounded-xl border border-slate-200 dark:border-[#222226] bg-slate-50/50 dark:bg-[#0c0c10] px-4 py-4 space-y-2">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                Control ({100 - form.variantSplitPct}%) — cost off
-              </p>
-              <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Auth-only SR routing</p>
-              <p className="text-[11px] text-slate-400">Routes purely on success rate — multi-objective disabled.</p>
-            </div>
-            <div className="rounded-xl border border-brand-200 dark:border-brand-800/50 bg-brand-50/30 dark:bg-brand-900/10 px-4 py-4 space-y-3">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-500">
-                Variant ({form.variantSplitPct}%) — cost on
-              </p>
-              <div>
-                <label className="block text-[11px] text-slate-500 mb-1">Variant margin (fraction of ticket, 0–1)</label>
-                <input
-                  type="number" min={0.01} max={1} step={0.01}
-                  value={form.variantMargin ?? ''}
-                  placeholder="e.g. 0.15"
-                  onChange={e => setForm(f => ({ ...f, variantMargin: e.target.value === '' ? null : Number(e.target.value) }))}
-                  className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-                />
-                <p className="text-[10px] text-slate-400 mt-0.5">Lower margin lets cheaper PSPs win more often. The default 1.0 is effectively auth-only, so set a realistic business margin.</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ── Autopilot value arms ── */}
-        {form.experimentType === 'autopilot_value' && (
-          <div className="space-y-3">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="rounded-xl border border-slate-200 dark:border-[#222226] bg-slate-50/50 dark:bg-[#0c0c10] px-4 py-4 space-y-2">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                  Control ({100 - form.variantSplitPct}%) — manual
-                </p>
-                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Cost-aware SR, manual config</p>
-                <p className="text-[11px] text-slate-400">Ignores autopilot’s auto-tuned bucket/hedging — uses your manual/default values.</p>
-              </div>
-              <div className="rounded-xl border border-brand-200 dark:border-brand-800/50 bg-brand-50/30 dark:bg-brand-900/10 px-4 py-4 space-y-2">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-500">
-                  Variant ({form.variantSplitPct}%) — autopilot
-                </p>
-                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Cost-aware SR, autopilot config</p>
-                <p className="text-[11px] text-slate-400">Uses autopilot’s live auto-calibrated bucket size and discovery share.</p>
-              </div>
-            </div>
-            <div className="flex items-start gap-2 rounded-lg border border-amber-200 dark:border-amber-800/50 bg-amber-50 dark:bg-amber-900/15 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-300">
-              <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-              <span>Enable <span className="font-medium">Autopilot → Self-tuning</span> for this merchant first, otherwise there are no autopilot-tuned values and both arms behave identically.</span>
-            </div>
-          </div>
-        )}
-
         {/* Traffic split */}
         <div>
-          <label className="block text-xs text-slate-500 mb-1">
-            Variant traffic — <span className="font-semibold text-slate-700 dark:text-slate-300">{form.variantSplitPct}% variant / {100 - form.variantSplitPct}% control</span>
-          </label>
-          <p className="text-[11px] text-slate-400 mb-2">Keep this small (5–15%) to limit exposure.</p>
+          <FieldLabel hint="Keep this small (5–15%) to limit exposure while the variant is unproven.">
+            Variant traffic — <span className="ml-1 font-semibold text-slate-700 dark:text-slate-300">{form.variantSplitPct}% variant / {100 - form.variantSplitPct}% control</span>
+          </FieldLabel>
           <input
             type="range" min={5} max={30} step={1}
             value={form.variantSplitPct}
@@ -860,8 +1065,7 @@ function CreateForm({
 
         {/* Min sample */}
         <div>
-          <label className="block text-xs text-slate-500 mb-1">Minimum sample size</label>
-          <p className="text-[11px] text-slate-400 mb-2">Transactions needed before reporting a significance verdict.</p>
+          <FieldLabel hint="Transactions needed before a significance verdict is reported.">Minimum sample size</FieldLabel>
           <div className="flex items-center gap-2 flex-wrap">
             {SAMPLE_SIZE_PRESETS.map(n => (
               <button
@@ -887,8 +1091,7 @@ function CreateForm({
 
         {/* Guardrail */}
         <div>
-          <label className="block text-xs text-slate-500 mb-1">Safety guardrail (pp)</label>
-          <p className="text-[11px] text-slate-400 mb-2">Flag if variant auth rate drops more than this many percentage points below control.</p>
+          <FieldLabel hint="Flag the experiment if the variant's auth rate falls this many percentage points below control.">Safety guardrail (pp)</FieldLabel>
           <input
             type="number" min={0.5} max={20} step={0.5}
             className="w-28 border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
@@ -929,7 +1132,6 @@ const DEFAULT_FORM: ABTestFormValues = {
   minSampleSize: 5000,
   guardrailThresholdPp: 3,
   variantSrConfig: { ...DEFAULT_VARIANT_SR_CONFIG },
-  variantMargin: 0.15,
 }
 
 export function ABTestingPage() {
@@ -1159,11 +1361,7 @@ export function ABTestingPage() {
                       <p className="text-[11px] text-slate-400 mt-0.5 truncate">
                         {kind === 'sr_config_tuning'
                           ? 'SR config tuning'
-                          : kind === 'cost_on_off'
-                          ? 'Cost on vs off'
-                          : kind === 'autopilot_value'
-                          ? 'Autopilot vs manual'
-                          : `${algorithmName(abData.control_algorithm_id)} → ${algorithmName(abData.variant_algorithm_id)}`
+                          : `${armLabel(abData.control_algorithm_id, abData.control_sr_config, algorithmName)} → ${armLabel(abData.variant_algorithm_id, abData.variant_sr_config, algorithmName)}`
                         }
                       </p>
                     )}
@@ -1182,6 +1380,7 @@ export function ABTestingPage() {
               isActive={activeAbTest?.id === selectedAlgo.id}
               merchantId={merchantId}
               algorithmName={algorithmName}
+              algorithms={allAlgorithms ?? []}
               onActivate={() => handleActivate(selectedAlgo.id)}
               onStop={() => setPendingDeactivateId(selectedAlgo.id)}
               onEdit={() => openEdit(selectedAlgo)}

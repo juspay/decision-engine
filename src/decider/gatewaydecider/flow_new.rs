@@ -215,6 +215,7 @@ pub async fn decider_full_payload_hs_function(
                 mo.and_then(|m| m.cost_saved_bps),
                 mo.and_then(|m| m.chosen.as_ref().and_then(|c| c.cost_bps)),
                 mo.map(|m| m.margin),
+                Some(dreq_.payment_info.amount),
             )
             .await;
         }

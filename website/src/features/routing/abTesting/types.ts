@@ -1,10 +1,19 @@
 export type ABTestExperimentType =
+  // Compare any two routing strategies. The SR strategies (auth / multi-objective manual /
+  // multi-objective autopilot) and rule-based/volume-split configs are all pickable arms here —
+  // this is where auth-vs-cost and manual-vs-autopilot experiments now live.
   | 'algorithm_comparison'
   | 'sr_config_tuning'
-  // Control = multi-objective OFF (auth-only SR) vs Variant = multi-objective ON (cost-aware).
-  | 'cost_on_off'
-  // Control = multi-objective ON with manual SR config vs Variant = ON with autopilot config.
-  | 'autopilot_value'
+
+// Synthetic arm values for the three SR strategies. They all resolve to algorithm_id 'sr_routing'
+// but carry different per-arm overrides (see payload.ts `resolveArm`). Kept distinct in the form so
+// the arm dropdown and the `control !== variant` check can tell them apart.
+export type SrStrategy = 'sr_auth' | 'sr_mo_manual' | 'sr_mo_autopilot'
+export const SR_STRATEGY_LABELS: Record<SrStrategy, string> = {
+  sr_auth: 'SR Routing (auth based)',
+  sr_mo_manual: 'SR Routing (Multi-Objective manual)',
+  sr_mo_autopilot: 'SR Routing (Multi-Objective autopilot)',
+}
 
 export interface SrConfigOverrideForm {
   hedgingPercent: number | null
@@ -26,9 +35,6 @@ export interface ABTestFormValues {
   guardrailThresholdPp: number
   /** Only used in sr_config_tuning mode. Control always uses the live SR config. */
   variantSrConfig: SrConfigOverrideForm
-  /** Variant-arm margin (fraction of ticket, 0–1) for the cost_on_off experiment. Lower margin
-   * lets cost win more often. Null = use the merchant's configured/default margin. */
-  variantMargin: number | null
 }
 
 export interface SrConfigOverridePayload {
