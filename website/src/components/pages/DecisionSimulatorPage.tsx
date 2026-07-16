@@ -3236,26 +3236,24 @@ export function DecisionSimulatorPage() {
               )
             })()}
 
-            {/* Retry sits next to TPS in the advanced group. The invisible spacer matches the
-                SurfaceLabel height so the checkbox row lines up with the TPS input. Editable mid-run
-                (read via smartRetryEnabledRef). */}
-            {showMoreInputs && (
-              <div className="flex flex-col gap-1.5">
-                <span className="block h-4" aria-hidden />
-                <label
-                  className="flex h-[34px] items-center gap-2 cursor-pointer select-none"
-                  title="When on, ~50% of failed transactions are treated as soft declines (GSM retry) and retried on the next eligible processor (alternate PSP)."
-                >
-                  <input
-                    type="checkbox"
-                    checked={smartRetryEnabled}
-                    onChange={e => setSmartRetryEnabled(e.target.checked)}
-                    className="cursor-pointer rounded border-slate-300 dark:border-slate-600"
-                  />
-                  <span className="text-xs font-medium text-slate-600 dark:text-slate-300">Retry Enabled</span>
-                </label>
-              </div>
-            )}
+            {/* Retry is always shown (not behind "More"). The invisible spacer matches the
+                SurfaceLabel height so the checkbox row lines up with the input row of the other
+                controls. Editable mid-run (read via smartRetryEnabledRef). */}
+            <div className="flex flex-col gap-1.5">
+              <span className="block h-4" aria-hidden />
+              <label
+                className="flex h-[34px] items-center gap-2 cursor-pointer select-none"
+                title="When on, ~50% of failed transactions are treated as soft declines (GSM retry) and retried on the next eligible processor (alternate PSP)."
+              >
+                <input
+                  type="checkbox"
+                  checked={smartRetryEnabled}
+                  onChange={e => setSmartRetryEnabled(e.target.checked)}
+                  className="cursor-pointer rounded border-slate-300 dark:border-slate-600"
+                />
+                <span className="text-xs font-medium text-slate-600 dark:text-slate-300">Retry Enabled</span>
+              </label>
+            </div>
 
             {/* {(() => {
               const BMIN = SIMULATION_AMOUNT_BOUND_MIN
@@ -3309,7 +3307,7 @@ export function DecisionSimulatorPage() {
                   size="sm"
                   variant="ghost"
                   onClick={() => setShowMoreInputs(v => !v)}
-                  title="Show or hide the advanced controls (TPS, Add processor, Retry)"
+                  title="Show or hide the advanced controls (TPS, Add processor)"
                 >
                   <SlidersHorizontal size={14} />
                   {showMoreInputs ? 'Less' : 'More'}
