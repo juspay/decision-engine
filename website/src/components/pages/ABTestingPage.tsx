@@ -372,13 +372,11 @@ function LiveSrConfigPanel({ hedging, elimination, bucketSize, autopilotSegmentC
       </div>
       {honorsAutopilot && autopilotFeatureOn && (
         <p className="flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400 pt-1.5 mt-0.5 border-t border-slate-100 dark:border-[#1e2330]">
-          {autopilotSegmentCount > 0
-            ? <>Autopilot active — tuning {autopilotSegmentCount} segment{autopilotSegmentCount === 1 ? '' : 's'}</>
-            : <>Autopilot enabled — using base config, not yet tuned</>}
+          Auto configures the Learning window and Discovery share based on your traffic volume.
           <InfoHint text={
             autopilotSegmentCount > 0
-              ? `Autopilot adjusts hedging % (Discovery share) and bucket size (Learning window) per segment (payment method / network / currency / country) based on your traffic volume — the values above are just the base config, not what every transaction uses.`
-              : `Autopilot will start tuning hedging % and bucket size per segment once enough traffic flows through it. Until then, every transaction uses the base config shown above.`
+              ? `Autopilot is tuning ${autopilotSegmentCount} segment${autopilotSegmentCount === 1 ? '' : 's'} (by payment method / network / currency / country) — hedging % (Discovery share) and bucket size (Learning window) can differ per segment and over time, so the values above are just the base config.`
+              : `Autopilot will start tuning hedging % (Discovery share) and bucket size (Learning window) per segment once enough traffic flows through it. Until then, every transaction uses the base config shown above.`
           } />
         </p>
       )}
