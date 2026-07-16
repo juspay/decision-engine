@@ -160,8 +160,10 @@ function ArmSelector({ label, help, algorithms, value, excludeId, allowedSrStrat
   // The merchant's base SR config (hedging / elimination / bucket size) plus how many segments
   // autopilot is actively tuning — shown when the resolved arm is SR-based. All three SR
   // strategies share the same base config; they differ in whether they honor autopilot's
-  // per-segment overrides on top of it (see `honorsAutopilot` below).
-  liveSrConfig: { hedging: number | null; elimination: number | null; bucketSize: number | null; autopilotSegmentCount: number }
+  // per-segment overrides on top of it (see `honorsAutopilot` below). `autopilotFeatureOn` is
+  // the merchant's actual auto-calibration flag — segment count alone can't distinguish "tuning
+  // right now" from "tuned before the feature was switched off".
+  liveSrConfig: { hedging: number | null; elimination: number | null; bucketSize: number | null; autopilotSegmentCount: number; autopilotFeatureOn: boolean }
   onChange: (id: string) => void
 }) {
   const srOptions = SR_STRATEGIES.filter(s => allowedSrStrategies.includes(s) || value === s)
@@ -232,9 +234,10 @@ function ArmSelector({ label, help, algorithms, value, excludeId, allowedSrStrat
             elimination={liveSrConfig.elimination}
             bucketSize={liveSrConfig.bucketSize}
             autopilotSegmentCount={liveSrConfig.autopilotSegmentCount}
-            // "MO manual" explicitly skips autopilot-tuned segments (see payload.ts); auth and
-            // "MO autopilot" both honor them by default.
-            honorsAutopilot={value !== 'sr_mo_manual'}
+            autopilotFeatureOn={liveSrConfig.autopilotFeatureOn}
+            // Only "MO autopilot" honors autopilot-tuned segments; "auth based" and "MO manual"
+            // both run on the merchant's static/manual config (see resolveArm in payload.ts).
+            honorsAutopilot={value === 'sr_mo_autopilot'}
           />
         </div>
       )}
@@ -339,12 +342,13 @@ function useLiveSrConfig(merchantId: string | undefined) {
 // / `get_sr_v3_bucket_size` in gw_scoring — absent override defaults to true). Only the "MO
 // manual" strategy forces it false; auth and "MO autopilot" both honor autopilot-tuned segments
 // by default, so both need the caveat when any exist.
-function LiveSrConfigPanel({ hedging, elimination, bucketSize, autopilotSegmentCount, honorsAutopilot }: {
+function LiveSrConfigPanel({ hedging, elimination, bucketSize, autopilotSegmentCount, honorsAutopilot, autopilotFeatureOn }: {
   hedging: number | null
   elimination: number | null
   bucketSize: number | null
   autopilotSegmentCount: number
   honorsAutopilot: boolean
+  autopilotFeatureOn: boolean
 }) {
   return (
     <div className="space-y-1.5">
@@ -366,14 +370,22 @@ function LiveSrConfigPanel({ hedging, elimination, bucketSize, autopilotSegmentC
           {bucketSize !== null ? `${bucketSize} requests` : <span className="text-slate-400 italic">Not configured</span>}
         </span>
       </div>
-      {honorsAutopilot && (
+      {honorsAutopilot && autopilotFeatureOn && (
         <p className="flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400 pt-1.5 mt-0.5 border-t border-slate-100 dark:border-[#1e2330]">
-          Auto configures the Learning window and Discovery share based on your traffic volume.
+          {autopilotSegmentCount > 0
+            ? <>Autopilot active — tuning {autopilotSegmentCount} segment{autopilotSegmentCount === 1 ? '' : 's'}</>
+            : <>Autopilot enabled — using base config, not yet tuned</>}
           <InfoHint text={
             autopilotSegmentCount > 0
-              ? `Autopilot is tuning ${autopilotSegmentCount} segment${autopilotSegmentCount === 1 ? '' : 's'} (by payment method / network / currency / country) and over time — the hedging % and bucket size above are just the base config, not what every transaction uses.`
-              : `Autopilot hasn't tuned any segments yet — the hedging % and bucket size above are the base config it starts from.`
+              ? `Autopilot adjusts hedging % (Discovery share) and bucket size (Learning window) per segment (payment method / network / currency / country) based on your traffic volume — the values above are just the base config, not what every transaction uses.`
+              : `Autopilot will start tuning hedging % and bucket size per segment once enough traffic flows through it. Until then, every transaction uses the base config shown above.`
           } />
+        </p>
+      )}
+      {honorsAutopilot && !autopilotFeatureOn && autopilotSegmentCount > 0 && (
+        <p className="flex items-center gap-1 text-[10px] text-slate-400 pt-1.5 mt-0.5 border-t border-slate-100 dark:border-[#1e2330]">
+          Autopilot is off — {autopilotSegmentCount} segment{autopilotSegmentCount === 1 ? '' : 's'} from earlier tuning
+          <InfoHint text={`Autopilot (auto-calibration) is currently disabled for this merchant. ${autopilotSegmentCount} segment${autopilotSegmentCount === 1 ? '' : 's'} still carry values it tuned before being turned off, but nothing is being actively adjusted right now — every transaction uses the base config shown above.`} />
         </p>
       )}
     </div>
@@ -470,6 +482,8 @@ function ExperimentDetailPanel({
   const isTuning = kind === 'sr_config_tuning'
   const costKind = hasCostArm(abData)
   const { liveHedging, liveElimination, liveBucketSize, autopilotSegmentCount } = useLiveSrConfig(merchantId || undefined)
+  const merchantFeatures = useMerchantFeatures(merchantId || undefined)
+  const autopilotFeatureOn = merchantFeatures.isEnabled('auto-calibration') || merchantFeatures.isEnabled('autopilot')
 
   // If the variant carries a margin override, value net EV at it; otherwise the backend default.
   const evalMargin = abData?.variant_sr_config?.margin
@@ -587,6 +601,7 @@ function ExperimentDetailPanel({
                   elimination={liveElimination}
                   bucketSize={liveBucketSize}
                   autopilotSegmentCount={autopilotSegmentCount}
+                  autopilotFeatureOn={autopilotFeatureOn}
                   // Absent override honors autopilot by default (see gw_scoring's `unwrap_or(true)`);
                   // only an explicit `use_autopilot: false` (the "MO manual" strategy) skips it.
                   honorsAutopilot={abData.control_sr_config?.use_autopilot !== false}
@@ -601,6 +616,7 @@ function ExperimentDetailPanel({
                   elimination={liveElimination}
                   bucketSize={liveBucketSize}
                   autopilotSegmentCount={autopilotSegmentCount}
+                  autopilotFeatureOn={autopilotFeatureOn}
                   honorsAutopilot={abData.variant_sr_config?.use_autopilot !== false}
                 />
               : <ArmRuleDetail algorithmId={abData.variant_algorithm_id} algorithms={algorithms} />}
@@ -959,23 +975,25 @@ function CreateForm({
       </CardHeader>
       <CardBody className="space-y-5">
 
-        {/* Experiment type toggle */}
-        <div>
-          <label className="block text-xs text-slate-500 mb-2">Experiment type</label>
-          <div className="flex flex-wrap items-center gap-2">
-            <button type="button" className={tabClass('algorithm_comparison')} onClick={() => setForm(f => ({ ...f, experimentType: 'algorithm_comparison' }))}>
-              Algorithm comparison
-            </button>
-            <button type="button" className={tabClass('sr_config_tuning')} onClick={() => setForm(f => ({ ...f, experimentType: 'sr_config_tuning' }))}>
-              <Sliders size={12} className="inline mr-1" />SR config tuning
-            </button>
+        {/* Experiment type toggle — creation only; the type is fixed once an experiment exists. */}
+        {!isEditing && (
+          <div>
+            <label className="block text-xs text-slate-500 mb-2">Experiment type</label>
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" className={tabClass('algorithm_comparison')} onClick={() => setForm(f => ({ ...f, experimentType: 'algorithm_comparison' }))}>
+                Algorithm comparison
+              </button>
+              <button type="button" className={tabClass('sr_config_tuning')} onClick={() => setForm(f => ({ ...f, experimentType: 'sr_config_tuning' }))}>
+                <Sliders size={12} className="inline mr-1" />SR config tuning
+              </button>
+            </div>
+            <p className="mt-1.5 text-[11px] text-slate-400">
+              {EXPERIMENT_TYPE_HELP[form.experimentType]}
+            </p>
           </div>
-          <p className="mt-1.5 text-[11px] text-slate-400">
-            {EXPERIMENT_TYPE_HELP[form.experimentType]}
-          </p>
-        </div>
+        )}
 
-        {/* Name */}
+        {/* Name — the only field editable on an existing experiment. */}
         <div>
           <FieldLabel required>Experiment name</FieldLabel>
           <input
@@ -984,10 +1002,18 @@ function CreateForm({
             value={form.name}
             onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
           />
+          {isEditing && (
+            <p className="mt-1.5 text-[11px] text-slate-400">
+              Only the name can be changed. To test a different routing setup, create a new experiment.
+            </p>
+          )}
         </div>
 
+        {/* Config fields (arms, split, sample, guardrail) — creation only. Editing an existing
+            experiment must not rebuild its config, so everything below is hidden in edit mode. */}
+
         {/* ── Algorithm comparison arms ── */}
-        {form.experimentType === 'algorithm_comparison' && (
+        {!isEditing && form.experimentType === 'algorithm_comparison' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <ArmSelector
               label="Control arm"
@@ -996,7 +1022,7 @@ function CreateForm({
               value={form.controlAlgorithmId}
               excludeId={form.variantAlgorithmId}
               allowedSrStrategies={allowedSrStrategies}
-              liveSrConfig={{ hedging: liveHedging, elimination: liveElimination, bucketSize: liveBucketSize, autopilotSegmentCount }}
+              liveSrConfig={{ hedging: liveHedging, elimination: liveElimination, bucketSize: liveBucketSize, autopilotSegmentCount, autopilotFeatureOn: autopilotOn }}
               onChange={id => setForm(f => ({ ...f, controlAlgorithmId: id }))}
             />
             <ArmSelector
@@ -1006,14 +1032,14 @@ function CreateForm({
               value={form.variantAlgorithmId}
               excludeId={form.controlAlgorithmId}
               allowedSrStrategies={allowedSrStrategies}
-              liveSrConfig={{ hedging: liveHedging, elimination: liveElimination, bucketSize: liveBucketSize, autopilotSegmentCount }}
+              liveSrConfig={{ hedging: liveHedging, elimination: liveElimination, bucketSize: liveBucketSize, autopilotSegmentCount, autopilotFeatureOn: autopilotOn }}
               onChange={id => setForm(f => ({ ...f, variantAlgorithmId: id }))}
             />
           </div>
         )}
 
         {/* ── SR Config Tuning arms ── */}
-        {form.experimentType === 'sr_config_tuning' && (
+        {!isEditing && form.experimentType === 'sr_config_tuning' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {/* Control — live config, non-editable */}
             <div className="rounded-xl border border-slate-200 dark:border-[#222226] bg-slate-50/50 dark:bg-[#0c0c10] px-4 py-4 space-y-3">
@@ -1050,6 +1076,7 @@ function CreateForm({
         )}
 
         {/* Traffic split */}
+        {!isEditing && (
         <div>
           <FieldLabel hint="Keep this small (5–15%) to limit exposure while the variant is unproven.">
             Variant traffic — <span className="ml-1 font-semibold text-slate-700 dark:text-slate-300">{form.variantSplitPct}% variant / {100 - form.variantSplitPct}% control</span>
@@ -1062,8 +1089,10 @@ function CreateForm({
           />
           <div className="flex justify-between text-[10px] text-slate-400 mt-0.5"><span>5%</span><span>30%</span></div>
         </div>
+        )}
 
         {/* Min sample */}
+        {!isEditing && (
         <div>
           <FieldLabel hint="Transactions needed before a significance verdict is reported.">Minimum sample size</FieldLabel>
           <div className="flex items-center gap-2 flex-wrap">
@@ -1088,8 +1117,10 @@ function CreateForm({
             />
           </div>
         </div>
+        )}
 
         {/* Guardrail */}
+        {!isEditing && (
         <div>
           <FieldLabel hint="Flag the experiment if the variant's auth rate falls this many percentage points below control.">Safety guardrail (pp)</FieldLabel>
           <input
@@ -1099,6 +1130,7 @@ function CreateForm({
             onChange={e => setForm(f => ({ ...f, guardrailThresholdPp: Number(e.target.value) }))}
           />
         </div>
+        )}
 
         <ErrorMessage error={error} />
 
@@ -1202,38 +1234,54 @@ export function ABTestingPage() {
 
   async function handleCreate() {
     if (!merchantId) return
+
+    // Edit = rename only. The routing config (arms, split, sample, guardrail) is never
+    // rebuilt on edit — we send the stored algorithm back untouched — so editing can never
+    // silently change how a running/collected experiment routes. To change the setup, the
+    // user creates a new experiment.
+    if (editingId) {
+      if (!form.name.trim()) { setError('Enter an experiment name'); return }
+      const original = savedAbTests.find(a => a.id === editingId)
+      const originalAlgorithm = original && (original.algorithm_data || original.algorithm)
+      if (!original || !originalAlgorithm) { setError('Could not load the experiment to edit'); return }
+      setSaving(true); setError(null); setSuccess(null)
+      try {
+        await apiPost('/routing/update', {
+          created_by: merchantId,
+          routing_algorithm_id: editingId,
+          name: form.name.trim(),
+          description: original.description ?? '',
+          algorithm: originalAlgorithm,
+        })
+        await mutateAll()
+        setSuccess(`"${form.name.trim()}" updated.`)
+        setSearchParams({ experiment: editingId }, { replace: true })
+        setEditingId(null)
+        setForm({ ...DEFAULT_FORM })
+        setShowCreate(false)
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : 'Failed to update experiment')
+      } finally {
+        setSaving(false)
+      }
+      return
+    }
+
     const validationError = validateABTestForm(form)
     if (validationError) { setError(validationError); return }
     setSaving(true); setError(null); setSuccess(null)
     try {
       const payload = toABTestCreatePayload(form, merchantId)
-      if (editingId) {
-        // Edit in place — keeps the same id so history/links stay valid.
-        await apiPost('/routing/update', {
-          created_by: merchantId,
-          routing_algorithm_id: editingId,
-          name: payload.name,
-          description: payload.description,
-          algorithm: payload.algorithm,
-        })
-        await mutateAll()
-        setSuccess(`"${form.name}" updated.`)
-        setSearchParams({ experiment: editingId }, { replace: true })
-        setEditingId(null)
-        setForm({ ...DEFAULT_FORM })
-        setShowCreate(false)
-      } else {
-        const result = await apiPost<RoutingAlgorithm>('/routing/create', payload)
-        const id = result.rule_id || result.id
-        setCreatedId(id)
-        setSuccess(`"${form.name}" created.`)
-        setForm({ ...DEFAULT_FORM })
-        await mutateAll()
-        setSearchParams({ experiment: id }, { replace: true })
-        setShowCreate(false)
-      }
+      const result = await apiPost<RoutingAlgorithm>('/routing/create', payload)
+      const id = result.rule_id || result.id
+      setCreatedId(id)
+      setSuccess(`"${form.name}" created.`)
+      setForm({ ...DEFAULT_FORM })
+      await mutateAll()
+      setSearchParams({ experiment: id }, { replace: true })
+      setShowCreate(false)
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : editingId ? 'Failed to update experiment' : 'Failed to create experiment')
+      setError(e instanceof Error ? e.message : 'Failed to create experiment')
     } finally {
       setSaving(false)
     }
