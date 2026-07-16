@@ -381,7 +381,17 @@ async fn process_sample(
 ) {
     let download_result = fetch_sample_from_s3(&bucket, &key, region.as_deref(), &path).await;
     let result = match download_result {
-        Ok(()) => run_ingest(&job_id, &path, &clickhouse, &connector, &account, &merchant_id).await,
+        Ok(()) => {
+            run_ingest(
+                &job_id,
+                &path,
+                &clickhouse,
+                &connector,
+                &account,
+                &merchant_id,
+            )
+            .await
+        }
         Err(e) => Err(e),
     };
 
@@ -426,7 +436,9 @@ async fn fetch_sample_from_s3(
         .key(key)
         .send()
         .await
-        .map_err(|e| IngestError::Download(format!("s3 get_object s3://{bucket}/{key} failed: {e}")))?;
+        .map_err(|e| {
+            IngestError::Download(format!("s3 get_object s3://{bucket}/{key} failed: {e}"))
+        })?;
 
     let mut file = tokio::fs::File::create(path).await.map_err(|e| {
         IngestError::Download(format!("could not open temp file {path:?} for sample: {e}"))
@@ -434,18 +446,21 @@ async fn fetch_sample_from_s3(
 
     let mut total: usize = 0;
     while let Some(chunk) = output.body.next().await {
-        let chunk = chunk.map_err(|e| IngestError::Download(format!("s3 body stream error: {e}")))?;
+        let chunk =
+            chunk.map_err(|e| IngestError::Download(format!("s3 body stream error: {e}")))?;
         total = total.saturating_add(chunk.len());
         if total > MAX_UPLOAD_BYTES {
             return Err(IngestError::Download(format!(
                 "sample exceeds {MAX_UPLOAD_BYTES} byte limit"
             )));
         }
-        file.write_all(&chunk).await.map_err(|e| {
-            IngestError::Download(format!("temp file write failed: {e}"))
-        })?;
+        file.write_all(&chunk)
+            .await
+            .map_err(|e| IngestError::Download(format!("temp file write failed: {e}")))?;
     }
-    file.flush().await.map_err(|e| IngestError::Download(format!("temp flush failed: {e}")))?;
+    file.flush()
+        .await
+        .map_err(|e| IngestError::Download(format!("temp flush failed: {e}")))?;
 
     if total == 0 {
         return Err(IngestError::Download("empty sample object".to_string()));
