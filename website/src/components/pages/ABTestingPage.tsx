@@ -53,11 +53,12 @@ function KindBadge({ kind }: { kind: ABTestExperimentType }) {
   return null
 }
 
-// Display label for an arm (algorithm_id + sr_config) — resolves the three SR strategies.
+// Display label for an arm (algorithm_id + sr_config) — resolves the four SR strategies
+// (cost-awareness × autopilot).
 function armLabel(id: string, config: SrConfigOverride | undefined, algorithmName: (id: string) => string): string {
   if (id === 'sr_routing') {
     if (config?.enable_multi_objective === true) return config.use_autopilot === true ? 'SR Routing (MO autopilot)' : 'SR Routing (MO manual)'
-    return 'SR Routing (auth based)'
+    return config?.use_autopilot === true ? 'SR Routing (auth based autopilot)' : 'SR Routing (auth based)'
   }
   return algorithmName(id)
 }
@@ -144,10 +145,10 @@ const SR_STRATEGIES = Object.keys(SR_STRATEGY_LABELS) as (keyof typeof SR_STRATE
 const isSrStrategy = (v: string): boolean => (SR_STRATEGIES as string[]).includes(v)
 
 // Cascading arm picker for Algorithm comparison. Level 1 picks the strategy: an SR strategy
-// (auth / multi-objective manual / multi-objective autopilot) resolves directly to an arm; a saved
-// config type (Rule-based / Volume split / …) shows a 2nd dropdown when it has more than one config
-// (a single-config type is auto-selected). `value` is the resolved arm form value:
-// '' | 'sr_auth' | 'sr_mo_manual' | 'sr_mo_autopilot' | <algorithmId>.
+// (auth / auth+autopilot / multi-objective manual / multi-objective autopilot) resolves directly to
+// an arm; a saved config type (Rule-based / Volume split / …) shows a 2nd dropdown when it has more
+// than one config (a single-config type is auto-selected). `value` is the resolved arm form value:
+// '' | 'sr_auth' | 'sr_auth_autopilot' | 'sr_mo_manual' | 'sr_mo_autopilot' | <algorithmId>.
 function ArmSelector({ label, help, algorithms, value, excludeId, allowedSrStrategies, liveSrConfig, onChange }: {
   label: string
   help: string
@@ -235,9 +236,9 @@ function ArmSelector({ label, help, algorithms, value, excludeId, allowedSrStrat
             bucketSize={liveSrConfig.bucketSize}
             autopilotSegmentCount={liveSrConfig.autopilotSegmentCount}
             autopilotFeatureOn={liveSrConfig.autopilotFeatureOn}
-            // Only "MO autopilot" honors autopilot-tuned segments; "auth based" and "MO manual"
-            // both run on the merchant's static/manual config (see resolveArm in payload.ts).
-            honorsAutopilot={value === 'sr_mo_autopilot'}
+            // The two autopilot strategies honor autopilot-tuned segments; "auth based" and
+            // "MO manual" run on the merchant's static/manual config (see resolveArm in payload.ts).
+            honorsAutopilot={value === 'sr_mo_autopilot' || value === 'sr_auth_autopilot'}
           />
         </div>
       )}
@@ -600,8 +601,9 @@ function ExperimentDetailPanel({
                   bucketSize={liveBucketSize}
                   autopilotSegmentCount={autopilotSegmentCount}
                   autopilotFeatureOn={autopilotFeatureOn}
-                  // Absent override honors autopilot by default (see gw_scoring's `unwrap_or(true)`);
-                  // only an explicit `use_autopilot: false` (the "MO manual" strategy) skips it.
+                  // Honors autopilot unless the arm explicitly set `use_autopilot: false` (the
+                  // "auth based" and "MO manual" strategies); absent → honors it (gw_scoring's
+                  // `unwrap_or(true)`).
                   honorsAutopilot={abData.control_sr_config?.use_autopilot !== false}
                 />
               : <ArmRuleDetail algorithmId={abData.control_algorithm_id} algorithms={algorithms} />}
@@ -951,6 +953,8 @@ function CreateForm({
   const autopilotOn = features.isEnabled('auto-calibration') || features.isEnabled('autopilot')
   const allowedSrStrategies: SrStrategy[] = [
     'sr_auth',
+    // Auth + autopilot needs only the autopilot feature (no cost-awareness required).
+    ...(autopilotOn ? (['sr_auth_autopilot'] as SrStrategy[]) : []),
     ...(moOn ? (['sr_mo_manual'] as SrStrategy[]) : []),
     ...(moOn && autopilotOn ? (['sr_mo_autopilot'] as SrStrategy[]) : []),
   ]

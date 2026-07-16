@@ -5,12 +5,14 @@ export type ABTestExperimentType =
   | 'algorithm_comparison'
   | 'sr_config_tuning'
 
-// Synthetic arm values for the three SR strategies. They all resolve to algorithm_id 'sr_routing'
-// but carry different per-arm overrides (see payload.ts `resolveArm`). Kept distinct in the form so
-// the arm dropdown and the `control !== variant` check can tell them apart.
-export type SrStrategy = 'sr_auth' | 'sr_mo_manual' | 'sr_mo_autopilot'
+// Synthetic arm values for the SR strategies. They all resolve to algorithm_id 'sr_routing' but
+// carry different per-arm overrides (see payload.ts `resolveArm`). Two independent dials —
+// cost-awareness (multi-objective) and autopilot self-tuning — give four combinations. Kept
+// distinct in the form so the arm dropdown and the `control !== variant` check can tell them apart.
+export type SrStrategy = 'sr_auth' | 'sr_auth_autopilot' | 'sr_mo_manual' | 'sr_mo_autopilot'
 export const SR_STRATEGY_LABELS: Record<SrStrategy, string> = {
   sr_auth: 'SR Routing (auth based)',
+  sr_auth_autopilot: 'SR Routing (auth based autopilot)',
   sr_mo_manual: 'SR Routing (Multi-Objective manual)',
   sr_mo_autopilot: 'SR Routing (Multi-Objective autopilot)',
 }

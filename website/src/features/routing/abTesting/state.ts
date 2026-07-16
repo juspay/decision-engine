@@ -16,7 +16,8 @@ function inferExperimentType(abData: ABTestAlgorithmData): ABTestExperimentType 
 function armFormValue(id: string, config?: SrConfigOverride): string {
   if (id !== 'sr_routing') return id
   if (config?.enable_multi_objective === true) return config.use_autopilot === true ? 'sr_mo_autopilot' : 'sr_mo_manual'
-  return 'sr_auth' // enable_multi_objective false or absent → auth-based SR
+  // Auth-based (cost off / absent) — split by autopilot: use_autopilot true → auth+autopilot.
+  return config?.use_autopilot === true ? 'sr_auth_autopilot' : 'sr_auth'
 }
 
 export function toABTestFormValues(algorithm: RoutingAlgorithm): ABTestFormValues | null {

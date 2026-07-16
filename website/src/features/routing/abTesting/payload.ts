@@ -14,15 +14,17 @@ const DESCRIPTIONS: Record<ABTestFormValues['experimentType'], (pct: number) => 
 
 // Resolve a form arm value into the stored (algorithm_id, sr_config) pair. The three SR strategies
 // all map to 'sr_routing' with a distinguishing per-arm override; a real algorithm id maps to itself.
-//  - sr_auth        → auth-only SR on the merchant's MANUAL config (multi-objective off AND
-//                     autopilot off, so it's a true static auth baseline). An autopilot-honoring
-//                     auth variant would be a separate strategy if we ever add one in a/b testing.
-//  - sr_mo_manual   → cost-aware SR using the merchant's manual config
-//  - sr_mo_autopilot→ cost-aware SR using autopilot's auto-tuned config
+// Two independent dials — cost-awareness (enable_multi_objective) and autopilot (use_autopilot):
+//  - sr_auth          → auth-only, manual config (cost off, autopilot off) — static auth baseline
+//  - sr_auth_autopilot→ auth-only, autopilot on (cost off, but hedging/bucket self-tuned)
+//  - sr_mo_manual     → cost-aware, manual config
+//  - sr_mo_autopilot  → cost-aware, autopilot on
 function resolveArm(value: string): { id: string; config?: SrConfigOverridePayload } {
   switch (value) {
     case 'sr_auth':
       return { id: 'sr_routing', config: { enable_multi_objective: false, use_autopilot: false } }
+    case 'sr_auth_autopilot':
+      return { id: 'sr_routing', config: { enable_multi_objective: false, use_autopilot: true } }
     case 'sr_mo_manual':
       return { id: 'sr_routing', config: { enable_multi_objective: true, use_autopilot: false } }
     case 'sr_mo_autopilot':
