@@ -308,6 +308,31 @@ const DEFAULT_DEBIT_FORM: DebitRoutingFormState = {
   card_type: 'debit',
 }
 
+// The baseline pair of processors the cost comparison always shows, even before anything is
+// ingested, so there's always at least two connectors to compare. Ingested and user-added
+// connectors are unioned on top of this (see the eligible-gateways seeding effect).
+const DEFAULT_ELIGIBLE_GATEWAYS = DEFAULT_FORM.eligible_gateways
+  .split(',')
+  .map(s => s.trim().toLowerCase())
+  .filter(Boolean)
+
+// Merge connector lists into one deduped, order-preserving set (normalized lowercase/trimmed).
+// Used to build the eligible-gateway set from default + ingested + manually-added connectors.
+function unionConnectors(...lists: string[][]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const list of lists) {
+    for (const raw of list) {
+      const c = raw.trim().toLowerCase()
+      if (c && !seen.has(c)) {
+        seen.add(c)
+        out.push(c)
+      }
+    }
+  }
+  return out
+}
+
 // Auth-rate simulation runs a fixed batch — no user input; it starts on Run
 // and stops at this many transactions.
 const SIMULATION_TOTAL_PAYMENTS = '5000'
@@ -992,9 +1017,25 @@ export function DecisionSimulatorPage() {
   // Per-column filters for the Transaction Log table.
   const [txFilters, setTxFilters] = useState<Record<string, string>>({})
   const [smartRetryEnabled, setSmartRetryEnabled] = useState(initialState.smartRetryEnabled)
+  // The batch run loop closes over this at start, so mirror it into a ref (like formRef /
+  // gatewaySimConfigsRef) and read that live — toggling Retry mid-run then takes effect on the
+  // next transaction instead of only on the next run.
+  const smartRetryEnabledRef = useRef(smartRetryEnabled)
+  useEffect(() => { smartRetryEnabledRef.current = smartRetryEnabled }, [smartRetryEnabled])
   const [isHardRefreshing, setIsHardRefreshing] = useState(false)
   // Confirmation popup guard for the destructive hard refresh.
   const [hardRefreshConfirmOpen, setHardRefreshConfirmOpen] = useState(false)
+  // Connectors the user manually added to the comparison via the "+" control. Unioned onto the
+  // default pair + ingested set in the seeding effect below, so a third (or fourth) processor
+  // gets its own SR slider alongside the ingested ones.
+  const [extraConnectors, setExtraConnectors] = useState<string[]>([])
+  // Open state + draft input for the "add connector" modal.
+  const [addConnectorOpen, setAddConnectorOpen] = useState(false)
+  const [newConnectorName, setNewConnectorName] = useState('')
+  const [addConnectorError, setAddConnectorError] = useState<string | null>(null)
+  // Collapses the advanced batch controls (TPS, Add processor, Retry) behind a "More" toggle so the
+  // default control bar stays uncluttered.
+  const [showMoreInputs, setShowMoreInputs] = useState(false)
   // Multi-objective card scenario: 'ALL' rotates the 8 variants round-robin (mixes dimensions
   // on one chart); a numeric index pins every txn to a single scenario so the SR Trend shows
   // one clean per-segment bucket instead of an interleaved sawtooth. The run loop reads the
@@ -1008,12 +1049,8 @@ export function DecisionSimulatorPage() {
   const [moCurrency, setMoCurrency] = useState<string>(MULTI_OBJECTIVE_CURRENCY)
   // Acceptance channel sent on each multi-objective transaction. Drives the in-house category
   // predictor (ecom vs pos resolves the online/in-person interchange split). VGS-collected cards
-  // are ecommerce, so that's the default.
-  const [moChannel, setMoChannel] = useState<'ecom' | 'pos'>('ecom')
-  // Read live in the run loop (see formRef) so switching the channel while paused
-  // takes effect on resume instead of only after a full stop/restart.
-  const moChannelRef = useRef(moChannel)
-  useEffect(() => { moChannelRef.current = moChannel }, [moChannel])
+  // are ecommerce, so this is fixed to 'ecom'.
+  const moChannel: 'ecom' | 'pos' = 'ecom'
   const [error, setError] = useState<string | null>(null)
   const txLogRef = useRef<HTMLDivElement>(null)
 
@@ -1304,21 +1341,22 @@ export function DecisionSimulatorPage() {
     })
   }, [form.ranking_algorithm, paymentMethodTypeOptions, cardBrandOptions, moCurrency])
 
-  // Cost mode only: in the multi-objective (economic-value) sim, drive the eligible connectors from
-  // the ones we've actually learned a cost model for, so the EV ranking is scored on real fitted
-  // costs rather than the static stripe+adyen default (which would rank stripe on fictional costs
-  // and omit an ingested connector like braintree). Falls back to the default when nothing is
-  // ingested yet. SR-based mode keeps the stripe+adyen default — the field is shared, so we reset it
-  // there. There is no manual editor for this field, so owning it here clobbers nothing; we stay out
-  // of the way of an in-flight run.
+  // Cost mode: drive the eligible connectors from the default pair *unioned* with the ones we've
+  // learned a cost model for (so an ingested connector like Adyen doesn't collapse the comparison
+  // to a single processor — the default pair is always kept for a side-by-side). Ingested connectors
+  // are scored on their real fitted costs; the default ones fall back to seed costs. SR-based mode
+  // just uses the default pair. Either way we also union in any connectors the user added via the
+  // "+" control. There is no manual text editor for this field, so owning it here clobbers nothing;
+  // we stay out of the way of an in-flight run.
   useEffect(() => {
     if (isSimulating) return
-    const target =
-      form.ranking_algorithm === 'SR_MULTI_OBJECTIVE' && ingestedConnectors.length > 0
-        ? ingestedConnectors.join(', ')
-        : DEFAULT_FORM.eligible_gateways
+    const merged =
+      form.ranking_algorithm === 'SR_MULTI_OBJECTIVE'
+        ? unionConnectors(DEFAULT_ELIGIBLE_GATEWAYS, ingestedConnectors, extraConnectors)
+        : unionConnectors(DEFAULT_ELIGIBLE_GATEWAYS, extraConnectors)
+    const target = merged.join(', ')
     setForm(prev => (prev.eligible_gateways === target ? prev : { ...prev, eligible_gateways: target }))
-  }, [form.ranking_algorithm, ingestedConnectors, isSimulating])
+  }, [form.ranking_algorithm, ingestedConnectors, extraConnectors, isSimulating])
 
   useEffect(() => {
     if (!selectedAuditPaymentId && !selectedPreviewPaymentId && !setupPrompt) return
@@ -1570,6 +1608,38 @@ export function DecisionSimulatorPage() {
   function clampSuccessRate(value: number): number {
     if (!Number.isFinite(value)) return 0
     return Math.round(Math.max(0, Math.min(100, value)))
+  }
+
+  function openAddConnector() {
+    setNewConnectorName('')
+    setAddConnectorError(null)
+    setAddConnectorOpen(true)
+  }
+
+  // Validate the modal input and add it to the comparison. The seeding effect unions it into the
+  // eligible-gateway set, so a new SR slider appears for it on the next render.
+  function submitAddConnector() {
+    const name = newConnectorName.trim().toLowerCase()
+    if (!name) {
+      setAddConnectorError('Enter a connector name.')
+      return
+    }
+    if (!/^[a-z0-9_-]+$/.test(name)) {
+      setAddConnectorError('Use only letters, numbers, hyphens or underscores.')
+      return
+    }
+    if (eligibleGatewaysParsed.includes(name)) {
+      setAddConnectorError(`${name.charAt(0).toUpperCase() + name.slice(1)} is already in the comparison.`)
+      return
+    }
+    setExtraConnectors(prev => (prev.includes(name) ? prev : [...prev, name]))
+    setAddConnectorOpen(false)
+  }
+
+  // Drop a manually-added connector from the comparison (the "×" on its slider). Only extras are
+  // removable; ingested/default connectors are owned by the seeding effect.
+  function removeExtraConnector(name: string) {
+    setExtraConnectors(prev => prev.filter(c => c !== name))
   }
 
   // Finds a real error code for `connector` that produces the desired GSM decision + penalty.
@@ -1939,9 +2009,9 @@ export function DecisionSimulatorPage() {
 
     const isMultiObjective = form.ranking_algorithm === 'SR_MULTI_OBJECTIVE'
 
-    // Parallel-requests (TPS) lever: how many transactions we fan out per batch. Read
-    // once here so a mid-run slider change can't reshape an in-flight run. 1 reproduces
-    // the original strictly-sequential loop.
+    // Parallel-requests (TPS) lever: how many transactions we keep in flight at once (the worker
+    // pool size below). Read once here so a mid-run slider change can't reshape an in-flight run.
+    // 1 reproduces the original strictly-sequential loop.
     const concurrency = Math.max(1, Math.min(MAX_SIMULATION_TPS, Math.round(simulationConfig.tps) || 1))
 
     // One full transaction (decide → score → optional smart retry). Returns the row to
@@ -1988,7 +2058,7 @@ export function DecisionSimulatorPage() {
           cardType: paymentMethod,
           cardProgram,
           ...(cardIssuerCountry && { cardIssuerCountry }),
-          channel: moChannelRef.current,
+          channel: moChannel,
         },
         eligibleGatewayList: gateways,
         rankingAlgorithm: 'SR_BASED_ROUTING',
@@ -2006,7 +2076,7 @@ export function DecisionSimulatorPage() {
       // alternate processor; the rest are hard declines. Only meaningful when retry is on
       // and the decision actually has a fallback to route to.
       const retryable =
-        smartRetryEnabled &&
+        smartRetryEnabledRef.current &&
         outcome === 'FAILURE' &&
         decideRes.fallback_gateways.length > 0 &&
         Math.random() < SIM_RETRYABLE_FAILURE_SHARE
@@ -2068,72 +2138,79 @@ export function DecisionSimulatorPage() {
     }
 
     try {
-      for (let start = resumeFrom; start < total; start += concurrency) {
-        if (simulationAbortRef.current) break
-        // Idle here while paused (loop stays alive, state preserved); a Stop still
-        // breaks out. The in-flight batch always completes before we pause. Before
-        // idling, flush the completed rows and record `start` as the resume point so
-        // leaving the page (to edit config) and returning can continue from exactly
-        // here — committed results and the resume index stay in lockstep.
-        if (simulationPausedRef.current) {
-          setSimulationResults([...results])
-          markExplorerRunDataUpdated()
-          runProgressRef.current = start
-          while (simulationPausedRef.current && !simulationAbortRef.current) {
-            await new Promise(resolve => setTimeout(resolve, 120))
-          }
-        }
-        if (simulationAbortRef.current) break
+      // Sliding-window worker pool. The old loop fired a batch of `concurrency` txns and awaited
+      // Promise.all — a barrier that blocked on the slowest request in the batch, so the chart
+      // advanced in bursts of `concurrency` points separated by the batch's tail latency (the
+      // hiccups seen at high TPS). Instead keep up to `concurrency` requests in flight at all
+      // times and stream each result the moment it lands: completions (and the chart) flow
+      // smoothly, and one slow request no longer stalls the other in-flight ones.
+      let dispatched = resumeFrom
+      let lastError: unknown = null
 
-        const chunk = Math.min(concurrency, total - start)
-        const isLastChunk = start + chunk >= total
-        // Fire the batch concurrently; settle each task so one bad txn can't sink the
-        // rest, then append rows in index order so the result stream stays sequential.
-        const settled = await Promise.all(
-          Array.from({ length: chunk }, (_, k) =>
-            runTxn(start + k).then(
-              (r): { ok: true; row: SimulationResult } => ({ ok: true, row: r }),
-              (e: unknown): { ok: false; error: unknown } => ({ ok: false, error: e }),
-            ),
-          ),
-        )
-
-        let chunkSucceeded = 0
-        for (const s of settled) {
-          if (s.ok) {
-            results.push(s.row)
-            chunkSucceeded++
-          }
-        }
-
-        if (chunkSucceeded === 0) {
-          // A wholly-failed batch counts as one consecutive failure; bail if the backend
-          // looks down, otherwise back off and retry the next batch.
-          consecutiveErrors++
-          if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-            const firstError = settled.find((s): s is { ok: false; error: unknown } => !s.ok)
-            handleRunError(firstError?.error, 'batch', `Simulation stopped after ${MAX_CONSECUTIVE_ERRORS} consecutive failed batches. Check that the server is running.`)
-            return
-          }
-          await new Promise(resolve => setTimeout(resolve, 1000))
-          continue
-        }
-        consecutiveErrors = 0
-
+      // Commit the accumulated rows + refresh the events feed, throttled so a fast loop can't
+      // spam re-renders (force=true bypasses the throttle for pause/end-of-run flushes).
+      const flushResults = (force: boolean) => {
         const now = Date.now()
-        if (now - lastUIUpdate > 150 || isLastChunk) {
+        if (force || now - lastUIUpdate > 150) {
           setSimulationResults([...results])
           markExplorerRunDataUpdated()
           lastUIUpdate = now
         }
-        // Pull fresh Autopilot events ~4x/sec so new actions surface promptly and
-        // in small batches (one big once-a-second flush buried the highlight on a
-        // fast loop). The append-only accumulator makes frequent refreshes safe;
-        // they're naturally floored by the Kafka→ClickHouse flush cadence.
-        if (now - lastEventsRefresh > 250 || isLastChunk) {
+        if (force || now - lastEventsRefresh > 250) {
           routingEvents.refresh()
           lastEventsRefresh = now
         }
+      }
+
+      const worker = async (): Promise<void> => {
+        while (true) {
+          if (simulationAbortRef.current) return
+          // Idle here while paused — without claiming new work — so the in-flight requests drain
+          // and the resume index stays put; a Stop still breaks out. Flush once on the way in so a
+          // page-leave/return resumes from exactly the committed rows.
+          if (simulationPausedRef.current) {
+            runProgressRef.current = results.length
+            flushResults(true)
+            while (simulationPausedRef.current && !simulationAbortRef.current) {
+              await new Promise(resolve => setTimeout(resolve, 120))
+            }
+            continue
+          }
+
+          const i = dispatched
+          if (i >= total) return
+          dispatched++
+
+          try {
+            const row = await runTxn(i)
+            results.push(row)
+            consecutiveErrors = 0
+          } catch (e) {
+            lastError = e
+            // Repeated failures with no success between them means the backend is down: bail and
+            // signal the other workers. A single failure amid successes just resets the counter.
+            consecutiveErrors++
+            if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+              simulationAbortRef.current = true
+              return
+            }
+            await new Promise(resolve => setTimeout(resolve, 300))
+          }
+
+          // Record the resume point as the committed count and flush on the shared throttle.
+          runProgressRef.current = results.length
+          flushResults(false)
+        }
+      }
+
+      // Fan out `concurrency` workers that each pull the next txn index off `dispatched` until the
+      // run is exhausted (single-threaded, so no two claim the same index).
+      await Promise.all(Array.from({ length: concurrency }, () => worker()))
+
+      // If a worker tripped the error threshold (as opposed to a user Stop), surface the failure.
+      if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+        handleRunError(lastError, 'batch', `Simulation stopped after ${MAX_CONSECUTIVE_ERRORS} consecutive errors. Check that the server is running.`)
+        return
       }
     } finally {
       setSimulationResults([...results])
@@ -2964,6 +3041,47 @@ export function DecisionSimulatorPage() {
         onCancel={() => setHardRefreshConfirmOpen(false)}
       />
 
+      {addConnectorOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-[2px]"
+            onClick={() => setAddConnectorOpen(false)}
+          />
+          <div className="relative w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl outline-none dark:border-[#2a303a] dark:bg-[#0d1118]">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Add a processor</h3>
+            <p className="mt-2 text-sm leading-relaxed text-slate-500 dark:text-[#8a93a6]">
+              Enter a connector name (e.g. <span className="font-medium">braintree</span>,{' '}
+              <span className="font-medium">worldpay</span>). It joins the comparison with its own SR
+              slider — scored on its ingested cost model if it has one, otherwise seed costs.
+            </p>
+            <input
+              autoFocus
+              type="text"
+              value={newConnectorName}
+              placeholder="Connector name"
+              onChange={e => {
+                setNewConnectorName(e.target.value)
+                if (addConnectorError) setAddConnectorError(null)
+              }}
+              onKeyDown={e => {
+                if (e.key === 'Enter') submitAddConnector()
+                else if (e.key === 'Escape') setAddConnectorOpen(false)
+              }}
+              className="mt-4 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100"
+            />
+            {addConnectorError && <p className="mt-2 text-xs text-red-500">{addConnectorError}</p>}
+            <div className="mt-6 flex justify-end gap-2">
+              <Button variant="secondary" size="sm" onClick={() => setAddConnectorOpen(false)}>
+                Cancel
+              </Button>
+              <Button variant="primary" size="sm" onClick={submitAddConnector}>
+                Add processor
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {activeTab === 'rule' && (
         <RuleEvaluationPanel
           merchantId={effectiveMerchantId}
@@ -2993,6 +3111,17 @@ export function DecisionSimulatorPage() {
                   <div className="flex items-center gap-1.5">
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} />
                     <SurfaceLabel>{label}</SurfaceLabel>
+                    {extraConnectors.includes(key) && (
+                      <button
+                        type="button"
+                        onClick={() => removeExtraConnector(key)}
+                        className="ml-auto text-slate-400 transition-colors hover:text-red-500"
+                        title={`Remove ${key} from the comparison`}
+                        aria-label={`Remove ${key}`}
+                      >
+                        <X size={13} />
+                      </button>
+                    )}
                   </div>
                   <div className="relative">
                     <input
@@ -3026,8 +3155,27 @@ export function DecisionSimulatorPage() {
               )
             })}
 
+            {/* Add another processor to the comparison. Its cost is fitted if that connector has an
+                ingested report, otherwise it falls back to seed costs — either way it gets its own
+                SR slider so you can pit a third (or fourth) processor against the rest. Laid out as a
+                labeled control so it aligns with the sliders/selects on the row. Behind the "More"
+                toggle to keep the default bar uncluttered. */}
+            {showMoreInputs && (
+              <div className="flex w-[100px] flex-col gap-1.5">
+                <SurfaceLabel>Processor</SurfaceLabel>
+                <button
+                  type="button"
+                  onClick={openAddConnector}
+                  title="Add another processor to the comparison"
+                  className="flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-500 transition-colors hover:border-brand-400 hover:text-brand-500 dark:border-[#33333a] dark:bg-[#0d0d13] dark:text-[#8a93a6] dark:hover:border-brand-500 dark:hover:text-brand-400"
+                >
+                  <Plus size={14} /> Add
+                </button>
+              </div>
+            )}
+
             {form.ranking_algorithm === 'SR_MULTI_OBJECTIVE' && (
-              <div className="flex w-[220px] flex-col gap-1.5">
+              <div className="flex w-[175px] flex-col gap-1.5">
                 <SurfaceLabel>
                   <span title="Pin every multi-objective transaction to one card scenario so the SR Trend shows a single clean per-segment bucket. 'All scenarios' rotates through the 8 card types (interleaves dimensions on one chart). Editable while paused — the rest of the run continues in the new segment on resume.">Card scenario</span>
                 </SurfaceLabel>
@@ -3063,53 +3211,49 @@ export function DecisionSimulatorPage() {
               </div>
             )}
 
-            {form.ranking_algorithm === 'SR_MULTI_OBJECTIVE' && (
-              <div className="flex w-[130px] flex-col gap-1.5">
-                <SurfaceLabel>
-                  <span title="Acceptance channel. Drives the in-house category predictor: 'ecom' (online / card-not-present, e.g. VGS-collected) vs 'pos' (in-person terminal). This resolves the online-vs-in-person interchange category — the biggest signal for debit.">Channel</span>
-                </SurfaceLabel>
-                <select
-                  value={moChannel}
-                  disabled={isSimulating && !isPaused}
-                  onChange={e => setMoChannel(e.target.value as 'ecom' | 'pos')}
-                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50 disabled:cursor-not-allowed dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100"
-                >
-                  <option value="ecom">ecom (online)</option>
-                  <option value="pos">pos (in-person)</option>
-                </select>
-              </div>
-            )}
-
-            {/* {(() => {
+            {showMoreInputs && (() => {
               const tps = Math.max(1, Math.min(MAX_SIMULATION_TPS, simulationConfig.tps || 1))
-              const fillPct = ((tps - 1) / (MAX_SIMULATION_TPS - 1)) * 100
-              const tpsColor = '#6366f1'
               return (
-                <div className="flex w-[190px] flex-col gap-1.5">
-                  <div className="flex items-center justify-between gap-1.5">
-                    <SurfaceLabel>
-                      <span title="Transactions fired concurrently per batch. Higher = more decide+feedback round-trips per second, so gateway scores move faster. Applies on the next run.">Parallel requests</span>
-                    </SurfaceLabel>
-                    <span className="text-xs font-semibold tabular-nums text-slate-600 dark:text-slate-300">{tps}×</span>
-                  </div>
+                <div className="flex w-[62px] flex-col gap-1.5">
+                  <SurfaceLabel>
+                    <span title={`Transactions kept in flight at once (1–${MAX_SIMULATION_TPS}). Higher = more decide+feedback round-trips per second, so gateway scores move faster. Applies on the next run.`}>TPS</span>
+                  </SurfaceLabel>
                   <input
-                    type="range"
+                    type="number"
                     min={1}
                     max={MAX_SIMULATION_TPS}
+                    step={1}
                     value={tps}
                     disabled={isSimulating}
-                    onChange={e => setSimulationConfig(c => ({ ...c, tps: Number(e.target.value) }))}
-                    className="mt-1 h-1.5 w-full cursor-pointer appearance-none rounded-full outline-none disabled:cursor-not-allowed disabled:opacity-50
-                      [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:bg-[color:var(--thumb)] [&::-webkit-slider-thumb]:shadow [&::-webkit-slider-thumb]:transition-transform [&::-webkit-slider-thumb]:hover:scale-110 [&::-webkit-slider-thumb]:active:scale-95
-                      [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-white [&::-moz-range-thumb]:border-solid [&::-moz-range-thumb]:bg-[color:var(--thumb)] [&::-moz-range-thumb]:shadow"
-                    style={{
-                      '--thumb': tpsColor,
-                      background: `linear-gradient(to right, ${tpsColor} ${fillPct}%, rgba(148,163,184,0.45) ${fillPct}%)`,
-                    } as CSSProperties}
+                    onChange={e => {
+                      const n = Math.round(Number(e.target.value))
+                      const clamped = Number.isFinite(n) ? Math.max(1, Math.min(MAX_SIMULATION_TPS, n)) : 1
+                      setSimulationConfig(c => ({ ...c, tps: clamped }))
+                    }}
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100"
                   />
                 </div>
               )
-            })()} */}
+            })()}
+
+            {/* Retry is always shown (not behind "More"). The invisible spacer matches the
+                SurfaceLabel height so the checkbox row lines up with the input row of the other
+                controls. Editable mid-run (read via smartRetryEnabledRef). */}
+            <div className="flex flex-col gap-1.5">
+              <span className="block h-4" aria-hidden />
+              <label
+                className="flex h-[34px] items-center gap-2 cursor-pointer select-none"
+                title="When on, ~50% of failed transactions are treated as soft declines (GSM retry) and retried on the next eligible processor (alternate PSP)."
+              >
+                <input
+                  type="checkbox"
+                  checked={smartRetryEnabled}
+                  onChange={e => setSmartRetryEnabled(e.target.checked)}
+                  className="cursor-pointer rounded border-slate-300 dark:border-slate-600"
+                />
+                <span className="text-xs font-medium text-slate-600 dark:text-slate-300">Retry Enabled</span>
+              </label>
+            </div>
 
             {/* {(() => {
               const BMIN = SIMULATION_AMOUNT_BOUND_MIN
@@ -3159,19 +3303,15 @@ export function DecisionSimulatorPage() {
             <div className="flex flex-col gap-1.5 lg:ml-auto">
               <span className="block h-4" aria-hidden />
               <div className="flex flex-wrap items-center gap-3">
-                <label
-                  className="flex items-center gap-2 cursor-pointer select-none"
-                  title="When on, ~50% of failed transactions are treated as soft declines (GSM retry) and retried on the next eligible processor (alternate PSP)."
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setShowMoreInputs(v => !v)}
+                  title="Show or hide the advanced controls (TPS, Add processor)"
                 >
-                  <input
-                    type="checkbox"
-                    checked={smartRetryEnabled}
-                    onChange={e => setSmartRetryEnabled(e.target.checked)}
-                    disabled={isSimulating}
-                    className="rounded border-slate-300 dark:border-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
-                  />
-                  <span className="text-xs font-medium text-slate-600 dark:text-slate-300">Retry Enabled</span>
-                </label>
+                  <SlidersHorizontal size={14} />
+                  {showMoreInputs ? 'Less' : 'More'}
+                </Button>
 
                 <Button size="sm" variant="secondary" onClick={resetCurrentTabState}>
           <RefreshCw size={14} />

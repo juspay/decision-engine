@@ -59,9 +59,6 @@ export function ConnectorsPanel({ merchantId }: { merchantId?: string }) {
               <h2 className="mt-2 font-medium text-slate-800 dark:text-white">
                 Fees &amp; overrides per connector
               </h2>
-              <p className="mt-0.5 text-xs text-slate-500 dark:text-[#9ca7ba]">
-                Set a connector-wide fee, or expand one to override its individual segments.
-              </p>
             </div>
           </div>
           {merchantId && addableConnectors.length > 0 && !adding && (
@@ -227,10 +224,6 @@ function ConnectorRow({
 
       {isExpanded && canExpand && (
         <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50/50 p-3 dark:border-[#232833] dark:bg-[#0b1017]">
-          <p className="mb-2 text-xs text-slate-500 dark:text-[#9ca7ba]">
-            Override individual segments for {titleCase(fee.connector)} · {fee.account}. A segment
-            fee beats this connector's blanket fee.
-          </p>
           <ClustersPanel
             merchantId={merchantId}
             editable

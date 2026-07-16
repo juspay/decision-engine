@@ -1,17 +1,21 @@
-import { useMemo, useState } from 'react'
-import { ChevronDown, ChevronUp, Pencil } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Check, ChevronDown, ChevronUp, Pencil, X } from 'lucide-react'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { Spinner } from '../ui/Spinner'
 import {
-  deleteClusterOverride,
   setClusterOverride,
   useCostClusters,
   type ClusterFee,
   type ClustersScope,
 } from '../../hooks/useCostRouting'
-import { inputClass } from './CostRoutingShared'
+
+// Compact numeric input for the inline fee editor. Deliberately not `inputClass` (which is `w-full`
+// and would collapse in the narrow Fee cell, scrolling the value out of view).
+const feeInputClass =
+  'rounded-lg border border-slate-200 bg-white px-2 py-1 text-sm text-right text-slate-900 ' +
+  'focus:border-brand-500 focus:outline-none dark:border-[#232833] dark:bg-[#0b1017] dark:text-white'
 
 const NETWORK_LABELS: Record<string, string> = {
   mc: 'Mastercard',
@@ -48,18 +52,6 @@ function programOf(c: ClusterFee): string {
   if (net && v.startsWith(net)) v = v.slice(net.length)
   if (fund && v.endsWith(fund)) v = v.slice(0, v.length - fund.length)
   return v ? titleCase(v) : '—'
-}
-
-/** Human-readable segment name: "Visa Standard debit · HU · HUF" (+ category). Used in the editor
- * heading, where a single-line label reads better than the split columns. */
-function clusterLabel(c: ClusterFee): string {
-  const program = programOf(c)
-  const card = [networkLabel(c.card_network), program !== '—' ? program : '', c.funding]
-    .filter(Boolean)
-    .join(' ')
-  const parts = [card, c.issuer_country?.toUpperCase(), c.currency?.toUpperCase()].filter(Boolean)
-  const base = parts.join(' · ') || 'Unknown segment'
-  return c.ic_category ? `${base} · ${c.ic_category}` : base
 }
 
 function formatFee(pctBps: number | null, fixed: number | null): string {
@@ -161,85 +153,24 @@ export function ClustersPanel({
             </tr>
           </thead>
           <tbody>
-            {sorted.map((c) => {
-              const isOverride = c.source === 'override'
-              return (
-                <tr
-                  key={c.key}
-                  className="border-b border-slate-100 last:border-0 dark:border-[#1c1c23]"
-                >
-                  <td className="py-2 pr-3 capitalize text-slate-600 dark:text-[#c7cfdd]">
-                    {titleCase(c.connector)}
-                  </td>
-                  <td className="py-2 pr-3 font-medium text-slate-700 dark:text-[#c7cfdd]">
-                    {networkLabel(c.card_network)}
-                  </td>
-                  <td className="py-2 pr-3 text-slate-600 dark:text-[#c7cfdd]">{programOf(c)}</td>
-                  <td className="py-2 pr-3 capitalize text-slate-600 dark:text-[#c7cfdd]">
-                    {c.funding || '—'}
-                  </td>
-                  <td className="py-2 pr-3 tabular-nums text-slate-600 dark:text-[#c7cfdd]">
-                    {c.issuer_country?.toUpperCase() || '—'}
-                  </td>
-                  <td className="py-2 pr-3 tabular-nums text-slate-600 dark:text-[#c7cfdd]">
-                    {c.currency?.toUpperCase() || '—'}
-                  </td>
-                  <td className="py-2 pr-3 text-slate-500 dark:text-[#9ca7ba]">
-                    {c.ic_category || '—'}
-                  </td>
-                  <td className="py-2 pr-3 text-right tabular-nums text-slate-600 dark:text-[#c7cfdd]">
-                    {c.gross_sum > 0 ? formatCompact(c.gross_sum) : '—'}
-                  </td>
-                  <td className="py-2 pr-3 text-right tabular-nums text-slate-500 dark:text-[#9ca7ba]">
-                    {c.n > 0 ? c.n.toLocaleString() : '—'}
-                  </td>
-                  <td className="py-2 pr-3 text-right">
-                    <div className="flex items-center justify-end gap-1.5">
-                      {isOverride && <Badge variant="purple">Override</Badge>}
-                      <span className="tabular-nums font-medium text-slate-800 dark:text-[#c7cfdd]">
-                        {formatFee(c.effective_pct_bps, c.effective_fixed)}
-                      </span>
-                    </div>
-                    {isOverride && c.model_pct_bps != null && (
-                      <span className="block text-[11px] tabular-nums text-slate-400 line-through">
-                        {formatFee(c.model_pct_bps, c.model_fixed)}
-                      </span>
-                    )}
-                  </td>
-                  {editable && (
-                    <td className="py-2 pr-3 text-right">
-                      {editingKey !== c.key && (
-                        <Button variant="ghost" size="sm" onClick={() => setEditingKey(c.key)}>
-                          <Pencil size={13} /> Edit
-                        </Button>
-                      )}
-                    </td>
-                  )}
-                </tr>
-              )
-            })}
+            {sorted.map((c) => (
+              <ClusterRow
+                key={c.key}
+                c={c}
+                editable={editable}
+                merchantId={merchantId}
+                isEditing={editingKey === c.key}
+                onEdit={() => setEditingKey(c.key)}
+                onCancel={() => setEditingKey(null)}
+                onSaved={() => {
+                  setEditingKey(null)
+                  mutate()
+                }}
+              />
+            ))}
           </tbody>
         </table>
       </div>
-
-      {editable &&
-        editingKey &&
-        (() => {
-          const c = clusters.find((x) => x.key === editingKey)
-          if (!c) return null
-          return (
-            <ClusterFeeEditor
-              key={c.key}
-              merchantId={merchantId}
-              cluster={c}
-              onCancel={() => setEditingKey(null)}
-              onSaved={() => {
-                setEditingKey(null)
-                mutate()
-              }}
-            />
-          )
-        })()}
 
       <ErrorMessage
         error={error instanceof Error ? error.message : error ? 'Failed to load segments' : null}
@@ -285,24 +216,49 @@ function SortableHeader({
   )
 }
 
-function ClusterFeeEditor({
+/**
+ * One segment row. In the overrides view it edits inline: clicking Edit swaps this row's Fee cell
+ * for the bps/fixed inputs and its action cell for Save/Cancel/Remove — no detached editor panel.
+ * The identity columns (network/program/country/…) stay put and serve as the row's label.
+ */
+function ClusterRow({
+  c,
+  editable,
   merchantId,
-  cluster,
+  isEditing,
+  onEdit,
   onCancel,
   onSaved,
 }: {
+  c: ClusterFee
+  editable: boolean
   merchantId?: string
-  cluster: ClusterFee
+  isEditing: boolean
+  onEdit: () => void
   onCancel: () => void
   onSaved: () => void
 }) {
-  const [pctBps, setPctBps] = useState(
-    String(cluster.override_pct_bps ?? cluster.model_pct_bps ?? 0),
-  )
-  const [fixed, setFixed] = useState(String(cluster.override_fixed ?? cluster.model_fixed ?? 0))
-  const [busy, setBusy] = useState<'save' | 'clear' | null>(null)
+  const isOverride = c.source === 'override'
+  // Pre-fill with the fee the row actually shows (effective = override, else model, else an inherited
+  // connector fee). Seeding from override/model alone left inherited-fee segments at 0 even though a
+  // real fee was displayed.
+  const seedPctBps = () => String(c.effective_pct_bps ?? c.override_pct_bps ?? c.model_pct_bps ?? 0)
+  const seedFixed = () => String(c.effective_fixed ?? c.override_fixed ?? c.model_fixed ?? 0)
+  const [pctBps, setPctBps] = useState(seedPctBps)
+  const [fixed, setFixed] = useState(seedFixed)
+  const [busy, setBusy] = useState<'save' | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const canClear = cluster.source === 'override'
+
+  // The row stays mounted, so re-seed the inputs from the cluster each time it enters edit mode —
+  // otherwise a reopened editor would show whatever was typed (and not saved) last time. Only keyed
+  // on the open/close transition so a background data refresh can't clobber in-progress typing.
+  useEffect(() => {
+    if (!isEditing) return
+    setPctBps(seedPctBps())
+    setFixed(seedFixed())
+    setError(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEditing])
 
   async function save() {
     if (!merchantId) return
@@ -315,7 +271,7 @@ function ClusterFeeEditor({
     setBusy('save')
     setError(null)
     try {
-      await setClusterOverride(merchantId, cluster.key, { pct_bps: p, fixed: f })
+      await setClusterOverride(merchantId, c.key, { pct_bps: p, fixed: f })
       onSaved()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save fee')
@@ -324,67 +280,112 @@ function ClusterFeeEditor({
     }
   }
 
-  async function clear() {
-    if (!merchantId) return
-    setBusy('clear')
-    setError(null)
-    try {
-      await deleteClusterOverride(merchantId, cluster.key)
-      onSaved()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to clear override')
-    } finally {
-      setBusy(null)
-    }
-  }
-
   return (
-    <div className="space-y-3 rounded-lg border border-slate-200 bg-white p-3 dark:border-[#232833] dark:bg-[#0c1219]">
-      <p className="text-sm font-medium text-slate-700 dark:text-[#c7cfdd]">{clusterLabel(cluster)}</p>
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="space-y-1">
-          <span className="block text-xs font-medium text-slate-600 dark:text-[#9ca7ba]">
-            Percentage (bps)
-          </span>
-          <input
-            className={`${inputClass} w-32`}
-            type="number"
-            step="0.1"
-            min="0"
-            value={pctBps}
-            onChange={(e) => setPctBps(e.target.value)}
-          />
-        </label>
-        <label className="space-y-1">
-          <span className="block text-xs font-medium text-slate-600 dark:text-[#9ca7ba]">
-            Fixed per txn
-          </span>
-          <input
-            className={`${inputClass} w-32`}
-            type="number"
-            step="0.01"
-            min="0"
-            value={fixed}
-            onChange={(e) => setFixed(e.target.value)}
-          />
-        </label>
-        <div className="flex items-center gap-2">
-          <Button size="sm" onClick={save} disabled={busy !== null || !merchantId}>
-            {busy === 'save' ? <Spinner size={13} /> : null}
-            Save fee
-          </Button>
-          <Button variant="ghost" size="sm" onClick={onCancel} disabled={busy !== null}>
-            Cancel
-          </Button>
-          {canClear && (
-            <Button variant="danger" size="sm" onClick={clear} disabled={busy !== null}>
-              {busy === 'clear' ? <Spinner size={13} /> : null}
-              Remove
-            </Button>
+    <>
+      <tr className="border-b border-slate-100 last:border-0 dark:border-[#1c1c23]">
+        <td className="py-2 pr-3 capitalize text-slate-600 dark:text-[#c7cfdd]">
+          {titleCase(c.connector)}
+        </td>
+        <td className="py-2 pr-3 font-medium text-slate-700 dark:text-[#c7cfdd]">
+          {networkLabel(c.card_network)}
+        </td>
+        <td className="py-2 pr-3 text-slate-600 dark:text-[#c7cfdd]">{programOf(c)}</td>
+        <td className="py-2 pr-3 capitalize text-slate-600 dark:text-[#c7cfdd]">
+          {c.funding || '—'}
+        </td>
+        <td className="py-2 pr-3 tabular-nums text-slate-600 dark:text-[#c7cfdd]">
+          {c.issuer_country?.toUpperCase() || '—'}
+        </td>
+        <td className="py-2 pr-3 tabular-nums text-slate-600 dark:text-[#c7cfdd]">
+          {c.currency?.toUpperCase() || '—'}
+        </td>
+        <td className="py-2 pr-3 text-slate-500 dark:text-[#9ca7ba]">{c.ic_category || '—'}</td>
+        <td className="py-2 pr-3 text-right tabular-nums text-slate-600 dark:text-[#c7cfdd]">
+          {c.gross_sum > 0 ? formatCompact(c.gross_sum) : '—'}
+        </td>
+        <td className="py-2 pr-3 text-right tabular-nums text-slate-500 dark:text-[#9ca7ba]">
+          {c.n > 0 ? c.n.toLocaleString() : '—'}
+        </td>
+        <td className="py-2 pr-3 text-right">
+          {isEditing ? (
+            <div className="flex items-center justify-end gap-1">
+              <input
+                className={`${feeInputClass} w-20`}
+                type="number"
+                step="0.1"
+                min="0"
+                value={pctBps}
+                onChange={(e) => setPctBps(e.target.value)}
+                title="Percentage (bps)"
+                aria-label="Percentage (bps)"
+              />
+              <input
+                className={`${feeInputClass} w-16`}
+                type="number"
+                step="0.01"
+                min="0"
+                value={fixed}
+                onChange={(e) => setFixed(e.target.value)}
+                title="Fixed per txn"
+                aria-label="Fixed per txn"
+              />
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-end gap-1.5">
+                {isOverride && <Badge variant="purple">Override</Badge>}
+                <span className="tabular-nums font-medium text-slate-800 dark:text-[#c7cfdd]">
+                  {formatFee(c.effective_pct_bps, c.effective_fixed)}
+                </span>
+              </div>
+              {isOverride && c.model_pct_bps != null && (
+                <span className="block text-[11px] tabular-nums text-slate-400 line-through">
+                  {formatFee(c.model_pct_bps, c.model_fixed)}
+                </span>
+              )}
+            </>
           )}
-        </div>
-      </div>
-      <ErrorMessage error={error} />
-    </div>
+        </td>
+        {editable && (
+          <td className="py-2 pr-3 text-right">
+            {isEditing ? (
+              <div className="flex items-center justify-end gap-1 whitespace-nowrap">
+                <button
+                  type="button"
+                  onClick={save}
+                  disabled={busy !== null || !merchantId}
+                  title="Save fee"
+                  aria-label="Save fee"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-brand-600 text-white transition-colors hover:bg-brand-700 disabled:opacity-40 dark:bg-white dark:text-black dark:hover:bg-slate-200"
+                >
+                  {busy === 'save' ? <Spinner size={13} /> : <Check size={14} />}
+                </button>
+                <button
+                  type="button"
+                  onClick={onCancel}
+                  disabled={busy !== null}
+                  title="Cancel"
+                  aria-label="Cancel"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 disabled:opacity-40 dark:text-[#a1a1aa] dark:hover:bg-[#121214] dark:hover:text-white"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ) : (
+              <Button variant="ghost" size="sm" onClick={onEdit}>
+                <Pencil size={13} /> Edit
+              </Button>
+            )}
+          </td>
+        )}
+      </tr>
+      {isEditing && error && (
+        <tr>
+          <td colSpan={editable ? 11 : 10} className="pb-2 pr-3">
+            <ErrorMessage error={error} />
+          </td>
+        </tr>
+      )}
+    </>
   )
 }
