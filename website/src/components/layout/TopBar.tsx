@@ -42,7 +42,6 @@ export function TopBar() {
       updateMerchant(res.token, res.merchant_id, res.merchants)
       setMerchantId(res.merchant_id)
       setMerchantOpen(false)
-      window.location.reload()
     } catch {
       // ignore
     } finally {

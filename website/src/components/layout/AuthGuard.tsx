@@ -38,8 +38,8 @@ export function AuthGuard() {
   const setMerchantId = useMerchantStore((s) => s.setMerchantId)
 
   const { data: me, error, isValidating } = useSWR<MeResponse>(
-    token && hasHydrated ? '/auth/me' : null,
-    fetcher,
+    token && hasHydrated ? ['/auth/me', token] : null,
+    ([url]) => fetcher(url),
     { revalidateOnFocus: false, shouldRetryOnError: false },
   )
 
