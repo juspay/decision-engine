@@ -43,10 +43,14 @@ What it ships today:
 
 - **Rule-based routing** — define priority rules per merchant using Euclid, Juspay's open rule engine
 - **Success-rate ordering** — gateways ranked dynamically from transaction outcome feedback
+- **Multi-objective (cost-aware) routing** — re-ranks gateways by expected value (auth probability × [margin − learned per-gateway cost]) instead of auth rate alone
+- **Cost data ingestion** — learns each connector's real fee from settlement reports and invoices, at a fine-grained per-cluster level, to power cost-aware routing
+- **A/B testing** — split live traffic between a control and variant routing strategy with a guardrail and built-in significance testing
+- **Autopilot & auto-calibration** — background self-tuning of success-rate hedging and bucket size from observed traffic
 - **Volume splits** — distribute traffic across gateways by percentage
 - **Debit routing gates** — per-merchant toggle for debit-network routing
 - **Downtime detection** — auto-excludes gateways that are failing
-- **Analytics** — ClickHouse-backed tables for routing outcomes and decision audit
+- **Analytics** — ClickHouse-backed tables for routing outcomes, decision audit, and experiment results
 - **Dashboard** — React UI for configuring rules and inspecting decisions
 - **Multi-DB** — MySQL and PostgreSQL support
 - **Team management** — invite and manage members per merchant account
@@ -76,9 +80,10 @@ Open:
 - API: `http://localhost:8080`
 - Dashboard: `http://localhost:8081/dashboard/`
 - Docs: `http://localhost:8081/introduction`
-- API reference: `http://localhost:8081/api-overview`
+- API guide (curl examples): `http://localhost:8081/api-refs/api-ref`
+- API reference (OpenAPI): `http://localhost:8081/api-reference`
 
-For deployed docs or dashboard environments, use the same paths under your deployed host, e.g. `https://<docs-host>/api-overview`.
+For deployed docs or dashboard environments, use the same paths under your deployed host, e.g. `https://<docs-host>/api-refs/api-ref`.
 
 ### From Source
 
@@ -127,11 +132,13 @@ curl http://localhost:8080/health
 
 | Resource | Description |
 |----------|-------------|
+| [Installation Guide](docs/installation.md) | Docker, source build, database setup — end to end |
 | [Local Setup Guide](docs/local-setup.md) | CLI, Docker, Compose profiles, and Helm |
 | [MySQL Setup Guide](docs/setup-guide-mysql.md) | MySQL-specific walkthrough |
 | [PostgreSQL Setup Guide](docs/setup-guide-postgres.md) | PostgreSQL-specific walkthrough |
+| [API Guide](docs/api-refs/api-ref.mdx) | Copy-paste `curl` examples for every route family, including cost ingestion, A/B testing, and autopilot |
 | [API Reference (Swagger)](https://juspay.github.io/decision-engine/api-docs/) | Interactive Swagger UI — browse and try every endpoint against the OpenAPI spec |
-| [API Overview](docs/api-overview.md) | Entrypoint to API examples, OpenAPI schema, and route access rules |
+| [Multi-Objective Routing](docs/api-refs/decide-gateway-multi-objective.mdx) | Cost-aware post-step that re-ranks gateways on expected value |
 | [Configuration Guide](docs/configuration.md) | All config options explained |
 | [Deep Dive Blog](https://juspay.io/blog/juspay-orchestrator-and-merchant-controlled-routing-engine) | How the routing logic works |
 | [Performance Benchmarks](docs/benchmarks.mdx) | Throughput and latency of the `/decide-gateway` endpoint under sustained load |

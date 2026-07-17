@@ -19,6 +19,7 @@ For local development, start with:
 ```bash
 export BASE_URL=http://localhost:8080
 export AUTH_HEADER="Authorization: Bearer <jwt_token>"
+export TENANT_HEADER="x-tenant-id: public"
 # Sandbox only:
 # export BASE_URL=https://sandbox.hyperswitch.io
 # export FEATURE_HEADER="x-feature: decision-engine"
@@ -28,6 +29,7 @@ export AUTH_HEADER="Authorization: Bearer <jwt_token>"
 
 - Method and path: `GET /analytics/payment-audit`
 - Parameters:
+  - `x-tenant-id` (header, required, string) — see [Environment setup](/api-refs/api-ref#environment-setup).
   - `range` (query, optional, string)
   - `start_ms` (query, optional, integer)
   - `end_ms` (query, optional, integer)
@@ -57,21 +59,24 @@ export AUTH_HEADER="Authorization: Bearer <jwt_token>"
 
 ```bash
 curl "$BASE_URL/analytics/payment-audit?range=1d&page=1&page_size=10" \
-  --header "$AUTH_HEADER"
+  --header "$AUTH_HEADER" \
+  --header "$TENANT_HEADER"
 ```
 
 ### Exact payment lookup
 
 ```bash
 curl "$BASE_URL/analytics/payment-audit?range=1d&payment_id=pay_sr_001" \
-  --header "$AUTH_HEADER"
+  --header "$AUTH_HEADER" \
+  --header "$TENANT_HEADER"
 ```
 
 ### Debit routing audit
 
 ```bash
 curl "$BASE_URL/analytics/payment-audit?range=1d&routing_approach=NTW_BASED_ROUTING" \
-  --header "$AUTH_HEADER"
+  --header "$AUTH_HEADER" \
+  --header "$TENANT_HEADER"
 ```
 
 ## Response
@@ -115,6 +120,6 @@ curl "$BASE_URL/analytics/payment-audit?range=1d&routing_approach=NTW_BASED_ROUT
 
 ## Related
 
-- [Preview Trace](./analyticsPreviewTrace.mdx)
-- [Analytics Log Summaries](./analyticsLogSummaries.mdx)
-- [Analytics Endpoints](../../api-refs/analytics-endpoints.mdx)
+- [Preview Trace](/api-reference/endpoint/analyticsPreviewTrace)
+- [Analytics Log Summaries](/api-reference/endpoint/analyticsLogSummaries)
+- [Analytics Endpoints](/api-refs/analytics-endpoints)

@@ -19,6 +19,7 @@ For local development, start with:
 ```bash
 export BASE_URL=http://localhost:8080
 export AUTH_HEADER="Authorization: Bearer <jwt_token>"
+export TENANT_HEADER="x-tenant-id: public"
 # Sandbox only:
 # export BASE_URL=https://sandbox.hyperswitch.io
 # export FEATURE_HEADER="x-feature: decision-engine"
@@ -28,6 +29,7 @@ export AUTH_HEADER="Authorization: Bearer <jwt_token>"
 
 - Method and path: `GET /analytics/preview-trace`
 - Parameters:
+  - `x-tenant-id` (header, required, string) — see [Environment setup](/api-refs/api-ref#environment-setup).
   - `range` (query, optional, string)
   - `start_ms` (query, optional, integer)
   - `end_ms` (query, optional, integer)
@@ -57,14 +59,16 @@ export AUTH_HEADER="Authorization: Bearer <jwt_token>"
 
 ```bash
 curl "$BASE_URL/analytics/preview-trace?range=1d&page=1&page_size=10&route=routing_evaluate" \
-  --header "$AUTH_HEADER"
+  --header "$AUTH_HEADER" \
+  --header "$TENANT_HEADER"
 ```
 
 ### Open one decision trace
 
 ```bash
 curl "$BASE_URL/analytics/preview-trace?range=1d&payment_id=volume_decision_001" \
-  --header "$AUTH_HEADER"
+  --header "$AUTH_HEADER" \
+  --header "$TENANT_HEADER"
 ```
 
 ## Response
@@ -99,6 +103,6 @@ curl "$BASE_URL/analytics/preview-trace?range=1d&payment_id=volume_decision_001"
 
 ## Related
 
-- [Evaluate Routing Rule](./evaluateRoutingRule.mdx)
-- [Payment Audit](./analyticsPaymentAudit.mdx)
-- [Analytics Endpoints](../../api-refs/analytics-endpoints.mdx)
+- [Evaluate Routing Rule](/api-reference/endpoint/evaluateRoutingRule)
+- [Payment Audit](/api-reference/endpoint/analyticsPaymentAudit)
+- [Analytics Endpoints](/api-refs/analytics-endpoints)

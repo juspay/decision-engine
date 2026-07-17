@@ -1,14 +1,14 @@
 ---
-title: "Analytics Decisions"
-description: "ClickHouse-backed decisions read endpoint."
-openapi: "openapi.json GET /analytics/decisions"
+title: "Cost Savings"
+description: "ClickHouse-backed cost savings read endpoint."
+openapi: "openapi.json GET /analytics/cost-savings"
 ---
 
-# Analytics Decisions
+# Cost Savings
 
 ## Use case
 
-Returns decision volume time series and routing approach totals for the selected window.
+Returns a rollup of savings attributed to [multi-objective (cost-aware) routing](/api-refs/decide-gateway-multi-objective) — how much cheaper the chosen gateway was versus the plain success-rate head, trended over the window.
 
 ## Authentication
 
@@ -27,7 +27,7 @@ export TENANT_HEADER="x-tenant-id: public"
 
 ## Request
 
-- Method and path: `GET /analytics/decisions`
+- Method and path: `GET /analytics/cost-savings`
 - Parameters:
   - `x-tenant-id` (header, required, string) — see [Environment setup](/api-refs/api-ref#environment-setup).
   - `range` (query, optional, string)
@@ -51,22 +51,12 @@ export TENANT_HEADER="x-tenant-id: public"
   - `routing_approach` (query, optional, string)
   - `exclude_routing_approach` (query, optional, string)
   - `error_code` (query, optional, string)
-- Body: Optional query parameters include `range`, `routing_approach`, `exclude_routing_approach`, `gateway`, and routing dimensions.
+- Body: Optional query parameters include `range` and `currency`. Omit `currency` to aggregate across all currencies present in the window.
 
 ## Example
 
-### Decision activity
-
 ```bash
-curl "$BASE_URL/analytics/decisions?range=1h" \
-  --header "$AUTH_HEADER" \
-  --header "$TENANT_HEADER"
-```
-
-### Exclude debit routing
-
-```bash
-curl "$BASE_URL/analytics/decisions?range=1d&exclude_routing_approach=NTW_BASED_ROUTING" \
+curl "$BASE_URL/analytics/cost-savings?range=1w&currency=USD" \
   --header "$AUTH_HEADER" \
   --header "$TENANT_HEADER"
 ```
@@ -75,20 +65,20 @@ curl "$BASE_URL/analytics/decisions?range=1d&exclude_routing_approach=NTW_BASED_
 
 ```json
 {
-  "series": [
-    {
-      "timestamp_ms": 1777136400000,
-      "gateway": "adyen",
-      "count": 7
-    },
-    {
-      "timestamp_ms": 1777136400000,
-      "gateway": "stripe",
-      "count": 3
-    }
+  "merchant_id": "merchant_demo",
+  "range": "1w",
+  "currency": "USD",
+  "available_currencies": [
+    { "currency": "USD", "decision_count": 4820 },
+    { "currency": "EUR", "decision_count": 612 }
+  ],
+  "trend": [
+    { "bucket_ms": 1784112000000, "saved_value": 128.42 }
   ],
   "totals": {
-    "SR_SELECTION_V3_ROUTING": 10
+    "saved_value": 962.3,
+    "cost_won_count": 341,
+    "total_decisions": 4820
   }
 }
 ```
@@ -97,10 +87,12 @@ curl "$BASE_URL/analytics/decisions?range=1d&exclude_routing_approach=NTW_BASED_
 
 - Analytics reads are ClickHouse-backed and merchant-scoped by the authenticated context.
 - Use `range=15m|1h|12h|1d|1w` or `start_ms` plus `end_ms` for a custom window.
-- Use this for route volume charts; use gateway scores for auth-rate score percentages.
+- `saved_value` is money saved versus the SR head's cost, in the requested (or aggregated) currency.
+- Requires [cost data ingestion](/api-refs/cost-ingestion-setup) to have fitted a cost model — otherwise `cost_won_count` stays at zero.
 
 ## Related
 
-- [Analytics Routing Stats](/api-reference/endpoint/analyticsRoutingStats)
-- [Payment Audit](/api-reference/endpoint/analyticsPaymentAudit)
+- [Multi-Objective Routing](/api-refs/decide-gateway-multi-objective)
+- [Cost Ingestion: Fees & Coverage](/api-refs/cost-ingestion-fees)
+- [Analytics Overview](/api-reference/endpoint/analyticsOverview)
 - [Analytics Endpoints](/api-refs/analytics-endpoints)

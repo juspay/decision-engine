@@ -1,6 +1,11 @@
+---
+title: "PostgreSQL Setup"
+description: "Set up Decision Engine with a PostgreSQL database."
+---
+
 # PostgreSQL Setup Guide
 
-This page provides PostgreSQL-focused commands. The full end-to-end setup (CLI, Docker, Compose, Helm) is in [local-setup.md](local-setup.md).
+This page provides PostgreSQL-focused commands. For the full end-to-end setup — CLI, Docker, Compose, Helm — see the [Local Setup Guide](/local-setup).
 
 ## Docker Compose (GHCR track)
 
@@ -45,3 +50,10 @@ Expected response:
 ```json
 {"message":"Health is good"}
 ```
+
+## Related Docs
+
+- [Installation](/installation)
+- [Local Setup Guide](/local-setup)
+- [MySQL Setup](/setup-guide-mysql)
+- [Configuration](/configuration)

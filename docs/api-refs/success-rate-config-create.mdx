@@ -32,4 +32,4 @@ curl --location "$BASE_URL/rule/create" \
 { "merchant_id": "merchant_demo", "config": { "type": "successRate" } }
 ```
 
-`margin` is the merchant margin as a fraction of ticket (e.g. `0.20` for 20%). It feeds the [multi-objective routing](./decide-gateway-multi-objective.mdx) expected-value ranking `EV = auth × (margin − cost_bps / 10 000)` and defaults to `1.0` when unset.
+`margin` is the merchant margin as a fraction of ticket (e.g. `0.20` for 20%). It feeds the [multi-objective routing](/api-refs/decide-gateway-multi-objective) expected-value ranking `EV = auth × (margin − cost_bps / 10 000)` and defaults to `1.0` when unset.

@@ -19,6 +19,7 @@ For local development, start with:
 ```bash
 export BASE_URL=http://localhost:8080
 export AUTH_HEADER="Authorization: Bearer <jwt_token>"
+export TENANT_HEADER="x-tenant-id: public"
 # Sandbox only:
 # export BASE_URL=https://sandbox.hyperswitch.io
 # export FEATURE_HEADER="x-feature: decision-engine"
@@ -35,7 +36,8 @@ export AUTH_HEADER="Authorization: Bearer <jwt_token>"
 ### Diagnostics
 
 ```bash
-curl "$BASE_URL/health/diagnostics"
+curl "$BASE_URL/health/diagnostics" \
+  --header "$TENANT_HEADER"
 ```
 
 ## Response
@@ -57,5 +59,5 @@ curl "$BASE_URL/health/diagnostics"
 
 ## Related
 
-- [Health Check](./healthCheck.mdx)
-- [Health Ready](./healthReady.mdx)
+- [Health Check](/api-reference/endpoint/healthCheck)
+- [Health Ready](/api-reference/endpoint/healthReady)

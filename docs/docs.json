@@ -14,67 +14,18 @@
         "group": "Overview",
         "pages": [
           "introduction",
-          "installation",
-          "local-setup",
-          "configuration",
-          "dashboard-guide",
-          "api-overview",
+          {
+            "group": "Installation",
+            "pages": [
+              "installation",
+              "local-setup",
+              "setup-guide-postgres",
+              "setup-guide-mysql",
+              "configuration",
+              "dashboard-guide"
+            ]
+          },
           "api-reference",
-          "dual-protocol-layer"
-        ]
-      },
-      {
-        "group": "API Examples (curl flows)",
-        "pages": [
-          "api-refs/api-ref",
-          "api-refs/health-check",
-          "api-refs/auth-and-onboarding",
-          "api-refs/api-keys",
-          "api-refs/merchant-account-create",
-          "api-refs/merchant-account-get",
-          "api-refs/merchant-account-delete",
-          "api-refs/merchant-debit-routing",
-          "api-refs/decide-gateway-sr-based",
-          "api-refs/decide-gateway-pl-based",
-          "api-refs/decide-gateway-debit-routing",
-          "api-refs/decide-gateway-hybrid-routing",
-          "api-refs/decide-gateway-multi-objective",
-          "api-refs/decision-gateway-legacy",
-          "api-refs/update-gateway-score",
-          "api-refs/update-score-legacy",
-          "api-refs/routing-algorithm-create",
-          "api-refs/routing-algorithm-evaluate",
-          "api-refs/routing-hybrid",
-          "api-refs/routing-algorithm-list",
-          "api-refs/routing-algorithm-list-active",
-          "api-refs/routing-algorithm-activate",
-          "api-refs/routing-algorithm-deactivate",
-          "api-refs/routing-single-connector-example",
-          "api-refs/routing-priority-example",
-          "api-refs/routing-volume-split-example",
-          "api-refs/routing-advanced-example",
-          "api-refs/success-rate-config-create",
-          "api-refs/success-rate-config-get",
-          "api-refs/success-rate-config-update",
-          "api-refs/success-rate-config-delete",
-          "api-refs/elimination-config-create",
-          "api-refs/elimination-config-get",
-          "api-refs/elimination-config-update",
-          "api-refs/elimination-config-delete",
-          "api-refs/config-endpoints",
-          "api-refs/analytics-endpoints"
-        ]
-      },
-      {
-        "group": "Database Setup",
-        "pages": [
-          "setup-guide-postgres",
-          "setup-guide-mysql"
-        ]
-      },
-      {
-        "group": "Operations",
-        "pages": [
           "analytics",
           "payment-audit",
           "clickhouse-analytics",
@@ -156,7 +107,11 @@
           "api-reference/endpoint/analyticsRoutingStats",
           "api-reference/endpoint/analyticsLogSummaries",
           "api-reference/endpoint/analyticsPaymentAudit",
-          "api-reference/endpoint/analyticsPreviewTrace"
+          "api-reference/endpoint/analyticsPreviewTrace",
+          "api-reference/endpoint/analyticsCostSavings",
+          "api-reference/endpoint/analyticsRoutingEvents",
+          "api-reference/endpoint/analyticsExperimentResults",
+          "api-reference/endpoint/analyticsExperimentTransactions"
         ]
       },
       {
@@ -166,6 +121,115 @@
           "api-reference/endpoint/legacyUpdateScore",
           "api-reference/endpoint/getRoutingConfig",
           "api-reference/endpoint/configSrDimension"
+        ]
+      },
+      {
+        "group": "API Examples (curl flows)",
+        "pages": [
+          "api-refs/api-ref",
+          {
+            "group": "Health & Status",
+            "pages": [
+              "api-refs/health-check"
+            ]
+          },
+          {
+            "group": "Authentication & Onboarding",
+            "pages": [
+              "api-refs/auth-and-onboarding",
+              "api-refs/api-keys"
+            ]
+          },
+          {
+            "group": "Merchant Accounts",
+            "pages": [
+              "api-refs/merchant-account-create",
+              "api-refs/merchant-account-get",
+              "api-refs/merchant-account-delete",
+              "api-refs/merchant-debit-routing"
+            ]
+          },
+          {
+            "group": "Configure Routing",
+            "pages": [
+              "api-refs/routing-algorithm-create",
+              "api-refs/routing-single-connector-example",
+              "api-refs/routing-priority-example",
+              "api-refs/routing-volume-split-example",
+              "api-refs/routing-advanced-example",
+              "api-refs/routing-algorithm-activate",
+              "api-refs/routing-algorithm-deactivate",
+              "api-refs/routing-algorithm-update-delete",
+              "api-refs/routing-algorithm-list",
+              "api-refs/routing-algorithm-list-active",
+              "api-refs/routing-algorithm-evaluate",
+              "api-refs/routing-hybrid"
+            ]
+          },
+          {
+            "group": "Scoring Configuration",
+            "pages": [
+              "api-refs/success-rate-config-create",
+              "api-refs/success-rate-config-get",
+              "api-refs/success-rate-config-update",
+              "api-refs/success-rate-config-delete",
+              "api-refs/elimination-config-create",
+              "api-refs/elimination-config-get",
+              "api-refs/elimination-config-update",
+              "api-refs/elimination-config-delete",
+              "api-refs/config-endpoints"
+            ]
+          },
+          {
+            "group": "Cost Data Ingestion",
+            "pages": [
+              "api-refs/cost-ingestion-setup",
+              "api-refs/cost-ingestion-uploads",
+              "api-refs/cost-ingestion-fees"
+            ]
+          },
+          {
+            "group": "A/B Testing",
+            "pages": [
+              "api-refs/ab-testing-create",
+              "api-refs/ab-testing-results"
+            ]
+          },
+          {
+            "group": "Autopilot & Feature Flags",
+            "pages": [
+              "api-refs/merchant-features"
+            ]
+          },
+          {
+            "group": "Run Transactions",
+            "pages": [
+              "api-refs/decide-gateway-sr-based",
+              "api-refs/decide-gateway-pl-based",
+              "api-refs/decide-gateway-debit-routing",
+              "api-refs/decide-gateway-hybrid-routing",
+              "api-refs/decide-gateway-multi-objective"
+            ]
+          },
+          {
+            "group": "Feedback & Scoring",
+            "pages": [
+              "api-refs/update-gateway-score"
+            ]
+          },
+          {
+            "group": "Analytics & Audit",
+            "pages": [
+              "api-refs/analytics-endpoints"
+            ]
+          },
+          {
+            "group": "Legacy & Compatibility",
+            "pages": [
+              "api-refs/decision-gateway-legacy",
+              "api-refs/update-score-legacy"
+            ]
+          }
         ]
       }
     ]

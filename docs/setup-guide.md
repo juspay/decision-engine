@@ -4,8 +4,8 @@ This page has been consolidated.
 
 Use the canonical guide:
 
-- [Local Setup Guide](local-setup.md)
+- [Local Setup Guide](/local-setup)
 
 For database-specific walkthroughs:
-- [PostgreSQL Setup Guide](setup-guide-postgres.md)
-- [MySQL Setup Guide](setup-guide-mysql.md)
+- [PostgreSQL Setup Guide](/setup-guide-postgres)
+- [MySQL Setup Guide](/setup-guide-mysql)
