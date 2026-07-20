@@ -122,3 +122,9 @@ SELECT count() FROM default.analytics_domain_events;
 SELECT count() FROM default.analytics_payment_audit_summary_buckets;
 SELECT name, engine FROM system.tables WHERE database = 'default' AND name LIKE 'analytics_%';
 ```
+
+## Related Docs
+
+- [Analytics](/analytics) — the operator-facing view built on this pipeline.
+- [Payment Audit](/payment-audit) — single-payment timeline lookups against these tables.
+- [Local Setup Guide](/local-setup) — bringing up the `analytics-clickhouse` profile.

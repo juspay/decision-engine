@@ -19,6 +19,7 @@ For local development, start with:
 ```bash
 export BASE_URL=http://localhost:8080
 export AUTH_HEADER="Authorization: Bearer <jwt_token>"
+export TENANT_HEADER="x-tenant-id: public"
 # Sandbox only:
 # export BASE_URL=https://sandbox.hyperswitch.io
 # export FEATURE_HEADER="x-feature: decision-engine"
@@ -28,6 +29,7 @@ export AUTH_HEADER="Authorization: Bearer <jwt_token>"
 
 - Method and path: `GET /analytics/overview`
 - Parameters:
+  - `x-tenant-id` (header, required, string) — see [Environment setup](/api-refs/api-ref#environment-setup).
   - `range` (query, optional, string)
   - `start_ms` (query, optional, integer)
   - `end_ms` (query, optional, integer)
@@ -57,7 +59,8 @@ export AUTH_HEADER="Authorization: Bearer <jwt_token>"
 
 ```bash
 curl "$BASE_URL/analytics/overview?range=1d" \
-  --header "$AUTH_HEADER"
+  --header "$AUTH_HEADER" \
+  --header "$TENANT_HEADER"
 ```
 
 ## Response
@@ -85,6 +88,6 @@ curl "$BASE_URL/analytics/overview?range=1d" \
 
 ## Related
 
-- [Analytics Routing Stats](./analyticsRoutingStats.mdx)
-- [Payment Audit](./analyticsPaymentAudit.mdx)
-- [Analytics Endpoints](../../api-refs/analytics-endpoints.mdx)
+- [Analytics Routing Stats](/api-reference/endpoint/analyticsRoutingStats)
+- [Payment Audit](/api-reference/endpoint/analyticsPaymentAudit)
+- [Analytics Endpoints](/api-refs/analytics-endpoints)

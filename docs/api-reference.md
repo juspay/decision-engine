@@ -1,16 +1,22 @@
-# API Overview
+---
+title: "API Reference"
+description: "Schema-backed reference for every Decision Engine endpoint, with request/response models and an interactive playground."
+---
 
-The canonical OpenAPI contract for the docs site is `docs/openapi.json`. Use this page for schema-oriented navigation. Use [API Examples](./api-refs/api-ref.mdx) for curl-first flows, valid payloads, and route variants.
+# API Reference
 
-## Docs surfaces
+This is the schema-backed reference for every Decision Engine endpoint. Each page below shows the full request and response model and includes an interactive playground, generated from the OpenAPI contract.
 
-| Surface | What it is for | Path |
-| --- | --- | --- |
-| API Examples | Public integration guide with cURL flows, variants, and working payloads. | [`docs/api-refs/`](./api-refs/api-ref.mdx) |
-| OpenAPI Endpoint Reference | Schema-backed endpoint pages generated around `docs/openapi.json`. | [`docs/api-reference/endpoint/`](./api-reference/endpoint/createRoutingRule.mdx) |
-| OpenAPI contract | Machine-readable contract consumed by Mintlify and tooling. | [`docs/openapi.json`](./openapi.json) |
+Looking for copy-paste examples and end-to-end flows instead? Start with the [API Guide](/api-refs/api-ref).
 
-If you need rule examples such as AND, OR, nested AND+OR, `volume_split_priority`, enum arrays, or number-array matching, start with [Advanced Routing Example](./api-refs/routing-advanced-example.mdx). If you need the exact `POST /routing/create` schema and playground metadata, use [Create Routing Rule](./api-reference/endpoint/createRoutingRule.mdx).
+## Two ways to read the API
+
+| Surface | Best for |
+| --- | --- |
+| [API Guide](/api-refs/api-ref) | Task-oriented `curl` examples, complete flows, and request variants. |
+| API Reference (this section) | Exact request/response schemas and an interactive playground, one page per endpoint. |
+
+For advanced rule examples — AND, OR, nested AND+OR, `volume_split_priority`, enum arrays, and number-array matching — see the [Advanced Routing Example](/api-refs/routing-advanced-example). For the exact `POST /routing/create` schema, use [Create Routing Rule](/api-reference/endpoint/createRoutingRule).
 
 ## Access classes
 
@@ -25,73 +31,77 @@ If you need rule examples such as AND, OR, nested AND+OR, `volume_split_priority
 
 ### Health
 
-- [Health Check](./api-reference/endpoint/healthCheck.mdx)
-- [Health Ready](./api-reference/endpoint/healthReady.mdx)
-- [Health Diagnostics](./api-reference/endpoint/healthDiagnostics.mdx)
+- [Health Check](/api-reference/endpoint/healthCheck)
+- [Health Ready](/api-reference/endpoint/healthReady)
+- [Health Diagnostics](/api-reference/endpoint/healthDiagnostics)
 
 ### Auth And Onboarding
 
-- [Signup](./api-reference/endpoint/signup.mdx)
-- [Login](./api-reference/endpoint/login.mdx)
-- [Logout](./api-reference/endpoint/logout.mdx)
-- [Current User](./api-reference/endpoint/me.mdx)
-- [List User Merchants](./api-reference/endpoint/listUserMerchants.mdx)
-- [Switch Merchant](./api-reference/endpoint/switchMerchant.mdx)
-- [Onboard Merchant](./api-reference/endpoint/onboardMerchant.mdx)
+- [Signup](/api-reference/endpoint/signup)
+- [Login](/api-reference/endpoint/login)
+- [Logout](/api-reference/endpoint/logout)
+- [Current User](/api-reference/endpoint/me)
+- [List User Merchants](/api-reference/endpoint/listUserMerchants)
+- [Switch Merchant](/api-reference/endpoint/switchMerchant)
+- [Onboard Merchant](/api-reference/endpoint/onboardMerchant)
 
 ### API Keys
 
-- [Create API Key](./api-reference/endpoint/createApiKey.mdx)
-- [List API Keys](./api-reference/endpoint/listApiKeys.mdx)
-- [Revoke API Key](./api-reference/endpoint/revokeApiKey.mdx)
+- [Create API Key](/api-reference/endpoint/createApiKey)
+- [List API Keys](/api-reference/endpoint/listApiKeys)
+- [Revoke API Key](/api-reference/endpoint/revokeApiKey)
 
 ### Merchant Account
 
-- [Create Merchant](./api-reference/endpoint/createMerchant.mdx)
-- [Get Merchant](./api-reference/endpoint/getMerchant.mdx)
-- [Delete Merchant](./api-reference/endpoint/deleteMerchant.mdx)
-- [Get Merchant Debit Routing](./api-reference/endpoint/getMerchantDebitRouting.mdx)
-- [Update Merchant Debit Routing](./api-reference/endpoint/updateMerchantDebitRouting.mdx)
+- [Create Merchant](/api-reference/endpoint/createMerchant)
+- [Get Merchant](/api-reference/endpoint/getMerchant)
+- [Delete Merchant](/api-reference/endpoint/deleteMerchant)
+- [Get Merchant Debit Routing](/api-reference/endpoint/getMerchantDebitRouting)
+- [Update Merchant Debit Routing](/api-reference/endpoint/updateMerchantDebitRouting)
 
 ### Gateway Decision
 
-- [Decide Gateway](./api-reference/endpoint/decideGateway.mdx)
-- [Legacy Decision Gateway](./api-reference/endpoint/legacyDecisionGateway.mdx)
-- [Update Gateway Score](./api-reference/endpoint/updateGatewayScore.mdx)
-- [Legacy Update Score](./api-reference/endpoint/legacyUpdateScore.mdx)
+- [Decide Gateway](/api-reference/endpoint/decideGateway)
+- [Legacy Decision Gateway](/api-reference/endpoint/legacyDecisionGateway)
+- [Update Gateway Score](/api-reference/endpoint/updateGatewayScore)
+- [Legacy Update Score](/api-reference/endpoint/legacyUpdateScore)
 
 ### Routing Rules
 
-- [Create Routing Rule](./api-reference/endpoint/createRoutingRule.mdx)
-- [Activate Routing Rule](./api-reference/endpoint/activateRoutingRule.mdx)
-- [Deactivate Routing Rule](./api-reference/endpoint/deactivateRoutingRule.mdx)
-- [List Routing Rules](./api-reference/endpoint/listRoutingRules.mdx)
-- [Get Active Routing Rule](./api-reference/endpoint/getActiveRoutingRule.mdx)
-- [Evaluate Routing Rule](./api-reference/endpoint/evaluateRoutingRule.mdx)
-- [Hybrid Routing](./api-reference/endpoint/hybridRouting.mdx)
+- [Create Routing Rule](/api-reference/endpoint/createRoutingRule)
+- [Activate Routing Rule](/api-reference/endpoint/activateRoutingRule)
+- [Deactivate Routing Rule](/api-reference/endpoint/deactivateRoutingRule)
+- [List Routing Rules](/api-reference/endpoint/listRoutingRules)
+- [Get Active Routing Rule](/api-reference/endpoint/getActiveRoutingRule)
+- [Evaluate Routing Rule](/api-reference/endpoint/evaluateRoutingRule)
+- [Hybrid Routing](/api-reference/endpoint/hybridRouting)
 
 ### Rule Configuration
 
-- [Create Rule Config](./api-reference/endpoint/createRuleConfig.mdx)
-- [Get Rule Config](./api-reference/endpoint/getRuleConfig.mdx)
-- [Update Rule Config](./api-reference/endpoint/updateRuleConfig.mdx)
-- [Delete Rule Config](./api-reference/endpoint/deleteRuleConfig.mdx)
+- [Create Rule Config](/api-reference/endpoint/createRuleConfig)
+- [Get Rule Config](/api-reference/endpoint/getRuleConfig)
+- [Update Rule Config](/api-reference/endpoint/updateRuleConfig)
+- [Delete Rule Config](/api-reference/endpoint/deleteRuleConfig)
 
 ### Config
 
-- [Get Routing Config](./api-reference/endpoint/getRoutingConfig.mdx)
-- [Configure SR Dimensions](./api-reference/endpoint/configSrDimension.mdx)
+- [Get Routing Config](/api-reference/endpoint/getRoutingConfig)
+- [Configure SR Dimensions](/api-reference/endpoint/configSrDimension)
 
 ### Analytics
 
-- [Overview](./api-reference/endpoint/analyticsOverview.mdx)
-- [Gateway Scores](./api-reference/endpoint/analyticsGatewayScores.mdx)
-- [Decisions](./api-reference/endpoint/analyticsDecisions.mdx)
-- [Routing Stats](./api-reference/endpoint/analyticsRoutingStats.mdx)
-- [Log Summaries](./api-reference/endpoint/analyticsLogSummaries.mdx)
-- [Payment Audit](./api-reference/endpoint/analyticsPaymentAudit.mdx)
-- [Preview Trace](./api-reference/endpoint/analyticsPreviewTrace.mdx)
+- [Overview](/api-reference/endpoint/analyticsOverview)
+- [Gateway Scores](/api-reference/endpoint/analyticsGatewayScores)
+- [Decisions](/api-reference/endpoint/analyticsDecisions)
+- [Routing Stats](/api-reference/endpoint/analyticsRoutingStats)
+- [Log Summaries](/api-reference/endpoint/analyticsLogSummaries)
+- [Payment Audit](/api-reference/endpoint/analyticsPaymentAudit)
+- [Preview Trace](/api-reference/endpoint/analyticsPreviewTrace)
+- [Cost Savings](/api-reference/endpoint/analyticsCostSavings)
+- [Routing Events](/api-reference/endpoint/analyticsRoutingEvents)
+- [A/B Test Experiment Results](/api-reference/endpoint/analyticsExperimentResults)
+- [A/B Test Experiment Transactions](/api-reference/endpoint/analyticsExperimentTransactions)
 
 ## Curl Examples
 
-For local and sandbox smoke-test examples, use [API Examples](./api-refs/api-ref.mdx).
+For local and sandbox smoke-test examples, use [API Examples](/api-refs/api-ref).

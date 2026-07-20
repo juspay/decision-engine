@@ -5,11 +5,14 @@ description: "Curl example for /decide-gateway with the multi-objective (cost-aw
 
 # Decide Gateway: Multi-Objective Routing
 
-Multi-objective routing is a cost-aware post-step on top of SR-based scoring. After the success-rate scorer picks its head gateway, the engine fetches per-PSP fee estimates and re-ranks every gateway that has cost data on expected value:
+Multi-objective routing is a cost-aware post-step on top of SR-based scoring. After the success-rate scorer picks its head gateway, the engine fetches per-PSP fee estimates and re-ranks every gateway that has cost data on economic value:
 
 ```
-EV = auth_rate × (margin − cost_bps / 10 000)
+Economic value (EV) = auth rate × settlement value
+settlement value = txn amount − cost of payment processing (acquirer, issuer & network fee)
 ```
+
+The settlement value is derived from the merchant's `margin` and the per-PSP cost estimate (see the `margin` field on [Create success-rate config](/api-refs/success-rate-config-create)).
 
 If a cheaper PSP has a strictly higher expected value than the SR head, it is promoted (`outcome: COST_WON`) and `routing_approach` becomes `SR_SELECTION_MULTI_OBJECTIVE`. Otherwise the SR head is kept (`outcome: AUTH_WON`) and `routing_approach` keeps its normal SR value. Either way, the response carries a `multi_objective_info` block explaining the decision.
 
@@ -23,8 +26,11 @@ If a cheaper PSP has a strictly higher expected value than the SR head, it is pr
 Notes:
 
 - The post-step only runs on SR-scored decisions and is skipped while hedging (exploration) is active for the transaction.
-- `margin` (fraction of ticket, e.g. `0.20`) comes from the merchant's success-rate config — see [Create success-rate config](./success-rate-config-create.mdx). It defaults to `1.0` when unset.
+- `margin` (fraction of ticket, e.g. `0.20`) comes from the merchant's success-rate config — see [Create success-rate config](/api-refs/success-rate-config-create). It defaults to `1.0` when unset.
+- This post-step re-ranks the SR scores it is handed; it does not tune them. [Autopilot](/api-refs/merchant-features) is the separate self-tuning job that calibrates SR hedging and bucket size, and can run alongside this post-step (they are independent dials — `enableMultiObjective` and `use_autopilot`).
 - Gateways without fee data cannot be ranked on expected value and never win on cost; if the SR head itself has no fee data, the SR order is kept.
+- Per-gateway fee data comes from [cost ingestion](/api-refs/cost-ingestion-setup) — settlement reports and invoices fitted into a per-cluster cost model. Check [cost coverage](/api-refs/cost-ingestion-fees#cost-coverage) to see what share of volume actually has a trustworthy fee estimate before relying on this post-step.
+- To compare cost-aware routing against a plain auth-rate baseline on live traffic before flipping the merchant flag, run it as an [A/B test experiment](/api-refs/ab-testing-create) arm (`enable_multi_objective: true` on one arm only).
 
 ## Request
 
