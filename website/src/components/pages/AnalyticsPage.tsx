@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useSearchParams } from 'react-router-dom'
 import useSWR from 'swr'
 import {
   Bar,
@@ -70,6 +70,7 @@ type RoutingFilters = {
 }
 
 type AnalyticsView = 'transactions' | 'rule_based'
+const ANALYTICS_VIEWS: readonly AnalyticsView[] = ['transactions', 'rule_based']
 const ANALYTICS_VIEW_LABELS: Record<AnalyticsView, string> = {
   transactions: 'Multi-objective',
   rule_based: 'Rule based / Volume based',
@@ -872,7 +873,24 @@ function SmartRetrySection({ stats }: { stats: SmartRetryStats | null }) {
 export function AnalyticsPage() {
   const location = useLocation()
   const [range, setRange] = useState<AnalyticsRangeValue>('1d')
-  const [view, setView] = useState<AnalyticsView>('transactions')
+  // View is kept in the URL (?view=…) so a reload or shared/searched link
+  // reopens it directly; the default (transactions) is left out of the URL.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const viewParam = searchParams.get('view')
+  const view: AnalyticsView = ANALYTICS_VIEWS.includes(viewParam as AnalyticsView)
+    ? (viewParam as AnalyticsView)
+    : 'transactions'
+  const setView = (nextView: AnalyticsView) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        if (nextView === 'transactions') next.delete('view')
+        else next.set('view', nextView)
+        return next
+      },
+      { replace: true },
+    )
+  }
   const [routingFilters, setRoutingFilters] = useState<RoutingFilters>(EMPTY_ROUTING_FILTERS)
   const [customRangeOpen, setCustomRangeOpen] = useState(false)
   const [connectorFiltersOpen, setConnectorFiltersOpen] = useState(false)

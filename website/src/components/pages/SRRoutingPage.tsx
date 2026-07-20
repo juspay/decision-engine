@@ -225,6 +225,9 @@ function CurrentConfigDetails({ config }: { config: SRConfigResponse['config'] }
 type SRTab = 'autopilot' | 'manual' | 'flags' | 'cost'
 const SR_TABS: readonly SRTab[] = ['autopilot', 'manual', 'flags', 'cost']
 
+type ManualSection = 'scoring' | 'elimination' | 'dimensions'
+const MANUAL_SECTIONS: readonly ManualSection[] = ['scoring', 'elimination', 'dimensions']
+
 export function SRRoutingPage() {
   // Same merchant resolution as OverviewPage/RoutingHubPage — this page must
   // never disagree with the Overview setup checklist about what is configured.
@@ -247,7 +250,23 @@ export function SRRoutingPage() {
       { replace: true },
     )
   }
-  const [manualTab, setManualTab] = useState<'scoring' | 'elimination' | 'dimensions'>('scoring')
+  // The Manual sub-section is also kept in the URL (?section=…) so a search
+  // result or shared link can jump straight to Elimination / SR Dimensions.
+  const sectionParam = searchParams.get('section')
+  const manualTab: ManualSection = MANUAL_SECTIONS.includes(sectionParam as ManualSection)
+    ? (sectionParam as ManualSection)
+    : 'scoring'
+  const setManualTab = (section: ManualSection) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        if (section === 'scoring') next.delete('section')
+        else next.set('section', section)
+        return next
+      },
+      { replace: true },
+    )
+  }
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState(false)
