@@ -33,7 +33,7 @@ const INSERT_CHUNK_ROWS: usize = 25_000;
 
 /// Columns we provide; `ingested_at` is intentionally omitted so ClickHouse applies its DEFAULT.
 const COLUMNS: &str =
-    "connector,account,merchant_id,txn_date,ingestion_id,card_network,variant,funding,\
+    "connector,account,report_account,merchant_id,txn_date,ingestion_id,card_network,variant,funding,\
 issuer_country,currency,ic_category,interchange_bps,channel,band,fit_bucket,n,sx,sy,sxx,sxy,\
 syy,su,suu,suy,suuy,syyuu,sample_x,sample_y";
 
@@ -84,6 +84,7 @@ async fn insert_chunk(
         let obj = json!({
             "connector": connector,
             "account": account,
+            "report_account": r.report_account,
             "merchant_id": merchant_id,
             "txn_date": r.txn_date.to_string(),
             "ingestion_id": ingestion_id,

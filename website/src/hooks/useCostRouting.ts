@@ -174,7 +174,7 @@ export interface ClusterFee {
   model_fixed: number | null
   grade_bps?: number | null
   pct_ci95_bps?: number | null
-  astar?: number | null
+  crossover_amount?: number | null
   prop_bps?: number | null
   fix_abs?: number | null
   fix_bps?: number | null

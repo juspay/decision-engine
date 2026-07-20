@@ -26,6 +26,7 @@ const SAMPLE_CAP_PER_BUCKET: usize = 64;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct BucketKey {
     txn_date: NaiveDate,
+    report_account: String,
     card_network: String,
     variant: String,
     funding: String,
@@ -100,6 +101,7 @@ impl BucketStats {
 /// One fully-aggregated bucket, ready to insert into `cost_daily_stats`.
 pub struct DailyStatRow {
     pub txn_date: NaiveDate,
+    pub report_account: String,
     pub card_network: String,
     pub variant: String,
     pub funding: String,
@@ -155,6 +157,7 @@ impl RollupAccumulator {
         }
         let key = BucketKey {
             txn_date: row.txn_date.unwrap_or(fallback_date),
+            report_account: row.report_account.clone(),
             card_network: row.card_network.clone(),
             variant: row.variant.clone(),
             funding: row.funding.clone(),
@@ -187,6 +190,7 @@ impl RollupAccumulator {
             .into_iter()
             .map(|(k, s)| DailyStatRow {
                 txn_date: k.txn_date,
+                report_account: k.report_account,
                 card_network: k.card_network,
                 variant: k.variant,
                 funding: k.funding,
@@ -222,6 +226,7 @@ mod tests {
     fn row(gross: f64, fee: f64, date: &str) -> SettledFeeRow {
         SettledFeeRow {
             txn_ref: String::new(),
+            report_account: String::new(),
             card_network: "visa".into(),
             variant: "visacredit".into(),
             funding: "credit".into(),

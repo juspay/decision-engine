@@ -18,6 +18,10 @@ pub struct SettledFeeRow {
     /// aggregates by the cluster fields below (read straight off this struct) and nothing
     /// downstream reads `txn_ref`, so it is NOT a dedup key.
     pub txn_ref: String,
+    /// Connector-native merchant/account inside the report, when present. For Adyen this is the CSV
+    /// `Merchant Account`, which separates POS/ecom/country accounts inside one uploaded report.
+    /// Blank for connectors whose reports do not expose an internal account dimension.
+    pub report_account: String,
     /// Card network, lowercased: `visa`, `mc`, …
     pub card_network: String,
     /// Payment-method variant (carries tier + funding), lowercased: `visastandarddebit`, …

@@ -21,9 +21,10 @@ use crate::cost_ingestion::types::{
     ConnectorCreds, IngestError, ReportNotification, SettledFeeRow,
 };
 
-/// Adyen record types that actually carry settlement fees; everything else (Authorised,
-/// Received, Refused, …) has empty fee columns and would pollute the fit.
-const FEE_RECORD_TYPES: [&str; 2] = ["SentForSettle", "Settled"];
+/// Adyen record type that carries the final settled fee signal. PAR also includes
+/// `SentForSettle`, but `cluster_explorer.py` keeps one settled leg only so the same transaction
+/// does not affect the fee fit twice.
+const FEE_RECORD_TYPES: [&str; 1] = ["Settled"];
 
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -178,6 +179,7 @@ impl SettlementReportSource for AdyenReportSource {
             scheme: usize,
             interchange: usize,
             icsf: usize,
+            merchant_account: Option<usize>,
             booking: Option<usize>,
             terminal: Option<usize>,
         }
@@ -198,6 +200,9 @@ impl SettlementReportSource for AdyenReportSource {
                     scheme: h.require("Scheme Fees (SC)")?,
                     interchange: h.require("Interchange (SC)")?,
                     icsf: h.require("ICSF details")?,
+                    // Optional in tests/older fixtures; present in Adyen accounting reports and
+                    // needed to match cluster_explorer.py's per-merchant-account split.
+                    merchant_account: h.index("Merchant Account"),
                     // Optional: used only for the ingested report's period; absent in older/test reports.
                     booking: h.index("Booking Date"),
                     // Optional: a terminal id marks in-person (POS) acceptance; absence ⇒ online (ecom).
@@ -232,6 +237,10 @@ impl SettlementReportSource for AdyenReportSource {
 
                 Ok(Some(SettledFeeRow {
                     txn_ref: row.get(c.psp).to_string(),
+                    report_account: c
+                        .merchant_account
+                        .map(|i| row.get(i).trim().to_string())
+                        .unwrap_or_default(),
                     card_network: row.get(c.brand).to_lowercase(),
                     variant,
                     funding,

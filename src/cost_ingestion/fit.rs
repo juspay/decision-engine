@@ -62,7 +62,7 @@ fn client() -> &'static reqwest::Client {
 /// back until the running count crosses `MIN_SAMPLES` or the max window is exhausted.
 const LOAD_ROLLUP_SQL: &str = r#"
 SELECT
-    s.card_network, s.variant, s.funding, s.issuer_country, s.currency, s.ic_category,
+    s.report_account, s.card_network, s.variant, s.funding, s.issuer_country, s.currency, s.ic_category,
     s.interchange_bps, s.fit_bucket,
     sum(s.n) AS n,
     sum(s.sx) AS sx,
@@ -80,15 +80,15 @@ SELECT
 FROM __DB__.cost_daily_stats AS s FINAL
 INNER JOIN
 (
-    SELECT card_network, variant, funding, issuer_country, currency, ic_category,
+    SELECT report_account, card_network, variant, funding, issuer_country, currency, ic_category,
            interchange_bps, txn_date
     FROM
     (
         SELECT
-            card_network, variant, funding, issuer_country, currency, ic_category,
+            report_account, card_network, variant, funding, issuer_country, currency, ic_category,
             interchange_bps, txn_date, n,
             sum(n) OVER (
-                PARTITION BY card_network, variant, funding, issuer_country, currency,
+                PARTITION BY report_account, card_network, variant, funding, issuer_country, currency,
                              ic_category, interchange_bps
                 ORDER BY txn_date DESC
                 ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
@@ -96,29 +96,29 @@ INNER JOIN
         FROM
         (
             SELECT
-                card_network, variant, funding, issuer_country, currency, ic_category,
+                report_account, card_network, variant, funding, issuer_country, currency, ic_category,
                 interchange_bps, txn_date, sum(n) AS n
             FROM __DB__.cost_daily_stats FINAL
             WHERE connector = {connector:String}
               AND account = {account:String}
               AND merchant_id = {merchant_id:String}
               AND txn_date >= {max_window_start:Date}
-            GROUP BY card_network, variant, funding, issuer_country, currency, ic_category,
+            GROUP BY report_account, card_network, variant, funding, issuer_country, currency, ic_category,
                      interchange_bps, txn_date
         )
     )
     WHERE txn_date >= {base_window_start:Date}
        OR coalesce(cum_n_before, 0) < {min_samples:UInt32}
 ) AS d
-USING (card_network, variant, funding, issuer_country, currency, ic_category,
+USING (report_account, card_network, variant, funding, issuer_country, currency, ic_category,
        interchange_bps, txn_date)
 WHERE s.connector = {connector:String}
   AND s.account = {account:String}
   AND s.merchant_id = {merchant_id:String}
   AND s.txn_date >= {max_window_start:Date}
-GROUP BY s.card_network, s.variant, s.funding, s.issuer_country, s.currency, s.ic_category,
+GROUP BY s.report_account, s.card_network, s.variant, s.funding, s.issuer_country, s.currency, s.ic_category,
          s.interchange_bps, s.fit_bucket
-ORDER BY s.card_network, s.variant, s.funding, s.issuer_country, s.currency, s.ic_category,
+ORDER BY s.report_account, s.card_network, s.variant, s.funding, s.issuer_country, s.currency, s.ic_category,
          s.interchange_bps, s.fit_bucket
 FORMAT JSONEachRow
 "#;
@@ -136,13 +136,14 @@ WHERE connector = {connector:String} AND account = {account:String}
 "#;
 
 const INSERT_COLUMNS: &str = "\
-report_date,connector,account,merchant_id,card_network,variant,funding,issuer_country,currency,\
+report_date,connector,account,report_account,merchant_id,card_network,variant,funding,issuer_country,currency,\
 ic_category,interchange_bps,segment_idx,amount_lo,amount_hi,pct_bps,fixed,n,gross_sum,bps_rmse,\
-grade_bps,pct_ci95_bps,astar,prop_bps,fix_abs,fix_bps,below_gross_frac,fan_frac,fan_money_bps,\
+grade_bps,pct_ci95_bps,crossover_amount,prop_bps,fix_abs,fix_bps,below_gross_frac,fan_frac,fan_money_bps,\
 r2,verdict";
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct ClusterKey {
+    report_account: String,
     card_network: String,
     variant: String,
     funding: String,
@@ -214,6 +215,8 @@ struct Bucket {
 
 #[derive(Debug, Clone, Deserialize)]
 struct RollupRow {
+    #[serde(default)]
+    report_account: String,
     card_network: String,
     variant: String,
     funding: String,
@@ -251,7 +254,7 @@ struct OlsFit {
 
 #[derive(Debug, Clone, Copy)]
 struct Decomp {
-    astar: f64,
+    crossover_amount: f64,
     prop_bps: f64,
     fix_abs: f64,
     fix_bps: f64,
@@ -292,7 +295,7 @@ struct ModelRow {
     bps_rmse: f64,
     grade_bps: f64,
     pct_ci95_bps: f64,
-    astar: f64,
+    crossover_amount: f64,
     prop_bps: f64,
     fix_abs: f64,
     fix_bps: f64,
@@ -391,6 +394,7 @@ fn parse_rollup(text: &str) -> Result<BTreeMap<ClusterKey, Vec<Bucket>>, IngestE
         let row: RollupRow =
             serde_json::from_str(line).map_err(|e| IngestError::Storage(e.to_string()))?;
         let key = ClusterKey {
+            report_account: row.report_account,
             card_network: row.card_network,
             variant: row.variant,
             funding: row.funding,
@@ -515,7 +519,7 @@ fn build_row(
         dec.fix_bps
     };
     let fan_frac = dispersion(samples, fit.slope, fit.intercept);
-    let fan_money_bps = money_bps(samples, fit.slope, fit.intercept, dec.astar);
+    let fan_money_bps = money_bps(samples, fit.slope, fit.intercept, dec.crossover_amount);
     let mut verdict = verdict_override.unwrap_or_else(|| {
         if stats.n < MIN_N {
             Verdict::Thin
@@ -542,7 +546,7 @@ fn build_row(
         } else {
             f64::INFINITY
         },
-        astar: dec.astar,
+        crossover_amount: dec.crossover_amount,
         prop_bps: dec.prop_bps,
         fix_abs: dec.fix_abs,
         fix_bps: dec.fix_bps,
@@ -638,12 +642,12 @@ fn abs_rms(s: FitStats, intercept: f64, slope: f64) -> f64 {
 }
 
 fn decompose(whole: FitStats, buckets: &[Bucket], slope: f64, intercept: f64) -> Decomp {
-    let astar = crossover(slope, intercept);
+    let crossover_amount = crossover(slope, intercept);
     let mut below = FitStats::default();
     let mut above = FitStats::default();
     for b in buckets {
         let (_, hi) = bucket_range(b.fit_bucket);
-        if hi <= astar {
+        if hi <= crossover_amount {
             below.merge(&b.stats);
         } else {
             above.merge(&b.stats);
@@ -659,14 +663,14 @@ fn decompose(whole: FitStats, buckets: &[Bucket], slope: f64, intercept: f64) ->
     } else {
         f64::NAN
     };
-    let fix_bps = if below.n > 0 && astar > 0.0 {
-        fix_abs / astar * 10_000.0
+    let fix_bps = if below.n > 0 && crossover_amount > 0.0 {
+        fix_abs / crossover_amount * 10_000.0
     } else {
         f64::NAN
     };
     let total_vol = if whole.sx > 0.0 { whole.sx } else { 1.0 };
     Decomp {
-        astar,
+        crossover_amount,
         prop_bps,
         fix_abs,
         fix_bps,
@@ -753,14 +757,14 @@ fn dispersion(samples: &[Sample], slope: f64, intercept: f64) -> f64 {
     }
 }
 
-fn money_bps(samples: &[Sample], slope: f64, intercept: f64, astar: f64) -> f64 {
+fn money_bps(samples: &[Sample], slope: f64, intercept: f64, crossover_amount: f64) -> f64 {
     if !slope.is_finite() || !intercept.is_finite() {
         return 0.0;
     }
     let mut num = 0.0;
     let mut den = 0.0;
     for p in samples {
-        if p.x <= 0.0 || p.x < astar {
+        if p.x <= 0.0 || p.x < crossover_amount {
             continue;
         }
         num += ((intercept + slope * p.x) - p.y).abs();
@@ -904,6 +908,7 @@ async fn insert_models(
             "report_date": report_date,
             "connector": connector,
             "account": account,
+            "report_account": &r.key.report_account,
             "merchant_id": merchant_id,
             "card_network": &r.key.card_network,
             "variant": &r.key.variant,
@@ -922,7 +927,7 @@ async fn insert_models(
             "bps_rmse": clean_float(r.bps_rmse),
             "grade_bps": clean_float(r.grade_bps),
             "pct_ci95_bps": clean_float(r.pct_ci95_bps),
-            "astar": clean_float(r.astar),
+            "crossover_amount": clean_float(r.crossover_amount),
             "prop_bps": clean_float(r.prop_bps),
             "fix_abs": clean_float(r.fix_abs),
             "fix_bps": clean_float(r.fix_bps),

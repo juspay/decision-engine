@@ -192,6 +192,7 @@ impl SettlementReportSource for StripeReportSource {
                     &currency,
                     month,
                 ]),
+                report_account: String::new(),
                 card_network,
                 variant,
                 funding,

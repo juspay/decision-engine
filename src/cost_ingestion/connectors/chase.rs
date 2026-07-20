@@ -360,6 +360,7 @@ impl SettlementReportSource for ChaseReportSource {
 
                 Ok(Some(SettledFeeRow {
                     txn_ref: row.get(c.order).trim().to_string(),
+                    report_account: String::new(),
                     card_network: network,
                     variant,
                     funding,

@@ -176,6 +176,7 @@ impl PaymentAcc {
         let total_fee = self.scheme_fee + self.commission;
         Some(SettledFeeRow {
             txn_ref: self.txn_ref,
+            report_account: String::new(),
             card_network: self.card_network,
             variant: self.variant,
             funding: self.funding,

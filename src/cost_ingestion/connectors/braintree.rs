@@ -195,6 +195,7 @@ impl SettlementReportSource for BraintreeReportSource {
 
                 Ok(Some(SettledFeeRow {
                     txn_ref: row.get(c.txn).to_string(),
+                    report_account: String::new(),
                     card_network: network,
                     variant,
                     funding,
