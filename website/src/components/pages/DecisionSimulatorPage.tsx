@@ -344,12 +344,13 @@ const DEFAULT_SIMULATION_TPS = 1
 const MAX_SIMULATION_TPS = 50
 
 // Bounds + defaults for the per-transaction amount range slider (multi-objective sim).
-// Bounds are only consumed by the amount-range slider, which is currently commented out;
-// kept here (commented) so re-enabling the slider restores them in one place.
-// const SIMULATION_AMOUNT_BOUND_MIN = 1
-// const SIMULATION_AMOUNT_BOUND_MAX = 1000
+const SIMULATION_AMOUNT_BOUND_MIN = 1
+const SIMULATION_AMOUNT_BOUND_MAX = 100000
 const DEFAULT_SIMULATION_MIN_AMOUNT = 10
 const DEFAULT_SIMULATION_MAX_AMOUNT = 100
+// Hidden for now — the amount-range control isn't needed yet. The sim still runs
+// with the default range above; flip to true to bring the slider back.
+const SHOW_AMOUNT_RANGE_SLIDER = false
 
 // Share of simulated failures modeled as soft declines (GSM `retry`) that are retried on an
 // alternate processor when smart retry is enabled. The rest are hard declines (no retry).
@@ -3255,7 +3256,7 @@ export function DecisionSimulatorPage() {
               </label>
             </div>
 
-            {/* {(() => {
+            {SHOW_AMOUNT_RANGE_SLIDER && (() => {
               const BMIN = SIMULATION_AMOUNT_BOUND_MIN
               const BMAX = SIMULATION_AMOUNT_BOUND_MAX
               const lo = Math.max(BMIN, Math.min(simulationConfig.minAmount, simulationConfig.maxAmount))
@@ -3295,7 +3296,7 @@ export function DecisionSimulatorPage() {
                   </div>
                 </div>
               )
-            })()} */}
+            })()}
 
             {/* Action cluster, pushed to the trailing edge. The invisible spacer matches the
                 SurfaceLabel height (leading-4 = 16px) so the control row lines up with the
