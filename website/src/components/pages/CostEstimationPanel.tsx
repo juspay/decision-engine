@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Database, LineChart, SlidersHorizontal, type LucideIcon } from 'lucide-react'
 import { Card, CardBody, CardHeader, SurfaceLabel } from '../ui/Card'
@@ -69,6 +69,14 @@ export function CostEstimationPanel({ merchantId }: { merchantId?: string }) {
       { replace: true },
     )
   }
+  // Canonicalize the shared ?section= param while this panel is mounted (Cost tab):
+  // drop unknown values (e.g. a leftover SR Manual section) and the default
+  // (overrides) so the URL never advertises a section the panel isn't showing.
+  useEffect(() => {
+    const canonical = section === 'overrides' ? null : section
+    if (sectionParam !== canonical) setSection(section)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [section, sectionParam])
 
   return (
     <div className="grid gap-6 lg:grid-cols-[220px_1fr] lg:items-start">

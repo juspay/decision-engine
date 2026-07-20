@@ -267,6 +267,16 @@ export function SRRoutingPage() {
       { replace: true },
     )
   }
+  // The ?section= param is shared with the Cost tab, which has a disjoint set of
+  // valid values. When the Manual tab is active, canonicalize it: drop unknown
+  // values (e.g. a leftover cost section after switching tabs) and the default
+  // (scoring) so the URL never advertises a section the Manual UI isn't showing.
+  useEffect(() => {
+    if (activeTab !== 'manual') return
+    const canonical = manualTab === 'scoring' ? null : manualTab
+    if (sectionParam !== canonical) setManualTab(manualTab)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, manualTab, sectionParam])
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState(false)

@@ -65,7 +65,7 @@ const SEARCH_GROUPS: SearchGroup[] = [
       { to: '/routing/sr', label: 'Multi Objective', icon: TrendingUp, keywords: ['sr', 'success rate', 'auth rate'] },
       { to: '/routing/sr?tab=autopilot', label: 'Autopilot', hint: 'Multi Objective', icon: Gauge, keywords: ['sr', 'auto', 'automatic'] },
       { to: '/routing/sr?tab=manual', label: 'Manual Config', hint: 'Multi Objective', icon: SlidersHorizontal, keywords: ['sr', 'weights', 'tuning'] },
-      { to: '/routing/sr?tab=manual&section=scoring', label: 'Scoring Defaults', hint: 'Manual Config', icon: SlidersHorizontal, keywords: ['sr', 'scoring', 'defaults', 'weights'] },
+      { to: '/routing/sr?tab=manual', label: 'Scoring Defaults', hint: 'Manual Config', icon: SlidersHorizontal, keywords: ['sr', 'scoring', 'defaults', 'weights'] },
       { to: '/routing/sr?tab=manual&section=elimination', label: 'Elimination', hint: 'Manual Config', icon: SlidersHorizontal, keywords: ['sr', 'eliminate', 'threshold', 'latency'] },
       { to: '/routing/sr?tab=manual&section=dimensions', label: 'SR Dimensions', hint: 'Manual Config', icon: SlidersHorizontal, keywords: ['sr', 'dimensions', 'split', 'clusters', 'udf'] },
       { to: '/routing/sr?tab=flags', label: 'Feature Flags', hint: 'Multi Objective', icon: ToggleRight, keywords: ['sr', 'toggles', 'settings'] },

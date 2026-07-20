@@ -891,6 +891,15 @@ export function AnalyticsPage() {
       { replace: true },
     )
   }
+  // Keep the URL canonical: an unknown or explicitly-default ?view= is rewritten
+  // to the canonical form (default omitted) so the URL never disagrees with the
+  // rendered view and default links stay shareable/canonical.
+  useEffect(() => {
+    const canonical = view === 'transactions' ? null : view
+    if (viewParam !== canonical) setView(view)
+    // setView is stable enough for this purpose; re-run only on the derived state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, viewParam])
   const [routingFilters, setRoutingFilters] = useState<RoutingFilters>(EMPTY_ROUTING_FILTERS)
   const [customRangeOpen, setCustomRangeOpen] = useState(false)
   const [connectorFiltersOpen, setConnectorFiltersOpen] = useState(false)
