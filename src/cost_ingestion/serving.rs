@@ -35,6 +35,20 @@ struct ServingCost {
     fixed: f64,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ServingSegment {
+    cost: ServingCost,
+    segment_idx: u16,
+    amount_lo: f64,
+    amount_hi: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, std::hash::Hash)]
+struct PredictedIc {
+    category: String,
+    interchange_bps: String,
+}
+
 impl ServingCost {
     fn effective_cost_bps(&self, amount: f64) -> f64 {
         if amount > 0.0 {
@@ -50,11 +64,11 @@ impl ServingCost {
 #[derive(Default, Clone)]
 struct MerchantModels {
     /// `connector|network|funding|currency|region` → blended cost (graceful fallback).
-    coarse: HashMap<String, ServingCost>,
-    /// `connector|network|variant|funding|issuer|currency|ic_category` → specific cluster cost.
-    fine: HashMap<String, ServingCost>,
-    /// Predictor back-off levels (most specific first): level-key → modal `ic_category`.
-    predictor: Vec<HashMap<String, String>>,
+    coarse: HashMap<String, Vec<ServingSegment>>,
+    /// `connector|network|variant|funding|issuer|currency|ic_category|ic_rate` → fitted segments.
+    fine: HashMap<String, Vec<ServingSegment>>,
+    /// Predictor back-off levels (most specific first): level-key → modal category/rate pair.
+    predictor: Vec<HashMap<String, PredictedIc>>,
     /// Manual per-connector blended-fee overrides (lowercase connector → flat cost). When present
     /// for a connector, it wins over the learned model at [`lookup`] — the merchant told us the
     /// contract rate, so every EV calculation on that connector uses it.
@@ -143,8 +157,44 @@ fn fine_key(
     issuer: &str,
     currency: &str,
     ic_category: &str,
+    interchange_bps: &str,
 ) -> String {
     format!(
+        "{}|{}|{}|{}|{}|{}|{}|{}",
+        connector.to_lowercase(),
+        normalize_network(&network.to_lowercase()),
+        variant.to_lowercase(),
+        funding.to_lowercase(),
+        issuer.to_lowercase(),
+        currency.to_lowercase(),
+        ic_category.to_lowercase(),
+        interchange_bps.to_lowercase(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn override_keys(
+    connector: &str,
+    network: &str,
+    variant: &str,
+    funding: &str,
+    issuer: &str,
+    currency: &str,
+    ic_category: &str,
+    interchange_bps: &str,
+    segment_idx: Option<u16>,
+) -> Vec<String> {
+    let base = fine_key(
+        connector,
+        network,
+        variant,
+        funding,
+        issuer,
+        currency,
+        ic_category,
+        interchange_bps,
+    );
+    let legacy = format!(
         "{}|{}|{}|{}|{}|{}|{}",
         connector.to_lowercase(),
         normalize_network(&network.to_lowercase()),
@@ -153,7 +203,14 @@ fn fine_key(
         issuer.to_lowercase(),
         currency.to_lowercase(),
         ic_category.to_lowercase(),
-    )
+    );
+    let mut out = Vec::new();
+    if let Some(idx) = segment_idx {
+        out.push(format!("{base}|{idx}"));
+        out.push(format!("{legacy}|{idx}"));
+    }
+    out.push(legacy);
+    out
 }
 
 /// Reconstruct the report's `variant` string from decide-time card attributes
@@ -219,6 +276,10 @@ pub struct InhouseMatch {
     pub variant: Option<String>,
     pub issuer: Option<String>,
     pub ic_category: Option<String>,
+    pub interchange_bps: Option<String>,
+    pub segment_idx: Option<u16>,
+    pub amount_lo: Option<f64>,
+    pub amount_hi: Option<f64>,
 }
 
 /// Look up an in-house cost at decide time. Tries the fine, category-predicted cluster first, then
@@ -242,35 +303,63 @@ pub fn lookup(
     let snapshot = cache().read().ok()?.clone();
     let m = snapshot.get(merchant_id)?;
 
-    // Resolve the fine cluster key once (needs a raw issuer + a predicted interchange category).
-    // Reused for both the highest-precedence cluster-override check and the learned fine-model
-    // lookup, so the two can never disagree on which cluster this transaction is.
+    let brand = normalize_network(&network.to_lowercase()).to_string();
+    let connector_l = connector.to_lowercase();
+
+    // Resolve the fine cluster key once (needs a raw issuer + predicted category/rate pair).
+    // The same predicted pair is used for overrides and learned models, so they cannot drift.
     let fine = if issuer.is_empty() {
         None
     } else {
         let variant = reconstruct_variant(network, program, funding, wallet);
         let band = amount_band(amount);
-        predict_category(m, network, &variant, funding, issuer, band, channel).map(|cat| {
+        predict_category(m, network, &variant, funding, issuer, band, channel).map(|pred| {
             let key = fine_key(
-                connector, network, &variant, funding, issuer, currency, &cat,
+                connector,
+                network,
+                &variant,
+                funding,
+                issuer,
+                currency,
+                &pred.category,
+                &pred.interchange_bps,
             );
-            (key, variant, cat)
+            (key, variant, pred)
         })
     };
 
-    // 1. Cluster override — the merchant set a fee for this exact segment (including its card
-    //    program). Most specific, wins over everything (connector override + learned model).
-    if let Some((key, variant, cat)) = &fine {
-        if let Some(cost) = m.cluster_overrides.get(key) {
+    let fine_segment = fine
+        .as_ref()
+        .and_then(|(key, _, _)| m.fine.get(key))
+        .and_then(|segments| pick_segment(segments, amount));
+
+    // 1. Cluster override — exact segment first, then legacy unsegmented keys.
+    if let Some((_, variant, pred)) = &fine {
+        let keys = override_keys(
+            connector,
+            network,
+            variant,
+            funding,
+            issuer,
+            currency,
+            &pred.category,
+            &pred.interchange_bps,
+            fine_segment.map(|s| s.segment_idx),
+        );
+        if let Some(cost) = keys.iter().find_map(|key| m.cluster_overrides.get(key)) {
             return Some(InhouseMatch {
                 effective_bps: cost.effective_cost_bps(amount),
                 pct_bps: cost.pct_bps,
                 fixed: cost.fixed,
-                brand: normalize_network(&network.to_lowercase()).to_string(),
+                brand,
                 currency: currency.to_uppercase(),
                 variant: Some(variant.clone()),
                 issuer: Some(issuer.to_uppercase()),
-                ic_category: Some(cat.clone()),
+                ic_category: Some(pred.category.clone()),
+                interchange_bps: Some(pred.interchange_bps.clone()),
+                segment_idx: fine_segment.map(|s| s.segment_idx),
+                amount_lo: fine_segment.map(|s| s.amount_lo),
+                amount_hi: fine_segment.map(|s| s.amount_hi),
             });
         }
     }
@@ -278,58 +367,89 @@ pub fn lookup(
     // 2. Connector override: the merchant gave us this connector's blanket contract rate, so use it
     //    flat for every transaction not covered by a cluster override above. `connector` is already
     //    lowercased by the caller; lowercase again defensively so the key always matches.
-    if let Some(cost) = m.overrides.get(&connector.to_lowercase()) {
+    if let Some(cost) = m.overrides.get(&connector_l) {
         return Some(InhouseMatch {
             effective_bps: cost.effective_cost_bps(amount),
             pct_bps: cost.pct_bps,
             fixed: cost.fixed,
-            brand: normalize_network(&network.to_lowercase()).to_string(),
+            brand,
             currency: currency.to_uppercase(),
             variant: None,
             issuer: None,
             ic_category: None,
+            interchange_bps: None,
+            segment_idx: None,
+            amount_lo: None,
+            amount_hi: None,
         });
     }
 
     // The invoice-derived add-on for this connector (if any), layered onto the *learned* models
     // below — never onto the overrides above, which are already all-in contract rates.
-    let addon = m.addons.get(&connector.to_lowercase());
+    let addon = m.addons.get(&connector_l);
 
     // 3. Learned fine model: serve the specific fitted cluster, plus the invoice add-on.
-    if let Some((key, variant, cat)) = &fine {
-        if let Some(cost) = m.fine.get(key) {
-            let cost = cost.with_addon(addon);
-            return Some(InhouseMatch {
-                effective_bps: cost.effective_cost_bps(amount),
-                pct_bps: cost.pct_bps,
-                fixed: cost.fixed,
-                brand: normalize_network(&network.to_lowercase()).to_string(),
-                currency: currency.to_uppercase(),
-                variant: Some(variant.clone()),
-                issuer: Some(issuer.to_uppercase()),
-                ic_category: Some(cat.clone()),
-            });
-        }
+    if let (Some(segment), Some((_, variant, pred))) = (fine_segment, fine.as_ref()) {
+        let cost = segment.cost.with_addon(addon);
+        return Some(InhouseMatch {
+            effective_bps: cost.effective_cost_bps(amount),
+            pct_bps: cost.pct_bps,
+            fixed: cost.fixed,
+            brand,
+            currency: currency.to_uppercase(),
+            variant: Some(variant.clone()),
+            issuer: Some(issuer.to_uppercase()),
+            ic_category: Some(pred.category.clone()),
+            interchange_bps: Some(pred.interchange_bps.clone()),
+            segment_idx: Some(segment.segment_idx),
+            amount_lo: Some(segment.amount_lo),
+            amount_hi: Some(segment.amount_hi),
+        });
     }
 
     // 4. Fallback: the coarse region blend (previous behavior) — no single variant/issuer/category.
     let key = coarse_key(connector, network, funding, currency, region);
-    m.coarse.get(&key).map(|cost| {
-        let cost = cost.with_addon(addon);
-        InhouseMatch {
+    m.coarse.get(&key).and_then(|segments| {
+        let segment = pick_segment(segments, amount)?;
+        let cost = segment.cost.with_addon(addon);
+        Some(InhouseMatch {
             effective_bps: cost.effective_cost_bps(amount),
             pct_bps: cost.pct_bps,
             fixed: cost.fixed,
-            brand: normalize_network(&network.to_lowercase()).to_string(),
+            brand,
             currency: currency.to_uppercase(),
             variant: None,
             issuer: None,
             ic_category: None,
-        }
+            interchange_bps: None,
+            segment_idx: Some(segment.segment_idx),
+            amount_lo: Some(segment.amount_lo),
+            amount_hi: Some(segment.amount_hi),
+        })
     })
 }
 
-/// Predict the interchange category by trying each back-off level, most specific first.
+fn pick_segment(segments: &[ServingSegment], amount: f64) -> Option<ServingSegment> {
+    let mut fallback = None;
+    let mut best = None;
+    let mut best_width = f64::INFINITY;
+    for segment in segments {
+        if segment.amount_lo == 0.0 && segment.amount_hi == 0.0 {
+            fallback = Some(*segment);
+            continue;
+        }
+        if amount >= segment.amount_lo && amount < segment.amount_hi {
+            let width = segment.amount_hi - segment.amount_lo;
+            if width < best_width {
+                best = Some(*segment);
+                best_width = width;
+            }
+        }
+    }
+    best.or(fallback)
+}
+
+/// Predict the interchange category/rate pair by trying each back-off level, most specific first.
 fn predict_category(
     m: &MerchantModels,
     network: &str,
@@ -338,12 +458,12 @@ fn predict_category(
     issuer: &str,
     band: &str,
     channel: &str,
-) -> Option<String> {
+) -> Option<PredictedIc> {
     let keys = predictor_level_keys(network, variant, funding, issuer, band, channel);
     for (i, key) in keys.iter().enumerate() {
         if let Some(table) = m.predictor.get(i) {
-            if let Some(cat) = table.get(key) {
-                return Some(cat.clone());
+            if let Some(pred) = table.get(key) {
+                return Some(pred.clone());
             }
         }
     }
@@ -382,6 +502,7 @@ pub fn spawn(clickhouse: ClickHouseAnalyticsConfig) {
 const COST_SQL: &str = r#"
 SELECT
     merchant_id, connector, card_network, variant, funding, issuer_country, currency, ic_category,
+    interchange_bps, segment_idx, amount_lo, amount_hi,
     sum(pct_bps * gross_sum) AS pct_num,
     sum(fixed * gross_sum)   AS fixed_num,
     sum(gross_sum)           AS w
@@ -390,23 +511,27 @@ WHERE verdict = 'GOOD' AND gross_sum > 0{merchant_filter}
   AND (merchant_id, connector, account, report_date) IN (
       SELECT merchant_id, connector, account, max(report_date)
       FROM __DB__.cost_fee_model{merchant_filter_sub} GROUP BY merchant_id, connector, account)
-GROUP BY merchant_id, connector, card_network, variant, funding, issuer_country, currency, ic_category
+GROUP BY merchant_id, connector, card_network, variant, funding, issuer_country, currency,
+         ic_category, interchange_bps, segment_idx, amount_lo, amount_hi
 FORMAT TSV
 "#;
 
 /// Per-(merchant, network, variant, funding, issuer, band, channel) category counts, for the
 /// predictor. `channel` (pos/ecom) is the strongest disambiguator between in-person and online
 /// interchange categories. `band` is a stored column of the rollup (stamped at ingestion by the same
-/// `amount_band` thresholds this file uses at decide time); the €5 floor was applied at aggregation.
+/// `amount_band` thresholds this file uses at decide time). Positive micro transactions are kept;
+/// fixed-fee tails are handled by the fitter.
 /// `{merchant_filter}` is a `WHERE merchant_id = {merchant:String}` for a single-merchant refresh,
 /// or `""` for the global rebuild.
 const PREDICTOR_SQL: &str = r#"
 SELECT
-    merchant_id, card_network, variant, funding, issuer_country, band, channel, ic_category,
+    merchant_id, card_network, variant, funding, issuer_country, band, channel,
+    ic_category, interchange_bps,
     sum(n) AS c
 FROM __DB__.cost_daily_stats FINAL
 {merchant_filter}
-GROUP BY merchant_id, card_network, variant, funding, issuer_country, band, channel, ic_category
+GROUP BY merchant_id, card_network, variant, funding, issuer_country, band, channel,
+         ic_category, interchange_bps
 FORMAT TSV
 "#;
 
@@ -456,35 +581,48 @@ async fn refresh_inner(
 
     let mut snap: Snapshot = HashMap::new();
 
-    // 1. Cost tables (coarse blend + fine per-category), volume-weighted.
-    let mut coarse_acc: HashMap<String, HashMap<String, (f64, f64, f64)>> = HashMap::new(); // merchant -> key -> (pct_num, fix_num, w)
-    let mut fine_acc: HashMap<String, HashMap<String, (f64, f64, f64)>> = HashMap::new();
+    // 1. Cost tables (coarse blend + fine per-category), volume-weighted per amount segment.
+    let mut coarse_acc: HashMap<String, HashMap<String, HashMap<String, SegmentAcc>>> =
+        HashMap::new();
+    let mut fine_acc: HashMap<String, HashMap<String, HashMap<String, SegmentAcc>>> =
+        HashMap::new();
     for line in cost_rows.lines() {
         let f: Vec<&str> = line.split('\t').collect();
-        if f.len() < 11 {
+        if f.len() < 15 {
             continue;
         }
-        let (merchant, connector, network, variant, funding, issuer, currency, ic) =
-            (f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7]);
-        let pct_num: f64 = f[8].trim().parse().unwrap_or(0.0);
-        let fix_num: f64 = f[9].trim().parse().unwrap_or(0.0);
-        let w: f64 = f[10].trim().parse().unwrap_or(0.0);
+        let (merchant, connector, network, variant, funding, issuer, currency, ic, ic_bps) =
+            (f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8]);
+        let segment_idx: u16 = f[9].trim().parse().unwrap_or(0);
+        let amount_lo: f64 = f[10].trim().parse().unwrap_or(0.0);
+        let amount_hi: f64 = f[11].trim().parse().unwrap_or(0.0);
+        let pct_num: f64 = f[12].trim().parse().unwrap_or(0.0);
+        let fix_num: f64 = f[13].trim().parse().unwrap_or(0.0);
+        let w: f64 = f[14].trim().parse().unwrap_or(0.0);
         if w <= 0.0 {
             continue;
         }
         let region = issuer_region(issuer);
         let ck = coarse_key(connector, network, funding, currency, &region);
-        accumulate(
+        accumulate_segment(
             coarse_acc.entry(merchant.to_string()).or_default(),
             ck,
+            segment_idx,
+            amount_lo,
+            amount_hi,
             pct_num,
             fix_num,
             w,
         );
-        let fk = fine_key(connector, network, variant, funding, issuer, currency, ic);
-        accumulate(
+        let fk = fine_key(
+            connector, network, variant, funding, issuer, currency, ic, ic_bps,
+        );
+        accumulate_segment(
             fine_acc.entry(merchant.to_string()).or_default(),
             fk,
+            segment_idx,
+            amount_lo,
+            amount_hi,
             pct_num,
             fix_num,
             w,
@@ -492,27 +630,32 @@ async fn refresh_inner(
     }
     for (merchant, keys) in coarse_acc {
         let m = snap.entry(merchant).or_default();
-        m.coarse = finalize(keys);
+        m.coarse = finalize_segments(keys);
     }
     for (merchant, keys) in fine_acc {
         let m = snap.entry(merchant).or_default();
-        m.fine = finalize(keys);
+        m.fine = finalize_segments(keys);
     }
 
     // 2. Predictor tables: accumulate category counts per back-off level, keep the modal category
     //    with >= MIN_SUPPORT total observations.
-    let mut pred_acc: HashMap<String, Vec<HashMap<String, HashMap<String, u64>>>> = HashMap::new();
+    let mut pred_acc: HashMap<String, Vec<HashMap<String, HashMap<PredictedIc, u64>>>> =
+        HashMap::new();
     for line in pred_rows.lines() {
         let f: Vec<&str> = line.split('\t').collect();
-        if f.len() < 9 {
+        if f.len() < 10 {
             continue;
         }
-        let (merchant, network, variant, funding, issuer, band, channel, ic) =
-            (f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7]);
-        let c: u64 = f[8].trim().parse().unwrap_or(0);
+        let (merchant, network, variant, funding, issuer, band, channel, ic, ic_bps) =
+            (f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8]);
+        let c: u64 = f[9].trim().parse().unwrap_or(0);
         if c == 0 {
             continue;
         }
+        let pred = PredictedIc {
+            category: ic.to_string(),
+            interchange_bps: ic_bps.to_string(),
+        };
         let levels = pred_acc
             .entry(merchant.to_string())
             .or_insert_with(|| vec![HashMap::new(); PREDICTOR_LEVELS]);
@@ -523,12 +666,12 @@ async fn refresh_inner(
             *levels[i]
                 .entry(key)
                 .or_default()
-                .entry(ic.to_string())
+                .entry(pred.clone())
                 .or_insert(0) += c;
         }
     }
     for (merchant, levels) in pred_acc {
-        let tables: Vec<HashMap<String, String>> = levels
+        let tables: Vec<HashMap<String, PredictedIc>> = levels
             .into_iter()
             .map(|level| {
                 level
@@ -540,7 +683,7 @@ async fn refresh_inner(
                         }
                         cats.into_iter()
                             .max_by_key(|(_, n)| *n)
-                            .map(|(cat, _)| (key, cat))
+                            .map(|(pred, _)| (key, pred))
                     })
                     .collect()
             })
@@ -641,21 +784,13 @@ async fn load_overlays_into(snap: &mut Snapshot, merchant_id: &str) {
         ),
     }
 
-    // Cluster-level overrides, keyed by the same fine_key the lookup builds at decide time.
+    // Cluster-level overrides, keyed by the same wire key the lookup probes at decide time.
     match super::overrides::list_clusters(merchant_id).await {
         Ok(list) if !list.is_empty() => {
             let cluster_overrides = list
                 .into_iter()
                 .map(|c| {
-                    let key = fine_key(
-                        &c.dims.connector,
-                        &c.dims.card_network,
-                        &c.dims.variant,
-                        &c.dims.funding,
-                        &c.dims.issuer_country,
-                        &c.dims.currency,
-                        &c.dims.ic_category,
-                    );
+                    let key = super::overrides::key_of_dims(&c.dims);
                     (
                         key,
                         ServingCost {
@@ -706,30 +841,73 @@ async fn load_overlays_into(snap: &mut Snapshot, merchant_id: &str) {
     }
 }
 
-fn accumulate(
-    map: &mut HashMap<String, (f64, f64, f64)>,
+#[derive(Debug, Clone, Copy)]
+struct SegmentAcc {
+    segment_idx: u16,
+    amount_lo: f64,
+    amount_hi: f64,
+    pct_num: f64,
+    fix_num: f64,
+    w: f64,
+}
+
+fn accumulate_segment(
+    map: &mut HashMap<String, HashMap<String, SegmentAcc>>,
     key: String,
+    segment_idx: u16,
+    amount_lo: f64,
+    amount_hi: f64,
     pct_num: f64,
     fix_num: f64,
     w: f64,
 ) {
-    let e = map.entry(key).or_insert((0.0, 0.0, 0.0));
-    e.0 += pct_num;
-    e.1 += fix_num;
-    e.2 += w;
+    let segment_key = format!("{segment_idx}|{amount_lo:.12}|{amount_hi:.12}");
+    let e = map
+        .entry(key)
+        .or_default()
+        .entry(segment_key)
+        .or_insert(SegmentAcc {
+            segment_idx,
+            amount_lo,
+            amount_hi,
+            pct_num: 0.0,
+            fix_num: 0.0,
+            w: 0.0,
+        });
+    e.pct_num += pct_num;
+    e.fix_num += fix_num;
+    e.w += w;
 }
 
-fn finalize(keys: HashMap<String, (f64, f64, f64)>) -> HashMap<String, ServingCost> {
+fn finalize_segments(
+    keys: HashMap<String, HashMap<String, SegmentAcc>>,
+) -> HashMap<String, Vec<ServingSegment>> {
     keys.into_iter()
-        .filter(|(_, (_, _, w))| *w > 0.0)
-        .map(|(k, (pn, fn_, w))| {
-            (
-                k,
-                ServingCost {
-                    pct_bps: pn / w,
-                    fixed: fn_ / w,
-                },
-            )
+        .filter_map(|(k, segments)| {
+            let mut out: Vec<ServingSegment> = segments
+                .into_values()
+                .filter(|s| s.w > 0.0)
+                .map(|s| ServingSegment {
+                    cost: ServingCost {
+                        pct_bps: s.pct_num / s.w,
+                        fixed: s.fix_num / s.w,
+                    },
+                    segment_idx: s.segment_idx,
+                    amount_lo: s.amount_lo,
+                    amount_hi: s.amount_hi,
+                })
+                .collect();
+            out.sort_by(|a, b| {
+                a.amount_lo
+                    .total_cmp(&b.amount_lo)
+                    .then(a.amount_hi.total_cmp(&b.amount_hi))
+                    .then(a.segment_idx.cmp(&b.segment_idx))
+            });
+            if out.is_empty() {
+                None
+            } else {
+                Some((k, out))
+            }
         })
         .collect()
 }

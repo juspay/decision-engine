@@ -184,6 +184,7 @@ impl PaymentAcc {
             // No single interchange category exists for blended pricing (`Fee Detail` is per-line
             // and noisy), so leave it empty — the rollup buckets all blended volume together.
             ic_category: String::new(),
+            interchange_bps: String::new(),
             txn_date: self.txn_date,
             // Checkout is card-not-present online acceptance; no terminal id in the report.
             channel: "ecom".to_string(),

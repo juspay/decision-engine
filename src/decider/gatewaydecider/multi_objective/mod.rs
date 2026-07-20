@@ -86,6 +86,14 @@ pub struct CostModel {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ic_category: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub interchange_bps: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub segment_idx: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub amount_lo: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub amount_hi: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub pct_bps: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fixed_fee: Option<f64>,

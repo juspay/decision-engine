@@ -2,7 +2,7 @@
 //!
 //! Individual transactions are never stored. As a report streams in (batch by batch, off the
 //! connector parser), each fee-bearing transaction is folded into one bucket keyed by
-//! `(cluster × transaction-day × amount-band × channel)`. A bucket accumulates the additive sums an
+//! `(cluster × transaction-day × predictor-band × fit-bucket × channel)`. A bucket accumulates the additive sums an
 //! OLS fit needs — `n, Σx, Σy, Σx², Σxy, Σy²` and the reciprocal terms for the bps-RMSE /
 //! NON_LINEAR check — so summing buckets over any window reconstructs the exact same line the raw
 //! rows would give (see `scratch/settlement-table-removal-worked-example.md`).
@@ -13,13 +13,13 @@
 use std::collections::HashMap;
 
 use chrono::NaiveDate;
+use rand::{rngs::StdRng, Rng, SeedableRng};
 
-use super::types::{amount_band, SettledFeeRow};
+use super::types::{amount_band, fit_bucket, SettledFeeRow};
 
-/// The €5 micro-amount floor: transactions below this are excluded from the fit and predictor, so
-/// they never enter a bucket. Applied here at aggregation time (it cannot be recovered later).
-/// Mirrors the `WHERE gross >= 5` that the fit and predictor queries used to apply against raw rows.
-const MICRO_AMOUNT_FLOOR: f64 = 5.0;
+/// Per-bucket bounded sample used by the fitter's fan detector. The sufficient statistics remain
+/// authoritative for the OLS fit; samples only answer "does a minority of rows sit far off-line?".
+const SAMPLE_CAP_PER_BUCKET: usize = 64;
 
 /// Identity of one rollup bucket. `band`/`channel` are predictor features the fit sums away; the
 /// rest is the fit's cluster key plus the transaction day.
@@ -32,8 +32,10 @@ struct BucketKey {
     issuer_country: String,
     currency: String,
     ic_category: String,
+    interchange_bps: String,
     channel: String,
     band: &'static str,
+    fit_bucket: i32,
 }
 
 /// Additive sufficient statistics for the transactions in one bucket. Every field is a plain sum,
@@ -51,6 +53,12 @@ struct Stats {
     suy: f64,
     suuy: f64,
     syyuu: f64,
+}
+
+#[derive(Debug, Clone, Default)]
+struct BucketStats {
+    sums: Stats,
+    samples: Vec<(f64, f64)>,
 }
 
 impl Stats {
@@ -72,6 +80,23 @@ impl Stats {
     }
 }
 
+impl BucketStats {
+    fn add(&mut self, x: f64, y: f64, rng: &mut StdRng) {
+        let seen = self.sums.n;
+        self.sums.add(x, y);
+        if self.samples.len() < SAMPLE_CAP_PER_BUCKET {
+            self.samples.push((x, y));
+            return;
+        }
+        let j = rng.gen_range(0..=seen);
+        if let Ok(idx) = usize::try_from(j) {
+            if idx < SAMPLE_CAP_PER_BUCKET {
+                self.samples[idx] = (x, y);
+            }
+        }
+    }
+}
+
 /// One fully-aggregated bucket, ready to insert into `cost_daily_stats`.
 pub struct DailyStatRow {
     pub txn_date: NaiveDate,
@@ -81,8 +106,10 @@ pub struct DailyStatRow {
     pub issuer_country: String,
     pub currency: String,
     pub ic_category: String,
+    pub interchange_bps: String,
     pub channel: String,
     pub band: &'static str,
+    pub fit_bucket: i32,
     pub n: u64,
     pub sx: f64,
     pub sy: f64,
@@ -94,24 +121,36 @@ pub struct DailyStatRow {
     pub suy: f64,
     pub suuy: f64,
     pub syyuu: f64,
+    pub sample_x: Vec<f64>,
+    pub sample_y: Vec<f64>,
 }
 
 /// Accumulates a report's transactions into per-day sufficient statistics.
-#[derive(Default)]
 pub struct RollupAccumulator {
-    buckets: HashMap<BucketKey, Stats>,
+    buckets: HashMap<BucketKey, BucketStats>,
+    rng: StdRng,
+}
+
+impl Default for RollupAccumulator {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl RollupAccumulator {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            buckets: HashMap::new(),
+            rng: StdRng::seed_from_u64(7),
+        }
     }
 
-    /// Fold one transaction. Rows below the micro-amount floor (or with non-positive gross, which
-    /// would make the reciprocal terms explode) are skipped — the same rows the fit/predictor
-    /// filtered out at read time. `fallback_date` dates rows whose report carried no txn date.
+    /// Fold one transaction. Non-positive/invalid gross is skipped because reciprocal fit terms
+    /// require `gross > 0`; fee-bearing micro transactions are retained and judged by fit quality
+    /// rather than a currency-blind amount floor. `fallback_date` dates rows whose report carried
+    /// no txn date.
     pub fn add_row(&mut self, row: &SettledFeeRow, fallback_date: NaiveDate) {
-        if row.gross.is_nan() || row.gross < MICRO_AMOUNT_FLOOR {
+        if !row.gross.is_finite() || row.gross <= 0.0 || !row.total_fee.is_finite() {
             return;
         }
         let key = BucketKey {
@@ -122,13 +161,15 @@ impl RollupAccumulator {
             issuer_country: row.issuer_country.clone(),
             currency: row.currency.clone(),
             ic_category: row.ic_category.clone(),
+            interchange_bps: row.interchange_bps.clone(),
             channel: row.channel.clone(),
             band: amount_band(row.gross),
+            fit_bucket: fit_bucket(row.gross),
         };
         self.buckets
             .entry(key)
             .or_default()
-            .add(row.gross, row.total_fee);
+            .add(row.gross, row.total_fee, &mut self.rng);
     }
 
     /// Number of distinct buckets accumulated (for capacity hints / diagnostics).
@@ -152,19 +193,23 @@ impl RollupAccumulator {
                 issuer_country: k.issuer_country,
                 currency: k.currency,
                 ic_category: k.ic_category,
+                interchange_bps: k.interchange_bps,
                 channel: k.channel,
                 band: k.band,
-                n: s.n,
-                sx: s.sx,
-                sy: s.sy,
-                sxx: s.sxx,
-                sxy: s.sxy,
-                syy: s.syy,
-                su: s.su,
-                suu: s.suu,
-                suy: s.suy,
-                suuy: s.suuy,
-                syyuu: s.syyuu,
+                fit_bucket: k.fit_bucket,
+                n: s.sums.n,
+                sx: s.sums.sx,
+                sy: s.sums.sy,
+                sxx: s.sums.sxx,
+                sxy: s.sums.sxy,
+                syy: s.sums.syy,
+                su: s.sums.su,
+                suu: s.sums.suu,
+                suy: s.sums.suy,
+                suuy: s.sums.suuy,
+                syyuu: s.sums.syyuu,
+                sample_x: s.samples.iter().map(|(x, _)| *x).collect(),
+                sample_y: s.samples.iter().map(|(_, y)| *y).collect(),
             })
             .collect()
     }
@@ -183,6 +228,7 @@ mod tests {
             issuer_country: "GB".into(),
             currency: "GBP".into(),
             ic_category: "".into(),
+            interchange_bps: "".into(),
             txn_date: Some(NaiveDate::parse_from_str(date, "%Y-%m-%d").unwrap()),
             channel: "ecom".into(),
             gross,
@@ -195,11 +241,14 @@ mod tests {
     }
 
     #[test]
-    fn floors_micro_amounts() {
+    fn keeps_positive_micro_amounts() {
         let mut acc = RollupAccumulator::new();
         let d = NaiveDate::parse_from_str("2026-06-28", "%Y-%m-%d").unwrap();
         acc.add_row(&row(4.99, 0.5, "2026-06-28"), d);
-        assert!(acc.is_empty(), "sub-floor txn must not create a bucket");
+        assert!(
+            !acc.is_empty(),
+            "positive micro txn should still create a bucket"
+        );
     }
 
     #[test]

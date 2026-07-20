@@ -198,6 +198,7 @@ impl SettlementReportSource for StripeReportSource {
                 issuer_country: String::new(),
                 currency,
                 ic_category: String::new(),
+                interchange_bps: String::new(),
                 txn_date,
                 channel,
                 gross,

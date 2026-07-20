@@ -78,6 +78,13 @@ function VerdictTable({ coverage }: { coverage: CoverageSummary }) {
       txns: coverage.non_linear_txns,
       gross: coverage.non_linear_gross,
     },
+    {
+      verdict: 'Fan',
+      note: 'mixed fee populations — safe fallback',
+      dot: 'bg-fuchsia-500',
+      txns: coverage.fan_txns,
+      gross: coverage.fan_gross,
+    },
   ]
   const txnPct = (n: number) => (coverage.total_txns > 0 ? (n / coverage.total_txns) * 100 : 0)
   const volPct = (v: number) => (coverage.total_gross > 0 ? (v / coverage.total_gross) * 100 : 0)

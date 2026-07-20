@@ -6,15 +6,18 @@ export interface CoverageSummary {
   good_clusters: number
   thin_clusters: number
   non_linear_clusters: number
+  fan_clusters: number
   total_txns: number
   good_txns: number
   thin_txns: number
   non_linear_txns: number
+  fan_txns: number
   good_txn_pct: number
   total_gross: number
   good_gross: number
   thin_gross: number
   non_linear_gross: number
+  fan_gross: number
   /** Share of settled volume (money) with a trustworthy cost model — the headline metric. */
   good_gross_pct: number
   bps_rmse_p50: number
@@ -77,6 +80,8 @@ export interface PriceChange {
   issuer_country: string
   currency: string
   ic_category: string
+  interchange_bps?: string
+  segment_idx?: number
   old_pct_bps: number
   new_pct_bps: number
   old_fixed: number
@@ -159,10 +164,23 @@ export interface ClusterFee {
   issuer_country: string
   currency: string
   ic_category: string
+  interchange_bps?: string | null
+  segment_idx?: number | null
+  amount_lo?: number | null
+  amount_hi?: number | null
   n: number
   gross_sum: number
   model_pct_bps: number | null
   model_fixed: number | null
+  grade_bps?: number | null
+  pct_ci95_bps?: number | null
+  astar?: number | null
+  prop_bps?: number | null
+  fix_abs?: number | null
+  fix_bps?: number | null
+  below_gross_frac?: number | null
+  fan_frac?: number | null
+  fan_money_bps?: number | null
   override_pct_bps: number | null
   override_fixed: number | null
   override_updated_at: string | null

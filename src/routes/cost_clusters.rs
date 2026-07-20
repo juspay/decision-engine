@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Iso8601;
 
 use crate::cost_ingestion::blended::{self, ClusterScope, TopCluster};
-use crate::cost_ingestion::overrides::{self, ClusterDims, ClusterOverride};
+use crate::cost_ingestion::overrides::{self, key_of_dims, ClusterDims, ClusterOverride};
 use crate::routes::connector_fees::{clickhouse_config, refresh_serving};
 
 /// How many top clusters to surface by default (top by GMV). Capped so the response and the
@@ -22,41 +22,35 @@ use crate::routes::connector_fees::{clickhouse_config, refresh_serving};
 const DEFAULT_LIMIT: u32 = 10;
 const MAX_LIMIT: u32 = 50;
 
-/// The `connector|network|variant|funding|issuer|currency|ic_category` key used on the wire and to
-/// key the stored override. Built lowercase so it round-trips through [`ClusterDims::from_key`] and
-/// matches the serving `fine_key`.
-#[allow(clippy::too_many_arguments)]
-fn cluster_key(
-    connector: &str,
-    network: &str,
-    variant: &str,
-    funding: &str,
-    issuer: &str,
-    currency: &str,
-    ic_category: &str,
-) -> String {
-    format!(
-        "{}|{}|{}|{}|{}|{}|{}",
-        connector.to_lowercase(),
-        network.to_lowercase(),
-        variant.to_lowercase(),
-        funding.to_lowercase(),
-        issuer.to_lowercase(),
-        currency.to_lowercase(),
-        ic_category.to_lowercase(),
-    )
+fn dims_from_cluster(c: &TopCluster) -> ClusterDims {
+    let has_segment_key = !c.interchange_bps.is_empty() || c.segment_idx != 0;
+    ClusterDims {
+        connector: c.connector.to_lowercase(),
+        card_network: c.card_network.to_lowercase(),
+        variant: c.variant.to_lowercase(),
+        funding: c.funding.to_lowercase(),
+        issuer_country: c.issuer_country.to_lowercase(),
+        currency: c.currency.to_lowercase(),
+        ic_category: c.ic_category.to_lowercase(),
+        interchange_bps: (!c.interchange_bps.is_empty()).then(|| c.interchange_bps.to_lowercase()),
+        segment_idx: has_segment_key.then_some(c.segment_idx),
+    }
 }
 
-fn key_of_dims(d: &ClusterDims) -> String {
-    cluster_key(
-        &d.connector,
-        &d.card_network,
-        &d.variant,
-        &d.funding,
-        &d.issuer_country,
-        &d.currency,
-        &d.ic_category,
-    )
+fn empty_to_none(s: String) -> Option<String> {
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
+}
+
+fn nonzero_segment_value(v: f64, segment_idx: Option<u16>) -> Option<f64> {
+    segment_idx.filter(|idx| *idx > 0).map(|_| v)
+}
+
+fn nonzero_quality(v: f64) -> Option<f64> {
+    (v != 0.0).then_some(v)
 }
 
 /// One cluster's fee picture for the dashboard.
@@ -71,6 +65,10 @@ pub struct ClusterFee {
     pub issuer_country: String,
     pub currency: String,
     pub ic_category: String,
+    pub interchange_bps: Option<String>,
+    pub segment_idx: Option<u16>,
+    pub amount_lo: Option<f64>,
+    pub amount_hi: Option<f64>,
     /// Transaction count and settled GMV for the cluster (0 for an override-only cluster no longer
     /// in the top set).
     pub n: u64,
@@ -78,6 +76,15 @@ pub struct ClusterFee {
     /// Learned fee (present when the cluster is in the fitted snapshot).
     pub model_pct_bps: Option<f64>,
     pub model_fixed: Option<f64>,
+    pub grade_bps: Option<f64>,
+    pub pct_ci95_bps: Option<f64>,
+    pub astar: Option<f64>,
+    pub prop_bps: Option<f64>,
+    pub fix_abs: Option<f64>,
+    pub fix_bps: Option<f64>,
+    pub below_gross_frac: Option<f64>,
+    pub fan_frac: Option<f64>,
+    pub fan_money_bps: Option<f64>,
     /// Manual override, when set.
     pub override_pct_bps: Option<f64>,
     pub override_fixed: Option<f64>,
@@ -136,15 +143,8 @@ pub async fn list_cost_clusters(
     let mut out: Vec<ClusterFee> = Vec::new();
 
     for c in top {
-        let key = cluster_key(
-            &c.connector,
-            &c.card_network,
-            &c.variant,
-            &c.funding,
-            &c.issuer_country,
-            &c.currency,
-            &c.ic_category,
-        );
+        let dims = dims_from_cluster(&c);
+        let key = key_of_dims(&dims);
         seen.insert(key.clone());
         let ov = overrides.get(&key);
         let (effective_pct_bps, effective_fixed, source) = match ov {
@@ -160,10 +160,23 @@ pub async fn list_cost_clusters(
             issuer_country: c.issuer_country,
             currency: c.currency,
             ic_category: c.ic_category,
+            interchange_bps: empty_to_none(c.interchange_bps),
+            segment_idx: dims.segment_idx,
+            amount_lo: nonzero_segment_value(c.amount_lo, dims.segment_idx),
+            amount_hi: nonzero_segment_value(c.amount_hi, dims.segment_idx),
             n: c.n,
             gross_sum: c.gross_sum,
             model_pct_bps: Some(c.pct_bps),
             model_fixed: Some(c.fixed),
+            grade_bps: Some(c.grade_bps),
+            pct_ci95_bps: Some(c.pct_ci95_bps),
+            astar: nonzero_quality(c.astar),
+            prop_bps: nonzero_quality(c.prop_bps),
+            fix_abs: nonzero_quality(c.fix_abs),
+            fix_bps: nonzero_quality(c.fix_bps),
+            below_gross_frac: Some(c.below_gross_frac),
+            fan_frac: Some(c.fan_frac),
+            fan_money_bps: Some(c.fan_money_bps),
             override_pct_bps: ov.map(|o| o.pct_bps),
             override_fixed: ov.map(|o| o.fixed),
             override_updated_at: ov.map(|o| o.updated_at.clone()),
@@ -189,10 +202,23 @@ pub async fn list_cost_clusters(
             issuer_country: o.dims.issuer_country.clone(),
             currency: o.dims.currency.clone(),
             ic_category: o.dims.ic_category.clone(),
+            interchange_bps: o.dims.interchange_bps.clone(),
+            segment_idx: o.dims.segment_idx,
+            amount_lo: None,
+            amount_hi: None,
             n: 0,
             gross_sum: 0.0,
             model_pct_bps: None,
             model_fixed: None,
+            grade_bps: None,
+            pct_ci95_bps: None,
+            astar: None,
+            prop_bps: None,
+            fix_abs: None,
+            fix_bps: None,
+            below_gross_frac: None,
+            fan_frac: None,
+            fan_money_bps: None,
             override_pct_bps: Some(o.pct_bps),
             override_fixed: Some(o.fixed),
             override_updated_at: Some(o.updated_at.clone()),
@@ -228,7 +254,7 @@ pub async fn set_cluster_override(
     }
     let dims = ClusterDims::from_key(&cluster_key).ok_or((
         StatusCode::BAD_REQUEST,
-        "cluster key must have 7 '|'-separated fields".to_string(),
+        "cluster key must have 7, 8, or 9 '|'-separated fields".to_string(),
     ))?;
     let ov = ClusterOverride {
         dims,
@@ -251,7 +277,7 @@ pub async fn delete_cluster_override(
 ) -> Result<StatusCode, (StatusCode, String)> {
     let dims = ClusterDims::from_key(&cluster_key).ok_or((
         StatusCode::BAD_REQUEST,
-        "cluster key must have 7 '|'-separated fields".to_string(),
+        "cluster key must have 7, 8, or 9 '|'-separated fields".to_string(),
     ))?;
     overrides::delete_cluster(&merchant_id, &dims)
         .await
