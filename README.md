@@ -43,7 +43,7 @@ What it ships today:
 
 - **Rule-based routing** — define priority rules per merchant using Euclid, Juspay's open rule engine
 - **Success-rate ordering** — gateways ranked dynamically from transaction outcome feedback
-- **Multi-objective (cost-aware) routing** — re-ranks gateways by expected value (auth probability × [margin − learned per-gateway cost]) instead of auth rate alone
+- **Multi-objective (cost-aware) routing** — re-ranks gateways to balance approval rate against per-gateway processing cost, favoring cheaper gateways when they don't meaningfully hurt auth
 - **Cost data ingestion** — learns each connector's real fee from settlement reports and invoices, at a fine-grained per-cluster level, to power cost-aware routing
 - **A/B testing** — split live traffic between a control and variant routing strategy with a guardrail and built-in significance testing
 - **Autopilot & auto-calibration** — background self-tuning of success-rate hedging and bucket size from observed traffic
