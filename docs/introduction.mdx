@@ -21,31 +21,31 @@ Decision Engine is a Rust service that sits between your orchestrator and your p
 | **Network + SR hybrid routing** | `NTW_SR_HYBRID_ROUTING` — combines network eligibility with success-rate ranking. |
 | **Multi-objective (cost-aware) routing** | Not a `rankingAlgorithm` value — a post-step *on top of* success-rate routing. Re-ranks gateways with cost data by expected value and promotes a cheaper one if it wins. See below. |
 
-The first four are selected per request with `rankingAlgorithm`. See the [routing configuration guides](api-refs/routing-algorithm-create) and [decide-gateway examples](api-refs/decide-gateway-sr-based) for full request/response detail.
+The first four are selected per request with `rankingAlgorithm`. See the [routing configuration guides](/api-refs/routing-algorithm-create) and [decide-gateway examples](/api-refs/decide-gateway-sr-based) for full request/response detail.
 
 ### Multi-Objective (Cost-Aware) Routing
 
-A post-step on top of success-rate scoring: after SR picks a head gateway, Decision Engine re-ranks every gateway with cost data by **expected value** (`EV = auth_rate × (margin − cost_bps / 10,000)`), and promotes a cheaper gateway if it wins on EV. Toggle it per request (`enableMultiObjective`) or per merchant (`multi_objective_routing_enabled` feature flag). See [Multi-Objective Routing](api-refs/decide-gateway-multi-objective).
+A post-step on top of success-rate scoring: after SR picks a head gateway, Decision Engine re-ranks every gateway with cost data by **expected value** (`EV = auth_rate × (margin − cost_bps / 10,000)`), and promotes a cheaper gateway if it wins on EV. Toggle it per request (`enableMultiObjective`) or per merchant (`multi_objective_routing_enabled` feature flag). See [Multi-Objective Routing](/api-refs/decide-gateway-multi-objective).
 
 ### Cost Data Ingestion
 
-Learns each connector's *real* fee — not a static rate card — from settlement reports and invoices, fitted down to a per-cluster level (connector × card network × variant × funding × issuer country × currency × interchange category). This is what feeds multi-objective routing's cost side. Reports arrive by webhook, scheduled poll, or manual upload; fees can be read, overridden per connector or per cluster, and audited for coverage. See [Cost Ingestion: Connector Setup](api-refs/cost-ingestion-setup).
+Learns each connector's *real* fee — not a static rate card — from settlement reports and invoices, fitted down to a per-cluster level (connector × card network × variant × funding × issuer country × currency × interchange category). This is what feeds multi-objective routing's cost side. Reports arrive by webhook, scheduled poll, or manual upload; fees can be read, overridden per connector or per cluster, and audited for coverage. See [Cost Ingestion: Connector Setup](/api-refs/cost-ingestion-setup).
 
 ### A/B Testing
 
-Split live traffic between a control and variant routing strategy — auth-only vs. cost-aware, manual vs. autopilot, or any two saved algorithms — with a configurable split percentage, a minimum sample size, and a guardrail that auto-flags a regression before it does damage. Built-in statistical significance testing (two-sample z-test) tells you when a variant actually wins. See [A/B Testing: Create An Experiment](api-refs/ab-testing-create).
+Split live traffic between a control and variant routing strategy — auth-only vs. cost-aware, manual vs. autopilot, or any two saved algorithms — with a configurable split percentage, a minimum sample size, and a guardrail that auto-flags a regression before it does damage. Built-in statistical significance testing (two-sample z-test) tells you when a variant actually wins. See [A/B Testing: Create An Experiment](/api-refs/ab-testing-create).
 
 ### Autopilot & Auto-Calibration
 
-A background job that self-tunes success-rate scoring — hedging percentage and bucket size — from observed traffic, with no manual retuning. Every calibration run is logged as an auditable event, and a merchant can hard-reset live scores back to a clean baseline at any time. See [Merchant Features: Autopilot & Feature Flags](api-refs/merchant-features).
+A background job that self-tunes success-rate scoring — hedging percentage and bucket size — from observed traffic, with no manual retuning. Every calibration run is logged as an auditable event, and a merchant can hard-reset live scores back to a clean baseline at any time. See [Merchant Features: Autopilot & Feature Flags](/api-refs/merchant-features).
 
 ### Analytics & Audit
 
-ClickHouse-backed views for everything above: routing overview, gateway score trends, decision volume, cost savings, routing events (leader changes, autopilot re-tunes), and a single-payment audit trail that answers "which gateway was picked, and why" for any transaction. See [Analytics Endpoints](api-refs/analytics-endpoints) and [Payment Audit](payment-audit).
+ClickHouse-backed views for everything above: routing overview, gateway score trends, decision volume, cost savings, routing events (leader changes, autopilot re-tunes), and a single-payment audit trail that answers "which gateway was picked, and why" for any transaction. See [Analytics Endpoints](/api-refs/analytics-endpoints) and [Payment Audit](/payment-audit).
 
 ### Dashboard
 
-A React operator UI for configuring routing, running A/B tests, watching analytics, and auditing decisions without touching the API directly. See [Dashboard](dashboard-guide).
+A React operator UI for configuring routing, running A/B tests, watching analytics, and auditing decisions without touching the API directly. See [Dashboard](/dashboard-guide).
 
 ### Platform
 
@@ -69,7 +69,7 @@ The API is organized into the following endpoint groups:
 | Cost ingestion | `POST/GET/DELETE /merchant-account/{merchantId}/connectors/*`, `.../cost-*` | Connector credentials, settlement/invoice uploads, fee overrides. |
 | Analytics | `GET /analytics/*` | Gateway scores, decisions, cost savings, routing events, experiment results, audit. |
 
-For copy-paste `curl` examples of each flow, see the [API Guide](api-refs/api-ref). For exact request and response schemas, use the OpenAPI-backed endpoint pages under [API Reference](api-reference).
+For copy-paste `curl` examples of each flow, see the [API Guide](/api-refs/api-ref). For exact request and response schemas, use the OpenAPI-backed endpoint pages under [API Reference](/api-reference).
 
 ## Run Locally
 
@@ -92,7 +92,7 @@ URLs:
 - Dashboard: `http://localhost:8081/dashboard/`
 - Docs: `http://localhost:8081/introduction`
 
-Use [Installation](installation) for the full Compose, database, and Helm matrix.
+Use [Installation](/installation) for the full Compose, database, and Helm matrix.
 
 ## Dashboard Routes
 
@@ -111,11 +111,11 @@ When the dashboard profile is running, the React app is available at:
 - `/dashboard/analytics`
 - `/dashboard/audit`
 
-Use [Dashboard Guide](dashboard-guide) for route-by-route details.
+Use [Dashboard Guide](/dashboard-guide) for route-by-route details.
 
 ## Where To Go Next
 
-- [Installation](installation) — Docker Compose, PostgreSQL/MySQL setup, and configuration, end to end.
-- [Dashboard](dashboard-guide) — route-by-route guide to the React operator dashboard.
-- [API Guide (curl examples)](api-refs/api-ref) — copy-paste flows for every route family, including cost ingestion, A/B testing, and autopilot.
-- [API Reference (OpenAPI)](api-reference) — schema-backed endpoint pages with a request playground.
+- [Installation](/installation) — Docker Compose, PostgreSQL/MySQL setup, and configuration, end to end.
+- [Dashboard](/dashboard-guide) — route-by-route guide to the React operator dashboard.
+- [API Guide (curl examples)](/api-refs/api-ref) — copy-paste flows for every route family, including cost ingestion, A/B testing, and autopilot.
+- [API Reference (OpenAPI)](/api-reference) — schema-backed endpoint pages with a request playground.
