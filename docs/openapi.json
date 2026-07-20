@@ -4698,7 +4698,7 @@
       },
       "MultiObjectiveInfo": {
         "type": "object",
-        "description": "Present when the multi-objective (cost-aware) post-step ran. Explains why the gateway was picked: the SR head was kept (AUTH_WON) or a higher expected-value PSP was promoted (COST_WON). Expected value is auth_rate * (margin - cost_bps / 10000).",
+        "description": "Present when the multi-objective (cost-aware) post-step ran. Explains why the gateway was picked: the SR head was kept (AUTH_WON) or a higher economic-value PSP was promoted (COST_WON). Economic value is auth rate × settlement value, where settlement value = txn amount − cost of payment processing (acquirer, issuer & network fee).",
         "properties": {
           "outcome": {
             "type": "string",

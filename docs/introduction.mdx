@@ -25,7 +25,7 @@ The first four are selected per request with `rankingAlgorithm`. See the [routin
 
 ### Multi-Objective (Cost-Aware) Routing
 
-A post-step on top of success-rate scoring: after SR picks a head gateway, Decision Engine re-ranks every gateway with cost data by **expected value** (`EV = auth_rate × (margin − cost_bps / 10,000)`), and promotes a cheaper gateway if it wins on EV. Toggle it per request (`enableMultiObjective`) or per merchant (`multi_objective_routing_enabled` feature flag). See [Multi-Objective Routing](/api-refs/decide-gateway-multi-objective).
+A post-step on top of success-rate scoring: after SR picks a head gateway, Decision Engine re-ranks every gateway with cost data by **economic value** (`EV = auth rate × settlement value`, where `settlement value = txn amount − cost of payment processing (acquirer, issuer & network fee)`), and promotes a cheaper gateway if it wins on EV. Toggle it per request (`enableMultiObjective`) or per merchant (`multi_objective_routing_enabled` feature flag). See [Multi-Objective Routing](/api-refs/decide-gateway-multi-objective).
 
 ### Cost Data Ingestion
 
