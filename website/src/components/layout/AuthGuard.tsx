@@ -1,10 +1,11 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { Navigate, Outlet } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import useSWR from 'swr'
 import { useAuthStore } from '../../store/authStore'
 import { useMerchantStore } from '../../store/merchantStore'
 import { fetcher } from '../../lib/api'
+import { refreshSessionScopedSWRCache } from '../../lib/swrCache'
 
 interface MeResponse {
   user_id: string
@@ -36,12 +37,19 @@ export function AuthGuard() {
   const setAuth = useAuthStore((s) => s.setAuth)
   const clearAuth = useAuthStore((s) => s.clearAuth)
   const setMerchantId = useMerchantStore((s) => s.setMerchantId)
+  const previousTokenRef = useRef<string | null>(null)
 
   const { data: me, error, isValidating } = useSWR<MeResponse>(
-    token && hasHydrated ? '/auth/me' : null,
-    fetcher,
+    token && hasHydrated ? ['/auth/me', token] : null,
+    ([url]) => fetcher(url),
     { revalidateOnFocus: false, shouldRetryOnError: false },
   )
+
+  useEffect(() => {
+    if (!hasHydrated || !token || previousTokenRef.current === token) return
+    previousTokenRef.current = token
+    refreshSessionScopedSWRCache()
+  }, [hasHydrated, token])
 
   useEffect(() => {
     if (!me || !token) return
