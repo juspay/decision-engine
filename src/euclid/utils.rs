@@ -181,7 +181,7 @@ fn validate_condition(
         errors.push(ValidationErrorDetails::new(
             &condition.lhs,
             "unknown_key",
-            format!("Invalid key '{}': Unknown key in condition", &condition.lhs),
+            format!("Invalid key '{}': Unknown key in condition", condition.lhs),
         ));
         return;
     }
@@ -205,7 +205,7 @@ fn validate_condition(
                 "invalid_comparison",
                 format!(
                     "Invalid comparison type '{}': expected Equal or NotEqual, got {:?}",
-                    &condition.lhs, condition.comparison
+                    condition.lhs, condition.comparison
                 ),
             ));
         }
@@ -231,7 +231,7 @@ fn validate_condition(
                     "invalid_enum_value",
                     format!(
                         "Invalid enum value '{}': expected one of {:?}, got '{}'",
-                        &condition.lhs, valid_values, value
+                        condition.lhs, valid_values, value
                     ),
                 ));
             }
@@ -249,7 +249,7 @@ fn validate_condition(
                     "invalid_enum_values",
                     format!(
                         "Invalid enum values '{}': expected values from {:?}, got {:?}",
-                        &condition.lhs, valid_values, invalid
+                        condition.lhs, valid_values, invalid
                     ),
                 ));
             }
@@ -260,7 +260,7 @@ fn validate_condition(
                 "type_mismatch",
                 format!(
                     "Invalid enum variant '{}': expected enum variant, got {:?}",
-                    &condition.lhs,
+                    condition.lhs,
                     condition.value.get_type()
                 ),
             ));
@@ -340,7 +340,7 @@ fn validate_condition(
                 "type_mismatch",
                 format!(
                     "Invalid key '{}': expected number, got {:?}",
-                    &condition.lhs,
+                    condition.lhs,
                     condition.value.get_type()
                 ),
             ));
@@ -365,7 +365,7 @@ fn validate_condition(
                 "type_mismatch",
                 format!(
                     "Invalid key '{}': expected metadata variant, got {:?}",
-                    &condition.lhs,
+                    condition.lhs,
                     condition.value.get_type()
                 ),
             ));
@@ -392,7 +392,7 @@ fn validate_condition(
                     "type_mismatch",
                     format!(
                         "Invalid key '{}': expected {}, got {}",
-                        &condition.lhs,
+                        condition.lhs,
                         key_config.data_type.as_str(),
                         condition.value.get_type()
                     ),

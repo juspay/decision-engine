@@ -111,6 +111,7 @@ impl SettlementReportSource for BraintreeReportSource {
     fn parse_rows(
         &self,
         reader: Box<dyn std::io::Read + Send>,
+        mapping: &crate::cost_ingestion::mapping::ColumnMapping,
         on_row: &mut dyn FnMut(SettledFeeRow) -> Result<(), IngestError>,
     ) -> Result<(), IngestError> {
         // Resolved column indices for one report. Braintree's field order can drift between report
@@ -136,6 +137,7 @@ impl SettlementReportSource for BraintreeReportSource {
 
         csv_reader::parse(
             reader,
+            mapping,
             |h| {
                 Ok(Cols {
                     txn: h.require("Transaction ID")?,
@@ -368,7 +370,16 @@ v1,sale,USD,25.00,,,venmo_account,0.00,0.15\n";
         let err = BraintreeReportSource::new()
             .parse_report(csv.as_bytes())
             .unwrap_err();
-        assert!(matches!(err, IngestError::Parse(_)));
+        let IngestError::MissingColumns {
+            missing, required, ..
+        } = err
+        else {
+            panic!("expected MissingColumns, got {err:?}");
+        };
+        // Every miss is reported at once, not just the first one resolved.
+        assert_eq!(missing.len(), required.len() - 2, "all but the two present");
+        assert!(missing.contains(&"Settlement Amount".to_string()));
+        assert!(!missing.contains(&"Transaction ID".to_string()));
     }
 
     #[test]

@@ -451,6 +451,36 @@ where
             )),
         )
         .route(
+            // Header preflight: the dashboard posts only the first few KB of the merchant's file to
+            // check it parses before committing to a multi-GB upload. Cap the body accordingly —
+            // anything larger is a client bug, and the handler stops reading at the cap anyway.
+            "/merchant-account/:merchant-id/connectors/:connector/report/validate-headers",
+            post(routes::report_upload::validate_report_headers).layer(
+                axum::extract::DefaultBodyLimit::max(
+                    crate::cost_ingestion::preflight::HEADER_SAMPLE_BYTES,
+                ),
+            ),
+        )
+        .route(
+            // Which connectors support report ingestion, straight off the registry — the dashboard's
+            // connector picker reads this instead of keeping its own list.
+            "/cost-ingestion/connectors",
+            get(routes::report_upload::list_ingest_connectors),
+        )
+        .route(
+            // Preview a *candidate* column mapping: what the merchant's rows actually become under
+            // it. Small JSON body (a mapping + a file sample), so the default body limit applies.
+            "/merchant-account/:merchant-id/connectors/:connector/report/preview",
+            post(routes::report_upload::preview_column_mapping),
+        )
+        .route(
+            // A settlement source's saved column mapping, applied to every future ingestion of it.
+            "/merchant-account/:merchant-id/connectors/:connector/report/column-mapping",
+            get(routes::report_upload::get_column_mapping)
+                .put(routes::report_upload::set_column_mapping)
+                .delete(routes::report_upload::delete_column_mapping),
+        )
+        .route(
             // "Use a sample file": run a curated demo report (fetched from configured URL) through
             // the same pipeline, so a merchant without a report file can still exercise the flow.
             "/merchant-account/:merchant-id/connectors/:connector/report/sample",

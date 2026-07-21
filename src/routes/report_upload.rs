@@ -21,7 +21,7 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 
-use crate::cost_ingestion::{pipeline, sink, store};
+use crate::cost_ingestion::{mapping, pipeline, sink, store};
 use crate::logger;
 use crate::storage::types::CostIngestion;
 
@@ -292,6 +292,248 @@ pub async fn upload_report(
             status: "processing".to_string(),
         }),
     ))
+}
+
+/// `GET /cost-ingestion/connectors` — every connector whose settlement report can be ingested.
+///
+/// Read straight off the [`ConnectorRegistry`](crate::cost_ingestion::ConnectorRegistry), which is
+/// the same registry the parsers, the preflight and the mapper resolve through. The dashboard's
+/// connector picker is driven from this rather than its own copy of the list, so registering a
+/// connector is one line in `with_builtins` and it appears in the UI — a hardcoded frontend list
+/// would silently make new connectors unmappable, which is precisely the coupling the registry
+/// exists to avoid.
+pub async fn list_ingest_connectors() -> Json<Vec<ConnectorInfo>> {
+    let registry = crate::cost_ingestion::source::ConnectorRegistry::with_builtins();
+    Json(
+        registry
+            .connectors()
+            .into_iter()
+            .map(|id| ConnectorInfo {
+                id: id.to_string(),
+                // Whether reports arrive by polling the connector's API rather than a pushed
+                // webhook. Surfaced so the dashboard can explain how a source gets its reports
+                // without keeping its own per-connector table of that fact.
+                pull: crate::cost_ingestion::creds::is_pull_connector(id),
+            })
+            .collect(),
+    )
+}
+
+/// A connector that supports settlement-report ingestion.
+#[derive(Debug, Serialize)]
+pub struct ConnectorInfo {
+    pub id: String,
+    pub pull: bool,
+}
+
+/// `POST /merchant-account/:id/connectors/:connector/report/validate-headers` — check a report's
+/// header row against `connector` **before** the merchant uploads the file.
+///
+/// The body is just the leading bytes of their file (the dashboard sends
+/// `file.slice(0, HEADER_SAMPLE_BYTES)`), so this is a few-KB request answered synchronously in
+/// milliseconds. Without it the only way to learn a file's headers are wrong is to upload all of it,
+/// wait for the background parse, and read `last_error` off the history row — once per missing
+/// column, since resolution used to stop at the first.
+///
+/// A file that cannot be parsed is **200 with `ok: false`**, not an error status: "your header is
+/// missing these columns" is a successful answer to the question asked. Only an unknown connector
+/// (404) or an unreadable sample (400) is an error.
+pub async fn validate_report_headers(
+    Path((merchant_id, connector)): Path<(String, String)>,
+    Query(params): Query<PreflightParams>,
+    body: Body,
+) -> Result<Json<crate::cost_ingestion::preflight::PreflightReport>, (StatusCode, String)> {
+    use crate::cost_ingestion::preflight;
+
+    let sample = read_capped(body, preflight::HEADER_SAMPLE_BYTES).await?;
+    if sample.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "empty header sample".to_string()));
+    }
+
+    // Validate against the source's saved mapping when there is an account to look one up for, so a
+    // merchant who mapped this source last month sees their next file pass immediately.
+    let mapping = match params.account.as_deref() {
+        Some(account) => mapping::load(&merchant_id, &connector, account)
+            .await
+            .map_err(|e| storage_error("load column mapping", e))?,
+        None => Default::default(),
+    };
+
+    let registry = crate::cost_ingestion::source::ConnectorRegistry::with_builtins();
+    preflight::check(&registry, &connector, &sample, &mapping)
+        .map(Json)
+        .map_err(map_preflight_error)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PreflightParams {
+    /// Optional: when given, the source's saved column mapping is applied to the check.
+    pub account: Option<String>,
+}
+
+/// Body of a mapping preview/save: the candidate mapping plus the file sample it was written
+/// against. The sample travels with the request because a mapping is only meaningful relative to a
+/// specific file's headers, and the server holds no copy of the merchant's file at this stage.
+#[derive(Debug, Deserialize)]
+pub struct MappingRequest {
+    /// `expected label -> merchant's label`.
+    pub columns: std::collections::HashMap<String, String>,
+    /// The leading bytes of the merchant's report, as text.
+    #[serde(default)]
+    pub sample: String,
+    /// Whether `sample` is the head of a larger file rather than the whole of a small one. Stated by
+    /// the caller (which knows the file's real size) rather than inferred from the sample's length,
+    /// which text decoding can shift off the cap. Defaults to `false`: treating a partial sample as
+    /// whole merely reinstates the old behaviour, whereas treating a whole file as partial would
+    /// silently discard genuinely fee-free rows.
+    #[serde(default)]
+    pub truncated: bool,
+}
+
+/// `POST /merchant-account/:id/connectors/:connector/report/preview` — parse the first rows of a
+/// sample under a **candidate** mapping and return what they become.
+///
+/// Takes no `account`: the mapping being previewed is in the request body, not yet stored against a
+/// settlement source, so there is nothing to look one up for.
+///
+/// This is the safety net for the mapping UI, and the reason mapping is safe to offer at all.
+/// Well-formedness is checkable (`ColumnMapping::validate`) but *correctness* is not: pointing
+/// `Commission (SC)` at an all-in fee column validates fine, fits fine, grades `GOOD`, and serves a
+/// wrong price to the router. Returning the derived `gross` / `total_fee` / effective rate is what
+/// lets a human catch that, so the dashboard renders this before it will save.
+pub async fn preview_column_mapping(
+    Path((_merchant_id, connector)): Path<(String, String)>,
+    Json(req): Json<MappingRequest>,
+) -> Result<Json<crate::cost_ingestion::preflight::PreviewReport>, (StatusCode, String)> {
+    use crate::cost_ingestion::preflight;
+
+    let registry = crate::cost_ingestion::source::ConnectorRegistry::with_builtins();
+    let candidate = mapping::ColumnMapping::from_pairs(req.columns);
+    preflight::preview(
+        &registry,
+        &connector,
+        req.sample.as_bytes(),
+        &candidate,
+        req.truncated,
+    )
+    .map(Json)
+    .map_err(map_preflight_error)
+}
+
+/// `GET /merchant-account/:id/connectors/:connector/report/column-mapping?account=` — the saved
+/// mapping for a settlement source, or an empty one.
+pub async fn get_column_mapping(
+    Path((merchant_id, connector)): Path<(String, String)>,
+    Query(params): Query<UploadParams>,
+) -> Result<Json<mapping::ColumnMapping>, (StatusCode, String)> {
+    mapping::load(&merchant_id, &connector, &params.account)
+        .await
+        .map(Json)
+        .map_err(|e| storage_error("load column mapping", e))
+}
+
+/// `PUT /merchant-account/:id/connectors/:connector/report/column-mapping?account=` — save a
+/// mapping so every future upload, webhook, and poll for this source applies it automatically.
+/// Persistence is most of the value: it turns a recurring monthly chore into a one-time one.
+///
+/// Rejects a mapping that is not well-formed against the connector's schema and the file's headers
+/// (unknown column, absent target, two columns sharing a source). It deliberately does **not**
+/// reject an implausible one — that judgement belongs to the merchant looking at
+/// [`preview_column_mapping`], since an unusual-but-real report is indistinguishable from a wrong
+/// mapping from here.
+pub async fn set_column_mapping(
+    Path((merchant_id, connector)): Path<(String, String)>,
+    Query(params): Query<UploadParams>,
+    Json(req): Json<MappingRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    use crate::cost_ingestion::preflight;
+
+    let candidate = mapping::ColumnMapping::from_pairs(req.columns);
+
+    // Well-formedness is checked against the connector's own schema and the sample's real headers,
+    // both discovered from the connector rather than hardcoded here.
+    if !candidate.is_empty() {
+        if req.sample.is_empty() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "a file sample is required to validate a mapping".to_string(),
+            ));
+        }
+        let registry = crate::cost_ingestion::source::ConnectorRegistry::with_builtins();
+        let report = preflight::check(
+            &registry,
+            &connector,
+            req.sample.as_bytes(),
+            mapping::ColumnMapping::none(),
+        )
+        .map_err(map_preflight_error)?;
+        let known: Vec<String> = report
+            .required
+            .iter()
+            .chain(report.optional.iter())
+            .cloned()
+            .collect();
+        candidate
+            .validate(&known, &report.found)
+            .map_err(|e| (StatusCode::BAD_REQUEST, format!("{e}")))?;
+    }
+
+    mapping::save(&merchant_id, &connector, &params.account, &candidate)
+        .await
+        .map_err(|e| storage_error("save column mapping", e))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `DELETE /merchant-account/:id/connectors/:connector/report/column-mapping?account=` — clear a
+/// source's mapping so its reports parse with the connector's own labels again.
+pub async fn delete_column_mapping(
+    Path((merchant_id, connector)): Path<(String, String)>,
+    Query(params): Query<UploadParams>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    mapping::delete(&merchant_id, &connector, &params.account)
+        .await
+        .map_err(|e| storage_error("clear column mapping", e))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Turn a storage failure into a 500 that says what failed without handing the caller our internals.
+///
+/// The `Debug` form of an `IngestError` can carry driver text, connection strings and query
+/// fragments; useful in a log, not something to return to a dashboard client. The detail is logged
+/// server-side under `op` so it stays diagnosable, and the response body is a stable phrase.
+///
+/// Deliberately not applied to the 4xx paths: a rejected column mapping ("'Payable (SC)' is mapped
+/// to 'X', which is not a column in this file") is the merchant's own input described back to them,
+/// and it is the entire value of that response.
+fn storage_error(op: &str, e: crate::cost_ingestion::IngestError) -> (StatusCode, String) {
+    logger::error!(tag = "report_upload", "{} failed: {:?}", op, e);
+    (StatusCode::INTERNAL_SERVER_ERROR, format!("could not {op}"))
+}
+
+fn map_preflight_error(e: crate::cost_ingestion::IngestError) -> (StatusCode, String) {
+    match e {
+        crate::cost_ingestion::IngestError::UnknownConnector(c) => (
+            StatusCode::NOT_FOUND,
+            format!("connector {c} does not support report ingestion"),
+        ),
+        other => (StatusCode::BAD_REQUEST, format!("{other}")),
+    }
+}
+
+/// Read at most `cap` bytes of a body into memory, stopping early once the cap is reached. Used only
+/// for the header sample — the report upload path itself never buffers a body.
+async fn read_capped(body: Body, cap: usize) -> Result<Vec<u8>, (StatusCode, String)> {
+    let mut buf = Vec::new();
+    let mut stream = body.into_data_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| (StatusCode::BAD_REQUEST, format!("read error: {e}")))?;
+        let take = cap.saturating_sub(buf.len()).min(chunk.len());
+        buf.extend_from_slice(&chunk[..take]);
+        if buf.len() >= cap {
+            break;
+        }
+    }
+    Ok(buf)
 }
 
 /// `POST /merchant-account/:id/connectors/:connector/report/sample` — run a curated **sample**
