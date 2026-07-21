@@ -113,7 +113,9 @@ pub async fn decider_full_payload_hs_function(
         .await
         {
             Some(card_info) => {
-                if update_txn_card_info.cardSwitchProvider.is_none() {
+                if update_txn_card_info.cardSwitchProvider.is_none()
+                    && !card_info.card_switch_provider.is_empty()
+                {
                     update_txn_card_info.cardSwitchProvider =
                         Some(masking::Secret::new(card_info.card_switch_provider));
                 }

@@ -185,10 +185,10 @@ pub fn country_name_to_iso2(name: &str) -> Option<CountryISO2> {
         "PALAU" => Some(CountryISO2::PW),
         "PARAGUAY" => Some(CountryISO2::PY),
         "QATAR" => Some(CountryISO2::QA),
-        "KOSOVO" => Some(CountryISO2::QZ),
+        "KOSOVO" | "KOSOVOREPUBLICOF" => Some(CountryISO2::QZ),
         "REUNION" => Some(CountryISO2::RE),
         "ROMANIA" => Some(CountryISO2::RO),
-        "KOSOVOREPUBLICOF" | "SERBIA" => Some(CountryISO2::RS),
+        "SERBIA" => Some(CountryISO2::RS),
         "RUSSIA" | "RUSSIANFEDERATION" => Some(CountryISO2::RU),
         "RWANDA" => Some(CountryISO2::RW),
         "SAUDIARABIA" => Some(CountryISO2::SA),
@@ -251,7 +251,7 @@ pub fn country_name_to_iso2(name: &str) -> Option<CountryISO2> {
 /// Convenience wrapper returning the ISO alpha-2 code as a `String` (e.g. `"NL"`), or `None`
 /// when the name isn't recognized. The `CountryISO2` variant name *is* the alpha-2 code.
 pub fn country_name_to_iso2_code(name: &str) -> Option<String> {
-    country_name_to_iso2(name).map(|c| format!("{c:?}"))
+    country_name_to_iso2(name).map(|c| c.to_string())
 }
 
 #[cfg(test)]
@@ -288,5 +288,25 @@ mod tests {
     fn added_codes_resolve() {
         assert_eq!(country_name_to_iso2("KOSOVO"), Some(CountryISO2::QZ));
         assert_eq!(country_name_to_iso2("TAIWAN"), Some(CountryISO2::TW));
+    }
+
+    #[test]
+    fn kosovo_and_serbia_stay_distinct() {
+        // Both Kosovo spellings map to QZ; only Serbia maps to RS.
+        assert_eq!(country_name_to_iso2("KOSOVO"), Some(CountryISO2::QZ));
+        assert_eq!(
+            country_name_to_iso2("KOSOVO.REPUBLICOF"),
+            Some(CountryISO2::QZ)
+        );
+        assert_eq!(country_name_to_iso2("SERBIA"), Some(CountryISO2::RS));
+    }
+
+    #[test]
+    fn iso2_code_uses_display() {
+        assert_eq!(
+            country_name_to_iso2_code("NETHERLANDS").as_deref(),
+            Some("NL")
+        );
+        assert_eq!(country_name_to_iso2_code("KOSOVO").as_deref(), Some("QZ"));
     }
 }

@@ -42,7 +42,6 @@ fn client() -> &'static reqwest::Client {
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
             .pool_idle_timeout(Some(Duration::from_secs(30)))
-            .timeout(Duration::from_secs(10))
             .build()
             .expect("failed to build card-info reqwest client")
     })
