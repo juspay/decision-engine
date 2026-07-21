@@ -11,6 +11,10 @@ on:
         required: false
         type: string
 
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
   packages: write
@@ -36,7 +40,7 @@ jobs:
           # Generate date-based tag (YYYY.MM.DD format)
           DATE_TAG=$(TZ=Asia/Kolkata date +%Y.%m.%d)
           
-          # Validate tag suffix against allowed charset (alphanumeric, dash, dot only)
+          # Validate tag suffix against allowed charset (alphanumeric, dash, dot, underscore only)
           if [[ -n "$TAG_SUFFIX" ]]; then
             if [[ ! "$TAG_SUFFIX" =~ ^[a-zA-Z0-9._-]+$ ]]; then
               echo "Error: tag_suffix contains invalid characters. Only alphanumeric, dash, dot, and underscore are allowed."
@@ -57,8 +61,8 @@ jobs:
           echo "Creating tag: ${TAG_NAME} at commit ${SHORT_SHA}"
           
           # Check if tag already exists
-          if git rev-parse "${TAG_NAME}" >/dev/null 2>&1; then
-            EXISTING_SHA=$(git rev-parse "${TAG_NAME}^{commit}")
+          if git show-ref --tags --verify --quiet "refs/tags/${TAG_NAME}"; then
+            EXISTING_SHA=$(git rev-parse "refs/tags/${TAG_NAME}^{commit}")
             if [[ "$EXISTING_SHA" == "$GITHUB_SHA" ]]; then
               echo "Tag ${TAG_NAME} already exists and points to current commit. Reusing."
               exit 0
@@ -69,11 +73,10 @@ jobs:
             fi
           fi
           
-          # Create and push tag
+          # Create tag locally (will be pushed after successful builds)
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag -a "${TAG_NAME}" -m "Nightly build ${TAG_NAME} (${SHORT_SHA})"
-          git push origin "${TAG_NAME}"
 
   build-postgres-image:
     needs: create-tag
@@ -335,16 +338,32 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  notify-completion:
+  push-tag:
     needs: [create-tag, create-release]
     runs-on: ubuntu-latest
     permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Push tag to remote
+        run: |
+          TAG_NAME="${{ needs.create-tag.outputs.tag_name }}"
+          echo "Pushing tag ${TAG_NAME} to remote..."
+          git push origin "${TAG_NAME}"
+          echo "Tag pushed successfully!"
+
+  notify-completion:
+    needs: [create-tag, push-tag]
+    runs-on: ubuntu-latest
+    permissions:
       contents: read
-    if: always()
+    if: success()
     steps:
       - name: Check build status
         run: |
-          echo "Nightly build completed!"
+          echo "Nightly build completed successfully!"
           echo "Tag: ${{ needs.create-tag.outputs.tag_name }}"
           echo "Release: https://github.com/${{ github.repository }}/releases/tag/${{ needs.create-tag.outputs.tag_name }}"
           echo "Images are available at:"

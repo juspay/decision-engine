@@ -41,7 +41,8 @@ You can manually trigger a nightly build from the GitHub Actions UI:
 
 1. Go to Actions → Nightly Build and Release
 2. Click "Run workflow"
-3. Optionally provide a tag suffix (e.g., `rc1` creates `nightly-2026.07.21-rc1`)
+3. Select the `main` branch (nightlies should only be published from the default branch)
+4. Optionally provide a tag suffix (e.g., `rc1` creates `nightly-2026.07.21-rc1`)
 
 ## Tag Format
 
@@ -54,7 +55,7 @@ Each nightly build creates a GitHub pre-release with:
 - Tag name and commit SHA
 - Build timestamp
 - Links to all Docker images
-- Automated release notes
+- Release description with build metadata and usage examples
 
 ## Configuration
 
