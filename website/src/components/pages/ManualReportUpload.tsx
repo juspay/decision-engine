@@ -47,6 +47,13 @@ export function ManualReportUpload({ merchantId }: { merchantId?: string }) {
   const [sampleText, setSampleText] = useState('')
   /** Whether `sampleText` is only the head of the chosen file. */
   const [truncated, setTruncated] = useState(false)
+  /**
+   * Whether the merchant has dismissed the mapping panel. Deliberately separate from `preflight`:
+   * clearing the verdict to hide the panel would also clear what the Upload button is gated on,
+   * so "close this panel" would silently become "let me upload a file we already know cannot be
+   * parsed" — the exact outcome the preflight exists to prevent.
+   */
+  const [mappingDismissed, setMappingDismissed] = useState(false)
   const [checking, setChecking] = useState(false)
 
   // Which connectors exist comes from the backend registry, so registering one there is enough to
@@ -100,6 +107,7 @@ export function ManualReportUpload({ merchantId }: { merchantId?: string }) {
         const text = await slice.text()
         setSampleText(text)
         setTruncated(chosen.size > HEADER_SAMPLE_BYTES)
+        setMappingDismissed(false)
         setPreflight(await validateReportHeaders(merchantId, connector, slice, account || undefined))
       } catch (e: unknown) {
         // A preflight failure must not block the upload — it is an early warning, not a gate. The
@@ -117,6 +125,7 @@ export function ManualReportUpload({ merchantId }: { merchantId?: string }) {
     setFile(chosen)
     setPreflight(null)
     setSampleText('')
+    setMappingDismissed(false)
     setError(null)
     if (chosen) void runPreflight(chosen)
   }
@@ -276,7 +285,7 @@ export function ManualReportUpload({ merchantId }: { merchantId?: string }) {
               </p>
             )}
 
-            {preflight && !preflight.ok && merchantId && account && (
+            {preflight && !preflight.ok && !mappingDismissed && merchantId && account && (
               <ColumnMappingPanel
                 merchantId={merchantId}
                 connector={connector}
@@ -284,13 +293,30 @@ export function ManualReportUpload({ merchantId }: { merchantId?: string }) {
                 preflight={preflight}
                 sampleText={sampleText}
                 truncated={truncated}
-                onCancel={() => setPreflight(null)}
+                onCancel={() => setMappingDismissed(true)}
                 onSaved={() => {
                   // Re-run preflight with the mapping now saved: it should come back clean, which
                   // both confirms the mapping took effect and swaps the panel for the ready state.
                   if (file) void runPreflight(file)
                 }}
               />
+            )}
+
+            {/* Dismissed the panel but the file still cannot be parsed: keep the reason visible
+                rather than leaving a disabled button with no explanation. */}
+            {preflight && !preflight.ok && mappingDismissed && account && (
+              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-500">
+                This file is still missing {preflight.missing.length} required{' '}
+                {preflight.missing.length === 1 ? 'column' : 'columns'}, so it can't be uploaded.{' '}
+                <button
+                  type="button"
+                  onClick={() => setMappingDismissed(false)}
+                  className="font-medium underline underline-offset-2"
+                >
+                  Map columns
+                </button>{' '}
+                or choose a different file.
+              </p>
             )}
 
             {/* Mapping is stored per (connector, account), so there is nothing to save it under

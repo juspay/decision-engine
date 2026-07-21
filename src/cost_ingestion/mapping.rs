@@ -174,12 +174,19 @@ pub async fn save(
     .map_err(|e| IngestError::Storage(e.to_string()))
 }
 
-/// Remove a source's mapping. Idempotent — clearing an absent mapping is not an error.
+/// Remove a source's mapping. Idempotent — clearing a mapping that was never set is not an error,
+/// since "nothing stored" is the requested end state either way. Real storage failures are *not*
+/// absorbed; see the match arms.
 pub async fn delete(merchant_id: &str, connector: &str, account: &str) -> Result<(), IngestError> {
     match service_configuration::delete_config(config_name(merchant_id, connector, account)).await {
         Ok(()) => Ok(()),
-        // Nothing stored is the desired end state, not a failure.
-        Err(_) => Ok(()),
+        // The one absorbed case: nothing was stored, which is the state the caller asked for.
+        Err(crate::generics::MeshError::NoRowstoDelete) => Ok(()),
+        // Anything else — a dropped connection, a failed query — really did fail to clear the
+        // mapping. Reporting success there would tell a merchant their mapping was removed while
+        // the next ingestion silently kept applying it: precisely the quiet wrong answer this
+        // module exists to prevent.
+        Err(e) => Err(IngestError::Storage(e.to_string())),
     }
 }
 

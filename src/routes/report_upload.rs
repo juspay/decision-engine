@@ -355,7 +355,7 @@ pub async fn validate_report_headers(
     let mapping = match params.account.as_deref() {
         Some(account) => mapping::load(&merchant_id, &connector, account)
             .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?,
+            .map_err(|e| storage_error("load column mapping", e))?,
         None => Default::default(),
     };
 
@@ -390,8 +390,11 @@ pub struct MappingRequest {
     pub truncated: bool,
 }
 
-/// `POST /merchant-account/:id/connectors/:connector/report/preview?account=` — parse the first
-/// rows of a sample under a **candidate** mapping and return what they become.
+/// `POST /merchant-account/:id/connectors/:connector/report/preview` — parse the first rows of a
+/// sample under a **candidate** mapping and return what they become.
+///
+/// Takes no `account`: the mapping being previewed is in the request body, not yet stored against a
+/// settlement source, so there is nothing to look one up for.
 ///
 /// This is the safety net for the mapping UI, and the reason mapping is safe to offer at all.
 /// Well-formedness is checkable (`ColumnMapping::validate`) but *correctness* is not: pointing
@@ -426,7 +429,7 @@ pub async fn get_column_mapping(
     mapping::load(&merchant_id, &connector, &params.account)
         .await
         .map(Json)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))
+        .map_err(|e| storage_error("load column mapping", e))
 }
 
 /// `PUT /merchant-account/:id/connectors/:connector/report/column-mapping?account=` — save a
@@ -477,7 +480,7 @@ pub async fn set_column_mapping(
 
     mapping::save(&merchant_id, &connector, &params.account, &candidate)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(|e| storage_error("save column mapping", e))?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -489,8 +492,25 @@ pub async fn delete_column_mapping(
 ) -> Result<StatusCode, (StatusCode, String)> {
     mapping::delete(&merchant_id, &connector, &params.account)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(|e| storage_error("clear column mapping", e))?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Turn a storage failure into a 500 that says what failed without handing the caller our internals.
+///
+/// The `Debug` form of an `IngestError` can carry driver text, connection strings and query
+/// fragments; useful in a log, not something to return to a dashboard client. The detail is logged
+/// server-side under `op` so it stays diagnosable, and the response body is a stable phrase.
+///
+/// Deliberately not applied to the 4xx paths: a rejected column mapping ("'Payable (SC)' is mapped
+/// to 'X', which is not a column in this file") is the merchant's own input described back to them,
+/// and it is the entire value of that response.
+fn storage_error(op: &str, e: crate::cost_ingestion::IngestError) -> (StatusCode, String) {
+    logger::error!(tag = "report_upload", "{} failed: {:?}", op, e);
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        format!("could not {op}"),
+    )
 }
 
 fn map_preflight_error(e: crate::cost_ingestion::IngestError) -> (StatusCode, String) {

@@ -727,14 +727,33 @@ Settled,REF1,visacredit,visa,IN,EUR,96.00,1.00,0.50,0.50,2.00,\n";
 }
 
 #[cfg(test)]
-mod sample_file_tests {
+mod renamed_report_tests {
     use super::*;
     use std::collections::HashMap;
 
-    /// The demo CSV handed to the user. Pinned as a test so the file and the UI flow it is meant to
-    /// exercise cannot drift apart: it must fail preflight with exactly the five renamed columns,
-    /// and the intended mapping must then parse it into plausible rows.
-    const SAMPLE: &[u8] = include_bytes!("../../scratch/adyen-settlement-renamed-columns.csv");
+    /// A realistic Adyen report as a merchant's BI export would emit it: five required columns
+    /// renamed, the rest untouched, plus the lifecycle rows the parser skips. It must fail preflight
+    /// with exactly those five, and the intended mapping must then parse it into plausible rows.
+    ///
+    /// Held inline rather than read from disk. An `include_bytes!` of a generated file is a trap
+    /// here: the natural place to drop one (`scratch/`) is gitignored, so the tests would compile
+    /// for whoever generated the file and fail to build for everyone else.
+    const SAMPLE: &[u8] = b"\
+Record Type,Psp Reference,Payment Method Variant,Global Card Brand,Issuer Country,Settlement Currency,Net Settlement Amount,Processing Commission,Markup (SC),Card Scheme Fee,Interchange Fee,IC Details JSON\n\
+Settled,REF1,visacredit,visa,IN,EUR,97.70,0.80,0.15,0.15,1.20,\"[{\"t\":\"ic\",\"n\":\"Visa Consumer Credit Standard\"}]\"\n\
+Settled,REF2,visadebit,visa,GB,GBP,244.52,1.90,0.40,0.38,2.80,\"[{\"t\":\"ic\",\"n\":\"Visa Consumer Debit Standard\"}]\"\n\
+Settled,REF3,mccredit,mc,DE,EUR,73.74,0.62,0.11,0.11,0.92,\"[{\"t\":\"ic\",\"n\":\"Mastercard Consumer Credit Core\"}]\"\n\
+Authorised,REF90,visacredit,visa,GB,GBP,,,,,,\n\
+Settled,REF4,mcdebit,mc,FR,EUR,410.50,3.30,0.62,0.63,4.95,\"[{\"t\":\"ic\",\"n\":\"Mastercard Consumer Debit Core\"}]\"\n\
+Settled,REF5,visacredit,visa,US,USD,38.95,0.33,0.06,0.06,0.50,\"[{\"t\":\"ic\",\"n\":\"Visa Consumer Credit Standard\"}]\"\n\
+Settled,REF6,amexcredit,amex,NL,EUR,176.12,1.44,0.27,0.27,2.15,\"[{\"t\":\"ic\",\"n\":\"Amex Standard\"}]\"\n\
+Settled,REF7,visabusinesscredit,visa,ES,EUR,93.80,0.77,0.14,0.14,1.15,\"[{\"t\":\"ic\",\"n\":\"Visa Consumer Credit Standard\"}]\"\n\
+Received,REF91,mccredit,mc,DE,EUR,,,,,,\n\
+Settled,REF8,mccredit,mc,GB,GBP,303.33,2.46,0.46,0.47,3.68,\"[{\"t\":\"ic\",\"n\":\"Mastercard Consumer Credit Core\"}]\"\n\
+Settled,REF9,visadebit,visa,IN,EUR,56.85,0.47,0.09,0.09,0.70,\"[{\"t\":\"ic\",\"n\":\"Visa Consumer Debit Standard\"}]\"\n\
+Settled,REF10,mcdebit,mc,US,USD,141.44,1.15,0.22,0.22,1.72,\"[{\"t\":\"ic\",\"n\":\"Mastercard Consumer Debit Core\"}]\"\n\
+Settled,REF11,visacredit,visa,DE,EUR,207.74,1.69,0.32,0.32,2.53,\"[{\"t\":\"ic\",\"n\":\"Visa Consumer Credit Standard\"}]\"\n\
+Settled,REF12,amexcredit,amex,GB,GBP,86.09,0.70,0.13,0.13,1.05,\"[{\"t\":\"ic\",\"n\":\"Amex Standard\"}]\"\n";
 
     fn intended_mapping() -> ColumnMapping {
         ColumnMapping::from_pairs(HashMap::from([
