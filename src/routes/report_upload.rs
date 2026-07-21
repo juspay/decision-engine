@@ -507,10 +507,7 @@ pub async fn delete_column_mapping(
 /// and it is the entire value of that response.
 fn storage_error(op: &str, e: crate::cost_ingestion::IngestError) -> (StatusCode, String) {
     logger::error!(tag = "report_upload", "{} failed: {:?}", op, e);
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        format!("could not {op}"),
-    )
+    (StatusCode::INTERNAL_SERVER_ERROR, format!("could not {op}"))
 }
 
 fn map_preflight_error(e: crate::cost_ingestion::IngestError) -> (StatusCode, String) {
