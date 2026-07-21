@@ -103,6 +103,12 @@ pub async fn ingest_report_reader(
     let registry = ConnectorRegistry::with_builtins();
     let source = registry.get(connector)?;
 
+    // The merchant's saved column mapping for this settlement source, if they had to map their
+    // report's labels onto the connector's. Empty (the common case) means the file is parsed exactly
+    // as it always was. Loaded here rather than passed in so *every* caller — manual upload, webhook
+    // worker, poller — applies it without having to remember to.
+    let mapping = super::mapping::load(merchant_id, connector, account).await?;
+
     // The fit runs today (the snapshot's `report_date` = fit-run date); it windows on transaction
     // date internally, so a monthly file, daily files, or a mix all fold into the same model.
     let report_date = crate::utils::date_time::now().date().to_string();
@@ -115,7 +121,7 @@ pub async fn ingest_report_reader(
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<SettledFeeRow>>(CHANNEL_DEPTH);
     let parse = tokio::task::spawn_blocking(move || {
         // Connector parses row-by-row; `parse_in_batches` does the generic accumulate-and-flush.
-        parse_in_batches(source.as_ref(), reader, BATCH_SIZE, |batch| {
+        parse_in_batches(source.as_ref(), reader, &mapping, BATCH_SIZE, |batch| {
             tx.blocking_send(batch)
                 // The receiver drops only when the consume loop has already errored out; end the
                 // parse quietly and let that error surface to the caller.

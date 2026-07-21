@@ -46,6 +46,7 @@ use axum::http::HeaderMap;
 use bytes::Bytes;
 use masking::Secret;
 
+use crate::cost_ingestion::connectors::csv_reader;
 use crate::cost_ingestion::source::SettlementReportSource;
 use crate::cost_ingestion::types::{
     ConnectorCreds, IngestError, ReportNotification, SettledFeeRow,
@@ -119,36 +120,42 @@ impl SettlementReportSource for StripeReportSource {
     fn parse_rows(
         &self,
         reader: Box<dyn std::io::Read + Send>,
+        mapping: &crate::cost_ingestion::mapping::ColumnMapping,
         on_row: &mut dyn FnMut(SettledFeeRow) -> Result<(), IngestError>,
     ) -> Result<(), IngestError> {
         let mut reader = csv::ReaderBuilder::new().flexible(true).from_reader(reader);
 
-        let headers = reader
-            .headers()
+        // Stripe drives its own row loop (its rows are fee lines, not transactions, so it does not
+        // use `csv_reader::parse`) but resolves columns through the shared `Headers` so that a
+        // header mismatch reports *every* missing column at once, exactly as the other connectors
+        // do, and so the upload preflight can enumerate this connector's schema the same way.
+        let header_rec = reader
+            .byte_headers()
             .map_err(|e| IngestError::Parse(e.to_string()))?
             .clone();
-        let idx = |name: &str| headers.iter().position(|h| h == name);
-        let col = |name: &str| -> Result<usize, IngestError> {
-            idx(name).ok_or_else(|| IngestError::Parse(format!("missing column: {name}")))
-        };
+        let h = csv_reader::Headers::new(&header_rec, mapping);
 
-        let c_brand = col("Card Brand")?;
-        let c_interaction = col("Shopper Interaction")?;
-        let c_funding = col("Funding Source")?;
-        let c_variant = col("Payment Method Variant")?;
-        let c_gross = col("Gross Qty")?;
-        let c_cost = col("Cost Qty")?;
-        let c_refund_flag = col("Refund Flag")?;
+        let c_brand = h.require("Card Brand")?;
+        let c_interaction = h.require("Shopper Interaction")?;
+        let c_funding = h.require("Funding Source")?;
+        let c_variant = h.require("Payment Method Variant")?;
+        let c_gross = h.require("Gross Qty")?;
+        let c_cost = h.require("Cost Qty")?;
+        let c_refund_flag = h.require("Refund Flag")?;
         // Currency: prefer the gross-side currency, fall back to the cost-side.
-        let c_gross_ccy = col("Gross Ccy")?;
-        let c_cost_ccy = idx("Cost Ccy");
+        let c_gross_ccy = h.require("Gross Ccy")?;
+        let c_cost_ccy = h.index("Cost Ccy");
         // Optional — used for the ingested report's period, and folded into the synthetic `txn_ref`.
-        let c_month = idx("Month");
+        let c_month = h.index("Month");
         // Optional — folded into the synthetic `txn_ref` so distinct fee lines/rates get distinct
         // keys. Provenance only; `txn_ref` is not a dedup key (see module docs).
-        let c_fee_name = idx("Fee Name");
-        let c_variable_fee = idx("Variable Fee");
-        let c_fixed_fee = idx("Fixed Fee");
+        let c_fee_name = h.index("Fee Name");
+        let c_variable_fee = h.index("Variable Fee");
+        let c_fixed_fee = h.index("Fixed Fee");
+
+        // Required by `Headers::require`'s deferred-error contract: fail here, before any row is
+        // read, rather than indexing with a placeholder.
+        h.finish()?;
 
         for record in reader.records() {
             let record = record.map_err(|e| IngestError::Parse(e.to_string()))?;
@@ -334,7 +341,16 @@ mc,Ecommerce,DOMESTIC,CREDIT,mccommercialcredit,Scheme Fee,100000,150,USD,USD,20
         let err = StripeReportSource::new()
             .parse_report(csv.as_bytes())
             .unwrap_err();
-        assert!(matches!(err, IngestError::Parse(_)));
+        let IngestError::MissingColumns {
+            missing, required, ..
+        } = err
+        else {
+            panic!("expected MissingColumns, got {err:?}");
+        };
+        // Stripe drives its own row loop but must aggregate misses like the shared driver does.
+        assert_eq!(missing.len(), required.len() - 2, "all but the two present");
+        assert!(missing.contains(&"Gross Qty".to_string()));
+        assert!(!missing.contains(&"Card Brand".to_string()));
     }
 
     #[test]

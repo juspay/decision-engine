@@ -1,16 +1,21 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Upload } from 'lucide-react'
 import { Card, CardBody, CardHeader, SurfaceLabel } from '../ui/Card'
 import { Button } from '../ui/Button'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { Spinner } from '../ui/Spinner'
 import {
+  HEADER_SAMPLE_BYTES,
   runSampleReport,
   uploadReport,
   useCostCoverage,
+  useIngestConnectors,
   useIngestionHistory,
+  validateReportHeaders,
+  type PreflightReport,
 } from '../../hooks/useCostRouting'
 import { Field, UPLOAD_CONNECTORS, inputClass } from './CostRoutingShared'
+import { ColumnMappingPanel } from './ColumnMappingPanel'
 
 type IngestMode = 'upload' | 'sample'
 
@@ -35,8 +40,31 @@ export function ManualReportUpload({ merchantId }: { merchantId?: string }) {
   const [error, setError] = useState<string | null>(null)
   const [activeJobId, setActiveJobId] = useState<number | null>(null)
 
-  const connectorLabel =
-    UPLOAD_CONNECTORS.find((c) => c.value === connector)?.label ?? connector
+  // Header preflight, run the moment a file is chosen. `preflight` is null until it has run;
+  // `sampleText` is the same few KB it ran on, kept so the mapping panel can show example values and
+  // send the sample back with a candidate mapping.
+  const [preflight, setPreflight] = useState<PreflightReport | null>(null)
+  const [sampleText, setSampleText] = useState('')
+  /** Whether `sampleText` is only the head of the chosen file. */
+  const [truncated, setTruncated] = useState(false)
+  const [checking, setChecking] = useState(false)
+
+  // Which connectors exist comes from the backend registry, so registering one there is enough to
+  // make it selectable (and mappable) here. UPLOAD_CONNECTORS is now only a display-name table:
+  // anything it doesn't know falls back to a capitalised id rather than disappearing from the list.
+  const { connectors: ingestConnectors } = useIngestConnectors()
+  const connectorOptions = (
+    ingestConnectors.length > 0
+      ? ingestConnectors.map((c) => c.id)
+      : UPLOAD_CONNECTORS.map((c) => c.value)
+  ).map((id) => ({
+    value: id,
+    label:
+      UPLOAD_CONNECTORS.find((c) => c.value === id)?.label ??
+      id.charAt(0).toUpperCase() + id.slice(1),
+  }))
+
+  const connectorLabel = connectorOptions.find((c) => c.value === connector)?.label ?? connector
 
   const activeJob = activeJobId != null ? ingestions.find((j) => j.id === activeJobId) : undefined
 
@@ -44,6 +72,54 @@ export function ManualReportUpload({ merchantId }: { merchantId?: string }) {
   useEffect(() => {
     if (activeJob?.status === 'completed') mutateCoverage()
   }, [activeJob?.status, mutateCoverage])
+
+  // A preflight verdict is only meaningful for the connector and account it was run against —
+  // both decide which columns are required and which saved mapping applies. Re-check on either
+  // change rather than leaving a stale verdict on screen.
+  useEffect(() => {
+    if (file) void runPreflight(file)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `file` is handled by handleFileChange
+  }, [connector, account])
+
+  /**
+   * Check a newly-chosen file's headers before anything is uploaded. Only the first
+   * {@link HEADER_SAMPLE_BYTES} are sent, so this costs a few KB and answers in milliseconds —
+   * versus the alternative of discovering the same problem after a multi-GB transfer and a
+   * background parse, one missing column at a time.
+   */
+  const runPreflight = useCallback(
+    async (chosen: File) => {
+      if (!merchantId) return
+      setChecking(true)
+      setPreflight(null)
+      setError(null)
+      try {
+        const slice = chosen.slice(0, HEADER_SAMPLE_BYTES)
+        // Read and send the same bytes, so the mapping panel's example values line up exactly with
+        // the headers the server reports.
+        const text = await slice.text()
+        setSampleText(text)
+        setTruncated(chosen.size > HEADER_SAMPLE_BYTES)
+        setPreflight(await validateReportHeaders(merchantId, connector, slice, account || undefined))
+      } catch (e: unknown) {
+        // A preflight failure must not block the upload — it is an early warning, not a gate. The
+        // server re-validates on ingest regardless.
+        setPreflight(null)
+        setError(e instanceof Error ? e.message : 'Could not check this file’s columns')
+      } finally {
+        setChecking(false)
+      }
+    },
+    [merchantId, connector, account],
+  )
+
+  function handleFileChange(chosen: File | null) {
+    setFile(chosen)
+    setPreflight(null)
+    setSampleText('')
+    setError(null)
+    if (chosen) void runPreflight(chosen)
+  }
 
   async function handleUpload() {
     if (!merchantId) {
@@ -158,7 +234,7 @@ export function ManualReportUpload({ merchantId }: { merchantId?: string }) {
             value={connector}
             onChange={(e) => setConnector(e.target.value)}
           >
-            {UPLOAD_CONNECTORS.map((c) => (
+            {connectorOptions.map((c) => (
               <option key={c.value} value={c.value}>
                 {c.label}
               </option>
@@ -181,15 +257,66 @@ export function ManualReportUpload({ merchantId }: { merchantId?: string }) {
                 type="file"
                 accept=".csv,text/csv,text/plain"
                 className={inputClass}
-                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                onChange={(e) => handleFileChange(e.target.files?.[0] ?? null)}
               />
             </Field>
+
+            {/* Header check — resolved before a single byte of the report is uploaded. */}
+            {checking && (
+              <p className="flex items-center gap-2 text-sm text-slate-500 dark:text-[#9ca7ba]">
+                <Spinner size={14} />
+                Checking this file's columns…
+              </p>
+            )}
+
+            {preflight?.ok && (
+              <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-400">
+                All {preflight.required.length} required columns found — this file is ready to
+                upload.
+              </p>
+            )}
+
+            {preflight && !preflight.ok && merchantId && account && (
+              <ColumnMappingPanel
+                merchantId={merchantId}
+                connector={connector}
+                account={account}
+                preflight={preflight}
+                sampleText={sampleText}
+                truncated={truncated}
+                onCancel={() => setPreflight(null)}
+                onSaved={() => {
+                  // Re-run preflight with the mapping now saved: it should come back clean, which
+                  // both confirms the mapping took effect and swaps the panel for the ready state.
+                  if (file) void runPreflight(file)
+                }}
+              />
+            )}
+
+            {/* Mapping is stored per (connector, account), so there is nothing to save it under
+                until the account is filled in. */}
+            {preflight && !preflight.ok && !account && (
+              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-500">
+                This file is missing {preflight.missing.length} required{' '}
+                {preflight.missing.length === 1 ? 'column' : 'columns'}. Enter the account above to
+                map your columns to {connector}'s.
+              </p>
+            )}
           </>
         )}
 
         <div className="flex items-center gap-3">
+          {/* Upload is blocked while we *know* the file won't parse — the whole point of the
+              preflight is to not spend a multi-GB upload on a file that is going to fail. A
+              preflight that errored leaves `preflight` null and does not block: it is an early
+              warning, and the server validates on ingest regardless. */}
           {mode === 'upload' ? (
-            <Button onClick={handleUpload} disabled={!merchantId || uploading || processing}>
+            <Button
+              onClick={handleUpload}
+              disabled={
+                !merchantId || uploading || processing || checking || preflight?.ok === false
+              }
+            >
               {uploading || processing ? (
                 <>
                   <Spinner size={14} />

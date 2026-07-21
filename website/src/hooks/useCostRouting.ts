@@ -290,6 +290,178 @@ export async function uploadReport(
   )
 }
 
+// ── Column mapping ───────────────────────────────────────────────────────────────────────────────
+
+/** A connector's verdict on a report's header row. */
+export interface PreflightReport {
+  connector: string
+  ok: boolean
+  /** Required columns absent from the file. */
+  missing: string[]
+  /** Required columns the file does carry. */
+  matched: string[]
+  /** Everything the connector requires. */
+  required: string[]
+  /** Columns the connector uses if present but tolerates the absence of. */
+  optional: string[]
+  /**
+   * Optional columns this file lacks. These never fail an ingestion — which is why they are worth
+   * showing: their absence is silent but not free. Adyen's `Unique Terminal ID` is what separates
+   * in-person from online acceptance, and `Booking Date` dates the report period; a renamed one
+   * quietly degrades the fitted model. Offer them, don't block on them.
+   */
+  optional_missing: string[]
+  /** The header labels the merchant's file actually has. */
+  found: string[]
+  /** Connectors that fully accept this file — a strong hint the wrong one was selected. */
+  suggested_connectors: { connector: string; matched_required: number }[]
+}
+
+/** One row as a candidate mapping would produce it — the derived values, not the raw columns. */
+export interface PreviewRow {
+  card_network: string
+  variant: string
+  funding: string
+  currency: string
+  issuer_country: string
+  gross: number
+  total_fee: number
+  effective_pct: number
+  interchange: number
+  scheme_fee: number
+  markup: number
+  commission: number
+}
+
+export interface PreviewReport {
+  rows: PreviewRow[]
+  median_effective_pct: number | null
+  /** Set when the derived numbers don't look like card processing. Advisory, not blocking. */
+  warning: string | null
+}
+
+/** `expected label -> the merchant's label`. */
+export type ColumnMapping = Record<string, string>
+
+/**
+ * How much of the file to send for header checks. Must not exceed the server's own cap
+ * (`preflight::HEADER_SAMPLE_BYTES`), which rejects a larger body outright.
+ */
+export const HEADER_SAMPLE_BYTES = 64 * 1024
+
+/**
+ * Check a report's headers against a connector *before* uploading it. Send only
+ * `file.slice(0, HEADER_SAMPLE_BYTES)` — a few KB answered in milliseconds, versus discovering the
+ * same problem after a multi-GB upload and a background parse.
+ *
+ * Passing `account` applies that source's saved mapping, so a previously-mapped source validates
+ * clean straight away. A file that can't be parsed is a normal response with `ok: false`, not a
+ * rejected request.
+ */
+export async function validateReportHeaders(
+  merchantId: string,
+  connector: string,
+  headerSample: Blob,
+  account?: string,
+) {
+  const q = account ? `?account=${encodeURIComponent(account)}` : ''
+  return apiUploadWithProgress<PreflightReport>(
+    `/merchant-account/${merchantId}/connectors/${connector}/report/validate-headers${q}`,
+    headerSample,
+  )
+}
+
+/**
+ * Show what a *candidate* mapping actually produces from the merchant's own rows.
+ *
+ * This is the guardrail that makes mapping safe to offer. A mapping can be perfectly well-formed —
+ * every column known, every target present — and still be wrong (an all-in fee column pointed at one
+ * fee component, say). A wrong mapping doesn't error: it fits, grades GOOD, and silently misprices
+ * routing. The derived `gross` / `total_fee` / effective rate is where that becomes visible, so the
+ * UI renders this before it will let a mapping be saved.
+ */
+export async function previewColumnMapping(
+  merchantId: string,
+  connector: string,
+  columns: ColumnMapping,
+  sample: string,
+  truncated: boolean,
+) {
+  return apiPost<PreviewReport>(
+    `/merchant-account/${merchantId}/connectors/${connector}/report/preview`,
+    { columns, sample, truncated },
+  )
+}
+
+/** A connector whose settlement report can be ingested. */
+export interface IngestConnector {
+  id: string
+  /** Reports are fetched by polling the connector's API rather than pushed to a webhook. */
+  pull: boolean
+}
+
+/**
+ * Connectors that support report ingestion, read from the backend's connector registry.
+ *
+ * Deliberately not a constant in this file: the registry is the single source of truth for which
+ * connectors exist, and a hardcoded copy here would silently make a newly-registered connector
+ * unselectable — and therefore unmappable — until someone remembered to edit the frontend too.
+ */
+export function useIngestConnectors() {
+  const { data, error, isLoading } = useSWR<IngestConnector[]>(
+    '/cost-ingestion/connectors',
+    fetcher,
+    { revalidateOnFocus: false },
+  )
+  return { connectors: data ?? [], error, isLoading }
+}
+
+/** A settlement source's saved column mapping (empty object when none is set). */
+export function useColumnMapping(merchantId?: string, connector?: string, account?: string) {
+  const path =
+    merchantId && connector && account
+      ? `/merchant-account/${merchantId}/connectors/${connector}/report/column-mapping?account=${encodeURIComponent(account)}`
+      : null
+  const { data, error, isLoading, mutate } = useSWR<{ columns: ColumnMapping }>(path, fetcher, {
+    revalidateOnFocus: false,
+  })
+  return { mapping: data?.columns ?? {}, error, isLoading, mutate }
+}
+
+/**
+ * Save a mapping for a settlement source. Every future ingestion of it — upload, webhook, or poll —
+ * applies the mapping automatically, which is most of the value: it turns a recurring monthly chore
+ * into a one-time one.
+ *
+ * `sample` is required (and must be the file the mapping was written against) so the server can
+ * reject a mapping that names an unknown column, targets a column the file lacks, or points two
+ * expected columns at the same source column.
+ */
+export async function setColumnMapping(
+  merchantId: string,
+  connector: string,
+  account: string,
+  columns: ColumnMapping,
+  sample: string,
+  truncated: boolean,
+) {
+  return apiPut(
+    `/merchant-account/${merchantId}/connectors/${connector}/report/column-mapping?account=${encodeURIComponent(account)}`,
+    { columns, sample, truncated },
+  )
+}
+
+/** Clear a source's mapping so its reports parse with the connector's own labels again. */
+export async function deleteColumnMapping(
+  merchantId: string,
+  connector: string,
+  account: string,
+) {
+  return apiDelete(
+    `/merchant-account/${merchantId}/connectors/${connector}/report/column-mapping?account=${encodeURIComponent(account)}`,
+  )
+}
+
 /**
  * Run a curated sample report for a connector ("Use a sample file") — for merchants without a
  * report file of their own. The server downloads the configured sample and runs the identical

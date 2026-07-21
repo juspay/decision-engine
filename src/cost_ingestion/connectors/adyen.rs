@@ -162,6 +162,7 @@ impl SettlementReportSource for AdyenReportSource {
     fn parse_rows(
         &self,
         reader: Box<dyn std::io::Read + Send>,
+        mapping: &crate::cost_ingestion::mapping::ColumnMapping,
         on_row: &mut dyn FnMut(SettledFeeRow) -> Result<(), IngestError>,
     ) -> Result<(), IngestError> {
         // Resolved column indices for one report (order can drift between report versions).
@@ -184,6 +185,7 @@ impl SettlementReportSource for AdyenReportSource {
 
         csv_reader::parse(
             reader,
+            mapping,
             |h| {
                 Ok(Cols {
                     record: h.require("Record Type")?,
