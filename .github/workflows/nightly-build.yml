@@ -30,12 +30,19 @@ jobs:
 
       - name: Create nightly tag
         id: create_tag
+        env:
+          TAG_SUFFIX: ${{ github.event.inputs.tag_suffix }}
         run: |
           # Generate date-based tag (YYYY.MM.DD format)
           DATE_TAG=$(TZ=Asia/Kolkata date +%Y.%m.%d)
-          TAG_SUFFIX="${{ github.event.inputs.tag_suffix }}"
           
+          # Validate tag suffix against allowed charset (alphanumeric, dash, dot only)
           if [[ -n "$TAG_SUFFIX" ]]; then
+            if [[ ! "$TAG_SUFFIX" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+              echo "Error: tag_suffix contains invalid characters. Only alphanumeric, dash, dot, and underscore are allowed."
+              echo "Provided: $TAG_SUFFIX"
+              exit 1
+            fi
             TAG_NAME="nightly-${DATE_TAG}-${TAG_SUFFIX}"
           else
             TAG_NAME="nightly-${DATE_TAG}"
@@ -331,6 +338,8 @@ jobs:
   notify-completion:
     needs: [create-tag, create-release]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     if: always()
     steps:
       - name: Check build status
