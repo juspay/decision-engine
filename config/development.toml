@@ -90,6 +90,11 @@ service_config_ttl = 300    # 5 minutes
 [compression_filepath]
 zstd_compression_filepath = "/tmp/extra-paths/redis-zstd-dictionaries/sbx"
 
+[card_info_service]
+base_url = "https://integ.hyperswitch.io/api/cards"
+api_key = "hyperswitch_api_key"
+timeout_ms = 2000
+
 [cost_ingestion]
 # Drain webhook-enqueued jobs in this process. Off by default so only a dedicated ingest
 # deployment owns the worker; enable in dev to process pending jobs locally.

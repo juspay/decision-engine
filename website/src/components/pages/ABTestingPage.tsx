@@ -13,6 +13,7 @@ import {
   RoutingAlgorithm,
   ABTestAlgorithmData,
   SrConfigOverride,
+  ExperimentArmMetrics,
   ExperimentResultsResponse,
   ExperimentTransactionsResponse,
 } from '../../types/api'
@@ -46,8 +47,8 @@ function hasCostArm(abData?: ABTestAlgorithmData): boolean {
 
 function KindBadge({ kind }: { kind: ABTestExperimentType }) {
   if (kind === 'sr_config_tuning') return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300">
-      <Sliders size={9} /> SR Config Tuning
+    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300">
+      <Sliders size={11} /> SR Config Tuning
     </span>
   )
   return null
@@ -81,32 +82,32 @@ function ArmRuleDetail({ algorithmId, algorithms }: { algorithmId: string; algor
     return gateways.length > 0 ? (
       <div className="flex flex-wrap gap-1">
         {gateways.map((g, i) => (
-          <span key={i} className="rounded-full bg-brand-50 dark:bg-brand-900/20 px-2 py-0.5 text-[11px] font-medium text-brand-700 dark:text-brand-300">
+          <span key={i} className="rounded-full bg-brand-50 dark:bg-brand-900/20 px-2 py-0.5 text-xs font-medium text-brand-700 dark:text-brand-300">
             {i + 1}. {g.gateway_name}
           </span>
         ))}
       </div>
-    ) : <p className="text-xs text-slate-400 italic">No connectors configured.</p>
+    ) : <p className="text-sm text-slate-400 italic">No connectors configured.</p>
   }
   if (type === 'volume_split') {
     const splits = (Array.isArray(data) ? data : []) as { split: number; output: { gateway_name: string } }[]
     return splits.length > 0 ? (
       <div className="flex flex-wrap gap-1">
         {splits.map((s, i) => (
-          <span key={i} className="rounded-full bg-emerald-50 dark:bg-emerald-900/20 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
+          <span key={i} className="rounded-full bg-emerald-50 dark:bg-emerald-900/20 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-300">
             {s.output.gateway_name} {s.split}%
           </span>
         ))}
       </div>
-    ) : <p className="text-xs text-slate-400 italic">No splits configured.</p>
+    ) : <p className="text-sm text-slate-400 italic">No splits configured.</p>
   }
   if (type === 'single') {
     const conn = data as { gateway_name: string } | undefined
     return conn ? (
-      <span className="rounded-full bg-slate-100 dark:bg-[#1a1f2a] px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:text-[#8090a8]">
+      <span className="rounded-full bg-slate-100 dark:bg-[#1a1f2a] px-2 py-0.5 text-xs font-medium text-slate-600 dark:text-[#8090a8]">
         {conn.gateway_name}
       </span>
-    ) : <p className="text-xs text-slate-400 italic">No connector configured.</p>
+    ) : <p className="text-sm text-slate-400 italic">No connector configured.</p>
   }
   return null
 }
@@ -116,7 +117,7 @@ function ArmRuleDetail({ algorithmId, algorithms }: { algorithmId: string; algor
 function InfoHint({ text }: { text: string }) {
   return (
     <span title={text} className="inline-flex cursor-help align-middle text-slate-300 hover:text-slate-500 dark:text-slate-600 dark:hover:text-slate-400">
-      <Info size={12} />
+      <Info size={14} />
     </span>
   )
 }
@@ -125,7 +126,7 @@ function InfoHint({ text }: { text: string }) {
 // helper paragraphs under each input.
 function FieldLabel({ children, hint, required }: { children: ReactNode; hint?: string; required?: boolean }) {
   return (
-    <label className="mb-1.5 flex items-center gap-1 text-xs font-medium text-slate-600 dark:text-slate-300">
+    <label className="mb-1.5 flex items-center gap-1 text-sm font-medium text-slate-600 dark:text-slate-300">
       {children}{required && <span className="text-slate-400">*</span>}
       {hint && <InfoHint text={hint} />}
     </label>
@@ -197,7 +198,7 @@ function ArmSelector({ label, help, algorithms, value, excludeId, allowedSrStrat
     onChange(c.length === 1 ? c[0].id : '')
   }
 
-  const selectCls = 'w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500'
+  const selectCls = 'w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-base focus:outline-none focus:ring-1 focus:ring-brand-500'
 
   return (
     <div>
@@ -220,7 +221,7 @@ function ArmSelector({ label, help, algorithms, value, excludeId, allowedSrStrat
         </select>
       )}
       {configs.length === 1 && (
-        <p className="mt-1.5 text-[11px] text-slate-400">Using <span className="font-medium text-slate-600 dark:text-slate-300">{configs[0].name}</span></p>
+        <p className="mt-1.5 text-xs text-slate-400">Using <span className="font-medium text-slate-600 dark:text-slate-300">{configs[0].name}</span></p>
       )}
       {value && !isSrStrategy(value) && (
         <div className="mt-2 rounded-lg border border-slate-100 dark:border-[#1a1f2a] bg-slate-50/60 dark:bg-[#0a0a0f]/60 p-2">
@@ -229,7 +230,7 @@ function ArmSelector({ label, help, algorithms, value, excludeId, allowedSrStrat
       )}
       {value && isSrStrategy(value) && (
         <div className="mt-2 rounded-lg border border-slate-100 dark:border-[#1a1f2a] bg-slate-50/60 dark:bg-[#0a0a0f]/60 p-2">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400 mb-1.5">Base SR config</p>
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-1.5">Base SR config</p>
           <LiveSrConfigPanel
             hedging={liveSrConfig.hedging}
             elimination={liveSrConfig.elimination}
@@ -251,36 +252,123 @@ function deltaLabel(deltaPp: number) {
   return `${sign}${deltaPp.toFixed(2)}pp`
 }
 
+// Signed money delta for TCS (total cost saved) — a bare number, no unit, matching how the
+// per-arm cards render it.
+function moneyDeltaLabel(value: number) {
+  const sign = value > 0 ? '+' : ''
+  return `${sign}${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+}
+
 function authRatePct(rate: number) {
   return `${(rate * 100).toFixed(2)}%`
 }
 
-function VerdictChip({ verdict }: { verdict: string }) {
-  if (verdict === 'collecting_data') return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-      <Clock size={11} /> Collecting data
-    </span>
-  )
-  if (verdict === 'variant_wins') return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
-      <CheckCircle2 size={11} /> Variant wins
-    </span>
-  )
-  if (verdict === 'variant_loses') return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400">
-      <XCircle size={11} /> Variant loses
-    </span>
-  )
-  if (verdict === 'guardrail_breached') return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400">
-      <AlertTriangle size={11} /> Guardrail breached
-    </span>
-  )
+// One signed metric delta shown inside the verdict banner (e.g. "+24.70pp  NAR"). Coloured by
+// sign independently, so a mixed outcome (auth up, cost down) reads honestly.
+function DeltaStat({ value, label, positive, title }: { value: string; label: string; positive: boolean; title?: string }) {
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-      Not significant
+    <span className="inline-flex items-baseline gap-1" title={title}>
+      <span className={`text-base font-bold tabular-nums ${positive ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>{value}</span>
+      <span className="text-xs font-medium text-slate-400">{label}</span>
     </span>
   )
+}
+
+// The primary, hard-to-miss statement of "did the variant win," shown at the top of the Results
+// card. Surfaces all three head-to-head deltas (NAR / FAAR / TCS) plus a plain-English note on
+// what the verdict is actually decided on — economic value (auth uplift + fees saved), not auth
+// alone. `costKind` gates the cost-only pieces (TCS delta, EV wording); auth-only experiments are
+// judged on net auth rate directly.
+function VerdictBanner({ verdict, control, variant, costKind }: {
+  verdict: string
+  control: ExperimentArmMetrics
+  variant: ExperimentArmMetrics
+  costKind: boolean
+}) {
+  const c = VERDICT_STYLES[verdict] ?? VERDICT_STYLES.not_significant
+  const Icon = c.icon
+
+  // Deltas are point estimates — meaningful once a verdict exists, misleading while a handful of
+  // transactions are still trickling in, so they're hidden during collecting_data.
+  const showDeltas = verdict !== 'collecting_data'
+  const narDelta = (variant.auth_rate - control.auth_rate) * 100
+  const faarDelta = (variant.first_attempt_auth_rate - control.first_attempt_auth_rate) * 100
+  const tcsDelta = (variant.total_cost_saved ?? 0) - (control.total_cost_saved ?? 0)
+
+  // The z-test decides wins/losses/ties on economic value; the guardrail trip is a pure auth
+  // safety check, so the "how it's judged" note only applies to the former three.
+  const zTestVerdict = verdict === 'variant_wins' || verdict === 'variant_loses' || verdict === 'not_significant'
+  const basisNote = costKind
+    ? 'Winner is decided on economic value per transaction — the variant\'s auth uplift plus the gateway fees it saved versus default routing.'
+    : 'Winner is decided on net auth rate (NAR) — the share of payments that succeeded on any attempt — tested for statistical significance.'
+  const basisTooltip = costKind
+    ? 'Economic value per transaction = (profit margin on a success) + (gateway fee that success saved versus what default routing would have paid). Failures are worth zero. A variant only wins when its average economic value is significantly above control\'s — so a small auth dip can still win if it saves enough cost, and an auth gain can still fail to win if it isn\'t significant. NAR = net auth rate (any attempt), FAAR = first-attempt auth rate, TCS = total fees saved in money.'
+    : 'The variant only wins when its net auth rate (NAR) is significantly above control\'s. NAR = net auth rate (succeeded on any attempt); FAAR = first-attempt auth rate.'
+
+  return (
+    <div className={`rounded-xl border px-4 py-3.5 ${c.bannerBg} ${c.bannerBorder}`}>
+      <div className="flex items-start gap-3">
+        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${c.iconBg}`}>
+          <Icon size={18} className={c.chipText} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <p className={`text-base font-semibold ${c.chipText}`}>{c.bannerLabel}</p>
+            {zTestVerdict && <InfoHint text={basisTooltip} />}
+          </div>
+          {showDeltas && (
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
+              <DeltaStat value={deltaLabel(narDelta)} label="NAR" positive={narDelta >= 0} title="Net auth rate — succeeded on any attempt" />
+              <DeltaStat value={deltaLabel(faarDelta)} label="FAAR" positive={faarDelta >= 0} title="First-attempt auth rate — succeeded without a retry" />
+              {costKind && (
+                <DeltaStat value={moneyDeltaLabel(tcsDelta)} label="TCS" positive={tcsDelta >= 0} title="Total cost saved — gateway fees saved in money" />
+              )}
+            </div>
+          )}
+          <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">
+            {zTestVerdict ? basisNote : c.bannerSubtext}
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const VERDICT_STYLES: Record<string, {
+  icon: typeof Clock
+  chipBg: string; chipText: string; chipLabel: string
+  bannerBg: string; bannerBorder: string; iconBg: string; bannerLabel: string; bannerSubtext: string
+}> = {
+  collecting_data: {
+    icon: Clock,
+    chipBg: 'bg-slate-100 dark:bg-slate-800', chipText: 'text-slate-500 dark:text-slate-400', chipLabel: 'Collecting data',
+    bannerBg: 'bg-slate-50 dark:bg-slate-800/30', bannerBorder: 'border-slate-200 dark:border-slate-700', iconBg: 'bg-slate-200 dark:bg-slate-700',
+    bannerLabel: 'Still collecting data', bannerSubtext: 'The verdict will appear once the minimum sample size is reached.',
+  },
+  variant_wins: {
+    icon: CheckCircle2,
+    chipBg: 'bg-emerald-100 dark:bg-emerald-900/30', chipText: 'text-emerald-700 dark:text-emerald-400', chipLabel: 'Variant wins',
+    bannerBg: 'bg-emerald-50 dark:bg-emerald-900/15', bannerBorder: 'border-emerald-200 dark:border-emerald-800/50', iconBg: 'bg-emerald-100 dark:bg-emerald-900/40',
+    bannerLabel: 'Variant is winning', bannerSubtext: "It's outperforming control with statistical significance.",
+  },
+  variant_loses: {
+    icon: XCircle,
+    chipBg: 'bg-red-100 dark:bg-red-900/30', chipText: 'text-red-600 dark:text-red-400', chipLabel: 'Variant loses',
+    bannerBg: 'bg-red-50 dark:bg-red-900/15', bannerBorder: 'border-red-200 dark:border-red-800/50', iconBg: 'bg-red-100 dark:bg-red-900/40',
+    bannerLabel: 'Variant is underperforming', bannerSubtext: 'Control is significantly ahead — consider stopping the experiment.',
+  },
+  guardrail_breached: {
+    icon: AlertTriangle,
+    chipBg: 'bg-red-100 dark:bg-red-900/30', chipText: 'text-red-600 dark:text-red-400', chipLabel: 'Guardrail breached',
+    bannerBg: 'bg-red-50 dark:bg-red-900/15', bannerBorder: 'border-red-200 dark:border-red-800/50', iconBg: 'bg-red-100 dark:bg-red-900/40',
+    bannerLabel: 'Guardrail breached', bannerSubtext: 'The variant dropped further below control than the configured safety margin allows.',
+  },
+  not_significant: {
+    icon: AlertTriangle,
+    chipBg: 'bg-slate-100 dark:bg-slate-800', chipText: 'text-slate-500 dark:text-slate-400', chipLabel: 'Not significant',
+    bannerBg: 'bg-slate-50 dark:bg-slate-800/30', bannerBorder: 'border-slate-200 dark:border-slate-700', iconBg: 'bg-slate-200 dark:bg-slate-700',
+    bannerLabel: 'Not statistically significant', bannerSubtext: "The difference between arms isn't large enough yet to call a winner.",
+  },
 }
 
 // ─── SR Config param display helpers ──────────────────────────────────────────
@@ -351,28 +439,34 @@ function LiveSrConfigPanel({ hedging, elimination, bucketSize, autopilotSegmentC
   honorsAutopilot: boolean
   autopilotFeatureOn: boolean
 }) {
+  const autopilotActive = honorsAutopilot && autopilotFeatureOn
+
   return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between text-[11px]">
-        <span className="text-slate-500">Hedging % (explore-exploit)</span>
-        <span className="font-medium text-slate-700 dark:text-slate-300">
-          {hedging !== null ? `${hedging}%` : <span className="text-slate-400 italic">Not configured</span>}
-        </span>
-      </div>
-      <div className="flex items-center justify-between text-[11px]">
-        <span className="text-slate-500">Elimination threshold</span>
-        <span className="font-medium text-slate-700 dark:text-slate-300">
-          {elimination !== null ? `SR < ${(elimination * 100).toFixed(0)}%` : <span className="text-slate-400 italic">Not configured</span>}
-        </span>
-      </div>
-      <div className="flex items-center justify-between text-[11px]">
-        <span className="text-slate-500">Bucket size (score window)</span>
-        <span className="font-medium text-slate-700 dark:text-slate-300">
-          {bucketSize !== null ? `${bucketSize} requests` : <span className="text-slate-400 italic">Not configured</span>}
-        </span>
-      </div>
+    <div className="space-y-2">
+      {!autopilotActive && (
+        <>
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-slate-500">Hedging % (explore-exploit)</span>
+            <span className="font-medium text-slate-700 dark:text-slate-300">
+              {hedging !== null ? `${hedging}%` : <span className="text-slate-400 italic">Not configured</span>}
+            </span>
+          </div>
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-slate-500">Elimination threshold</span>
+            <span className="font-medium text-slate-700 dark:text-slate-300">
+              {elimination !== null ? `SR < ${(elimination * 100).toFixed(0)}%` : <span className="text-slate-400 italic">Not configured</span>}
+            </span>
+          </div>
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-slate-500">Bucket size (score window)</span>
+            <span className="font-medium text-slate-700 dark:text-slate-300">
+              {bucketSize !== null ? `${bucketSize} requests` : <span className="text-slate-400 italic">Not configured</span>}
+            </span>
+          </div>
+        </>
+      )}
       {honorsAutopilot && autopilotFeatureOn && (
-        <p className="flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400 pt-1.5 mt-0.5 border-t border-slate-100 dark:border-[#1e2330]">
+        <p className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
           Auto configures the Learning window and Discovery share based on your traffic volume.
           <InfoHint text={
             autopilotSegmentCount > 0
@@ -382,7 +476,7 @@ function LiveSrConfigPanel({ hedging, elimination, bucketSize, autopilotSegmentC
         </p>
       )}
       {honorsAutopilot && !autopilotFeatureOn && autopilotSegmentCount > 0 && (
-        <p className="flex items-center gap-1 text-[10px] text-slate-400 pt-1.5 mt-0.5 border-t border-slate-100 dark:border-[#1e2330]">
+        <p className="flex items-center gap-1 text-xs text-slate-400 pt-1.5 mt-0.5 border-t border-slate-100 dark:border-[#1e2330]">
           Autopilot is off — {autopilotSegmentCount} segment{autopilotSegmentCount === 1 ? '' : 's'} from earlier tuning
           <InfoHint text={`Autopilot (auto-calibration) is currently disabled for this merchant. ${autopilotSegmentCount} segment${autopilotSegmentCount === 1 ? '' : 's'} still carry values it tuned before being turned off, but nothing is being actively adjusted right now — every transaction uses the base config shown above.`} />
         </p>
@@ -414,12 +508,12 @@ function SrParamDiff({ abData, liveHedging, liveElimination }: SrParamDiffProps)
 
   return (
     <div className="rounded-xl border border-slate-200 dark:border-[#222226] overflow-hidden">
-      <div className="px-4 py-2.5 bg-slate-50 dark:bg-[#0a0a0f] border-b border-slate-200 dark:border-[#222226]">
-        <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400">Parameter overrides</p>
+      <div className="px-4 py-3 bg-slate-50 dark:bg-[#0a0a0f] border-b border-slate-200 dark:border-[#222226]">
+        <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Parameter overrides</p>
       </div>
-      <table className="w-full text-xs">
+      <table className="w-full text-sm">
         <thead>
-          <tr className="text-left text-[10px] text-slate-400 border-b border-slate-100 dark:border-[#1e2330]">
+          <tr className="text-left text-xs text-slate-400 border-b border-slate-100 dark:border-[#1e2330]">
             <th className="px-4 py-2">Parameter</th>
             <th className="px-4 py-2 text-slate-500">Control (current config)</th>
             <th className="px-4 py-2 text-brand-500">Variant (override)</th>
@@ -445,6 +539,31 @@ function SrParamDiff({ abData, liveHedging, liveElimination }: SrParamDiffProps)
       </table>
     </div>
   )
+}
+
+// Page numbers to render in the transaction pager: always the first and last page, plus a
+// sliding window of up to WINDOW pages centred on the current one. `null` marks a gap that renders
+// as an ellipsis. The window is nudged inward near either edge so it stays WINDOW wide.
+function buildPageList(current: number, totalPages: number): (number | null)[] {
+  const WINDOW = 5
+  // When everything fits (window + the two anchors), just list every page.
+  if (totalPages <= WINDOW + 2) {
+    return Array.from({ length: totalPages }, (_, i) => i + 1)
+  }
+  const half = Math.floor(WINDOW / 2)
+  let start = current - half
+  let end = current + half
+  if (start < 2) { end += 2 - start; start = 2 }
+  if (end > totalPages - 1) { start -= end - (totalPages - 1); end = totalPages - 1 }
+  start = Math.max(2, start)
+  end = Math.min(totalPages - 1, end)
+
+  const pages: (number | null)[] = [1]
+  if (start > 2) pages.push(null)
+  for (let p = start; p <= end; p++) pages.push(p)
+  if (end < totalPages - 1) pages.push(null)
+  pages.push(totalPages)
+  return pages
 }
 
 // ─── Experiment detail panel ──────────────────────────────────────────────────
@@ -538,7 +657,7 @@ function ExperimentDetailPanel({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-base font-semibold text-slate-900 dark:text-white">{algorithm.name}</h2>
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white">{algorithm.name}</h2>
             <KindBadge kind={kind} />
             {isActive
               ? <Badge variant="green">Active</Badge>
@@ -546,105 +665,112 @@ function ExperimentDetailPanel({
             }
           </div>
           {abData && (
-            <p className="mt-0.5 text-xs text-slate-500">
+            <p className="mt-1 flex flex-wrap items-center gap-1.5 text-sm text-slate-500">
+              <span className="flex h-1.5 w-14 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800" title={`${controlPct}% control / ${variantPct}% variant`}>
+                <span className="h-full bg-slate-400" style={{ width: `${controlPct}%` }} />
+                <span className="h-full bg-brand-500" style={{ width: `${variantPct}%` }} />
+              </span>
               {controlPct}/{variantPct} split · Min sample {minSample.toLocaleString()} · Guardrail {abData.guardrail_threshold_pp}pp
             </p>
           )}
         </div>
         <div className="flex items-center gap-2">
           {isActive ? (
-            <Button size="sm" variant="danger" onClick={onStop}><PowerOff size={13} /> Stop</Button>
+            <Button size="sm" variant="danger" onClick={onStop}><PowerOff size={15} /> Stop</Button>
           ) : (
             <>
               {/* Edit / Delete are only offered while inactive — a running experiment must be
                   stopped first to avoid corrupting its collected results (enforced server-side too). */}
-              <Button size="sm" variant="secondary" onClick={onEdit}><Pencil size={13} /> Edit</Button>
-              <Button size="sm" variant="secondary" onClick={onDelete}><Trash2 size={13} /> Delete</Button>
+              <Button size="sm" variant="secondary" onClick={onEdit}><Pencil size={15} /> Edit</Button>
+              <Button size="sm" variant="secondary" onClick={onDelete}><Trash2 size={15} /> Delete</Button>
               <Button size="sm" variant="primary" onClick={onActivate}>Activate</Button>
             </>
           )}
         </div>
       </div>
 
-      {/* Arm config */}
+      {/* Arm config + routing rule breakdown, combined into one card per arm. The routing rule
+          is the actual logic behind the arm's algorithm ID: static algorithms (rule-based,
+          priority, volume split, single) show their configured rule; SR-based arms (auth / MO
+          manual / MO autopilot) show the merchant's live SR config, fetched the same way SR
+          config tuning's create-form panel does. */}
       {abData && (
         isTuning ? (
           <SrParamDiff abData={abData} liveHedging={liveHedging} liveElimination={liveElimination} />
         ) : (
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-xl border border-slate-200 dark:border-[#222226] bg-slate-50 dark:bg-[#0c0c10] px-4 py-3">
-              <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400 mb-1">Control ({controlPct}%)</p>
-              <p className="text-sm font-medium text-slate-800 dark:text-white truncate">{armLabel(abData.control_algorithm_id, abData.control_sr_config, algorithmName)}</p>
-              <p className="text-[10px] text-slate-400 mt-0.5">Baseline</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-start">
+            <div className="rounded-xl border border-slate-200 dark:border-[#222226] bg-slate-50 dark:bg-[#0c0c10] px-5 py-4">
+              <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-slate-400 mb-1">
+                <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
+                Control ({controlPct}%)
+              </p>
+              <p className="text-base font-medium text-slate-800 dark:text-white truncate">{armLabel(abData.control_algorithm_id, abData.control_sr_config, algorithmName)}</p>
+              <p className="text-xs text-slate-400 mt-0.5">Baseline</p>
+              <div className="mt-3 pt-3 border-t border-slate-200 dark:border-[#222226]">
+                {abData.control_algorithm_id === 'sr_routing'
+                  ? <LiveSrConfigPanel
+                      hedging={liveHedging}
+                      elimination={liveElimination}
+                      bucketSize={liveBucketSize}
+                      autopilotSegmentCount={autopilotSegmentCount}
+                      autopilotFeatureOn={autopilotFeatureOn}
+                      // Honors autopilot unless the arm explicitly set `use_autopilot: false` (the
+                      // "auth based" and "MO manual" strategies); absent → honors it (gw_scoring's
+                      // `unwrap_or(true)`).
+                      honorsAutopilot={abData.control_sr_config?.use_autopilot !== false}
+                    />
+                  : <ArmRuleDetail algorithmId={abData.control_algorithm_id} algorithms={algorithms} />}
+              </div>
             </div>
-            <div className="rounded-xl border border-brand-200 dark:border-brand-800/50 bg-brand-50/50 dark:bg-brand-900/10 px-4 py-3">
-              <p className="text-[10px] font-medium uppercase tracking-wide text-brand-400 mb-1">Variant ({variantPct}%)</p>
-              <p className="text-sm font-medium text-slate-800 dark:text-white truncate">{armLabel(abData.variant_algorithm_id, abData.variant_sr_config, algorithmName)}</p>
-              <p className="text-[10px] text-slate-400 mt-0.5">Being tested</p>
+            <div className="rounded-xl border border-brand-200 dark:border-brand-800/50 bg-brand-50/50 dark:bg-brand-900/10 px-5 py-4">
+              <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-brand-500 mb-1">
+                <span className="h-1.5 w-1.5 rounded-full bg-brand-500" />
+                Variant ({variantPct}%)
+              </p>
+              <p className="text-base font-medium text-slate-800 dark:text-white truncate">{armLabel(abData.variant_algorithm_id, abData.variant_sr_config, algorithmName)}</p>
+              <p className="text-xs text-slate-400 mt-0.5">Being tested</p>
+              <div className="mt-3 pt-3 border-t border-brand-200 dark:border-brand-800/50">
+                {abData.variant_algorithm_id === 'sr_routing'
+                  ? <LiveSrConfigPanel
+                      hedging={liveHedging}
+                      elimination={liveElimination}
+                      bucketSize={liveBucketSize}
+                      autopilotSegmentCount={autopilotSegmentCount}
+                      autopilotFeatureOn={autopilotFeatureOn}
+                      honorsAutopilot={abData.variant_sr_config?.use_autopilot !== false}
+                    />
+                  : <ArmRuleDetail algorithmId={abData.variant_algorithm_id} algorithms={algorithms} />}
+              </div>
             </div>
           </div>
         )
-      )}
-
-      {/* Routing rule breakdown — the actual logic behind each arm's algorithm ID. Static
-          algorithms (rule-based, priority, volume split, single) show their configured rule;
-          SR-based arms (auth / MO manual / MO autopilot) show the merchant's live SR config,
-          fetched the same way SR config tuning's create-form panel does. */}
-      {abData && !isTuning && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-start">
-          <div className="rounded-xl border border-slate-200 dark:border-[#222226] px-4 py-3">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400 mb-2">Control routing rule</p>
-            {abData.control_algorithm_id === 'sr_routing'
-              ? <LiveSrConfigPanel
-                  hedging={liveHedging}
-                  elimination={liveElimination}
-                  bucketSize={liveBucketSize}
-                  autopilotSegmentCount={autopilotSegmentCount}
-                  autopilotFeatureOn={autopilotFeatureOn}
-                  // Honors autopilot unless the arm explicitly set `use_autopilot: false` (the
-                  // "auth based" and "MO manual" strategies); absent → honors it (gw_scoring's
-                  // `unwrap_or(true)`).
-                  honorsAutopilot={abData.control_sr_config?.use_autopilot !== false}
-                />
-              : <ArmRuleDetail algorithmId={abData.control_algorithm_id} algorithms={algorithms} />}
-          </div>
-          <div className="rounded-xl border border-brand-200 dark:border-brand-800/50 px-4 py-3">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-brand-400 mb-2">Variant routing rule</p>
-            {abData.variant_algorithm_id === 'sr_routing'
-              ? <LiveSrConfigPanel
-                  hedging={liveHedging}
-                  elimination={liveElimination}
-                  bucketSize={liveBucketSize}
-                  autopilotSegmentCount={autopilotSegmentCount}
-                  autopilotFeatureOn={autopilotFeatureOn}
-                  honorsAutopilot={abData.variant_sr_config?.use_autopilot !== false}
-                />
-              : <ArmRuleDetail algorithmId={abData.variant_algorithm_id} algorithms={algorithms} />}
-          </div>
-        </div>
       )}
 
       {/* Stats */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
-            <h3 className="text-sm font-semibold text-slate-800 dark:text-white">Results</h3>
-            <p className="text-xs text-slate-500 mt-0.5">Updates every 60 seconds</p>
+            <h3 className="text-base font-semibold text-slate-800 dark:text-white">Results</h3>
+            <p className="text-sm text-slate-500 mt-0.5">Updates every 60 seconds</p>
           </div>
-          {results && <VerdictChip verdict={results.verdict} />}
         </CardHeader>
         <CardBody className="space-y-5">
           {isLoading && !results ? (
-            <div className="flex items-center gap-2 text-sm text-slate-400"><Spinner size={14} /> Loading stats…</div>
+            <div className="flex items-center gap-2 text-base text-slate-400"><Spinner size={16} /> Loading stats…</div>
           ) : !results ? (
-            <p className="text-sm text-slate-400 italic">
+            <p className="text-base text-slate-400 italic">
               Stats unavailable — analytics pipeline may not be configured in this environment.
             </p>
           ) : (
             <>
+              {/* Verdict — the single most important readout on this card, so it leads. It also
+                  carries the three head-to-head deltas (NAR/FAAR/TCS) and how the winner is judged,
+                  so no separate delta card is needed below. */}
+              <VerdictBanner verdict={results.verdict} control={results.control} variant={results.variant} costKind={costKind} />
+
               {/* Progress */}
               <div>
-                <div className="flex justify-between text-xs text-slate-500 mb-1.5">
+                <div className="flex justify-between text-sm text-slate-500 mb-1.5">
                   <span>Transactions collected</span>
                   <span className="font-medium">{totalTxns.toLocaleString()} / {minSample.toLocaleString()}</span>
                 </div>
@@ -654,75 +780,58 @@ function ExperimentDetailPanel({
                     style={{ width: `${progress}%` }}
                   />
                 </div>
-                <p className="mt-1 text-[10px] text-slate-400">{progress}% of minimum sample collected</p>
+                <p className="mt-1 text-xs text-slate-400">{progress}% of minimum sample collected</p>
               </div>
 
-              {/* Arm comparison */}
-              <div className="grid grid-cols-3 gap-3">
+              {/* Arm comparison — the per-arm absolute figures. The variant-vs-control deltas that
+                  used to live in a third column now sit in the verdict banner above. */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {[
                   { label: `Control (${controlPct}%)`, metrics: results.control, accent: false },
                   { label: `Variant (${variantPct}%)`, metrics: results.variant, accent: true },
                 ].map(({ label, metrics, accent }) => {
                   const noOutcome = metrics.transaction_count - metrics.success_count - metrics.failure_count
                   return (
-                    <div key={label} className={`rounded-xl border px-4 py-3 space-y-1 ${accent ? 'border-brand-200 dark:border-brand-800/50' : 'border-slate-200 dark:border-[#222226]'}`}>
-                      <p className={`text-[10px] ${accent ? 'text-brand-500' : 'text-slate-400'}`}>{label}</p>
-                      <p className="text-xl font-bold text-slate-800 dark:text-white">
-                        {authRatePct(metrics.auth_rate)} <span className="text-[10px] font-normal text-slate-400" title="Net auth rate — payments that succeeded on any attempt">NAR</span>
+                    <div key={label} className={`rounded-xl border px-5 py-4 space-y-1.5 ${accent ? 'border-brand-200 dark:border-brand-800/50' : 'border-slate-200 dark:border-[#222226]'}`}>
+                      <p className={`flex items-center gap-1.5 text-xs font-medium ${accent ? 'text-brand-500' : 'text-slate-400'}`}>
+                        <span className={`h-1.5 w-1.5 rounded-full ${accent ? 'bg-brand-500' : 'bg-slate-400'}`} />
+                        {label}
                       </p>
-                      <p className="text-xs text-slate-500" title="First-attempt auth rate — payments that succeeded without a retry">
+                      <p className="text-2xl font-bold text-slate-800 dark:text-white">
+                        {authRatePct(metrics.auth_rate)} <span className="text-xs font-normal text-slate-400" title="Net auth rate — payments that succeeded on any attempt">NAR</span>
+                      </p>
+                      <p className="text-sm text-slate-500" title="First-attempt auth rate — payments that succeeded without a retry">
                         FAAR {authRatePct(metrics.first_attempt_auth_rate)}
                       </p>
                       {costKind && metrics.total_cost_saved !== null && (
-                        <p className="text-xs text-sky-600 dark:text-sky-400" title="Total cost saved — gateway fees saved on successful payments">
+                        <p className="text-sm text-sky-600 dark:text-sky-400" title="Total cost saved — gateway fees saved on successful payments">
                           TCS {metrics.total_cost_saved.toLocaleString(undefined, { maximumFractionDigits: 2 })}
                         </p>
                       )}
-                      <p className="text-xs text-slate-400">{metrics.transaction_count.toLocaleString()} txns</p>
-                      <p className="text-xs text-emerald-600 dark:text-emerald-400">{metrics.success_count.toLocaleString()} success</p>
+                      <p className="text-sm text-slate-400">{metrics.transaction_count.toLocaleString()} txns</p>
+                      <p className="text-sm text-emerald-600 dark:text-emerald-400">{metrics.success_count.toLocaleString()} success</p>
                       {metrics.failure_count > 0 && (
-                        <p className="text-xs text-red-500 dark:text-red-400">{metrics.failure_count.toLocaleString()} failure</p>
+                        <p className="text-sm text-red-500 dark:text-red-400">{metrics.failure_count.toLocaleString()} failure</p>
                       )}
                       {noOutcome > 0 && (
-                        <p className="text-xs text-amber-600 dark:text-amber-400" title="Routed payments with no outcome recorded yet">
+                        <p className="text-sm text-amber-600 dark:text-amber-400" title="Routed payments with no outcome recorded yet">
                           {noOutcome.toLocaleString()} no outcome
                         </p>
                       )}
                       {costKind && metrics.avg_cost_saved_bps !== null && (
-                        <p className="text-xs text-sky-600 dark:text-sky-400" title="Average bps saved vs the SR head on cost-routed payments">
+                        <p className="text-sm text-sky-600 dark:text-sky-400" title="Average bps saved vs the SR head on cost-routed payments">
                           {metrics.avg_cost_saved_bps.toFixed(1)} bps saved
                         </p>
                       )}
                     </div>
                   )
                 })}
-
-                {/* Merchant-facing delta: NAR / FAAR / TCS differences only. The verdict itself
-                    still comes from the backend's EV z-test (shown as the VerdictChip); the
-                    statistical internals (p, CI, EV bps) are deliberately not displayed. */}
-                <div key="delta" className="rounded-xl border border-slate-200 dark:border-[#222226] px-4 py-3 space-y-1">
-                  <p className="text-[10px] text-slate-400">Delta (variant − control)</p>
-                  <p className={`text-xl font-bold ${results.delta_pp > 0 ? 'text-emerald-600 dark:text-emerald-400' : results.delta_pp < 0 ? 'text-red-500' : 'text-slate-800 dark:text-white'}`}>
-                    {deltaLabel(results.delta_pp)} <span className="text-[10px] font-normal text-slate-400">NAR</span>
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    FAAR {deltaLabel((results.variant.first_attempt_auth_rate - results.control.first_attempt_auth_rate) * 100)}
-                  </p>
-                  {costKind && (
-                    <p className="text-xs text-sky-600 dark:text-sky-400" title="Extra gateway fees saved by the variant vs the control">
-                      TCS {(() => {
-                        const d = (results.variant.total_cost_saved ?? 0) - (results.control.total_cost_saved ?? 0)
-                        return `${d > 0 ? '+' : ''}${d.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
-                      })()}
-                    </p>
-                  )}
-                </div>
               </div>
 
               {/* Guardrail warning */}
               {results.verdict === 'guardrail_breached' && (
-                <div className="flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-xs text-red-600 dark:text-red-400">
-                  <ShieldAlert size={12} />
+                <div className="flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-600 dark:text-red-400">
+                  <ShieldAlert size={14} />
                   Variant auth rate dropped {Math.abs(results.delta_pp).toFixed(2)}pp below control — beyond the {abData?.guardrail_threshold_pp}pp guardrail. Consider stopping the experiment.
                 </div>
               )}
@@ -735,32 +844,32 @@ function ExperimentDetailPanel({
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
-            <h3 className="text-sm font-semibold text-slate-800 dark:text-white">Transactions</h3>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <h3 className="text-base font-semibold text-slate-800 dark:text-white">Transactions</h3>
+            <p className="text-sm text-slate-500 mt-0.5">
               {txnData ? `${txnData.total.toLocaleString()} decisions` : 'Loading…'}
             </p>
           </div>
-          {txnsLoading && <Spinner size={14} />}
+          {txnsLoading && <Spinner size={16} />}
         </CardHeader>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-base">
             <thead>
-              <tr className="text-left text-xs text-slate-500 bg-slate-50 dark:bg-[#0a0a0f] border-b border-t border-slate-100 dark:border-[#1e2330]">
-                <th className="px-4 py-2.5 font-medium">Arm</th>
-                <th className="px-4 py-2.5 font-medium">Routing</th>
-                <th className="px-4 py-2.5 font-medium">Payment ID</th>
-                <th className="px-4 py-2.5 font-medium">Gateway</th>
-                <th className="px-4 py-2.5 font-medium">Status</th>
-                <th className="px-4 py-2.5 font-medium">Time</th>
+              <tr className="text-left text-sm text-slate-500 bg-slate-50 dark:bg-[#0a0a0f] border-b border-t border-slate-100 dark:border-[#1e2330]">
+                <th className="px-4 py-3 font-medium">Arm</th>
+                <th className="px-4 py-3 font-medium">Routing</th>
+                <th className="px-4 py-3 font-medium">Payment ID</th>
+                <th className="px-4 py-3 font-medium">Gateway</th>
+                <th className="px-4 py-3 font-medium">Status</th>
+                <th className="px-4 py-3 font-medium">Time</th>
               </tr>
             </thead>
           </table>
           <div className="max-h-[400px] overflow-y-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-base">
               <tbody>
                 {!txnData?.transactions.length ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-8 text-sm text-slate-400 text-center">
+                    <td colSpan={6} className="px-4 py-8 text-base text-slate-400 text-center">
                       {txnsLoading ? 'Loading…' : 'No transactions logged yet for this experiment.'}
                     </td>
                   </tr>
@@ -775,8 +884,8 @@ function ExperimentDetailPanel({
                     title={txnIsSr ? 'Open in Decision Audit' : 'Audit trail not available for static arm payments'}
                     className={`border-b border-slate-50 dark:border-[#131318] transition-colors ${txnIsSr ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-[#0f0f16]' : 'cursor-default opacity-60'}`}
                   >
-                    <td className="px-4 py-2.5">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
                         txn.variant_arm === 'control'
                           ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
                           : 'bg-brand-100 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300'
@@ -784,27 +893,27 @@ function ExperimentDetailPanel({
                         {txn.variant_arm === 'control' ? 'Control' : 'Variant'}
                       </span>
                     </td>
-                    <td className="px-4 py-2.5 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                    <td className="px-4 py-3 text-sm text-slate-500 dark:text-slate-400 whitespace-nowrap">
                       {routingType(txn.variant_arm)}
                     </td>
-                    <td className="px-4 py-2.5 font-mono text-xs text-slate-600 dark:text-slate-400 max-w-[180px] truncate">
+                    <td className="px-4 py-3 font-mono text-sm text-slate-600 dark:text-slate-400 max-w-[180px] truncate">
                       {txn.payment_id}
                     </td>
-                    <td className="px-4 py-2.5 text-xs text-slate-700 dark:text-slate-300">
+                    <td className="px-4 py-3 text-sm text-slate-700 dark:text-slate-300">
                       {txn.gateway ?? '—'}
                     </td>
-                    <td className="px-4 py-2.5">
+                    <td className="px-4 py-3">
                       {txn.status === 'success' ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">success</span>
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">success</span>
                       ) : txn.status === 'failure' ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400">failure</span>
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400">failure</span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" title="Payment was routed but no outcome was recorded — counted against auth rate">
-                          <Clock size={9} /> no outcome
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" title="Payment was routed but no outcome was recorded — counted against auth rate">
+                          <Clock size={11} /> no outcome
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-2.5 text-xs text-slate-400 whitespace-nowrap">
+                    <td className="px-4 py-3 text-sm text-slate-400 whitespace-nowrap">
                       {formatTime(txn.created_at_ms)}
                     </td>
                   </tr>
@@ -816,8 +925,8 @@ function ExperimentDetailPanel({
             {txnData && txnData.total > TXN_PAGE_SIZE && (() => {
               const totalPages = Math.ceil(txnData.total / TXN_PAGE_SIZE)
               return (
-                <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100 dark:border-[#1e2330]">
-                  <p className="text-xs text-slate-500">
+                <div className="flex items-center justify-between px-5 py-4 border-t border-slate-100 dark:border-[#1e2330]">
+                  <p className="text-sm text-slate-500">
                     Page {txnPage} of {totalPages} · {txnData.total.toLocaleString()} total
                   </p>
                   <div className="flex items-center gap-1">
@@ -825,27 +934,19 @@ function ExperimentDetailPanel({
                       type="button"
                       onClick={() => setTxnPage(p => Math.max(1, p - 1))}
                       disabled={txnPage === 1 || txnsLoading}
-                      className="px-2.5 py-1 rounded-md border border-slate-200 dark:border-[#222226] text-xs text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-[#1a1a22] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                      className="px-2.5 py-1 rounded-md border border-slate-200 dark:border-[#222226] text-sm text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-[#1a1a22] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                     >
                       ← Prev
                     </button>
-                    {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
-                      const page = totalPages <= 7
-                        ? i + 1
-                        : [1, totalPages, txnPage - 1, txnPage, txnPage + 1].includes(i + 1)
-                          ? i + 1
-                          : null
-                      if (page === null) return null
-                      const prev = totalPages <= 7 ? i : [1, totalPages, txnPage - 1, txnPage, txnPage + 1].includes(i) ? i : null
-                      const showEllipsis = prev !== null && page - prev > 1
-                      return (
-                        <span key={i} className="flex items-center gap-1">
-                          {showEllipsis && <span className="px-1 text-xs text-slate-400">…</span>}
-                          <button
+                    {buildPageList(txnPage, totalPages).map((page, idx) => (
+                      page === null
+                        ? <span key={`ellipsis-${idx}`} className="px-1 text-sm text-slate-400">…</span>
+                        : <button
+                            key={page}
                             type="button"
                             onClick={() => setTxnPage(page)}
                             disabled={txnsLoading}
-                            className={`min-w-[28px] px-2 py-1 rounded-md border text-xs transition-colors ${
+                            className={`min-w-[28px] px-2 py-1 rounded-md border text-sm transition-colors ${
                               page === txnPage
                                 ? 'border-brand-500 bg-brand-500 text-white'
                                 : 'border-slate-200 dark:border-[#222226] text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-[#1a1a22]'
@@ -853,14 +954,12 @@ function ExperimentDetailPanel({
                           >
                             {page}
                           </button>
-                        </span>
-                      )
-                    })}
+                    ))}
                     <button
                       type="button"
                       onClick={() => setTxnPage(p => Math.min(totalPages, p + 1))}
                       disabled={txnPage === totalPages || txnsLoading}
-                      className="px-2.5 py-1 rounded-md border border-slate-200 dark:border-[#222226] text-xs text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-[#1a1a22] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                      className="px-2.5 py-1 rounded-md border border-slate-200 dark:border-[#222226] text-sm text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-[#1a1a22] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                     >
                       Next →
                     </button>
@@ -887,13 +986,13 @@ interface SrArmEditorProps {
 function SrArmEditor({ label, splitPct, config, onChange }: SrArmEditorProps) {
   return (
     <div className="rounded-xl border border-brand-200 dark:border-brand-800/50 bg-brand-50/30 dark:bg-brand-900/10 px-4 py-4 space-y-3">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-500">
+      <p className="text-xs font-semibold uppercase tracking-wide text-brand-500">
         {label} ({splitPct}%)
       </p>
 
-      <div className="space-y-2.5">
+      <div className="space-y-3">
         <div>
-          <label className="mb-1 flex items-center gap-1 text-[11px] text-slate-500">
+          <label className="mb-1 flex items-center gap-1 text-xs text-slate-500">
             Hedging % (explore-exploit)
             <InfoHint text="Share of traffic sent to non-top gateways to keep their scores fresh." />
           </label>
@@ -902,12 +1001,12 @@ function SrArmEditor({ label, splitPct, config, onChange }: SrArmEditorProps) {
             value={config.hedgingPercent ?? ''}
             placeholder="e.g. 5"
             onChange={e => onChange(c => ({ ...c, hedgingPercent: e.target.value === '' ? null : Number(e.target.value) }))}
-            className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+            className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-base focus:outline-none focus:ring-1 focus:ring-brand-500"
           />
         </div>
 
         <div>
-          <label className="mb-1 flex items-center gap-1 text-[11px] text-slate-500">
+          <label className="mb-1 flex items-center gap-1 text-xs text-slate-500">
             Elimination threshold (0–1)
             <InfoHint text="SR score (0–1) below which a gateway is dropped from routing." />
           </label>
@@ -916,7 +1015,7 @@ function SrArmEditor({ label, splitPct, config, onChange }: SrArmEditorProps) {
             value={config.eliminationThreshold ?? ''}
             placeholder="e.g. 0.70"
             onChange={e => onChange(c => ({ ...c, eliminationThreshold: e.target.value === '' ? null : Number(e.target.value) }))}
-            className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+            className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-base focus:outline-none focus:ring-1 focus:ring-brand-500"
           />
         </div>
       </div>
@@ -964,7 +1063,7 @@ function CreateForm({
   const { liveHedging, liveElimination, liveBucketSize, autopilotSegmentCount } = useLiveSrConfig(merchantId || undefined)
 
   const tabClass = (type: ABTestExperimentType) =>
-    `px-3 py-1.5 text-xs font-medium rounded-md border transition-colors ${
+    `px-3 py-1.5 text-sm font-medium rounded-md border transition-colors ${
       form.experimentType === type
         ? 'bg-slate-900 text-white border-slate-900 dark:bg-white dark:text-slate-900 dark:border-white'
         : 'border-slate-200 dark:border-[#222226] text-slate-600 dark:text-slate-400 hover:border-slate-400 dark:hover:border-slate-500'
@@ -973,23 +1072,23 @@ function CreateForm({
   return (
     <Card>
       <CardHeader>
-        <h2 className="text-sm font-semibold text-slate-800 dark:text-white">{isEditing ? 'Edit Experiment' : 'New Experiment'}</h2>
+        <h2 className="text-base font-semibold text-slate-800 dark:text-white">{isEditing ? 'Edit Experiment' : 'New Experiment'}</h2>
       </CardHeader>
       <CardBody className="space-y-5">
 
         {/* Experiment type toggle — creation only; the type is fixed once an experiment exists. */}
         {!isEditing && (
           <div>
-            <label className="block text-xs text-slate-500 mb-2">Experiment type</label>
+            <label className="block text-sm text-slate-500 mb-2">Experiment type</label>
             <div className="flex flex-wrap items-center gap-2">
               <button type="button" className={tabClass('algorithm_comparison')} onClick={() => setForm(f => ({ ...f, experimentType: 'algorithm_comparison' }))}>
                 Algorithm comparison
               </button>
               <button type="button" className={tabClass('sr_config_tuning')} onClick={() => setForm(f => ({ ...f, experimentType: 'sr_config_tuning' }))}>
-                <Sliders size={12} className="inline mr-1" />SR config tuning
+                <Sliders size={14} className="inline mr-1" />SR config tuning
               </button>
             </div>
-            <p className="mt-1.5 text-[11px] text-slate-400">
+            <p className="mt-1.5 text-xs text-slate-400">
               {EXPERIMENT_TYPE_HELP[form.experimentType]}
             </p>
           </div>
@@ -999,13 +1098,13 @@ function CreateForm({
         <div>
           <FieldLabel required>Experiment name</FieldLabel>
           <input
-            className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+            className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-base focus:outline-none focus:ring-1 focus:ring-brand-500"
             placeholder={form.experimentType === 'sr_config_tuning' ? 'e.g. Hedging 10% vs 5%' : 'e.g. Stripe vs Checkout.com'}
             value={form.name}
             onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
           />
           {isEditing && (
-            <p className="mt-1.5 text-[11px] text-slate-400">
+            <p className="mt-1.5 text-xs text-slate-400">
               Only the name can be changed. To test a different routing setup, create a new experiment.
             </p>
           )}
@@ -1045,24 +1144,24 @@ function CreateForm({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {/* Control — live config, non-editable */}
             <div className="rounded-xl border border-slate-200 dark:border-[#222226] bg-slate-50/50 dark:bg-[#0c0c10] px-4 py-4 space-y-3">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
                 Control ({100 - form.variantSplitPct}%) — current config
               </p>
-              <div className="space-y-2.5">
+              <div className="space-y-3">
                 <div>
-                  <p className="text-[11px] text-slate-500 mb-0.5">Hedging % (explore-exploit)</p>
-                  <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                    {liveHedging !== null ? `${liveHedging}%` : <span className="text-slate-400 italic text-xs">Not configured</span>}
+                  <p className="text-xs text-slate-500 mb-0.5">Hedging % (explore-exploit)</p>
+                  <p className="text-base font-medium text-slate-700 dark:text-slate-300">
+                    {liveHedging !== null ? `${liveHedging}%` : <span className="text-slate-400 italic text-sm">Not configured</span>}
                   </p>
                 </div>
                 <div>
-                  <p className="text-[11px] text-slate-500 mb-0.5">Elimination threshold</p>
-                  <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                    {liveElimination !== null ? `SR < ${(liveElimination * 100).toFixed(0)}%` : <span className="text-slate-400 italic text-xs">Not configured</span>}
+                  <p className="text-xs text-slate-500 mb-0.5">Elimination threshold</p>
+                  <p className="text-base font-medium text-slate-700 dark:text-slate-300">
+                    {liveElimination !== null ? `SR < ${(liveElimination * 100).toFixed(0)}%` : <span className="text-slate-400 italic text-sm">Not configured</span>}
                   </p>
                 </div>
               </div>
-              <p className="text-[10px] text-slate-400 pt-1 border-t border-slate-100 dark:border-[#1e2330]">
+              <p className="text-xs text-slate-400 pt-1 border-t border-slate-100 dark:border-[#1e2330]">
                 Edit in <span className="font-medium">SR Routing → Scoring / Elimination</span>
               </p>
             </div>
@@ -1089,7 +1188,7 @@ function CreateForm({
             onChange={e => setForm(f => ({ ...f, variantSplitPct: Number(e.target.value) }))}
             className="w-full accent-brand-500"
           />
-          <div className="flex justify-between text-[10px] text-slate-400 mt-0.5"><span>5%</span><span>30%</span></div>
+          <div className="flex justify-between text-xs text-slate-400 mt-0.5"><span>5%</span><span>30%</span></div>
         </div>
         )}
 
@@ -1102,7 +1201,7 @@ function CreateForm({
               <button
                 key={n} type="button"
                 onClick={() => setForm(f => ({ ...f, minSampleSize: n }))}
-                className={`px-3 py-1 rounded-md text-xs font-medium border transition-colors ${
+                className={`px-3 py-1 rounded-md text-sm font-medium border transition-colors ${
                   form.minSampleSize === n
                     ? 'bg-brand-500 text-white border-brand-500'
                     : 'border-slate-200 dark:border-[#222226] text-slate-600 dark:text-slate-400 hover:border-brand-400'
@@ -1113,7 +1212,7 @@ function CreateForm({
             ))}
             <input
               type="number" min={100}
-              className="w-28 border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500"
+              className="w-28 border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
               value={form.minSampleSize}
               onChange={e => setForm(f => ({ ...f, minSampleSize: Number(e.target.value) }))}
             />
@@ -1127,7 +1226,7 @@ function CreateForm({
           <FieldLabel hint="Flag the experiment if the variant's auth rate falls this many percentage points below control.">Safety guardrail (pp)</FieldLabel>
           <input
             type="number" min={0.5} max={20} step={0.5}
-            className="w-28 border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+            className="w-28 border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-1.5 text-base focus:outline-none focus:ring-1 focus:ring-brand-500"
             value={form.guardrailThresholdPp}
             onChange={e => setForm(f => ({ ...f, guardrailThresholdPp: Number(e.target.value) }))}
           />
@@ -1137,7 +1236,7 @@ function CreateForm({
         <ErrorMessage error={error} />
 
         {success && (
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-200">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-base text-emerald-800 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-200">
             <span>{success}</span>
             {createdId && (
               <Button size="sm" variant="primary" onClick={() => onActivateCreated(createdId)}>
@@ -1148,7 +1247,7 @@ function CreateForm({
         )}
 
         <Button variant="primary" onClick={onCreate} disabled={saving || !merchantId}>
-          {saving ? <><Spinner size={14} /> {isEditing ? 'Saving…' : 'Creating…'}</> : isEditing ? 'Save Changes' : 'Create Experiment'}
+          {saving ? <><Spinner size={16} /> {isEditing ? 'Saving…' : 'Creating…'}</> : isEditing ? 'Save Changes' : 'Create Experiment'}
         </Button>
       </CardBody>
     </Card>
@@ -1347,32 +1446,32 @@ export function ABTestingPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">A/B Testing</h1>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+          <p className="mt-1 text-base text-slate-500 dark:text-slate-400">
             Compare routing strategies on live traffic with statistical significance.
           </p>
         </div>
         <Button variant="secondary" size="sm" onClick={openCreate}>
-          <Plus size={14} /> New Experiment
+          <Plus size={16} /> New Experiment
         </Button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-5">
 
         {/* Left: experiment list */}
-        <div className="space-y-1">
-          <p className="px-1 pb-1 text-[11px] font-medium uppercase tracking-wide text-slate-400">
+        <div className="space-y-1.5">
+          <p className="px-1 pb-1 text-xs font-medium uppercase tracking-wide text-slate-400">
             Experiments {savedAbTests.length > 0 && `(${savedAbTests.length})`}
           </p>
 
           {!merchantId ? (
-            <p className="px-2 py-2 text-sm text-slate-400">Set merchant ID to load experiments.</p>
+            <p className="px-2 py-2 text-base text-slate-400">Set merchant ID to load experiments.</p>
           ) : !allAlgorithms ? (
-            <p className="px-2 py-2 text-sm text-slate-400">Loading…</p>
+            <p className="px-2 py-2 text-base text-slate-400">Loading…</p>
           ) : savedAbTests.length === 0 ? (
             <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-slate-200 dark:border-[#222226] py-8 text-center">
-              <FlaskConical size={20} className="text-slate-300 dark:text-slate-600" />
-              <p className="text-sm text-slate-400">No experiments yet.</p>
-              <Button size="sm" variant="secondary" onClick={openCreate}><Plus size={13} /> Create one</Button>
+              <FlaskConical size={22} className="text-slate-300 dark:text-slate-600" />
+              <p className="text-base text-slate-400">No experiments yet.</p>
+              <Button size="sm" variant="secondary" onClick={openCreate}><Plus size={15} /> Create one</Button>
             </div>
           ) : (
             <div className="rounded-xl border border-slate-200 dark:border-[#222226] overflow-hidden">
@@ -1387,7 +1486,7 @@ export function ABTestingPage() {
                     key={algo.id}
                     type="button"
                     onClick={() => selectExperiment(algo.id)}
-                    className={`w-full text-left px-3 py-2.5 transition-colors ${
+                    className={`relative w-full text-left pl-4 pr-3 py-3 transition-colors ${
                       idx > 0 ? 'border-t border-slate-100 dark:border-[#1e2330]' : ''
                     } ${
                       isSelected
@@ -1395,20 +1494,25 @@ export function ABTestingPage() {
                         : 'hover:bg-slate-50 dark:hover:bg-[#0f0f16]'
                     }`}
                   >
+                    {/* Left accent bar makes the selected row identifiable at a glance,
+                        independent of the (fairly subtle) background tint. */}
+                    {isSelected && <span className="absolute left-0 top-0 bottom-0 w-0.5 bg-brand-500" />}
                     <div className="flex items-center gap-1.5 min-w-0">
-                      <p className={`truncate text-sm font-medium ${
+                      <p className={`truncate text-base font-medium ${
                         isSelected ? 'text-brand-700 dark:text-brand-300' : 'text-slate-800 dark:text-white'
                       }`}>
                         {algo.name}
                       </p>
                       {isActive && (
-                        <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">
-                          ● Active
+                        <span className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                          Active
                         </span>
                       )}
                     </div>
                     {abData && (
-                      <p className="text-[11px] text-slate-400 mt-0.5 truncate">
+                      <p className="flex items-center gap-1 text-xs text-slate-400 mt-0.5 truncate">
+                        {kind === 'sr_config_tuning' && <Sliders size={11} className="shrink-0 text-violet-400" />}
                         {kind === 'sr_config_tuning'
                           ? 'SR config tuning'
                           : `${armLabel(abData.control_algorithm_id, abData.control_sr_config, algorithmName)} → ${armLabel(abData.variant_algorithm_id, abData.variant_sr_config, algorithmName)}`
@@ -1456,8 +1560,8 @@ export function ABTestingPage() {
 
           {rightPanelContent === 'empty' && (
             <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 dark:border-[#222226] py-16 text-center">
-              <FlaskConical size={24} className="text-slate-300 dark:text-slate-600 mb-2" />
-              <p className="text-sm text-slate-500">Select an experiment to view details</p>
+              <FlaskConical size={26} className="text-slate-300 dark:text-slate-600 mb-2" />
+              <p className="text-base text-slate-500">Select an experiment to view details</p>
             </div>
           )}
         </div>
