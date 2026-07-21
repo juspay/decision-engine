@@ -272,9 +272,14 @@ impl SettlementReportSource for ChaseReportSource {
             .map_err(|e| IngestError::Download(e.to_string()))
     }
 
+    fn unwrap_envelope(&self, reader: Box<dyn Read + Send>) -> Box<dyn Read + Send> {
+        Box::new(EnvelopeReader::new(reader))
+    }
+
     fn parse_rows(
         &self,
         reader: Box<dyn Read + Send>,
+        mapping: &crate::cost_ingestion::mapping::ColumnMapping,
         on_row: &mut dyn FnMut(SettledFeeRow) -> Result<(), IngestError>,
     ) -> Result<(), IngestError> {
         // Resolved column indices for one report. Preset-report column order can drift between
@@ -301,10 +306,11 @@ impl SettlementReportSource for ChaseReportSource {
 
         // Strip the preset-report BEGIN/metadata/END envelope so the shared CSV driver sees a plain
         // header + data stream.
-        let reader: Box<dyn Read + Send> = Box::new(EnvelopeReader::new(reader));
+        let reader = self.unwrap_envelope(reader);
 
         csv_reader::parse(
             reader,
+            mapping,
             |h| {
                 Ok(Cols {
                     order: h.require("Merchant Order Number")?,
@@ -861,7 +867,17 @@ o2,ED,3,GB,GBP,EDBT,SALE,100,-1.00,-0.20\n";
     fn missing_required_column_errors() {
         let csv = b"Merchant Order Number,Action Type Code Text\no1,SALE\n";
         let err = ChaseReportSource::new().parse_report(csv).unwrap_err();
-        assert!(matches!(err, IngestError::Parse(_)));
+        let IngestError::MissingColumns {
+            missing, required, ..
+        } = err
+        else {
+            panic!("expected MissingColumns, got {err:?}");
+        };
+        // Every miss is reported at once, not just the first one resolved.
+        assert_eq!(missing.len(), required.len() - 2, "all but the two present");
+        assert!(missing.contains(&"Payment Method Code".to_string()));
+        assert!(missing.contains(&"Total Interchange Amount".to_string()));
+        assert!(!missing.contains(&"Merchant Order Number".to_string()));
     }
 
     #[test]

@@ -225,6 +225,9 @@ function CurrentConfigDetails({ config }: { config: SRConfigResponse['config'] }
 type SRTab = 'autopilot' | 'manual' | 'flags' | 'cost'
 const SR_TABS: readonly SRTab[] = ['autopilot', 'manual', 'flags', 'cost']
 
+type ManualSection = 'scoring' | 'elimination' | 'dimensions'
+const MANUAL_SECTIONS: readonly ManualSection[] = ['scoring', 'elimination', 'dimensions']
+
 export function SRRoutingPage() {
   // Same merchant resolution as OverviewPage/RoutingHubPage — this page must
   // never disagree with the Overview setup checklist about what is configured.
@@ -247,7 +250,33 @@ export function SRRoutingPage() {
       { replace: true },
     )
   }
-  const [manualTab, setManualTab] = useState<'scoring' | 'elimination' | 'dimensions'>('scoring')
+  // The Manual sub-section is also kept in the URL (?section=…) so a search
+  // result or shared link can jump straight to Elimination / SR Dimensions.
+  const sectionParam = searchParams.get('section')
+  const manualTab: ManualSection = MANUAL_SECTIONS.includes(sectionParam as ManualSection)
+    ? (sectionParam as ManualSection)
+    : 'scoring'
+  const setManualTab = (section: ManualSection) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        if (section === 'scoring') next.delete('section')
+        else next.set('section', section)
+        return next
+      },
+      { replace: true },
+    )
+  }
+  // The ?section= param is shared with the Cost tab, which has a disjoint set of
+  // valid values. When the Manual tab is active, canonicalize it: drop unknown
+  // values (e.g. a leftover cost section after switching tabs) and the default
+  // (scoring) so the URL never advertises a section the Manual UI isn't showing.
+  useEffect(() => {
+    if (activeTab !== 'manual') return
+    const canonical = manualTab === 'scoring' ? null : manualTab
+    if (sectionParam !== canonical) setManualTab(manualTab)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, manualTab, sectionParam])
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState(false)

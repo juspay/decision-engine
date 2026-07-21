@@ -45,6 +45,7 @@ export default defineConfig(({ command }) => {
         '/decide-gateway': createApiProxy(),
         '/decision_gateway': createApiProxy(),
         '/merchant-account': createApiProxy(),
+        '^/cost-ingestion(?:/.*)?$': createApiProxy(),
         '/config-sr-dimension': createApiProxy(),
         '^/config(?:/.*)?$': createApiProxy(),
         '/health': createApiProxy(),
@@ -74,6 +75,8 @@ export default defineConfig(({ command }) => {
         '/decide-gateway': createApiProxy(),
         '/decision_gateway': createApiProxy(),
         '/merchant-account': createApiProxy(),
+        // Mirrors the dev-server table above; see the note there.
+        '^/cost-ingestion(?:/.*)?$': createApiProxy(),
         '/config-sr-dimension': createApiProxy(),
         '^/config(?:/.*)?$': createApiProxy(),
         '/health': createApiProxy(),

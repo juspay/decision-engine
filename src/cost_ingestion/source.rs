@@ -18,6 +18,7 @@ use super::connectors::braintree::BraintreeReportSource;
 use super::connectors::chase::ChaseReportSource;
 use super::connectors::checkout::CheckoutReportSource;
 use super::connectors::stripe::StripeReportSource;
+use super::mapping::ColumnMapping;
 use super::types::{ConnectorCreds, IngestError, ReadyReport, ReportNotification, SettledFeeRow};
 
 /// Everything connector-specific lives behind this trait. All methods are pure functions of
@@ -68,6 +69,31 @@ pub trait SettlementReportSource: Send + Sync {
         note: &ReportNotification,
     ) -> Result<Bytes, IngestError>;
 
+    /// Whether one emitted row is assembled from **several** report rows (Checkout fans one payment
+    /// across a capture line plus its fee lines, accumulates them, and flushes at end of file)
+    /// rather than mapping one report row to one emitted row.
+    ///
+    /// This matters only where a report is read *partially*: the upload preflight parses the first
+    /// few KB of a file, and a grouping connector's final group is then almost always cut in half —
+    /// a capture with its fee lines still beyond the cut yields a row with real gross and zero fee.
+    /// Consumers of partial parses must know not to trust such a row (see
+    /// [`preview`](super::preflight::preview)); a full ingestion is unaffected, as it always reaches
+    /// EOF with every group complete.
+    fn groups_rows(&self) -> bool {
+        false
+    }
+
+    /// Strip any connector-specific framing wrapping the CSV — J.P. Morgan preset reports arrive
+    /// inside a `BEGIN` / `EntityId=…` / `END` envelope — leaving a plain `header + data` stream.
+    /// Default: the report is already plain CSV.
+    ///
+    /// Exists as its own step (rather than living inline in `parse_rows`) so that anything reading
+    /// a report's *header* without parsing it — notably the upload preflight — sees the same
+    /// unwrapped stream `parse_rows` does, instead of mistaking a frame line for the header row.
+    fn unwrap_envelope(&self, reader: Box<dyn Read + Send>) -> Box<dyn Read + Send> {
+        reader
+    }
+
     /// Stream-normalize the connector's native report into canonical [`SettledFeeRow`]s, calling
     /// `on_row` once per row. This is the *only* connector-specific parsing code — the column
     /// names / native format live here and nowhere else.
@@ -78,17 +104,32 @@ pub trait SettlementReportSource: Send + Sync {
     ///
     /// `on_row` is synchronous: this runs inside `spawn_blocking`, and the pipeline's callback
     /// buffers rows and pushes each full batch across a channel to the async inserter.
+    ///
+    /// `mapping` carries the merchant's `expected label -> their label` column overrides; pass
+    /// [`ColumnMapping::none`] when there are none. It is an explicit parameter rather than ambient
+    /// state because it changes which column feeds which fee component, and a wrong mapping produces
+    /// a *plausible* cost model rather than an error — that is not a data flow to leave implicit.
     fn parse_rows(
         &self,
         reader: Box<dyn Read + Send>,
+        mapping: &ColumnMapping,
         on_row: &mut dyn FnMut(SettledFeeRow) -> Result<(), IngestError>,
     ) -> Result<(), IngestError>;
 
-    /// Buffered convenience over [`parse_rows`]: collect the whole report into one `Vec`.
-    /// Fine for tests and small inputs; the streaming path never uses this.
+    /// Buffered convenience over [`parse_rows`]: collect the whole report into one `Vec`, with no
+    /// column mapping. Fine for tests and small inputs; the streaming path never uses this.
     fn parse_report(&self, bytes: &[u8]) -> Result<Vec<SettledFeeRow>, IngestError> {
+        self.parse_report_mapped(bytes, ColumnMapping::none())
+    }
+
+    /// [`parse_report`](Self::parse_report) with a column mapping applied.
+    fn parse_report_mapped(
+        &self,
+        bytes: &[u8],
+        mapping: &ColumnMapping,
+    ) -> Result<Vec<SettledFeeRow>, IngestError> {
         let mut all = Vec::new();
-        self.parse_rows(Box::new(Cursor::new(bytes.to_vec())), &mut |row| {
+        self.parse_rows(Box::new(Cursor::new(bytes.to_vec())), mapping, &mut |row| {
             all.push(row);
             Ok(())
         })?;
@@ -102,12 +143,13 @@ pub trait SettlementReportSource: Send + Sync {
 pub fn parse_in_batches(
     source: &dyn SettlementReportSource,
     reader: Box<dyn Read + Send>,
+    mapping: &ColumnMapping,
     batch_size: usize,
     mut on_batch: impl FnMut(Vec<SettledFeeRow>) -> Result<(), IngestError>,
 ) -> Result<(), IngestError> {
     let batch_size = batch_size.max(1);
     let mut batch = Vec::with_capacity(batch_size);
-    source.parse_rows(reader, &mut |row| {
+    source.parse_rows(reader, mapping, &mut |row| {
         batch.push(row);
         if batch.len() >= batch_size {
             on_batch(std::mem::replace(
@@ -153,6 +195,14 @@ impl ConnectorRegistry {
             .get(connector)
             .cloned()
             .ok_or_else(|| IngestError::UnknownConnector(connector.to_string()))
+    }
+
+    /// Every registered connector id. Used by the upload preflight to test a header row against all
+    /// connectors, so a file uploaded under the wrong one can be spotted.
+    pub fn connectors(&self) -> Vec<&'static str> {
+        let mut ids: Vec<&'static str> = self.sources.keys().copied().collect();
+        ids.sort_unstable(); // HashMap order is nondeterministic; keep suggestions stable.
+        ids
     }
 
     /// Every registered **pull** connector (those discovered by polling). The report poller sweeps

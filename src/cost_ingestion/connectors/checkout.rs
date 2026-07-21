@@ -376,9 +376,16 @@ impl SettlementReportSource for CheckoutReportSource {
         Ok(Bytes::from(out))
     }
 
+    /// One payment fans across a capture line plus its fee lines, which are accumulated and flushed
+    /// at EOF — so a partially-read report ends with an incomplete payment.
+    fn groups_rows(&self) -> bool {
+        true
+    }
+
     fn parse_rows(
         &self,
         reader: Box<dyn std::io::Read + Send>,
+        mapping: &crate::cost_ingestion::mapping::ColumnMapping,
         on_row: &mut dyn FnMut(SettledFeeRow) -> Result<(), IngestError>,
     ) -> Result<(), IngestError> {
         // Resolved column indices for one report. Field order can drift between report versions, so
@@ -404,6 +411,7 @@ impl SettlementReportSource for CheckoutReportSource {
         let mut discard = |_row: SettledFeeRow| -> Result<(), IngestError> { Ok(()) };
         csv_reader::parse(
             reader,
+            mapping,
             |h| {
                 Ok(Cols {
                     payment_id: h.require("Payment ID")?,
@@ -691,7 +699,16 @@ pay_4,Partial Capture,Partial Capture,AMEX,Credit,GB,GBP,20.00,2026-07-09T12:00:
         let err = CheckoutReportSource::new()
             .parse_report(csv.as_bytes())
             .unwrap_err();
-        assert!(matches!(err, IngestError::Parse(_)));
+        let IngestError::MissingColumns {
+            missing, required, ..
+        } = err
+        else {
+            panic!("expected MissingColumns, got {err:?}");
+        };
+        // Every miss is reported at once, not just the first one resolved.
+        assert_eq!(missing.len(), required.len() - 2, "all but the two present");
+        assert!(missing.contains(&"Holding Currency Amount".to_string()));
+        assert!(!missing.contains(&"Payment ID".to_string()));
     }
 
     #[test]

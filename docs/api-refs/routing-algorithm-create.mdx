@@ -5,18 +5,19 @@ description: "Curl examples for /routing/create."
 
 # Create Routing Algorithm
 
-Use `/routing/create` to persist a merchant-scoped routing algorithm. Creating an algorithm does not make it active; call [`/routing/activate`](./routing-algorithm-activate.mdx) after creation.
+Use `/routing/create` to persist a merchant-scoped routing algorithm. Creating an algorithm does not make it active; call [`/routing/activate`](/api-refs/routing-algorithm-activate) after creation.
 
 Supported `algorithm.type` values:
 
 | Type | Use case | Full example |
 | --- | --- | --- |
-| `single` | Always return one connector. | [Single connector](./routing-single-connector-example.mdx) |
-| `priority` | Return connectors in the configured order. | [Priority routing](./routing-priority-example.mdx) |
-| `volume_split` | Split decisions by percentage. | [Volume split](./routing-volume-split-example.mdx) |
-| `advanced` | Evaluate AND/OR/nested conditions before returning an output. | [Advanced routing](./routing-advanced-example.mdx) |
+| `single` | Always return one connector. | [Single connector](/api-refs/routing-single-connector-example) |
+| `priority` | Return connectors in the configured order. | [Priority routing](/api-refs/routing-priority-example) |
+| `volume_split` | Split decisions by percentage. | [Volume split](/api-refs/routing-volume-split-example) |
+| `advanced` | Evaluate AND/OR/nested conditions before returning an output. | [Advanced routing](/api-refs/routing-advanced-example) |
+| `ab_test` | Split traffic between a control and variant strategy with guardrails and significance testing. | [A/B testing](/api-refs/ab-testing-create) |
 
-There is no public deactivate route in the current API. To change active behavior, create or select another algorithm and activate it.
+Use [`/routing/deactivate`](/api-refs/routing-algorithm-deactivate) to deactivate the currently active algorithm without deleting it, and [update or delete](/api-refs/routing-algorithm-update-delete) an inactive algorithm in place.
 
 ## Priority Rule
 
@@ -86,7 +87,7 @@ curl --location "$BASE_URL/routing/create" \
 
 ## Advanced Rule
 
-Use `advanced` for conditional routing. The complete AND/OR/nested reference is in [Advanced Routing Example](./routing-advanced-example.mdx).
+Use `advanced` for conditional routing. The complete AND/OR/nested reference is in [Advanced Routing Example](/api-refs/routing-advanced-example).
 
 ```bash
 curl --location "$BASE_URL/routing/create" \
@@ -148,7 +149,9 @@ curl --location "$BASE_URL/routing/create" \
 
 ## Related
 
-- [Activate Routing Algorithm](./routing-algorithm-activate.mdx)
-- [List Routing Algorithms](./routing-algorithm-list.mdx)
-- [Evaluate Routing Algorithm](./routing-algorithm-evaluate.mdx)
-- [Advanced Routing Example](./routing-advanced-example.mdx)
+- [Activate Routing Algorithm](/api-refs/routing-algorithm-activate)
+- [Update & Delete Routing Algorithm](/api-refs/routing-algorithm-update-delete)
+- [List Routing Algorithms](/api-refs/routing-algorithm-list)
+- [Evaluate Routing Algorithm](/api-refs/routing-algorithm-evaluate)
+- [Advanced Routing Example](/api-refs/routing-advanced-example)
+- [A/B Testing: Create An Experiment](/api-refs/ab-testing-create)

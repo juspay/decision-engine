@@ -5,6 +5,7 @@ import { useMerchantStore } from '../../store/merchantStore'
 import { apiFetch } from '../../lib/api'
 import { ChevronDown, Building2, Check, Plus } from 'lucide-react'
 import { NotificationBell } from './NotificationBell'
+import { GlobalSearch } from './GlobalSearch'
 
 interface SwitchMerchantResponse {
   token: string
@@ -53,10 +54,18 @@ export function TopBar() {
   const currentMerchant = merchants.find((m) => m.merchant_id === user?.merchantId)
 
   return (
-    <header className="flex h-[78px] shrink-0 items-center justify-between border-b border-slate-200 bg-white px-6 transition-colors duration-300 dark:border-[#22262f] dark:bg-[#06080d] relative z-10">
-      <div />
+    <header className="flex h-[78px] shrink-0 items-center gap-4 border-b border-slate-200 bg-white px-6 transition-colors duration-300 dark:border-[#22262f] dark:bg-[#06080d] relative z-10">
+      <div className="flex-1" />
 
-      <div className="flex items-center gap-2">
+      {/* The header sits right of the 256px (w-64) sidebar, so centering within
+          it lands 128px right of the screen center. Shift left by half the
+          sidebar (-translate-x-32 = -8rem = -128px) to center against the
+          viewport — i.e. the user's screen — not just the content area. */}
+      <div className="flex min-w-0 flex-[2] justify-center lg:-translate-x-32">
+        <GlobalSearch />
+      </div>
+
+      <div className="flex flex-1 items-center justify-end gap-2">
         <NotificationBell />
 
         {/* Merchant switcher */}

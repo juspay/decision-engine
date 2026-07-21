@@ -7,9 +7,9 @@ on:
     paths:
       - "README.md"
       - "docs/openapi.json"
+      - "docs/api-reference.md"
       - "docs/api-reference/**"
       - "docs/api-refs/**"
-      - "docs/api-overview.md"
       - ".github/workflows/api-reference-pages.yml"
   workflow_dispatch:
 

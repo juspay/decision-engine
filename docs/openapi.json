@@ -88,6 +88,17 @@
         ],
         "parameters": [
           {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": true,
+            "description": "Tenant to resolve. The shipped config files define only the \"public\" tenant. No fallback — omitting this fails with TE_03.",
+            "schema": {
+              "type": "string",
+              "default": "public"
+            },
+            "example": "public"
+          },
+          {
             "name": "range",
             "in": "query",
             "required": false,
@@ -287,6 +298,17 @@
           }
         ],
         "parameters": [
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": true,
+            "description": "Tenant to resolve. The shipped config files define only the \"public\" tenant. No fallback — omitting this fails with TE_03.",
+            "schema": {
+              "type": "string",
+              "default": "public"
+            },
+            "example": "public"
+          },
           {
             "name": "range",
             "in": "query",
@@ -488,6 +510,17 @@
         ],
         "parameters": [
           {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": true,
+            "description": "Tenant to resolve. The shipped config files define only the \"public\" tenant. No fallback — omitting this fails with TE_03.",
+            "schema": {
+              "type": "string",
+              "default": "public"
+            },
+            "example": "public"
+          },
+          {
             "name": "range",
             "in": "query",
             "required": false,
@@ -687,6 +720,17 @@
           }
         ],
         "parameters": [
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": true,
+            "description": "Tenant to resolve. The shipped config files define only the \"public\" tenant. No fallback — omitting this fails with TE_03.",
+            "schema": {
+              "type": "string",
+              "default": "public"
+            },
+            "example": "public"
+          },
           {
             "name": "range",
             "in": "query",
@@ -888,6 +932,17 @@
         ],
         "parameters": [
           {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": true,
+            "description": "Tenant to resolve. The shipped config files define only the \"public\" tenant. No fallback — omitting this fails with TE_03.",
+            "schema": {
+              "type": "string",
+              "default": "public"
+            },
+            "example": "public"
+          },
+          {
             "name": "range",
             "in": "query",
             "required": false,
@@ -1088,6 +1143,17 @@
         ],
         "parameters": [
           {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": true,
+            "description": "Tenant to resolve. The shipped config files define only the \"public\" tenant. No fallback — omitting this fails with TE_03.",
+            "schema": {
+              "type": "string",
+              "default": "public"
+            },
+            "example": "public"
+          },
+          {
             "name": "range",
             "in": "query",
             "required": false,
@@ -1287,6 +1353,17 @@
           }
         ],
         "parameters": [
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": true,
+            "description": "Tenant to resolve. The shipped config files define only the \"public\" tenant. No fallback — omitting this fails with TE_03.",
+            "schema": {
+              "type": "string",
+              "default": "public"
+            },
+            "example": "public"
+          },
           {
             "name": "range",
             "in": "query",
@@ -2278,7 +2355,20 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": true,
+            "description": "Tenant to resolve. The shipped config files define only the \"public\" tenant. No fallback — omitting this fails with TE_03.",
+            "schema": {
+              "type": "string",
+              "default": "public"
+            },
+            "example": "public"
+          }
+        ]
       }
     },
     "/health/ready": {
@@ -3302,6 +3392,508 @@
           }
         }
       }
+    },
+    "/analytics/cost-savings": {
+      "get": {
+        "operationId": "analyticsCostSavings",
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "Cost savings",
+        "description": "ClickHouse-backed rollup of savings attributed to multi-objective (cost-aware) routing, trended over the window.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": true,
+            "description": "Tenant to resolve. The shipped config files define only the \"public\" tenant. No fallback — omitting this fails with TE_03.",
+            "schema": {
+              "type": "string",
+              "default": "public"
+            },
+            "example": "public"
+          },
+          {
+            "name": "range",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "start_ms",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "end_ms",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "payment_method_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "payment_method",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "card_network",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "card_is_in",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "currency",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "auth_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "gateway",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "payment_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "request_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "route",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "flow_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "routing_approach",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "exclude_routing_approach",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "error_code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cost savings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analytics/routing-events": {
+      "get": {
+        "operationId": "analyticsRoutingEvents",
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "Routing events",
+        "description": "Historical feed of routing-relevant state changes: SR leader changes, gateways entering/exiting the multi-objective auth band, and autopilot calibration runs.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": true,
+            "description": "Tenant to resolve. The shipped config files define only the \"public\" tenant. No fallback — omitting this fails with TE_03.",
+            "schema": {
+              "type": "string",
+              "default": "public"
+            },
+            "example": "public"
+          },
+          {
+            "name": "range",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "start_ms",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "end_ms",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "payment_method_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "payment_method",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "min_transaction_count",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "min_score_delta",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "tolerance_pp",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "bucket",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Routing events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analytics/experiment/{experiment_id}/results": {
+      "get": {
+        "operationId": "analyticsExperimentResults",
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "A/B test experiment results",
+        "description": "Statistical significance results (control vs. variant) for a routing A/B test experiment, with guardrail evaluation.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": true,
+            "description": "Tenant to resolve. The shipped config files define only the \"public\" tenant. No fallback — omitting this fails with TE_03.",
+            "schema": {
+              "type": "string",
+              "default": "public"
+            },
+            "example": "public"
+          },
+          {
+            "name": "experiment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "routing_a1b2c3d4-1111-2222-3333-444455556666"
+          },
+          {
+            "name": "start_ms",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "end_ms",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "min_sample_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "guardrail_threshold_pp",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "evaluation_margin",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A/B test experiment results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analytics/experiment/{experiment_id}/transactions": {
+      "get": {
+        "operationId": "analyticsExperimentTransactions",
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "A/B test experiment transactions",
+        "description": "Paginated per-transaction log for a routing A/B test experiment, including arm assignment and outcome.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": true,
+            "description": "Tenant to resolve. The shipped config files define only the \"public\" tenant. No fallback — omitting this fails with TE_03.",
+            "schema": {
+              "type": "string",
+              "default": "public"
+            },
+            "example": "public"
+          },
+          {
+            "name": "experiment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "routing_a1b2c3d4-1111-2222-3333-444455556666"
+          },
+          {
+            "name": "start_ms",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A/B test experiment transactions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4106,7 +4698,7 @@
       },
       "MultiObjectiveInfo": {
         "type": "object",
-        "description": "Present when the multi-objective (cost-aware) post-step ran. Explains why the gateway was picked: the SR head was kept (AUTH_WON) or a higher expected-value PSP was promoted (COST_WON). Expected value is auth_rate * (margin - cost_bps / 10000).",
+        "description": "Present when the multi-objective (cost-aware) post-step ran. Explains why the gateway was picked: the SR head was kept (AUTH_WON) or a higher economic-value PSP was promoted (COST_WON). Economic value is auth rate × settlement value, where settlement value = txn amount − cost of payment processing (acquirer, issuer & network fee).",
         "properties": {
           "outcome": {
             "type": "string",

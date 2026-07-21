@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Database, LineChart, SlidersHorizontal, type LucideIcon } from 'lucide-react'
 import { Card, CardBody, CardHeader, SurfaceLabel } from '../ui/Card'
 import { CoverageBreakdown } from './CostCoverageCard'
@@ -12,6 +13,7 @@ import { useCostCoverage, useIngestionHistory } from '../../hooks/useCostRouting
 
 /** The three concerns of cost estimation, as vertical sections. */
 type Section = 'ingestion' | 'data' | 'overrides'
+const COST_SECTIONS: readonly Section[] = ['ingestion', 'data', 'overrides']
 type IngestMode = 'automatic' | 'manual' | 'invoice'
 
 interface SectionDef {
@@ -48,7 +50,33 @@ const SECTIONS: SectionDef[] = [
  * at a time, so the page stops being one long dense stack.
  */
 export function CostEstimationPanel({ merchantId }: { merchantId?: string }) {
-  const [section, setSection] = useState<Section>('overrides')
+  // Active section is kept in the URL (?section=…, shared with the SR Manual tab
+  // since only one SR tab is visible at a time) so a search result or shared link
+  // can open Data Ingestion / Ingested Data directly. Default (overrides) is omitted.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const sectionParam = searchParams.get('section')
+  const section: Section = COST_SECTIONS.includes(sectionParam as Section)
+    ? (sectionParam as Section)
+    : 'overrides'
+  const setSection = (next: Section) => {
+    setSearchParams(
+      (prev) => {
+        const params = new URLSearchParams(prev)
+        if (next === 'overrides') params.delete('section')
+        else params.set('section', next)
+        return params
+      },
+      { replace: true },
+    )
+  }
+  // Canonicalize the shared ?section= param while this panel is mounted (Cost tab):
+  // drop unknown values (e.g. a leftover SR Manual section) and the default
+  // (overrides) so the URL never advertises a section the panel isn't showing.
+  useEffect(() => {
+    const canonical = section === 'overrides' ? null : section
+    if (sectionParam !== canonical) setSection(section)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [section, sectionParam])
 
   return (
     <div className="grid gap-6 lg:grid-cols-[220px_1fr] lg:items-start">

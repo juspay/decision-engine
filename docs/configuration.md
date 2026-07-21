@@ -1,3 +1,8 @@
+---
+title: "Configuration"
+description: "Configure Decision Engine via config files and environment variable overrides."
+---
+
 # Configuration Guide
 
 This document explains how to configure Decision Engine for local and on-prem deployments.
@@ -93,10 +98,12 @@ For Docker Compose runs both are pre-wired via service names in `config/docker-c
 
 ```toml
 [tenant_secrets]
-hyperswitch = { schema = "public" }
+public = { schema = "public" }
 ```
 
-Maps tenant identifiers to database schemas. Add entries for each tenant you want to support.
+Maps tenant identifiers to database schemas. The shipped config files (`config/development.toml`, `config/docker-configuration.toml`) define only the `public` tenant — add entries for any additional tenant you want to support.
+
+Some routes resolve the tenant from an `x-tenant-id` request header rather than the authenticated merchant, and reject the request outright if it's missing (`TE_03`). Send `x-tenant-id: public` on `GET /health/diagnostics`, every `GET /analytics/*` route, and `POST /gateway-score/reset` — see [API Guide](/api-refs/api-ref#environment-setup).
 
 ### Redis
 
@@ -215,6 +222,7 @@ Selected values can be overridden at runtime via environment variables. This is 
 
 ## Related Docs
 
-- [Local Setup Guide](local-setup.md)
-- [API Overview](api-overview.md)
-- [API Examples](api-refs/api-ref.mdx)
+- [Installation](/installation)
+- [Local Setup Guide](/local-setup)
+- [API Guide](/api-refs/api-ref)
+- [API Reference](/api-reference)

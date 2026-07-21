@@ -23,17 +23,17 @@ clickhouse-client ${auth_args} --multiquery <<SQL
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Daily per-cluster sufficient statistics — the ONLY persistent settlement store.
 -- We do NOT keep individual transactions. As each report streams in it is aggregated
--- (in the ingest worker) into one row per (cluster × transaction-day × predictor-band ×
--- fit-bucket × channel), holding the additive sums an OLS fit needs (n, Σx, Σy, Σx², Σxy, Σy² and the
+-- (in the ingest worker) into one row per (cluster × transaction-day × amount-band ×
+-- channel), holding the additive sums an OLS fit needs (n, Σx, Σy, Σx², Σxy, Σy² and the
 -- reciprocal terms for the bps-RMSE / NON_LINEAR check). Because these sums are additive
 -- across days, the fit reconstructs the exact same line it would get from raw rows, for any
 -- window — and can re-slice at a price-change date. See
 -- scratch/settlement-table-removal-worked-example.md for the correctness walkthrough.
 --
 -- band + channel are carried so the §9 interchange-category predictor (which keys on the
--- amount band and pos/ecom channel) can be served from the same rollup. fit_bucket is the
--- log-amount bucket used by the L1 segmented fitter. Positive micro-amount txns are retained;
--- the fitter judges fixed-fee-dominated tails by absolute error rather than dropping data.
+-- amount band and pos/ecom channel) can be served from the same rollup; the fit sums them
+-- away. The €5 micro-amount floor (WHERE gross >= 5) is applied at aggregation time, so it
+-- cannot be recovered later — no consumer wants sub-floor txns.
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS cost_daily_stats (
     connector        LowCardinality(String),   -- 'adyen', 'stripe', … (never a code branch)
@@ -47,11 +47,9 @@ CREATE TABLE IF NOT EXISTS cost_daily_stats (
     issuer_country   LowCardinality(String),    -- 'FR', 'IT', …             │
     currency         LowCardinality(String),    -- 'EUR', 'AUD', …           │
     ic_category      String,                     -- interchange category (''=flat-fee) ┘
-    interchange_bps  String DEFAULT '',          -- IC rate from report, when available; separates overlapping fans
     channel          LowCardinality(String) DEFAULT '',  -- 'pos' | 'ecom' — predictor feature (§9), summed away by the fit
     band             LowCardinality(String) DEFAULT '',  -- amount band ('lo'..'hi') — predictor feature, summed away by the fit
-    fit_bucket       Int32 DEFAULT 0,             -- floor(log10(gross) * 10), L1 segmentation bucket
-    -- Sufficient statistics over the txns in this bucket (gross > 0 only). All additive.
+    -- Sufficient statistics over the txns in this bucket (gross >= 5 only). All additive.
     n                UInt64,                     -- count
     sx               Float64,                    -- Σ gross            (regression x)
     sy               Float64,                    -- Σ total_fee        (regression y)
@@ -63,31 +61,20 @@ CREATE TABLE IF NOT EXISTS cost_daily_stats (
     suy              Float64,                    -- Σ total_fee/gross  │ and NON_LINEAR check are
     suuy             Float64,                    -- Σ total_fee/gross² │ built from these
     syyuu            Float64,                    -- Σ total_fee²/gross²┘
-    sample_x         Array(Float64) DEFAULT [],   -- bounded reservoir sample of gross for fan detection
-    sample_y         Array(Float64) DEFAULT [],   -- bounded reservoir sample of fee for fan detection
     ingested_at      DateTime DEFAULT now()
 )
--- Identity is the (cluster, DAY, band, fit_bucket, channel) bucket, NOT the transaction. A day re-delivered by
+-- Identity is the (cluster, DAY, band, channel) bucket, NOT the transaction. A day re-delivered by
 -- a later, authoritative report (overlapping monthly+daily, a re-upload, webhook+manual) collapses
--- to one bucket — the latest ingested_at wins. This is the "latest report wins per day" de-dup:
+-- to one bucket — the latest `ingested_at` wins. This is the "latest report wins per day" de-dup:
 -- correct as long as a report is complete for each day it covers (settlement reports are day- or
--- month-complete batches). The fit windows on txn_date, independent of when the rows arrived.
+-- month-complete batches). The fit windows on `txn_date`, independent of when the rows arrived.
 ENGINE = ReplacingMergeTree(ingested_at)
 PARTITION BY toYYYYMM(txn_date)
 ORDER BY (connector, account, merchant_id, txn_date,
-          card_network, variant, funding, issuer_country, currency, ic_category,
-          interchange_bps, channel, band, fit_bucket)
+          card_network, variant, funding, issuer_country, currency, ic_category, channel, band)
 -- Generous retention: the fit windows on the *latest* transaction date in the data (not the wall
 -- clock), so this only needs to outlast a backfill of older reports, not track "now".
 TTL txn_date + INTERVAL 400 DAY;
-
--- Existing deployments can add the new columns in place, but the sorting key also changed to
--- include interchange_bps and fit_bucket. Rebuild/reingest cost_daily_stats before enabling
--- segmented serving on an existing table; otherwise FINAL can collapse distinct fit buckets.
-ALTER TABLE cost_daily_stats ADD COLUMN IF NOT EXISTS interchange_bps String DEFAULT '' AFTER ic_category;
-ALTER TABLE cost_daily_stats ADD COLUMN IF NOT EXISTS fit_bucket Int32 DEFAULT 0 AFTER band;
-ALTER TABLE cost_daily_stats ADD COLUMN IF NOT EXISTS sample_x Array(Float64) DEFAULT [] AFTER syyuu;
-ALTER TABLE cost_daily_stats ADD COLUMN IF NOT EXISTS sample_y Array(Float64) DEFAULT [] AFTER sample_x;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Fitted cost models: one row per cluster per snapshot (the OLS output of §3).
@@ -105,46 +92,16 @@ CREATE TABLE IF NOT EXISTS cost_fee_model (
     issuer_country   LowCardinality(String),
     currency         LowCardinality(String),
     ic_category      String,                     -- '' = first-class key (iDEAL / Klarna / CB)
-    interchange_bps  String DEFAULT '',          -- report IC rate used to split overlapping fans
-    segment_idx      UInt16 DEFAULT 0,            -- 0 = whole-cluster fit; >0 = L1 amount segment
-    amount_lo        Float64 DEFAULT 0,           -- inclusive segment lower bound; 0/0 means all amounts
-    amount_hi        Float64 DEFAULT 0,           -- exclusive segment upper bound; 0/0 means all amounts
     pct_bps          Float64,                     -- OLS slope × 10 000
     fixed            Float64,                     -- OLS intercept (settlement-currency units)
     n                UInt64,                      -- cluster sample size
     gross_sum        Float64 DEFAULT 0,           -- settled volume in this cluster (money-weighted coverage)
-    bps_rmse         Float64,                     -- typical per-txn cost error (legacy blended metric)
-    grade_bps        Float64 DEFAULT 0,           -- decomposed error used to grade (% or fixed regime)
-    pct_ci95_bps     Float64 DEFAULT 0,           -- 95% half-width for slope bps
-    astar            Float64 DEFAULT 0,           -- fixed/rate crossover amount
-    prop_bps         Float64 DEFAULT 0,           -- proportional-regime bps RMSE
-    fix_abs          Float64 DEFAULT 0,           -- fixed-regime absolute fee RMSE
-    fix_bps          Float64 DEFAULT 0,           -- fixed-regime bps-equivalent RMSE at astar
-    below_gross_frac Float64 DEFAULT 0,           -- volume share below astar
-    fan_frac         Float64 DEFAULT 0,           -- share of sampled upper-ticket txns > fan threshold
-    fan_money_bps    Float64 DEFAULT 0,           -- sample money-weighted off-line error
+    bps_rmse         Float64,                     -- typical per-txn cost error (the gate metric)
     r2               Float64,                     -- reference only — NOT used to gate
-    verdict          Enum8('GOOD' = 1, 'NON_LINEAR' = 2, 'THIN' = 3, 'FAN' = 4),
+    verdict          Enum8('GOOD' = 1, 'NON_LINEAR' = 2, 'THIN' = 3),
     fitted_at        DateTime DEFAULT now()
 ) ENGINE = ReplacingMergeTree(fitted_at)
 PARTITION BY toYYYYMM(report_date)
 ORDER BY (connector, account, merchant_id, report_date,
-          card_network, variant, issuer_country, currency, ic_category, interchange_bps, segment_idx);
-
--- Existing deployments can add these columns in place, but should rebuild/reinsert
--- cost_fee_model so the table sorting key includes interchange_bps and segment_idx.
-ALTER TABLE cost_fee_model ADD COLUMN IF NOT EXISTS interchange_bps String DEFAULT '' AFTER ic_category;
-ALTER TABLE cost_fee_model ADD COLUMN IF NOT EXISTS segment_idx UInt16 DEFAULT 0 AFTER interchange_bps;
-ALTER TABLE cost_fee_model ADD COLUMN IF NOT EXISTS amount_lo Float64 DEFAULT 0 AFTER segment_idx;
-ALTER TABLE cost_fee_model ADD COLUMN IF NOT EXISTS amount_hi Float64 DEFAULT 0 AFTER amount_lo;
-ALTER TABLE cost_fee_model ADD COLUMN IF NOT EXISTS grade_bps Float64 DEFAULT 0 AFTER bps_rmse;
-ALTER TABLE cost_fee_model ADD COLUMN IF NOT EXISTS pct_ci95_bps Float64 DEFAULT 0 AFTER grade_bps;
-ALTER TABLE cost_fee_model ADD COLUMN IF NOT EXISTS astar Float64 DEFAULT 0 AFTER pct_ci95_bps;
-ALTER TABLE cost_fee_model ADD COLUMN IF NOT EXISTS prop_bps Float64 DEFAULT 0 AFTER astar;
-ALTER TABLE cost_fee_model ADD COLUMN IF NOT EXISTS fix_abs Float64 DEFAULT 0 AFTER prop_bps;
-ALTER TABLE cost_fee_model ADD COLUMN IF NOT EXISTS fix_bps Float64 DEFAULT 0 AFTER fix_abs;
-ALTER TABLE cost_fee_model ADD COLUMN IF NOT EXISTS below_gross_frac Float64 DEFAULT 0 AFTER fix_bps;
-ALTER TABLE cost_fee_model ADD COLUMN IF NOT EXISTS fan_frac Float64 DEFAULT 0 AFTER below_gross_frac;
-ALTER TABLE cost_fee_model ADD COLUMN IF NOT EXISTS fan_money_bps Float64 DEFAULT 0 AFTER fan_frac;
-ALTER TABLE cost_fee_model MODIFY COLUMN verdict Enum8('GOOD' = 1, 'NON_LINEAR' = 2, 'THIN' = 3, 'FAN' = 4);
+          card_network, variant, issuer_country, currency, ic_category);
 SQL

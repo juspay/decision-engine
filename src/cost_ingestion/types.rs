@@ -148,6 +148,23 @@ pub enum IngestError {
     Download(String),
     #[error("report parse failed: {0}")]
     Parse(String),
+    /// The header row resolved, but one or more required columns were absent. Distinct from
+    /// [`Self::Parse`] because it is *actionable by the merchant* — it names every missing column at
+    /// once (not just the first) alongside the labels this connector expects and the ones the file
+    /// actually carried, which is what the upload preflight renders. Also produced deliberately by
+    /// probing a connector with an empty header row, where `missing == required` — that is how
+    /// `preflight` enumerates a connector's schema without duplicating any column list.
+    #[error("report is missing required column(s): {}", .missing.join(", "))]
+    MissingColumns {
+        /// Required labels absent from the file, in the order the connector resolves them.
+        missing: Vec<String>,
+        /// Every label this connector requires.
+        required: Vec<String>,
+        /// Every label this connector reads if present but tolerates the absence of.
+        optional: Vec<String>,
+        /// The header labels the uploaded file actually carried.
+        found: Vec<String>,
+    },
     #[error("credential encryption/decryption failed: {0}")]
     Crypto(String),
     #[error("credential storage failed: {0}")]

@@ -1,3 +1,8 @@
+---
+title: "Local Setup"
+description: "Full Docker Compose, source-build, and Helm matrix for running Decision Engine locally."
+---
+
 # Local Setup Guide
 
 This is the canonical local startup guide for Decision Engine.
@@ -19,8 +24,8 @@ Required for source runs:
 
 Decision Engine supports two local tracks:
 
-1. published-image track: pull existing images
-2. local-build track: build images or binaries from the current source tree
+1. **Published-image track** — pull existing images.
+2. **Local-build track** — build images or binaries from the current source tree.
 
 Default tags used in this repo:
 
@@ -60,25 +65,7 @@ You must pass at least one profile.
 
 ## Fastest Bring-Up
 
-### API Only
-
-```bash
-docker compose --profile postgres-ghcr up -d
-```
-
-### API + Dashboard + Docs
-
-```bash
-docker compose --profile dashboard-postgres-ghcr up -d
-```
-
-### With Monitoring
-
-```bash
-docker compose --profile postgres-ghcr --profile monitoring up -d
-```
-
-## One-Command Local Dev
+### One-Command Local Dev
 
 For local source-run development with the full PostgreSQL analytics stack:
 
@@ -118,6 +105,24 @@ started itself. To keep infra running after exit:
 
 ```bash
 ONECLICK_KEEP_INFRA=1 ./oneclick.sh
+```
+
+### API Only
+
+```bash
+docker compose --profile postgres-ghcr up -d
+```
+
+### API + Dashboard + Docs
+
+```bash
+docker compose --profile dashboard-postgres-ghcr up -d
+```
+
+### With Monitoring
+
+```bash
+docker compose --profile postgres-ghcr --profile monitoring up -d
 ```
 
 ## Make Targets
@@ -191,11 +196,13 @@ Chart location: `helm-charts/`
 
 ```bash
 cd helm-charts
-helm dependency build
+helm dependency update
 helm install my-release .
 ```
 
-For image overrides, use `image.repository`, `image.version`, and `image.pullPolicy`. Verify the rendered templates directly when troubleshooting chart behavior.
+Use `helm dependency update`, not `helm dependency build` — the committed `Chart.lock` digest can drift out of sync with `Chart.yaml`, and `build` fails hard on any mismatch (`Error: the lock file (Chart.lock) is out of sync with the dependencies file`). `update` re-resolves and re-fetches the `postgresql`, `mysql`, and `redis` subcharts from the Bitnami repo unconditionally.
+
+For image overrides, use `image.repository`, `image.version`, and `image.pullPolicy`. Verify with `helm install --dry-run` or `helm template` before applying to a cluster.
 
 ## Verification
 
@@ -250,9 +257,17 @@ curl --user decision_engine:decision_engine \
   "http://localhost:8123/?query=SHOW%20TABLES%20FROM%20default"
 ```
 
-### Common next files to inspect
+### Common Next Files To Inspect
 
 - `docker-compose.yaml`
 - `config/docker-configuration.toml`
 - `src/config.rs`
 - `src/app.rs`
+
+## Related Docs
+
+- [Installation](/installation)
+- [PostgreSQL Setup](/setup-guide-postgres)
+- [MySQL Setup](/setup-guide-mysql)
+- [Configuration](/configuration)
+- [API Guide](/api-refs/api-ref)
