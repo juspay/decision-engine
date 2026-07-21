@@ -15,8 +15,8 @@ use crate::types::country::country_name::country_name_to_iso2_code;
 /// that we consume for BIN enrichment.
 #[derive(Debug, Deserialize)]
 struct CardInfoResponse {
-    /// Card IIN echoed back by the API, e.g. "53721661".
-    card_iin: String,
+    #[serde(rename = "card_iin")]
+    card_bin: String,
     /// Card network / switch provider, e.g. "Mastercard".
     #[serde(default)]
     card_network: Option<String>,
@@ -133,13 +133,13 @@ pub async fn get_card_info_by_bin(card_bin: Option<String>) -> Option<CardInfo> 
 }
 
 fn map_response_to_card_info(res: CardInfoResponse) -> Option<CardInfo> {
-    let card_isin = match to_isin(res.card_iin.clone()) {
+    let card_isin = match to_isin(res.card_bin.clone()) {
         Ok(isin) => isin,
         Err(_) => {
             logger::warn!(
                 tag = "cardInfoApi",
-                "unparseable card_iin {:?} from cards API",
-                res.card_iin
+                "unparsable card_bin {:?} from cards API",
+                res.card_bin
             );
             return None;
         }

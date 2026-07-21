@@ -56,6 +56,8 @@ encrypter = "encrypter"
 [default.extend-words]
 # Project-specific terms that are valid
 incase = "incase"
+# IIN = Issuer Identification Number (the card BIN); appears as `card_iin`
+iin = "iin"
 # Database column name (would require migration to fix)
 penality = "penality"
 # HashiCorp (company name)
