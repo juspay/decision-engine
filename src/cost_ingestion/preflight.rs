@@ -174,8 +174,9 @@ fn suggest(registry: &ConnectorRegistry, selected: &str, header_sample: &[u8]) -
             }
         })
         .collect();
-    // Most columns matched first; `connectors()` is already sorted, so ties stay deterministic.
-    out.sort_by(|a, b| b.matched_required.cmp(&a.matched_required));
+    // Most columns matched first; `connectors()` is already sorted and `sort_by_key` is stable, so
+    // ties stay in deterministic (alphabetical) order.
+    out.sort_by_key(|s| std::cmp::Reverse(s.matched_required));
     out
 }
 
