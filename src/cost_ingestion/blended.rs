@@ -63,8 +63,21 @@ pub struct TopCluster {
     pub issuer_country: String,
     pub currency: String,
     pub ic_category: String,
+    pub interchange_bps: String,
+    pub segment_idx: u16,
+    pub amount_lo: f64,
+    pub amount_hi: f64,
     pub pct_bps: f64,
     pub fixed: f64,
+    pub grade_bps: f64,
+    pub pct_ci95_bps: f64,
+    pub crossover_amount: f64,
+    pub prop_bps: f64,
+    pub fix_abs: f64,
+    pub fix_bps: f64,
+    pub below_gross_frac: f64,
+    pub fan_frac: f64,
+    pub fan_money_bps: f64,
     /// Transaction count (so a small-ticket/high-txn segment stays visible next to GMV).
     pub n: u64,
     /// Settled GMV — the ranking weight.
@@ -98,13 +111,24 @@ pub struct ClusterScope<'a> {
 const TOP_CLUSTERS_SQL: &str = r#"
 SELECT
     connector, card_network, variant, funding, issuer_country, currency, ic_category,
+    interchange_bps, segment_idx, amount_lo, amount_hi,
     sum(pct_bps * gross_sum) / sum(gross_sum) AS blended_pct_bps,
     sum(fixed * gross_sum)   / sum(gross_sum) AS blended_fixed,
+    sum(grade_bps * gross_sum) / sum(gross_sum) AS blended_grade_bps,
+    max(pct_ci95_bps)        AS pct_ci95_bps,
+    max(crossover_amount)    AS crossover_amount,
+    sum(prop_bps * gross_sum) / sum(gross_sum) AS blended_prop_bps,
+    sum(fix_abs * gross_sum) / sum(gross_sum) AS blended_fix_abs,
+    sum(fix_bps * gross_sum) / sum(gross_sum) AS blended_fix_bps,
+    sum(below_gross_frac * gross_sum) / sum(gross_sum) AS blended_below_gross_frac,
+    max(fan_frac)            AS fan_frac,
+    max(fan_money_bps)       AS fan_money_bps,
     sum(n)                   AS txns,
     sum(gross_sum)           AS total_gross
 FROM __DB__.cost_fee_model FINAL
 WHERE verdict = 'GOOD' AND gross_sum > 0 AND merchant_id = {merchant_id:String}{snapshot_filter}
-GROUP BY connector, card_network, variant, funding, issuer_country, currency, ic_category
+GROUP BY connector, card_network, variant, funding, issuer_country, currency, ic_category,
+         interchange_bps, segment_idx, amount_lo, amount_hi
 ORDER BY total_gross DESC
 LIMIT {limit:UInt32}
 FORMAT TSV
@@ -196,7 +220,7 @@ pub async fn top_clusters(
     let mut out = Vec::new();
     for line in text.lines() {
         let f: Vec<&str> = line.split('\t').collect();
-        if f.len() < 11 {
+        if f.len() < 24 {
             continue;
         }
         out.push(TopCluster {
@@ -207,10 +231,23 @@ pub async fn top_clusters(
             issuer_country: f[4].trim().to_string(),
             currency: f[5].trim().to_string(),
             ic_category: f[6].trim().to_string(),
-            pct_bps: f[7].trim().parse().unwrap_or(0.0),
-            fixed: f[8].trim().parse().unwrap_or(0.0),
-            n: f[9].trim().parse().unwrap_or(0),
-            gross_sum: f[10].trim().parse().unwrap_or(0.0),
+            interchange_bps: f[7].trim().to_string(),
+            segment_idx: f[8].trim().parse().unwrap_or(0),
+            amount_lo: f[9].trim().parse().unwrap_or(0.0),
+            amount_hi: f[10].trim().parse().unwrap_or(0.0),
+            pct_bps: f[11].trim().parse().unwrap_or(0.0),
+            fixed: f[12].trim().parse().unwrap_or(0.0),
+            grade_bps: f[13].trim().parse().unwrap_or(0.0),
+            pct_ci95_bps: f[14].trim().parse().unwrap_or(0.0),
+            crossover_amount: f[15].trim().parse().unwrap_or(0.0),
+            prop_bps: f[16].trim().parse().unwrap_or(0.0),
+            fix_abs: f[17].trim().parse().unwrap_or(0.0),
+            fix_bps: f[18].trim().parse().unwrap_or(0.0),
+            below_gross_frac: f[19].trim().parse().unwrap_or(0.0),
+            fan_frac: f[20].trim().parse().unwrap_or(0.0),
+            fan_money_bps: f[21].trim().parse().unwrap_or(0.0),
+            n: f[22].trim().parse().unwrap_or(0),
+            gross_sum: f[23].trim().parse().unwrap_or(0.0),
         });
     }
     Ok(out)

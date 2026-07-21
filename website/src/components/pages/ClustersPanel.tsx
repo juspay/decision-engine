@@ -54,6 +54,25 @@ function programOf(c: ClusterFee): string {
   return v ? titleCase(v) : '—'
 }
 
+/** Human-readable segment name: "Visa Standard debit · HU · HUF" (+ category). Used in the editor
+ * heading, where a single-line label reads better than the split columns. */
+function clusterLabel(c: ClusterFee): string {
+  const program = programOf(c)
+  const card = [networkLabel(c.card_network), program !== '—' ? program : '', c.funding]
+    .filter(Boolean)
+    .join(' ')
+  const parts = [card, c.issuer_country?.toUpperCase(), c.currency?.toUpperCase()].filter(Boolean)
+  const base = parts.join(' · ') || 'Unknown segment'
+  const amount = amountSegmentLabel(c)
+  const category = c.ic_category ? `${base} · ${c.ic_category}` : base
+  return amount ? `${category} · ${amount}` : category
+}
+
+function amountSegmentLabel(c: ClusterFee): string {
+  if (!c.segment_idx || c.amount_lo == null || c.amount_hi == null) return ''
+  return `${formatCompact(c.amount_lo)}-${formatCompact(c.amount_hi)}`
+}
+
 function formatFee(pctBps: number | null, fixed: number | null): string {
   if (pctBps == null && fixed == null) return '—'
   const pct = `${(pctBps ?? 0).toFixed(1)} bps`
@@ -239,6 +258,7 @@ function ClusterRow({
   onSaved: () => void
 }) {
   const isOverride = c.source === 'override'
+  const label = clusterLabel(c)
   // Pre-fill with the fee the row actually shows (effective = override, else model, else an inherited
   // connector fee). Seeding from override/model alone left inherited-fee segments at 0 even though a
   // real fee was displayed.
@@ -299,7 +319,16 @@ function ClusterRow({
         <td className="py-2 pr-3 tabular-nums text-slate-600 dark:text-[#c7cfdd]">
           {c.currency?.toUpperCase() || '—'}
         </td>
-        <td className="py-2 pr-3 text-slate-500 dark:text-[#9ca7ba]">{c.ic_category || '—'}</td>
+        <td className="py-2 pr-3 text-slate-500 dark:text-[#9ca7ba]">
+          {c.ic_category || '—'}
+          {(c.interchange_bps || amountSegmentLabel(c)) && (
+            <span className="block text-[11px] text-slate-400">
+              {[c.interchange_bps ? `${c.interchange_bps} bps IC` : '', amountSegmentLabel(c)]
+                .filter(Boolean)
+                .join(' · ')}
+            </span>
+          )}
+        </td>
         <td className="py-2 pr-3 text-right tabular-nums text-slate-600 dark:text-[#c7cfdd]">
           {c.gross_sum > 0 ? formatCompact(c.gross_sum) : '—'}
         </td>
@@ -354,8 +383,8 @@ function ClusterRow({
                   type="button"
                   onClick={save}
                   disabled={busy !== null || !merchantId}
-                  title="Save fee"
-                  aria-label="Save fee"
+                  title={`Save fee for ${label}`}
+                  aria-label={`Save fee for ${label}`}
                   className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-brand-600 text-white transition-colors hover:bg-brand-700 disabled:opacity-40 dark:bg-white dark:text-black dark:hover:bg-slate-200"
                 >
                   {busy === 'save' ? <Spinner size={13} /> : <Check size={14} />}

@@ -39,15 +39,29 @@ pub struct ClusterDims {
     pub issuer_country: String,
     pub currency: String,
     pub ic_category: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interchange_bps: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub segment_idx: Option<u16>,
 }
 
 impl ClusterDims {
-    /// Parse the `connector|network|variant|funding|issuer|currency|ic_category` key used on the wire
-    /// (URL path). `ic_category` may legitimately be empty (flat-fee clusters), so we split on exactly
-    /// the seven fields and allow a trailing empty last segment.
+    /// Parse cluster override keys. Backward-compatible forms:
+    /// - 7 fields: legacy unsegmented key.
+    /// - 8 fields: legacy segmented key (`...|ic_category|segment_idx`).
+    /// - 9 fields: IC-rate segmented key (`...|ic_category|interchange_bps|segment_idx`).
     pub fn from_key(key: &str) -> Option<Self> {
         let p: Vec<&str> = key.split('|').collect();
-        if p.len() != 7 {
+        if !matches!(p.len(), 7 | 8 | 9) {
+            return None;
+        }
+        let (interchange_bps, segment_idx) = match p.len() {
+            7 => (None, None),
+            8 => (None, p[7].parse::<u16>().ok()),
+            9 => (Some(p[7].to_lowercase()), p[8].parse::<u16>().ok()),
+            _ => (None, None),
+        };
+        if matches!(p.len(), 8 | 9) && segment_idx.is_none() {
             return None;
         }
         Some(Self {
@@ -58,7 +72,27 @@ impl ClusterDims {
             issuer_country: p[4].to_lowercase(),
             currency: p[5].to_lowercase(),
             ic_category: p[6].to_lowercase(),
+            interchange_bps,
+            segment_idx,
         })
+    }
+}
+
+pub fn key_of_dims(d: &ClusterDims) -> String {
+    let base = format!(
+        "{}|{}|{}|{}|{}|{}|{}",
+        d.connector.to_lowercase(),
+        d.card_network.to_lowercase(),
+        d.variant.to_lowercase(),
+        d.funding.to_lowercase(),
+        d.issuer_country.to_lowercase(),
+        d.currency.to_lowercase(),
+        d.ic_category.to_lowercase(),
+    );
+    match (&d.interchange_bps, d.segment_idx) {
+        (Some(rate), Some(idx)) => format!("{base}|{}|{idx}", rate.to_lowercase()),
+        (None, Some(idx)) => format!("{base}|{idx}"),
+        _ => base,
     }
 }
 

@@ -33,8 +33,9 @@ const INSERT_CHUNK_ROWS: usize = 25_000;
 
 /// Columns we provide; `ingested_at` is intentionally omitted so ClickHouse applies its DEFAULT.
 const COLUMNS: &str =
-    "connector,account,merchant_id,txn_date,ingestion_id,card_network,variant,funding,\
-issuer_country,currency,ic_category,channel,band,n,sx,sy,sxx,sxy,syy,su,suu,suy,suuy,syyuu";
+    "connector,account,report_account,merchant_id,txn_date,ingestion_id,card_network,variant,funding,\
+issuer_country,currency,ic_category,interchange_bps,channel,band,fit_bucket,n,sx,sy,sxx,sxy,\
+syy,su,suu,suy,suuy,syyuu,sample_x,sample_y";
 
 fn client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
@@ -83,6 +84,7 @@ async fn insert_chunk(
         let obj = json!({
             "connector": connector,
             "account": account,
+            "report_account": r.report_account,
             "merchant_id": merchant_id,
             "txn_date": r.txn_date.to_string(),
             "ingestion_id": ingestion_id,
@@ -92,8 +94,10 @@ async fn insert_chunk(
             "issuer_country": r.issuer_country,
             "currency": r.currency,
             "ic_category": r.ic_category,
+            "interchange_bps": r.interchange_bps,
             "channel": r.channel,
             "band": r.band,
+            "fit_bucket": r.fit_bucket,
             "n": r.n,
             "sx": r.sx,
             "sy": r.sy,
@@ -105,6 +109,8 @@ async fn insert_chunk(
             "suy": r.suy,
             "suuy": r.suuy,
             "syyuu": r.syyuu,
+            "sample_x": r.sample_x,
+            "sample_y": r.sample_y,
         });
         body.push_str(
             &serde_json::to_string(&obj).map_err(|e| IngestError::Storage(e.to_string()))?,

@@ -21,9 +21,10 @@ use crate::cost_ingestion::types::{
     ConnectorCreds, IngestError, ReportNotification, SettledFeeRow,
 };
 
-/// Adyen record types that actually carry settlement fees; everything else (Authorised,
-/// Received, Refused, …) has empty fee columns and would pollute the fit.
-const FEE_RECORD_TYPES: [&str; 2] = ["SentForSettle", "Settled"];
+/// Adyen record type that carries the final settled fee signal. PAR also includes
+/// `SentForSettle`, but `cluster_explorer.py` keeps one settled leg only so the same transaction
+/// does not affect the fee fit twice.
+const FEE_RECORD_TYPES: [&str; 1] = ["Settled"];
 
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -179,6 +180,7 @@ impl SettlementReportSource for AdyenReportSource {
             scheme: usize,
             interchange: usize,
             icsf: usize,
+            merchant_account: Option<usize>,
             booking: Option<usize>,
             terminal: Option<usize>,
         }
@@ -200,6 +202,9 @@ impl SettlementReportSource for AdyenReportSource {
                     scheme: h.require("Scheme Fees (SC)")?,
                     interchange: h.require("Interchange (SC)")?,
                     icsf: h.require("ICSF details")?,
+                    // Optional in tests/older fixtures; present in Adyen accounting reports and
+                    // needed to match cluster_explorer.py's per-merchant-account split.
+                    merchant_account: h.index("Merchant Account"),
                     // Optional: used only for the ingested report's period; absent in older/test reports.
                     booking: h.index("Booking Date"),
                     // Optional: a terminal id marks in-person (POS) acceptance; absence ⇒ online (ecom).
@@ -230,14 +235,21 @@ impl SettlementReportSource for AdyenReportSource {
                 }
                 .to_string();
 
+                let (ic_category, interchange_bps) = ic_details(row.get(c.icsf));
+
                 Ok(Some(SettledFeeRow {
                     txn_ref: row.get(c.psp).to_string(),
+                    report_account: c
+                        .merchant_account
+                        .map(|i| row.get(i).trim().to_string())
+                        .unwrap_or_default(),
                     card_network: row.get(c.brand).to_lowercase(),
                     variant,
                     funding,
                     issuer_country: row.get(c.issuer).to_string(),
                     currency: row.get(c.ccy).to_string(),
-                    ic_category: ic_category(row.get(c.icsf)),
+                    ic_category,
+                    interchange_bps,
                     txn_date,
                     channel,
                     gross,
@@ -381,21 +393,52 @@ fn base64_encode(bytes: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
-/// Pull the interchange category from the `ICSF details` JSON array: the element with `t=="ic"`
-/// carries the product category in `n`. `""` when absent (flat-fee methods) or unparsable.
-fn ic_category(raw: &str) -> String {
+/// Pull the interchange category and rate from the `ICSF details` JSON array: the element with
+/// `t=="ic"` carries the product category in `n` and, when present, the card-product rate in `bps`.
+/// Empty strings mean absent (flat-fee methods) or unparsable.
+fn ic_details(raw: &str) -> (String, String) {
     if raw.is_empty() {
-        return String::new();
+        return (String::new(), String::new());
     }
     let Ok(Value::Array(arr)) = serde_json::from_str::<Value>(raw) else {
-        return String::new();
+        return (String::new(), String::new());
     };
-    arr.iter()
+    let Some(ic) = arr
+        .iter()
         .find(|e| e.get("t").and_then(Value::as_str) == Some("ic"))
-        .and_then(|e| e.get("n").and_then(Value::as_str))
+    else {
+        return (String::new(), String::new());
+    };
+    let category = ic
+        .get("n")
+        .and_then(Value::as_str)
         .unwrap_or("")
         .trim()
-        .to_string()
+        .to_string();
+    let bps = ic.get("bps").map(normalize_bps).unwrap_or_default();
+    (category, bps)
+}
+
+fn normalize_bps(v: &Value) -> String {
+    let raw = match v {
+        Value::Number(n) => n.to_string(),
+        Value::String(s) => s.trim().to_string(),
+        _ => String::new(),
+    };
+    let Ok(n) = raw.parse::<f64>() else {
+        return raw;
+    };
+    if !n.is_finite() {
+        return String::new();
+    }
+    let mut s = format!("{n:.6}");
+    while s.contains('.') && s.ends_with('0') {
+        s.pop();
+    }
+    if s.ends_with('.') {
+        s.pop();
+    }
+    s
 }
 
 /// Parse a money cell; blanks/garbage become `0.0` (mirrors `par_extract.to_float`).
@@ -429,6 +472,7 @@ ref2,Settled,visastandarddebit,visa,FR,EUR,100.00,0.05,0.00,0.02,0.20,\"[{\"\"t\
         assert_eq!(r.txn_ref, "ref2");
         assert_eq!(r.funding, "debit");
         assert_eq!(r.ic_category, "Intra EEA Consumer EMV Debit");
+        assert_eq!(r.interchange_bps, "");
         assert!((r.total_fee - 0.27).abs() < 1e-9, "0.05+0.00+0.02+0.20");
         assert!((r.gross - 100.27).abs() < 1e-9, "payable + total_fee");
         assert!(r.txn_date.is_none(), "no Booking Date column -> None");
@@ -446,9 +490,24 @@ ref2,Settled,visastandarddebit,visa,FR,EUR,100.00,0.05,0.00,0.02,0.20,\"[{\"\"t\
 
     #[test]
     fn ic_category_absent_yields_empty() {
-        assert_eq!(ic_category(""), "");
-        assert_eq!(ic_category("[{\"t\":\"scheme\",\"n\":\"x\"}]"), "");
-        assert_eq!(ic_category("not json"), "");
+        assert_eq!(ic_details(""), (String::new(), String::new()));
+        assert_eq!(
+            ic_details("[{\"t\":\"scheme\",\"n\":\"x\"}]"),
+            (String::new(), String::new())
+        );
+        assert_eq!(ic_details("not json"), (String::new(), String::new()));
+    }
+
+    #[test]
+    fn ic_details_extracts_rate_bps() {
+        assert_eq!(
+            ic_details("[{\"t\":\"ic\",\"n\":\"Consumer Debit\",\"bps\":0.2}]"),
+            ("Consumer Debit".to_string(), "0.2".to_string())
+        );
+        assert_eq!(
+            ic_details("[{\"t\":\"ic\",\"n\":\"Commercial\",\"bps\":\"142.5000\"}]"),
+            ("Commercial".to_string(), "142.5".to_string())
+        );
     }
 
     #[test]

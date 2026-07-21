@@ -24,11 +24,13 @@ pub struct CoverageSummary {
     pub good_clusters: u64,
     pub thin_clusters: u64,
     pub non_linear_clusters: u64,
+    pub fan_clusters: u64,
     // Transaction counts by verdict (the thin-tail vs non-linear split of the gap).
     pub total_txns: u64,
     pub good_txns: u64,
     pub thin_txns: u64,
     pub non_linear_txns: u64,
+    pub fan_txns: u64,
     /// Share of *transactions* with a trustworthy cost model.
     pub good_txn_pct: f64,
     // Money-weighted coverage — the headline for a cost/EV system.
@@ -36,6 +38,7 @@ pub struct CoverageSummary {
     pub good_gross: f64,
     pub thin_gross: f64,
     pub non_linear_gross: f64,
+    pub fan_gross: f64,
     /// Share of settled *volume* (money) with a trustworthy cost model.
     pub good_gross_pct: f64,
     // Fit accuracy of the GOOD models (per-txn cost error, basis points).
@@ -57,14 +60,17 @@ SELECT
     countIf(verdict = 'GOOD') AS good_clusters,
     countIf(verdict = 'THIN') AS thin_clusters,
     countIf(verdict = 'NON_LINEAR') AS non_linear_clusters,
+    countIf(verdict = 'FAN') AS fan_clusters,
     sum(n) AS total_txns,
     sumIf(n, verdict = 'GOOD') AS good_txns,
     sumIf(n, verdict = 'THIN') AS thin_txns,
     sumIf(n, verdict = 'NON_LINEAR') AS non_linear_txns,
+    sumIf(n, verdict = 'FAN') AS fan_txns,
     sum(gross_sum) AS total_gross,
     sumIf(gross_sum, verdict = 'GOOD') AS good_gross,
     sumIf(gross_sum, verdict = 'THIN') AS thin_gross,
     sumIf(gross_sum, verdict = 'NON_LINEAR') AS non_linear_gross,
+    sumIf(gross_sum, verdict = 'FAN') AS fan_gross,
     quantileIf(0.5)(bps_rmse, verdict = 'GOOD') AS bps_rmse_p50,
     quantileIf(0.9)(bps_rmse, verdict = 'GOOD') AS bps_rmse_p90,
     toString(rd) AS report_date
@@ -117,18 +123,21 @@ pub async fn for_merchant(
     let good_clusters = u(1);
     let thin_clusters = u(2);
     let non_linear_clusters = u(3);
-    let total_txns = u(4);
-    let good_txns = u(5);
-    let thin_txns = u(6);
-    let non_linear_txns = u(7);
-    let total_gross = g(8);
-    let good_gross = g(9);
-    let thin_gross = g(10);
-    let non_linear_gross = g(11);
+    let fan_clusters = u(4);
+    let total_txns = u(5);
+    let good_txns = u(6);
+    let thin_txns = u(7);
+    let non_linear_txns = u(8);
+    let fan_txns = u(9);
+    let total_gross = g(10);
+    let good_gross = g(11);
+    let thin_gross = g(12);
+    let non_linear_gross = g(13);
+    let fan_gross = g(14);
     // quantiles come back as `nan` when there are no GOOD clusters; treat as 0.
-    let bps_rmse_p50 = g(12);
-    let bps_rmse_p90 = g(13);
-    let report_date = f.get(14).unwrap_or(&"").trim().to_string();
+    let bps_rmse_p50 = g(15);
+    let bps_rmse_p90 = g(16);
+    let report_date = f.get(17).unwrap_or(&"").trim().to_string();
 
     let good_txn_pct = if total_txns > 0 {
         good_txns as f64 / total_txns as f64 * 100.0
@@ -145,15 +154,18 @@ pub async fn for_merchant(
         good_clusters,
         thin_clusters,
         non_linear_clusters,
+        fan_clusters,
         total_txns,
         good_txns,
         thin_txns,
         non_linear_txns,
+        fan_txns,
         good_txn_pct,
         total_gross,
         good_gross,
         thin_gross,
         non_linear_gross,
+        fan_gross,
         good_gross_pct,
         bps_rmse_p50: if bps_rmse_p50.is_nan() {
             0.0

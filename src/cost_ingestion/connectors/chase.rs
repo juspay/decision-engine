@@ -366,12 +366,14 @@ impl SettlementReportSource for ChaseReportSource {
 
                 Ok(Some(SettledFeeRow {
                     txn_ref: row.get(c.order).trim().to_string(),
+                    report_account: String::new(),
                     card_network: network,
                     variant,
                     funding,
                     issuer_country: row.get(c.issuer).trim().to_string(),
                     currency: row.get(c.currency).trim().to_string(),
                     ic_category: row.get(c.ic_code).trim().to_string(),
+                    interchange_bps: String::new(),
                     txn_date,
                     channel,
                     gross,

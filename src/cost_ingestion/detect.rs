@@ -32,6 +32,8 @@ pub struct PriceChange {
     pub issuer_country: String,
     pub currency: String,
     pub ic_category: String,
+    pub interchange_bps: String,
+    pub segment_idx: u16,
     pub old_pct_bps: f64,
     pub new_pct_bps: f64,
     pub old_fixed: f64,
@@ -44,9 +46,11 @@ const CHANGES_SQL: &str = r#"
 WITH ranked AS (
     SELECT
         connector, account, card_network, variant, funding, issuer_country, currency, ic_category,
+        interchange_bps, segment_idx,
         report_date, pct_bps, fixed, verdict,
         row_number() OVER (
-            PARTITION BY connector, account, card_network, variant, funding, issuer_country, currency, ic_category
+            PARTITION BY connector, account, card_network, variant, funding, issuer_country,
+                         currency, ic_category, interchange_bps, segment_idx
             ORDER BY report_date DESC
         ) AS rn
     FROM __DB__.cost_fee_model FINAL
@@ -54,13 +58,14 @@ WITH ranked AS (
 )
 SELECT
     cur.connector, cur.account, cur.card_network, cur.variant, cur.funding,
-    cur.issuer_country, cur.currency, cur.ic_category,
+    cur.issuer_country, cur.currency, cur.ic_category, cur.interchange_bps, cur.segment_idx,
     prev.pct_bps AS old_pct, cur.pct_bps AS new_pct,
     prev.fixed AS old_fixed, cur.fixed AS new_fixed,
     toString(cur.report_date) AS changed_on
 FROM (SELECT * FROM ranked WHERE rn = 1) AS cur
 INNER JOIN (SELECT * FROM ranked WHERE rn = 2) AS prev
-    USING (connector, account, card_network, variant, funding, issuer_country, currency, ic_category)
+    USING (connector, account, card_network, variant, funding, issuer_country, currency,
+           ic_category, interchange_bps, segment_idx)
 WHERE cur.verdict = 'GOOD'
   AND (abs(cur.pct_bps - prev.pct_bps) > {tol_bps:Float64}
        OR abs(cur.fixed - prev.fixed) > {tol_fixed:Float64})
@@ -108,7 +113,7 @@ pub async fn price_changes(
             continue;
         }
         let f: Vec<&str> = line.split('\t').collect();
-        if f.len() < 13 {
+        if f.len() < 15 {
             continue;
         }
         let g = |i: usize| f[i].trim().parse::<f64>().unwrap_or(0.0);
@@ -121,11 +126,13 @@ pub async fn price_changes(
             issuer_country: f[5].to_string(),
             currency: f[6].to_string(),
             ic_category: f[7].to_string(),
-            old_pct_bps: g(8),
-            new_pct_bps: g(9),
-            old_fixed: g(10),
-            new_fixed: g(11),
-            changed_on: f[12].trim().to_string(),
+            interchange_bps: f[8].to_string(),
+            segment_idx: f[9].trim().parse().unwrap_or(0),
+            old_pct_bps: g(10),
+            new_pct_bps: g(11),
+            old_fixed: g(12),
+            new_fixed: g(13),
+            changed_on: f[14].trim().to_string(),
         });
     }
     Ok(out)

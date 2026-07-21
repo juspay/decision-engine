@@ -18,6 +18,10 @@ pub struct SettledFeeRow {
     /// aggregates by the cluster fields below (read straight off this struct) and nothing
     /// downstream reads `txn_ref`, so it is NOT a dedup key.
     pub txn_ref: String,
+    /// Connector-native merchant/account inside the report, when present. For Adyen this is the CSV
+    /// `Merchant Account`, which separates POS/ecom/country accounts inside one uploaded report.
+    /// Blank for connectors whose reports do not expose an internal account dimension.
+    pub report_account: String,
     /// Card network, lowercased: `visa`, `mc`, …
     pub card_network: String,
     /// Payment-method variant (carries tier + funding), lowercased: `visastandarddebit`, …
@@ -30,6 +34,10 @@ pub struct SettledFeeRow {
     pub currency: String,
     /// Interchange category from the report; `""` for flat-fee methods (iDEAL/Klarna/CB).
     pub ic_category: String,
+    /// Interchange rate in basis points when the report exposes it (Adyen `ICSF details[].bps`).
+    /// Empty for connectors that do not provide a comparable card-product rate. This is a fit key
+    /// only: at decide time the predictor learns the modal `(ic_category, interchange_bps)` pair.
+    pub interchange_bps: String,
     /// Transaction (booking) date, when the report carries one. Not staged into ClickHouse — used
     /// only to compute the ingested report's period (min/max) for the history record.
     pub txn_date: Option<NaiveDate>,
@@ -64,6 +72,12 @@ pub fn amount_band(amount: f64) -> &'static str {
     } else {
         "hi"
     }
+}
+
+/// Log-amount bucket used by the segmented cost fitter. Kept separate from [`amount_band`], which
+/// is deliberately coarse because it is a serving-time predictor feature.
+pub fn fit_bucket(amount: f64) -> i32 {
+    (amount.log10() * 10.0).floor() as i32
 }
 
 impl SettledFeeRow {

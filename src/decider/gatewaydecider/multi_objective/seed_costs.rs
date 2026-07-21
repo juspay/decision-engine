@@ -144,6 +144,10 @@ pub fn lookup_seed_costs(
                         variant: None,
                         issuer: None,
                         ic_category: None,
+                        interchange_bps: None,
+                        segment_idx: None,
+                        amount_lo: None,
+                        amount_hi: None,
                     }),
                 },
             ))
