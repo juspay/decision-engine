@@ -105,9 +105,7 @@ pub fn check(
 
     let (ok, missing, found) = match schema {
         Resolution::Ok { found } => (true, Vec::new(), found),
-        Resolution::Missing {
-            missing, found, ..
-        } => (false, missing, found),
+        Resolution::Missing { missing, found, .. } => (false, missing, found),
         // A malformed sample (unreadable CSV) is not a missing-column problem; report it as such
         // rather than claiming every column is absent.
         Resolution::Unreadable(e) => return Err(e),
@@ -355,7 +353,9 @@ fn median_pct(rows: &[PreviewRow]) -> Option<f64> {
 
 /// Outcome of running a connector's column resolution over a header sample.
 enum Resolution {
-    Ok { found: Vec<String> },
+    Ok {
+        found: Vec<String>,
+    },
     Missing {
         missing: Vec<String>,
         required: Vec<String>,
@@ -428,7 +428,8 @@ mod tests {
     }
 
     /// A valid Adyen header row (required columns only, deliberately not in resolution order).
-    const ADYEN_HEADER: &[u8] = b"Psp Reference,Record Type,Payment Method Variant,Global Card Brand,\
+    const ADYEN_HEADER: &[u8] =
+        b"Psp Reference,Record Type,Payment Method Variant,Global Card Brand,\
 Issuer Country,Settlement Currency,Payable (SC),Commission (SC),Markup (SC),Scheme Fees (SC),\
 Interchange (SC),ICSF details\n";
 
@@ -471,7 +472,13 @@ Settlement Currency,Commission (SC),Markup (SC),Scheme Fees (SC),ICSF details\n"
     /// from what `parse_rows` actually requires.
     #[test]
     fn enumerates_connector_schema_without_duplicating_it() {
-        let r = check(&registry(), "adyen", b"Nothing,Useful\n", ColumnMapping::none()).unwrap();
+        let r = check(
+            &registry(),
+            "adyen",
+            b"Nothing,Useful\n",
+            ColumnMapping::none(),
+        )
+        .unwrap();
         assert!(!r.ok);
         assert_eq!(
             r.required.len(),
@@ -496,7 +503,13 @@ Settlement Currency,Commission (SC),Markup (SC),Scheme Fees (SC),ICSF details\n"
     /// would paper over rather than fix. An Adyen file uploaded as Braintree should say so.
     #[test]
     fn suggests_the_connector_the_file_actually_matches() {
-        let r = check(&registry(), "braintree", ADYEN_HEADER, ColumnMapping::none()).unwrap();
+        let r = check(
+            &registry(),
+            "braintree",
+            ADYEN_HEADER,
+            ColumnMapping::none(),
+        )
+        .unwrap();
         assert!(!r.ok, "adyen's header is not a braintree report");
         assert_eq!(
             r.suggested_connectors
@@ -566,10 +579,18 @@ Scheme Fees (SC),Interchange (SC),ICSF details\n";
         assert_eq!(unmapped.missing, vec!["Payable (SC)"]);
 
         let m = ColumnMapping::from_pairs(
-            [("Payable (SC)".to_string(), "Net Settlement Amount".to_string())].into(),
+            [(
+                "Payable (SC)".to_string(),
+                "Net Settlement Amount".to_string(),
+            )]
+            .into(),
         );
         let mapped = check(&registry(), "adyen", header, &m).unwrap();
-        assert!(mapped.ok, "mapping resolves the rename: {:?}", mapped.missing);
+        assert!(
+            mapped.ok,
+            "mapping resolves the rename: {:?}",
+            mapped.missing
+        );
         // The connector's own vocabulary is unchanged by the mapping — it is what the UI offers as
         // the right-hand column, so it must not shift as the merchant maps.
         assert_eq!(mapped.required, unmapped.required);
@@ -585,14 +606,26 @@ Settled,REF1,visacredit,visa,IN,EUR,96.00,1.00,0.50,0.50,2.00,\n";
     #[test]
     fn preview_shows_the_derived_values_a_mapping_produces() {
         let m = ColumnMapping::from_pairs(
-            [("Payable (SC)".to_string(), "Net Settlement Amount".to_string())].into(),
+            [(
+                "Payable (SC)".to_string(),
+                "Net Settlement Amount".to_string(),
+            )]
+            .into(),
         );
         let p = preview(&registry(), "adyen", RENAMED_SAMPLE, &m, false).unwrap();
 
         assert_eq!(p.rows.len(), 1);
         let r = &p.rows[0];
-        assert!((r.total_fee - 4.0).abs() < 1e-9, "fees summed: {}", r.total_fee);
-        assert!((r.gross - 100.0).abs() < 1e-9, "payable + fees: {}", r.gross);
+        assert!(
+            (r.total_fee - 4.0).abs() < 1e-9,
+            "fees summed: {}",
+            r.total_fee
+        );
+        assert!(
+            (r.gross - 100.0).abs() < 1e-9,
+            "payable + fees: {}",
+            r.gross
+        );
         assert!((r.effective_pct - 4.0).abs() < 1e-9);
         assert_eq!(r.card_network, "visa");
         assert!(p.warning.is_none(), "4% is plausible: {:?}", p.warning);
@@ -612,7 +645,10 @@ Settled,REF1,visacredit,visa,IN,EUR,96.00,1.00,0.50,0.50,2.00,\n";
         let pct = p.median_effective_pct.expect("a rate was derived");
         assert!(pct > 25.0, "gross collapsed to a fee column: {pct}%");
         assert!(
-            p.warning.as_deref().unwrap_or("").contains("outside the range"),
+            p.warning
+                .as_deref()
+                .unwrap_or("")
+                .contains("outside the range"),
             "the merchant must be warned: {:?}",
             p.warning
         );
@@ -625,7 +661,10 @@ Settled,REF1,visacredit,visa,IN,EUR,96.00,1.00,0.50,0.50,2.00,\n";
         // column whose values are never a fee-bearing record type, so every row is skipped.
         let m = ColumnMapping::from_pairs(
             [
-                ("Payable (SC)".to_string(), "Net Settlement Amount".to_string()),
+                (
+                    "Payable (SC)".to_string(),
+                    "Net Settlement Amount".to_string(),
+                ),
                 ("Record Type".to_string(), "Global Card Brand".to_string()),
             ]
             .into(),
@@ -633,7 +672,10 @@ Settled,REF1,visacredit,visa,IN,EUR,96.00,1.00,0.50,0.50,2.00,\n";
         let p = preview(&registry(), "adyen", RENAMED_SAMPLE, &m, false).unwrap();
         assert!(p.rows.is_empty());
         assert!(
-            p.warning.as_deref().unwrap_or("").contains("no fee-bearing rows"),
+            p.warning
+                .as_deref()
+                .unwrap_or("")
+                .contains("no fee-bearing rows"),
             "got {:?}",
             p.warning
         );
@@ -654,7 +696,12 @@ Settled,REF1,visacredit,visa,IN,EUR,96.00,1.00,0.50,0.50,2.00,\n";
     #[test]
     fn unknown_connector_is_an_error_not_a_verdict() {
         assert!(matches!(
-            check(&registry(), "not_a_psp", ADYEN_HEADER, ColumnMapping::none()),
+            check(
+                &registry(),
+                "not_a_psp",
+                ADYEN_HEADER,
+                ColumnMapping::none()
+            ),
             Err(IngestError::UnknownConnector(_))
         ));
     }
@@ -662,7 +709,13 @@ Settled,REF1,visacredit,visa,IN,EUR,96.00,1.00,0.50,0.50,2.00,\n";
     /// Stripe drives its own row loop; it must still aggregate misses like the shared driver does.
     #[test]
     fn hand_rolled_connector_also_aggregates() {
-        let r = check(&registry(), "stripe", b"Card Brand,Funding Source\n", ColumnMapping::none()).unwrap();
+        let r = check(
+            &registry(),
+            "stripe",
+            b"Card Brand,Funding Source\n",
+            ColumnMapping::none(),
+        )
+        .unwrap();
         assert!(!r.ok);
         assert!(
             r.missing.len() > 1,
@@ -681,15 +734,26 @@ mod sample_file_tests {
     /// The demo CSV handed to the user. Pinned as a test so the file and the UI flow it is meant to
     /// exercise cannot drift apart: it must fail preflight with exactly the five renamed columns,
     /// and the intended mapping must then parse it into plausible rows.
-    const SAMPLE: &[u8] =
-        include_bytes!("../../scratch/adyen-settlement-renamed-columns.csv");
+    const SAMPLE: &[u8] = include_bytes!("../../scratch/adyen-settlement-renamed-columns.csv");
 
     fn intended_mapping() -> ColumnMapping {
         ColumnMapping::from_pairs(HashMap::from([
-            ("Payable (SC)".to_string(), "Net Settlement Amount".to_string()),
-            ("Commission (SC)".to_string(), "Processing Commission".to_string()),
-            ("Scheme Fees (SC)".to_string(), "Card Scheme Fee".to_string()),
-            ("Interchange (SC)".to_string(), "Interchange Fee".to_string()),
+            (
+                "Payable (SC)".to_string(),
+                "Net Settlement Amount".to_string(),
+            ),
+            (
+                "Commission (SC)".to_string(),
+                "Processing Commission".to_string(),
+            ),
+            (
+                "Scheme Fees (SC)".to_string(),
+                "Card Scheme Fee".to_string(),
+            ),
+            (
+                "Interchange (SC)".to_string(),
+                "Interchange Fee".to_string(),
+            ),
             ("ICSF details".to_string(), "IC Details JSON".to_string()),
         ]))
     }
@@ -716,7 +780,12 @@ mod sample_file_tests {
                 "Scheme Fees (SC)",
             ]
         );
-        assert_eq!(r.matched.len(), 7, "the other seven line up: {:?}", r.matched);
+        assert_eq!(
+            r.matched.len(),
+            7,
+            "the other seven line up: {:?}",
+            r.matched
+        );
         assert!(
             r.suggested_connectors.is_empty(),
             "must not look like another connector, or the UI steers away from mapping"
@@ -839,12 +908,21 @@ mc,Ecommerce,DEBIT,maestro,10000.00,250.00,Settle,USD,USD,2025/01,Scheme Fee,0.0
         for (connector, report, column, renamed) in cases() {
             // Baseline: the untouched report parses.
             let base = check(&reg, connector, report.as_bytes(), ColumnMapping::none()).unwrap();
-            assert!(base.ok, "{connector}: valid report rejected: {:?}", base.missing);
+            assert!(
+                base.ok,
+                "{connector}: valid report rejected: {:?}",
+                base.missing
+            );
 
             // Rename one required column: preflight must name exactly that one.
             let renamed_report = report.replacen(column, renamed, 1);
-            let broken =
-                check(&reg, connector, renamed_report.as_bytes(), ColumnMapping::none()).unwrap();
+            let broken = check(
+                &reg,
+                connector,
+                renamed_report.as_bytes(),
+                ColumnMapping::none(),
+            )
+            .unwrap();
             assert!(!broken.ok, "{connector}: rename went unnoticed");
             assert_eq!(broken.missing, vec![column], "{connector}");
             assert!(
@@ -858,7 +936,11 @@ mc,Ecommerce,DEBIT,maestro,10000.00,250.00,Settle,USD,USD,2025/01,Scheme Fee,0.0
                 renamed.to_string(),
             )]));
             let fixed = check(&reg, connector, renamed_report.as_bytes(), &m).unwrap();
-            assert!(fixed.ok, "{connector}: mapping did not apply: {:?}", fixed.missing);
+            assert!(
+                fixed.ok,
+                "{connector}: mapping did not apply: {:?}",
+                fixed.missing
+            );
         }
     }
 
@@ -886,7 +968,6 @@ mc,Ecommerce,DEBIT,maestro,10000.00,250.00,Settle,USD,USD,2025/01,Scheme Fee,0.0
         }
     }
 }
-
 
 /// Partial-read behaviour. The preflight parses only the first `HEADER_SAMPLE_BYTES` of a file, and
 /// a connector that assembles one row from several report rows ends that slice mid-group. These pin
@@ -923,7 +1004,10 @@ Issuer Country,Holding Currency,Holding Currency Amount,Processed On\n";
         // Enough payments to exceed the cap, then cut exactly as the browser's slice would — which
         // lands mid-payment, leaving a capture whose fee lines never arrive.
         let full = checkout_report(4000);
-        assert!(full.len() > HEADER_SAMPLE_BYTES, "fixture must exceed the cap");
+        assert!(
+            full.len() > HEADER_SAMPLE_BYTES,
+            "fixture must exceed the cap"
+        );
         let cut = &full.as_bytes()[..HEADER_SAMPLE_BYTES];
 
         let p = preview(
@@ -966,7 +1050,14 @@ Issuer Country,Holding Currency,Holding Currency Amount,Processed On\n";
             )]
             .into(),
         );
-        let p = preview(&ConnectorRegistry::with_builtins(), "checkout", cut, &wrong, true).unwrap();
+        let p = preview(
+            &ConnectorRegistry::with_builtins(),
+            "checkout",
+            cut,
+            &wrong,
+            true,
+        )
+        .unwrap();
         assert!(
             p.warning.is_some(),
             "a wrong mapping must still be caught, median {:?}",
@@ -1110,7 +1201,10 @@ ICSF details\n"
         .unwrap();
         let ej = serde_json::to_value(&empty).unwrap();
         assert!(ej["median_effective_pct"].is_null());
-        assert!(ej["warning"].is_string(), "an empty preview must explain itself");
+        assert!(
+            ej["warning"].is_string(),
+            "an empty preview must explain itself"
+        );
     }
 
     /// The mapping is stored and returned as `{ "columns": { expected: theirs } }`, which is the

@@ -413,8 +413,8 @@ pub async fn preview_column_mapping(
         &candidate,
         req.truncated,
     )
-        .map(Json)
-        .map_err(map_preflight_error)
+    .map(Json)
+    .map_err(map_preflight_error)
 }
 
 /// `GET /merchant-account/:id/connectors/:connector/report/column-mapping?account=` — the saved

@@ -139,13 +139,10 @@ pub async fn load(
     connector: &str,
     account: &str,
 ) -> Result<ColumnMapping, IngestError> {
-    let stored = service_configuration::find_config_by_name(config_name(
-        merchant_id,
-        connector,
-        account,
-    ))
-    .await
-    .map_err(|e| IngestError::Storage(e.to_string()))?;
+    let stored =
+        service_configuration::find_config_by_name(config_name(merchant_id, connector, account))
+            .await
+            .map_err(|e| IngestError::Storage(e.to_string()))?;
     Ok(stored
         .and_then(|c| c.value)
         .and_then(|v| serde_json::from_str(&v).ok())
@@ -178,11 +175,7 @@ pub async fn save(
 }
 
 /// Remove a source's mapping. Idempotent — clearing an absent mapping is not an error.
-pub async fn delete(
-    merchant_id: &str,
-    connector: &str,
-    account: &str,
-) -> Result<(), IngestError> {
+pub async fn delete(merchant_id: &str, connector: &str, account: &str) -> Result<(), IngestError> {
     match service_configuration::delete_config(config_name(merchant_id, connector, account)).await {
         Ok(()) => Ok(()),
         // Nothing stored is the desired end state, not a failure.
@@ -209,7 +202,10 @@ mod tests {
 
     #[test]
     fn empty_mapping_resolves_to_the_expected_label() {
-        assert_eq!(ColumnMapping::none().resolve("Payable (SC)"), "Payable (SC)");
+        assert_eq!(
+            ColumnMapping::none().resolve("Payable (SC)"),
+            "Payable (SC)"
+        );
         assert!(ColumnMapping::none().is_empty());
     }
 
@@ -217,7 +213,11 @@ mod tests {
     fn mapped_column_resolves_to_the_merchants_label() {
         let m = mapping(&[("Payable (SC)", "Net Settlement Amount")]);
         assert_eq!(m.resolve("Payable (SC)"), "Net Settlement Amount");
-        assert_eq!(m.resolve("Record Type"), "Record Type", "unmapped passes through");
+        assert_eq!(
+            m.resolve("Record Type"),
+            "Record Type",
+            "unmapped passes through"
+        );
     }
 
     #[test]
