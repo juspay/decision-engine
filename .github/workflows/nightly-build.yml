@@ -1,0 +1,312 @@
+name: Nightly Build and Release
+
+on:
+  schedule:
+    # Runs at 5:00 AM IST (11:30 PM UTC previous day) every day
+    - cron: '30 23 * * *'
+  workflow_dispatch:
+    inputs:
+      tag_suffix:
+        description: 'Optional tag suffix (e.g., "rc1" for nightly-2026.07.21-rc1)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  create-tag-and-build:
+    runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.create_tag.outputs.tag_name }}
+      short_sha: ${{ steps.create_tag.outputs.short_sha }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create nightly tag
+        id: create_tag
+        run: |
+          # Generate date-based tag (YYYY.MM.DD format)
+          DATE_TAG=$(TZ=Asia/Kolkata date +%Y.%m.%d)
+          TAG_SUFFIX="${{ github.event.inputs.tag_suffix }}"
+          
+          if [[ -n "$TAG_SUFFIX" ]]; then
+            TAG_NAME="nightly-${DATE_TAG}-${TAG_SUFFIX}"
+          else
+            TAG_NAME="nightly-${DATE_TAG}"
+          fi
+          
+          SHORT_SHA="${GITHUB_SHA::7}"
+          
+          echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
+          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "Creating tag: ${TAG_NAME} at commit ${SHORT_SHA}"
+          
+          # Create and push tag
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${TAG_NAME}" -m "Nightly build ${TAG_NAME} (${SHORT_SHA})"
+          git push origin "${TAG_NAME}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.create_tag.outputs.tag_name }}
+          name: Nightly Build ${{ steps.create_tag.outputs.tag_name }}
+          body: |
+            ## Nightly Build - ${{ steps.create_tag.outputs.tag_name }}
+            
+            **Commit:** ${{ steps.create_tag.outputs.short_sha }}
+            **Built:** $(TZ=Asia/Kolkata date '+%Y-%m-%d %H:%M:%S IST')
+            
+            ### Docker Images
+            This release includes the following Docker images:
+            - `ghcr.io/${{ github.repository }}/postgres:${{ steps.create_tag.outputs.tag_name }}`
+            - `ghcr.io/${{ github.repository }}:${{ steps.create_tag.outputs.tag_name }}`
+            - `ghcr.io/${{ github.repository }}/groovy-runner:${{ steps.create_tag.outputs.tag_name }}`
+            
+            ### Usage
+            ```bash
+            docker pull ghcr.io/${{ github.repository }}:${{ steps.create_tag.outputs.tag_name }}
+            ```
+            
+            ---
+            *This is an automated nightly build. Use at your own risk.*
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-postgres-image:
+    needs: create-tag-and-build
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            tag: linux-amd64
+            os: ubuntu-latest
+          - platform: linux/arm64
+            tag: linux-arm64
+            os: ubuntu-24.04-arm
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/postgres
+          tags: |
+            type=raw,value=${{ needs.create-tag-and-build.outputs.tag_name }}
+            type=raw,value=nightly-latest
+
+      - name: Build and push Postgres Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.postgres
+          platforms: ${{ matrix.platform }}
+          tags: ghcr.io/${{ github.repository }}/postgres:${{ needs.create-tag-and-build.outputs.tag_name }}-${{ matrix.tag }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=nightly-postgres-${{ matrix.tag }}
+          cache-to: type=gha,scope=nightly-postgres-${{ matrix.tag }},mode=max
+          push: true
+        env:
+          CARGO_INCREMENTAL: '0'
+          RUSTFLAGS: "-A warnings"
+          SCCACHE_ENABLE: "true"
+
+  build-mysql-image:
+    needs: create-tag-and-build
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            tag: linux-amd64
+            os: ubuntu-latest
+          - platform: linux/arm64
+            tag: linux-arm64
+            os: ubuntu-24.04-arm
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=${{ needs.create-tag-and-build.outputs.tag_name }}
+            type=raw,value=nightly-latest
+
+      - name: Build and push MySQL Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          platforms: ${{ matrix.platform }}
+          tags: ghcr.io/${{ github.repository }}:${{ needs.create-tag-and-build.outputs.tag_name }}-${{ matrix.tag }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=nightly-mysql-${{ matrix.tag }}
+          cache-to: type=gha,scope=nightly-mysql-${{ matrix.tag }},mode=max
+          push: true
+        env:
+          CARGO_INCREMENTAL: '0'
+          RUSTFLAGS: "-A warnings"
+          SCCACHE_ENABLE: "true"
+
+  create-postgres-manifest:
+    needs: [create-tag-and-build, build-postgres-image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create multi-arch manifest
+        run: |
+          TAG_NAME="${{ needs.create-tag-and-build.outputs.tag_name }}"
+          
+          # Create manifest for nightly tag
+          docker buildx imagetools create --tag ghcr.io/${{ github.repository }}/postgres:${TAG_NAME} \
+            ghcr.io/${{ github.repository }}/postgres:${TAG_NAME}-linux-amd64 \
+            ghcr.io/${{ github.repository }}/postgres:${TAG_NAME}-linux-arm64
+          
+          # Create manifest for nightly-latest
+          docker buildx imagetools create --tag ghcr.io/${{ github.repository }}/postgres:nightly-latest \
+            ghcr.io/${{ github.repository }}/postgres:${TAG_NAME}-linux-amd64 \
+            ghcr.io/${{ github.repository }}/postgres:${TAG_NAME}-linux-arm64
+
+  create-mysql-manifest:
+    needs: [create-tag-and-build, build-mysql-image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create multi-arch manifest
+        run: |
+          TAG_NAME="${{ needs.create-tag-and-build.outputs.tag_name }}"
+          
+          # Create manifest for nightly tag
+          docker buildx imagetools create --tag ghcr.io/${{ github.repository }}:${TAG_NAME} \
+            ghcr.io/${{ github.repository }}:${TAG_NAME}-linux-amd64 \
+            ghcr.io/${{ github.repository }}:${TAG_NAME}-linux-arm64
+          
+          # Create manifest for nightly-latest
+          docker buildx imagetools create --tag ghcr.io/${{ github.repository }}:nightly-latest \
+            ghcr.io/${{ github.repository }}:${TAG_NAME}-linux-amd64 \
+            ghcr.io/${{ github.repository }}:${TAG_NAME}-linux-arm64
+
+  build-groovy-image:
+    needs: create-tag-and-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/groovy-runner
+          tags: |
+            type=raw,value=${{ needs.create-tag-and-build.outputs.tag_name }}
+            type=raw,value=nightly-latest
+
+      - name: Build and push Groovy Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: groovy.Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ghcr.io/${{ github.repository }}/groovy-runner:${{ needs.create-tag-and-build.outputs.tag_name }}
+            ghcr.io/${{ github.repository }}/groovy-runner:nightly-latest
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=nightly-groovy
+          cache-to: type=gha,scope=nightly-groovy,mode=max
+
+  notify-completion:
+    needs: [create-postgres-manifest, create-mysql-manifest, build-groovy-image]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check build status
+        run: |
+          echo "Nightly build completed!"
+          echo "Tag: ${{ needs.create-tag-and-build.outputs.tag_name }}"
+          echo "Images are available at:"
+          echo "  - ghcr.io/${{ github.repository }}/postgres:${{ needs.create-tag-and-build.outputs.tag_name }}"
+          echo "  - ghcr.io/${{ github.repository }}:${{ needs.create-tag-and-build.outputs.tag_name }}"
+          echo "  - ghcr.io/${{ github.repository }}/groovy-runner:${{ needs.create-tag-and-build.outputs.tag_name }}"
