@@ -91,10 +91,62 @@ pub async fn decider_full_payload_hs_function(
         resolve_bin.clone()
     );
     let m_vault_provider = Utils::get_vault_provider(dreq.cardToken.as_deref());
-    let update_txn_card_info = TxnCardInfo {
+    let mut update_txn_card_info = TxnCardInfo {
         card_isin: resolve_bin,
         ..dreq.txnCardInfo
     };
+
+    // BIN enrichment: when the request carries a card BIN but leaves the card attributes blank or missing
+    let bin_present = update_txn_card_info
+        .card_isin
+        .as_deref()
+        .map(|isin| !isin.is_empty())
+        .unwrap_or(false);
+    let missing_card_attrs = update_txn_card_info.cardSwitchProvider.is_none()
+        || update_txn_card_info.card_type.is_none()
+        || update_txn_card_info.card_program.is_none()
+        || update_txn_card_info.card_issuer_country.is_none();
+    if bin_present && missing_card_attrs {
+        match crate::types::card::card_info_api::get_card_info_by_bin(
+            update_txn_card_info.card_isin.clone(),
+        )
+        .await
+        {
+            Some(card_info) => {
+                if update_txn_card_info.cardSwitchProvider.is_none() {
+                    update_txn_card_info.cardSwitchProvider =
+                        Some(masking::Secret::new(card_info.card_switch_provider));
+                }
+                if update_txn_card_info.card_type.is_none() {
+                    update_txn_card_info.card_type = card_info.card_type;
+                }
+                if update_txn_card_info.card_program.is_none() {
+                    // cardProgram is populated from the card sub-type (e.g. "DEBIT STANDARD").
+                    update_txn_card_info.card_program = card_info.card_sub_type;
+                }
+                if update_txn_card_info.card_issuer_country.is_none() {
+                    update_txn_card_info.card_issuer_country = card_info.card_issuer_country;
+                }
+                logger::debug!(
+                    action = "binEnrichmentFromCardInfo",
+                    tag = "binEnrichmentFromCardInfo",
+                    "Enriched card attributes from card_info for bin {:?}: card_type={:?}, card_program={:?}, card_issuer_country={:?}",
+                    update_txn_card_info.card_isin,
+                    update_txn_card_info.card_type,
+                    update_txn_card_info.card_program,
+                    update_txn_card_info.card_issuer_country,
+                );
+            }
+            None => {
+                logger::debug!(
+                    action = "binEnrichmentFromCardInfo",
+                    tag = "binEnrichmentFromCardInfo",
+                    "No card_info row found for bin {:?}; card attributes left as sent",
+                    update_txn_card_info.card_isin,
+                );
+            }
+        }
+    }
 
     let decider_params = T::DeciderParams {
         dpMerchantAccount: dreq.merchantAccount,

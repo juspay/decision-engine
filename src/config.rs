@@ -67,6 +67,28 @@ pub struct GlobalConfig {
     pub cost_ingestion: CostIngestionConfig,
     #[serde(default)]
     pub sr_auto_calibration: SrAutoCalibrationConfig,
+    #[serde(default)]
+    pub card_info_service: CardInfoServiceConfig,
+}
+
+/// Configuration for the external Hyperswitch cards-info API used to enrich a payment's
+/// card attributes from its BIN (see the BIN-enrichment step in `flow_new`).
+#[derive(Clone, serde::Deserialize, Debug)]
+#[serde(default)]
+pub struct CardInfoServiceConfig {
+    pub base_url: String,
+    pub api_key: masking::Secret<String>,
+    pub timeout_ms: u64,
+}
+
+impl Default for CardInfoServiceConfig {
+    fn default() -> Self {
+        Self {
+            base_url: "https://integ.hyperswitch.io/api/cards".to_string(),
+            api_key: masking::Secret::new(String::new()),
+            timeout_ms: 2_000,
+        }
+    }
 }
 
 /// Runtime auto-calibration of the SRv3 bucket size + hedging %.
@@ -290,6 +312,7 @@ pub struct TenantConfig {
     pub cache_config: CacheConfig,
     pub hypersense: HypersenseConfig,
     pub cost_ingestion: CostIngestionConfig,
+    pub card_info_service: CardInfoServiceConfig,
 }
 
 /// Configuration for the in-house cost-estimation settlement ingestion pipeline
@@ -448,6 +471,7 @@ impl TenantConfig {
             cache_config: global_config.cache_config.clone(),
             hypersense: global_config.hypersense.clone(),
             cost_ingestion: global_config.cost_ingestion.clone(),
+            card_info_service: global_config.card_info_service.clone(),
         }
     }
 }
