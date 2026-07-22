@@ -347,9 +347,20 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Push tag to remote
+      - name: Re-create and push tag to remote
         run: |
           TAG_NAME="${{ needs.create-tag.outputs.tag_name }}"
+          SHORT_SHA="${{ needs.create-tag.outputs.short_sha }}"
+          
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Re-create the tag (it was created locally in create-tag job but not pushed)
+          echo "Creating tag ${TAG_NAME} at commit ${GITHUB_SHA::7}..."
+          git tag -a "${TAG_NAME}" -m "Nightly build ${TAG_NAME} (${SHORT_SHA})"
+          
+          # Push tag to remote
           echo "Pushing tag ${TAG_NAME} to remote..."
           git push origin "${TAG_NAME}"
           echo "Tag pushed successfully!"
