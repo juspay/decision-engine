@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Pencil, ShieldCheck, Trash2 } from 'lucide-react'
-import { Card, CardBody, CardHeader, SurfaceLabel } from '../ui/Card'
+import { Card, CardBody, CardHeader } from '../ui/Card'
+import * as type from '../ui/typography'
 import { Button } from '../ui/Button'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { Spinner } from '../ui/Spinner'
@@ -109,10 +110,7 @@ export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }
         <div className="flex items-center gap-2">
           <ShieldCheck size={16} className="text-brand-500" />
           <div>
-            <SurfaceLabel>Connector credentials</SurfaceLabel>
-            <h2 className="mt-2 font-medium text-slate-800 dark:text-white">
-              Settlement report access
-            </h2>
+            <h2 className={type.heading}>Settlement report access</h2>
           </div>
         </div>
       </CardHeader>
@@ -212,7 +210,7 @@ export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }
 
         {sources.length > 0 && (
           <div className="mt-2 border-t border-slate-100 pt-4 dark:border-[#232833]">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+            <p className="text-[12px] font-medium text-slate-500 dark:text-[#8d96aa]">
               Configured
             </p>
             <ul className="mt-2 space-y-1 text-sm text-slate-600 dark:text-[#9ca7ba]">

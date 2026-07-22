@@ -228,7 +228,7 @@ export function RoutingHubPage() {
       />
 
       <header>
-        <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Routing Hub</h1>
+        <h1 className="text-lg font-semibold text-slate-900 dark:text-white">Routing Hub</h1>
       </header>
 
       {actionError && (

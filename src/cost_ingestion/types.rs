@@ -47,23 +47,25 @@ pub struct SettledFeeRow {
     pub scheme_fee: f64,
     pub markup: f64,
     pub commission: f64,
+    /// Issuer BIN (leading PAN digits) when the report carries the card number, else `""`. Seeds the
+    /// global `cost_bin_product` map that resolves the card product for co-badged schemes whose
+    /// `variant` leaves `funding` blank (Open Risk #4). Never itself a fit dimension.
+    pub bin: String,
 }
 
-/// Amount bands (settlement-currency units) the interchange-category predictor keys on. Shared by
-/// the rollup aggregator (which stamps each txn's band at ingestion) and the decide-time predictor
-/// lookup in `serving.rs`, so the two can never drift. Thresholds mirror the prototype.
-pub fn amount_band(amount: f64) -> &'static str {
-    if amount <= 20.0 {
-        "lo"
-    } else if amount <= 50.0 {
-        "b50"
-    } else if amount <= 100.0 {
-        "b100"
-    } else if amount <= 250.0 {
-        "b250"
-    } else {
-        "hi"
+/// Base-10 **log** amount bucket ([`BUCKETS_PER_DECADE`] per decade), as a string. This replaces the
+/// old fixed-unit bands (`20/50/100/250`), which were currency-BLIND and too coarse for the fit's
+/// `a*` crossover: a €2 `a*` sat inside one band, and a HUF cluster put all real volume in one band.
+/// A log bucket is a fixed *ratio*, so `a*` resolves at the same relative precision in any currency.
+/// Shared by the rollup (stamps each txn) and the decide-time predictor lookup in `serving.rs`, so
+/// the two can never drift. Bucket `k` spans `[10^(k/10), 10^((k+1)/10))`; the fit recovers a
+/// bucket's lower amount as `pow(10, k/10)` to decide which buckets lie above `a*`.
+pub const BUCKETS_PER_DECADE: f64 = 10.0;
+pub fn amount_band(amount: f64) -> String {
+    if amount <= 0.0 {
+        return "0".to_string();
     }
+    ((amount.log10() * BUCKETS_PER_DECADE).floor() as i64).to_string()
 }
 
 impl SettledFeeRow {
@@ -78,6 +80,40 @@ impl SettledFeeRow {
         } else {
             String::new()
         }
+    }
+
+    /// Resolve funding for the cluster key: the variant when it encodes it (`mc*`/`visa*`), else —
+    /// for co-badged schemes (`cartebancaire`) whose variant is silent — infer from the stated
+    /// interchange rate. The report exposes no product field for these cards; the rate is the only
+    /// signal, and it is not arbitrary — the observed values cluster on the EU Interchange Fee
+    /// Regulation caps: 0.20% (20 bps) consumer debit, 0.30% (30 bps) consumer credit, with
+    /// commercial cards exempt from the caps and running higher (~90 bps). We map each band to its
+    /// product: `<= 25` debit, `<= 60` credit, above commercial. A heuristic bootstrap; when
+    /// `cards_info` (BIN → funding) is fed it supersedes this.
+    /// `None`/absent rate ⇒ unresolved (`""`) ⇒ the cluster abstains, exactly as today.
+    pub fn resolve_funding(variant: &str, ic_bps: Option<f64>) -> String {
+        let f = Self::funding_from_variant(variant);
+        if !f.is_empty() {
+            return f;
+        }
+        match ic_bps {
+            Some(b) if b > 0.0 && b <= 25.0 => "debit".to_string(),
+            Some(b) if b > 25.0 && b <= 60.0 => "credit".to_string(),
+            Some(b) if b > 60.0 => "commercial".to_string(),
+            _ => String::new(),
+        }
+    }
+
+    /// Extract the issuer BIN from a PAN as the report states it — reports mask the middle
+    /// (`489678****4354`), so we take the leading run of digits, capped at 8 (the modern BIN
+    /// length). Returns `""` when the field is empty or non-numeric (trimmed/tokenized reports),
+    /// which simply means this row contributes no BIN observation.
+    pub fn bin_from_pan(pan: &str) -> String {
+        pan.trim()
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .take(8)
+            .collect()
     }
 }
 

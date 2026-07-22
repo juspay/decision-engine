@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ChevronDown, ChevronRight, Network, Pencil, Plus, X } from 'lucide-react'
-import { Card, CardBody, CardHeader, SurfaceLabel } from '../ui/Card'
+import { Card, CardBody, CardHeader } from '../ui/Card'
+import * as type from '../ui/typography'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { ErrorMessage } from '../ui/ErrorMessage'
@@ -55,10 +56,7 @@ export function ConnectorsPanel({ merchantId }: { merchantId?: string }) {
           <div className="flex items-center gap-2">
             <Network size={16} className="text-brand-500" />
             <div>
-              <SurfaceLabel>Connectors</SurfaceLabel>
-              <h2 className="mt-2 font-medium text-slate-800 dark:text-white">
-                Fees &amp; overrides per connector
-              </h2>
+              <h2 className={type.heading}>Fees &amp; overrides per connector</h2>
             </div>
           </div>
           {merchantId && addableConnectors.length > 0 && !adding && (

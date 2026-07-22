@@ -171,6 +171,8 @@ pub async fn ingest_report_reader(
 
     // One insert of the fully-aggregated buckets, then fit from what the rollup now holds. The
     // history record reports transactions *processed* (`staged`), not bucket count.
+    // Grab the per-BIN observations first (borrows) before `into_rows` consumes the accumulator.
+    let bin_rows = acc.bin_rows();
     let rows = acc.into_rows();
     sink::insert_daily_stats(
         clickhouse,
@@ -181,6 +183,18 @@ pub async fn ingest_report_reader(
         &rows,
     )
     .await?;
+
+    // Feed the global BIN → card-product map (Open Risk #4 seed). Best-effort: this is additive data
+    // collection that no live path depends on yet (Step B), so a failure here must not fail the
+    // report's ingest/fit — log and continue.
+    if let Err(e) = sink::insert_bin_product(clickhouse, &bin_rows).await {
+        crate::logger::warn!(
+            tag = "cost_ingestion",
+            "bin_product insert failed ({} bins): {}",
+            bin_rows.len(),
+            e
+        );
+    }
 
     let summary =
         fit::fit_snapshot(clickhouse, connector, account, merchant_id, &report_date).await?;

@@ -401,6 +401,7 @@ interface ExplorerPersistedState {
   volumeResponseOpen: boolean
   smartRetryEnabled: boolean
   multiObjScenario: number | 'ALL'
+  moCurrency: string
   resumableRun: { total: number; nextIndex: number } | null
 }
 
@@ -444,6 +445,7 @@ function getDefaultExplorerState(): ExplorerPersistedState {
     volumeResponseOpen: false,
     smartRetryEnabled: false,
     multiObjScenario: DEFAULT_MULTI_OBJ_SCENARIO,
+    moCurrency: MULTI_OBJECTIVE_CURRENCY,
     resumableRun: null,
   }
 }
@@ -1030,6 +1032,10 @@ export function DecisionSimulatorPage() {
   // default pair + ingested set in the seeding effect below, so a third (or fourth) processor
   // gets its own SR slider alongside the ingested ones.
   const [extraConnectors, setExtraConnectors] = useState<string[]>([])
+  // Connectors the user explicitly removed from the comparison (the "×" on a slider). Subtracted
+  // from the default+ingested+extra union in the seeding effect, so even a default (stripe/adyen)
+  // or ingested connector can be dropped and won't be re-added on the next render. Lowercased.
+  const [removedConnectors, setRemovedConnectors] = useState<string[]>([])
   // Open state + draft input for the "add connector" modal.
   const [addConnectorOpen, setAddConnectorOpen] = useState(false)
   const [newConnectorName, setNewConnectorName] = useState('')
@@ -1047,7 +1053,7 @@ export function DecisionSimulatorPage() {
   useEffect(() => { multiObjScenarioRef.current = multiObjScenario }, [multiObjScenario])
   // Currency for the multi-objective sim (was hardcoded to USD). Drives whether a transaction can
   // match an in-house fitted cost model (keyed by currency) or falls back to the seed table.
-  const [moCurrency, setMoCurrency] = useState<string>(MULTI_OBJECTIVE_CURRENCY)
+  const [moCurrency, setMoCurrency] = useState<string>(initialState.moCurrency)
   // Acceptance channel sent on each multi-objective transaction. Drives the in-house category
   // predictor (ecom vs pos resolves the online/in-person interchange split). VGS-collected cards
   // are ecommerce, so this is fixed to 'ecom'.
@@ -1355,9 +1361,12 @@ export function DecisionSimulatorPage() {
       form.ranking_algorithm === 'SR_MULTI_OBJECTIVE'
         ? unionConnectors(DEFAULT_ELIGIBLE_GATEWAYS, ingestedConnectors, extraConnectors)
         : unionConnectors(DEFAULT_ELIGIBLE_GATEWAYS, extraConnectors)
-    const target = merged.join(', ')
+    // Subtract any connectors the user explicitly removed so a dropped default/ingested one
+    // stays out (this effect owns the field, so without the subtraction it would re-add them).
+    const removed = new Set(removedConnectors)
+    const target = merged.filter(gw => !removed.has(gw)).join(', ')
     setForm(prev => (prev.eligible_gateways === target ? prev : { ...prev, eligible_gateways: target }))
-  }, [form.ranking_algorithm, ingestedConnectors, extraConnectors, isSimulating])
+  }, [form.ranking_algorithm, ingestedConnectors, extraConnectors, removedConnectors, isSimulating])
 
   useEffect(() => {
     if (!selectedAuditPaymentId && !selectedPreviewPaymentId && !setupPrompt) return
@@ -1447,6 +1456,7 @@ export function DecisionSimulatorPage() {
     setDebitResponseOpen(nextState.debitResponseOpen)
     setVolumeResponseOpen(nextState.volumeResponseOpen)
     setMultiObjScenario(nextState.multiObjScenario)
+    setMoCurrency(nextState.moCurrency)
     setResumableRun(nextState.resumableRun)
     setSelectedAuditPaymentId(null)
     setSelectedAuditEventId(null)
@@ -1529,6 +1539,7 @@ export function DecisionSimulatorPage() {
       volumeResponseOpen,
       smartRetryEnabled,
       multiObjScenario,
+      moCurrency,
       resumableRun: resumableRunSnapshot,
     }
 
@@ -1565,6 +1576,7 @@ export function DecisionSimulatorPage() {
     volumeResponseOpen,
     smartRetryEnabled,
     multiObjScenario,
+    moCurrency,
   ])
 
   // Resume a paused run that survived a page unmount: continue the loop from the saved
@@ -1634,13 +1646,19 @@ export function DecisionSimulatorPage() {
       return
     }
     setExtraConnectors(prev => (prev.includes(name) ? prev : [...prev, name]))
+    // Clear it from the removed set so re-adding a previously-dropped default/ingested
+    // connector (e.g. stripe) actually brings it back.
+    setRemovedConnectors(prev => prev.filter(c => c !== name))
     setAddConnectorOpen(false)
   }
 
-  // Drop a manually-added connector from the comparison (the "×" on its slider). Only extras are
-  // removable; ingested/default connectors are owned by the seeding effect.
-  function removeExtraConnector(name: string) {
-    setExtraConnectors(prev => prev.filter(c => c !== name))
+  // Drop a connector from the comparison (the "×" on its slider). Works for any source: extras are
+  // removed from that list, and defaults/ingested connectors go into removedConnectors so the
+  // seeding effect subtracts them instead of re-adding them.
+  function removeConnector(name: string) {
+    const key = name.trim().toLowerCase()
+    setExtraConnectors(prev => prev.filter(c => c !== key))
+    setRemovedConnectors(prev => (prev.includes(key) ? prev : [...prev, key]))
   }
 
   // Finds a real error code for `connector` that produces the desired GSM decision + penalty.
@@ -3112,10 +3130,13 @@ export function DecisionSimulatorPage() {
                   <div className="flex items-center gap-1.5">
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} />
                     <SurfaceLabel>{label}</SurfaceLabel>
-                    {extraConnectors.includes(key) && (
+                    {/* Any connector can be removed (default, ingested or user-added), but keep at
+                        least two so the routing comparison stays meaningful, and don't mutate the
+                        eligible set mid-run. */}
+                    {eligibleGatewaysParsed.length > 2 && !isSimulating && (
                       <button
                         type="button"
-                        onClick={() => removeExtraConnector(key)}
+                        onClick={() => removeConnector(key)}
                         className="ml-auto text-slate-400 transition-colors hover:text-red-500"
                         title={`Remove ${key} from the comparison`}
                         aria-label={`Remove ${key}`}

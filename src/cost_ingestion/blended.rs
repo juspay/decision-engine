@@ -86,6 +86,28 @@ pub struct ClusterScope<'a> {
     pub report_date: Option<&'a str>,
 }
 
+/// How the top-N is ranked before the `LIMIT` cuts it. This selects *which* segments appear, not just
+/// their display order — top-20-by-GMV and top-20-by-txns can be materially different sets (a snapshot
+/// full of small-value, high-count debit segments ranks very differently by money vs. count).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ClusterOrder {
+    /// Settled GMV — money moved (default; the cost-impact ranking).
+    #[default]
+    Gross,
+    /// Transaction count.
+    Txns,
+}
+
+impl ClusterOrder {
+    /// The `ORDER BY` expression — a fixed SELECT-alias, so it's safe to interpolate into the SQL.
+    fn column(self) -> &'static str {
+        match self {
+            ClusterOrder::Gross => "total_gross",
+            ClusterOrder::Txns => "txns",
+        }
+    }
+}
+
 // Highest-GMV GOOD segments, ranked by settled money (gross_sum). Rolled up across `variant` (the
 // card program/tier) — within a connector + interchange category variants price the same, so keeping
 // them split only produces confusing duplicate rows. Fees are volume-weighted; n/gross summed.
@@ -105,7 +127,7 @@ SELECT
 FROM __DB__.cost_fee_model FINAL
 WHERE verdict = 'GOOD' AND gross_sum > 0 AND merchant_id = {merchant_id:String}{snapshot_filter}
 GROUP BY connector, card_network, variant, funding, issuer_country, currency, ic_category
-ORDER BY total_gross DESC
+ORDER BY {order_col} DESC
 LIMIT {limit:UInt32}
 FORMAT TSV
 "#;
@@ -143,17 +165,19 @@ fn client() -> &'static reqwest::Client {
     CLIENT.get_or_init(|| super::ch_http::client(TIMEOUT))
 }
 
-/// The merchant's highest-GMV GOOD segments ranked by settled volume, narrowed by `scope` (empty =
-/// merchant-wide; connector/account = that connector's latest snapshot; + report_date = one exact
-/// ingested snapshot).
+/// The merchant's top GOOD segments ranked by `order` (settled GMV by default, or transaction count),
+/// narrowed by `scope` (empty = merchant-wide; connector/account = that connector's latest snapshot;
+/// + report_date = one exact ingested snapshot).
 pub async fn top_clusters(
     cfg: &ClickHouseAnalyticsConfig,
     merchant_id: &str,
     limit: u32,
     scope: ClusterScope<'_>,
+    order: ClusterOrder,
 ) -> Result<Vec<TopCluster>, IngestError> {
     let sql = TOP_CLUSTERS_SQL
         .replace("{snapshot_filter}", &build_snapshot_filter(&scope))
+        .replace("{order_col}", order.column())
         .replace("__DB__", &cfg.database);
     let limit_s = limit.to_string();
     let mut params: Vec<(&str, &str)> = vec![

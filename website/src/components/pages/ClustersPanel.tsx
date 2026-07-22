@@ -77,17 +77,26 @@ export function ClustersPanel({
   editable,
   limit = 10,
   scope,
+  defaultSort = 'gross_sum',
 }: {
   merchantId?: string
   editable: boolean
   limit?: number
   /** When set, shows one ingested snapshot's segments instead of the merchant-wide top set. */
   scope?: ClustersScope
+  /** Initial ranking — also selects which top-N the backend returns, not just display order.
+   * 'gross_sum' (default) = settled GMV / cost impact; 'n' = transaction count. */
+  defaultSort?: 'gross_sum' | 'n'
 }) {
-  const { clusters, isLoading, error, mutate } = useCostClusters(merchantId, { limit, ...scope })
+  const { clusters, isLoading, error, mutate } = useCostClusters(merchantId, {
+    limit,
+    order: defaultSort,
+    ...scope,
+  })
   const [editingKey, setEditingKey] = useState<string | null>(null)
-  // Ranked by GMV by default (money moved = cost impact); click Volume/Txns to re-sort.
-  const [sortKey, setSortKey] = useState<'gross_sum' | 'n'>('gross_sum')
+  // Seeded from `defaultSort` (GMV = money moved / cost impact; txns = count); click Volume/Txns to
+  // re-sort the fetched set.
+  const [sortKey, setSortKey] = useState<'gross_sum' | 'n'>(defaultSort)
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc')
 
   const sorted = useMemo(() => {
@@ -128,7 +137,7 @@ export function ClustersPanel({
       <div className="overflow-x-auto">
         <table className="w-full min-w-[720px] text-left text-sm">
           <thead>
-            <tr className="border-b border-slate-200 text-xs uppercase tracking-[0.14em] text-slate-400 dark:border-[#232833]">
+            <tr className="border-b border-slate-200 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] dark:border-[#232833]">
               <th className="py-2 pr-3 font-semibold">Connector</th>
               <th className="py-2 pr-3 font-semibold">Network</th>
               <th className="py-2 pr-3 font-semibold">Program</th>
@@ -192,12 +201,12 @@ function SortableHeader({
   onClick: () => void
 }) {
   return (
-    <th className="py-2 pr-3 text-right font-semibold">
+    <th className="py-2 pr-3 text-right font-medium">
       <button
         type="button"
         onClick={onClick}
         aria-sort={active ? (dir === 'desc' ? 'descending' : 'ascending') : 'none'}
-        className={`inline-flex items-center gap-1 uppercase tracking-[0.14em] transition-colors hover:text-slate-600 dark:hover:text-slate-200 ${
+        className={`inline-flex items-center gap-1 transition-colors hover:text-slate-600 dark:hover:text-slate-200 ${
           active ? 'text-slate-600 dark:text-slate-200' : ''
         }`}
       >

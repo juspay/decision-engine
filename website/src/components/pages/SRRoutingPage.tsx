@@ -13,10 +13,26 @@ import { useMerchantStore } from '../../store/merchantStore'
 import { useAuthStore } from '../../store/authStore'
 import { apiPost, fetcher } from '../../lib/api'
 import { PAYMENT_METHOD_TYPES, PAYMENT_METHODS } from '../../lib/constants'
-import { Plus, Trash2, Eye, PowerOff, Info } from 'lucide-react'
+import {
+  Plus,
+  Trash2,
+  Eye,
+  PowerOff,
+  Info,
+  Layers,
+  SlidersHorizontal,
+  Ban,
+  type LucideIcon,
+} from 'lucide-react'
+import * as type from '../ui/typography'
 import { useMerchantFeatures, type KnownFeature } from '../../hooks/useMerchantFeatures'
 import { BucketHedgingTuner } from './BucketHedgingTuner'
 import { CostEstimationPanel } from './CostEstimationPanel'
+
+/** One input treatment for the config forms, so fields don't drift apart field by field. */
+const configInputClass =
+  'w-full rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm ' +
+  'focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226]'
 
 // Ensures a stored value is always selectable in a dropdown, even when it isn't in the known
 // option list (e.g. auto-calibration writes the casing live txns use, "CARD"/"CREDIT", while the
@@ -27,10 +43,10 @@ function optionsWithValue(options: readonly string[], value: string): string[] {
 
 // Dimensions a merchant can split SR scoring clusters on (must match backend ELIGIBLE_DIMENSIONS).
 const ELIGIBLE_SR_DIMENSIONS: { key: string; label: string; note?: string }[] = [
-  { key: 'card_network', label: 'Card Network' },
+  { key: 'card_network', label: 'Card network' },
   { key: 'currency', label: 'Currency' },
   { key: 'country', label: 'Country' },
-  { key: 'auth_type', label: 'Auth Type' },
+  { key: 'auth_type', label: 'Auth type' },
   { key: 'card_is_in', label: 'Card BIN', note: 'High cardinality — not auto-calibrated' },
 ]
 // Low-cardinality dims Autopilot auto-selects when enabled (BIN excluded to avoid a score-key explosion).
@@ -153,26 +169,26 @@ function CurrentConfigDetails({ config }: { config: SRConfigResponse['config'] }
   return (
     <div className="text-xs text-slate-600 dark:text-[#b2bdd1] space-y-4">
       <div className="border-b border-slate-200 pb-3 dark:border-[#222226]">
-        <h3 className="font-medium text-slate-700 mb-2 dark:text-slate-200">Default Settings</h3>
+        <h3 className="font-medium text-slate-700 mb-2 dark:text-slate-200">Default settings</h3>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           <div>
-            <span className="text-slate-500">Bucket Size:</span>
+            <span className="text-slate-500">Bucket size</span>
             <p className="font-medium">{config.data.defaultBucketSize}</p>
           </div>
           <div>
-            <span className="text-slate-500">Success Rate:</span>
+            <span className="text-slate-500">Success rate</span>
             <p className="font-medium">{config.data.defaultSuccessRate ?? 'Not set'}</p>
           </div>
           <div>
-            <span className="text-slate-500">Hedging %:</span>
+            <span className="text-slate-500">Hedging %</span>
             <p className="font-medium">{config.data.defaultHedgingPercent ?? 'Not set'}</p>
           </div>
           <div>
-            <span className="text-slate-500">Feedback Latency Window:</span>
+            <span className="text-slate-500">Feedback latency window</span>
             <p className="font-medium">{config.data.defaultLatencyThreshold ?? 'Not set'} s</p>
           </div>
           <div>
-            <span className="text-slate-500">Margin:</span>
+            <span className="text-slate-500">Margin</span>
             <p className="font-medium">{config.data.margin != null ? `${config.data.margin * 100}%` : 'Not set (100%)'}</p>
           </div>
         </div>
@@ -180,7 +196,7 @@ function CurrentConfigDetails({ config }: { config: SRConfigResponse['config'] }
 
       {config.data.subLevelInputConfig && config.data.subLevelInputConfig.length > 0 ? (
         <div>
-          <h3 className="font-medium text-slate-700 mb-2 dark:text-slate-200">Sub-Level Configurations</h3>
+          <h3 className="font-medium text-slate-700 mb-2 dark:text-slate-200">Sub-level configurations</h3>
           <div className="space-y-2">
             {config.data.subLevelInputConfig.map((subConfig, idx) => (
               <div key={idx} className="bg-slate-50 dark:bg-[#151518] rounded-lg p-3">
@@ -194,15 +210,15 @@ function CurrentConfigDetails({ config }: { config: SRConfigResponse['config'] }
                     <p className="font-medium">{subConfig.paymentMethod}</p>
                   </div>
                   <div>
-                    <span className="text-slate-500">Bucket Size:</span>
+                    <span className="text-slate-500">Bucket size</span>
                     <p className="font-medium">{subConfig.bucketSize}</p>
                   </div>
                   <div>
-                    <span className="text-slate-500">Hedging %:</span>
+                    <span className="text-slate-500">Hedging %</span>
                     <p className="font-medium">{subConfig.hedgingPercent ?? 'Default'}</p>
                   </div>
                   <div>
-                    <span className="text-slate-500">Feedback Latency Window:</span>
+                    <span className="text-slate-500">Feedback latency window</span>
                     <p className="font-medium">{subConfig.latencyThreshold ?? 'Default'} s</p>
                   </div>
                 </div>
@@ -224,9 +240,34 @@ function CurrentConfigDetails({ config }: { config: SRConfigResponse['config'] }
 
 type SRTab = 'autopilot' | 'manual' | 'flags' | 'cost'
 const SR_TABS: readonly SRTab[] = ['autopilot', 'manual', 'flags', 'cost']
+/** Tabs laid out as a left rail + content pane, which need the full page width to breathe. */
+const WIDE_TABS: readonly SRTab[] = ['manual', 'cost']
 
 type ManualSection = 'scoring' | 'elimination' | 'dimensions'
 const MANUAL_SECTIONS: readonly ManualSection[] = ['scoring', 'elimination', 'dimensions']
+
+/** Manual config's three concerns, as a vertical rail — mirrors the Cost tab's section rail. */
+const MANUAL_SECTION_DEFS: { id: ManualSection; icon: LucideIcon; title: string; blurb: string }[] =
+  [
+    {
+      id: 'scoring',
+      icon: SlidersHorizontal,
+      title: 'Scoring defaults',
+      blurb: 'Bucket size, hedging & per-payment-type overrides',
+    },
+    {
+      id: 'elimination',
+      icon: Ban,
+      title: 'Elimination',
+      blurb: 'Drop a PSP whose auth rate falls too low',
+    },
+    {
+      id: 'dimensions',
+      icon: Layers,
+      title: 'SR Dimensions',
+      blurb: 'Attributes scoring splits clusters on',
+    },
+  ]
 
 export function SRRoutingPage() {
   // Same merchant resolution as OverviewPage/RoutingHubPage — this page must
@@ -429,14 +470,15 @@ export function SRRoutingPage() {
     }`
 
   return (
-    // Cost Estimation is a wide two-column dashboard, so it takes the full page width;
-    // the config tabs read better constrained.
-    <div className={`space-y-6 ${activeTab === 'cost' ? 'w-full' : 'max-w-4xl'}`}>
+    // Cost Estimation and Manual are rail + content dashboards, so they take the full page width —
+    // constraining them would spend a quarter of an already-narrow column on the rail. The
+    // single-column tabs (Autopilot, Flags) still read better constrained.
+    <div className={`space-y-6 ${WIDE_TABS.includes(activeTab) ? 'w-full' : 'max-w-4xl'}`}>
       {/* Page header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Multi Objective Routing</h1>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+          <h1 className="text-lg font-semibold text-slate-900 dark:text-white">Multi Objective Routing</h1>
+          <p className="mt-0.5 text-[13px] leading-relaxed text-slate-500 dark:text-slate-400">
             Dynamic gateway scoring based on real-time success rates.
           </p>
         </div>
@@ -496,71 +538,57 @@ export function SRRoutingPage() {
 
           {/* ── Manual tab ── */}
           {activeTab === 'manual' && (
-            <div className="space-y-6">
-              {/* Manual sub-tabs */}
-              <div className="inline-flex rounded-lg border border-slate-200 p-0.5 dark:border-[#222226]">
-                {([['scoring', 'Scoring defaults'], ['elimination', 'Elimination'], ['dimensions', 'SR Dimensions']] as const).map(([id, label]) => (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => setManualTab(id)}
-                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                      manualTab === id
-                        ? 'bg-brand-500 text-white'
-                        : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+            <div className="grid gap-6 lg:grid-cols-[220px_1fr] lg:items-start">
+              <ManualSectionRail active={manualTab} onSelect={setManualTab} />
 
+              <div className="min-w-0 space-y-6">
               {manualTab === 'scoring' && (
               <div className="space-y-6">
               <ManualCostToggle merchantId={merchantId} />
               <form onSubmit={handleSubmit(onSave)} className="space-y-6">
               <Card>
                 <CardHeader>
-                  <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Scoring defaults</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">Applied to all payment types unless a sub-level override exists.</p>
+                  <h2 className={type.heading}>Scoring defaults</h2>
+                  <p className={`mt-1 ${type.subheading}`}>Applied to every payment type unless an override below replaces them.</p>
                 </CardHeader>
                 <CardBody className="grid gap-6 md:grid-cols-3">
                   <label className="space-y-1.5">
-                    <span className="text-xs font-medium text-slate-600 dark:text-slate-300">Bucket Size</span>
+                    <span className={type.label}>Bucket size</span>
                     <input
                       type="number"
+                      placeholder="50–200"
                       {...register('defaultBucketSize')}
-                      className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 w-full focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      className={configInputClass}
                     />
-                    {errors.defaultBucketSize && <p className="text-xs text-red-500">{errors.defaultBucketSize.message}</p>}
-                    <p className="text-[11px] text-slate-400 leading-relaxed">
-                      How many recent payments factor into each gateway's score. Smaller = faster adaptation, higher = more stable. Recommended: 50–200 depending on volume.
+                    {errors.defaultBucketSize && <p className="text-[13px] text-red-500">{errors.defaultBucketSize.message}</p>}
+                    <p className={type.hint}>
+                      Recent payments per gateway score. Lower adapts faster, higher stays steadier.
                     </p>
                   </label>
 
                   <label className="space-y-1.5">
-                    <span className="text-xs font-medium text-slate-600 dark:text-slate-300">Hedging %</span>
+                    <span className={type.label}>Hedging %</span>
                     <input
                       type="number" step="0.1"
                       {...register('defaultHedgingPercent')}
-                      placeholder="e.g. 10"
-                      className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 w-full focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      placeholder="10"
+                      className={configInputClass}
                     />
-                    <p className="text-[11px] text-slate-400 leading-relaxed">
-                      Share of traffic sent to non-top gateways to keep their scores fresh. Only active when Explore-exploit is enabled under Feature Flags.
+                    <p className={type.hint}>
+                      Traffic share sent to non-top gateways to keep their scores fresh. Needs Explore-exploit on.
                     </p>
                   </label>
 
                   <label className="space-y-1.5">
-                    <span className="text-xs font-medium text-slate-600 dark:text-slate-300">Latency Threshold (s)</span>
+                    <span className={type.label}>Latency threshold (s)</span>
                     <input
                       type="number"
                       {...register('defaultLatencyThreshold')}
                       placeholder="300"
-                      className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 w-full focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      className={configInputClass}
                     />
-                    <p className="text-[11px] text-slate-400 leading-relaxed">
-                      Timeouts within this window are treated as temporary outages; outside it as a performance issue. Default: 300 s.
+                    <p className={type.hint}>
+                      Timeouts inside this window count as outages, outside it as slow performance.
                     </p>
                   </label>
                 </CardBody>
@@ -569,8 +597,8 @@ export function SRRoutingPage() {
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between">
                   <div>
-                    <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Sub-level overrides</h2>
-                    <p className="text-xs text-slate-500 mt-0.5">Optional per payment-method-type overrides for the settings above.</p>
+                    <h2 className={type.heading}>Sub-level overrides</h2>
+                    <p className={`mt-1 ${type.subheading}`}>Optional per payment-method-type overrides for the settings above.</p>
                   </div>
                   <Button type="button" variant="secondary" size="sm" onClick={addSubLevelOverride}>
                     <Plus size={14} /> Add Override
@@ -581,7 +609,7 @@ export function SRRoutingPage() {
                     {fields.length ? (
                       <table className="w-full text-sm">
                         <thead>
-                          <tr className="text-left text-xs text-slate-500 border-b border-slate-200 dark:border-[#1c1c24] bg-slate-50 dark:bg-[#0a0a0f]">
+                          <tr className="text-left text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] border-b border-slate-200 dark:border-[#1c1c24] bg-slate-50 dark:bg-[#0a0a0f]">
                             <th className="px-4 py-2">Source</th>
                             <th className="px-4 py-2">Method Type</th>
                             <th className="px-4 py-2">Method</th>
@@ -651,7 +679,7 @@ export function SRRoutingPage() {
                 </div>
               )}
               <Button type="submit" disabled={saving || !merchantId}>
-                {saving ? <><Spinner size={14} /> Saving…</> : 'Save Manual Config'}
+                {saving ? <><Spinner size={14} /> Saving…</> : 'Save changes'}
               </Button>
               </form>
               </div>
@@ -660,6 +688,7 @@ export function SRRoutingPage() {
               {manualTab === 'elimination' && <EliminationConfig merchantId={merchantId} />}
 
               {manualTab === 'dimensions' && <SrDimensionsConfig merchantId={merchantId} />}
+              </div>
             </div>
           )}
 
@@ -671,6 +700,46 @@ export function SRRoutingPage() {
         </>
       )}
     </div>
+  )
+}
+
+/**
+ * Left rail for the Manual tab's three sections. Deliberately the same shape as the Cost tab's
+ * section rail (220px column, icon + title + blurb) so the two tabs don't teach two different
+ * navigation idioms for the same kind of choice.
+ */
+function ManualSectionRail({
+  active,
+  onSelect,
+}: {
+  active: ManualSection
+  onSelect: (s: ManualSection) => void
+}) {
+  return (
+    <nav className="flex gap-2 overflow-x-auto lg:flex-col lg:gap-1 lg:overflow-visible">
+      {MANUAL_SECTION_DEFS.map(({ id, icon: Icon, title, blurb }) => {
+        const on = active === id
+        return (
+          <button
+            key={id}
+            type="button"
+            onClick={() => onSelect(id)}
+            aria-current={on ? 'page' : undefined}
+            className={`flex shrink-0 items-start gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors lg:w-full ${
+              on
+                ? 'border-brand-500/40 bg-brand-500/8 text-slate-900 dark:text-white'
+                : 'border-transparent text-slate-600 hover:bg-slate-50 dark:text-[#9ca7ba] dark:hover:bg-[#141923]'
+            }`}
+          >
+            <Icon size={18} className={`mt-0.5 shrink-0 ${on ? 'text-brand-500' : 'text-slate-400'}`} />
+            <span className="min-w-0">
+              <span className="block text-sm font-medium">{title}</span>
+              <span className="mt-0.5 hidden text-xs text-slate-400 lg:block">{blurb}</span>
+            </span>
+          </button>
+        )
+      })}
+    </nav>
   )
 }
 
@@ -817,7 +886,7 @@ function AutopilotConfig({ merchantId }: { merchantId: string | null }) {
         <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-4">
           <div className="max-w-2xl">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-slate-800 dark:text-white">Autopilot mode</span>
+              <span className={type.heading}>Autopilot mode</span>
               {autopilotOn ? <Badge variant="green">On</Badge> : <Badge variant="gray">Off</Badge>}
             </div>
             <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#9aa6bb]">
@@ -977,8 +1046,8 @@ function SrDimensionsConfig({ merchantId }: { merchantId: string | null }) {
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <h2 className="text-sm font-semibold text-slate-800 dark:text-white">SR scoring dimensions</h2>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <h2 className={type.heading}>SR scoring dimensions</h2>
+          <p className={`mt-1 ${type.subheading}`}>
             Attributes SR scoring splits clusters on. More dimensions = finer, more responsive scores, but more clusters (each needs its own volume to score well). Changing this re-buckets scores. Autopilot enables the low-cardinality dimensions automatically.
           </p>
         </CardHeader>
@@ -1036,8 +1105,8 @@ function SRFeatureFlags({ merchantId }: { merchantId: string | null }) {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Scoring behaviour flags</h2>
-        <p className="text-xs text-slate-500 mt-0.5">
+        <h2 className={type.heading}>Scoring behaviour flags</h2>
+        <p className={`mt-1 ${type.subheading}`}>
           Merchant-level toggles that affect how SR scores are computed and how traffic is explored.
         </p>
       </div>
@@ -1176,10 +1245,10 @@ function EliminationConfig({ merchantId }: { merchantId: string | null }) {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-4">
             <div className="min-w-0">
-              <h2 className="text-sm font-semibold text-slate-800 dark:text-white">
+              <h2 className={type.heading}>
                 Elimination Configuration
               </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
+              <p className={`mt-1 ${type.subheading}`}>
                 Elimination routing is active · threshold {existing.config.data.threshold}
               </p>
             </div>
@@ -1208,36 +1277,37 @@ function EliminationConfig({ merchantId }: { merchantId: string | null }) {
 
       <Card>
         <CardHeader>
-          <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Elimination Configs</h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Each gateway carries a health score that decays on consecutive failures and recovers on successes. When it falls below the threshold, the gateway is removed from routing until it recovers. This is not the raw success rate.
+          <h2 className={type.heading}>Elimination</h2>
+          <p className={`mt-1 ${type.subheading}`}>
+            Each gateway carries a health score that decays on consecutive failures and recovers on
+            successes. Below the threshold, it drops out of routing until it recovers.
           </p>
         </CardHeader>
         <CardBody className="grid gap-4 md:grid-cols-2">
-          <label className="space-y-1">
-            <span className="text-xs text-slate-500">Threshold <span className="text-red-400">*</span></span>
+          <label className="space-y-1.5">
+            <span className={type.label}>Threshold <span className="text-red-400">*</span></span>
             <input
               type="number" step="0.01" min="0" max="1"
               value={threshold}
               onChange={e => setThreshold(e.target.value)}
-              placeholder="e.g. 0.05"
-              className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 w-full focus:outline-none focus:ring-1 focus:ring-brand-500"
+              placeholder="0.05"
+              className={configInputClass}
             />
-            <p className="text-[11px] text-slate-400 dark:text-slate-500">
-              Health score (0–1) below which a gateway is eliminated — the score decays on consecutive failures and recovers on successes, so a lower value tolerates more failures before dropping a gateway. Not the success rate.
+            <p className={type.hint}>
+              Health score from 0 to 1, not success rate. Lower tolerates more failures before dropping a gateway.
             </p>
           </label>
-          <label className="space-y-1">
-            <span className="text-xs text-slate-500">Gateway Latency Threshold (ms)</span>
+          <label className="space-y-1.5">
+            <span className={type.label}>Gateway latency threshold (ms)</span>
             <input
               type="number"
               value={gatewayLatency}
               onChange={e => setGatewayLatency(e.target.value)}
-              placeholder="e.g. 5000"
-              className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 w-full focus:outline-none focus:ring-1 focus:ring-brand-500"
+              placeholder="5000"
+              className={configInputClass}
             />
-            <p className="text-[11px] text-slate-400 dark:text-slate-500">
-              Gateways exceeding this latency are also eliminated. Leave blank to disable.
+            <p className={type.hint}>
+              Gateways slower than this are eliminated too. Leave blank to disable.
             </p>
           </label>
         </CardBody>

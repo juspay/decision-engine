@@ -41,96 +41,121 @@ const FIT_SQL: &str = r#"
 INSERT INTO __DB__.cost_fee_model
     (report_date, connector, account, merchant_id, card_network, variant, funding,
      issuer_country, currency, ic_category, pct_bps, fixed, n, bps_rmse, r2, gross_sum, verdict)
+WITH
+-- Deduped per-(cluster, day, LOG-amount-band) buckets over the max window. We keep `band` (a
+-- base-10 log bucket, 10/decade) so the fit can later resolve each cluster's a* crossover; FINAL
+-- dedups the ReplacingMergeTree so a re-delivered day is counted once.
+day_band AS (
+    SELECT card_network, variant, funding, issuer_country, currency, ic_category, band, txn_date,
+        sum(n) AS n, sum(sx) AS sx, sum(sy) AS sy, sum(sxx) AS sxx, sum(sxy) AS sxy,
+        sum(syy) AS syy, sum(su) AS su, sum(suu) AS suu, sum(suy) AS suy,
+        sum(suuy) AS suuy, sum(syyuu) AS syyuu
+    FROM __DB__.cost_daily_stats FINAL
+    WHERE connector = {connector:String} AND account = {account:String}
+      AND merchant_id = {merchant_id:String} AND txn_date >= {max_window_start:Date}
+    GROUP BY card_network, variant, funding, issuer_country, currency, ic_category, band, txn_date
+),
+-- Adaptive per-cluster window at DAY granularity (band-independent): keep the base window plus older
+-- days until the running txn count reaches MIN_SAMPLES, so thin clusters can cross the sample gate.
+windowed_days AS (
+    SELECT card_network, variant, funding, issuer_country, currency, ic_category, txn_date
+    FROM (
+        SELECT card_network, variant, funding, issuer_country, currency, ic_category, txn_date,
+            sum(dn) OVER (
+                PARTITION BY card_network, variant, funding, issuer_country, currency, ic_category
+                ORDER BY txn_date DESC ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+            ) AS cum_n_before
+        FROM (
+            SELECT card_network, variant, funding, issuer_country, currency, ic_category, txn_date,
+                sum(n) AS dn
+            FROM day_band
+            GROUP BY card_network, variant, funding, issuer_country, currency, ic_category, txn_date
+        )
+    )
+    WHERE txn_date >= {base_window_start:Date} OR coalesce(cum_n_before, 0) < {min_samples:UInt32}
+),
+-- Per-(cluster, band) sufficient stats over the in-window days, with each bucket's amount range.
+per_band AS (
+    SELECT card_network, variant, funding, issuer_country, currency, ic_category, band,
+        sum(n) AS n, sum(sx) AS sx, sum(sy) AS sy, sum(sxx) AS sxx, sum(sxy) AS sxy,
+        sum(syy) AS syy, sum(su) AS su, sum(suu) AS suu, sum(suy) AS suy,
+        sum(suuy) AS suuy, sum(syyuu) AS syyuu,
+        pow(10, (toFloat64(band) + 1) / 10) AS band_hi   -- bucket's upper amount bound
+    FROM day_band
+    INNER JOIN windowed_days USING (card_network, variant, funding, issuer_country, currency, ic_category, txn_date)
+    GROUP BY card_network, variant, funding, issuer_country, currency, ic_category, band
+),
+-- Whole-cluster OLS fit → slope, intercept, and the a* = fixed/rate crossover (0 when there is no
+-- positive fixed fee, which makes the a* grade fall back to the whole cluster).
+whole AS (
+    SELECT *,
+        (n * sxx - sx * sx) AS denom,
+        if(denom = 0, nan, (n * sxy - sx * sy) / denom) AS slope,
+        if(denom = 0, nan, (sy - slope * sx) / n) AS intercept,
+        if(denom = 0 OR (n * syy - sy * sy) = 0, nan,
+           pow(n * sxy - sx * sy, 2) / (denom * (n * syy - sy * sy))) AS r2,
+        if(slope > 0 AND intercept > 0, intercept / slope, 0.0) AS a_star,
+        -- 95% CI half-width of the slope, in bps (L2 reliability gate). Based on the ABSOLUTE
+        -- residual variance (SSE), which — unlike proportional bps_rmse — is not inflated by the
+        -- low-amount dust, so a tight rate reads tight even for a thin cluster. 999999 when
+        -- undegenerate (n<=2 or no amount spread) so it can never promote.
+        if(n > 2 AND denom > 0,
+           1.96 * sqrt(greatest(0.0, syy - intercept * sy - slope * sxy) / (n - 2) * n / denom) * 10000,
+           999999.0) AS ci_bps
+    FROM (
+        SELECT card_network, variant, funding, issuer_country, currency, ic_category,
+            sum(n) AS n, sum(sx) AS sx, sum(sy) AS sy, sum(sxx) AS sxx, sum(sxy) AS sxy, sum(syy) AS syy
+        FROM per_band
+        GROUP BY card_network, variant, funding, issuer_country, currency, ic_category
+    )
+),
+-- Proportional-error sufficient stats over the buckets AT/ABOVE a* (upper bound past a*), i.e. the
+-- region where cost is proportional. The fixed-fee-dominated buckets below a* are excluded from the
+-- grade — no data deleted, no hardcoded threshold; a* comes from each cluster's own fit.
+above AS (
+    SELECT pb.card_network AS card_network, pb.variant AS variant, pb.funding AS funding,
+        pb.issuer_country AS issuer_country, pb.currency AS currency, pb.ic_category AS ic_category,
+        sum(pb.n) AS n_above, sum(pb.su) AS su, sum(pb.suu) AS suu, sum(pb.suy) AS suy,
+        sum(pb.suuy) AS suuy, sum(pb.syyuu) AS syyuu
+    FROM per_band AS pb
+    INNER JOIN whole AS w USING (card_network, variant, funding, issuer_country, currency, ic_category)
+    WHERE pb.band_hi > w.a_star
+    GROUP BY pb.card_network, pb.variant, pb.funding, pb.issuer_country, pb.currency, pb.ic_category
+)
 SELECT
     report_date, connector, account, merchant_id, card_network, variant, funding,
     issuer_country, currency, ic_category, pct_bps, fixed, n, bps_rmse, r2, gross_sum,
-    multiIf(n < 200, 'THIN', isNaN(bps_rmse) OR bps_rmse > 15, 'NON_LINEAR', 'GOOD') AS verdict
+    -- Verdict with the L2 reliability gate. A poor fit is NON_LINEAR only with enough data to say so
+    -- (else THIN). A good fit is GOOD with >=200 txns OR — the L2 promotion — with >=30 txns and a
+    -- tight slope CI (the rate is well-pinned despite few samples). Otherwise THIN (safe fallback).
+    multiIf(
+        (n_above = 0 OR isNaN(bps_rmse) OR bps_rmse > 15) AND n >= 200, 'NON_LINEAR',
+        n_above = 0 OR isNaN(bps_rmse) OR bps_rmse > 15, 'THIN',
+        n >= 200, 'GOOD',
+        n >= 30 AND ci_bps <= 15, 'GOOD',
+        'THIN'
+    ) AS verdict
 FROM
 (
     SELECT
-        report_date, connector, account, merchant_id, card_network, variant, funding,
-        issuer_country, currency, ic_category, n, r2, gross_sum,
-        slope * 10000 AS pct_bps,
-        intercept AS fixed,
-        sqrt(greatest(0.0, sum_sq) / n) * 10000 AS bps_rmse
-    FROM
-    (
-        SELECT
-            {report_date:Date} AS report_date,
-            {connector:String} AS connector,
-            {account:String} AS account,
-            {merchant_id:String} AS merchant_id,
-            card_network, variant, funding, issuer_country, currency, ic_category, n,
-            sx AS gross_sum,
-            (n * sxx - sx * sx) AS denom,
-            if(denom = 0, nan, (n * sxy - sx * sy) / denom) AS slope,
-            if(denom = 0, nan, (sy - slope * sx) / n) AS intercept,
-            if(denom = 0 OR (n * syy - sy * sy) = 0, nan,
-               pow(n * sxy - sx * sy, 2) / (denom * (n * syy - sy * sy))) AS r2,
-            (intercept * intercept * suu + n * slope * slope + syyuu
-             - 2 * intercept * suuy - 2 * slope * suy + 2 * intercept * slope * su) AS sum_sq
-        FROM
-        (
-            -- Sum the per-day buckets that fall in each cluster's adaptive window into one set of
-            -- per-cluster sufficient statistics (all sums are additive across days/bands/channels).
-            SELECT
-                card_network, variant, funding, issuer_country, currency, ic_category,
-                sum(n) AS n,
-                sum(sx) AS sx,
-                sum(sy) AS sy,
-                sum(sxx) AS sxx,
-                sum(sxy) AS sxy,
-                sum(syy) AS syy,
-                sum(su) AS su,
-                sum(suu) AS suu,
-                sum(suy) AS suy,
-                sum(suuy) AS suuy,
-                sum(syyuu) AS syyuu
-            FROM
-            (
-                -- Adaptive per-cluster window at day granularity: keep every day in the base window
-                -- (recent, so high-volume clusters stay agile to price changes), and let thin
-                -- clusters reach back over older days until the running txn count crosses
-                -- MIN_SAMPLES (capped at the max window) so they can cross the GOOD sample gate
-                -- instead of being stuck THIN. `cum_n_before` = txns on strictly-more-recent days.
-                SELECT *
-                FROM
-                (
-                    SELECT
-                        card_network, variant, funding, issuer_country, currency, ic_category,
-                        txn_date, n, sx, sy, sxx, sxy, syy, su, suu, suy, suuy, syyuu,
-                        sum(n) OVER (
-                            PARTITION BY card_network, variant, funding, issuer_country, currency, ic_category
-                            ORDER BY txn_date DESC
-                            ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
-                        ) AS cum_n_before
-                    FROM
-                    (
-                        -- Collapse band/channel to per-(cluster, day) sums. FINAL dedups the
-                        -- ReplacingMergeTree so a day re-delivered by a later report (overlapping
-                        -- monthly+daily, a re-upload, webhook+manual) is counted once — its latest
-                        -- authoritative bucket wins.
-                        SELECT
-                            card_network, variant, funding, issuer_country, currency, ic_category,
-                            txn_date,
-                            sum(n) AS n, sum(sx) AS sx, sum(sy) AS sy, sum(sxx) AS sxx,
-                            sum(sxy) AS sxy, sum(syy) AS syy, sum(su) AS su, sum(suu) AS suu,
-                            sum(suy) AS suy, sum(suuy) AS suuy, sum(syyuu) AS syyuu
-                        FROM __DB__.cost_daily_stats FINAL
-                        WHERE connector = {connector:String}
-                          AND account = {account:String}
-                          AND merchant_id = {merchant_id:String}
-                          AND txn_date >= {max_window_start:Date}
-                        GROUP BY card_network, variant, funding, issuer_country, currency,
-                                 ic_category, txn_date
-                    )
-                )
-                WHERE txn_date >= {base_window_start:Date}
-                   OR coalesce(cum_n_before, 0) < {min_samples:UInt32}
-            )
-            GROUP BY card_network, variant, funding, issuer_country, currency, ic_category
-        )
-    )
+        {report_date:Date} AS report_date, {connector:String} AS connector,
+        {account:String} AS account, {merchant_id:String} AS merchant_id,
+        w.card_network AS card_network, w.variant AS variant, w.funding AS funding,
+        w.issuer_country AS issuer_country, w.currency AS currency, w.ic_category AS ic_category,
+        w.slope * 10000 AS pct_bps, w.intercept AS fixed, w.n AS n, w.r2 AS r2, w.sx AS gross_sum,
+        w.ci_bps AS ci_bps,
+        -- A cluster with no bucket above a* (fully fixed-fee-dominated) has no proportional region;
+        -- coalesce keeps the row and grades it NON_LINEAR rather than emitting a null.
+        coalesce(a.n_above, 0) AS n_above,
+        if(n_above = 0, 999999.0,
+           sqrt(greatest(0.0,
+               w.intercept * w.intercept * coalesce(a.suu, 0.0) + n_above * w.slope * w.slope
+               + coalesce(a.syyuu, 0.0) - 2 * w.intercept * coalesce(a.suuy, 0.0)
+               - 2 * w.slope * coalesce(a.suy, 0.0) + 2 * w.intercept * w.slope * coalesce(a.su, 0.0)
+           ) / n_above) * 10000
+        ) AS bps_rmse
+    FROM whole AS w
+    LEFT JOIN above AS a USING (card_network, variant, funding, issuer_country, currency, ic_category)
 )
 "#;
 
