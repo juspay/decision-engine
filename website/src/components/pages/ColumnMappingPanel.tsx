@@ -179,7 +179,7 @@ export function ColumnMappingPanel({
 
       {/* Unmatched required columns — the actual work. */}
       <div className="space-y-2">
-        <div className="grid grid-cols-[1fr_auto_1fr] gap-3 px-1 text-xs font-medium uppercase tracking-wide text-slate-400">
+        <div className="grid grid-cols-[1fr_auto_1fr] gap-3 px-1 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa]">
           <span>Your column</span>
           <span />
           <span>Maps to ({connector})</span>

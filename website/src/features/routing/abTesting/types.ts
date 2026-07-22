@@ -10,11 +10,15 @@ export type ABTestExperimentType =
 // cost-awareness (multi-objective) and autopilot self-tuning — give four combinations. Kept
 // distinct in the form so the arm dropdown and the `control !== variant` check can tell them apart.
 export type SrStrategy = 'sr_auth' | 'sr_auth_autopilot' | 'sr_mo_manual' | 'sr_mo_autopilot'
+// Labels name the routing *goal* (approvals, or approvals + fee savings) rather than the internal
+// algorithm (SR / multi-objective), with the autopilot-vs-manual tuning mode as a trailing
+// qualifier. Single source of truth: the create-form dropdown and `armLabel` (which renders
+// existing experiments) both resolve through this map, so a rename here propagates everywhere.
 export const SR_STRATEGY_LABELS: Record<SrStrategy, string> = {
-  sr_auth: 'SR Routing (auth based)',
-  sr_auth_autopilot: 'SR Routing (auth based autopilot)',
-  sr_mo_manual: 'SR Routing (Multi-Objective manual)',
-  sr_mo_autopilot: 'SR Routing (Multi-Objective autopilot)',
+  sr_auth: 'Maximize approvals · manual tuning',
+  sr_auth_autopilot: 'Maximize approvals · auto-tuned',
+  sr_mo_manual: 'Approvals + save on fees · manual',
+  sr_mo_autopilot: 'Approvals + save on fees · auto-tuned',
 }
 
 export interface SrConfigOverrideForm {

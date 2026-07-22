@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import * as type from '../ui/typography'
 
 /** Connectors whose settlement report can be manually uploaded (their parser is implemented). The
  * automatic path is gated separately — Chase pulls via its poller (OAuth + reporting API), while
@@ -28,10 +29,10 @@ export function Field({
   children: ReactNode
 }) {
   return (
-    <label className="block space-y-1">
-      <span className="text-sm font-medium text-slate-700 dark:text-[#c7cfdd]">{label}</span>
+    <label className="block space-y-1.5">
+      <span className={type.label}>{label}</span>
       {children}
-      {hint && <span className="block text-xs text-slate-400">{hint}</span>}
+      {hint && <span className={`block ${type.hint}`}>{hint}</span>}
     </label>
   )
 }

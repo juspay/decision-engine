@@ -399,7 +399,7 @@ export function BucketHedgingTuner() {
             </button>
           </div>
 
-          <p className="mt-2 text-[11px] text-slate-400">
+          <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8d96aa]">
             {inputError ? (
               <span className="text-red-500">{inputError}</span>
             ) : (
@@ -459,8 +459,8 @@ export function BucketHedgingTuner() {
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 dark:border-[#1c1c24] dark:bg-[#0b0b10]">
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Static</span>
-                <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-[#1f1f29] dark:text-slate-400">sized for leanest hour</span>
+                <span className="text-[13px] font-semibold text-slate-600 dark:text-slate-300">Static</span>
+                <span className="rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500 dark:bg-[#1f1f29] dark:text-slate-400">sized for leanest hour</span>
               </div>
               <div className="mt-2 grid grid-cols-2 gap-y-2 text-sm">
                 <span className="text-slate-400">Bucket B</span><span className="text-right font-mono font-semibold text-slate-800 dark:text-slate-100">{model.staticB}</span>
@@ -471,8 +471,8 @@ export function BucketHedgingTuner() {
             </div>
             <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 px-4 py-3 dark:border-emerald-900 dark:bg-emerald-950/20">
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-600 dark:text-emerald-300">Automatic</span>
-                <span className="rounded bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200">per-hour sizing</span>
+                <span className="text-[13px] font-semibold text-emerald-600 dark:text-emerald-300">Automatic</span>
+                <span className="rounded bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200">per-hour sizing</span>
               </div>
               <div className="mt-2 grid grid-cols-2 gap-y-2 text-sm">
                 <span className="text-slate-400">Bucket B</span><span className="text-right font-mono font-semibold text-slate-800 dark:text-slate-100">{model.autoBMin === model.autoBMax ? model.autoBMin : `${model.autoBMin}–${model.autoBMax}`}</span>

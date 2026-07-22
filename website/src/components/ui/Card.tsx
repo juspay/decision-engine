@@ -43,9 +43,18 @@ export function CardBody({ children, className = '' }: CardProps) {
   return <div className={`min-w-0 px-6 py-5 ${className}`}>{children}</div>
 }
 
+/**
+ * A small label naming the region above it — a stat's caption, a panel's subject.
+ *
+ * Sentence case, not the uppercase tracking-[0.18em] kicker this used to be. Two reasons: letterspaced
+ * all-caps is measurably slower to read at small sizes, and the kicker was mostly used directly above
+ * a heading that repeated it ("MANUAL UPLOAD" over "Upload a settlement report"), so it added a
+ * decorative tier rather than information. Where that duplication exists, delete the label instead of
+ * restyling it — this is for labels that name something the heading doesn't.
+ */
 export function SurfaceLabel({ children, className = '' }: CardProps) {
   return (
-    <p className={`block max-w-full truncate text-[11px] font-semibold uppercase leading-4 tracking-[0.18em] text-slate-500 dark:text-[#8390a7] ${className}`}>
+    <p className={`block max-w-full truncate text-[12px] font-medium leading-4 text-slate-500 dark:text-[#8d96aa] ${className}`}>
       {children}
     </p>
   )

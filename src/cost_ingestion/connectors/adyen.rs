@@ -181,6 +181,7 @@ impl SettlementReportSource for AdyenReportSource {
             icsf: usize,
             booking: Option<usize>,
             terminal: Option<usize>,
+            card_number: Option<usize>,
         }
 
         csv_reader::parse(
@@ -205,6 +206,9 @@ impl SettlementReportSource for AdyenReportSource {
                     // Optional: a terminal id marks in-person (POS) acceptance; absence ⇒ online (ecom).
                     // Drives the channel feature of the category predictor.
                     terminal: h.index("Unique Terminal ID"),
+                    // Optional: the (masked) PAN — its leading digits are the issuer BIN that seeds
+                    // the global card-product map. Absent in trimmed/tokenized exports ⇒ no BIN.
+                    card_number: h.index("Card Number"),
                 })
             },
             |c, row| {
@@ -221,7 +225,10 @@ impl SettlementReportSource for AdyenReportSource {
                 let gross = to_float(row.get(c.payable)) + total_fee;
 
                 let variant = row.get(c.variant).to_lowercase();
-                let funding = SettledFeeRow::funding_from_variant(&variant);
+                // Resolve funding from the variant, falling back to the interchange rate for
+                // co-badge cards whose variant is silent (separates the 20/30/90 fan).
+                let interchange_bps = ic_bps(row.get(c.icsf));
+                let funding = SettledFeeRow::resolve_funding(&variant, interchange_bps);
                 let txn_date = c.booking.and_then(|i| parse_booking_date(row.get(i)));
                 // POS when a terminal id is present, else online. Absent column ⇒ unknown ⇒ ecom.
                 let channel = match c.terminal {
@@ -230,6 +237,12 @@ impl SettlementReportSource for AdyenReportSource {
                 }
                 .to_string();
 
+                let icsf = row.get(c.icsf);
+                let bin = c
+                    .card_number
+                    .map(|i| SettledFeeRow::bin_from_pan(row.get(i)))
+                    .unwrap_or_default();
+
                 Ok(Some(SettledFeeRow {
                     txn_ref: row.get(c.psp).to_string(),
                     card_network: row.get(c.brand).to_lowercase(),
@@ -237,7 +250,7 @@ impl SettlementReportSource for AdyenReportSource {
                     funding,
                     issuer_country: row.get(c.issuer).to_string(),
                     currency: row.get(c.ccy).to_string(),
-                    ic_category: ic_category(row.get(c.icsf)),
+                    ic_category: ic_category(icsf),
                     txn_date,
                     channel,
                     gross,
@@ -246,6 +259,7 @@ impl SettlementReportSource for AdyenReportSource {
                     scheme_fee,
                     markup,
                     commission,
+                    bin,
                 }))
             },
             on_row,
@@ -398,6 +412,21 @@ fn ic_category(raw: &str) -> String {
         .to_string()
 }
 
+/// Pull the stated interchange rate (bps) out of the `ICSF details` JSON — the `bps` field on the
+/// `"t":"ic"` line item. `None` when the report omits it (trimmed exports carry the `ic` name but
+/// no `bps`). This is recorded per-BIN only; it never enters the cluster key.
+fn ic_bps(raw: &str) -> Option<f64> {
+    if raw.is_empty() {
+        return None;
+    }
+    let Ok(Value::Array(arr)) = serde_json::from_str::<Value>(raw) else {
+        return None;
+    };
+    arr.iter()
+        .find(|e| e.get("t").and_then(Value::as_str) == Some("ic"))
+        .and_then(|e| e.get("bps").and_then(Value::as_f64))
+}
+
 /// Parse a money cell; blanks/garbage become `0.0` (mirrors `par_extract.to_float`).
 fn to_float(s: &str) -> f64 {
     s.trim().parse::<f64>().unwrap_or(0.0)
@@ -452,6 +481,19 @@ ref2,Settled,visastandarddebit,visa,FR,EUR,100.00,0.05,0.00,0.02,0.20,\"[{\"\"t\
     }
 
     #[test]
+    fn bin_and_rate_extraction() {
+        // Masked PAN → leading run of digits, capped at 8; empty/tokenized ⇒ "".
+        assert_eq!(SettledFeeRow::bin_from_pan("489678****4354"), "489678");
+        assert_eq!(SettledFeeRow::bin_from_pan("48967812****4354"), "48967812");
+        assert_eq!(SettledFeeRow::bin_from_pan(""), "");
+        assert_eq!(SettledFeeRow::bin_from_pan("****1234"), "");
+        // Stated interchange rate from the ICSF `ic` line; absent (trimmed export) ⇒ None.
+        assert_eq!(ic_bps("[{\"t\":\"ic\",\"n\":\"X\",\"bps\":20.0}]"), Some(20.0));
+        assert_eq!(ic_bps("[{\"t\":\"ic\",\"n\":\"X\"}]"), None);
+        assert_eq!(ic_bps(""), None);
+    }
+
+    #[test]
     fn funding_derivation() {
         assert_eq!(
             SettledFeeRow::funding_from_variant("visastandarddebit"),
@@ -462,6 +504,21 @@ ref2,Settled,visastandarddebit,visa,FR,EUR,100.00,0.05,0.00,0.02,0.20,\"[{\"\"t\
             "credit"
         );
         assert_eq!(SettledFeeRow::funding_from_variant("ideal"), "");
+    }
+
+    #[test]
+    fn cobadge_funding_resolves_from_rate() {
+        // mc/visa: the variant wins; the rate is ignored even if present.
+        assert_eq!(SettledFeeRow::resolve_funding("visastandarddebit", Some(90.0)), "debit");
+        // co-badge (blank variant): fall back to the interchange rate → separates the fan on the
+        // EU IFR caps: 20 bps debit, 30 bps credit, ~90 bps (cap-exempt) commercial.
+        assert_eq!(SettledFeeRow::resolve_funding("cartebancaire", Some(20.0)), "debit");
+        assert_eq!(SettledFeeRow::resolve_funding("cartebancaire", Some(30.0)), "credit");
+        assert_eq!(SettledFeeRow::resolve_funding("cartebancaire", Some(90.0)), "commercial");
+        // 0 (rate present but zero) is unknown, not debit ⇒ abstains.
+        assert_eq!(SettledFeeRow::resolve_funding("cartebancaire", Some(0.0)), "");
+        // no rate (trimmed export): unresolved ⇒ abstains, exactly as today.
+        assert_eq!(SettledFeeRow::resolve_funding("cartebancaire", None), "");
     }
 
     #[test]

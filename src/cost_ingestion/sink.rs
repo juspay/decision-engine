@@ -16,7 +16,7 @@ use serde_json::json;
 
 use crate::config::ClickHouseAnalyticsConfig;
 
-use super::rollup::DailyStatRow;
+use super::rollup::{BinProductRow, DailyStatRow};
 use super::types::IngestError;
 
 const INSERT_TIMEOUT: Duration = Duration::from_secs(60);
@@ -133,6 +133,72 @@ async fn insert_chunk(
         let text = resp.text().await.unwrap_or_default();
         return Err(IngestError::Storage(format!(
             "clickhouse insert failed ({status}): {text}"
+        )));
+    }
+    Ok(())
+}
+
+/// Column list for the global BIN → card-product table.
+const BIN_COLUMNS: &str = "bin,card_network,issuer_country,funding,support_n";
+
+/// Insert this report's per-BIN card-product observations into the GLOBAL `cost_bin_product` map.
+/// Unlike `cost_daily_stats`, this carries no (connector, account, merchant): a card's product is
+/// universal (architecture §7), so every report's BINs merge into one global aggregate. The table is
+/// a `SummingMergeTree(support_n)`, so re-inserting the same (bin, network, country, funding)
+/// key simply accumulates support — there is no delete/replace to reconcile per ingestion.
+pub async fn insert_bin_product(
+    cfg: &ClickHouseAnalyticsConfig,
+    rows: &[BinProductRow],
+) -> Result<usize, IngestError> {
+    if rows.is_empty() {
+        return Ok(0);
+    }
+    for chunk in rows.chunks(INSERT_CHUNK_ROWS) {
+        insert_bin_chunk(cfg, chunk).await?;
+    }
+    Ok(rows.len())
+}
+
+async fn insert_bin_chunk(
+    cfg: &ClickHouseAnalyticsConfig,
+    rows: &[BinProductRow],
+) -> Result<(), IngestError> {
+    let mut body = String::with_capacity(rows.len() * 96);
+    for r in rows {
+        let obj = json!({
+            "bin": r.bin,
+            "card_network": r.card_network,
+            "issuer_country": r.issuer_country,
+            "funding": r.funding,
+            "support_n": r.support_n,
+        });
+        body.push_str(
+            &serde_json::to_string(&obj).map_err(|e| IngestError::Storage(e.to_string()))?,
+        );
+        body.push('\n');
+    }
+
+    let query = format!(
+        "INSERT INTO {}.cost_bin_product ({BIN_COLUMNS}) FORMAT JSONEachRow",
+        cfg.database
+    );
+    let mut req = client()
+        .post(cfg.url.trim_end_matches('/'))
+        .query(&[("query", query.as_str())])
+        .body(body);
+    if !cfg.user.is_empty() {
+        req = req.basic_auth(&cfg.user, cfg.password.as_ref().map(|p| p.peek().clone()));
+    }
+
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| IngestError::Storage(e.to_string()))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(IngestError::Storage(format!(
+            "clickhouse bin insert failed ({status}): {text}"
         )));
     }
     Ok(())

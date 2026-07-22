@@ -193,6 +193,8 @@ impl PaymentAcc {
             scheme_fee: self.scheme_fee,
             markup: 0.0,
             commission: self.commission,
+            // Checkout's blended report carries no PAN, so no BIN observation.
+            bin: String::new(),
         })
     }
 }

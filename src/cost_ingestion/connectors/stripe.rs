@@ -216,6 +216,8 @@ impl SettlementReportSource for StripeReportSource {
                 scheme_fee: 0.0,
                 markup: 0.0,
                 commission: 0.0,
+                // Stripe's aggregated report carries no PAN, so no BIN observation.
+                bin: String::new(),
             })?;
         }
         Ok(())

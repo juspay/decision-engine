@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { FileText, Check, Info, Trash2 } from 'lucide-react'
-import { Card, CardBody, CardHeader, SurfaceLabel } from '../ui/Card'
+import { Card, CardBody, CardHeader } from '../ui/Card'
+import * as type from '../ui/typography'
 import { Button } from '../ui/Button'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { Spinner } from '../ui/Spinner'
@@ -91,10 +92,7 @@ export function InvoiceUpload({ merchantId }: { merchantId?: string }) {
           <div className="flex items-center gap-2">
             <FileText size={16} className="text-brand-500" />
             <div>
-              <SurfaceLabel>Invoice</SurfaceLabel>
-              <h2 className="mt-2 font-medium text-slate-800 dark:text-white">
-                Upload a connector invoice
-              </h2>
+              <h2 className={type.heading}>Upload a connector invoice</h2>
             </div>
           </div>
         </CardHeader>
@@ -260,7 +258,7 @@ function LineTable({
     <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-[#232833]">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-400 dark:border-[#232833]">
+          <tr className="border-b border-slate-200 text-left text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] dark:border-[#232833]">
             <th className="px-3 py-2 font-medium">Fee</th>
             <th className="px-3 py-2 font-medium">Category</th>
             <th className="px-3 py-2 text-right font-medium">On invoice</th>
@@ -327,10 +325,8 @@ function ActiveAddons({
   return (
     <Card>
       <CardHeader>
-        <SurfaceLabel>Active invoice add-ons</SurfaceLabel>
-        <h3 className="mt-2 font-medium text-slate-800 dark:text-white">
-          Currently applied to routing
-        </h3>
+        <h3 className={type.heading}>Active invoice add-ons</h3>
+        <p className={`mt-1 ${type.subheading}`}>Currently applied to routing.</p>
       </CardHeader>
       <CardBody className="space-y-2">
         {addons.map((a) => (

@@ -213,6 +213,9 @@ impl SettlementReportSource for BraintreeReportSource {
                     scheme_fee,
                     markup,
                     commission,
+                    // Braintree's PAR carries no PAN, so this connector contributes no BIN
+                    // observation (bin stays empty).
+                    bin: String::new(),
                 }))
             },
             on_row,

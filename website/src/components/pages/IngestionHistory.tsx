@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ChevronDown, ChevronRight, History, Trash2 } from 'lucide-react'
-import { Card, CardBody, CardHeader, SurfaceLabel } from '../ui/Card'
+import { Card, CardBody, CardHeader } from '../ui/Card'
+import * as type from '../ui/typography'
 import { Spinner } from '../ui/Spinner'
 import { ClustersPanel } from './ClustersPanel'
 import {
@@ -62,10 +63,7 @@ export function IngestionHistory({ merchantId }: { merchantId?: string }) {
         <div className="flex items-center gap-2">
           <History size={16} className="text-brand-500" />
           <div>
-            <SurfaceLabel>Ingestion history</SurfaceLabel>
-            <h2 className="mt-2 font-medium text-slate-800 dark:text-white">
-              Reports ingested
-            </h2>
+            <h2 className={type.heading}>Reports ingested</h2>
           </div>
         </div>
       </CardHeader>
@@ -83,7 +81,7 @@ export function IngestionHistory({ merchantId }: { merchantId?: string }) {
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] text-left text-sm">
               <thead>
-                <tr className="border-b border-slate-200 text-xs uppercase tracking-[0.14em] text-slate-400 dark:border-[#232833]">
+                <tr className="border-b border-slate-200 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] dark:border-[#232833]">
                   <th className="py-2 pr-2 font-semibold" />
                   <th className="py-2 pr-3 font-semibold">Ingested</th>
                   <th className="py-2 pr-3 font-semibold">Source</th>
@@ -212,13 +210,14 @@ function Row({
             {/* This report's fitted segments and the fee we learned for each. */}
             {job.status === 'completed' && job.report_date && (
               <div className="mt-4 border-t border-slate-200 pt-3 dark:border-[#232833]">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
-                  Fitted segments (top by volume)
+                <p className="mb-2 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa]">
+                  Fitted segments (top by txns)
                 </p>
                 <ClustersPanel
                   merchantId={merchantId}
                   editable={false}
                   limit={20}
+                  defaultSort="n"
                   scope={{
                     connector: job.connector,
                     account: job.account,
@@ -237,7 +236,7 @@ function Row({
 function Detail({ label, value, error }: { label: string; value: string; error?: boolean }) {
   return (
     <div>
-      <dt className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{label}</dt>
+      <dt className="text-[12px] font-medium text-slate-500 dark:text-[#8d96aa]">{label}</dt>
       <dd
         className={`mt-0.5 break-words text-sm ${
           error ? 'text-red-500' : 'text-slate-600 dark:text-[#c7cfdd]'

@@ -86,7 +86,7 @@ function VerdictTable({ coverage }: { coverage: CoverageSummary }) {
     <div className="overflow-x-auto">
       <table className="w-full min-w-[520px] text-left text-sm">
         <thead>
-          <tr className="border-b border-slate-200 text-xs uppercase tracking-[0.14em] text-slate-400 dark:border-[#232833]">
+          <tr className="border-b border-slate-200 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] dark:border-[#232833]">
             <th className="py-2 pr-3 font-semibold">Verdict</th>
             <th className="py-2 pr-3 text-right font-semibold">Txns</th>
             <th className="py-2 pr-3 text-right font-semibold">Txn %</th>

@@ -184,9 +184,9 @@ export interface ClustersScope {
  */
 export function useCostClusters(
   merchantId?: string,
-  opts: { limit?: number } & ClustersScope = {},
+  opts: { limit?: number; order?: 'gross_sum' | 'n' } & ClustersScope = {},
 ) {
-  const { limit = 10, connector, account, reportDate } = opts
+  const { limit = 10, order, connector, account, reportDate } = opts
   let path: string | null = null
   if (merchantId) {
     const params = new URLSearchParams({ limit: String(limit) })
@@ -196,6 +196,9 @@ export function useCostClusters(
     if (connector) params.set('connector', connector)
     if (account) params.set('account', account)
     if (reportDate) params.set('report_date', reportDate)
+    // `order` picks which top-N the backend selects (not just display order): 'n' ranks by txn count,
+    // otherwise settled GMV. Only send the non-default so GMV views keep clean URLs.
+    if (order === 'n') params.set('order', 'txns')
     path = `/merchant-account/${merchantId}/cost-clusters?${params.toString()}`
   }
   const { data, error, isLoading, mutate } = useSWR<ClusterFee[]>(path, fetcher, {

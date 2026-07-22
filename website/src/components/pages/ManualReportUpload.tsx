@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Upload } from 'lucide-react'
-import { Card, CardBody, CardHeader, SurfaceLabel } from '../ui/Card'
+import { Card, CardBody, CardHeader } from '../ui/Card'
+import * as type from '../ui/typography'
 import { Button } from '../ui/Button'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { Spinner } from '../ui/Spinner'
@@ -31,7 +32,9 @@ export function ManualReportUpload({ merchantId }: { merchantId?: string }) {
   const { ingestions, mutate: mutateHistory } = useIngestionHistory(merchantId)
 
   const fileRef = useRef<HTMLInputElement>(null)
-  const [mode, setMode] = useState<IngestMode>('upload')
+  // Sample-first: a merchant landing here usually has no report file to hand, so the default is the
+  // path that works with nothing — run a curated sample end to end, then switch to a real upload.
+  const [mode, setMode] = useState<IngestMode>('sample')
   const [connector, setConnector] = useState('adyen')
   const [account, setAccount] = useState('')
   const [file, setFile] = useState<File | null>(null)
@@ -198,10 +201,7 @@ export function ManualReportUpload({ merchantId }: { merchantId?: string }) {
         <div className="flex items-center gap-2">
           <Upload size={16} className="text-brand-500" />
           <div>
-            <SurfaceLabel>Manual upload</SurfaceLabel>
-            <h2 className="mt-2 font-medium text-slate-800 dark:text-white">
-              Upload a settlement report
-            </h2>
+            <h2 className={type.heading}>Upload a settlement report</h2>
           </div>
         </div>
       </CardHeader>
@@ -210,8 +210,8 @@ export function ManualReportUpload({ merchantId }: { merchantId?: string }) {
         <div className="inline-flex rounded-lg border border-slate-200 p-0.5 dark:border-[#2a3344]">
           {(
             [
-              ['upload', 'Upload a file'],
               ['sample', 'Use a sample file'],
+              ['upload', 'Upload a file'],
             ] as [IngestMode, string][]
           ).map(([value, label]) => (
             <button

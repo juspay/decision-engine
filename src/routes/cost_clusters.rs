@@ -13,7 +13,7 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Iso8601;
 
-use crate::cost_ingestion::blended::{self, ClusterScope, TopCluster};
+use crate::cost_ingestion::blended::{self, ClusterOrder, ClusterScope, TopCluster};
 use crate::cost_ingestion::overrides::{self, ClusterDims, ClusterOverride};
 use crate::routes::connector_fees::{clickhouse_config, refresh_serving};
 
@@ -97,6 +97,9 @@ pub struct TopClustersQuery {
     pub connector: Option<String>,
     pub account: Option<String>,
     pub report_date: Option<String>,
+    /// Ranking for the top-N selection: `"txns"` ranks by transaction count; anything else (default)
+    /// ranks by settled GMV.
+    pub order: Option<String>,
 }
 
 /// `GET /merchant-account/:merchant_id/cost-clusters?limit=N[&connector&account&report_date]` — top
@@ -116,13 +119,17 @@ pub async fn list_cost_clusters(
         account: q.account.as_deref(),
         report_date: q.report_date.as_deref(),
     };
+    let order = match q.order.as_deref() {
+        Some("txns") => ClusterOrder::Txns,
+        _ => ClusterOrder::Gross,
+    };
     // "Scoped" = narrowed to a connector/account/snapshot; only then do we suppress the
     // append-overrides-outside-the-top-set behavior (that's a merchant-wide affordance).
     let scoped = q.connector.is_some() || q.account.is_some() || q.report_date.is_some();
 
     // Surface a ClickHouse failure as a 500 with its message — a swallowed error here is
     // indistinguishable from "no segments" and hides real query bugs.
-    let top: Vec<TopCluster> = blended::top_clusters(&cfg, &merchant_id, limit, scope)
+    let top: Vec<TopCluster> = blended::top_clusters(&cfg, &merchant_id, limit, scope, order)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
     let overrides: HashMap<String, ClusterOverride> = overrides::list_clusters(&merchant_id)

@@ -380,6 +380,8 @@ impl SettlementReportSource for ChaseReportSource {
                     scheme_fee,
                     markup,
                     commission,
+                    // Chase's report carries no PAN here, so no BIN observation.
+                    bin: String::new(),
                 }))
             },
             on_row,

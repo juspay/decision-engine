@@ -250,7 +250,7 @@ pub fn lookup(
     } else {
         let variant = reconstruct_variant(network, program, funding, wallet);
         let band = amount_band(amount);
-        predict_category(m, network, &variant, funding, issuer, band, channel).map(|cat| {
+        predict_category(m, network, &variant, funding, issuer, &band, channel).map(|cat| {
             let key = fine_key(
                 connector, network, &variant, funding, issuer, currency, &cat,
             );
@@ -821,9 +821,13 @@ mod tests {
 
     #[test]
     fn amount_bands() {
-        assert_eq!(amount_band(15.0), "lo");
-        assert_eq!(amount_band(40.0), "b50");
-        assert_eq!(amount_band(60.0), "b100"); // the €60 AUD case → "> AUD 50" tier
-        assert_eq!(amount_band(500.0), "hi");
+        // Log buckets (10/decade): bucket k = floor(log10(amount)*10). Currency-native resolution.
+        assert_eq!(amount_band(1.0), "0"); // 10^0
+        assert_eq!(amount_band(10.0), "10"); // 10^1
+        assert_eq!(amount_band(100.0), "20"); // 10^2
+        assert_eq!(amount_band(1000.0), "30"); // 10^3
+        // adjacent amounts share a bucket; a decade later is +10 buckets, in ANY currency
+        assert_eq!(amount_band(100.0), amount_band(120.0));
+        assert_eq!(amount_band(0.0), "0"); // guard
     }
 }
