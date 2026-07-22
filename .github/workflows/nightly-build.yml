@@ -358,7 +358,11 @@ jobs:
           
           # Re-create the tag (it was created locally in create-tag job but not pushed)
           echo "Creating tag ${TAG_NAME} at commit ${GITHUB_SHA::7}..."
-          git tag -a "${TAG_NAME}" -m "Nightly build ${TAG_NAME} (${SHORT_SHA})"
+          if git show-ref --tags --verify --quiet "refs/tags/${TAG_NAME}"; then
+            echo "Tag ${TAG_NAME} already exists locally. Skipping create."
+          else
+            git tag -a "${TAG_NAME}" "${GITHUB_SHA}" -m "Nightly build ${TAG_NAME} (${SHORT_SHA})"
+          fi
           
           # Push tag to remote
           echo "Pushing tag ${TAG_NAME} to remote..."
