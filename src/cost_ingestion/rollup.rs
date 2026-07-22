@@ -254,7 +254,10 @@ mod tests {
         acc.add_row(&row(0.0, 0.5, "2026-06-28"), d); // gross 0 → skipped (1/x guard)
         assert!(acc.is_empty(), "non-positive gross makes no bucket");
         acc.add_row(&row(4.99, 0.5, "2026-06-28"), d); // genuine small ticket → KEPT, no floor
-        assert!(!acc.is_empty(), "genuine small-ticket business is not deleted");
+        assert!(
+            !acc.is_empty(),
+            "genuine small-ticket business is not deleted"
+        );
     }
 
     #[test]
@@ -330,7 +333,10 @@ mod tests {
         assert!(acc.is_empty(), "non-positive gross makes no fit bucket");
         let rows = acc.bin_rows();
         assert_eq!(rows.len(), 1, "but its BIN observation is still captured");
-        assert_eq!((&*rows[0].bin, &*rows[0].funding, rows[0].support_n), ("513770", "debit", 1));
+        assert_eq!(
+            (&*rows[0].bin, &*rows[0].funding, rows[0].support_n),
+            ("513770", "debit", 1)
+        );
     }
 
     #[test]
@@ -351,8 +357,15 @@ mod tests {
         acc.add_row(&card_row(60.0, "497040", "debit"), d);
         acc.add_row(&card_row(60.0, "497040", ""), d);
         let rows = acc.bin_rows();
-        assert_eq!(rows.len(), 2, "resolved and unresolved observations are distinct");
+        assert_eq!(
+            rows.len(),
+            2,
+            "resolved and unresolved observations are distinct"
+        );
         assert!(rows.iter().any(|r| r.funding == "debit"));
-        assert!(rows.iter().any(|r| r.funding.is_empty()), "no rate ⇒ funding blank (unresolved)");
+        assert!(
+            rows.iter().any(|r| r.funding.is_empty()),
+            "no rate ⇒ funding blank (unresolved)"
+        );
     }
 }

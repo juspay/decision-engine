@@ -826,7 +826,7 @@ mod tests {
         assert_eq!(amount_band(10.0), "10"); // 10^1
         assert_eq!(amount_band(100.0), "20"); // 10^2
         assert_eq!(amount_band(1000.0), "30"); // 10^3
-        // adjacent amounts share a bucket; a decade later is +10 buckets, in ANY currency
+                                               // adjacent amounts share a bucket; a decade later is +10 buckets, in ANY currency
         assert_eq!(amount_band(100.0), amount_band(120.0));
         assert_eq!(amount_band(0.0), "0"); // guard
     }

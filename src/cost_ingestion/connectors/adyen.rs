@@ -488,7 +488,10 @@ ref2,Settled,visastandarddebit,visa,FR,EUR,100.00,0.05,0.00,0.02,0.20,\"[{\"\"t\
         assert_eq!(SettledFeeRow::bin_from_pan(""), "");
         assert_eq!(SettledFeeRow::bin_from_pan("****1234"), "");
         // Stated interchange rate from the ICSF `ic` line; absent (trimmed export) ⇒ None.
-        assert_eq!(ic_bps("[{\"t\":\"ic\",\"n\":\"X\",\"bps\":20.0}]"), Some(20.0));
+        assert_eq!(
+            ic_bps("[{\"t\":\"ic\",\"n\":\"X\",\"bps\":20.0}]"),
+            Some(20.0)
+        );
         assert_eq!(ic_bps("[{\"t\":\"ic\",\"n\":\"X\"}]"), None);
         assert_eq!(ic_bps(""), None);
     }
@@ -509,14 +512,29 @@ ref2,Settled,visastandarddebit,visa,FR,EUR,100.00,0.05,0.00,0.02,0.20,\"[{\"\"t\
     #[test]
     fn cobadge_funding_resolves_from_rate() {
         // mc/visa: the variant wins; the rate is ignored even if present.
-        assert_eq!(SettledFeeRow::resolve_funding("visastandarddebit", Some(90.0)), "debit");
+        assert_eq!(
+            SettledFeeRow::resolve_funding("visastandarddebit", Some(90.0)),
+            "debit"
+        );
         // co-badge (blank variant): fall back to the interchange rate → separates the fan on the
         // EU IFR caps: 20 bps debit, 30 bps credit, ~90 bps (cap-exempt) commercial.
-        assert_eq!(SettledFeeRow::resolve_funding("cartebancaire", Some(20.0)), "debit");
-        assert_eq!(SettledFeeRow::resolve_funding("cartebancaire", Some(30.0)), "credit");
-        assert_eq!(SettledFeeRow::resolve_funding("cartebancaire", Some(90.0)), "commercial");
+        assert_eq!(
+            SettledFeeRow::resolve_funding("cartebancaire", Some(20.0)),
+            "debit"
+        );
+        assert_eq!(
+            SettledFeeRow::resolve_funding("cartebancaire", Some(30.0)),
+            "credit"
+        );
+        assert_eq!(
+            SettledFeeRow::resolve_funding("cartebancaire", Some(90.0)),
+            "commercial"
+        );
         // 0 (rate present but zero) is unknown, not debit ⇒ abstains.
-        assert_eq!(SettledFeeRow::resolve_funding("cartebancaire", Some(0.0)), "");
+        assert_eq!(
+            SettledFeeRow::resolve_funding("cartebancaire", Some(0.0)),
+            ""
+        );
         // no rate (trimmed export): unresolved ⇒ abstains, exactly as today.
         assert_eq!(SettledFeeRow::resolve_funding("cartebancaire", None), "");
     }
