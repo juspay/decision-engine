@@ -47,36 +47,51 @@ jobs:
               echo "Provided: $TAG_SUFFIX"
               exit 1
             fi
-            TAG_NAME="nightly-${DATE_TAG}-${TAG_SUFFIX}"
+            BASE_TAG="nightly-${DATE_TAG}-${TAG_SUFFIX}"
           else
-            TAG_NAME="nightly-${DATE_TAG}"
+            BASE_TAG="nightly-${DATE_TAG}"
           fi
           
           SHORT_SHA="${GITHUB_SHA::7}"
           BUILT_AT=$(TZ=Asia/Kolkata date '+%Y-%m-%d %H:%M:%S IST')
           
+          # Check if base tag exists remotely and points to different commit
+          # If so, append run number to make it unique
+          TAG_NAME="${BASE_TAG}"
+          if git ls-remote --tags origin | grep -q "refs/tags/${BASE_TAG}$"; then
+            # Tag exists remotely, check if it points to current commit
+            git fetch origin "refs/tags/${BASE_TAG}:refs/tags/${BASE_TAG}" 2>/dev/null || true
+            EXISTING_SHA=$(git rev-parse "refs/tags/${BASE_TAG}^{commit}" 2>/dev/null || echo "")
+            
+            if [[ "$EXISTING_SHA" == "$GITHUB_SHA" ]]; then
+              echo "✓ Tag ${BASE_TAG} already exists and points to current commit ${SHORT_SHA}"
+              echo "  Reusing existing tag. Builds will update images."
+            else
+              # Tag exists but points to different commit, append run number
+              TAG_NAME="${BASE_TAG}-run${GITHUB_RUN_NUMBER}"
+              echo "⚠ Tag ${BASE_TAG} exists but points to different commit"
+              echo "  Creating unique tag: ${TAG_NAME}"
+            fi
+          else
+            echo "✓ Tag ${BASE_TAG} does not exist remotely. Will create new tag."
+          fi
+          
+          # Output the final tag name
           echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
           echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
           echo "built_at=${BUILT_AT}" >> $GITHUB_OUTPUT
-          echo "Creating tag: ${TAG_NAME} at commit ${SHORT_SHA}"
-          
-          # Check if tag already exists
-          if git show-ref --tags --verify --quiet "refs/tags/${TAG_NAME}"; then
-            EXISTING_SHA=$(git rev-parse "refs/tags/${TAG_NAME}^{commit}")
-            if [[ "$EXISTING_SHA" == "$GITHUB_SHA" ]]; then
-              echo "Tag ${TAG_NAME} already exists and points to current commit. Reusing."
-              exit 0
-            else
-              echo "Error: Tag ${TAG_NAME} already exists but points to different commit (${EXISTING_SHA})"
-              echo "Current commit: ${GITHUB_SHA}"
-              exit 1
-            fi
-          fi
+          echo "final_tag=${TAG_NAME}" >> $GITHUB_OUTPUT
           
           # Create tag locally (will be pushed after successful builds)
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "${TAG_NAME}" -m "Nightly build ${TAG_NAME} (${SHORT_SHA})"
+          
+          # Remove local tag if it exists
+          git tag -d "${TAG_NAME}" 2>/dev/null || true
+          
+          # Create the tag pointing to current commit
+          echo "Creating tag: ${TAG_NAME} → ${GITHUB_SHA}"
+          git tag -a "${TAG_NAME}" "${GITHUB_SHA}" -m "Nightly build ${TAG_NAME} (${SHORT_SHA})"
 
   build-postgres-image:
     needs: create-tag
@@ -357,17 +372,24 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
           # Re-create the tag (it was created locally in create-tag job but not pushed)
-          echo "Creating tag ${TAG_NAME} at commit ${GITHUB_SHA::7}..."
-          if git show-ref --tags --verify --quiet "refs/tags/${TAG_NAME}"; then
-            echo "Tag ${TAG_NAME} already exists locally. Skipping create."
-          else
-            git tag -a "${TAG_NAME}" "${GITHUB_SHA}" -m "Nightly build ${TAG_NAME} (${SHORT_SHA})"
-          fi
+          echo "Creating tag ${TAG_NAME} at commit ${GITHUB_SHA}..."
           
-          # Push tag to remote
+          # Remove local tag if it exists
+          git tag -d "${TAG_NAME}" 2>/dev/null || true
+          
+          # Create annotated tag pointing to current commit
+          git tag -a "${TAG_NAME}" "${GITHUB_SHA}" -m "Nightly build ${TAG_NAME} (${SHORT_SHA})"
+          
+          # Push tag to remote (force push to handle updates)
           echo "Pushing tag ${TAG_NAME} to remote..."
-          git push origin "${TAG_NAME}"
-          echo "Tag pushed successfully!"
+          if git ls-remote --tags origin | grep -q "refs/tags/${TAG_NAME}$"; then
+            echo "⚠ Tag exists remotely. Force-pushing to update..."
+            git push --force origin "${TAG_NAME}"
+          else
+            echo "✓ Pushing new tag..."
+            git push origin "${TAG_NAME}"
+          fi
+          echo "✓ Tag pushed successfully!"
 
   notify-completion:
     needs: [create-tag, push-tag]
