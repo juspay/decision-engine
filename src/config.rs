@@ -864,6 +864,13 @@ impl GlobalConfig {
             );
         }
 
+        self.card_info_service.api_key = secret_management_client
+            .get_secret(self.card_info_service.api_key.clone())
+            .await
+            .change_context(error::ConfigurationError::KmsDecryptError(
+                "card_info_service_api_key",
+            ))?;
+
         Ok(())
     }
 
