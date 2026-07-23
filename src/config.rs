@@ -129,6 +129,10 @@ pub struct UserAuthConfig {
     /// JWT expiry in seconds (default 24 hours)
     #[serde(default = "default_jwt_expiry")]
     pub jwt_expiry_seconds: u64,
+    /// Expiry (seconds) for HS-redirect SSO sessions. Short-lived by design — HS can re-mint on
+    /// demand — so a leaked session caps its own blast radius. Default 15 minutes.
+    #[serde(default = "default_hs_redirect_jwt_expiry")]
+    pub hs_redirect_jwt_expiry_seconds: u64,
     /// Send verification email on signup; block login until verified
     #[serde(default)]
     pub email_verification_enabled: bool,
@@ -140,6 +144,10 @@ fn default_true() -> bool {
 
 fn default_jwt_expiry() -> u64 {
     86400
+}
+
+fn default_hs_redirect_jwt_expiry() -> u64 {
+    900 // 15 minutes
 }
 
 const DEFAULT_ADMIN_SECRET: &str = "test_admin";
@@ -169,6 +177,7 @@ impl Default for UserAuthConfig {
         Self {
             jwt_secret: "change_me_in_production_use_32chars!!".to_string(),
             jwt_expiry_seconds: default_jwt_expiry(),
+            hs_redirect_jwt_expiry_seconds: default_hs_redirect_jwt_expiry(),
             email_verification_enabled: false,
         }
     }
