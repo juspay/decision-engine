@@ -1,5 +1,5 @@
 use crate::app::{get_tenant_app_state, APP_STATE};
-use crate::auth;
+use crate::auth::{self, TOKEN_TYPE_HS_REDIRECT, TOKEN_TYPE_STANDARD};
 use crate::error::{self, ContainerError, ResultContainerExt, UserAuthError};
 use crate::storage::types::{
     MerchantAccountNew, NewUser, NewUserMerchant, User, UserEmailVerifiedUpdate, UserMerchant,
@@ -25,6 +25,11 @@ use crate::storage::schema::user_merchants::dsl as um_dsl;
 use crate::storage::schema_pg::user_merchants::dsl as um_dsl;
 
 const JWT_DENYLIST_PREFIX: &str = "jwt_revoked:";
+
+/// One-time SSO handoff codes (HS → DE merchant redirect). The code — never a session token —
+/// is what travels in the redirect URL; it is single-use and short-lived.
+const HS_SSO_CODE_PREFIX: &str = "hs_sso_code:";
+const HS_SSO_CODE_TTL_SECONDS: i64 = 60;
 
 #[derive(Debug, Deserialize)]
 pub struct SignupRequest {
@@ -303,6 +308,7 @@ pub async fn signup(
         &payload.email,
         requested_merchant_id.as_deref().unwrap_or(""),
         "admin",
+        TOKEN_TYPE_STANDARD,
         &global_config.user_auth.jwt_secret,
         global_config.user_auth.jwt_expiry_seconds,
     )
@@ -386,6 +392,7 @@ pub async fn login(
         &user.email,
         &active_merchant_id,
         &user.role,
+        TOKEN_TYPE_STANDARD,
         &global_config.user_auth.jwt_secret,
         global_config.user_auth.jwt_expiry_seconds,
     )
@@ -413,6 +420,15 @@ pub async fn create_merchant(
         .ok_or(UserAuthError::StorageError)?;
 
     let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
+
+    // HS-redirect sessions are scoped to the routing view — they have no real user row, so
+    // creating a merchant would attach it to a phantom user. Refuse.
+    if claims.token_type == TOKEN_TYPE_HS_REDIRECT {
+        return Err(error::ContainerError::from(
+            UserAuthError::UnsupportedOperation,
+        ));
+    }
+
     let app_state = get_tenant_app_state().await;
 
     let merchant_id = format!(
@@ -480,6 +496,7 @@ pub async fn create_merchant(
         &claims.email,
         &merchant_id,
         &claims.role,
+        TOKEN_TYPE_STANDARD,
         &global_config.user_auth.jwt_secret,
         global_config.user_auth.jwt_expiry_seconds,
     )
@@ -522,6 +539,11 @@ pub async fn switch_merchant(
         .ok_or(UserAuthError::StorageError)?;
 
     let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
+
+    if claims.token_type == TOKEN_TYPE_HS_REDIRECT {
+        return Err(error::ContainerError::from(UserAuthError::UnsupportedOperation));
+    }
+
     let app_state = get_tenant_app_state().await;
 
     let merchants = fetch_user_merchants(&app_state, &claims.user_id).await?;
@@ -535,6 +557,7 @@ pub async fn switch_merchant(
         &claims.email,
         &target.merchant_id,
         &target.role,
+        TOKEN_TYPE_STANDARD,
         &global_config.user_auth.jwt_secret,
         global_config.user_auth.jwt_expiry_seconds,
     )
@@ -573,6 +596,10 @@ pub async fn change_password(
         .ok_or(UserAuthError::StorageError)?;
 
     let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
+
+    if claims.token_type == TOKEN_TYPE_HS_REDIRECT {
+        return Err(error::ContainerError::from(UserAuthError::UnsupportedOperation));
+    }
 
     let app_state = get_tenant_app_state().await;
 
@@ -675,6 +702,14 @@ pub async fn invite_member(
         .ok_or(UserAuthError::StorageError)?;
 
     let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
+
+    // HS-redirect sessions must not manage identity — otherwise a leaked short-lived token
+    // could mint persistent real user accounts.
+    if claims.token_type == TOKEN_TYPE_HS_REDIRECT {
+        return Err(error::ContainerError::from(
+            UserAuthError::UnsupportedOperation,
+        ));
+    }
 
     if claims.role != "admin" {
         return Err(error::ContainerError::from(UserAuthError::Forbidden));
@@ -987,6 +1022,18 @@ pub async fn me(
         .ok_or(UserAuthError::StorageError)?;
 
     let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
+
+    if claims.token_type == TOKEN_TYPE_HS_REDIRECT {
+        return Ok(Json(MeResponse {
+            user_id: claims.user_id,
+            email: claims.email,
+            merchant_id: claims.merchant_id,
+            role: claims.role,
+            email_verified: true,
+            merchants: vec![],
+        }));
+    }
+
     let app_state = get_tenant_app_state().await;
 
     let mut users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
@@ -1141,4 +1188,127 @@ pub async fn verify_jwt_not_revoked(
     }
 
     Ok(claims)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AdminMerchantTokenRequest {
+    pub merchant_id: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AdminMerchantCodeResponse {
+    pub code: String,
+    pub expires_in: i64,
+}
+
+/// Server-to-server: HS calls this with the shared admin secret to obtain a short-lived,
+/// single-use handoff *code* for a merchant. The code — never a session token — is what
+/// travels in the redirect URL; the browser redeems it for the JWT via `exchange_merchant_token`.
+/// Keeping the token out of the URL prevents it leaking to access logs, proxies, browser
+/// history, and the `Referer` header.
+#[axum::debug_handler]
+pub async fn admin_merchant_token(
+    headers: HeaderMap,
+    Json(payload): Json<AdminMerchantTokenRequest>,
+) -> Result<Json<AdminMerchantCodeResponse>, error::ContainerError<UserAuthError>> {
+    let global_config = APP_STATE
+        .get()
+        .map(|s| s.global_config.clone())
+        .ok_or(UserAuthError::StorageError)?;
+
+    let provided = headers
+        .get("x-admin-secret")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    if provided != global_config.admin_secret.secret {
+        return Err(error::ContainerError::from(UserAuthError::InvalidToken));
+    }
+
+    // Verify the merchant actually exists in DE before issuing a code.
+    crate::types::merchant::merchant_account::load_merchant_by_merchant_id(
+        payload.merchant_id.clone(),
+    )
+    .await
+    .ok_or_else(|| error::ContainerError::from(UserAuthError::MerchantNotFound))?;
+
+    let app_state = get_tenant_app_state().await;
+
+    // Opaque, single-use code stored against the merchant. The JWT is *not* minted here — it is
+    // minted only on redemption, so no session token is ever placed in a URL.
+    let code = auth::generate_api_key();
+    let code_key = format!("{}{}", HS_SSO_CODE_PREFIX, code);
+    app_state
+        .redis_conn
+        .set_key_with_ttl(&code_key, &payload.merchant_id, HS_SSO_CODE_TTL_SECONDS)
+        .await
+        .change_context(UserAuthError::StorageError)?;
+
+    Ok(Json(AdminMerchantCodeResponse {
+        code,
+        expires_in: HS_SSO_CODE_TTL_SECONDS,
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ExchangeMerchantTokenRequest {
+    pub code: String,
+}
+
+/// Called by the DE SPA with the one-time code carried in the redirect URL. Atomically consumes
+/// the code (single-use) and mints a short-lived `hs_redirect` session JWT scoped to the merchant.
+#[axum::debug_handler]
+pub async fn exchange_merchant_token(
+    Json(payload): Json<ExchangeMerchantTokenRequest>,
+) -> Result<Json<AuthResponse>, error::ContainerError<UserAuthError>> {
+    let global_config = APP_STATE
+        .get()
+        .map(|s| s.global_config.clone())
+        .ok_or(UserAuthError::StorageError)?;
+
+    let app_state = get_tenant_app_state().await;
+    let code_key = format!("{}{}", HS_SSO_CODE_PREFIX, payload.code);
+
+    // Read the merchant behind the code. A missing/expired/unknown code reads as NotFound —
+    // treat any failure to read it as an invalid code (401), not a server error (500).
+    let merchant_id = match app_state.redis_conn.get_key_string(&code_key).await {
+        Ok(merchant_id) if !merchant_id.is_empty() => merchant_id,
+        _ => return Err(error::ContainerError::from(UserAuthError::InvalidToken)),
+    };
+
+    // Atomically claim the code by deleting it. `DEL` is atomic and reports whether *this* call
+    // removed the key, so with two concurrent redemptions exactly one sees KeyDeleted — the
+    // other (already consumed, expired, or replayed) is rejected. This revision's DelReply is a
+    // bare enum with no helper methods, so match the variant directly.
+    let claimed = app_state
+        .redis_conn
+        .delete_key(&code_key)
+        .await
+        .change_context(UserAuthError::StorageError)?;
+
+    if !matches!(claimed, redis_interface::types::DelReply::KeyDeleted) {
+        return Err(error::ContainerError::from(UserAuthError::InvalidToken));
+    }
+
+    let synthetic_user_id = format!("hs_{}", merchant_id);
+
+    let token = auth::generate_jwt(
+        &synthetic_user_id,
+        "",
+        &merchant_id,
+        "admin",
+        TOKEN_TYPE_HS_REDIRECT,
+        &global_config.user_auth.jwt_secret,
+        global_config.user_auth.hs_redirect_jwt_expiry_seconds,
+    )
+    .change_context(UserAuthError::TokenGenerationFailed)?;
+
+    Ok(Json(AuthResponse {
+        token,
+        user_id: synthetic_user_id,
+        email: String::new(),
+        merchant_id,
+        role: "admin".to_string(),
+        merchants: vec![],
+    }))
 }

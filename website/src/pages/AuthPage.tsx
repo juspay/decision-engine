@@ -199,7 +199,7 @@ export function AuthPage() {
       const authRes = res as AuthResponse
       setAuth(
         authRes.token,
-        { userId: authRes.user_id, email: authRes.email, merchantId: authRes.merchant_id, role: authRes.role },
+        { userId: authRes.user_id, email: authRes.email, merchantId: authRes.merchant_id, role: authRes.role, isRedirectSession: false },
         authRes.merchants,
       )
       if (authRes.merchant_id) setMerchantId(authRes.merchant_id)

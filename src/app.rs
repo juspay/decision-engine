@@ -624,6 +624,14 @@ where
         .route(
             "/auth/change-password",
             post(routes::user_auth::change_password),
+        )
+        .route(
+            "/auth/admin/merchant-token",
+            post(routes::user_auth::admin_merchant_token),
+        )
+        .route(
+            "/auth/admin/merchant-token/exchange",
+            post(routes::user_auth::exchange_merchant_token),
         );
 
     let router = axum::Router::new()
