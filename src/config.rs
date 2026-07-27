@@ -130,7 +130,9 @@ pub struct UserAuthConfig {
     #[serde(default = "default_jwt_expiry")]
     pub jwt_expiry_seconds: u64,
     /// Expiry (seconds) for HS-redirect SSO sessions. Short-lived by design — HS can re-mint on
-    /// demand — so a leaked session caps its own blast radius. Default 15 minutes.
+    /// demand — so a leaked session caps its own blast radius. Default 20 minutes. When it
+    /// expires the SPA sends the user back to Hyperswitch (not the DE login page — the synthetic
+    /// user has no password), so keep this comfortably above a typical routing edit.
     #[serde(default = "default_hs_redirect_jwt_expiry")]
     pub hs_redirect_jwt_expiry_seconds: u64,
     /// Send verification email on signup; block login until verified
@@ -147,7 +149,7 @@ fn default_jwt_expiry() -> u64 {
 }
 
 fn default_hs_redirect_jwt_expiry() -> u64 {
-    900 // 15 minutes
+    1200 // 20 minutes
 }
 
 const DEFAULT_ADMIN_SECRET: &str = "test_admin";

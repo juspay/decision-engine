@@ -5,6 +5,7 @@ use crate::storage::types::{
     MerchantAccountNew, NewUser, NewUserMerchant, User, UserEmailVerifiedUpdate, UserMerchant,
     UserMerchantIdUpdate,
 };
+use crate::types::merchant::merchant_account::load_merchant_by_merchant_id;
 use crate::utils::date_time;
 use axum::extract::Query;
 use axum::http::HeaderMap;
@@ -1226,11 +1227,9 @@ pub async fn admin_merchant_token(
     }
 
     // Verify the merchant actually exists in DE before issuing a code.
-    crate::types::merchant::merchant_account::load_merchant_by_merchant_id(
-        payload.merchant_id.clone(),
-    )
-    .await
-    .ok_or_else(|| error::ContainerError::from(UserAuthError::MerchantNotFound))?;
+    load_merchant_by_merchant_id(payload.merchant_id.clone())
+        .await
+        .ok_or_else(|| error::ContainerError::from(UserAuthError::MerchantNotFound))?;
 
     let app_state = get_tenant_app_state().await;
 
