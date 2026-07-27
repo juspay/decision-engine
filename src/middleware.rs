@@ -6,6 +6,7 @@ use axum::body::Body;
 use axum::response::{IntoResponse, Response};
 use axum::{http::Request, http::StatusCode, middleware::Next};
 use diesel::ExpressionMethods;
+use masking::PeekInterface;
 
 const API_KEY_CACHE_TTL: i64 = 300;
 
@@ -43,7 +44,9 @@ pub async fn authenticate(
         .and_then(|v| v.strip_prefix("Bearer "))
     {
         use crate::routes::user_auth::verify_jwt_not_revoked;
-        match verify_jwt_not_revoked(bearer, &app_state.global_config.user_auth.jwt_secret).await {
+        match verify_jwt_not_revoked(bearer, app_state.global_config.user_auth.jwt_secret.peek())
+            .await
+        {
             Ok(claims) => {
                 req.extensions_mut()
                     .insert(auth::AuthContext::from_jwt(&claims));

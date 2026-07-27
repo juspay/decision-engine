@@ -12,6 +12,7 @@ use axum::Json;
 use diesel::associations::HasTable;
 use diesel::{BoolExpressionMethods, ExpressionMethods};
 use error_stack::ResultExt;
+use masking::PeekInterface;
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "mysql")]
@@ -303,7 +304,7 @@ pub async fn signup(
         &payload.email,
         requested_merchant_id.as_deref().unwrap_or(""),
         "admin",
-        &global_config.user_auth.jwt_secret,
+        global_config.user_auth.jwt_secret.peek(),
         global_config.user_auth.jwt_expiry_seconds,
     )
     .change_context(UserAuthError::TokenGenerationFailed)?;
@@ -386,7 +387,7 @@ pub async fn login(
         &user.email,
         &active_merchant_id,
         &user.role,
-        &global_config.user_auth.jwt_secret,
+        global_config.user_auth.jwt_secret.peek(),
         global_config.user_auth.jwt_expiry_seconds,
     )
     .change_context(UserAuthError::TokenGenerationFailed)?;
@@ -412,7 +413,7 @@ pub async fn create_merchant(
         .map(|s| s.global_config.clone())
         .ok_or(UserAuthError::StorageError)?;
 
-    let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
+    let claims = verify_jwt_not_revoked(token, global_config.user_auth.jwt_secret.peek()).await?;
     let app_state = get_tenant_app_state().await;
 
     let merchant_id = format!(
@@ -480,7 +481,7 @@ pub async fn create_merchant(
         &claims.email,
         &merchant_id,
         &claims.role,
-        &global_config.user_auth.jwt_secret,
+        global_config.user_auth.jwt_secret.peek(),
         global_config.user_auth.jwt_expiry_seconds,
     )
     .change_context(UserAuthError::TokenGenerationFailed)?;
@@ -503,7 +504,7 @@ pub async fn list_merchants(
         .map(|s| s.global_config.clone())
         .ok_or(UserAuthError::StorageError)?;
 
-    let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
+    let claims = verify_jwt_not_revoked(token, global_config.user_auth.jwt_secret.peek()).await?;
     let app_state = get_tenant_app_state().await;
 
     let merchants = fetch_user_merchants(&app_state, &claims.user_id).await?;
@@ -521,7 +522,7 @@ pub async fn switch_merchant(
         .map(|s| s.global_config.clone())
         .ok_or(UserAuthError::StorageError)?;
 
-    let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
+    let claims = verify_jwt_not_revoked(token, global_config.user_auth.jwt_secret.peek()).await?;
     let app_state = get_tenant_app_state().await;
 
     let merchants = fetch_user_merchants(&app_state, &claims.user_id).await?;
@@ -535,7 +536,7 @@ pub async fn switch_merchant(
         &claims.email,
         &target.merchant_id,
         &target.role,
-        &global_config.user_auth.jwt_secret,
+        global_config.user_auth.jwt_secret.peek(),
         global_config.user_auth.jwt_expiry_seconds,
     )
     .change_context(UserAuthError::TokenGenerationFailed)?;
@@ -572,7 +573,7 @@ pub async fn change_password(
         .map(|s| s.global_config.clone())
         .ok_or(UserAuthError::StorageError)?;
 
-    let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
+    let claims = verify_jwt_not_revoked(token, global_config.user_auth.jwt_secret.peek()).await?;
 
     let app_state = get_tenant_app_state().await;
 
@@ -674,7 +675,7 @@ pub async fn invite_member(
         .map(|s| s.global_config.clone())
         .ok_or(UserAuthError::StorageError)?;
 
-    let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
+    let claims = verify_jwt_not_revoked(token, global_config.user_auth.jwt_secret.peek()).await?;
 
     if claims.role != "admin" {
         return Err(error::ContainerError::from(UserAuthError::Forbidden));
@@ -871,7 +872,7 @@ pub async fn list_members(
         .map(|s| s.global_config.clone())
         .ok_or(UserAuthError::StorageError)?;
 
-    let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
+    let claims = verify_jwt_not_revoked(token, global_config.user_auth.jwt_secret.peek()).await?;
     let app_state = get_tenant_app_state().await;
 
     let memberships =
@@ -953,7 +954,7 @@ pub async fn logout(
         .map(|s| s.global_config.clone())
         .ok_or(UserAuthError::StorageError)?;
 
-    let claims = auth::verify_jwt(token, &global_config.user_auth.jwt_secret)
+    let claims = auth::verify_jwt(token, global_config.user_auth.jwt_secret.peek())
         .change_context(UserAuthError::InvalidToken)?;
 
     let app_state = get_tenant_app_state().await;
@@ -986,7 +987,7 @@ pub async fn me(
         .map(|s| s.global_config.clone())
         .ok_or(UserAuthError::StorageError)?;
 
-    let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
+    let claims = verify_jwt_not_revoked(token, global_config.user_auth.jwt_secret.peek()).await?;
     let app_state = get_tenant_app_state().await;
 
     let mut users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(

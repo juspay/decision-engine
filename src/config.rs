@@ -12,6 +12,7 @@ use crate::{
 use error_stack::ResultExt;
 #[cfg(all(feature = "kms-hashicorp-vault", test))]
 use masking::ExposeInterface;
+use masking::PeekInterface;
 use redis_interface::RedisSettings;
 use serde::Deserialize;
 use std::{
@@ -51,9 +52,7 @@ pub struct GlobalConfig {
     pub compression_filepath: Option<CompressionFilepath>,
     #[serde(default = "default_true")]
     pub api_key_auth_enabled: bool,
-    #[serde(default)]
     pub user_auth: UserAuthConfig,
-    #[serde(default)]
     pub admin_secret: AdminSecretConfig,
     #[serde(default)]
     pub email: EmailConfig,
@@ -125,7 +124,7 @@ pub struct SrAutoCalibrationConfig {
 #[derive(Clone, serde::Deserialize, Debug)]
 pub struct UserAuthConfig {
     /// Secret used to sign JWTs — set a strong random value in production
-    pub jwt_secret: String,
+    pub jwt_secret: masking::Secret<String>,
     /// JWT expiry in seconds (default 24 hours)
     #[serde(default = "default_jwt_expiry")]
     pub jwt_expiry_seconds: u64,
@@ -147,27 +146,27 @@ const DEFAULT_ADMIN_SECRET: &str = "test_admin";
 #[derive(Clone, serde::Deserialize, Debug)]
 pub struct AdminSecretConfig {
     /// Secret required in `x-admin-secret` header to call privileged endpoints (e.g. merchant create)
-    pub secret: String,
+    pub secret: masking::Secret<String>,
 }
 
 impl Default for AdminSecretConfig {
     fn default() -> Self {
         Self {
-            secret: DEFAULT_ADMIN_SECRET.to_string(),
+            secret: DEFAULT_ADMIN_SECRET.to_string().into(),
         }
     }
 }
 
 impl AdminSecretConfig {
     pub fn is_default(&self) -> bool {
-        self.secret == DEFAULT_ADMIN_SECRET
+        self.secret.peek() == DEFAULT_ADMIN_SECRET
     }
 }
 
 impl Default for UserAuthConfig {
     fn default() -> Self {
         Self {
-            jwt_secret: "change_me_in_production_use_32chars!!".to_string(),
+            jwt_secret: "change_me_in_production_use_32chars!!".to_string().into(),
             jwt_expiry_seconds: default_jwt_expiry(),
             email_verification_enabled: false,
         }
@@ -870,6 +869,36 @@ impl GlobalConfig {
             .change_context(error::ConfigurationError::KmsDecryptError(
                 "card_info_service_api_key",
             ))?;
+
+        self.hypersense.password = secret_management_client
+            .get_secret(self.hypersense.password.clone())
+            .await
+            .change_context(error::ConfigurationError::KmsDecryptError(
+                "hypersense_password",
+            ))?;
+
+        self.user_auth.jwt_secret = secret_management_client
+            .get_secret(self.user_auth.jwt_secret.clone())
+            .await
+            .change_context(error::ConfigurationError::KmsDecryptError(
+                "user_auth_jwt_secret",
+            ))?;
+
+        self.admin_secret.secret = secret_management_client
+            .get_secret(self.admin_secret.secret.clone())
+            .await
+            .change_context(error::ConfigurationError::KmsDecryptError(
+                "admin_secret_secret",
+            ))?;
+
+        for secret in self.cost_ingestion.creds_encryption_keys.values_mut() {
+            *secret = secret_management_client
+                .get_secret(secret.clone())
+                .await
+                .change_context(error::ConfigurationError::KmsDecryptError(
+                    "cost_ingestion_creds_encryption_keys",
+                ))?;
+        }
 
         Ok(())
     }
