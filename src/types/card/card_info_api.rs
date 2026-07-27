@@ -9,7 +9,6 @@ use crate::logger;
 use crate::types::card::card_info::CardInfo;
 use crate::types::card::card_type::to_card_type;
 use crate::types::card::isin::to_isin;
-use crate::types::country::country_name::country_name_to_iso2_code;
 
 /// Subset of the Hyperswitch `GET /api/cards/{bin}` response (upstream `CardInfoResponse`)
 /// that we consume for BIN enrichment.
@@ -29,9 +28,9 @@ struct CardInfoResponse {
     /// Card segment, e.g. "Consumer" / "Commercial".
     #[serde(default)]
     card_segment_type: Option<String>,
-    /// Issuing country name, e.g. "NETHERLANDS".
+    /// ISO alpha-2 issuing country code, e.g. "CN".
     #[serde(default)]
-    card_issuing_country: Option<String>,
+    country_code: Option<String>,
     /// Numeric ISO country code, e.g. "528".
     #[serde(default)]
     numeric_country_code: Option<String>,
@@ -150,20 +149,9 @@ fn map_response_to_card_info(res: CardInfoResponse) -> Option<CardInfo> {
         .as_deref()
         .and_then(|ct| to_card_type(ct).ok());
 
-    // The API returns a free-text country *name* ("NETHERLANDS"); normalize it to its ISO
-    // alpha-2 code ("NL") via CountryISO2 so downstream region bucketing (issuer_region) works.
-    // An unrecognized name yields None rather than storing a non-code string.
-    let card_issuer_country = res.card_issuing_country.as_deref().and_then(|name| {
-        let code = country_name_to_iso2_code(name);
-        if code.is_none() {
-            logger::warn!(
-                tag = "cardInfoApi",
-                "unrecognized card_issuing_country {:?}; dropping",
-                name
-            );
-        }
-        code
-    });
+    // The API now returns the ISO alpha-2 issuing country code ("CN") directly, so we use it
+    // as-is for downstream region bucketing (issuer_region) instead of mapping a country name.
+    let card_issuer_country = res.country_code;
 
     Some(CardInfo {
         card_isin,
