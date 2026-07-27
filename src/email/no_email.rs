@@ -6,13 +6,18 @@ pub struct NoEmailClient;
 impl EmailClient for NoEmailClient {
     async fn send_email(&self, message: EmailMessage) -> error_stack::Result<(), EmailError> {
         // Extract the action URL from the body so developers can complete email
-        // verification or password reset manually. Avoid logging the full HTML body
-        // for other email types (e.g. invite emails) because it would expose
-        // temporary passwords. Reset URLs carry a live single-use credential, so they
-        // are only logged in debug builds — never from a release binary.
+        // verification, password reset, or an invite manually. Avoid logging the full
+        // HTML body for other email types. Reset and invite URLs carry a live single-use
+        // credential, so they are only logged in debug builds — never from a release
+        // binary.
+        // `starts_with` (not `contains`) for the release-logged verification branch: invite
+        // subjects embed an admin-chosen merchant name, so a substring match could let a
+        // crafted merchant name route a live set-password link into release logs.
         let subject_lower = message.subject.to_lowercase();
-        let action_url = if subject_lower.contains("confirm your email")
-            || (cfg!(debug_assertions) && subject_lower.contains("reset your password"))
+        let action_url = if subject_lower.starts_with("confirm your email")
+            || (cfg!(debug_assertions)
+                && (subject_lower.contains("reset your password")
+                    || subject_lower.contains("invited")))
         {
             extract_href_from_cta(&message.html_body)
         } else {

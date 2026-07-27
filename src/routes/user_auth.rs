@@ -104,6 +104,11 @@ const FORGOT_PASSWORD_RATE_WINDOW_SECONDS: i64 = 3600;
 const FORGOT_PASSWORD_RATE_MAX_PER_EMAIL: i64 = 3;
 const FORGOT_PASSWORD_RATE_MAX_PER_IP: i64 = 30;
 
+/// Set-password links for invited users reuse the reset-code machinery (same Redis prefix,
+/// same redemption endpoint) but live longer — an invitee may not open the email the same
+/// day the admin sends it.
+const INVITE_SET_PASSWORD_TTL_SECONDS: i64 = 7 * 86400; // 7 days
+
 #[axum::debug_handler]
 pub async fn signup(
     Json(payload): Json<SignupRequest>,
@@ -368,6 +373,16 @@ pub async fn login(
         return Err(error::ContainerError::from(UserAuthError::AccountInactive));
     }
 
+    if !auth::verify_password(&payload.password, &user.password_hash)
+        .change_context(UserAuthError::StorageError)?
+    {
+        return Err(error::ContainerError::from(UserAuthError::InvalidPassword));
+    }
+
+    // Only after the password checks out: revealing EmailNotVerified to a caller who
+    // doesn't hold the credential would turn login into an account-existence /
+    // verification-status oracle (invited accounts sit unverified until they set a
+    // password via their emailed link).
     let email_verified = {
         #[cfg(feature = "mysql")]
         {
@@ -380,12 +395,6 @@ pub async fn login(
     };
     if global_config.user_auth.email_verification_enabled && !email_verified {
         return Err(error::ContainerError::from(UserAuthError::EmailNotVerified));
-    }
-
-    if !auth::verify_password(&payload.password, &user.password_hash)
-        .change_context(UserAuthError::StorageError)?
-    {
-        return Err(error::ContainerError::from(UserAuthError::InvalidPassword));
     }
 
     let merchants = fetch_user_merchants(&app_state, &user.user_id).await?;
@@ -693,7 +702,7 @@ async fn record_password_reset_timestamp(
     let reset_at_key = format!("{}{}", PASSWORD_RESET_AT_PREFIX, user_id);
     let ttl = std::cmp::max(
         global_config.user_auth.jwt_expiry_seconds as i64,
-        PASSWORD_RESET_CODE_TTL_SECONDS,
+        std::cmp::max(PASSWORD_RESET_CODE_TTL_SECONDS, INVITE_SET_PASSWORD_TTL_SECONDS),
     );
     if let Err(err) = app_state
         .redis_conn
@@ -1015,8 +1024,6 @@ pub struct InviteMemberRequest {
 pub struct InviteMemberResponse {
     pub email: String,
     pub is_new_user: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub password: Option<String>,
     pub role: String,
 }
 
@@ -1155,17 +1162,67 @@ pub async fn invite_member(
         Ok(Json(InviteMemberResponse {
             email: existing_user.email,
             is_new_user: false,
-            password: None,
             role,
         }))
     } else {
-        // Create new user with generated password
-        let generated_password = generate_random_password();
-
-        let password_hash = auth::hash_password(&generated_password)
-            .change_context(UserAuthError::PasswordHashingFailed)?;
+        // New users never receive a password — not in the email, not in the API response.
+        // The account is created with an unusable random hash and the invitee sets their
+        // own password through a single-use emailed link (the reset-password machinery).
+        //
+        // That emailed link is the account's only credential, so an email backend that
+        // delivers nothing (NoEmailClient logs the URL in debug builds only) must fail
+        // the invite instead of reporting false success and leaving a dead account.
+        if !global_config.email.is_active() && !cfg!(debug_assertions) {
+            return Err(error::ContainerError::from(UserAuthError::EmailSendFailed));
+        }
 
         let user_id = uuid::Uuid::new_v4().to_string();
+
+        // Unusable placeholder: a random secret hashed and immediately discarded. Login is
+        // impossible until the invitee sets a real password via the link (or, if the email
+        // is lost, via the forgot-password flow). Computed before the Redis write so no
+        // failure after the code is stored lacks a compensating delete.
+        let password_hash = auth::hash_password(&auth::generate_api_key())
+            .change_context(UserAuthError::PasswordHashingFailed)?;
+
+        let code = auth::generate_api_key();
+        let code_key = format!("{}{}", PASSWORD_RESET_CODE_PREFIX, auth::hash_api_key(&code));
+        let issued_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let code_value = format!("{}:{}", user_id, issued_at);
+        app_state
+            .redis_conn
+            .set_key_with_ttl(&code_key, &code_value, INVITE_SET_PASSWORD_TTL_SECONDS)
+            .await
+            .change_context(UserAuthError::StorageError)?;
+
+        // Send before any DB writes (same ordering as signup): the emailed link is the
+        // invitee's only way into the account, so a delivery failure must fail the invite
+        // cleanly — nothing persisted, the admin simply retries.
+        let email_client = APP_STATE
+            .get()
+            .map(|s| s.email_client.clone())
+            .ok_or(UserAuthError::StorageError)?;
+        let set_password_url = format!(
+            "{}/reset-password?token={}",
+            global_config.email.base_url, code
+        );
+        let send_result = email_client
+            .send_email(
+                crate::email::templates::InviteSetPasswordTemplate {
+                    user_email: payload.email.clone(),
+                    merchant_name: merchant_name.clone(),
+                    set_password_url,
+                }
+                .into_message(),
+            )
+            .await;
+        if send_result.is_err() {
+            let _ = app_state.redis_conn.delete_key(&code_key).await;
+        }
+        send_result.change_context(UserAuthError::EmailSendFailed)?;
 
         let new_user = NewUser {
             user_id: user_id.clone(),
@@ -1177,16 +1234,22 @@ pub async fn invite_member(
             is_active: 1,
             #[cfg(feature = "postgres")]
             is_active: true,
+            // Mailbox control is proven when the set-password link is redeemed — the
+            // reset flow flips this to true.
             #[cfg(feature = "mysql")]
-            email_verified: 1,
+            email_verified: 0,
             #[cfg(feature = "postgres")]
-            email_verified: true,
+            email_verified: false,
             created_at: now,
         };
 
-        crate::generics::generic_insert(&app_state.db, new_user)
+        if crate::generics::generic_insert(&app_state.db, new_user)
             .await
-            .change_context(UserAuthError::StorageError)?;
+            .is_err()
+        {
+            let _ = app_state.redis_conn.delete_key(&code_key).await;
+            return Err(error::ContainerError::from(UserAuthError::StorageError));
+        }
 
         let new_user_merchant = NewUserMerchant {
             user_id: user_id.clone(),
@@ -1199,7 +1262,8 @@ pub async fn invite_member(
             .await
             .is_err()
         {
-            // Compensating delete: remove orphaned user if membership insert fails
+            // Compensating deletes: remove the orphaned user and the now-dangling link
+            // if the membership insert fails.
             let conn = app_state.db.get_conn().await.ok();
             if let Some(conn) = conn {
                 let _ = crate::generics::generic_delete::<
@@ -1208,37 +1272,13 @@ pub async fn invite_member(
                 >(&conn, dsl::user_id.eq(user_id.clone()))
                 .await;
             }
+            let _ = app_state.redis_conn.delete_key(&code_key).await;
             return Err(error::ContainerError::from(UserAuthError::StorageError));
-        }
-
-        let email_config = &global_config.email;
-        if email_config.is_active() {
-            let email_client = APP_STATE
-                .get()
-                .map(|s| s.email_client.clone())
-                .ok_or(UserAuthError::StorageError)?;
-
-            let email_msg = crate::email::templates::InviteUserTemplate {
-                user_email: payload.email.clone(),
-                merchant_name: merchant_name.clone(),
-                temporary_password: generated_password.clone(),
-                base_url: email_config.base_url.clone(),
-            }
-            .into_message();
-
-            if let Err(err) = email_client.send_email(email_msg).await {
-                crate::logger::warn!(
-                    to = %payload.email,
-                    error = ?err,
-                    "Failed to send invite email; invite still succeeded"
-                );
-            }
         }
 
         Ok(Json(InviteMemberResponse {
             email: payload.email,
             is_new_user: true,
-            password: Some(generated_password),
             role,
         }))
     }
@@ -1293,37 +1333,6 @@ pub async fn list_members(
         .collect();
 
     Ok(Json(members))
-}
-
-fn generate_random_password() -> String {
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
-    let uppercase = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    let lowercase = b"abcdefghijklmnopqrstuvwxyz";
-    let digits = b"0123456789";
-    let special = b"!@#$%^&*";
-
-    let mut password = vec![
-        uppercase[rng.gen_range(0..uppercase.len())] as char,
-        lowercase[rng.gen_range(0..lowercase.len())] as char,
-        digits[rng.gen_range(0..digits.len())] as char,
-        special[rng.gen_range(0..special.len())] as char,
-    ];
-
-    let all: Vec<u8> = [
-        uppercase.as_ref(),
-        lowercase.as_ref(),
-        digits.as_ref(),
-        special.as_ref(),
-    ]
-    .concat();
-    for _ in 0..12 {
-        password.push(all[rng.gen_range(0..all.len())] as char);
-    }
-
-    use rand::seq::SliceRandom;
-    password.shuffle(&mut rng);
-    password.into_iter().collect()
 }
 
 #[axum::debug_handler]

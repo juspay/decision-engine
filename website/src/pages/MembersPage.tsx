@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { UserPlus, Users, Copy, Check, Loader2, Eye, EyeOff } from 'lucide-react'
+import { UserPlus, Users, Loader2 } from 'lucide-react'
 import { apiFetch } from '../lib/api'
 import { ErrorMessage } from '../components/ui/ErrorMessage'
 
@@ -12,7 +12,6 @@ interface MemberInfo {
 interface InviteResponse {
   email: string
   is_new_user: boolean
-  password?: string
   role: string
 }
 
@@ -28,30 +27,6 @@ function RoleBadge({ role }: { role: string }) {
   )
 }
 
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false)
-  async function copy() {
-    if (!navigator.clipboard) return
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1800)
-    } catch {
-      // clipboard unavailable or denied — fail silently
-    }
-  }
-  return (
-    <button
-      onClick={copy}
-      className="ml-1.5 inline-flex items-center justify-center w-6 h-6 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
-      title={copied ? 'Copied' : 'Copy'}
-      aria-label={copied ? 'Copied' : 'Copy'}
-    >
-      {copied ? <Check size={13} className="text-green-500" /> : <Copy size={13} />}
-    </button>
-  )
-}
-
 export function MembersPage() {
   const [members, setMembers] = useState<MemberInfo[]>([])
   const [loadingMembers, setLoadingMembers] = useState(true)
@@ -62,7 +37,6 @@ export function MembersPage() {
   const [inviting, setInviting] = useState(false)
   const [inviteError, setInviteError] = useState<string | null>(null)
   const [inviteResult, setInviteResult] = useState<InviteResponse | null>(null)
-  const [showPassword, setShowPassword] = useState(false)
 
   async function loadMembers() {
     setLoadingMembers(true)
@@ -159,35 +133,13 @@ export function MembersPage() {
         </form>
 
         {inviteResult && (
-          <div className={`mt-4 rounded-xl border p-4 ${inviteResult.is_new_user ? 'border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/20' : 'border-green-200 bg-green-50 dark:border-green-900/40 dark:bg-green-950/20'}`}>
+          <div className="mt-4 rounded-xl border border-green-200 bg-green-50 p-4 dark:border-green-900/40 dark:bg-green-950/20">
             {inviteResult.is_new_user ? (
-              <>
-                <p className="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-2">
-                  New account created — share these credentials
-                </p>
-                <div className="space-y-1.5 text-sm">
-                  <div className="flex items-center">
-                    <span className="w-20 text-amber-700 dark:text-amber-400 font-medium">Email</span>
-                    <code className="text-amber-900 dark:text-amber-200">{inviteResult.email}</code>
-                    <CopyButton text={inviteResult.email} />
-                  </div>
-                  <div className="flex items-center">
-                    <span className="w-20 text-amber-700 dark:text-amber-400 font-medium">Password</span>
-                    <code className="text-amber-900 dark:text-amber-200">
-                      {showPassword ? inviteResult.password : '••••••••••••••••'}
-                    </code>
-                    <button
-                      onClick={() => setShowPassword((v) => !v)}
-                      className="ml-1.5 inline-flex items-center justify-center w-6 h-6 rounded text-amber-600 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-200 transition-colors"
-                      title={showPassword ? 'Hide password' : 'Show password'}
-                      aria-label={showPassword ? 'Hide password' : 'Show password'}
-                    >
-                      {showPassword ? <EyeOff size={13} /> : <Eye size={13} />}
-                    </button>
-                    {inviteResult.password && <CopyButton text={inviteResult.password} />}
-                  </div>
-                </div>
-              </>
+              <p className="text-sm text-green-800 dark:text-green-300">
+                Invitation sent to <span className="font-semibold">{inviteResult.email}</span> —
+                they&rsquo;ll receive an email with a link to set their password (valid for 7
+                days).
+              </p>
             ) : (
               <p className="text-sm text-green-800 dark:text-green-300">
                 <span className="font-semibold">{inviteResult.email}</span> has been added to this merchant.

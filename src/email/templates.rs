@@ -299,19 +299,16 @@ impl PasswordResetTemplate {
     }
 }
 
-pub struct InviteUserTemplate {
+pub struct InviteSetPasswordTemplate {
     pub user_email: String,
     pub merchant_name: String,
-    pub temporary_password: String,
-    pub base_url: String,
+    pub set_password_url: String,
 }
 
-impl InviteUserTemplate {
+impl InviteSetPasswordTemplate {
     pub fn into_message(self) -> EmailMessage {
         let merchant = escape_html(&self.merchant_name);
-        let email = escape_html(&self.user_email);
-        let password = escape_html(&self.temporary_password);
-        let base_url = escape_html(&self.base_url);
+        let url = escape_html(&self.set_password_url);
         let html_body = format!(
             r#"<!DOCTYPE html>
 <html lang="en">
@@ -322,7 +319,7 @@ impl InviteUserTemplate {
 </head>
 <body style="margin:0;padding:0;background-color:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
   <!-- Preheader -->
-  <span style="display:none;max-height:0;overflow:hidden;mso-hide:all;">You&rsquo;ve been added to {merchant} on Juspay Decision Engine. Your login details are inside.&#8202;&#65279;&#847;</span>
+  <span style="display:none;max-height:0;overflow:hidden;mso-hide:all;">You&rsquo;ve been invited to {merchant} on Juspay Decision Engine. Set your password to get started.&#8202;&#65279;&#847;</span>
 
   <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background-color:#f1f5f9;">
     <tr>
@@ -346,39 +343,33 @@ impl InviteUserTemplate {
                 You&rsquo;ve been invited
               </h1>
               <p style="margin:0 0 32px;font-size:15px;line-height:1.75;color:#475569;">
-                You&rsquo;ve been added to <strong style="color:#0f172a;">{merchant}</strong> on Juspay Decision Engine.
-                Use the credentials below to sign in, then change your password from your account settings.
+                You&rsquo;ve been invited to <strong style="color:#0f172a;">{merchant}</strong> on Juspay Decision Engine.
+                Click the button below to choose your password and activate your account.
               </p>
 
-              <!-- Credentials card -->
-              <table width="100%" cellpadding="0" cellspacing="0" role="presentation"
-                     style="background-color:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;margin:0 0 36px;">
-                <tr>
-                  <td style="padding:20px 24px 16px;">
-                    <p style="margin:0 0 4px;font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;">Email</p>
-                    <p style="margin:0;font-size:15px;color:#0f172a;">{email}</p>
-                  </td>
-                </tr>
-                <tr>
-                  <td style="border-top:1px solid #e2e8f0;padding:16px 24px 20px;">
-                    <p style="margin:0 0 4px;font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;">Temporary password</p>
-                    <p style="margin:0;font-size:15px;font-family:'Courier New',Courier,monospace;color:#0f172a;letter-spacing:0.04em;">{password}</p>
-                  </td>
-                </tr>
-              </table>
-
               <!-- CTA button -->
-              <table cellpadding="0" cellspacing="0" role="presentation" style="margin:0 0 8px;">
+              <table cellpadding="0" cellspacing="0" role="presentation" style="margin:0 0 40px;">
                 <tr>
                   <td style="background-color:#4371ff;border-radius:12px;">
-                    <a href="{base_url}/login"
+                    <a href="{url}"
                        style="display:inline-block;background-color:#4371ff;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;padding:14px 32px;border-radius:12px;letter-spacing:-0.01em;">
-                      Sign in to Decision Engine &rarr;
+                      Set your password &rarr;
                     </a>
                   </td>
                 </tr>
               </table>
 
+              <!-- Divider -->
+              <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin:0 0 28px;">
+                <tr><td style="border-top:1px solid #e2e8f0;"></td></tr>
+              </table>
+
+              <p style="margin:0 0 8px;font-size:13px;color:#94a3b8;">
+                Button not working? Copy and paste this link into your browser:
+              </p>
+              <p style="margin:0;font-size:12px;word-break:break-all;line-height:1.6;">
+                <a href="{url}" style="color:#3b82f6;text-decoration:none;">{url}</a>
+              </p>
             </td>
           </tr>
 
@@ -386,8 +377,8 @@ impl InviteUserTemplate {
           <tr>
             <td style="background-color:#f8fafc;border-radius:0 0 16px 16px;padding:24px 48px;border:1px solid #e2e8f0;border-top:none;">
               <p style="margin:0 0 6px;font-size:12px;color:#94a3b8;line-height:1.65;">
-                For your security, please <strong style="color:#64748b;">change your password</strong> after signing in.
-                If you weren&rsquo;t expecting this invitation, contact your account administrator.
+                This link expires in <strong style="color:#64748b;">7 days</strong> and can be used only once.
+                If you weren&rsquo;t expecting this invitation, you can safely ignore this email &mdash; the account cannot be used until a password is set.
               </p>
               <p style="margin:10px 0 0;font-size:11px;color:#cbd5e1;">
                 Juspay Decision Engine &nbsp;&middot;&nbsp; Automated security email &mdash; please do not reply.
@@ -402,15 +393,13 @@ impl InviteUserTemplate {
 </body>
 </html>"#,
             merchant = merchant,
-            email = email,
-            password = password,
-            base_url = base_url
+            url = url
         );
 
         EmailMessage {
             to: self.user_email,
             subject: format!(
-                "You've been invited to join {} on Decision Engine",
+                "You're invited to {} on Decision Engine",
                 self.merchant_name
             ),
             html_body,
