@@ -181,9 +181,8 @@ curl --location "$BASE_URL/merchant/members/invite" \
 {
   "email": "teammate@example.com",
   "is_new_user": true,
-  "password": "TempPass#8821",
   "role": "member"
 }
 ```
 
-`password` is only present when the invite creates a brand-new user account — share it out of band so they can log in and change it. Inviting an email that's already a user omits `password` and just adds the membership.
+No credentials are ever returned or emailed. When the invite creates a brand-new user (`is_new_user: true`), the invitee receives an email with a single-use **set-password link** (valid for 7 days) that opens the dashboard's reset-password page; the account is unusable until they set a password. If the invite email cannot be delivered, the request fails with `500` and nothing is created — just retry. Because the emailed link is the new account's only credential, inviting new users in a release deployment requires an active email client (`[email] active_email_client = "smtp"` or `"aws_ses"`); with `no_email_client` the request fails rather than creating an unreachable account. Inviting an email that's already a user simply adds the membership and sends a notification email.
